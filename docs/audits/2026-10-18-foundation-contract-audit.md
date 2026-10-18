@@ -6,7 +6,7 @@ Baseline: `e9c147ffe2e1d85c4493a44940d86af2c6a1dc17`
 
 Repair commits: `ad97c1f` (glyph ownership), `5ae2c83` (Scene asset context)
 
-Execution: [audit and hardening plan](../plans/2026-10-18-foundation-contract-audit-and-hardening-plan.md)
+Execution: [foundation refactor plan](../plans/2026-10-18-1105-refactor-foundation-contracts-plan.md)
 
 The searchable standalone HTML deliverable is kept outside the repository at
 `D:\Frankorz\Downloads\nara-foundation-contract-audit-2026-10-18.html`.
@@ -95,13 +95,15 @@ These are independent work lanes, not one mandatory linear rewrite.
 
 ### F03 — Patch transactions validate business invariants between operations
 
-**P1 · Structural contract risk · Proposed · High confidence; static counterexample**
+**P1 · Confirmed defect · Fixed · High confidence**
 
 - **Evidence:** [`nara_scene/src/patch.rs:260`](../../crates/nara_scene/src/patch.rs#L260),
   [`:377`](../../crates/nara_scene/src/patch.rs#L377), and
   [`:1197`](../../crates/nara_scene/src/patch.rs#L1197) validate intermediate candidates;
   [`validation.rs:287`](../../crates/nara_scene/src/validation.rs#L287) reaches native component
-  invariants. No new runtime regression for this entry has been executed.
+  invariants. The coupled-field Scene and Prefab regressions failed before repair and now pass.
+  Intermediate candidates retain structural/schema checks; native business validation runs on
+  the final candidate. Recursive reference closure remains the separate U2–U4/U13 work.
 - **Counterexample:** an invariant requires `x == y`. A patch changing `(1, 1)` to `(2, 2)` through
   two field operations is rejected in either operation order despite a valid final document.
 - **Direction:** validate path access, permission, value shape, and work budgets per operation;
@@ -230,7 +232,7 @@ These are independent work lanes, not one mandatory linear rewrite.
 
 ### F09 — Runtime thread ownership is weaker than its NonSend and retirement assumptions
 
-**P2 · Structural contract risk · Proposed · Send trait confirmed; runtime failure inferred**
+**P2 · Structural contract risk · Fixed · Type and owner-thread regressions verified**
 
 - **Evidence:** [`nara_app/src/runtime.rs:2222`](../../crates/nara_app/src/runtime.rs#L2222) and
   [`:2812`](../../crates/nara_app/src/runtime.rs#L2812) have no visible owner-thread marker, while
@@ -238,6 +240,9 @@ These are independent work lanes, not one mandatory linear rewrite.
   [`:3289`](../../crates/nara_app/src/runtime.rs#L3289) and requires owner-thread draining at
   [`:1243`](../../crates/nara_app/src/runtime.rs#L1243). Close context's mutable access is limited
   to Resource types at [`:925`](../../crates/nara_app/src/runtime.rs#L925).
+  U6 now marks the shared `RuntimeOwnerState` non-Send/non-Sync from App construction through
+  admission, execution and retirement, including quarantine guards. World-free definitions and
+  metadata remain transportable; concrete SDK-specific NonSend close polling remains consumer-gated.
 - **Counterexample:** a platform audio controller is inserted as NonSend, then an admitted runtime
   is moved to another thread for driving or drop. A metadata-only `rustc` probe confirms
   `RuntimeInstance: Send`. Access panic and wrong-thread resource forgetting are inferred from the
@@ -452,8 +457,12 @@ executed results below. Proposed acceptance bullets above are not execution evid
 | --- | --- | --- |
 | F01 regression before repair | Failed, then repaired-owner and consumer suites passed | Red run `cc35e95f-47ee-4663-b933-4f0b15d5255d`; green run `f6bfd071-3de4-4453-9d91-34aeaa9b2e3a`. Root startup and real project Retry results are recorded below. |
 | F02 regression before repair | Failed, then focused repaired suite passed | Red run `e9caedac-3687-400d-8d49-56b32162015f`; same green run as F01. GPU scope recorded separately below. |
-| F03 coupled-field counterexample | Static analysis only | Add and execute scene/prefab transaction regression before claiming a reproduced test. |
+| F03 coupled-field transaction | Reproduced, repaired; 3 focused tests passed | Both Scene and Prefab regressions rejected operation 0 before repair. Green run `319662ab-c409-4b28-ab4f-9a32b8172113` covers either field order, invalid-final atomicity, Undo, private candidate application and invalid intermediate shape rejection. |
 | F09 RuntimeInstance Send trait probe | Confirmed | `rustc 1.99.0 --edition=2024 --emit=metadata` against the current `target/deps` nara_app rlib compiled `assert_send::<RuntimeInstance>()`, exit 0. Cross-thread NonSend failure was not executed. |
+| F09 owner-thread repair | Compile-time and runtime regressions passed | Eleven executable owner/failure types failed the new non-Send assertions before repair and pass afterward. Run `c1a0572d-ee1f-4df6-9f4b-1f560fd77dd4`: 3 tests prove transportable metadata, independent owner-thread construction/destruction, and NonSend quarantine draining. No native audio SDK is claimed. |
+| U1/U6 owning packages | 269 passed | Run `4eb263a3-5fba-4eb1-be23-65f4a513ca70`; `nara_app` plus `nara_scene` with `nara_scene/serde`, serial. The initial featureless full-suite invocation failed to compile existing serde-only integration targets; the supported feature-enabled suite passed. |
+| U1/U6 root consumers | 107 passed | Run `f0100cd7-16b0-48f3-b009-34765a8383d0`: runtime driver compile-fail boundary, runtime instance, scene transactions and authoring session, including exact validation-budget boundaries. |
+| U1/U6 reference-game | 21 passed | Run `792a73b8-f677-4166-bcb0-a94a6a089099`: first_wave, including stable asset Retry and old identity retirement. Existing target reused, serial build. |
 | Focused repaired-owner suites | 144 passed | Green run above: nara_scene 114 + nara_ui_render 30 library tests; Windows, Rust 1.99.0, 7.722 s. This does not qualify GPU or all public consumers. |
 | Root startup source consumers | 4 passed | Run `8ab2683b-0009-4fef-96d6-308b6cbb1afd`; focused startup_scene checks only, not native Editor or full product qualification. |
 | WGPU ui-submitter library suite | 95 passed | Run `1c2384ef-5d72-43cf-aa50-47ca80449891`; Windows, `WGPU_BACKEND=dx12`, Rust 1.99.0, 12.664 s. Includes shared-cache GPU upload/replay and nonblank glyph readback; not complete native Editor qualification. |
