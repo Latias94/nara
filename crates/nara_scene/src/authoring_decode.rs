@@ -14,7 +14,8 @@ use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, CatalogFingerprint, ComponentCapability,
     ComponentFieldId, ComponentSchema, ComponentSchemaContributionReceipt, ComponentSchemaVersion,
     ComponentTypeId, ComponentValue, ComponentValueShape, DeclaredAssetReference, EntityReference,
-    PersistentComponentSchemaOwnerId, collect_declared_asset_references_from_schema,
+    PersistentComponentSchemaOwnerId, collect_declared_asset_references_from_schema_with_limits,
+    effective_component_value,
 };
 
 use crate::{
@@ -25,7 +26,9 @@ use crate::{
         error as diagnostic_error, warning as diagnostic_warning, with_asset_ref,
         with_public_locator,
     },
-    validation::validate_scene_structure,
+    validation::{
+        reference_traversal_limits, validate_effective_local_references, validate_scene_structure,
+    },
 };
 
 /// Stable project-relative or stable-asset identity of one persistent authoring document.
@@ -1411,6 +1414,8 @@ struct ClassificationContext<'a> {
     record_facts: Vec<AuthoringRecordFact>,
     manifest: Vec<UnavailableRecordManifestEntry>,
     placements: BTreeMap<SceneEntityId, crate::ScenePlacement>,
+    namespace: BTreeSet<&'a SceneEntityId>,
+    limits: SceneFileLimits,
 }
 
 fn classify_scene_document(
@@ -1436,6 +1441,8 @@ fn classify_scene_document(
                 &document.roots,
                 &document.entities,
             ),
+            namespace: document.entities.iter().map(|entity| &entity.id).collect(),
+            limits,
         };
         for entity in &document.entities {
             classify_entity_components(entity, AuthoringRecordOrigin::Direct, &mut context)?;
@@ -1631,17 +1638,27 @@ fn classify_complete_record(
     context: &mut ClassificationContext<'_>,
 ) -> Result<(), AuthoringDocumentPublicationError> {
     let classified = context.basis.classify_record(component, record)?;
-    if classified.readiness.is_available()
-        && classified
-            .adapter
-            .as_ref()
-            .is_some_and(|adapter| !adapter.supports_native_preview())
-    {
+    if classified.readiness.is_available() {
         let schema = classified
             .schema
             .as_ref()
-            .expect("available data Adapter retains its schema");
-        nara_reflect::validate_component_value(schema, &record.value).map_err(|_| {
+            .expect("available authoring record retains its current schema");
+        let effective = effective_component_value(
+            schema,
+            &record.value,
+            context.limits.component_materialization_limits(),
+        )
+        .map_err(|_| {
+            rejection(with_public_locator(
+                diagnostic_error(
+                    "scene.authoring-component-value-invalid",
+                    "Persistent authoring record exceeds its effective-value policy",
+                ),
+                "component-id",
+                component.as_str(),
+            ))
+        })?;
+        nara_reflect::validate_component_value(schema, &effective).map_err(|_| {
             rejection(with_public_locator(
                 diagnostic_error(
                     "scene.authoring-component-value-invalid",
@@ -1651,6 +1668,24 @@ fn classify_complete_record(
                 component.as_str(),
             ))
         })?;
+        if matches!(&location, AuthoringRecordLocation::EntityComponent { .. }) {
+            validate_effective_local_references(
+                schema,
+                &effective,
+                |entity| context.namespace.contains(entity),
+                reference_traversal_limits(context.limits.component_materialization_limits()),
+            )
+            .map_err(|_| {
+                rejection(with_public_locator(
+                    diagnostic_error(
+                        "scene.authoring-local-reference-invalid",
+                        "Persistent authoring references do not close over their source namespace",
+                    ),
+                    "component-id",
+                    component.as_str(),
+                ))
+            })?;
+        }
     }
     let schema_declared_asset_references = if classified
         .schema
@@ -1659,13 +1694,15 @@ fn classify_complete_record(
     {
         Vec::new()
     } else {
-        collect_declared_asset_references_from_schema(
+        collect_declared_asset_references_from_schema_with_limits(
             classified
                 .schema
                 .as_ref()
                 .expect("a current known record retains its schema"),
             record.version,
             &record.value,
+            context.limits.component_materialization_limits(),
+            reference_traversal_limits(context.limits.component_materialization_limits()),
         )
         .map_err(|_| {
             rejection(with_public_locator(

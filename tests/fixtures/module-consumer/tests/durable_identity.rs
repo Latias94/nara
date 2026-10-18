@@ -4,20 +4,25 @@ mod support;
 use bevy_ecs::{component::Component, entity::Entity, world::World};
 use nara_asset::{AssetDatabaseError, AssetRef};
 use nara_identity::{
-    EntityLookup, EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
-    PersistentRuntimeReference, SceneEntityId, SpawnedSceneInstance, TombstoneCause,
+    EntityLookup, EntityReference, IdentityDomainError, PersistentRetirementDisposition,
+    PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
+    RuntimeEntityReference, SceneEntityId, SpawnedSceneInstance, TombstoneCause,
     WorldIdentityDomain, spawn_identity_entity,
 };
+use nara_reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId};
 use nara_scene::{
-    InMemoryPrefabSourceResolver, Name, SceneDocumentCandidate, SceneEntitySource,
+    InMemoryPrefabSourceResolver, Name, PrefabDocument, PrefabInstance, SceneDocument,
+    SceneDocumentCandidate, SceneEntityRecord, SceneEntitySource, ScenePatchDocument,
+    ScenePatchOperation, export_scene, spawn_scene,
     spawn_scene_with_prefab_resolver_and_asset_database,
 };
 use nara_scene_module_consumer::frozen_scene_registry;
 use serde::{Deserialize, Serialize};
 use support::{
-    ACTOR_ID, ACTOR_PATH, ConversionError, SCENE_ID, SCENE_PATH, SHARED_ID, SHARED_PATH,
-    copy_as_new, fixture_bytes, load_prefab, merge_source, merged_database, prefab_resolver,
-    resolve_source, stabilize_v1_scene_bytes, stable_id, stable_scene,
+    ACTOR_ID, ACTOR_PATH, ConversionError, DURABLE_LINKS_ID, DurableLinks, SCENE_ID, SCENE_PATH,
+    SHARED_ID, SHARED_PATH, copy_as_new, durable_links_document, durable_links_registry,
+    durable_links_value, fixture_bytes, load_prefab, merge_source, merged_database,
+    prefab_resolver, resolve_source, stabilize_v1_scene_bytes, stable_id, stable_scene,
 };
 
 #[test]
@@ -367,6 +372,260 @@ fn a_persistent_npc_rematerializes_without_reloading_its_scene_owner() {
             .lifetime_claims,
         scene_claims
     );
+}
+
+#[test]
+fn nested_durable_references_preserve_values_across_residency_and_default_matrix() {
+    let persistent = persistent_owner("44444444-4444-4444-8444-444444444444");
+    let reference = EntityReference::Persistent {
+        entity: persistent.clone(),
+    };
+    let component = ComponentTypeId::new(DURABLE_LINKS_ID);
+    let source_id = SceneEntityId::new("source").unwrap();
+    for required in [true, false] {
+        let registry = durable_links_registry(required, &reference);
+        for omitted in [true, false] {
+            let document = durable_links_document(omitted, &reference);
+            let original = document.clone();
+            let encoded = document.to_json_string().unwrap();
+            assert!(!encoded.contains("incarnation"));
+            let published = SceneDocumentCandidate::decode_json_bytes(encoded.as_bytes())
+                .unwrap()
+                .canonicalize(&registry)
+                .unwrap()
+                .publish(&registry)
+                .unwrap();
+            assert_eq!(published.document(), &document);
+            let mut world = World::new();
+            let spawned = spawn_scene(&mut world, &registry, &document);
+            assert!(
+                !spawned.diagnostics.has_errors(),
+                "{:?}",
+                spawned.diagnostics
+            );
+            let instance = spawned.instance.unwrap();
+            let EntityLookup::Resolved(source) = instance.resolve(&world, &source_id) else {
+                panic!("source must spawn independently of durable target residency");
+            };
+            assert_eq!(
+                world.get::<DurableLinks>(source).unwrap().0,
+                durable_links_value(&reference)
+            );
+            assert_eq!(
+                world
+                    .resource::<WorldIdentityDomain>()
+                    .resolve_entity_reference(&world, &reference, None),
+                EntityLookup::Missing,
+            );
+            let missing_export = export_scene(&world, &registry);
+            assert!(missing_export.output().is_none());
+            assert!(missing_export.diagnostics.has_errors());
+
+            let token = spawn_identity_entity(&mut world).unwrap();
+            world
+                .entity_mut(token.entity())
+                .insert(NpcState { visits: 0 });
+            let first = world.resource_scope(
+                |world, mut domain: bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
+                    domain
+                        .register_persistent(world, token, persistent.clone())
+                        .unwrap()
+                },
+            );
+            assert_eq!(
+                world
+                    .resource::<WorldIdentityDomain>()
+                    .resolve_entity_reference(&world, &reference, None),
+                EntityLookup::Resolved(token.entity()),
+            );
+            apply_npc_visit(&mut world, first.entity()).unwrap();
+            let live_export = export_scene(&world, &registry);
+            assert!(
+                !live_export.diagnostics.has_errors(),
+                "{:?}",
+                live_export.diagnostics
+            );
+            let exported =
+                &live_export.output().unwrap().document.entities[0].components[&component].value;
+            assert_eq!(
+                exported.field("links").unwrap(),
+                &durable_links_value(&reference)
+            );
+
+            world.resource_scope(
+                |world, mut domain: bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
+                    domain
+                        .retire_entity(world, token, TombstoneCause::Unloaded)
+                        .unwrap();
+                },
+            );
+            assert_eq!(
+                apply_npc_visit(&mut world, first.entity()),
+                Err(EntityLookup::Unloaded)
+            );
+            assert_eq!(world.get::<NpcState>(token.entity()).unwrap().visits, 1);
+            assert!(world.despawn(token.entity()));
+            assert_eq!(
+                world
+                    .resource::<WorldIdentityDomain>()
+                    .resolve_entity_reference(&world, &reference, None),
+                EntityLookup::Unloaded,
+            );
+            assert_eq!(
+                world.get::<DurableLinks>(source).unwrap().0,
+                durable_links_value(&reference)
+            );
+            assert_eq!(document, original);
+            assert_eq!(document.to_json_string().unwrap(), encoded);
+            let unloaded_spawn = spawn_scene(&mut world, &registry, &document);
+            assert!(
+                !unloaded_spawn.diagnostics.has_errors(),
+                "{:?}",
+                unloaded_spawn.diagnostics
+            );
+            assert!(export_scene(&world, &registry).output().is_none());
+
+            let prefab_source = AssetRef::path("prefabs/durable-links.prefab.ron").unwrap();
+            let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+                prefab_source.clone(),
+                PrefabDocument::new(document.roots.clone(), document.entities.clone()),
+            );
+            let anchors = ["first", "second"].map(|id| {
+                let mut anchor = SceneEntityRecord::new(SceneEntityId::new(id).unwrap());
+                anchor.prefab = Some(PrefabInstance {
+                    source: prefab_source.clone(),
+                    overrides: ScenePatchDocument::default(),
+                });
+                anchor
+            });
+            let expansion =
+                SceneDocument::from_ordered_roots(anchors).expand_prefabs(&registry, &resolver);
+            assert!(
+                !expansion.diagnostics.has_errors(),
+                "{:?}",
+                expansion.diagnostics
+            );
+            let expanded = expansion.document.unwrap();
+            let linked = expanded
+                .entities
+                .iter()
+                .filter_map(|entity| entity.components.get(&component))
+                .collect::<Vec<_>>();
+            assert_eq!(linked.len(), 2);
+            for record in linked {
+                assert_eq!(
+                    record.value.field("links").unwrap(),
+                    &durable_links_value(&reference)
+                );
+            }
+            let mut patched = durable_links_document(false, &reference);
+            let patch = ScenePatchDocument::new([ScenePatchOperation::RemoveField {
+                entity: source_id.clone(),
+                component: component.clone(),
+                component_version: ComponentSchemaVersion::ONE,
+                field: ComponentFieldId::new("links"),
+            }]);
+            let patch_report = patch.apply_to_scene(&mut patched, &registry);
+            assert!(patch_report.applied, "{:?}", patch_report.diagnostics);
+            assert!(
+                patched.entities[0].components[&component]
+                    .value
+                    .get("links")
+                    .is_none()
+            );
+
+            let replacement = spawn_identity_entity(&mut world).unwrap();
+            world
+                .entity_mut(replacement.entity())
+                .insert(NpcState { visits: 10 });
+            let current = world.resource_scope(
+                |world, mut domain: bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
+                    domain
+                        .register_persistent(world, replacement, persistent.clone())
+                        .unwrap()
+                },
+            );
+            assert_eq!(
+                apply_npc_visit(&mut world, first.entity()),
+                Err(EntityLookup::StaleRuntime)
+            );
+            assert_eq!(
+                world.get::<NpcState>(replacement.entity()).unwrap().visits,
+                10
+            );
+            apply_npc_visit(&mut world, current.entity()).unwrap();
+            assert_eq!(
+                world.get::<NpcState>(replacement.entity()).unwrap().visits,
+                11
+            );
+            world.resource_scope(
+                |world, mut domain: bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
+                    domain
+                        .retire_entity_with_disposition(
+                            world,
+                            replacement,
+                            TombstoneCause::Despawned,
+                            PersistentRetirementDisposition::Delete,
+                        )
+                        .unwrap();
+                },
+            );
+            assert_eq!(
+                apply_npc_visit(&mut world, current.entity()),
+                Err(EntityLookup::Deleted)
+            );
+            assert_eq!(
+                apply_npc_visit(&mut world, first.entity()),
+                Err(EntityLookup::StaleRuntime)
+            );
+            assert_eq!(
+                world.get::<NpcState>(replacement.entity()).unwrap().visits,
+                11
+            );
+            assert_eq!(
+                world
+                    .resource::<WorldIdentityDomain>()
+                    .resolve_entity_reference(&world, &reference, None),
+                EntityLookup::Deleted,
+            );
+            assert_eq!(
+                world.get::<DurableLinks>(source).unwrap().0,
+                durable_links_value(&reference)
+            );
+            assert_eq!(document, original);
+            assert!(!document.validate(&registry).has_errors());
+            let deleted_spawn = spawn_scene(&mut world, &registry, &document);
+            assert!(
+                !deleted_spawn.diagnostics.has_errors(),
+                "{:?}",
+                deleted_spawn.diagnostics
+            );
+            assert!(export_scene(&world, &registry).output().is_none());
+            let forbidden = spawn_identity_entity(&mut world).unwrap();
+            world.resource_scope(
+                |world, mut domain: bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
+                    assert!(matches!(
+                        domain.register_persistent(world, forbidden, persistent.clone()),
+                        Err(IdentityDomainError::PersistentIdentityDeleted { .. }),
+                    ));
+                },
+            );
+        }
+    }
+}
+
+fn apply_npc_visit(world: &mut World, target: &RuntimeEntityReference) -> Result<(), EntityLookup> {
+    let outcome = world
+        .resource::<WorldIdentityDomain>()
+        .lookup(world, target);
+    let EntityLookup::Resolved(entity) = outcome else {
+        return Err(outcome);
+    };
+    world
+        .get_mut::<NpcState>(entity)
+        .expect("visit commands target NPCs")
+        .visits += 1;
+    Ok(())
 }
 
 fn persistent_owner(id: &str) -> PersistentRuntimeReference {

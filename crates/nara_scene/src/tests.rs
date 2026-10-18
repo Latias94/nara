@@ -3892,7 +3892,7 @@ fn missing_persistent_reference_prevents_export_publication() {
 }
 
 #[test]
-fn tombstoned_persistent_reference_prevents_export_publication() {
+fn unloaded_persistent_reference_prevents_export_publication() {
     let registry = entity_link_registry();
     let persistent = persistent_reference("44444444-4444-4444-8444-444444444444");
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("source"))
@@ -3926,7 +3926,54 @@ fn tombstoned_persistent_reference_prevents_export_publication() {
             && diagnostic_has_text_field(
                 diagnostic,
                 "rewrite-error-kind",
-                "persistent-target-tombstoned",
+                "persistent-target-unloaded",
+            )
+    }));
+}
+
+#[test]
+fn deleted_persistent_reference_prevents_export_publication() {
+    let registry = entity_link_registry();
+    let persistent = persistent_reference("66666666-6666-4666-8666-666666666666");
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("source"))
+        .with_component(
+            entity_link_type_id(),
+            entity_link_record(EntityReference::Persistent {
+                entity: persistent.clone(),
+            }),
+        )]);
+    let mut world = World::new();
+    assert!(
+        !spawn_scene(&mut world, &registry, &document)
+            .diagnostics
+            .has_errors()
+    );
+    let external = spawn_identity_entity(&mut world).unwrap().entity();
+    register_persistent_axis(&mut world, external, persistent);
+    world.resource_scope(|world, mut domain: Mut<WorldIdentityDomain>| {
+        let token = domain.adopt_entity(world, external).unwrap();
+        domain
+            .retire_entity_with_disposition(
+                world,
+                token,
+                TombstoneCause::Despawned,
+                nara_identity::PersistentRetirementDisposition::Delete,
+            )
+            .unwrap();
+    });
+    let before_entities = world.iter_entities().count();
+
+    let export = export_scene(&world, &registry);
+
+    assert!(export.diagnostics.has_errors());
+    assert!(export.output().is_none());
+    assert_eq!(world.iter_entities().count(), before_entities);
+    assert!(export.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.export-entity-reference-rewrite-failed"
+            && diagnostic_has_text_field(
+                diagnostic,
+                "rewrite-error-kind",
+                "persistent-target-deleted",
             )
     }));
 }

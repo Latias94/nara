@@ -4,10 +4,16 @@ use nara_asset::{
     AssetDatabaseError, AssetMetaIdentityCandidate, AssetPath, AssetRecord, AssetRef,
     ProjectAssetDatabase, StableAssetId,
 };
-use nara_reflect::ComponentRegistry;
+use nara_ecs::Component;
+use nara_identity::EntityReference;
+use nara_reflect::{
+    ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
+    ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueShape,
+};
 use nara_scene::{
-    InMemoryPrefabSourceResolver, PrefabDocument, PrefabDocumentCandidate, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
+    InMemoryPrefabSourceResolver, PrefabDocument, PrefabDocumentCandidate, SceneComponentRecord,
+    SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
 };
 
 pub const SCENE_ID: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -16,6 +22,75 @@ pub const SHARED_ID: &str = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 pub const SCENE_PATH: &str = "source-a/startup.scene.ron";
 pub const ACTOR_PATH: &str = "source-a/actor.prefab.ron";
 pub const SHARED_PATH: &str = "source-b/shared.prefab.ron";
+pub const DURABLE_LINKS_ID: &str = "consumer.durable.Links";
+
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct DurableLinks(pub ComponentValue);
+
+pub fn durable_links_value(reference: &EntityReference) -> ComponentValue {
+    ComponentValue::map([(
+        "party",
+        ComponentValue::List(vec![
+            ComponentValue::EntityReference(reference.clone()),
+            ComponentValue::Null,
+        ]),
+    )])
+}
+
+pub fn durable_links_registry(required: bool, reference: &EntityReference) -> ComponentRegistry {
+    let shape = ComponentValueShape::map(ComponentValueShape::list(ComponentValueShape::optional(
+        ComponentValueShape::EntityRef,
+    )));
+    let mut links = if required {
+        ComponentFieldSchema::required(
+            ComponentFieldId::new("links"),
+            "Links",
+            ComponentFieldPath::from_fields(["links"]),
+            shape,
+        )
+    } else {
+        ComponentFieldSchema::optional(
+            ComponentFieldId::new("links"),
+            "Links",
+            ComponentFieldPath::from_fields(["links"]),
+            shape,
+        )
+    }
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_capability(ComponentCapability::EntityRef);
+    links.default_value = Some(durable_links_value(reference));
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_persistent_component_with_codec::<DurableLinks, _, _>(
+            ComponentSchema::new(
+                ComponentTypeId::new(DURABLE_LINKS_ID),
+                "Durable links",
+                ComponentSchemaVersion::ONE,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+            .with_fields([links]),
+            |value| Ok(DurableLinks(value.field("links")?.clone())),
+            |links| Ok(ComponentValue::map([("links", links.0.clone())])),
+        )
+        .unwrap();
+    registry.freeze().unwrap();
+    registry
+}
+
+pub fn durable_links_document(omitted: bool, reference: &EntityReference) -> SceneDocument {
+    let value = if omitted {
+        ComponentValue::Map(BTreeMap::new())
+    } else {
+        ComponentValue::map([("links", durable_links_value(reference))])
+    };
+    SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+        SceneEntityId::new("source").unwrap(),
+    )
+    .with_component(
+        ComponentTypeId::new(DURABLE_LINKS_ID),
+        SceneComponentRecord::new(ComponentSchemaVersion::ONE, value),
+    )])
+}
 
 pub struct ResolvedSource {
     pub database: ProjectAssetDatabase,

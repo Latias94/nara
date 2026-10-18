@@ -245,8 +245,15 @@ only the runtime export shortcut.
 A persistent reference that resolves to an entity in the same export set is rewritten to that
 entity's assigned scene-local ID because the exported document does not recreate its source runtime
 persistent axis. A persistent reference that resolves to a live entity outside the export set stays
-persistent. Missing, tombstoned, stale, or otherwise invalid persistent targets fail the complete
+persistent. Missing, unloaded, deleted, tombstoned, stale, or otherwise invalid persistent targets fail the complete
 export; they are never preserved as unchecked document references.
+
+This is an existence-requiring runtime bake boundary. Schema admission, source save, Prefab
+remapping and source patching preserve well-formed durable semantic references independently of
+whether the target is Missing, Unloaded or Deleted in a particular World. Required presence does
+not imply current residency. Consumers that need a live entity resolve through the domain and
+retain its typed outcome; Export reports Unloaded and Deleted separately rather than collapsing
+them into a tombstone.
 
 ## Ownership and Dependency Direction
 

@@ -7,7 +7,8 @@ use nara_reflect::{
     ComponentCodecError, ComponentDecodeContext, ComponentEntityReferenceRewriteError,
     ComponentFieldId, ComponentMigrationError, ComponentRegistry, ComponentSchema, ComponentTypeId,
     ComponentValue, ComponentValueMaterializationLimits, EntityReference,
-    EntityReferenceTraversalLimits, PreparedComponent, effective_component_value,
+    EntityReferenceTraversalLimits, PreparedComponent,
+    collect_declared_asset_references_from_schema_with_limits, effective_component_value,
     validate_component_value,
 };
 
@@ -89,19 +90,6 @@ pub(crate) fn preflight_authoring_scene_for_patch(
         Some(operation_index),
         SceneValidationMode::Native,
         true,
-    )
-}
-
-pub(crate) fn validate_patch_intermediate_scene(
-    document: &SceneDocument,
-    registry: &ComponentRegistry,
-    operation_index: usize,
-) -> DiagnosticReport {
-    validate_patch_intermediate_scene_with_limits(
-        document,
-        registry,
-        operation_index,
-        ComponentValueMaterializationLimits::default(),
     )
 }
 
@@ -503,6 +491,50 @@ fn preflight_scene_with_context_options(
                         operation_index,
                     );
                 }
+                continue;
+            }
+
+            let asset_references = match collect_declared_asset_references_from_schema_with_limits(
+                schema,
+                migrated.version,
+                &effective,
+                value_limits,
+                traversal_limits,
+            ) {
+                Ok(references) => references,
+                Err(_) => {
+                    push_with_operation_index(
+                        &mut diagnostics,
+                        component_payload_diagnostic(
+                            entity.id.as_str(),
+                            component_id,
+                            &ComponentCodecError::Message(
+                                "Schema-declared asset reference traversal failed".to_owned(),
+                            ),
+                        ),
+                        operation_index,
+                    );
+                    continue;
+                }
+            };
+            if let Some(database) = context.project_asset_database()
+                && let Some(reference) = asset_references
+                    .iter()
+                    .find(|reference| database.resolve_ref(reference.asset_ref()).is_err())
+            {
+                push_with_operation_index(
+                    &mut diagnostics,
+                    component_payload_diagnostic(
+                        entity.id.as_str(),
+                        component_id,
+                        &ComponentCodecError::invalid_asset_ref(
+                            reference.path().to_string(),
+                            reference.asset_ref().to_string(),
+                            "Asset reference is not declared in the project asset database",
+                        ),
+                    ),
+                    operation_index,
+                );
                 continue;
             }
 

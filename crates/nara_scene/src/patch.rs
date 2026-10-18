@@ -9,6 +9,7 @@ use nara_reflect::{
     ComponentCapability, ComponentDecodeContext, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentProjectionError, ComponentRegistry, ComponentSchemaVersion,
     ComponentTypeId, ComponentValue, ComponentValueCost, ComponentValueKind,
+    ComponentValueMaterializationLimits,
 };
 
 use crate::{
@@ -20,9 +21,10 @@ use crate::{
     validation::{
         preflight_authoring_scene_for_prefab_operation,
         preflight_authoring_scene_for_prefab_source,
+        preflight_authoring_scene_with_context_at_operation,
         preflight_authoring_scene_with_context_for_prefab_operation,
         preflight_authoring_scene_with_context_for_prefab_source,
-        validate_patch_intermediate_scene,
+        validate_patch_intermediate_scene_with_limits,
     },
 };
 
@@ -100,11 +102,8 @@ impl ScenePatchDocument {
             document,
             registry,
             limits,
-            |document, registry, operation_index| match operation_index {
-                Some(operation_index) => {
-                    document.validate_authoring_for_patch(registry, operation_index)
-                }
-                None => document.validate_authoring(registry),
+            |document, registry, operation_index| {
+                validate_patch_candidate(document, registry, None, operation_index, limits)
             },
         )
     }
@@ -134,13 +133,14 @@ impl ScenePatchDocument {
             document,
             registry,
             limits,
-            |document, registry, operation_index| match operation_index {
-                Some(operation_index) => document.validate_authoring_for_patch_with_asset_database(
+            |document, registry, operation_index| {
+                validate_patch_candidate(
+                    document,
                     registry,
-                    database,
+                    Some(database),
                     operation_index,
-                ),
-                None => document.validate_authoring_with_asset_database(registry, database),
+                    limits,
+                )
             },
         )
     }
@@ -300,7 +300,12 @@ impl ScenePatchDocument {
                 scratch.canonicalize();
                 validate(&scratch, registry, Some(operation_index))
             } else {
-                validate_patch_intermediate_scene(&scratch.instantiate(), registry, operation_index)
+                validate_patch_intermediate_scene_with_limits(
+                    &scratch.instantiate(),
+                    registry,
+                    operation_index,
+                    limits.materialization_limits(),
+                )
             };
             if validation.has_errors() {
                 return Err(ScenePatchReport {
@@ -325,6 +330,7 @@ impl ScenePatchDocument {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn apply_owned_to_unpublished_scene(
         self,
         document: &mut SceneDocument,
@@ -1071,6 +1077,14 @@ impl Default for ScenePatchApplyLimits {
 }
 
 impl ScenePatchApplyLimits {
+    fn materialization_limits(self) -> ComponentValueMaterializationLimits {
+        ComponentValueMaterializationLimits::new(
+            self.validation_value_nodes(),
+            self.validation_value_bytes(),
+            ComponentValueMaterializationLimits::default().depth(),
+        )
+    }
+
     #[must_use]
     pub const fn validation_work(self) -> ItemLimit {
         self.validation_work
@@ -1238,6 +1252,27 @@ fn apply_operation_for_patch(
     }
 }
 
+fn validate_patch_candidate(
+    document: &SceneDocument,
+    registry: &ComponentRegistry,
+    database: Option<&ProjectAssetDatabase>,
+    operation_index: Option<usize>,
+    limits: ScenePatchApplyLimits,
+) -> DiagnosticReport {
+    let mut context =
+        ComponentDecodeContext::new().with_materialization_limits(limits.materialization_limits());
+    if let Some(database) = database {
+        context = context.with_project_asset_database(database);
+    }
+    preflight_authoring_scene_with_context_at_operation(
+        document,
+        registry,
+        &mut context,
+        operation_index,
+    )
+    .diagnostics
+}
+
 fn validate_applied_operation(
     document: &mut SceneDocument,
     registry: &ComponentRegistry,
@@ -1266,7 +1301,12 @@ fn validate_applied_operation(
         document.canonicalize();
         validate(document, registry, Some(operation_index))
     } else {
-        validate_patch_intermediate_scene(document, registry, operation_index)
+        validate_patch_intermediate_scene_with_limits(
+            document,
+            registry,
+            operation_index,
+            limits.materialization_limits(),
+        )
     };
     if validation.has_errors() {
         return Err(Box::new(ScenePatchReport {

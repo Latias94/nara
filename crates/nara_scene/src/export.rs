@@ -114,6 +114,8 @@ enum ExportReferenceResolutionError {
     SceneLocalTargetStale,
     PersistentTargetMissing,
     PersistentTargetTombstoned,
+    PersistentTargetUnloaded,
+    PersistentTargetDeleted,
     PersistentTargetStale,
     InvalidIdentityState,
 }
@@ -532,6 +534,8 @@ const fn export_reference_resolution_error_name(
         ExportReferenceResolutionError::PersistentTargetTombstoned => {
             "persistent-target-tombstoned"
         }
+        ExportReferenceResolutionError::PersistentTargetUnloaded => "persistent-target-unloaded",
+        ExportReferenceResolutionError::PersistentTargetDeleted => "persistent-target-deleted",
         ExportReferenceResolutionError::PersistentTargetStale => "persistent-target-stale",
         ExportReferenceResolutionError::InvalidIdentityState => "invalid-identity-state",
     }
@@ -642,8 +646,11 @@ fn rewrite_export_reference(
         (EntityReference::Persistent { .. }, EntityLookup::StaleRegistration) => {
             Err(ExportReferenceResolutionError::PersistentTargetStale)
         }
-        (EntityReference::Persistent { .. }, EntityLookup::Unloaded | EntityLookup::Deleted) => {
-            Err(ExportReferenceResolutionError::PersistentTargetTombstoned)
+        (EntityReference::Persistent { .. }, EntityLookup::Unloaded) => {
+            Err(ExportReferenceResolutionError::PersistentTargetUnloaded)
+        }
+        (EntityReference::Persistent { .. }, EntityLookup::Deleted) => {
+            Err(ExportReferenceResolutionError::PersistentTargetDeleted)
         }
         (
             _,

@@ -108,6 +108,12 @@ reference-path work limits measure different resources. Scene file publication r
 policy through canonicalization; Prefab, patch and fresh Export owners retain their aggregate
 accounting. A per-value bound alone does not establish a bounded aggregate product.
 
+Final native Scene and patch validation traverses every declared effective asset reference even
+when a hand-written codec does not resolve it. A supplied project asset database establishes
+catalogue membership; no database means schema/syntax admission only, not a live-residency claim.
+Domain codecs still own source-kind and native loading requirements. Intermediate patch candidates
+retain shape checks and the selected materialization policy while final target closure runs once.
+
 Inspector distinguishes Defaulted from Present and Missing while edits and inverse history address
 the authored value. A complete published derived Prefab or runtime Export may retain explicit
 effective values; runtime Export remains a bake, not an omission-preserving source round trip.

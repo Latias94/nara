@@ -61,6 +61,13 @@ every field has a supported closed shape; opaque collections retain `KnownUnboun
 a native Adapter. Complete recursive shape validation applies before availability and after
 each final edit candidate. This adds no project-code execution or native preview binding.
 
+Current Available records use the selected file policy for effective defaults and reference work.
+Direct records validate local references against their source document namespace, including when
+an unrelated Prefab anchor is present. ADR 0038 does not admit generated projection IDs as new
+persistent identities. Override records belong to their referenced Prefab's final patch namespace,
+so source classification does not interpret them against the outer document. Unknown, future and
+unbound records retain their preservation boundary rather than acquiring typed remap authority.
+
 Generic field writes accept editable closed shapes through the same bounded transaction
 port. Entity-reference-containing field writes remain denied until the complete target and
 remap closure is admitted. Reading declared references and native Prefab remapping use the

@@ -753,15 +753,12 @@ impl PrefabAuthoringSession {
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
     ) -> Result<Self, crate::SceneFilePublicationError> {
-        let (document, source_upgrade_required) = candidate.into_canonical_document(registry)?;
-        let diagnostics = document
-            .instantiate()
-            .validate_authoring_with_asset_database(registry, database);
-        if diagnostics.has_errors() {
-            return Err(crate::SceneFilePublicationError::new(diagnostics).into());
-        }
+        let published = candidate
+            .canonicalize(registry)?
+            .publish_with_asset_database(registry, database)?;
+        let source_upgrade_required = published.source_upgrade_required();
         Ok(Self::new_with_source_state(
-            document,
+            published.into_document(),
             source_upgrade_required,
             SceneAuthoringHistoryLimits::default(),
         ))
@@ -883,14 +880,11 @@ impl PrefabAuthoringSession {
         database: &ProjectAssetDatabase,
     ) -> Result<(), AuthoringSessionReplacementError> {
         self.authority.require_native()?;
-        let (document, source_upgrade_required) = candidate.into_canonical_document(registry)?;
-        let diagnostics = document
-            .instantiate()
-            .validate_authoring_with_asset_database(registry, database);
-        if diagnostics.has_errors() {
-            return Err(crate::SceneFilePublicationError::new(diagnostics).into());
-        }
-        self.replace_document_with_source_state(document, source_upgrade_required);
+        let published = candidate
+            .canonicalize(registry)?
+            .publish_with_asset_database(registry, database)?;
+        let source_upgrade_required = published.source_upgrade_required();
+        self.replace_document_with_source_state(published.into_document(), source_upgrade_required);
         Ok(())
     }
 
@@ -1213,13 +1207,12 @@ impl SceneAuthoringSession {
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
     ) -> Result<Self, crate::SceneFilePublicationError> {
-        let (document, source_upgrade_required) = candidate.into_canonical_document(registry)?;
-        let diagnostics = document.validate_authoring_with_asset_database(registry, database);
-        if diagnostics.has_errors() {
-            return Err(crate::SceneFilePublicationError::new(diagnostics));
-        }
+        let published = candidate
+            .canonicalize(registry)?
+            .publish_with_asset_database(registry, database)?;
+        let source_upgrade_required = published.source_upgrade_required();
         Ok(Self::new_with_source_state(
-            document,
+            published.into_document(),
             source_upgrade_required,
             SceneAuthoringHistoryLimits::default(),
         ))
@@ -1323,12 +1316,11 @@ impl SceneAuthoringSession {
         database: &ProjectAssetDatabase,
     ) -> Result<(), AuthoringSessionReplacementError> {
         self.authority.require_native()?;
-        let (document, source_upgrade_required) = candidate.into_canonical_document(registry)?;
-        let diagnostics = document.validate_authoring_with_asset_database(registry, database);
-        if diagnostics.has_errors() {
-            return Err(crate::SceneFilePublicationError::new(diagnostics).into());
-        }
-        self.replace_document_with_source_state(document, source_upgrade_required);
+        let published = candidate
+            .canonicalize(registry)?
+            .publish_with_asset_database(registry, database)?;
+        let source_upgrade_required = published.source_upgrade_required();
+        self.replace_document_with_source_state(published.into_document(), source_upgrade_required);
         Ok(())
     }
 
