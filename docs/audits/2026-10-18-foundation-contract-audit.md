@@ -6,9 +6,10 @@ Baseline: `e9c147ffe2e1d85c4493a44940d86af2c6a1dc17`
 
 Repair commits: `ad97c1f` (glyph ownership), `5ae2c83` (Scene asset context)
 
-Companion: [searchable, standalone HTML report](2026-10-18-foundation-contract-audit.html)
-
 Execution: [audit and hardening plan](../plans/2026-10-18-foundation-contract-audit-and-hardening-plan.md)
+
+The searchable standalone HTML deliverable is kept outside the repository at
+`D:\Frankorz\Downloads\nara-foundation-contract-audit-2026-10-18.html`.
 
 ## Decision summary
 
