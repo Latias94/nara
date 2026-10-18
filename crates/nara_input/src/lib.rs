@@ -1,7 +1,7 @@
 //! Input state primitives and semantic action outcomes.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt::{self, Display, Formatter},
     hash::Hash,
@@ -22,12 +22,12 @@ use schedule::InputSet;
 #[doc(hidden)]
 pub use timeline::{__InputDriverEvent, __InputDriverOutput};
 pub use timeline::{
-    InputAdmission, InputConsumerCursors, InputEndpointRetirement, InputEventKind,
-    InputFrameObservations, InputGeometryGeneration, InputIngressError, InputInvalidationReason,
-    InputPointerId, InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration,
-    InputRouteStamp, InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimeline,
-    InputTimelineEntry, InputUiCursorError, InputUiDisposition, InputWindowEvent, InputWindowId,
-    MAX_INPUT_ROUTES, MAX_INPUT_TIMELINE_ENTRIES,
+    ActionInputProvenance, InputAdmission, InputConsumerCursors, InputEndpointRetirement,
+    InputEventKind, InputFrameObservations, InputGeometryGeneration, InputIngressError,
+    InputInvalidationReason, InputPointerId, InputPresentationEpoch, InputPresentedRoute,
+    InputRouteGeneration, InputRouteStamp, InputSeatId, InputSlotGeneration, InputSurfaceId,
+    InputTimeline, InputTimelineEntry, InputUiCursorError, InputUiDisposition, InputWindowEvent,
+    InputWindowId, MAX_INPUT_ROUTES, MAX_INPUT_TIMELINE_ENTRIES,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -131,17 +131,37 @@ impl Error for ButtonInputError {}
 /// Retained button state plus one bounded edge log with independent frame and action cursors.
 #[derive(Debug, Clone, Resource)]
 pub struct ButtonInput<T> {
-    pressed: HashSet<T>,
+    pressed: BTreeMap<T, BTreeSet<ButtonInputEndpoint>>,
     transitions: Vec<ButtonTransition<T>>,
     action_resolved_prefix_len: usize,
     frame_observed_prefix_len: usize,
     transition_sequence: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ButtonInputEndpoint {
+    Synthetic,
+    Timeline {
+        window: InputWindowId,
+        seat: InputSeatId,
+        pointer: Option<InputPointerId>,
+    },
+}
+
+impl ButtonInputEndpoint {
+    const fn from_route(route: InputRouteStamp) -> Self {
+        Self::Timeline {
+            window: route.window(),
+            seat: route.seat(),
+            pointer: route.pointer(),
+        }
+    }
+}
+
 impl<T> Default for ButtonInput<T> {
     fn default() -> Self {
         Self {
-            pressed: HashSet::new(),
+            pressed: BTreeMap::new(),
             transitions: Vec::new(),
             action_resolved_prefix_len: 0,
             frame_observed_prefix_len: 0,
@@ -155,29 +175,47 @@ where
     T: Copy + Eq + Hash + Ord,
 {
     pub fn press(&mut self, button: T) -> Result<bool, ButtonInputError> {
-        if self.pressed.contains(&button) {
+        if self
+            .pressed
+            .get(&button)
+            .is_some_and(|endpoints| endpoints.contains(&ButtonInputEndpoint::Synthetic))
+        {
             return Ok(false);
         }
         self.push_transition(button, ButtonTransitionPhase::Pressed)?;
-        self.pressed.insert(button);
+        self.pressed
+            .entry(button)
+            .or_default()
+            .insert(ButtonInputEndpoint::Synthetic);
         Ok(true)
     }
 
     pub fn release(&mut self, button: T) -> Result<bool, ButtonInputError> {
-        if !self.pressed.contains(&button) {
+        if !self
+            .pressed
+            .get(&button)
+            .is_some_and(|endpoints| endpoints.contains(&ButtonInputEndpoint::Synthetic))
+        {
             return Ok(false);
         }
         self.push_transition(button, ButtonTransitionPhase::Released)?;
-        self.pressed.remove(&button);
+        self.remove_endpoint(button, ButtonInputEndpoint::Synthetic);
         Ok(true)
     }
 
     pub fn release_all(&mut self) -> Result<Vec<T>, ButtonInputError> {
-        let mut released = self.pressed.iter().copied().collect::<Vec<_>>();
-        released.sort();
+        let released = self
+            .pressed
+            .iter()
+            .filter_map(|(button, endpoints)| {
+                endpoints
+                    .contains(&ButtonInputEndpoint::Synthetic)
+                    .then_some(*button)
+            })
+            .collect::<Vec<_>>();
         self.preflight_transition_count(released.len())?;
-        self.pressed.clear();
         for button in released.iter().copied() {
+            self.remove_endpoint(button, ButtonInputEndpoint::Synthetic);
             self.push_transition_preflighted(button, ButtonTransitionPhase::Released);
         }
         Ok(released)
@@ -185,7 +223,7 @@ where
 
     #[must_use]
     pub fn pressed(&self, button: T) -> bool {
-        self.pressed.contains(&button)
+        self.pressed.contains_key(&button)
     }
 
     #[must_use]
@@ -220,7 +258,7 @@ where
     }
 
     pub fn pressed_buttons(&self) -> impl Iterator<Item = T> + '_ {
-        self.pressed.iter().copied()
+        self.pressed.keys().copied()
     }
 
     /// Ordered physical edges visible during the current app frame.
@@ -295,12 +333,18 @@ where
     fn apply_timeline_transition(
         &mut self,
         timeline_sequence: u64,
+        route: InputRouteStamp,
         button: T,
         phase: ButtonTransitionPhase,
     ) -> Result<(), ButtonInputError> {
+        let endpoint = ButtonInputEndpoint::from_route(route);
+        let endpoint_is_pressed = self
+            .pressed
+            .get(&button)
+            .is_some_and(|endpoints| endpoints.contains(&endpoint));
         let changes_state = match phase {
-            ButtonTransitionPhase::Pressed => !self.pressed.contains(&button),
-            ButtonTransitionPhase::Released => self.pressed.contains(&button),
+            ButtonTransitionPhase::Pressed => !endpoint_is_pressed,
+            ButtonTransitionPhase::Released => endpoint_is_pressed,
         };
         if !changes_state {
             return Ok(());
@@ -308,14 +352,23 @@ where
         self.preflight_transition_count(1)?;
         match phase {
             ButtonTransitionPhase::Pressed => {
-                self.pressed.insert(button);
+                self.pressed.entry(button).or_default().insert(endpoint);
             }
             ButtonTransitionPhase::Released => {
-                self.pressed.remove(&button);
+                self.remove_endpoint(button, endpoint);
             }
         }
         self.push_transition_with_origin_preflighted(button, phase, Some(timeline_sequence));
         Ok(())
+    }
+
+    fn remove_endpoint(&mut self, button: T, endpoint: ButtonInputEndpoint) {
+        if let Some(endpoints) = self.pressed.get_mut(&button) {
+            endpoints.remove(&endpoint);
+            if endpoints.is_empty() {
+                self.pressed.remove(&button);
+            }
+        }
     }
 
     fn push_transition_with_origin_preflighted(
@@ -877,6 +930,7 @@ pub struct ActionOutcome {
     pub binding: InputBinding,
     pub phase: ActionPhase,
     pub value: ActionValue,
+    pub provenance: ActionInputProvenance,
 }
 
 /// Frame-transient semantic input outcomes.
@@ -1010,12 +1064,12 @@ fn project_timeline_input(
         match entry.kind() {
             InputEventKind::Key { key, phase } => {
                 keyboard
-                    .apply_timeline_transition(entry.sequence(), key, phase)
+                    .apply_timeline_transition(entry.sequence(), entry.route(), key, phase)
                     .map_err(BevyError::error)?;
             }
             InputEventKind::PointerButton { button, phase } => {
                 mouse
-                    .apply_timeline_transition(entry.sequence(), button, phase)
+                    .apply_timeline_transition(entry.sequence(), entry.route(), button, phase)
                     .map_err(BevyError::error)?;
             }
             InputEventKind::PointerMoved => {
@@ -1064,7 +1118,13 @@ fn resolve_action_outcomes(
         let Some((input, transition_phase)) = entry.action_transition() else {
             continue;
         };
-        resolve_input_binding(&action_map, input, transition_phase, &mut outcomes);
+        resolve_input_binding(
+            &action_map,
+            input,
+            transition_phase,
+            entry.action_provenance(),
+            &mut outcomes,
+        );
     }
     // Keyboard and mouse retain independent physical timelines. Resolve each timeline in event
     // order for direct legacy mutations. Timeline-projected edges were already resolved above in
@@ -1100,7 +1160,13 @@ fn resolve_button_transitions<T: Copy>(
         .filter(|transition| transition.timeline_sequence().is_none())
     {
         let input = input_binding(transition.button());
-        resolve_input_binding(action_map, input, transition.phase(), outcomes);
+        resolve_input_binding(
+            action_map,
+            input,
+            transition.phase(),
+            ActionInputProvenance::synthetic(),
+            outcomes,
+        );
     }
 }
 
@@ -1108,6 +1174,7 @@ fn resolve_input_binding(
     action_map: &ActionMap,
     input: InputBinding,
     transition_phase: ButtonTransitionPhase,
+    provenance: ActionInputProvenance,
     outcomes: &mut ActionOutcomes,
 ) {
     let (phase, value) = match transition_phase {
@@ -1125,6 +1192,7 @@ fn resolve_input_binding(
                 binding: input,
                 phase,
                 value,
+                provenance,
             });
         }
     }

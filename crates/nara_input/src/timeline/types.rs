@@ -18,6 +18,7 @@ pub const MAX_INPUT_TIMELINE_ENTRIES: usize = 4_096;
 pub const MAX_INPUT_ROUTES: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InputWindowId(u64);
 
 impl InputWindowId {
@@ -35,6 +36,7 @@ impl InputWindowId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InputSurfaceId(u64);
 
 impl InputSurfaceId {
@@ -50,6 +52,7 @@ impl InputSurfaceId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InputSeatId(u32);
 
 impl InputSeatId {
@@ -67,6 +70,7 @@ impl InputSeatId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InputPointerId(u32);
 
 impl InputPointerId {
@@ -84,6 +88,7 @@ impl InputPointerId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct InputPresentationEpoch(u64);
 
 impl InputPresentationEpoch {
@@ -100,6 +105,7 @@ impl InputPresentationEpoch {
 
 /// Host-owned generation of one installed UI surface slot snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct InputSlotGeneration(u64);
 
 impl InputSlotGeneration {
@@ -116,6 +122,7 @@ impl InputSlotGeneration {
 
 /// Host-owned generation of the exact UI route retained by one presented receipt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct InputRouteGeneration(u64);
 
 impl InputRouteGeneration {
@@ -132,6 +139,7 @@ impl InputRouteGeneration {
 
 /// Host-owned generation of the exact UI geometry used to route an input event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct InputGeometryGeneration(u64);
 
 impl InputGeometryGeneration {
@@ -145,6 +153,29 @@ impl InputGeometryGeneration {
         self.0
     }
 }
+
+#[cfg(feature = "serde")]
+macro_rules! nonzero_input_generation_deserialize {
+    ($($generation:ty),* $(,)?) => {
+        $(impl<'de> serde::Deserialize<'de> for $generation {
+            fn deserialize<Deserializer>(deserializer: Deserializer) -> Result<Self, Deserializer::Error>
+            where
+                Deserializer: serde::Deserializer<'de>,
+            {
+                let raw = <u64 as serde::Deserialize>::deserialize(deserializer)?;
+                Self::new(raw).ok_or_else(|| serde::de::Error::custom("input generation must be non-zero"))
+            }
+        })*
+    };
+}
+
+#[cfg(feature = "serde")]
+nonzero_input_generation_deserialize!(
+    InputPresentationEpoch,
+    InputSlotGeneration,
+    InputRouteGeneration,
+    InputGeometryGeneration,
+);
 
 /// Complete immutable route publication accepted by the normalized input authority.
 ///
@@ -221,6 +252,7 @@ impl InputPresentedRoute {
 
 /// Event-time routing facts captured without depending on UI or render types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InputRouteStamp {
     pub(super) window: InputWindowId,
     pub(super) surface: Option<InputSurfaceId>,
@@ -231,6 +263,52 @@ pub struct InputRouteStamp {
     pub(super) route_generation: Option<InputRouteGeneration>,
     pub(super) geometry_generation: Option<InputGeometryGeneration>,
     pub(super) binding_generation: u64,
+}
+
+/// Event-time endpoint and original held-press lineage for one semantic action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ActionInputProvenance {
+    sequence: Option<u64>,
+    route: InputRouteStamp,
+    press_sequence: Option<u64>,
+    press_route: Option<InputRouteStamp>,
+}
+
+impl ActionInputProvenance {
+    #[must_use]
+    pub const fn synthetic() -> Self {
+        Self {
+            sequence: None,
+            route: InputRouteStamp::unrouted(
+                InputWindowId::UNSPECIFIED,
+                InputSeatId::PRIMARY,
+                None,
+            ),
+            press_sequence: None,
+            press_route: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn sequence(self) -> Option<u64> {
+        self.sequence
+    }
+
+    #[must_use]
+    pub const fn route(self) -> InputRouteStamp {
+        self.route
+    }
+
+    #[must_use]
+    pub const fn press_sequence(self) -> Option<u64> {
+        self.press_sequence
+    }
+
+    #[must_use]
+    pub const fn press_route(self) -> Option<InputRouteStamp> {
+        self.press_route
+    }
 }
 
 impl InputRouteStamp {
@@ -360,6 +438,8 @@ pub struct InputTimelineEntry {
     pub(super) logical_position: Option<Vec2>,
     pub(super) kind: InputEventKind,
     pub(super) invalidation: Option<InputInvalidationReason>,
+    pub(super) press_sequence: Option<u64>,
+    pub(super) press_route: Option<InputRouteStamp>,
 }
 
 impl InputTimelineEntry {
@@ -386,6 +466,16 @@ impl InputTimelineEntry {
     #[must_use]
     pub const fn invalidation(self) -> Option<InputInvalidationReason> {
         self.invalidation
+    }
+
+    #[must_use]
+    pub const fn action_provenance(self) -> ActionInputProvenance {
+        ActionInputProvenance {
+            sequence: Some(self.sequence),
+            route: self.route,
+            press_sequence: self.press_sequence,
+            press_route: self.press_route,
+        }
     }
 
     pub(crate) fn action_transition(self) -> Option<(InputBinding, ButtonTransitionPhase)> {

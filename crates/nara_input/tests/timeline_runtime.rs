@@ -8,11 +8,12 @@ use nara_app::{
 use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_input::__private::InputSet;
 use nara_input::{
-    ActionId, ActionMap, ActionOutcomes, ButtonDriverInput, ButtonInput, InputEventKind,
-    InputFrameObservations, InputGeometryGeneration, InputPresentationEpoch, InputPresentedRoute,
-    InputRouteGeneration, InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimeline,
-    InputWindowEvent, InputWindowId, KeyCode, apply_keyboard_driver_input_at,
-    apply_window_input_driver_event,
+    ActionId, ActionMap, ActionOutcome, ActionOutcomes, ActionPhase, ButtonDriverInput,
+    ButtonInput, InputEventKind, InputFrameObservations, InputGeometryGeneration, InputPointerId,
+    InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration, InputSeatId,
+    InputSlotGeneration, InputSurfaceId, InputTimeline, InputWindowEvent, InputWindowId, KeyCode,
+    MouseButton, apply_keyboard_driver_input, apply_keyboard_driver_input_at,
+    apply_mouse_driver_input_at, apply_window_input_driver_event,
 };
 
 #[derive(Debug, Default, Resource)]
@@ -20,6 +21,16 @@ struct ObservedSequences(Vec<u64>);
 
 #[derive(Debug, Default, Resource)]
 struct ObservedActions(usize);
+
+#[derive(Debug, Default, Resource)]
+struct CapturedActionOutcomes(Vec<ActionOutcome>);
+
+fn capture_action_outcomes(
+    outcomes: Res<ActionOutcomes>,
+    mut captured: ResMut<CapturedActionOutcomes>,
+) {
+    captured.0.extend_from_slice(outcomes.as_slice());
+}
 
 #[derive(Debug, Default, Resource)]
 struct FixedKeyObservations(Vec<(bool, bool, bool)>);
@@ -107,6 +118,337 @@ fn stop_runtime(runtime: &mut RuntimeInstance) {
     if runtime.state() == RuntimeState::Stopping {
         runtime.drive(Duration::ZERO).unwrap();
     }
+}
+
+#[test]
+fn endpoint_projection_preserves_other_seat_keys_after_release_and_focus_loss() {
+    let first_window = InputWindowId::new(1);
+    let second_window = InputWindowId::new(2);
+    let first_seat = InputSeatId::PRIMARY;
+    let second_seat = InputSeatId::new(1);
+    let key = KeyCode::Character('d');
+    let mut app = App::new();
+    app.add_plugin(nara_input::InputPlugin)
+        .unwrap()
+        .insert_resource(CapturedActionOutcomes::default())
+        .unwrap()
+        .add_systems(CoreStage::Update, capture_action_outcomes)
+        .unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<ActionMap>()
+        .bind_key(ActionId::new("move").unwrap(), key);
+    for (window, seat, surface) in [
+        (first_window, first_seat, InputSurfaceId::new(9)),
+        (second_window, second_seat, InputSurfaceId::new(10)),
+    ] {
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<InputTimeline>()
+            .publish_presented_route(InputPresentedRoute::new(
+                window,
+                surface,
+                seat,
+                InputPresentationEpoch::new(1).unwrap(),
+                InputSlotGeneration::new(1).unwrap(),
+                InputRouteGeneration::new(1).unwrap(),
+                InputGeometryGeneration::new(1).unwrap(),
+            ))
+            .unwrap();
+    }
+    let mut runtime = start_runtime(app);
+    runtime
+        .with_driver_scope(|scope| {
+            for (window, seat) in [(first_window, first_seat), (second_window, second_seat)] {
+                apply_window_input_driver_event(
+                    scope,
+                    window,
+                    seat,
+                    InputWindowEvent::Focused(true),
+                )?;
+                apply_keyboard_driver_input_at(scope, window, seat, ButtonDriverInput::Press(key))?;
+            }
+            Ok::<(), nara_input::ButtonInputDriverError>(())
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input_at(
+                scope,
+                first_window,
+                first_seat,
+                ButtonDriverInput::Release(key),
+            )
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let held_after_first_release = runtime
+        .world()
+        .resource::<ButtonInput<KeyCode>>()
+        .pressed(key);
+    runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input_at(
+                scope,
+                first_window,
+                first_seat,
+                ButtonDriverInput::Press(key),
+            )
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    runtime
+        .with_driver_scope(|scope| {
+            apply_window_input_driver_event(
+                scope,
+                first_window,
+                first_seat,
+                InputWindowEvent::Focused(false),
+            )
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let held_after_first_focus_loss = runtime
+        .world()
+        .resource::<ButtonInput<KeyCode>>()
+        .pressed(key);
+    runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input_at(
+                scope,
+                second_window,
+                second_seat,
+                ButtonDriverInput::Release(key),
+            )
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let held_after_final_release = runtime
+        .world()
+        .resource::<ButtonInput<KeyCode>>()
+        .pressed(key);
+    let outcomes = runtime
+        .world()
+        .resource::<CapturedActionOutcomes>()
+        .0
+        .clone();
+    stop_runtime(&mut runtime);
+
+    assert!(held_after_first_release, "another seat still holds the key");
+    assert!(
+        held_after_first_focus_loss,
+        "focus loss releases only the affected seat"
+    );
+    assert!(!held_after_final_release);
+    assert_eq!(
+        outcomes
+            .iter()
+            .map(|outcome| outcome.phase)
+            .collect::<Vec<_>>(),
+        [
+            ActionPhase::Started,
+            ActionPhase::Started,
+            ActionPhase::Released,
+            ActionPhase::Started,
+            ActionPhase::Released,
+            ActionPhase::Released,
+        ]
+    );
+    let expected_origins = [
+        (2, first_window, first_seat, 2, InputSurfaceId::new(9)),
+        (4, second_window, second_seat, 4, InputSurfaceId::new(10)),
+        (5, first_window, first_seat, 2, InputSurfaceId::new(9)),
+        (6, first_window, first_seat, 6, InputSurfaceId::new(9)),
+        (7, first_window, first_seat, 6, InputSurfaceId::new(9)),
+        (9, second_window, second_seat, 4, InputSurfaceId::new(10)),
+    ];
+    for (outcome, (sequence, window, seat, press_sequence, surface)) in
+        outcomes.iter().zip(expected_origins)
+    {
+        assert_eq!(outcome.provenance.sequence(), Some(sequence));
+        assert_eq!(outcome.provenance.route().window(), window);
+        assert_eq!(outcome.provenance.route().seat(), seat);
+        assert_eq!(outcome.provenance.press_sequence(), Some(press_sequence));
+        assert_eq!(
+            outcome.provenance.press_route().unwrap().surface(),
+            Some(surface)
+        );
+    }
+}
+
+#[test]
+fn endpoint_projection_preserves_other_pointer_buttons_after_release() {
+    let window = InputWindowId::new(1);
+    let seat = InputSeatId::PRIMARY;
+    let first_pointer = InputPointerId::PRIMARY;
+    let second_pointer = InputPointerId::new(1);
+    let button = MouseButton::Left;
+    let mut app = App::new();
+    app.add_plugin(nara_input::InputPlugin)
+        .unwrap()
+        .insert_resource(CapturedActionOutcomes::default())
+        .unwrap()
+        .add_systems(CoreStage::Update, capture_action_outcomes)
+        .unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<ActionMap>()
+        .bind_mouse(ActionId::new("select").unwrap(), button);
+    let mut runtime = start_runtime(app);
+    runtime
+        .with_driver_scope(|scope| {
+            for pointer in [first_pointer, second_pointer] {
+                apply_mouse_driver_input_at(
+                    scope,
+                    window,
+                    seat,
+                    pointer,
+                    ButtonDriverInput::Press(button),
+                )?;
+            }
+            Ok::<(), nara_input::ButtonInputDriverError>(())
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    runtime
+        .with_driver_scope(|scope| {
+            apply_mouse_driver_input_at(
+                scope,
+                window,
+                seat,
+                first_pointer,
+                ButtonDriverInput::Release(button),
+            )
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let held_after_first_release = runtime
+        .world()
+        .resource::<ButtonInput<MouseButton>>()
+        .pressed(button);
+    runtime
+        .with_driver_scope(|scope| {
+            apply_window_input_driver_event(scope, window, seat, InputWindowEvent::Focused(false))
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let held_after_focus_loss = runtime
+        .world()
+        .resource::<ButtonInput<MouseButton>>()
+        .pressed(button);
+    let outcomes = runtime
+        .world()
+        .resource::<CapturedActionOutcomes>()
+        .0
+        .clone();
+    stop_runtime(&mut runtime);
+
+    assert!(
+        held_after_first_release,
+        "another pointer still holds the button"
+    );
+    assert!(!held_after_focus_loss);
+    assert_eq!(
+        outcomes
+            .iter()
+            .map(|outcome| outcome.phase)
+            .collect::<Vec<_>>(),
+        [
+            ActionPhase::Started,
+            ActionPhase::Started,
+            ActionPhase::Released,
+            ActionPhase::Released,
+        ]
+    );
+    for (outcome, (sequence, pointer, press_sequence)) in outcomes.iter().zip([
+        (1, first_pointer, 1),
+        (2, second_pointer, 2),
+        (3, first_pointer, 1),
+        (4, second_pointer, 2),
+    ]) {
+        assert_eq!(outcome.provenance.sequence(), Some(sequence));
+        assert_eq!(outcome.provenance.route().pointer(), Some(pointer));
+        assert_eq!(outcome.provenance.press_sequence(), Some(press_sequence));
+        assert_eq!(
+            outcome.provenance.press_route().unwrap().pointer(),
+            Some(pointer)
+        );
+    }
+}
+
+#[test]
+fn endpoint_projection_keeps_direct_synthetic_and_default_driver_members_separate() {
+    let key = KeyCode::Character('d');
+    let mut app = App::new();
+    app.add_plugin(nara_input::InputPlugin).unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(key)
+        .unwrap();
+    let mut runtime = start_runtime(app);
+    runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input(scope, ButtonDriverInput::Press(key))
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input(scope, ButtonDriverInput::Release(key))
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let synthetic_survives_driver_release = runtime
+        .world()
+        .resource::<ButtonInput<KeyCode>>()
+        .pressed(key);
+    runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input(scope, ButtonDriverInput::Press(key))
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    runtime
+        .with_driver_scope(|scope| {
+            scope.__apply_port::<ButtonInput<KeyCode>>(ButtonDriverInput::Release(key))
+        })
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let driver_survives_synthetic_release = runtime
+        .world()
+        .resource::<ButtonInput<KeyCode>>()
+        .pressed(key);
+    runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input(scope, ButtonDriverInput::Release(key))
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let held_after_final_release = runtime
+        .world()
+        .resource::<ButtonInput<KeyCode>>()
+        .pressed(key);
+    stop_runtime(&mut runtime);
+
+    assert!(synthetic_survives_driver_release);
+    assert!(driver_survives_synthetic_release);
+    assert!(!held_after_final_release);
 }
 
 #[test]

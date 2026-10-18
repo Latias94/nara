@@ -14,12 +14,12 @@ mod types;
 #[doc(hidden)]
 pub use types::{__InputDriverEvent, __InputDriverOutput};
 pub use types::{
-    InputAdmission, InputConsumerCursors, InputEndpointRetirement, InputEventKind,
-    InputFrameObservations, InputGeometryGeneration, InputIngressError, InputInvalidationReason,
-    InputPointerId, InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration,
-    InputRouteStamp, InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimelineEntry,
-    InputUiCursorError, InputUiDisposition, InputWindowEvent, InputWindowId, MAX_INPUT_ROUTES,
-    MAX_INPUT_TIMELINE_ENTRIES,
+    ActionInputProvenance, InputAdmission, InputConsumerCursors, InputEndpointRetirement,
+    InputEventKind, InputFrameObservations, InputGeometryGeneration, InputIngressError,
+    InputInvalidationReason, InputPointerId, InputPresentationEpoch, InputPresentedRoute,
+    InputRouteGeneration, InputRouteStamp, InputSeatId, InputSlotGeneration, InputSurfaceId,
+    InputTimelineEntry, InputUiCursorError, InputUiDisposition, InputWindowEvent, InputWindowId,
+    MAX_INPUT_ROUTES, MAX_INPUT_TIMELINE_ENTRIES,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1359,6 +1359,34 @@ impl InputTimeline {
         let first_sequence = self.next_sequence + 1;
         for (offset, draft) in drafts.iter().copied().enumerate() {
             let sequence = first_sequence + u64::try_from(offset).expect("bounded offset fits u64");
+            let press_origin = match draft.kind {
+                InputEventKind::Key {
+                    phase: ButtonTransitionPhase::Pressed,
+                    ..
+                }
+                | InputEventKind::PointerButton {
+                    phase: ButtonTransitionPhase::Pressed,
+                    ..
+                } => Some((sequence, draft.route)),
+                InputEventKind::Key {
+                    key,
+                    phase: ButtonTransitionPhase::Released,
+                } => self
+                    .pressed_keys
+                    .get(&(draft.route.window(), draft.route.seat()))
+                    .and_then(|pressed| pressed.get(&key))
+                    .map(|held| (held.press_sequence, held.route)),
+                InputEventKind::PointerButton {
+                    button,
+                    phase: ButtonTransitionPhase::Released,
+                } => draft.route.pointer().and_then(|pointer| {
+                    self.pressed_mouse_buttons
+                        .get(&(draft.route.window(), draft.route.seat(), pointer))
+                        .and_then(|pressed| pressed.get(&button))
+                        .map(|held| (held.press_sequence, held.route))
+                }),
+                _ => None,
+            };
             self.retained.push_back(RetainedInput {
                 entry: InputTimelineEntry {
                     sequence,
@@ -1366,6 +1394,8 @@ impl InputTimeline {
                     logical_position: draft.logical_position,
                     kind: draft.kind,
                     invalidation: draft.invalidation,
+                    press_sequence: press_origin.map(|(sequence, _)| sequence),
+                    press_route: press_origin.map(|(_, route)| route),
                 },
                 projection_pending: true,
                 observation_pending: true,

@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Last Revised**: 2026-10-18
 **Refines**: ADR 0013, ADR 0025, ADR 0035, ADR 0036, ADR 0039
 **Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0095: Plugin-Owned
 Specialized Domains and Project Configuration;
@@ -79,6 +80,12 @@ Rules:
   keyboard navigation, recoverable focus, text/IME behavior, and platform accessibility output.
 - Input diagnostics and replay capture record normalized events, routing decisions, and semantic
   action outcomes at defined stages.
+- Normalized window/seat/pointer identity survives button projection and semantic action delivery.
+  Held physical state is owned per endpoint; the convenient `pressed(button)` observation is the
+  aggregate of those memberships. Releasing or invalidating one endpoint cannot clear another.
+  Timeline-derived action outcomes retain their event sequence and route stamp; direct unstamped
+  low-level mutations are explicitly distinguishable. UI/gameplay release delivery follows the
+  accepted press ownership even when a presented route changes before release.
 
 Frame-transient input/window events follow ADR 0036 and ADR 0039 cleanup rules. Retained input
 state such as pressed buttons, focused element, and pointer capture persists until changed.
