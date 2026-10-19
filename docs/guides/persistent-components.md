@@ -224,8 +224,22 @@ values and `f32` overflow; ordinary finite `f32` rounding is allowed. Integer wi
 Type aliases and qualified type paths use ordinary Rust trait resolution. `Option<T>` has a
 required stored root and encodes `None` as explicit `Null`; it does not permit an absent root.
 Nested numeric domains apply to each element. Reference capabilities belong to the stable root
-field, while traversal reports the concrete nested value path. `Vec2` retains its existing opaque
-map schema and native codec; its member layout is not inferred from example values.
+field, while traversal reports the concrete nested value path. `Vec2` declares a closed record
+with required `x` and `y` finite-F32 members stored as F64 wire scalars. The same shape works in
+`Vec<Vec2>`, `Option<Vec2>` and supported maps. Missing axes, extra members and F32 overflow reject
+in both data-only authoring and native decoding; the shape is never inferred from example values.
+
+If an existing owner used the older opaque-map Vec2 helper, retain its historical catalog and
+advance each affected component's version, including components containing Vec2 in containers.
+Publish the next owner catalog with the exact predecessor fingerprint and register an explicit
+old-to-new component migration. A migration may preserve the x/y value unchanged when it already
+satisfies the closed shape; the successor's schema validation still rejects malformed values.
+Regenerate the current authoring bundle and prove saved predecessor data through strict Check
+before explicitly saving migrated documents. Do not rewrite historical catalogs or merely replace
+their fingerprints. The Reference Game's InitialVelocity2d v1-to-v2/catalog-v5 successor is a
+concrete example. Provider owner candidates inherit existing type tombstones from their exact
+predecessor; a registration callback declares newly retired IDs rather than re-declaring retained
+tombstones on every successor.
 
 `HashMap`, non-string map keys, enums, tuple structs, and arbitrary nested Rust structs remain
 unsupported. Manual schemas can declare closed records with `ComponentValueShape::record`:

@@ -40,7 +40,7 @@ pub struct InitialHealth {
 #[derive(Component, PersistentComponent, Debug, Clone, PartialEq)]
 #[nara(
     id = "reference_game.InitialVelocity2d",
-    version = 1,
+    version = 2,
     alias = "Initial velocity 2D",
     component_capabilities(scene, inspect, edit),
     field_capabilities(scene, inspect, edit)

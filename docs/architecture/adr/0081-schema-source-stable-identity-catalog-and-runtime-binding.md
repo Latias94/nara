@@ -1,9 +1,8 @@
 # ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding
 
 **Status**: Accepted
-**Last Revised**: 2026-10-18
+**Last Revised**: 2026-10-19
 **Date**: 2026-07-12
-**Last Revised**: 2026-10-16
 **Implemented Slices**: RGF-U1 canonical catalog and native binding boundary on 2026-07-12; RGF-U2
 native Rust derive authoring and public headless consumer on 2026-07-13; RGF-U12 World-independent
 content/fingerprint handoff on 2026-07-18; RGF-U29 explicit persistent composition and guarded
@@ -239,6 +238,17 @@ The first admitted field types are `i64`, `u64`, `Vec2`, and `EntityReference`.
 Entity references require `entity_ref`; `asset_ref`, collections, generics, enums, tuple
 structs, and arbitrary nested Rust types remain rejected until a production consumer proves their
 codec and schema contract.
+
+The recursive-shape successor under ADR 0045 admits the supported scalar/reference containers.
+Its Vec2 correction declares required x/y finite-F32 members under the existing stable root field,
+including inside containers. Moving an existing owner from opaque Vec2 maps to this closed shape
+requires a component successor, explicit migration and exact predecessor catalog; unchanged wire
+encoding alone is insufficient. The Reference Game retains catalog v4 and publishes catalog v5
+with InitialVelocity2d v2 and its explicit v1-to-v2 migration.
+
+External manual codecs register through the registry's closure-based codec methods, with public
+encode/decode contexts and typed errors. The erased codec trait and storage are private registry
+implementation details; they do not constitute a second external codec installation interface.
 
 The independent `reference-game` is the public production consumer. Its four components use only
 root exports, freeze against a committed predecessor catalog, round-trip through canonical

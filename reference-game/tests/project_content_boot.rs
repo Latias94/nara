@@ -8,7 +8,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use nara::project_host::ProjectContentBudgetKind;
+use nara::project_host::{ProjectContentBudgetKind, StartupContentMemberKind};
 use nara_reference_game::REFERENCE_GAME_SCHEMA_OWNER_ID;
 use project_content_fixture::{load_project_content, texture_stable_id};
 
@@ -62,7 +62,7 @@ fn assert_committed_content() {
             .owner_receipts()
             .find(|receipt| receipt.owner() == REFERENCE_GAME_SCHEMA_OWNER_ID)
             .map(|receipt| receipt.generation()),
-        Some(4),
+        Some(5),
     );
     assert!(!snapshot.source_upgrade_required());
     assert_eq!(snapshot.revision().to_hex().len(), 64);
@@ -114,7 +114,44 @@ fn assert_committed_content() {
         snapshot.images()[0].image().pixels().as_ptr(),
         cloned.images()[0].image().pixels().as_ptr(),
     );
-    assert_eq!(before_clone.high_water(ProjectContentBudgetKind::Files), 5,);
+    assert_eq!(
+        snapshot
+            .startup_content_closure()
+            .members()
+            .iter()
+            .map(|member| (member.kind(), member.path().as_str().to_owned()))
+            .collect::<Vec<_>>(),
+        [
+            (
+                StartupContentMemberKind::AssetSource,
+                "assets/textures/tiny-dungeon.png".to_owned()
+            ),
+            (
+                StartupContentMemberKind::AssetMetadata,
+                "assets/textures/tiny-dungeon.png.meta".to_owned()
+            ),
+            (
+                StartupContentMemberKind::ProjectManifest,
+                "nara.toml".to_owned()
+            ),
+            (
+                StartupContentMemberKind::Prefab,
+                "prefabs/enemy.prefab.json".to_owned()
+            ),
+            (
+                StartupContentMemberKind::Prefab,
+                "prefabs/reference-ui.prefab.json".to_owned()
+            ),
+            (
+                StartupContentMemberKind::Scene,
+                "scenes/startup.scene.json".to_owned()
+            ),
+        ],
+    );
+    // The content loader charges six reads: Scene + two Prefabs + image source + image
+    // metadata discovery + image metadata admission/digest revalidation. Manifest ingestion
+    // predates this loader; schema catalogs and unrelated images are outside this closure.
+    assert_eq!(before_clone.high_water(ProjectContentBudgetKind::Files), 6);
     assert_eq!(
         before_clone.high_water(ProjectContentBudgetKind::DependencyEdges),
         8,

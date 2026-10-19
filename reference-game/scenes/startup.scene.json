@@ -412,7 +412,7 @@
             }
           },
           "reference_game.InitialVelocity2d": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {

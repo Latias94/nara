@@ -357,12 +357,13 @@ fn generated_catalog_rejects_missing_reused_and_dropped_tombstones() {
 }
 
 #[test]
-fn reference_game_catalog_preserves_v1_through_v3_and_matches_the_v4_successor() {
-    assert_eq!(REFERENCE_GAME_SCHEMA_PROVIDER.binding().version(), 4);
+fn reference_game_catalog_preserves_v1_through_v4_and_matches_the_v5_successor() {
+    assert_eq!(REFERENCE_GAME_SCHEMA_PROVIDER.binding().version(), 5);
     let v1_fixture = include_str!("../schema/component-schema-v1.json");
     let v2_fixture = include_str!("../schema/component-schema-v2.json");
     let v3_fixture = include_str!("../schema/component-schema-v3.json");
     let v4_fixture = include_str!("../schema/component-schema-v4.json");
+    let v5_fixture = include_str!("../schema/component-schema-v5.json");
     let v1 = reference_game_predecessor_catalog();
     assert_eq!(format!("{}\n", v1.to_json_string().unwrap()), v1_fixture);
     let v2 = ComponentSchemaCatalog::from_json_bytes_with_predecessor(
@@ -383,10 +384,27 @@ fn reference_game_catalog_preserves_v1_through_v3_and_matches_the_v4_successor()
         ComponentCatalogFileLimits::default(),
     )
     .unwrap();
+    let velocity = v4
+        .components()
+        .iter()
+        .find(|schema| schema.id().as_str() == "reference_game.InitialVelocity2d")
+        .unwrap();
+    assert_eq!(velocity.version(), ComponentSchemaVersion::ONE);
+    assert_eq!(
+        velocity.fields()[0].shape(),
+        &nara::reflect::ComponentValueShape::opaque(nara::reflect::ComponentValueKind::Map)
+    );
+    let v5 = ComponentSchemaCatalog::from_json_bytes_with_predecessor(
+        v5_fixture.as_bytes(),
+        &v4,
+        ComponentCatalogFileLimits::default(),
+    )
+    .unwrap();
     for (catalog, predecessor, fixture) in [
         (&v2, &v1, v2_fixture),
         (&v3, &v2, v3_fixture),
         (&v4, &v3, v4_fixture),
+        (&v5, &v4, v5_fixture),
     ] {
         assert_eq!(
             format!(
@@ -404,13 +422,13 @@ fn reference_game_catalog_preserves_v1_through_v3_and_matches_the_v4_successor()
     let owner_receipt = snapshot
         .owner_receipt(REFERENCE_GAME_SCHEMA_OWNER_ID)
         .unwrap();
-    assert_eq!(owner_receipt.generation(), v4.generation());
-    assert_eq!(owner_receipt.catalog(), v4.fingerprint());
-    assert_eq!(owner_receipt.predecessor(), v4.predecessor().copied());
-    assert_eq!(registry.catalog().unwrap().components(), v4.components());
+    assert_eq!(owner_receipt.generation(), v5.generation());
+    assert_eq!(owner_receipt.catalog(), v5.fingerprint());
+    assert_eq!(owner_receipt.predecessor(), v5.predecessor().copied());
+    assert_eq!(registry.catalog().unwrap().components(), v5.components());
     assert_eq!(
         registry.catalog().unwrap().type_tombstones(),
-        v4.type_tombstones()
+        v5.type_tombstones()
     );
     for id in [
         "reference_game.PlayerRole",

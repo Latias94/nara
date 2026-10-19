@@ -17,7 +17,7 @@ use nara::{
         CapabilityRights, ContentDigest, DirectoryCapability, ExpectedTarget, FsError, FsOperation,
         HostCapabilityOptions, RelativeComponent, RelativePath, TemporaryFileFailure, TrustMode,
     },
-    project_host::{ingest_project_manifest, resolve_product_recipe},
+    project_host::{RuntimePlanError, ingest_project_manifest, resolve_product_recipe},
     reflect::{AuthoringSchemaBundleError, AuthoringSchemaBundleLimits},
 };
 use nara_reference_game::project_recipe;
@@ -34,6 +34,13 @@ fn main() -> ExitCode {
 
 fn finish_failure(mut error: BundleToolError) -> ExitCode {
     eprintln!("authoring-bundle: {error}");
+    if let BundleToolError::ResolveProductPlan(plan) = &error {
+        let mut cause = plan.source();
+        while let Some(source) = cause {
+            eprintln!("  caused by: {source}");
+            cause = source.source();
+        }
+    }
     if let BundleToolError::CreateTemporary(failure)
     | BundleToolError::WriteTemporary(failure)
     | BundleToolError::SyncTemporary(failure)
@@ -164,8 +171,8 @@ fn canonical_bundle_bytes(
     let bundle_path =
         RelativePath::new(bundle_path.as_str()).map_err(|_| BundleToolError::ParseBundlePath)?;
     let recipe = project_recipe().map_err(|_| BundleToolError::ComposeRecipe)?;
-    let plan = resolve_product_recipe(&candidate, recipe)
-        .map_err(|_| BundleToolError::ResolveProductPlan)?;
+    let plan =
+        resolve_product_recipe(&candidate, recipe).map_err(BundleToolError::ResolveProductPlan)?;
     let bundle = plan.schema_validation().authoring_schema_bundle();
     let mut encoded = bundle
         .to_json_string()
@@ -247,7 +254,7 @@ enum BundleToolError {
     BundlePathMissing,
     ParseBundlePath,
     ComposeRecipe,
-    ResolveProductPlan,
+    ResolveProductPlan(RuntimePlanError),
     Encode(AuthoringSchemaBundleError),
     ReadBundle(FsError),
     ResolveBundleParent(FsError),
@@ -284,8 +291,8 @@ impl Display for BundleToolError {
                 formatter.write_str("declared authoring schema bundle path is invalid")
             }
             Self::ComposeRecipe => formatter.write_str("project recipe could not be composed"),
-            Self::ResolveProductPlan => {
-                formatter.write_str("project product plan could not be resolved")
+            Self::ResolveProductPlan(source) => {
+                write!(formatter, "project product plan could not be resolved: {source}")
             }
             Self::Encode(_) => formatter.write_str("canonical authoring bundle could not encode"),
             Self::ReadBundle(_) => formatter.write_str("declared bundle could not be read"),
@@ -333,13 +340,13 @@ impl Error for BundleToolError {
             | Self::WriteTemporary(source)
             | Self::SyncTemporary(source) => Some(source),
             Self::Encode(source) => Some(source),
+            Self::ResolveProductPlan(source) => Some(source),
             Self::Usage
             | Self::ParseProjectManifestPath
             | Self::IngestManifest
             | Self::BundlePathMissing
             | Self::ParseBundlePath
             | Self::ComposeRecipe
-            | Self::ResolveProductPlan
             | Self::TemporaryName
             | Self::PublicationUnverified
             | Self::Stale => None,

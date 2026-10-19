@@ -315,7 +315,7 @@ pub mod advanced_prelude {
         WorldIdentityDomainSettings, resolve_in_world,
     };
     pub use nara_reflect::{
-        ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
+        ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
         ComponentFieldPathError, ComponentFieldPathSegment, ComponentFloat,
         ComponentMigrationError, ComponentRegistryError, ComponentValueError, ComponentValueKind,
         MigratedComponentValue, PreparedComponent, PreparedComponentCandidate,

@@ -78,12 +78,12 @@ pub const REFERENCE_GAME_SCHEMA_PROVIDER: ComponentSchemaProviderDefinition =
     ComponentSchemaProviderDefinition::with_validation(
         REFERENCE_GAME_SCHEMA_OWNER_ID,
         REFERENCE_GAME_SCHEMA_PROVIDER_ID,
-        nara::reflect::ComponentSchemaProviderBindingId::new("reference-game.components.native", 4),
-        reference_game_schema_v4,
+        nara::reflect::ComponentSchemaProviderBindingId::new("reference-game.components.native", 5),
+        reference_game_schema_v5,
         validate_reference_game_components,
         register_reference_game_components,
     )
-    .with_predecessor(reference_game_schema_v3);
+    .with_predecessor(reference_game_schema_v4);
 const REFERENCE_GAME_REQUIREMENTS: &[PluginId] = &[
     nara::reflect::COMPONENT_REGISTRY_PLUGIN_ID,
     nara::transform::TRANSFORM_PLUGIN_ID,
@@ -597,23 +597,33 @@ fn reference_game_schema_v4() -> Result<ComponentSchemaCatalog, ComponentSchemaP
     .map_err(|_| ComponentSchemaProviderSourceError::new("reference-game-schema-v4-invalid"))
 }
 
+fn reference_game_schema_v5() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError>
+{
+    let predecessor = reference_game_schema_v4()?;
+    ComponentSchemaCatalog::from_json_bytes_with_predecessor(
+        include_bytes!("../schema/component-schema-v5.json"),
+        &predecessor,
+        ComponentCatalogFileLimits::default(),
+    )
+    .map_err(|_| ComponentSchemaProviderSourceError::new("reference-game-schema-v5-invalid"))
+}
+
 pub fn register_reference_game_components(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     validate_reference_game_components(registry)?;
-    for removed_component in [
-        "reference_game.Enemy",
-        "reference_game.Player",
-        "reference_game.Projectile",
-    ] {
-        registry.declare_type_tombstone(ComponentTypeId::new(removed_component))?;
-    }
     register_component::<PlayerRole>(registry)?;
     register_component::<EnemyRole>(registry)?;
     register_component::<InitialHealth>(registry)?;
     register_component::<InitialVelocity2d>(registry)?;
     register_component::<WaveSpawn>(registry)?;
     register_component::<Weapon>(registry)?;
+    registry.register_component_migration(
+        &ComponentTypeId::new("reference_game.InitialVelocity2d"),
+        ComponentSchemaVersion::ONE,
+        ComponentSchemaVersion::new(2).expect("the velocity schema version is non-zero"),
+        migrate_initial_velocity_v1_to_v2,
+    )?;
     registry
         .register_component_migration(
             &ComponentTypeId::new("reference_game.Weapon"),
@@ -622,6 +632,16 @@ pub fn register_reference_game_components(
             migrate_weapon_v1_to_v2,
         )
         .map(|_| ())
+}
+
+fn migrate_initial_velocity_v1_to_v2(
+    value: ComponentValue,
+) -> Result<ComponentValue, ComponentCodecError> {
+    nara::reflect::validate_component_value(
+        &InitialVelocity2d::persistent_component_schema(),
+        &value,
+    )?;
+    Ok(value)
 }
 
 fn migrate_weapon_v1_to_v2(

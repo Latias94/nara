@@ -34,9 +34,7 @@ pub use authoring_bundle::{
     AuthoringSchemaBundle, AuthoringSchemaBundleError, AuthoringSchemaBundleLimits,
     AuthoringSchemaBundleOwner,
 };
-pub use codec::{
-    ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
-};
+pub use codec::{ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext};
 pub use effective::{
     ComponentValueMaterializationLimits, effective_component_value, effective_component_value_owned,
 };
@@ -143,7 +141,7 @@ pub mod __private {
 pub mod prelude {
     pub use crate::{
         ComponentApplyContext, ComponentCapability, ComponentCatalogGenerationError,
-        ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
+        ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
         ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentFieldPath,
         ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema, ComponentFloat,
         ComponentMigrationError, ComponentNumericDomain, ComponentRegistry, ComponentRegistryError,

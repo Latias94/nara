@@ -183,10 +183,17 @@ impl PersistentFieldCodec for u64 {
 
 impl PersistentFieldCodec for Vec2 {
     fn value_shape() -> ComponentValueShape {
-        ComponentValueShape::opaque(ComponentValueKind::Map)
+        let axis = <f32 as PersistentFieldCodec>::value_shape();
+        ComponentValueShape::record([("x".to_owned(), axis.clone()), ("y".to_owned(), axis)])
     }
 
     fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError> {
+        if !matches!(value, ComponentValue::Map(members) if members.len() == 2) {
+            return Err(ComponentCodecError::invalid_field(
+                field,
+                "a closed x/y record of finite f32 values",
+            ));
+        }
         let x = decode_f32_component(value, field, "x")?;
         let y = decode_f32_component(value, field, "y")?;
         Ok(Self::new(x, y))

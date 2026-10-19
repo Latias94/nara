@@ -186,6 +186,7 @@ fn create_repository_fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
         "reference-game/schema/component-schema-v2.json",
         "reference-game/schema/component-schema-v3.json",
         "reference-game/schema/component-schema-v4.json",
+        "reference-game/schema/component-schema-v5.json",
     ] {
         write_fixture_file(&repository, relative, relative.as_bytes());
     }

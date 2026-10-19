@@ -1,0 +1,43 @@
+{
+  "kind": "scene",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "roots": [
+      "player"
+    ],
+    "entities": [
+      {
+        "id": "player",
+        "children": [],
+        "components": {
+          "reference_game.InitialVelocity2d": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "velocity": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 1.5
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": -2.0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

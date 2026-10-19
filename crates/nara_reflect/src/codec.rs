@@ -285,29 +285,12 @@ impl<'a> ComponentEncodeContext<'a> {
     }
 }
 
-pub trait ComponentCodec: Send + Sync {
-    fn preflight(
-        &self,
-        value: &ComponentValue,
-    ) -> Result<PreparedComponentCandidate, ComponentCodecError> {
-        let mut context = ComponentDecodeContext::new();
-        self.preflight_with_context(value, &mut context)
-    }
-
+pub(crate) trait ComponentCodec: Send + Sync {
     fn preflight_with_context(
         &self,
         value: &ComponentValue,
         context: &mut ComponentDecodeContext<'_>,
     ) -> Result<PreparedComponentCandidate, ComponentCodecError>;
-
-    fn encode(
-        &self,
-        world: &World,
-        entity: Entity,
-    ) -> Result<Option<ComponentValue>, ComponentCodecError> {
-        let context = ComponentEncodeContext::new();
-        self.encode_with_context(world, entity, &context)
-    }
 
     fn encode_with_context(
         &self,

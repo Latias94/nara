@@ -13,6 +13,7 @@ reference-game/tests/data/*.command text eol=lf
 reference-game/nara.toml text eol=lf
 reference-game/scenes/*.json text eol=lf
 reference-game/prefabs/*.json text eol=lf
+reference-game/tests/fixtures/*.json text eol=lf
 reference-game/assets/**/*.meta text eol=lf
 
 # Frozen U9 measurement fixtures are hashed byte-for-byte.

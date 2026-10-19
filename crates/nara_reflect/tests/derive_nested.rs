@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use nara_asset::AssetRef;
+use nara_core::Vec2;
 use nara_ecs::{Component, World};
 use nara_identity::{EntityReference, SceneEntityId};
 use nara_reflect::{
@@ -256,4 +257,69 @@ fn generated_nested_reference_markers_are_checked_against_actual_shape() {
             ComponentRegistryError::InvalidFieldCapability { .. }
         ));
     }
+}
+
+#[derive(Component, PersistentComponent, Debug, PartialEq)]
+#[nara(
+    id = "nara.test.NestedMath",
+    version = 1,
+    alias = "Nested math",
+    component_capabilities(scene, inspect, edit),
+    field_capabilities(scene, inspect, edit)
+)]
+struct NestedMath {
+    #[nara(id = "vectors", alias = "Vectors")]
+    vectors: BTreeMap<String, Vec<Option<Vec2>>>,
+}
+
+#[test]
+fn generated_nested_math_composes_closed_axes_through_maps_lists_and_optional() {
+    let expected = NestedMath {
+        vectors: BTreeMap::from([("route".into(), vec![Some(Vec2::new(0.5, -2.0)), None])]),
+    };
+    let schema = NestedMath::persistent_component_schema();
+    let value = expected.__encode_persistent_component().unwrap();
+    validate_component_value(&schema, &value).unwrap();
+    assert_eq!(
+        NestedMath::__decode_persistent_component(&value).unwrap(),
+        expected
+    );
+    let ComponentValueShape::Map { value: list } = schema.fields()[0].shape() else {
+        panic!("the stable root has a typed map");
+    };
+    let ComponentValueShape::List { item } = list.as_ref() else {
+        panic!("map values contain lists");
+    };
+    let ComponentValueShape::Optional { value: vector } = item.as_ref() else {
+        panic!("list items retain explicit Null");
+    };
+    let ComponentValueShape::Record { members } = vector.as_ref() else {
+        panic!("Vec2 remains closed inside containers");
+    };
+    assert_eq!(
+        members
+            .iter()
+            .map(|member| member.name.as_str())
+            .collect::<Vec<_>>(),
+        ["x", "y"]
+    );
+    assert!(
+        members
+            .iter()
+            .all(|member| member.shape.numeric_domain() == Some(ComponentNumericDomain::F32))
+    );
+
+    let invalid = ComponentValue::map([(
+        "vectors",
+        ComponentValue::map([(
+            "route",
+            ComponentValue::List(vec![ComponentValue::map([
+                ("x", ComponentValue::f64(0.0).unwrap()),
+                ("y", ComponentValue::f64(0.0).unwrap()),
+                ("z", ComponentValue::f64(0.0).unwrap()),
+            ])]),
+        )]),
+    )]);
+    assert!(validate_component_value(&schema, &invalid).is_err());
+    assert!(NestedMath::__decode_persistent_component(&invalid).is_err());
 }

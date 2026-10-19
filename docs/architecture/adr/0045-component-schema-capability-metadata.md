@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-18
+**Last Revised**: 2026-10-19
 **Implemented Slice**: RGF-U1 canonical-v1 vocabulary on 2026-07-12
 **Refines**: ADR 0004, ADR 0011, ADR 0015, ADR 0021, ADR 0027, ADR 0028, ADR 0029
 **Refined By**: ADR 0051: Persistent File Envelope, Migration, and Golden Fixtures;
@@ -85,6 +85,14 @@ or reference visitor; schema-description limits must not silently replace a call
 budget. Shape validation walks declared structure, leaves opaque payloads to their owning codec,
 and bounds undeclared-path recursion. Direct in-memory callers own allocation/work admission under
 ADR 0049; reference visitors still scan complete values under explicit traversal limits.
+
+Derived `Vec2` fields use a closed Record with required `x` and `y` members, each an F64 wire
+scalar restricted to the finite F32 numeric domain. The same shape composes through supported
+List, Map and Optional containers. The root field retains its durable identity and capabilities;
+axis names are current value locators. This replaces the derive helper's former opaque-map
+description without changing x/y wire encoding. Existing component owners must retain their
+predecessor catalog, advance affected component versions and their owner catalog, and register an
+explicit migration. Unchanged wire bytes do not authorize silently tightening a saved schema.
 
 ### Effective Values
 

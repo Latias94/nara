@@ -15,6 +15,9 @@ use nara_scene::{
     ScenePatchOperation,
 };
 
+#[path = "support/vec2_data_authoring.rs"]
+mod vec2_data_authoring;
+
 fn bundle() -> AuthoringSchemaBundle {
     let field = ComponentFieldSchema::required(
         ComponentFieldId::new("amount"),
