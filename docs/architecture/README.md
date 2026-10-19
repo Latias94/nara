@@ -71,7 +71,8 @@ one complete field-edit entry, exact dispatch-result routing, a single component
 finite shared constraints. It compares alternative interfaces and defines caller-level acceptance;
 its implementation section groups corrections into complete editing and component-evolution
 workflows, with qualification at each changed boundary. It is not an Accepted contract or
-implemented API, and it does not reopen the completed correction plan.
+implemented convenience API, and it does not reopen the completed correction plan. Its S1
+existing-owner corrections are complete within the linked verification scope; S2/S3 remain proposed.
 
 The [UI foundation design](ui-foundation-design.md),
 [UI boundary study](ui-product-boundaries-editor-dogfood-and-porting-strategy.md), and

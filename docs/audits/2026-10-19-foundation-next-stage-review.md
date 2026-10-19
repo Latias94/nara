@@ -11,6 +11,13 @@ direction. Comparative sources are the local Bevy checkout
 `81ab961f91066a63bcbf3ec340962bb1a1ada558`. References describe those pinned sources, not their latest
 upstream state.
 
+**Subsequent implementation:** S1 corrected N01, N02, N08 and N09 through `bfbd2b8`.
+The [S1 verification record](../knowledge/engineering/verification/2026-10/2026-10-19T143606Z-authoring-s1-safety-and-field-override-recovery-0aca8f3bff914ffeaf0254f40a5cb118.md)
+contains owner, public-control, GPU and selected Windows native results and their limits.
+The original findings and review-time evidence below remain historical. N02 additionally required
+removing data-only Set-only gates and implementing exact inverse presence; correcting the button
+alone did not complete the workflow. N03-N07 and triggered G follow-ups remain open.
+
 Six independent research lanes covered execution/tasks, components/plugins, content/persistence,
 Editor workflows, iteration/delivery and render/platform ownership. A seventh lane challenged the
 combined conclusions. Researchers were read-only; the integration owner ran the bounded Prefab

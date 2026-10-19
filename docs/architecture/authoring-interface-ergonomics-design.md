@@ -10,6 +10,12 @@ This design addresses N01-N09 without reopening the completed correction plan. I
 next implementation sequence and the interfaces its consumers should exercise. Rust sketches
 are directional design examples, not compiling examples of today's API. Pele is excluded.
 
+S1 / E1-E2 is implemented through `bfbd2b8`, with the
+[verification record](../knowledge/engineering/verification/2026-10/2026-10-19T143606Z-authoring-s1-safety-and-field-override-recovery-0aca8f3bff914ffeaf0254f40a5cb118.md)
+covering the existing Prefab/render failure and field-override corrections. D1-D4's new convenience
+interfaces, correlated dispatch and shared interval metadata remain proposed. This status does
+not reopen U1-U15 or imply that S2/S3 is implemented.
+
 ## Start With The Developer's Work
 
 A game developer wants to declare gameplay data, install its behavior once, edit it, understand a
@@ -290,6 +296,8 @@ promise document save, native preview readiness or later-operation completion.
 The remove rule remains `Present && (!required || default_value.is_some())`. Reset is not writing
 the default back into the file. A field already Defaulted has no override to remove. Component
 creation templates, missing-field defaults and validation constraints retain separate meanings.
+Override removal applies to a map-member path endpoint. Removing a whole root value or terminal
+list index is not admitted by this finite Set/Remove inverse contract; the control stays disabled.
 All accepted operations use ordinary document Undo/Redo; the control adds no private persistent
 undo stack. Native text editing can retain its toolkit-local undo during input.
 
@@ -538,8 +546,9 @@ only after its consumer requires that choice. No generic operation service is ne
 
 ## Implementation Sequence And Ownership
 
-These units are proposed future work, not an active implementation goal. Reconcile affected ADRs
-when adopting the durable contracts. Preserve the existing history and complete real consumers.
+S1 / E1-E2 is complete within the linked verification scope. The remaining units are proposed
+work, not an active Goal. Reconcile affected ADRs when adopting their durable contracts. Preserve
+the existing history and complete real consumers.
 
 ### Architecture Adjustment After The Reference Comparison
 

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "f83b5e0fd7c94e24cc57eebd4c79f367916151a8ee3fe298b6e67735a9f1ef60"
+source_fingerprint: "f50d2076e92ea2d09160e6cfa203423115fb4ae1938007cee42b609a76066275"
 ---
 
 # Current State
@@ -12,13 +12,14 @@ source_fingerprint: "f83b5e0fd7c94e24cc57eebd4c79f367916151a8ee3fe298b6e67735a9f
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `f83b5e0fd7c94e24cc57eebd4c79f367916151a8ee3fe298b6e67735a9f1ef60`
-- Immutable records: 756
+- Source fingerprint: `f50d2076e92ea2d09160e6cfa203423115fb4ae1938007cee42b609a76066275`
+- Immutable records: 759
 - Active lane heads: 0
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
+- [Authoring S1 corrections complete; S2 remains proposed](registry/2026-10/2026-10-19T144026Z-authoring-workflow-s1-codex-root-2fbf60933b96475b84d9483c6acb0d3e.md): `completed` (authoring-workflow-s1-codex-root; producer `codex-root`)
 - [Dear ImGui 0.21 upgrade complete](registry/2026-10/2026-10-17T135355Z-dear-imgui-021-upgrade-codex-root-c8d8fd35d7b34ca2845220d1113df8e7.md): `completed` (dear-imgui-021-upgrade-codex-root; producer `codex-root`)
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
@@ -47,6 +48,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Authoring S1 safety and field override recovery](verification/2026-10/2026-10-19T143606Z-authoring-s1-safety-and-field-override-recovery-0aca8f3bff914ffeaf0254f40a5cb118.md) - Owner-local Prefab/render rejection fixes and complete data-only Reset/Remove history with explicit test and platform limits.
 - **Work Progress**: [Authoring architecture refinements and workflow delivery order](progress/2026-10/2026-10-19T132019Z-authoring-architecture-refinements-and-workflow-delivery-order-9db915d26cb2407291ac76b756a2126c.md) - Keep existing owners, refine exact edit/result and value contracts, and qualify complete workflows within each stage.
 - **Work Progress**: [Ergonomic authoring interface design and independent challenge](progress/2026-10/2026-10-19T120824Z-ergonomic-authoring-interface-design-and-independent-challenge-510d6c4813604051a07a6f1e7009019b.md) - Proposed caller-first field editing, correlated dispatch, component inventory and bounded validation; design-only outcome.
 - **Work Progress**: [Post-correction foundation audit and withdrawn reference](progress/2026-10/2026-10-19T113248Z-post-correction-foundation-audit-and-withdrawn-reference-4b9d308fc38e4a31bdbe594c037e9b11.md) - Open post-correction findings, bounded Prefab failure proof and exclusion of the withdrawn reference.
@@ -58,7 +60,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Foundation public consumer and saved-data integration](verification/2026-10/2026-10-19-foundation-public-consumer-integration.md) - Independent Scene and Editor consumers, candidate doctests and Reference Game workflows pass after fixture corrections.
 - **Verification Evidence**: [Foundation U13 stateful native panel composition](verification/2026-10/2026-10-19-foundation-u13-stateful-panels.md) - Paired source-built panel factories own independent drafts through native startup and GPU reconstruction.
 - **Verification Evidence**: [Foundation U11 explicit recursive Inspector drafts](verification/2026-10/2026-10-19-foundation-u11-recursive-inspector.md) - Shape-driven native controls commit complete root fields through existing document authority.
-- **Verification Evidence**: [Foundation U15 concrete TileSet resource access](verification/2026-10/2026-10-19-foundation-u15-tileset-access.md) - Runtime, managed Editor and TaskUpdate share one concrete publication resource join.
 
 # Integration Notes
 
