@@ -1,4 +1,5 @@
 #[path = "support/domain_reconciliation.rs"]
+#[expect(dead_code, reason = "The shared fixture also serves domain-only tests")]
 mod domain;
 #[path = "support/image_reconciliation.rs"]
 mod support;

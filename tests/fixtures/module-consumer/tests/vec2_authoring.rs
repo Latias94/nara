@@ -84,7 +84,7 @@ fn derived_vectors_edit_undo_save_and_reopen_without_a_native_registry() {
     let published =
         SceneDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
             .unwrap()
-            .admit_authoring(source.clone(), &bundle, &[adapter.clone()])
+            .admit_authoring(source.clone(), &bundle, std::slice::from_ref(&adapter))
             .unwrap()
             .publish();
     assert_eq!(

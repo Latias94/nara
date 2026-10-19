@@ -28,10 +28,10 @@ pub fn install(
 }
 
 /// A normal native runner entry point, compiled outside the Editor crate.
-pub fn run(options: EditorLaunchOptions) -> Result<(), EditorRunError> {
+pub fn run(options: EditorLaunchOptions) -> Result<(), Box<EditorRunError>> {
     let mut composition = EditorNativeComposition::new();
-    install(&mut composition)?;
-    composition.run(options)
+    install(&mut composition).map_err(EditorRunError::from)?;
+    composition.run(options).map_err(Box::new)
 }
 
 #[derive(Default)]

@@ -32,7 +32,7 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
     )
     .unwrap();
     let published = candidate
-        .admit_authoring(source.clone(), &bundle, &[adapter.clone()])
+        .admit_authoring(source.clone(), &bundle, std::slice::from_ref(&adapter))
         .unwrap()
         .publish();
     assert_eq!(published.unavailable_manifest().total_count(), 0);
