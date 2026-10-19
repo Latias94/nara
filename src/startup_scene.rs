@@ -30,7 +30,7 @@ use nara_ecs::{
 };
 use nara_identity::SpawnedSceneInstance;
 use nara_reflect::{ComponentRegistry, component_registry, validate_component_registry_authority};
-use nara_scene::{SceneDocument, SceneEntityProvenanceMap, spawn_scene_with_provenance};
+use nara_scene::{ExpandedSceneCandidate, SceneDocument, spawn_expanded_scene};
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 use crate::project_content::{ProjectContentAssets, ProjectContentLease};
@@ -86,8 +86,7 @@ enum StartupSceneRetention {
 /// Content reservation. The value deliberately does not implement `Clone`: exactly one
 /// materialization consumes exactly one source owner.
 pub struct StartupSceneSource {
-    document: Arc<SceneDocument>,
-    provenance: Arc<SceneEntityProvenanceMap>,
+    candidate: Arc<ExpandedSceneCandidate>,
     retention: StartupSceneRetention,
 }
 
@@ -112,34 +111,17 @@ impl StartupSceneSource {
         document: Arc<SceneDocument>,
         retained_byte_limit: ByteLimit,
     ) -> Result<Self, StartupSceneSourceError> {
-        let provenance = Arc::new(SceneEntityProvenanceMap::new());
-        let retained_bytes = direct_startup_scene_retained_bytes(&document, &provenance)
-            .map_err(|_| StartupSceneSourceError::RetainedBytesOverflow)?;
-        let limit = retained_byte_limit.get();
-        if retained_bytes > limit {
-            return Err(StartupSceneSourceError::RetainedBytesExceeded {
-                required: retained_bytes,
-                limit,
-            });
-        }
-        Ok(Self {
-            document,
-            provenance,
-            retention: StartupSceneRetention::Direct {
-                retained_bytes,
-                _limit: limit,
-            },
-        })
+        Self::direct_expanded(ExpandedSceneCandidate::plain(document), retained_byte_limit)
     }
 
-    /// Binds an owned already-expanded source together with its structured prefab provenance.
-    pub fn direct_with_provenance(
-        document: Arc<SceneDocument>,
-        provenance: Arc<SceneEntityProvenanceMap>,
+    /// Retains an already-expanded candidate without separating its document from its sources.
+    pub fn direct_expanded(
+        candidate: ExpandedSceneCandidate,
         retained_byte_limit: ByteLimit,
     ) -> Result<Self, StartupSceneSourceError> {
-        let retained_bytes = direct_startup_scene_retained_bytes(&document, &provenance)
-            .map_err(|_| StartupSceneSourceError::RetainedBytesOverflow)?;
+        let retained_bytes =
+            direct_startup_scene_retained_bytes(candidate.document(), candidate.provenance())
+                .map_err(|_| StartupSceneSourceError::RetainedBytesOverflow)?;
         let limit = retained_byte_limit.get();
         if retained_bytes > limit {
             return Err(StartupSceneSourceError::RetainedBytesExceeded {
@@ -148,8 +130,7 @@ impl StartupSceneSource {
             });
         }
         Ok(Self {
-            document,
-            provenance,
+            candidate: Arc::new(candidate),
             retention: StartupSceneRetention::Direct {
                 retained_bytes,
                 _limit: limit,
@@ -159,15 +140,13 @@ impl StartupSceneSource {
 
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(crate) fn from_project_content(
-        document: Arc<SceneDocument>,
-        provenance: Arc<SceneEntityProvenanceMap>,
+        candidate: Arc<ExpandedSceneCandidate>,
         assets: Arc<ProjectContentAssets>,
         lease: ProjectContentLease,
         retained_bytes: usize,
     ) -> Self {
         Self {
-            document,
-            provenance,
+            candidate,
             retention: StartupSceneRetention::Project {
                 _lease: lease,
                 assets,
@@ -178,7 +157,7 @@ impl StartupSceneSource {
 
     #[must_use]
     pub(crate) fn document(&self) -> &SceneDocument {
-        &self.document
+        self.candidate.document()
     }
 
     fn asset_database(&self) -> Option<&nara_asset::ProjectAssetDatabase> {
@@ -212,7 +191,7 @@ impl fmt::Debug for StartupSceneSource {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("StartupSceneSource")
-            .field("entity_count", &self.document.entities.len())
+            .field("entity_count", &self.document().entities.len())
             .field("retained_bytes", &self.retained_bytes())
             .field(
                 "retention",
@@ -237,25 +216,17 @@ impl StartupSceneSourceView {
             .map(|source| inspect(source.document()))
     }
 
-    /// Borrows the exact expanded document, provenance, and admitted asset database together.
+    /// Borrows the exact expanded candidate and admitted asset database together.
     ///
-    /// All three values come from the same retained source owner. Direct sources have no project
+    /// Both values come from the same retained source owner. Direct sources have no project
     /// database. Returns `None` after the root activation owner retires, even if another caller
     /// still retains the underlying document.
     pub fn with_expanded_scene<R>(
         &self,
-        inspect: impl FnOnce(
-            &SceneDocument,
-            &SceneEntityProvenanceMap,
-            Option<&nara_asset::ProjectAssetDatabase>,
-        ) -> R,
+        inspect: impl FnOnce(&ExpandedSceneCandidate, Option<&nara_asset::ProjectAssetDatabase>) -> R,
     ) -> Option<R> {
         let source = self.source.upgrade()?;
-        Some(inspect(
-            source.document(),
-            &source.provenance,
-            source.asset_database(),
-        ))
+        Some(inspect(&source.candidate, source.asset_database()))
     }
 
     /// Returns the logical retained-byte charge owned by the root activation authority.
@@ -518,13 +489,8 @@ pub fn materialize_startup_scene(
             )
         })?;
 
-    let mut report = spawn_scene_with_provenance(
-        world,
-        &registry,
-        source.document(),
-        &source.provenance,
-        source.asset_database(),
-    );
+    let mut report =
+        spawn_expanded_scene(world, &registry, &source.candidate, source.asset_database());
     if report.diagnostics.has_errors() {
         return Err(StartupSceneMaterializeError::new(report.diagnostics));
     }
@@ -639,9 +605,11 @@ mod tests {
     #[test]
     fn direct_source_enforces_its_exact_retained_byte_limit() {
         let document = Arc::new(SceneDocument::from_ordered_roots([]));
-        let required =
-            direct_startup_scene_retained_bytes(&document, &SceneEntityProvenanceMap::new())
-                .unwrap();
+        let required = direct_startup_scene_retained_bytes(
+            &document,
+            &nara_scene::SceneEntityProvenanceMap::new(),
+        )
+        .unwrap();
         assert!(required > 1);
 
         let source =
@@ -681,10 +649,10 @@ mod tests {
         assert_eq!(view.with_document(|source| source.entities.len()), Some(0));
         assert_eq!(clone.retained_bytes(), source.retained_bytes());
         assert_eq!(
-            view.with_expanded_scene(|document, provenance, database| {
-                assert!(provenance.is_empty());
+            view.with_expanded_scene(|candidate, database| {
+                assert!(candidate.provenance().is_empty());
                 assert!(database.is_none());
-                document.entities.len()
+                candidate.document().entities.len()
             }),
             Some(0)
         );
@@ -693,7 +661,7 @@ mod tests {
         assert_eq!(Arc::strong_count(&document), 1);
         assert_eq!(view.with_document(|source| source.entities.len()), None);
         assert_eq!(clone.with_document(|source| source.entities.len()), None);
-        assert_eq!(view.with_expanded_scene(|_, _, _| ()), None);
+        assert_eq!(view.with_expanded_scene(|_, _| ()), None);
     }
 
     #[test]

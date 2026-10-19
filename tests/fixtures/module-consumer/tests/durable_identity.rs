@@ -505,7 +505,7 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
                 "{:?}",
                 expansion.diagnostics
             );
-            let expanded = expansion.document.unwrap();
+            let expanded = expansion.document().unwrap();
             let linked = expanded
                 .entities
                 .iter()

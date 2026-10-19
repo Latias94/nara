@@ -36,6 +36,7 @@ pub(crate) fn direct_startup_scene_retained_bytes(
     checked_sum([
         startup_scene_retained_bytes(document, provenance)?,
         2 * ARC_CONTROL_BLOCK_BYTES,
+        size_of::<std::sync::Arc<SceneDocument>>(),
     ])
 }
 

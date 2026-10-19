@@ -880,3 +880,195 @@ fn additional_retirement_commits_runtime_hierarchy_and_promotes_survivors() {
         &[replacement_root, surviving_child]
     );
 }
+
+#[test]
+fn expanded_candidate_keeps_nested_source_paths_through_spawn_and_product_replacement() {
+    use nara_asset::AssetRef;
+    let mut registry = ComponentRegistry::new();
+    registry.freeze().unwrap();
+    let outer = AssetRef::path("prefabs/outer.ron").unwrap();
+    let inner = AssetRef::path("prefabs/inner.ron").unwrap();
+    let mut branch = SceneEntityRecord::new(scene_id("branch"));
+    branch.prefab = Some(PrefabInstance {
+        source: inner.clone(),
+        overrides: ScenePatchDocument::default(),
+    });
+    let resolver = InMemoryPrefabSourceResolver::new()
+        .with_prefab(outer.clone(), PrefabDocument::from_ordered_roots([branch]))
+        .with_prefab(
+            inner.clone(),
+            PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("leaf"))]),
+        );
+    let mut anchor = SceneEntityRecord::new(scene_id("anchor"));
+    anchor.prefab = Some(PrefabInstance {
+        source: outer.clone(),
+        overrides: ScenePatchDocument::default(),
+    });
+    let expansion =
+        SceneDocument::from_ordered_roots([anchor]).expand_prefabs(&registry, &resolver);
+    assert!(!expansion.diagnostics.has_errors());
+    let candidate = expansion.candidate.unwrap();
+    let (leaf_id, expected_source) = candidate
+        .provenance()
+        .iter()
+        .find(|(_, source)| source.source_entity_id() == &scene_id("leaf"))
+        .unwrap();
+    let path = expected_source.projection_path().unwrap();
+    assert_eq!(path.root_anchor(), &scene_id("anchor"));
+    assert_eq!(
+        path.source_chain()
+            .iter()
+            .map(|step| step.source_document())
+            .collect::<Vec<_>>(),
+        [&outer, &inner]
+    );
+    let mut world = World::new();
+    let initial = spawn_expanded_scene(&mut world, &registry, &candidate, None);
+    assert!(!initial.diagnostics.has_errors());
+    let old_leaf = spawned_entity(&world, &initial, leaf_id);
+    let old_source = world.get::<SceneEntitySource>(old_leaf).unwrap().clone();
+    assert_eq!(
+        &old_source.source_entity_id,
+        expected_source.source_entity_id()
+    );
+    assert_eq!(old_source.projection_path.as_ref(), Some(path));
+    let replacement = replace_expanded_scene_with_product(
+        &mut world,
+        &registry,
+        &candidate,
+        None,
+        spawned_instance(&initial),
+        transaction_limits(1, 1),
+        &[],
+        |_| {},
+    );
+    assert!(!replacement.diagnostics.has_errors());
+    assert!(world.get_entity(old_leaf).is_err());
+    let leaf = spawned_entity(&world, &replacement, leaf_id);
+    let source = world.get::<SceneEntitySource>(leaf).unwrap();
+    assert_eq!(&source.source_entity_id, expected_source.source_entity_id());
+    assert_eq!(source.projection_path.as_ref(), Some(path));
+    assert_ne!(source.instance_id, old_source.instance_id);
+}
+
+#[test]
+fn expanded_candidate_source_observer_rejects_before_publication_and_preserves_old_source() {
+    let mut fixture = ReplacementFixture::new();
+    let prefab_source = nara_asset::AssetRef::path("prefabs/projected.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        prefab_source.clone(),
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("projected"))]),
+    );
+    let mut anchor = SceneEntityRecord::new(fixture.target.clone());
+    anchor.prefab = Some(PrefabInstance {
+        source: prefab_source,
+        overrides: ScenePatchDocument::default(),
+    });
+    let expansion =
+        SceneDocument::from_ordered_roots([anchor]).expand_prefabs(&fixture.registry, &resolver);
+    assert!(!expansion.diagnostics.has_errors());
+    let candidate = expansion.candidate.unwrap();
+    assert!(
+        candidate
+            .provenance()
+            .values()
+            .any(|source| source.projection_path().is_some())
+    );
+    fixture.world.init_resource::<LifecycleCanary>();
+    fixture.world.add_observer(
+        |_: On<Add<SceneEntitySource>>, mut canary: ResMut<LifecycleCanary>| canary.0 += 1,
+    );
+    fixture.world.flush();
+    let before_entities = fixture.entity_ids();
+    let before_stats = fixture.world.resource::<WorldIdentityDomain>().stats();
+    let old_source = fixture
+        .world
+        .get::<SceneEntitySource>(fixture.old_entity)
+        .unwrap()
+        .clone();
+
+    let report = replace_expanded_scene_with_product(
+        &mut fixture.world,
+        &fixture.registry,
+        &candidate,
+        None,
+        &fixture.current,
+        transaction_limits(1, 1),
+        &[],
+        |overlay| {
+            overlay.replace_resource(RunState(2));
+        },
+    );
+
+    assert!(report.instance.is_none());
+    assert!(has_diagnostic(
+        &report,
+        "scene.runtime-projection-ineligible"
+    ));
+    assert_eq!(report.retired_entities(), 0);
+    assert_eq!(fixture.world.resource::<LifecycleCanary>().0, 0);
+    fixture.assert_unchanged(&before_entities, before_stats);
+    assert_eq!(
+        fixture.world.get::<SceneEntitySource>(fixture.old_entity),
+        Some(&old_source)
+    );
+}
+
+#[test]
+fn plain_candidate_with_unresolved_prefab_rejects_spawn_and_replacement_without_mutation() {
+    let mut fixture = ReplacementFixture::new();
+    let mut anchor = SceneEntityRecord::new(fixture.target.clone());
+    anchor.prefab = Some(PrefabInstance {
+        source: nara_asset::AssetRef::path("prefabs/unresolved.ron").unwrap(),
+        overrides: ScenePatchDocument::default(),
+    });
+    let candidate =
+        ExpandedSceneCandidate::plain(std::sync::Arc::new(SceneDocument::from_ordered_roots([
+            anchor,
+        ])));
+    let mut empty = World::new();
+    let empty_entities = empty
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+    let spawn = spawn_expanded_scene(&mut empty, &fixture.registry, &candidate, None);
+    assert!(spawn.instance.is_none());
+    assert!(has_diagnostic(&spawn, "scene.prefab-instance-unsupported"));
+    assert_eq!(
+        empty
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        empty_entities
+    );
+    assert!(!empty.contains_resource::<WorldIdentityDomain>());
+
+    let before_entities = fixture.entity_ids();
+    let before_stats = fixture.world.resource::<WorldIdentityDomain>().stats();
+    let old_source = fixture
+        .world
+        .get::<SceneEntitySource>(fixture.old_entity)
+        .unwrap()
+        .clone();
+    let replacement = replace_expanded_scene_with_product(
+        &mut fixture.world,
+        &fixture.registry,
+        &candidate,
+        None,
+        &fixture.current,
+        transaction_limits(1, 1),
+        &[],
+        |_| panic!("unresolved Prefab must reject before product configuration"),
+    );
+    assert!(replacement.instance.is_none());
+    assert!(has_diagnostic(
+        &replacement,
+        "scene.prefab-instance-unsupported"
+    ));
+    assert_eq!(replacement.retired_entities(), 0);
+    fixture.assert_unchanged(&before_entities, before_stats);
+    assert_eq!(
+        fixture.world.get::<SceneEntitySource>(fixture.old_entity),
+        Some(&old_source)
+    );
+}

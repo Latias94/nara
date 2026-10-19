@@ -15,8 +15,8 @@ use nara_reflect::{
 };
 
 use crate::{
-    PrefabProjectionPath, SceneDocument, SceneEntityId, SceneEntityProvenance, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation,
+    ExpandedSceneCandidate, PrefabProjectionPath, SceneDocument, SceneEntityId,
+    SceneEntityProvenance, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
     diagnostics::{
         error as diagnostic_error, usize_to_u64, with_asset_ref, with_codec_error,
         with_entity_reference_rewrite_error, with_migration_error, with_public_locator,
@@ -453,12 +453,29 @@ impl PrefabExpansionOptions {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct PrefabExpansionReport {
-    pub document: Option<SceneDocument>,
+    /// The immutable document and its source association, absent after failed expansion.
+    pub candidate: Option<ExpandedSceneCandidate>,
     pub diagnostics: DiagnosticReport,
-    /// Exact source provenance for every materialized entity when expansion succeeds.
-    pub provenance: BTreeMap<SceneEntityId, SceneEntityProvenance>,
+}
+
+impl PrefabExpansionReport {
+    /// Borrows the expanded document without granting materialization authority by itself.
+    #[must_use]
+    pub fn document(&self) -> Option<&SceneDocument> {
+        self.candidate
+            .as_ref()
+            .map(ExpandedSceneCandidate::document)
+    }
+
+    /// Borrows the source association established by this expansion.
+    #[must_use]
+    pub fn provenance(&self) -> Option<&crate::SceneEntityProvenanceMap> {
+        self.candidate
+            .as_ref()
+            .map(ExpandedSceneCandidate::provenance)
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -594,16 +611,26 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
 
         if self.diagnostics.has_errors() {
             return PrefabExpansionReport {
-                document: None,
+                candidate: None,
                 diagnostics: std::mem::take(&mut self.diagnostics),
-                provenance: BTreeMap::new(),
             };
         }
 
+        let candidate =
+            ExpandedSceneCandidate::from_expansion(expanded, std::mem::take(&mut self.provenance));
+        let candidate = match candidate {
+            Ok(candidate) => Some(candidate),
+            Err(_) => {
+                self.diagnostics.push(diagnostic_error(
+                    "scene.invalid-provenance",
+                    "Expanded scene source provenance is inconsistent",
+                ));
+                None
+            }
+        };
         PrefabExpansionReport {
-            document: Some(expanded),
+            candidate,
             diagnostics: std::mem::take(&mut self.diagnostics),
-            provenance: std::mem::take(&mut self.provenance),
         }
     }
 

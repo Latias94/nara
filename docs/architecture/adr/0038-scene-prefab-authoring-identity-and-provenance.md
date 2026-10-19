@@ -70,6 +70,14 @@ flowchart TD
 
 ## Rules
 
+- Expanded materialization input binds the immutable document and its complete provenance in one
+  owner-created candidate. Public spawn/replacement APIs do not accept independently assembled
+  document/map pairs. A plain-scene constructor explicitly supplies local provenance.
+- Validate source coverage and projection association before allocation or retiring the previous
+  instance. Install admitted source fields within the prepared commit, before hierarchy/identity
+  retirement; do not apply a second provenance pass after publication.
+- A retained startup view borrows the candidate without cloning its allocations independently of
+  the source retention lease. Document allocation sharing remains private to the admitted owner.
 - Scene and prefab documents must not store runtime `Entity`, runtime `AssetId`, or backend handles.
 - Rename/move tools must preserve document-relative IDs unless the user explicitly requests an ID
   rename patch.

@@ -71,6 +71,10 @@ Logical asset UUID, content locator, derivation key, and process-local handle id
 The initial supported profile has one principal durable product and one entity-bearing document per
 source; importer-private auxiliaries do not imply a public product graph. Authored entity IDs remain
 document-local and opaque. Prefab provenance is structured; live lookup requires instance selection.
+Expanded Scene materialization carries one immutable document/provenance candidate. Source coverage
+and projection association are admitted before allocation or replacement retirement, and source
+fields publish inside that prepared commit. Startup retention shares the admitted document through
+its owner without exposing a clonable candidate from a borrowed activation view.
 Saved dynamic identity and an explicit authored-instance binding do not establish a universal save format.
 
 Source rename preserves identity. Copy-as-new changes IDs and internal copied references; conflicting

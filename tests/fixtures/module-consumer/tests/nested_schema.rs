@@ -13,8 +13,7 @@ use nara_reflect::{
 use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, InMemoryPrefabSourceResolver,
     PrefabDocument, PrefabInstance, SceneAuthoringSession, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SceneEntityRecord, ScenePatchDocument, export_scene,
-    spawn_scene_with_asset_database,
+    SceneEntityId, SceneEntityRecord, ScenePatchDocument, export_scene, spawn_expanded_scene,
 };
 use nara_tooling::{SceneInspectorCommand, SceneInspectorState};
 use support::{COMPONENT_ID, IMAGE_ID, PREFAB_PATH, Relationships};
@@ -116,7 +115,7 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
         "{:?}",
         expansion.diagnostics
     );
-    let expanded = expansion.document.unwrap();
+    let expanded = expansion.document().unwrap();
     let mut remapped_targets = BTreeSet::new();
     let component_id = ComponentTypeId::new(COMPONENT_ID);
     for entity in &expanded.entities {
@@ -132,17 +131,19 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
         assert_ne!(target.as_str(), "friend");
         assert!(expanded.entities.iter().any(|entity| &entity.id == target));
         assert_eq!(
-            expansion.provenance[&entity.id]
+            expansion.provenance().unwrap()[&entity.id]
                 .projection_path()
                 .unwrap()
                 .root_anchor(),
-            expansion.provenance[target]
+            expansion.provenance().unwrap()[target]
                 .projection_path()
                 .unwrap()
                 .root_anchor()
         );
         assert_eq!(
-            expansion.provenance[target].source_entity_id().as_str(),
+            expansion.provenance().unwrap()[target]
+                .source_entity_id()
+                .as_str(),
             "friend"
         );
         assert!(remapped_targets.insert(target.clone()));
@@ -162,7 +163,12 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
     assert_eq!(remapped_targets.len(), 2);
 
     let mut world = World::new();
-    let spawned = spawn_scene_with_asset_database(&mut world, &registry, &expanded, &database);
+    let spawned = spawn_expanded_scene(
+        &mut world,
+        &registry,
+        expansion.candidate.as_ref().unwrap(),
+        Some(&database),
+    );
     assert!(
         !spawned.diagnostics.has_errors(),
         "{:?}",

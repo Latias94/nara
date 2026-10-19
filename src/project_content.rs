@@ -34,9 +34,9 @@ use nara_reflect::{
     collect_declared_asset_references, collect_declared_field_asset_references,
 };
 use nara_scene::{
-    PrefabDocument, PrefabDocumentCandidate, PrefabSourceResolver, SceneDocument,
-    SceneDocumentCandidate, SceneEntityProvenanceMap, SceneEntityRecord, SceneFormatError,
-    ScenePatchDocument, ScenePatchOperation,
+    ExpandedSceneCandidate, PrefabDocument, PrefabDocumentCandidate, PrefabSourceResolver,
+    SceneDocument, SceneDocumentCandidate, SceneEntityProvenanceMap, SceneEntityRecord,
+    SceneFormatError, ScenePatchDocument, ScenePatchOperation,
 };
 use nara_tilemap::{
     TileSetSource, TileSetSourceFileLimits, TilemapMembershipError,
@@ -201,8 +201,7 @@ struct ProjectContentSnapshotInner {
     startup_closure: StartupContentClosureReceipt,
     source_upgrade_required: bool,
     startup_scene: Arc<SceneDocument>,
-    expanded_startup_scene: Arc<SceneDocument>,
-    expanded_startup_scene_provenance: Arc<SceneEntityProvenanceMap>,
+    expanded_startup_scene: Arc<ExpandedSceneCandidate>,
     prefabs: Box<[ProjectPrefabContent]>,
     images: Box<[ProjectImageContent]>,
     tilesets: Box<[ProjectTileSetContent]>,
@@ -271,13 +270,13 @@ impl ProjectContentSnapshot {
 
     #[must_use]
     pub fn expanded_startup_scene(&self) -> &SceneDocument {
-        &self.inner.expanded_startup_scene
+        self.inner.expanded_startup_scene.document()
     }
 
     /// Returns the structured source identity paired with the expanded startup document.
     #[must_use]
     pub fn expanded_startup_scene_provenance(&self) -> &SceneEntityProvenanceMap {
-        &self.inner.expanded_startup_scene_provenance
+        self.inner.expanded_startup_scene.provenance()
     }
 
     #[must_use]
@@ -320,12 +319,11 @@ impl ProjectContentSnapshot {
     pub fn startup_scene_source(&self) -> StartupSceneSource {
         StartupSceneSource::from_project_content(
             Arc::clone(&self.inner.expanded_startup_scene),
-            Arc::clone(&self.inner.expanded_startup_scene_provenance),
             Arc::clone(&self.inner.assets),
             self.inner._runtime_lease.clone(),
             startup_scene_retained_bytes(
-                &self.inner.expanded_startup_scene,
-                &self.inner.expanded_startup_scene_provenance,
+                self.inner.expanded_startup_scene.document(),
+                self.inner.expanded_startup_scene.provenance(),
             )
             .expect("an admitted startup scene already has a valid retained-byte plan"),
         )
@@ -347,13 +345,14 @@ impl ProjectContentSnapshot {
             self.inner.assets.database(),
         );
         let nara_scene::PrefabExpansionReport {
-            document,
+            candidate,
             diagnostics,
-            provenance,
         } = expansion;
-        let expanded = document.ok_or_else(|| {
+        let expanded_candidate = candidate.ok_or_else(|| {
             map_scene_diagnostics(ProjectContentErrorKind::PrefabExpansion, diagnostics)
         })?;
+        let expanded = expanded_candidate.document();
+        let provenance = expanded_candidate.provenance();
         let diagnostics =
             expanded.validate_with_asset_database(registry, self.inner.assets.database());
         if diagnostics.has_errors() {
@@ -369,8 +368,7 @@ impl ProjectContentSnapshot {
             .reserve_retained(retained_bytes)
             .map_err(ProjectContentError::budget)?;
         Ok(StartupSceneSource::from_project_content(
-            Arc::new(expanded),
-            Arc::new(provenance),
+            Arc::new(expanded_candidate),
             Arc::clone(&self.inner.assets),
             lease,
             retained_bytes,
@@ -1027,13 +1025,14 @@ impl<'a> LoadContext<'a> {
             )
         };
         let nara_scene::PrefabExpansionReport {
-            document,
+            candidate: expanded_candidate,
             diagnostics,
-            provenance,
         } = expansion;
-        let expanded = document.ok_or_else(|| {
+        let expanded_candidate = expanded_candidate.ok_or_else(|| {
             map_scene_diagnostics(ProjectContentErrorKind::PrefabExpansion, diagnostics)
         })?;
+        let expanded = expanded_candidate.document();
+        let provenance = expanded_candidate.provenance();
         let expanded_retained = startup_scene_retained_bytes(&expanded, &provenance)?;
         self.commit_work_as_retained(work_before, expanded_retained)?;
 
@@ -1101,8 +1100,7 @@ impl<'a> LoadContext<'a> {
         self.set_budget(ProjectContentBudgetKind::RetainedBytes, retained_bytes)?;
 
         let startup_scene = Arc::new(startup_scene);
-        let expanded_startup_scene = Arc::new(expanded);
-        let expanded_startup_scene_provenance = Arc::new(provenance);
+        let expanded_startup_scene = Arc::new(expanded_candidate);
         let mut prefab_values = Vec::new();
         prefab_values
             .try_reserve_exact(loaded_prefabs.len())
@@ -1193,7 +1191,6 @@ impl<'a> LoadContext<'a> {
                 source_upgrade_required: self.source_upgrade_required,
                 startup_scene,
                 expanded_startup_scene,
-                expanded_startup_scene_provenance,
                 prefabs,
                 images,
                 tilesets,
@@ -2599,6 +2596,7 @@ fn snapshot_retained_overhead(
             size_of::<ProjectContentSnapshotInner>(),
             ARC_CONTROL_BLOCK_BYTES,
             3 * ARC_CONTROL_BLOCK_BYTES,
+            size_of::<Arc<SceneDocument>>(),
             SNAPSHOT_LEASE_OVERHEAD,
             if images.is_empty() {
                 0

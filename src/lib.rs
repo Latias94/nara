@@ -322,7 +322,7 @@ pub mod advanced_prelude {
     };
     pub use nara_scene::advanced::{
         SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
-        replace_scene_with_product, replace_scene_with_product_and_provenance,
+        replace_expanded_scene_with_product, replace_scene_with_product,
     };
     pub use nara_tasks::{
         OrderedTaskReadySnapshot, OrderedTaskResults, OrderedTaskTerminal, TaskCancellation,

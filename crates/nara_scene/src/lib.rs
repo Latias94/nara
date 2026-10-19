@@ -5,6 +5,7 @@ mod authoring;
 mod authoring_decode;
 #[cfg(feature = "serde")]
 mod authoring_preview;
+mod candidate;
 mod diagnostics;
 mod document;
 mod export;
@@ -46,6 +47,7 @@ pub use authoring_decode::{
     UnavailablePatchTarget, UnavailableRecord, UnavailableRecordManifest,
     UnavailableRecordManifestEntry, UnavailableValuePathSegment,
 };
+pub use candidate::ExpandedSceneCandidate;
 pub use document::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
 pub use export::{
     SceneExportOptions, SceneExportOutput, SceneExportRemap, SceneExportReport, export_scene,
@@ -79,7 +81,7 @@ pub mod advanced {
     pub use crate::product_transaction::{
         SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
     };
-    pub use crate::spawn::{replace_scene_with_product, replace_scene_with_product_and_provenance};
+    pub use crate::spawn::{replace_expanded_scene_with_product, replace_scene_with_product};
 }
 pub use scene_components::{
     Name, SCENE_COMPONENTS_PLUGIN_DECLARATION, SCENE_COMPONENTS_PLUGIN_ID,
@@ -89,10 +91,10 @@ pub use scene_components::{
 };
 pub use spawn::{
     SceneEntityRetirementError, SceneEntitySource, SceneSpawnReport, SceneSpawner,
-    retire_and_despawn_scene_entity, spawn_prefab, spawn_prefab_with_asset_database,
-    spawn_prefab_with_patch, spawn_prefab_with_patch_and_asset_database, spawn_scene,
-    spawn_scene_with_asset_database, spawn_scene_with_prefab_resolver,
-    spawn_scene_with_prefab_resolver_and_asset_database, spawn_scene_with_provenance,
+    retire_and_despawn_scene_entity, spawn_expanded_scene, spawn_prefab,
+    spawn_prefab_with_asset_database, spawn_prefab_with_patch,
+    spawn_prefab_with_patch_and_asset_database, spawn_scene, spawn_scene_with_asset_database,
+    spawn_scene_with_prefab_resolver, spawn_scene_with_prefab_resolver_and_asset_database,
 };
 
 #[doc(hidden)]

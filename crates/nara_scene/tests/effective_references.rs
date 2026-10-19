@@ -11,7 +11,8 @@ use nara_reflect::{
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, SceneComponentRecord,
-    SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, export_scene, spawn_scene,
+    SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, export_scene,
+    spawn_expanded_scene, spawn_scene,
 };
 #[cfg(feature = "serde")]
 use nara_scene::{SceneDocumentCandidate, SceneFileLimits};
@@ -177,12 +178,13 @@ fn repeated_prefabs_remap_default_local_reference_and_preserve_source_omission()
         "{:?}",
         expansion.diagnostics,
     );
-    let expanded = expansion.document.as_ref().unwrap();
+    let expanded = expansion.document().unwrap();
     let mut mapped_targets = BTreeSet::new();
     for anchor in ["left", "right"] {
         let projected = |source_entity: &str| {
             expansion
-                .provenance
+                .provenance()
+                .unwrap()
                 .iter()
                 .find(|(_, provenance)| {
                     provenance.projection_path().is_some_and(|path| {
@@ -214,7 +216,12 @@ fn repeated_prefabs_remap_default_local_reference_and_preserve_source_omission()
     }
     assert_eq!(mapped_targets.len(), 2);
     let mut world = World::new();
-    let report = spawn_scene(&mut world, &registry, expanded);
+    let report = spawn_expanded_scene(
+        &mut world,
+        &registry,
+        expansion.candidate.as_ref().unwrap(),
+        None,
+    );
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     assert_eq!(prefab, original_prefab);
     assert!(

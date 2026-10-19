@@ -1,7 +1,10 @@
 use nara::{
     identity::EntityLookup,
     prelude::*,
-    scene::{InMemoryPrefabSourceResolver, PrefabInstance, register_scene_components},
+    scene::{
+        InMemoryPrefabSourceResolver, PrefabInstance, register_scene_components,
+        spawn_expanded_scene,
+    },
     sprite::register_sprite_components,
 };
 
@@ -43,27 +46,29 @@ fn main() {
 
     let expansion = scene.expand_prefabs(&registry, &resolver);
     assert!(!expansion.diagnostics.has_errors());
-    let expanded = expansion.document.unwrap();
-    assert_eq!(
-        expanded
-            .entities
-            .iter()
-            .map(|entity| entity.id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["enemy", "enemy/visual"]
-    );
+    let candidate = expansion.candidate.unwrap();
+    let expanded = candidate.document();
+    assert_eq!(expanded.entities.len(), 2);
+    let visual_id = candidate
+        .provenance()
+        .iter()
+        .find_map(|(id, source)| {
+            (source.source_entity_id() == &scene_id("visual") && source.projection_path().is_some())
+                .then_some(id)
+        })
+        .expect("the expanded visual retains its source identity");
     let json = expanded.to_json_string().unwrap();
     assert!(json.contains("textures/enemy.png"));
     assert!(!json.contains("AssetId"));
 
     let mut world = World::new();
-    let report = spawn_scene(&mut world, &registry, &expanded);
+    let report = spawn_expanded_scene(&mut world, &registry, &candidate, None);
     assert!(!report.diagnostics.has_errors());
     let visual = match report
         .instance
         .as_ref()
         .expect("successful scene spawn should publish an instance")
-        .resolve(&world, &scene_id("enemy/visual"))
+        .resolve(&world, visual_id)
     {
         EntityLookup::Resolved(entity) => entity,
         lookup => panic!("expected resolved prefab entity, got {lookup:?}"),

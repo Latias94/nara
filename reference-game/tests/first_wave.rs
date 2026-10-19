@@ -7,7 +7,6 @@ use std::{
     collections::BTreeMap,
     fs,
     num::NonZeroU32,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -1176,7 +1175,7 @@ fn invalid_authored_weapon_configuration_rejects_startup_before_runtime_publicat
     let (project, plan, root) = headless_wave_candidate_plan_and_root();
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&project, &plan).unwrap();
-    let mut scene = snapshot.expanded_startup_scene().clone();
+    let mut scene = snapshot.startup_scene().clone();
     let weapon_id = ComponentTypeId::new("reference_game.Weapon");
     let weapon = scene
         .entities
@@ -1189,12 +1188,7 @@ fn invalid_authored_weapon_configuration_rejects_startup_before_runtime_publicat
     };
     fields.insert("damage".to_owned(), ComponentValue::I64(0));
 
-    let source = StartupSceneSource::direct_with_provenance(
-        Arc::new(scene),
-        Arc::new(snapshot.expanded_startup_scene_provenance().clone()),
-        ByteLimit::new(16 * 1024 * 1024).expect("the direct retained-scene limit is non-zero"),
-    )
-    .expect("the invalid reference scene should fit the bounded direct retention limit");
+    let source = reexpand_modified_authored_scene(scene, &snapshot, &plan);
     assert_startup_rejected(plan, source);
 }
 
@@ -1203,7 +1197,7 @@ fn missing_authored_weapon_sprite_rejects_startup_before_runtime_publication() {
     let (project, plan, root) = headless_wave_candidate_plan_and_root();
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&project, &plan).unwrap();
-    let mut scene = snapshot.expanded_startup_scene().clone();
+    let mut scene = snapshot.startup_scene().clone();
     let weapon = scene
         .entities
         .iter_mut()
@@ -1221,13 +1215,37 @@ fn missing_authored_weapon_sprite_rejects_startup_before_runtime_publication() {
         "the authored weapon fixture should carry its Sprite"
     );
 
-    let source = StartupSceneSource::direct_with_provenance(
-        Arc::new(scene),
-        Arc::new(snapshot.expanded_startup_scene_provenance().clone()),
+    let source = reexpand_modified_authored_scene(scene, &snapshot, &plan);
+    assert_startup_rejected(plan, source);
+}
+
+fn reexpand_modified_authored_scene(
+    scene: nara::scene::SceneDocument,
+    snapshot: &nara::project_host::ProjectContentSnapshot,
+    plan: &nara::project_host::RuntimePlan,
+) -> StartupSceneSource {
+    let resolver = snapshot.prefabs().iter().fold(
+        nara::scene::InMemoryPrefabSourceResolver::new(),
+        |resolver, prefab| {
+            resolver.with_prefab(
+                nara::asset::AssetRef::Path(prefab.path().clone()),
+                prefab.document().clone(),
+            )
+        },
+    );
+    let expansion = scene.expand_prefabs(plan.schema_validation().registry(), &resolver);
+    assert!(
+        !expansion.diagnostics.has_errors(),
+        "{:#?}",
+        expansion.diagnostics
+    );
+    StartupSceneSource::direct_expanded(
+        expansion
+            .candidate
+            .expect("successful expansion binds source provenance"),
         ByteLimit::new(16 * 1024 * 1024).expect("the direct retained-scene limit is non-zero"),
     )
-    .expect("the invalid reference scene should fit the bounded direct retention limit");
-    assert_startup_rejected(plan, source);
+    .expect("the modified reference scene fits the bounded direct retention limit")
 }
 
 fn assert_startup_rejected(plan: nara::project_host::RuntimePlan, source: StartupSceneSource) {

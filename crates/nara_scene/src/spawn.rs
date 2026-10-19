@@ -18,9 +18,8 @@ use nara_identity::{
         prepare_exact_scene_instance_replacement, prepare_exact_scene_instance_retirement,
         validate_additional_retirement_identity_axes, validate_identity_support_topology,
     },
-    EntityLookup, IdentityDomainError, RuntimeEntityReference, SceneInstanceId,
-    SpawnedSceneInstance, TombstoneCause, WorldEntityToken, WorldIdentityDomain,
-    WorldIdentityDomainSettings,
+    IdentityDomainError, RuntimeEntityReference, SceneInstanceId, SpawnedSceneInstance,
+    TombstoneCause, WorldEntityToken, WorldIdentityDomain, WorldIdentityDomainSettings,
 };
 use nara_reflect::{
     __private::{
@@ -31,8 +30,10 @@ use nara_reflect::{
 };
 
 use crate::{
-    PrefabDocument, PrefabExpansionReport, PrefabProjectionPath, PrefabSourceResolver,
-    SceneDocument, SceneEntityId, SceneEntityProvenanceMap, ScenePatchDocument,
+    ExpandedSceneCandidate, PrefabDocument, PrefabExpansionReport, PrefabProjectionPath,
+    PrefabSourceResolver, SceneDocument, SceneEntityId, SceneEntityProvenanceMap,
+    ScenePatchDocument,
+    candidate::validate_scene_provenance,
     diagnostics::{error as diagnostic_error, with_codec_error, with_public_locator},
     product_transaction::{
         PreparedSceneProductOverlay, SceneProductOverlayError, SceneProductOverlayWriter,
@@ -318,7 +319,9 @@ impl SceneSpawner {
         database: Option<&ProjectAssetDatabase>,
         commit: SceneIdentityCommit<'_>,
     ) -> SceneSpawnReport {
-        self.spawn_with_asset_context_and_product(world, registry, document, database, commit, None)
+        self.spawn_with_asset_context_and_product(
+            world, registry, document, None, database, commit, None,
+        )
     }
 
     fn spawn_with_asset_context_and_product(
@@ -326,10 +329,25 @@ impl SceneSpawner {
         world: &mut World,
         registry: &ComponentRegistry,
         document: &SceneDocument,
+        provenance: Option<&SceneEntityProvenanceMap>,
         database: Option<&ProjectAssetDatabase>,
         commit: SceneIdentityCommit<'_>,
         product: Option<SceneProductTransactionInput<'_>>,
     ) -> SceneSpawnReport {
+        if provenance
+            .is_some_and(|provenance| validate_scene_provenance(document, provenance).is_err())
+        {
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(diagnostic_error(
+                "scene.invalid-provenance",
+                "Expanded scene source provenance is inconsistent",
+            ));
+            return SceneSpawnReport {
+                instance: None,
+                diagnostics,
+                retired_entities: 0,
+            };
+        }
         let mut component_batch = ComponentApplyBatch::from_world(world);
         let mut preflight = component_batch.with_decode_context(database, |context| {
             preflight_scene_with_context(document, registry, context)
@@ -820,18 +838,26 @@ impl SceneSpawner {
 
         let world = product_insertion.commit();
         prepared_components.commit(world);
-        prepared_hierarchy.commit(world);
-        world.flush();
-
         let instance_id = prepared_identity.instance_id();
         for (entity_id, runtime_entity) in &spawned_by_id {
+            let source = provenance.map(|sources| {
+                sources
+                    .get(entity_id)
+                    .expect("preflight admits complete source coverage")
+            });
             world.entity_mut(*runtime_entity).insert(SceneEntitySource {
                 instance_id,
                 entity_id: entity_id.clone(),
-                source_entity_id: entity_id.clone(),
-                projection_path: None,
+                source_entity_id: source.map_or_else(
+                    || entity_id.clone(),
+                    |source| source.source_entity_id().clone(),
+                ),
+                projection_path: source.and_then(|source| source.projection_path().cloned()),
             });
         }
+
+        prepared_hierarchy.commit(world);
+        world.flush();
 
         let instance = match prepared_identity {
             PreparedSceneIdentityCommit::Register {
@@ -882,9 +908,8 @@ impl SceneSpawner {
         commit: SceneIdentityCommit<'_>,
     ) -> SceneSpawnReport {
         let PrefabExpansionReport {
-            document,
+            candidate,
             mut diagnostics,
-            provenance,
         } = expansion;
         if diagnostics.has_errors() {
             return SceneSpawnReport {
@@ -894,21 +919,16 @@ impl SceneSpawner {
             };
         }
 
-        let document = document.expect("successful prefab expansion should include document");
-        let mut report =
-            self.spawn_with_asset_context(world, registry, &document, database, commit);
-        if let Some(instance) = &report.instance {
-            for (entity_id, provenance) in provenance {
-                let EntityLookup::Resolved(entity) = instance.resolve(world, &entity_id) else {
-                    panic!("successful prefab spawn must resolve every provenance entry");
-                };
-                let mut source = world
-                    .get_mut::<SceneEntitySource>(entity)
-                    .expect("successful prefab spawn must attach scene provenance");
-                source.source_entity_id = provenance.source_entity_id().clone();
-                source.projection_path = provenance.projection_path().cloned();
-            }
-        }
+        let candidate = candidate.expect("successful prefab expansion should include candidate");
+        let mut report = self.spawn_with_asset_context_and_product(
+            world,
+            registry,
+            candidate.document(),
+            Some(candidate.provenance()),
+            database,
+            commit,
+            None,
+        );
         diagnostics.extend(report.diagnostics);
         report.diagnostics = diagnostics;
         report
@@ -1019,27 +1039,28 @@ pub fn replace_scene_with_product<F>(
 where
     F: FnOnce(&mut SceneProductOverlayWriter<'_>),
 {
-    replace_scene_with_product_and_provenance(
+    SceneSpawner::new().spawn_with_asset_context_and_product(
         world,
         registry,
         document,
-        &SceneEntityProvenanceMap::new(),
+        None,
         database,
-        current,
-        limits,
-        additional_retirements,
-        configure,
+        SceneIdentityCommit::Replace(current),
+        Some(SceneProductTransactionInput {
+            limits,
+            additional_retirements,
+            configure: Box::new(configure),
+        }),
     )
 }
 
 /// Replaces one active Scene Instance while preserving the source provenance of an already
 /// expanded document and its admitted asset-resolution context.
 #[must_use]
-pub fn replace_scene_with_product_and_provenance<F>(
+pub fn replace_expanded_scene_with_product<F>(
     world: &mut World,
     registry: &ComponentRegistry,
-    document: &SceneDocument,
-    provenance: &SceneEntityProvenanceMap,
+    candidate: &ExpandedSceneCandidate,
     database: Option<&ProjectAssetDatabase>,
     current: &SpawnedSceneInstance,
     limits: SceneProductTransactionLimits,
@@ -1049,10 +1070,11 @@ pub fn replace_scene_with_product_and_provenance<F>(
 where
     F: FnOnce(&mut SceneProductOverlayWriter<'_>),
 {
-    let mut report = SceneSpawner::new().spawn_with_asset_context_and_product(
+    SceneSpawner::new().spawn_with_asset_context_and_product(
         world,
         registry,
-        document,
+        candidate.document(),
+        Some(candidate.provenance()),
         database,
         SceneIdentityCommit::Replace(current),
         Some(SceneProductTransactionInput {
@@ -1060,9 +1082,7 @@ where
             additional_retirements,
             configure: Box::new(configure),
         }),
-    );
-    apply_scene_provenance(world, &mut report, provenance);
-    report
+    )
 }
 
 fn prepare_scene_product_transaction(
@@ -1577,41 +1597,23 @@ pub fn spawn_scene(
     SceneSpawner::new().spawn(world, registry, document)
 }
 
-/// Materializes an already expanded scene and restores its structured source provenance.
+/// Materializes an immutable expanded scene with the source association admitted by its owner.
 #[must_use]
-pub fn spawn_scene_with_provenance(
+pub fn spawn_expanded_scene(
     world: &mut World,
     registry: &ComponentRegistry,
-    document: &SceneDocument,
-    provenance: &SceneEntityProvenanceMap,
+    candidate: &ExpandedSceneCandidate,
     database: Option<&ProjectAssetDatabase>,
 ) -> SceneSpawnReport {
-    let mut report = match database {
-        Some(database) => spawn_scene_with_asset_database(world, registry, document, database),
-        None => spawn_scene(world, registry, document),
-    };
-    apply_scene_provenance(world, &mut report, provenance);
-    report
-}
-
-fn apply_scene_provenance(
-    world: &mut World,
-    report: &mut SceneSpawnReport,
-    provenance: &SceneEntityProvenanceMap,
-) {
-    let Some(instance) = &report.instance else {
-        return;
-    };
-    for (entity_id, source) in provenance {
-        let EntityLookup::Resolved(entity) = instance.resolve(world, entity_id) else {
-            panic!("successful expanded scene spawn must resolve every provenance entry");
-        };
-        let mut target = world
-            .get_mut::<SceneEntitySource>(entity)
-            .expect("successful expanded scene spawn must attach scene provenance");
-        target.source_entity_id = source.source_entity_id().clone();
-        target.projection_path = source.projection_path().cloned();
-    }
+    SceneSpawner::new().spawn_with_asset_context_and_product(
+        world,
+        registry,
+        candidate.document(),
+        Some(candidate.provenance()),
+        database,
+        SceneIdentityCommit::Register,
+        None,
+    )
 }
 
 #[must_use]
@@ -1686,4 +1688,147 @@ pub fn spawn_prefab_with_patch_and_asset_database(
 ) -> SceneSpawnReport {
     SceneSpawner::new()
         .spawn_prefab_with_patch_and_asset_database(world, registry, prefab, patch, database)
+}
+
+#[cfg(test)]
+mod provenance_admission_tests {
+    use super::*;
+    use crate::{SceneEntityProvenance, SceneEntityRecord};
+    use nara_core::ItemLimit;
+    use nara_identity::EntityLookup;
+
+    fn id(value: &str) -> SceneEntityId {
+        SceneEntityId::new(value).unwrap()
+    }
+
+    fn invalid_sources(document: &SceneDocument) -> Vec<SceneEntityProvenanceMap> {
+        let candidate = ExpandedSceneCandidate::plain(std::sync::Arc::new(document.clone()));
+        let sources = candidate.provenance();
+        let mut missing = sources.clone();
+        missing.remove(&id("left"));
+        let mut extra = sources.clone();
+        extra.insert(id("extra"), SceneEntityProvenance::local(id("extra")));
+        let mut rekeyed = sources.clone();
+        let source = rekeyed.remove(&id("left")).unwrap();
+        rekeyed.insert(id("stale"), source);
+        let swapped = [
+            (id("left"), sources[&id("right")].clone()),
+            (id("right"), sources[&id("left")].clone()),
+        ]
+        .into_iter()
+        .collect();
+        vec![missing, extra, rekeyed, swapped]
+    }
+
+    #[test]
+    fn invalid_provenance_rejects_before_scene_allocation_or_product_configuration() {
+        let mut registry = ComponentRegistry::new();
+        registry.freeze().unwrap();
+        let document = SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(id("left")),
+            SceneEntityRecord::new(id("right")),
+        ]);
+        for sources in invalid_sources(&document) {
+            let mut world = World::new();
+            let before_entities = world
+                .iter_entities()
+                .map(|entity| entity.id())
+                .collect::<Vec<_>>();
+            let report = SceneSpawner::new().spawn_with_asset_context_and_product(
+                &mut world,
+                &registry,
+                &document,
+                Some(&sources),
+                None,
+                SceneIdentityCommit::Register,
+                Some(SceneProductTransactionInput {
+                    limits: SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::ONE),
+                    additional_retirements: &[],
+                    configure: Box::new(|_| {
+                        panic!("invalid provenance must reject before product configuration")
+                    }),
+                }),
+            );
+            assert!(report.instance.is_none());
+            assert_eq!(
+                world
+                    .iter_entities()
+                    .map(|entity| entity.id())
+                    .collect::<Vec<_>>(),
+                before_entities
+            );
+            assert!(!world.contains_resource::<WorldIdentityDomain>());
+            assert_eq!(
+                report.diagnostics.iter().next().unwrap().code().as_str(),
+                "scene.invalid-provenance"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_provenance_replacement_preserves_old_entities_identity_and_sources() {
+        let mut registry = ComponentRegistry::new();
+        registry.freeze().unwrap();
+        let document = SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(id("left")),
+            SceneEntityRecord::new(id("right")),
+        ]);
+        let mut world = World::new();
+        let initial = spawn_scene(&mut world, &registry, &document);
+        assert!(
+            !initial.diagnostics.has_errors(),
+            "{:#?}",
+            initial.diagnostics
+        );
+        let current = initial
+            .instance
+            .expect("the baseline plain scene must materialize");
+        let before = world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>();
+        let stats = world.resource::<WorldIdentityDomain>().stats();
+        let old_sources = before
+            .iter()
+            .filter_map(|entity| {
+                world
+                    .get::<SceneEntitySource>(*entity)
+                    .cloned()
+                    .map(|source| (*entity, source))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(old_sources.len(), document.entities.len());
+        for sources in invalid_sources(&document) {
+            let report = SceneSpawner::new().spawn_with_asset_context_and_product(
+                &mut world,
+                &registry,
+                &document,
+                Some(&sources),
+                None,
+                SceneIdentityCommit::Replace(&current),
+                None,
+            );
+            assert!(report.instance.is_none());
+            assert_eq!(report.retired_entities(), 0);
+            assert_eq!(
+                report.diagnostics.iter().next().unwrap().code().as_str(),
+                "scene.invalid-provenance"
+            );
+            assert_eq!(
+                world
+                    .iter_entities()
+                    .map(|entity| entity.id())
+                    .collect::<Vec<_>>(),
+                before
+            );
+            assert_eq!(world.resource::<WorldIdentityDomain>().stats(), stats);
+            for (entity, source) in &old_sources {
+                assert_eq!(world.get::<SceneEntitySource>(*entity), Some(source));
+                assert_eq!(
+                    current.resolve(&world, &source.entity_id),
+                    EntityLookup::Resolved(*entity)
+                );
+            }
+        }
+    }
 }

@@ -534,7 +534,7 @@ fn scene_prefab_resolver_expands_one_level_instance_before_spawn() {
 
     assert!(!expansion.diagnostics.has_errors());
     let visual_id = prefab_projection_id(&expansion, "enemy", &["visual"]);
-    let expanded = expansion.document.as_ref().unwrap();
+    let expanded = expansion.document().unwrap();
     assert_eq!(expanded.entities.len(), 2);
     let anchor = expanded
         .entities
@@ -572,7 +572,7 @@ fn prefab_instance_override_patch_applies_before_projection() {
 
     assert!(!expansion.diagnostics.has_errors());
     let visual_id = prefab_projection_id(&expansion, "enemy", &["visual"]);
-    let expanded = expansion.document.as_ref().unwrap();
+    let expanded = expansion.document().unwrap();
     let visual = expanded
         .entities
         .iter()
@@ -642,7 +642,7 @@ fn prefab_instance_override_preserves_ordered_placement_before_projection() {
     let expansion = document.expand_prefabs(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
-    let expanded = expansion.document.as_ref().unwrap();
+    let expanded = expansion.document().unwrap();
     let anchor = expanded
         .entities
         .iter()
@@ -699,7 +699,8 @@ fn scene_prefab_resolver_expands_nested_instances_with_deterministic_ids() {
     assert!(!expansion.diagnostics.has_errors());
     let flash_id = prefab_projection_id(&expansion, "enemy", &["weapon", "muzzle", "flash"]);
     let provenance = expansion
-        .provenance
+        .provenance()
+        .unwrap()
         .get(flash_id)
         .expect("nested projection must retain source provenance");
     assert_eq!(provenance.source_entity_id(), &scene_id("flash"));
@@ -732,7 +733,7 @@ fn scene_prefab_resolver_expands_nested_instances_with_deterministic_ids() {
         projection.source_chain()[2].source_entity(),
         &scene_id("flash")
     );
-    let expanded = expansion.document.as_ref().unwrap();
+    let expanded = expansion.document().unwrap();
     assert_eq!(expanded.entities.len(), 4);
     assert_eq!(expansion, document.expand_prefabs(&registry, &resolver));
 
@@ -778,7 +779,7 @@ fn repeated_prefab_instances_expand_without_id_collisions() {
     let expansion = document.expand_prefabs(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
-    let expanded = expansion.document.as_ref().unwrap();
+    let expanded = expansion.document().unwrap();
     assert_eq!(expanded.entities.len(), 5);
     let left = prefab_projection_id(&expansion, "left", &["visual"]);
     let right = prefab_projection_id(&expansion, "right", &["visual"]);
@@ -786,7 +787,7 @@ fn repeated_prefab_instances_expand_without_id_collisions() {
     assert_ne!(left, &authored_id);
     assert_ne!(right, &authored_id);
     assert!(
-        expansion.provenance[&authored_id]
+        expansion.provenance().unwrap()[&authored_id]
             .projection_path()
             .is_none()
     );
@@ -815,7 +816,7 @@ fn prefab_opaque_ids_do_not_alias_distinct_nested_instances() {
     let expansion = document.expand_prefabs(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
-    let expanded = expansion.document.as_ref().unwrap();
+    let expanded = expansion.document().unwrap();
     assert_eq!(expanded.roots, [scene_id("left"), scene_id("left/branch")]);
     assert_eq!(expanded.entities.len(), 5);
     assert_eq!(
@@ -827,15 +828,16 @@ fn prefab_opaque_ids_do_not_alias_distinct_nested_instances() {
             .len(),
         5
     );
-    assert_eq!(expansion.provenance.len(), 5);
+    assert_eq!(expansion.provenance().unwrap().len(), 5);
     for root in &expanded.roots {
-        let provenance = expansion.provenance.get(root).unwrap();
+        let provenance = expansion.provenance().unwrap().get(root).unwrap();
         assert_eq!(provenance.source_entity_id(), root);
         assert!(provenance.projection_path().is_none());
     }
 
     let leaves = expansion
-        .provenance
+        .provenance()
+        .unwrap()
         .iter()
         .filter(|(_, provenance)| provenance.source_entity_id() == &leaf_id)
         .collect::<Vec<_>>();
@@ -888,7 +890,7 @@ fn prefab_expansion_preserves_source_order_and_prefixes_roots_before_anchor_chil
     let expansion = document.expand_prefabs(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
-    let expanded = expansion.document.as_ref().unwrap();
+    let expanded = expansion.document().unwrap();
     assert_eq!(expanded.roots.as_slice(), std::slice::from_ref(&anchor));
     let anchor = expanded
         .entities
@@ -948,7 +950,7 @@ fn repeated_prefab_instances_remap_declared_scene_local_references() {
     let expansion = document.expand_prefabs(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
-    let expanded = expansion.document.as_ref().unwrap();
+    let expanded = expansion.document().unwrap();
     for anchor in ["left", "right"] {
         let source_id = prefab_projection_id(&expansion, anchor, &["source"]);
         let target_id = prefab_projection_id(&expansion, anchor, &[local_target]);
@@ -1019,7 +1021,7 @@ fn nested_prefabs_remap_declared_scene_local_references_through_each_anchor() {
     assert!(!expansion.diagnostics.has_errors());
     let source_id = prefab_projection_id(&expansion, "root", &["nested", "source"]);
     let target_id = prefab_projection_id(&expansion, "root", &["nested", "target"]);
-    let expanded = expansion.document.as_ref().unwrap();
+    let expanded = expansion.document().unwrap();
     let source = expanded
         .entities
         .iter()
@@ -1073,7 +1075,7 @@ fn nested_prefab_generated_identifier_budget_charges_only_final_projection() {
     );
 
     assert!(!exact.diagnostics.has_errors());
-    assert!(exact.document.is_some());
+    assert!(exact.candidate.is_some());
 
     let failing_limits = PrefabExpansionLimits::default()
         .with_generated_identifier_bytes(ByteLimit::new(expected_bytes - 1).unwrap());
@@ -1083,7 +1085,7 @@ fn nested_prefab_generated_identifier_budget_charges_only_final_projection() {
         PrefabExpansionOptions::default().with_limits(failing_limits),
     );
 
-    assert!(failing.document.is_none());
+    assert!(failing.candidate.is_none());
     assert!(failing.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "generated-identifier-bytes")
             && diagnostic_has_u64_field(diagnostic, "observed", expected_bytes as u64)
@@ -1117,7 +1119,7 @@ fn prefab_reference_rewrite_uses_the_migrated_component_schema() {
     assert!(!expansion.diagnostics.has_errors());
     let source_id = prefab_projection_id(&expansion, "root", &["source"]);
     let target_id = prefab_projection_id(&expansion, "root", &["target"]);
-    let expanded = expansion.document.as_ref().unwrap();
+    let expanded = expansion.document().unwrap();
     let source = expanded
         .entities
         .iter()
@@ -1169,7 +1171,7 @@ fn prefab_expansion_budgets_mapped_component_references_before_publication() {
         PrefabExpansionOptions::default().with_limits(exact_limits),
     );
     assert!(!exact.diagnostics.has_errors());
-    assert!(exact.document.is_some());
+    assert!(exact.candidate.is_some());
 
     let limits = PrefabExpansionLimits::default()
         .with_generated_identifier_bytes(ByteLimit::new(expected_bytes - 1).unwrap());
@@ -1179,7 +1181,7 @@ fn prefab_expansion_budgets_mapped_component_references_before_publication() {
         PrefabExpansionOptions::default().with_limits(limits),
     );
 
-    assert!(expansion.document.is_none());
+    assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "generated-identifier-bytes")
             && diagnostic_has_u64_field(diagnostic, "observed", expected_bytes as u64)
@@ -1217,7 +1219,7 @@ fn prefab_reference_remap_preflight_uses_the_public_materialized_node_budget() {
         expansion.diagnostics
     );
     let source_id = prefab_projection_id(&expansion, "root", &["source"]);
-    let expanded = expansion.document.as_ref().unwrap();
+    let expanded = expansion.document().unwrap();
     let source = expanded
         .entities
         .iter()
@@ -1257,7 +1259,7 @@ fn prefab_reference_remap_rejects_undeclared_references_without_mutating_the_sou
 
     let expansion = document.expand_prefabs(&registry, &resolver);
 
-    assert!(expansion.document.is_none());
+    assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.prefab-entity-reference-rewrite-failed"
             && diagnostic_has_text_field(diagnostic, "rewrite-error-kind", "undeclared-reference")
@@ -1283,8 +1285,8 @@ fn prefab_reference_remap_rejects_a_target_outside_its_source_document() {
 
     let expansion = document.expand_prefabs(&registry, &resolver);
 
-    assert!(expansion.document.is_none());
-    assert!(expansion.provenance.is_empty());
+    assert!(expansion.candidate.is_none());
+    assert!(expansion.provenance().is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.prefab-entity-reference-rewrite-failed"
             && diagnostic_has_text_field(diagnostic, "rewrite-error-kind", "missing-source-entity")
@@ -1324,7 +1326,7 @@ fn prefab_expansion_budgets_mapped_reference_value_growth_before_publication() {
     );
 
     assert!(!exact.diagnostics.has_errors());
-    assert!(exact.document.is_some());
+    assert!(exact.candidate.is_some());
 
     let failing_limits = PrefabExpansionLimits::default()
         .with_materialized_value_bytes(ByteLimit::new(expected_bytes - 1).unwrap());
@@ -1334,7 +1336,7 @@ fn prefab_expansion_budgets_mapped_reference_value_growth_before_publication() {
         PrefabExpansionOptions::default().with_limits(failing_limits),
     );
 
-    assert!(failing.document.is_none());
+    assert!(failing.candidate.is_none());
     assert!(failing.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "materialized-value-bytes")
             && diagnostic_has_u64_field(diagnostic, "observed", expected_bytes as u64)
@@ -1370,7 +1372,7 @@ fn prefab_reference_remap_traversal_accepts_persistent_reference_at_logical_byte
 
     assert!(!expansion.diagnostics.has_errors());
     let source_id = prefab_projection_id(&expansion, "root", &["source"]);
-    let expanded = expansion.document.as_ref().unwrap();
+    let expanded = expansion.document().unwrap();
     let source = expanded
         .entities
         .iter()
@@ -1394,7 +1396,7 @@ fn missing_prefab_source_reports_asset_ref_without_expanded_document() {
     let expansion = document.expand_prefabs(&registry, &resolver);
     let report = spawn_scene_with_prefab_resolver(&mut world, &registry, &document, &resolver);
 
-    assert!(expansion.document.is_none());
+    assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.prefab-source-missing"
             && diagnostic_has_text_field(diagnostic, "entity-id", "enemy")
@@ -1423,7 +1425,7 @@ fn prefab_source_cycle_reports_typed_edge_without_concatenated_chain() {
 
     let expansion = document.expand_prefabs(&registry, &resolver);
 
-    assert!(expansion.document.is_none());
+    assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.prefab-cycle"
             && diagnostic_has_text_field(diagnostic, "cycle-from", "prefabs/b.ron")
@@ -1471,7 +1473,7 @@ fn prefab_source_cycle_reports_middle_cycle_start_for_multi_edge_chain() {
 
     let expansion = document.expand_prefabs(&registry, &resolver);
 
-    assert!(expansion.document.is_none());
+    assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.prefab-cycle"
             && diagnostic_has_text_field(diagnostic, "cycle-from", "prefabs/c.ron")
@@ -1498,7 +1500,7 @@ fn prefab_expansion_depth_limit_reports_before_spawn_mutation() {
         PrefabExpansionOptions::default().with_max_depth(1),
     );
 
-    assert!(expansion.document.is_none());
+    assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.prefab-depth-exceeded"
             && diagnostic_has_field_class(diagnostic, "entity-id", DiagnosticFieldClass::Public)
@@ -1525,7 +1527,7 @@ fn prefab_expansion_entity_budget_is_aggregate_across_reused_sources() {
     assert!(
         document
             .expand_prefabs_with_options(&registry, &resolver, exact)
-            .document
+            .candidate
             .is_some()
     );
 
@@ -1533,7 +1535,7 @@ fn prefab_expansion_entity_budget_is_aggregate_across_reused_sources() {
         PrefabExpansionLimits::default().with_materialized_entities(ItemLimit::new(3).unwrap()),
     );
     let expansion = document.expand_prefabs_with_options(&registry, &resolver, over);
-    assert!(expansion.document.is_none());
+    assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.prefab-expansion-budget-exceeded"
             && diagnostic_has_text_field(diagnostic, "budget-kind", "materialized-entities")
@@ -1576,7 +1578,7 @@ fn prefab_expansion_value_budgets_are_aggregate_across_reused_sources() {
                 &resolver,
                 PrefabExpansionOptions::default().with_limits(exact_limits),
             )
-            .document
+            .candidate
             .is_some()
     );
 
@@ -1587,7 +1589,7 @@ fn prefab_expansion_value_budgets_are_aggregate_across_reused_sources() {
         &resolver,
         PrefabExpansionOptions::default().with_limits(node_limits),
     );
-    assert!(node_report.document.is_none());
+    assert!(node_report.candidate.is_none());
     assert!(node_report.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "materialized-value-nodes")
             && diagnostic_has_u64_field(diagnostic, "observed", 2)
@@ -1601,7 +1603,7 @@ fn prefab_expansion_value_budgets_are_aggregate_across_reused_sources() {
         &resolver,
         PrefabExpansionOptions::default().with_limits(byte_limits),
     );
-    assert!(byte_report.document.is_none());
+    assert!(byte_report.candidate.is_none());
     assert!(byte_report.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "materialized-value-bytes")
             && diagnostic_has_u64_field(diagnostic, "observed", (payload_bytes * 2) as u64)
@@ -1627,7 +1629,7 @@ fn prefab_expansion_component_and_instance_budgets_are_independent() {
         PrefabExpansionLimits::default().with_materialized_components(ItemLimit::new(1).unwrap()),
     );
     let expansion = document.expand_prefabs_with_options(&registry, &resolver, component_limited);
-    assert!(expansion.document.is_none());
+    assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "materialized-components")
             && diagnostic_has_u64_field(diagnostic, "observed", 2)
@@ -1641,7 +1643,7 @@ fn prefab_expansion_component_and_instance_budgets_are_independent() {
         .with_limits(PrefabExpansionLimits::default().with_resolved_instances(ItemLimit::ONE));
     let expansion =
         two_instances.expand_prefabs_with_options(&registry, &resolver, instance_limited);
-    assert!(expansion.document.is_none());
+    assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "resolved-instances")
             && diagnostic_has_u64_field(diagnostic, "observed", 2)
@@ -1675,7 +1677,7 @@ fn prefab_expansion_counts_override_operations_per_instance() {
 
     let expansion = document.expand_prefabs_with_options(&registry, &resolver, options);
 
-    assert!(expansion.document.is_none());
+    assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "applied-patch-operations")
             && diagnostic_has_u64_field(diagnostic, "observed", 2)
@@ -1707,7 +1709,7 @@ fn prefab_expansion_bounds_generated_identifier_bytes_before_publication() {
         PrefabExpansionOptions::default().with_limits(limits),
     );
 
-    assert!(expansion.document.is_none());
+    assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "generated-identifier-bytes")
             && diagnostic_has_u64_field(diagnostic, "observed", expected_bytes as u64)
@@ -1721,7 +1723,7 @@ fn prefab_expansion_bounds_generated_identifier_bytes_before_publication() {
         &resolver,
         PrefabExpansionOptions::default().with_limits(single_limit),
     );
-    assert!(single.document.is_none());
+    assert!(single.candidate.is_none());
     assert!(single.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(
             diagnostic,
@@ -4482,7 +4484,7 @@ fn failed_nested_prefab_override_does_not_poison_a_sibling_source_expansion() {
 
     let expansion = document.expand_prefabs(&registry, &resolver);
 
-    assert!(expansion.document.is_none());
+    assert!(expansion.candidate.is_none());
     assert!(
         expansion
             .diagnostics
@@ -5309,17 +5311,21 @@ fn prefab_projection_id<'a>(
     root_anchor: &str,
     source_entities: &[&str],
 ) -> &'a SceneEntityId {
-    let mut matches = report.provenance.iter().filter(|(_, provenance)| {
-        provenance.projection_path().is_some_and(|path| {
-            path.root_anchor().as_str() == root_anchor
-                && path.source_chain().len() == source_entities.len()
-                && path
-                    .source_chain()
-                    .iter()
-                    .zip(source_entities)
-                    .all(|(step, entity)| step.source_entity().as_str() == *entity)
-        })
-    });
+    let mut matches = report
+        .provenance()
+        .unwrap()
+        .iter()
+        .filter(|(_, provenance)| {
+            provenance.projection_path().is_some_and(|path| {
+                path.root_anchor().as_str() == root_anchor
+                    && path.source_chain().len() == source_entities.len()
+                    && path
+                        .source_chain()
+                        .iter()
+                        .zip(source_entities)
+                        .all(|(step, entity)| step.source_entity().as_str() == *entity)
+            })
+        });
     let (id, _) = matches.next().expect("prefab projection must exist");
     assert!(matches.next().is_none(), "prefab projection must be unique");
     id
