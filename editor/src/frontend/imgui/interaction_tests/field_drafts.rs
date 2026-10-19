@@ -1,6 +1,9 @@
 use super::*;
 use nara::{
-    reflect::{ComponentNumericDomain, ComponentValueShape},
+    reflect::{
+        ComponentFloat, ComponentNumericBound, ComponentNumericDomain, ComponentNumericInterval,
+        ComponentValueShape,
+    },
     tooling::{EditorDocumentMutation, SceneInspectorCommand},
 };
 
@@ -23,6 +26,19 @@ pub(super) fn configure(project: &InteractionProject) {
             "flag",
             ComponentValueShape::scalar(ComponentValueKind::Bool),
         ),
+        (
+            "seconds",
+            ComponentValueShape::scalar(ComponentValueKind::F64)
+                .with_numeric_domain(ComponentNumericDomain::F32)
+                .with_numeric_interval(ComponentNumericInterval::F64 {
+                    min: Some(ComponentNumericBound::Included(
+                        ComponentFloat::new(0.0).unwrap(),
+                    )),
+                    max: Some(ComponentNumericBound::Included(
+                        ComponentFloat::new(30.0).unwrap(),
+                    )),
+                }),
+        ),
     ];
     let schema = ComponentSchema::new(
         ComponentTypeId::new(CUSTOM_COMPONENT),
@@ -44,6 +60,7 @@ pub(super) fn configure(project: &InteractionProject) {
         ("label", ComponentValue::String("before".into())),
         ("other", ComponentValue::I64(0)),
         ("flag", ComponentValue::Bool(false)),
+        ("seconds", ComponentValue::f64(0.5).unwrap()),
     ]));
     let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
         PersistentComponentSchemaOwnerId::try_new("studio.interaction.components").unwrap(),
@@ -155,6 +172,61 @@ fn actual_scalar_controls_retain_invalid_u8_and_long_input_until_explicit_correc
         draft(&interaction, "value").is_none(),
         "only this edit's owner acceptance clears its draft"
     );
+}
+
+#[test]
+fn actual_interval_controls_keep_out_of_range_input_until_corrected() {
+    let project = InteractionProject::new_field_drafts();
+    let mut interaction = setup(&project);
+    let before = interaction
+        .frame()
+        .workspace()
+        .active_scene
+        .as_ref()
+        .unwrap()
+        .revision;
+    interaction.replace_text(&format!("field:{CUSTOM_COMPONENT}:seconds"), "31");
+    interaction.click(&control("seconds", "Apply"));
+    assert_eq!(draft(&interaction, "seconds").unwrap().0, "31");
+    assert!(
+        interaction
+            .frontend
+            .retained_field_error(CUSTOM_COMPONENT, "seconds")
+            .is_some()
+    );
+    assert_eq!(
+        interaction
+            .frame()
+            .workspace()
+            .active_scene
+            .as_ref()
+            .unwrap()
+            .revision,
+        before
+    );
+    interaction.replace_text(&format!("field:{CUSTOM_COMPONENT}:seconds"), "30");
+    interaction.click(&control("seconds", "Apply"));
+    assert!(draft(&interaction, "seconds").is_none());
+    let frame = interaction.frame();
+    let field = frame
+        .workspace()
+        .active_scene
+        .as_ref()
+        .unwrap()
+        .editor
+        .inspector
+        .selected_entity_view
+        .as_ref()
+        .unwrap()
+        .components
+        .iter()
+        .find(|component| component.component.as_str() == CUSTOM_COMPONENT)
+        .unwrap()
+        .fields
+        .iter()
+        .find(|field| field.id.as_str() == "seconds")
+        .unwrap();
+    assert_eq!(field.value, Some(ComponentValue::f64(30.0).unwrap()));
 }
 
 #[test]

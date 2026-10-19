@@ -78,9 +78,9 @@ pub const UI_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
     nara_reflect::ComponentSchemaProviderDefinition::with_validation(
         UI_SCHEMA_OWNER_ID,
         UI_SCHEMA_PROVIDER_ID,
-        nara_reflect::ComponentSchemaProviderBindingId::new("nara.ui.components.native", 2)
-            .with_codec_version(2)
-            .with_migration_version(2),
+        nara_reflect::ComponentSchemaProviderBindingId::new("nara.ui.components.native", 3)
+            .with_codec_version(3)
+            .with_migration_version(3),
         ui_schema_catalog,
         crate::codec::validate_ui_components,
         register_ui_components,
@@ -225,3 +225,6 @@ pub mod advanced {
 
 #[cfg(test)]
 mod adapter_tests;
+
+#[cfg(test)]
+mod component_evolution_tests;

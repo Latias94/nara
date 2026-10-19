@@ -1,9 +1,10 @@
 use nara_asset::AssetRef;
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentFieldSchema, ComponentFloat, ComponentNumericBound, ComponentNumericDomain,
+    ComponentNumericInterval, ComponentRegistry, ComponentRegistryError, ComponentSchema,
     ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind,
+    ComponentValueKind, ComponentValueShape, validate_component_value,
 };
 use nara_scene::PrefabDocument;
 use nara_ui_kernel::{
@@ -29,6 +30,7 @@ const BRUSH_FIELDS: &[&str] = &["kind", "red", "green", "blue", "alpha", "role",
 const COLOR_FIELDS: &[&str] = &["red", "green", "blue", "alpha"];
 
 const UI_SCHEMA_VERSION_TWO: ComponentSchemaVersion = ComponentSchemaVersion(2);
+const UI_SCHEMA_VERSION_THREE: ComponentSchemaVersion = ComponentSchemaVersion(3);
 
 pub fn register_ui_components(
     registry: &mut ComponentRegistry,
@@ -86,6 +88,12 @@ pub fn register_ui_components(
         UI_SCHEMA_VERSION_TWO,
         migrate_legacy_text,
     )?;
+    registry.register_component_migration(
+        &ComponentTypeId::new(UI_TEXT_ID),
+        UI_SCHEMA_VERSION_TWO,
+        UI_SCHEMA_VERSION_THREE,
+        migrate_text_logical_size,
+    )?;
     Ok(())
 }
 
@@ -114,7 +122,7 @@ pub fn prefab_contains_ui_root(document: &PrefabDocument) -> bool {
         .any(|entity| entity.components.contains_key(&root))
 }
 
-pub(crate) fn ui_schema_predecessor_catalog() -> ComponentSchemaCatalog {
+fn legacy_ui_schema_catalog() -> ComponentSchemaCatalog {
     ComponentSchemaCatalog {
         components: vec![
             ui_root_schema(),
@@ -130,10 +138,27 @@ pub(crate) fn ui_schema_predecessor_catalog() -> ComponentSchemaCatalog {
     }
 }
 
+pub(crate) fn ui_schema_predecessor_catalog() -> ComponentSchemaCatalog {
+    let predecessor = legacy_ui_schema_catalog();
+    let mut current = ComponentSchemaCatalog::successor_of(&predecessor)
+        .expect("the fixed generation-one UI catalog always has a successor");
+    current.components = vec![
+        ui_root_schema(),
+        ui_node_schema(),
+        ui_visual_schema(),
+        version_two_ui_text_schema(),
+        ui_button_schema(),
+        ui_button_visuals_schema(),
+        ui_semantics_schema(),
+        ui_theme_schema(),
+    ];
+    current
+}
+
 pub(crate) fn ui_schema_catalog() -> ComponentSchemaCatalog {
     let predecessor = ui_schema_predecessor_catalog();
     let mut current = ComponentSchemaCatalog::successor_of(&predecessor)
-        .expect("the fixed generation-one UI catalog always has a successor");
+        .expect("the fixed generation-two UI catalog always has a successor");
     current.components = vec![
         ui_root_schema(),
         ui_node_schema(),
@@ -169,7 +194,8 @@ pub(crate) fn validate_ui_component_value(
 
 pub(crate) fn ui_component_schema_version(id: &ComponentTypeId) -> Option<ComponentSchemaVersion> {
     match id.as_str() {
-        UI_VISUAL_ID | UI_TEXT_ID => Some(UI_SCHEMA_VERSION_TWO),
+        UI_TEXT_ID => Some(UI_SCHEMA_VERSION_THREE),
+        UI_VISUAL_ID => Some(UI_SCHEMA_VERSION_TWO),
         UI_ROOT_ID | UI_NODE_ID | UI_BUTTON_ID | UI_BUTTON_VISUALS_ID | UI_SEMANTICS_ID
         | UI_THEME_ID => Some(ComponentSchemaVersion::ONE),
         _ => None,
@@ -858,6 +884,13 @@ fn migrate_legacy_text(mut value: ComponentValue) -> Result<ComponentValue, Comp
     Ok(value)
 }
 
+fn migrate_text_logical_size(value: ComponentValue) -> Result<ComponentValue, ComponentCodecError> {
+    // A narrower shared contract needs deliberate repair of invalid historical data. Keep valid
+    // stored numbers unchanged: F32 materialization belongs to validation and native decoding.
+    validate_component_value(&ui_text_schema(), &value)?;
+    Ok(value)
+}
+
 fn migrate_legacy_brush_at(
     value: &mut ComponentValue,
     field: &str,
@@ -1320,6 +1353,27 @@ fn ui_visual_schema() -> ComponentSchema {
 }
 
 fn ui_text_schema() -> ComponentSchema {
+    let mut schema = version_two_ui_text_schema();
+    schema.version = UI_SCHEMA_VERSION_THREE;
+    let logical_size = schema
+        .fields
+        .iter_mut()
+        .find(|field| field.id().as_str() == "logical_size")
+        .expect("the fixed UiText schema contains its logical-size field");
+    logical_size.shape = ComponentValueShape::scalar(ComponentValueKind::F64)
+        .with_numeric_domain(ComponentNumericDomain::F32)
+        .with_numeric_interval(ComponentNumericInterval::F64 {
+            min: Some(ComponentNumericBound::Excluded(
+                ComponentFloat::new(0.0).expect("the fixed lower text-size bound is finite"),
+            )),
+            max: Some(ComponentNumericBound::Included(
+                ComponentFloat::new(256.0).expect("the fixed upper text-size bound is finite"),
+            )),
+        });
+    schema
+}
+
+fn version_two_ui_text_schema() -> ComponentSchema {
     let mut fields = vec![
         field("content", ComponentValueKind::String),
         field("logical_size", ComponentValueKind::F64),

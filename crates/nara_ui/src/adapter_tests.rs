@@ -424,16 +424,16 @@ fn schema_catalog_is_canonical_closed_and_requires_every_field() {
         ]
     );
     assert!(catalog.type_tombstones.is_empty());
-    assert_eq!(catalog.generation(), 2);
+    assert_eq!(catalog.generation(), 3);
     assert!(catalog.predecessor().is_some());
     for schema in &catalog.components {
         let brush_bearing = matches!(schema.id().as_str(), "nara.ui.UiVisual" | "nara.ui.UiText");
         assert_eq!(
             schema.version(),
-            if brush_bearing {
-                ComponentSchemaVersion(2)
-            } else {
-                ComponentSchemaVersion::ONE
+            match schema.id().as_str() {
+                "nara.ui.UiText" => ComponentSchemaVersion(3),
+                "nara.ui.UiVisual" => ComponentSchemaVersion(2),
+                _ => ComponentSchemaVersion::ONE,
             }
         );
         assert_eq!(schema.field_tombstones().is_empty(), !brush_bearing);
@@ -516,6 +516,7 @@ fn legacy_brush_migrations_preserve_roles_and_expose_image_asset_references() {
     let migrated_text = registry
         .migrate_component_value(&text_id, ComponentSchemaVersion::ONE, &legacy_text)
         .expect("legacy text must migrate");
+    assert_eq!(migrated_text.version, ComponentSchemaVersion(3));
     assert_eq!(
         migrated_text
             .value

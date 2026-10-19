@@ -147,7 +147,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 2,
+            "version": 3,
             "value": {
               "type": "map",
               "value": {
@@ -580,7 +580,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 2,
+            "version": 3,
             "value": {
               "type": "map",
               "value": {
@@ -1016,7 +1016,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 2,
+            "version": 3,
             "value": {
               "type": "map",
               "value": {
@@ -1449,7 +1449,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 2,
+            "version": 3,
             "value": {
               "type": "map",
               "value": {
@@ -1649,7 +1649,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 2,
+            "version": 3,
             "value": {
               "type": "map",
               "value": {
@@ -2535,7 +2535,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 2,
+            "version": 3,
             "value": {
               "type": "map",
               "value": {
@@ -2735,7 +2735,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 2,
+            "version": 3,
             "value": {
               "type": "map",
               "value": {
@@ -3324,7 +3324,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 2,
+            "version": 3,
             "value": {
               "type": "map",
               "value": {

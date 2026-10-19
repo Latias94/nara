@@ -113,6 +113,36 @@ impl AuthoringWorkflow<'_> {
         self.click("+ Root")?;
         self.click("Add Component")?;
         self.click(CUSTOM_COMPONENT)?;
+        let before_range_edit = self.history()?;
+        self.replace_text(&format!("field:{CUSTOM_COMPONENT}:seconds"), "31")?;
+        self.click(&format!("field-action:{CUSTOM_COMPONENT}:seconds:Apply"))?;
+        if self.history()? != before_range_edit
+            || self
+                .native
+                .frontend
+                .retained_field_draft(CUSTOM_COMPONENT, "seconds")
+                .is_none_or(|draft| draft.0 != "31")
+            || self
+                .native
+                .frontend
+                .retained_field_error(CUSTOM_COMPONENT, "seconds")
+                .is_none()
+        {
+            return Err("native range rejection did not preserve the input and history".to_owned());
+        }
+        self.replace_text(&format!("field:{CUSTOM_COMPONENT}:seconds"), "30")?;
+        self.click(&format!("field-action:{CUSTOM_COMPONENT}:seconds:Apply"))?;
+        if self.history()? != before_range_edit + 1
+            || self
+                .native
+                .frontend
+                .retained_field_draft(CUSTOM_COMPONENT, "seconds")
+                .is_some()
+        {
+            return Err(
+                "native range correction did not receive its exact accepted result".to_owned(),
+            );
+        }
         self.replace_text(&format!("field:{CUSTOM_COMPONENT}:label"), "draft ")?;
         let owner = self.draft_text_owner()?;
         self.send_draft_ime(Ime::Enabled)?;
