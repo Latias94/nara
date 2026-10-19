@@ -46,6 +46,9 @@ Rules:
   identity evidence.
 - A successful open returns the opened handle plus identity evidence. Domain code reads or writes
   through that handle; it does not reopen a checked path.
+- Regular-file admission on Unix opens leaves nonblocking before inspecting the same handle, so
+  a FIFO cannot wait for a writer before type rejection. Ordinary and strict resolution preserve
+  no-follow policy. This does not promise a deadline for every filesystem or device operation.
 - Handle-bound resolution proves which object was authorized; it does not freeze that object's
   bytes or link count. A domain that requires stable input verifies an expected digest while reading
   or copies the stream into an engine-owned immutable candidate before publication.

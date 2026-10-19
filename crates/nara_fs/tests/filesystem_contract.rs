@@ -23,6 +23,10 @@ use nara_fs::{DirectoryEnumerationSession, FileKind};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(target_os = "linux")]
+#[path = "support/unix_file_open.rs"]
+mod unix_file_open;
+
 struct TestRoot(PathBuf);
 
 impl TestRoot {

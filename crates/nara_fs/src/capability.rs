@@ -237,7 +237,9 @@ impl DirectoryCapability {
         Ok((Self { inner: current }, leaf.clone()))
     }
 
-    /// Opens one direct child file through this directory authority.
+    /// Opens one direct child regular file through this directory authority.
+    ///
+    /// Unix leaf admission does not wait for a FIFO writer before validating the opened handle.
     pub fn open_child_file(&self, child: &RelativeComponent) -> Result<FileCapability, FsError> {
         self.ensure_strict_resolution(FsOperation::OpenFile)?;
         let file = platform::open_file(

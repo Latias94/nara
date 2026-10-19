@@ -211,7 +211,9 @@ pub(crate) fn open_file(
     open_component(
         parent,
         component,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        // Open a FIFO/device without waiting for a peer, then let the capability owner validate
+        // regular-file facts on this same handle. Regular files ignore NONBLOCK.
+        OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOFOLLOW | OFlags::CLOEXEC,
         strict,
         FsOperation::OpenFile,
     )
