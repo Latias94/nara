@@ -15,7 +15,7 @@ use nara_editor_panel_module_consumer::{
 };
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentMutation,
-    EditorNavigationAction, EditorWorkspaceIntentAction,
+    EditorNavigationAction,
 };
 
 fn clear_selected_from_companion(
@@ -205,7 +205,11 @@ fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selecti
                 EditorActionBatch::new(
                     frame.revision(),
                     [EditorAction::WorkspaceIntent(
-                        EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Discard),
+                        frame
+                            .workspace_intent()
+                            .decision_prompt()
+                            .unwrap()
+                            .resolve(EditorCloseDecision::Discard),
                     )],
                 ),
                 Duration::ZERO,

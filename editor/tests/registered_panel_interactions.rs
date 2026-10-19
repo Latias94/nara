@@ -5,9 +5,7 @@
 
 use std::{fs, path::Path, time::Duration};
 
-use nara::tooling::{
-    EditorAction, EditorActionBatch, EditorCloseDecision, EditorWorkspaceIntentAction,
-};
+use nara::tooling::{EditorAction, EditorActionBatch, EditorCloseDecision};
 use nara_editor::{
     EditorApplication, EditorLaunchOptions, ImguiEditorFrontend,
     workspace::{EditorPanelPlacement, EditorPanelTarget},
@@ -138,15 +136,9 @@ fn registered_panels_scroll_and_keep_independent_inspector_instances() {
         let Some(frame) = application.current_frame() else {
             break;
         };
-        let actions = if frame.workspace_intent().phase()
-            == Some(nara::tooling::EditorWorkspaceIntentPhase::AwaitingDecision)
-        {
-            vec![EditorAction::WorkspaceIntent(
-                EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Discard),
-            )]
-        } else {
-            vec![]
-        };
+        let actions = frame.workspace_intent().decision_prompt().map(|prompt| {
+            EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
+        });
         if application
             .submit_and_drive(
                 EditorActionBatch::new(frame.revision(), actions),

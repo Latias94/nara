@@ -23,8 +23,7 @@ use nara::{
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentKind, EditorFrameModel,
-        EditorPersistenceOperation, EditorPersistenceResult, EditorWorkspaceIntentAction,
-        EditorWorkspaceIntentPhase,
+        EditorPersistenceOperation, EditorPersistenceResult, EditorWorkspaceIntentPhase,
     },
 };
 
@@ -334,11 +333,9 @@ impl Drop for Interaction {
             let Some(frame) = self.application.current_frame() else {
                 return;
             };
-            let decision = (frame.workspace_intent().phase()
-                == Some(EditorWorkspaceIntentPhase::AwaitingDecision))
-            .then_some(EditorAction::WorkspaceIntent(
-                EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Discard),
-            ));
+            let decision = frame.workspace_intent().decision_prompt().map(|prompt| {
+                EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
+            });
             let update = self.application.submit_and_drive(
                 EditorActionBatch::new(frame.revision(), decision),
                 Duration::ZERO,
@@ -463,6 +460,121 @@ fn ordinary_scene_and_prefab_mouse_keyboard_workflow_saves_and_reopens_real_sour
 }
 
 #[test]
+fn dirty_close_displays_the_prompted_document_after_advance_and_stale_replay() {
+    use std::rc::Rc;
+
+    struct RenderedText(Rc<RefCell<String>>);
+
+    impl dear_imgui_rs::ClipboardBackend for RenderedText {
+        fn get(&mut self) -> Option<String> {
+            Some(self.0.borrow().clone())
+        }
+
+        fn set(&mut self, value: &str) {
+            value.clone_into(&mut self.0.borrow_mut());
+        }
+    }
+
+    fn rendered_close_dialog(interaction: &mut Interaction) -> String {
+        let log = Rc::new(RefCell::new(String::new()));
+        interaction
+            .context
+            .set_clipboard_backend(RenderedText(Rc::clone(&log)));
+        CONTROLS.with(|controls| controls.borrow_mut().clear());
+        let frame = interaction.frame();
+        let ui = interaction.context.frame();
+        let mut actions = Vec::new();
+        ui.window("Close identity proof").build(|| {
+            ui.log_to_clipboard(0_u32);
+            super::show_dirty_close_dialog(ui, &frame, &mut actions);
+            ui.log_finish();
+        });
+        let _ = interaction.context.render_legacy();
+        assert!(actions.is_empty());
+        log.take()
+    }
+
+    let project = InteractionProject::new();
+    let mut interaction = Interaction::new(&project);
+    interaction.click("+ Root");
+    interaction.click("entity:prefab-anchor");
+    interaction.click("Open Prefab Source");
+    interaction.click("+ Root");
+    assert_eq!(
+        interaction
+            .frame()
+            .workspace()
+            .documents
+            .iter()
+            .filter(|document| document.dirty)
+            .count(),
+        2
+    );
+
+    assert!(!interaction.application.request_exit().exit_ready());
+    interaction.render();
+    let first = interaction.frame();
+    let first_prompt = first.workspace_intent().decision_prompt().unwrap();
+    let first_document = first.workspace().document(first_prompt.document()).unwrap();
+    let first_title = format!("Document: {}", first_document.title);
+    let first_source = format!(
+        "Source: {}",
+        first_document.source_binding.as_ref().unwrap().locator()
+    );
+    let first_text = rendered_close_dialog(&mut interaction);
+    assert!(first_text.contains(&first_title), "{first_text}");
+    assert!(first_text.contains(&first_source), "{first_text}");
+
+    interaction.click("close:Discard and continue");
+    let second = interaction.frame();
+    let second_prompt = second.workspace_intent().decision_prompt().unwrap();
+    assert_ne!(first_prompt.document(), second_prompt.document());
+    let second_document = second
+        .workspace()
+        .document(second_prompt.document())
+        .unwrap();
+    let second_title = format!("Document: {}", second_document.title);
+    let second_source = format!(
+        "Source: {}",
+        second_document.source_binding.as_ref().unwrap().locator()
+    );
+    let second_text = rendered_close_dialog(&mut interaction);
+    assert!(second_text.contains(&second_title), "{second_text}");
+    assert!(second_text.contains(&second_source), "{second_text}");
+    assert!(!second_text.contains(&first_title), "{second_text}");
+    assert!(!second_text.contains(&first_source), "{second_text}");
+
+    interaction.frontend.submit_and_drive(
+        &mut interaction.application,
+        EditorActionBatch::new(
+            second.revision(),
+            [EditorAction::WorkspaceIntent(
+                first_prompt.resolve(EditorCloseDecision::Discard),
+            )],
+        ),
+        Duration::ZERO,
+    );
+    let after_replay = interaction.frame();
+    assert_eq!(
+        after_replay.workspace_intent().decision_prompt(),
+        Some(second_prompt)
+    );
+    assert_eq!(
+        after_replay.workspace().documents,
+        second.workspace().documents
+    );
+    let replay_text = rendered_close_dialog(&mut interaction);
+    assert!(replay_text.contains(&second_title), "{replay_text}");
+    assert!(replay_text.contains(&second_source), "{replay_text}");
+    assert!(!replay_text.contains(&first_title), "{replay_text}");
+    for label in ["Save and continue", "Discard and continue", "Cancel"] {
+        assert!(
+            CONTROLS.with(|controls| { controls.borrow().contains_key(&format!("close:{label}")) })
+        );
+    }
+}
+
+#[test]
 fn dirty_close_does_not_offer_a_decision_after_save_has_started() {
     use nara::tooling::{EditorWorkspaceIntent, EditorWorkspaceIntentAction};
 
@@ -507,6 +619,7 @@ fn dirty_close_does_not_offer_a_decision_after_save_has_started() {
                 Some(EditorWorkspaceIntentPhase::Saving),
                 Some(document),
                 None,
+                None,
             ),
         ),
         frame.diagnostics().clone(),
@@ -524,7 +637,11 @@ fn dirty_close_does_not_offer_a_decision_after_save_has_started() {
         EditorActionBatch::new(
             frame.revision(),
             [EditorAction::WorkspaceIntent(
-                EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Cancel),
+                frame
+                    .workspace_intent()
+                    .decision_prompt()
+                    .unwrap()
+                    .resolve(EditorCloseDecision::Cancel),
             )],
         ),
         Duration::ZERO,

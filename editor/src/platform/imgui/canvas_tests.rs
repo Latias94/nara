@@ -13,7 +13,7 @@ use nara::{
     scene::SceneEntityId,
     tooling::{
         EditorAction, EditorActionBatch, EditorCloseDecision, EditorNavigationAction,
-        EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase,
+        EditorWorkspaceIntentPhase,
     },
 };
 use winit::{
@@ -231,7 +231,11 @@ pub(super) fn retire_application(application: &mut EditorApplication) -> Result<
                 EditorActionBatch::new(
                     frame.revision(),
                     [EditorAction::WorkspaceIntent(
-                        EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Discard),
+                        frame
+                            .workspace_intent()
+                            .decision_prompt()
+                            .unwrap()
+                            .resolve(EditorCloseDecision::Discard),
                     )],
                 ),
                 Duration::ZERO,

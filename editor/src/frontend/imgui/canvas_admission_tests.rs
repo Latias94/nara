@@ -11,8 +11,7 @@ use nara::{
     scene::SceneEntityId,
     tooling::{
         EditorAction, EditorActionBatch, EditorCloseDecision, EditorGestureAction,
-        EditorGestureCancelReason, EditorNavigationAction, EditorWorkspaceIntentAction,
-        EditorWorkspaceIntentPhase,
+        EditorGestureCancelReason, EditorNavigationAction,
     },
     ui::__private::{UiAuthoringDimensionKind, UiAuthoringFieldValue},
 };
@@ -244,11 +243,9 @@ impl Drop for CanvasAdmission {
             let Some(frame) = self.application.current_frame() else {
                 return;
             };
-            let resolution = (frame.workspace_intent().phase()
-                == Some(EditorWorkspaceIntentPhase::AwaitingDecision))
-            .then_some(EditorAction::WorkspaceIntent(
-                EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Discard),
-            ));
+            let resolution = frame.workspace_intent().decision_prompt().map(|prompt| {
+                EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
+            });
             if self
                 .application
                 .submit_and_drive(

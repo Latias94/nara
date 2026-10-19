@@ -22,10 +22,11 @@ use nara::{
     render::Extent2d,
     scene::UnavailableRecordManifest,
     tooling::{
-        EditorAction, EditorActionBatch, EditorActionBatchReport, EditorActionRejection,
-        EditorFrameModel, EditorPersistenceResult, EditorPlayAction,
+        EditorAction, EditorActionBatch, EditorActionBatchReport, EditorActionOutcome,
+        EditorActionRejection, EditorFrameModel, EditorPersistenceResult, EditorPlayAction,
         EditorProjectBrowserLocalAction, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
-        EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult,
+        EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection,
+        EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult,
     },
 };
 use thiserror::Error;
@@ -1689,27 +1690,28 @@ fn dispatch_close_resolution_actions(
     batch: EditorActionBatch,
 ) -> (EditorApplicationDispatch, bool) {
     let frame_revision = batch.frame_revision();
-    let mut attempted_save = false;
     let actions = batch
         .into_actions()
         .into_iter()
         .filter(|action| {
             matches!(
                 action,
-                EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Resolve(_))
+                EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Resolve { .. })
                     | EditorAction::Play(EditorPlayAction::RetryClose)
                     | EditorAction::Play(EditorPlayAction::RetryRetirement)
             )
         })
-        .inspect(|action| {
-            if matches!(
+        .collect::<Vec<_>>();
+    let save_actions = actions
+        .iter()
+        .map(|action| {
+            matches!(
                 action,
-                EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Resolve(
-                    nara::tooling::EditorCloseDecision::Save
-                ))
-            ) {
-                attempted_save = true;
-            }
+                EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Resolve {
+                    decision: nara::tooling::EditorCloseDecision::Save,
+                    ..
+                })
+            )
         })
         .collect::<Vec<_>>();
     let dispatch = if actions.is_empty() {
@@ -1717,6 +1719,26 @@ fn dispatch_close_resolution_actions(
     } else {
         dispatch_project_actions(project, EditorActionBatch::new(frame_revision, actions))
     };
+    let attempted_save = dispatch
+        .feedback()
+        .and_then(Result::ok)
+        .is_some_and(|report| {
+            save_actions
+                .into_iter()
+                .zip(report.outcomes())
+                .any(|(is_save, outcome)| {
+                    is_save
+                        && matches!(
+                            outcome,
+                            EditorActionOutcome::WorkspaceIntent(
+                                EditorWorkspaceIntentRequestResult::Accepted
+                                    | EditorWorkspaceIntentRequestResult::Rejected(
+                                        EditorWorkspaceIntentRejection::PersistenceRejected(_),
+                                    ),
+                            )
+                        )
+                })
+        });
     (dispatch, attempted_save)
 }
 
@@ -1743,11 +1765,15 @@ fn abort_prepared_exit(project: &mut PublishedEditorProject) -> bool {
 }
 
 fn cancel_pending_exit(project: &mut PublishedEditorProject) -> bool {
-    match project.session.current_frame().workspace_intent().phase() {
+    let frame = project.session.current_frame();
+    match frame.workspace_intent().phase() {
         Some(EditorWorkspaceIntentPhase::AwaitingDecision) => {
+            let Some(prompt) = frame.workspace_intent().decision_prompt() else {
+                return false;
+            };
             let dispatch = dispatch_workspace_intent_action(
                 project,
-                EditorWorkspaceIntentAction::Resolve(nara::tooling::EditorCloseDecision::Cancel),
+                prompt.resolve(nara::tooling::EditorCloseDecision::Cancel),
             );
             if dispatch.actions_observed() {
                 project
@@ -1957,7 +1983,7 @@ mod tests {
             },
             tooling::{
                 EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentMutation,
-                EditorWorkspaceIntent, EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase,
+                EditorWorkspaceIntent, EditorWorkspaceIntentAction,
             },
         };
 
@@ -2038,11 +2064,9 @@ mod tests {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         while application.current_frame().is_some() && std::time::Instant::now() < deadline {
             let frame = application.current_frame().unwrap();
-            let actions = (frame.workspace_intent().phase()
-                == Some(EditorWorkspaceIntentPhase::AwaitingDecision))
-            .then_some(EditorAction::WorkspaceIntent(
-                EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Discard),
-            ));
+            let actions = frame.workspace_intent().decision_prompt().map(|prompt| {
+                EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
+            });
             let update = application.submit_and_drive(
                 EditorActionBatch::new(frame.revision(), actions),
                 std::time::Duration::ZERO,

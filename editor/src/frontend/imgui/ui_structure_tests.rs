@@ -12,8 +12,7 @@ use nara::{
     scene::{SceneEntityId, ScenePlacementAnchor},
     tooling::{
         EditorAction, EditorActionBatch, EditorCloseDecision, EditorFrameModel,
-        EditorPersistenceOperation, EditorPersistenceResult, EditorWorkspaceIntentAction,
-        EditorWorkspaceIntentPhase,
+        EditorPersistenceOperation, EditorPersistenceResult,
     },
 };
 use serde_json::{Value, json};
@@ -226,11 +225,9 @@ impl Drop for StructureInteraction {
             let Some(frame) = self.application.current_frame() else {
                 return;
             };
-            let decision = (frame.workspace_intent().phase()
-                == Some(EditorWorkspaceIntentPhase::AwaitingDecision))
-            .then_some(EditorAction::WorkspaceIntent(
-                EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Discard),
-            ));
+            let decision = frame.workspace_intent().decision_prompt().map(|prompt| {
+                EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
+            });
             if self
                 .application
                 .submit_and_drive(

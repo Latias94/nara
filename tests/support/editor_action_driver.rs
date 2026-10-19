@@ -219,9 +219,14 @@ pub fn resolve_workspace_intent(
     editor: &mut EditorProjectSession,
     decision: EditorCloseDecision,
 ) -> EditorWorkspaceIntentRequestResult {
+    let prompt = editor
+        .current_frame()
+        .workspace_intent()
+        .decision_prompt()
+        .expect("a workspace decision requires an observed prompt");
     match dispatch_one(
         editor,
-        EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Resolve(decision)),
+        EditorAction::WorkspaceIntent(prompt.resolve(decision)),
     ) {
         EditorActionOutcome::WorkspaceIntent(result) => result,
         outcome => panic!("expected a workspace-intent outcome, got {outcome:?}"),

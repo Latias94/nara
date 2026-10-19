@@ -5,7 +5,7 @@ use nara_scene::SceneAuthoringRevision;
 use crate::{
     EditorApplyChangesResult, EditorPlayView, EditorRuntimeAvailability, EditorRuntimeEditResult,
 };
-use crate::{EditorDocumentDigest, EditorDocumentId};
+use crate::{EditorClosePromptToken, EditorDocumentDigest, EditorDocumentId};
 
 /// Authoring completeness of the exact project snapshot installed in an Editor session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -307,6 +307,7 @@ pub enum EditorWorkspaceIntentRejection {
     NoActiveDocument,
     MissingDocument,
     DecisionNotRequired,
+    StalePrompt,
     PersistenceRejected(EditorPersistenceRejection),
 }
 
@@ -335,6 +336,7 @@ pub struct EditorWorkspaceIntentView {
     intent: Option<EditorWorkspaceIntent>,
     phase: Option<EditorWorkspaceIntentPhase>,
     decision_document: Option<EditorDocumentId>,
+    decision_prompt: Option<EditorClosePromptToken>,
     result: Option<EditorWorkspaceIntentResult>,
 }
 
@@ -344,12 +346,14 @@ impl EditorWorkspaceIntentView {
         intent: Option<EditorWorkspaceIntent>,
         phase: Option<EditorWorkspaceIntentPhase>,
         decision_document: Option<EditorDocumentId>,
+        decision_prompt: Option<EditorClosePromptToken>,
         result: Option<EditorWorkspaceIntentResult>,
     ) -> Self {
         Self {
             intent,
             phase,
             decision_document,
+            decision_prompt,
             result,
         }
     }
@@ -368,6 +372,11 @@ impl EditorWorkspaceIntentView {
     #[must_use]
     pub const fn decision_document(self) -> Option<EditorDocumentId> {
         self.decision_document
+    }
+
+    #[must_use]
+    pub const fn decision_prompt(self) -> Option<EditorClosePromptToken> {
+        self.decision_prompt
     }
 
     #[must_use]

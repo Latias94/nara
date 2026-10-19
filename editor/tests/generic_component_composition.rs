@@ -24,9 +24,9 @@ use nara::{
     tooling::{
         EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentKind,
         EditorDocumentMutation, EditorNavigationAction, EditorPersistenceAction,
-        EditorProjectBrowserAction, EditorReopenTarget, EditorWorkspaceIntentAction,
-        PrefabCompositionCommand, PrefabCompositionEntityDraft, SceneCompositionCommand,
-        SceneCompositionEntityKind, SceneInspectorCommand,
+        EditorProjectBrowserAction, EditorReopenTarget, PrefabCompositionCommand,
+        PrefabCompositionEntityDraft, SceneCompositionCommand, SceneCompositionEntityKind,
+        SceneInspectorCommand,
     },
 };
 use nara_editor::{EditorApplication, EditorApplicationState, EditorLaunchOptions};
@@ -642,11 +642,9 @@ fn close(app: &mut EditorApplication) {
         let Some(current) = app.current_frame() else {
             return;
         };
-        let action = (current.workspace_intent().phase()
-            == Some(nara::tooling::EditorWorkspaceIntentPhase::AwaitingDecision))
-        .then_some(EditorAction::WorkspaceIntent(
-            EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Discard),
-        ));
+        let action = current.workspace_intent().decision_prompt().map(|prompt| {
+            EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
+        });
         let update = app.submit_and_drive(
             EditorActionBatch::new(current.revision(), action),
             Duration::ZERO,

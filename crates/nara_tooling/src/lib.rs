@@ -20,10 +20,10 @@ pub use composition::{
 pub use frame::EditorFrameClock;
 pub use frame::{
     EditorAction, EditorActionAcknowledgement, EditorActionBatch, EditorActionBatchReport,
-    EditorActionOutcome, EditorActionRejection, EditorDocumentMutation, EditorFieldFeedback,
-    EditorFieldFeedbackReason, EditorFieldTarget, EditorFieldValidationFailure, EditorFrameModel,
-    EditorFrameRevision, EditorNavigationAction, EditorPersistenceAction, EditorPlayAction,
-    EditorReopenTarget, EditorWorkspaceIntentAction,
+    EditorActionOutcome, EditorActionRejection, EditorClosePromptToken, EditorDocumentMutation,
+    EditorFieldFeedback, EditorFieldFeedbackReason, EditorFieldTarget,
+    EditorFieldValidationFailure, EditorFrameModel, EditorFrameRevision, EditorNavigationAction,
+    EditorPersistenceAction, EditorPlayAction, EditorReopenTarget, EditorWorkspaceIntentAction,
 };
 #[doc(hidden)]
 pub use gesture::EditorGestureController;

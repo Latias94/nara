@@ -87,14 +87,14 @@ use nara_tasks::TaskShutdownReport;
 use nara_tooling::EditorFrameRevision;
 use nara_tooling::{
     __export_apply_changes_from_world, EditorAuthoringReadiness, EditorCloseDecision,
-    EditorDocumentId, EditorDocumentKind, EditorExternalPlayRequest, EditorExternalPlayView,
-    EditorFieldFeedback, EditorFrameClock, EditorFrameModel, EditorGestureCancelReason,
-    EditorGestureController, EditorPersistenceAuthority, EditorPersistenceCommand,
-    EditorPersistenceFailureStage, EditorPersistenceOperation, EditorPersistenceRejection,
-    EditorPersistenceRequestKind, EditorPersistenceRequestResult, EditorPersistenceResult,
-    EditorPersistenceView, EditorPlayCommand, EditorPlayFailure, EditorPlayOperation,
-    EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult, EditorPlayState,
-    EditorPlayView, EditorProjectContentGeneration, EditorProjectContentView,
+    EditorClosePromptToken, EditorDocumentId, EditorDocumentKind, EditorExternalPlayRequest,
+    EditorExternalPlayView, EditorFieldFeedback, EditorFrameClock, EditorFrameModel,
+    EditorGestureCancelReason, EditorGestureController, EditorPersistenceAuthority,
+    EditorPersistenceCommand, EditorPersistenceFailureStage, EditorPersistenceOperation,
+    EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPersistenceRequestResult,
+    EditorPersistenceResult, EditorPersistenceView, EditorPlayCommand, EditorPlayFailure,
+    EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult,
+    EditorPlayState, EditorPlayView, EditorProjectContentGeneration, EditorProjectContentView,
     EditorProjectReadinessView, EditorRuntimeAvailability, EditorRuntimeEditRejection,
     EditorRuntimeEditRequest, EditorRuntimeEditResult, EditorRuntimeUnavailableReason,
     EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceIntent,
@@ -588,6 +588,7 @@ enum PendingWorkspaceIntent {
 struct PendingDocumentClose {
     document: EditorDocumentId,
     phase: EditorWorkspaceIntentPhase,
+    prompt: Option<EditorClosePromptToken>,
 }
 
 #[derive(Debug)]
@@ -595,6 +596,7 @@ struct PendingExitPreparation {
     documents: Box<[EditorDocumentId]>,
     cursor: usize,
     phase: EditorWorkspaceIntentPhase,
+    prompt: Option<EditorClosePromptToken>,
 }
 
 impl PendingWorkspaceIntent {
@@ -627,6 +629,20 @@ impl PendingWorkspaceIntent {
             Self::Exit(pending) => pending.phase = phase,
         }
     }
+
+    fn prompt(&self) -> Option<EditorClosePromptToken> {
+        match self {
+            Self::CloseDocument(pending) => pending.prompt,
+            Self::Exit(pending) => pending.prompt,
+        }
+    }
+
+    fn set_prompt(&mut self, prompt: Option<EditorClosePromptToken>) {
+        match self {
+            Self::CloseDocument(pending) => pending.prompt = prompt,
+            Self::Exit(pending) => pending.prompt = prompt,
+        }
+    }
 }
 
 impl PendingExitPreparation {
@@ -635,6 +651,7 @@ impl PendingExitPreparation {
             documents: documents.into_boxed_slice(),
             cursor: 0,
             phase: EditorWorkspaceIntentPhase::AwaitingDecision,
+            prompt: None,
         }
     }
 
@@ -2253,6 +2270,9 @@ impl EditorProjectSession {
             intent,
             phase,
             decision_document,
+            self.pending_workspace_intent
+                .as_ref()
+                .and_then(PendingWorkspaceIntent::prompt),
             self.workspace_intent_result,
         )
     }
@@ -2302,7 +2322,7 @@ impl EditorProjectSession {
             );
         }
 
-        let pending = match intent {
+        let mut pending = match intent {
             EditorWorkspaceIntent::CloseDocument { document } => {
                 let Some(dirty) = self.workspace.document_is_dirty(document) else {
                     let reason = if self.workspace.active_document().is_some() {
@@ -2316,6 +2336,7 @@ impl EditorProjectSession {
                 };
                 PendingWorkspaceIntent::CloseDocument(PendingDocumentClose {
                     document,
+                    prompt: None,
                     phase: if dirty {
                         EditorWorkspaceIntentPhase::AwaitingDecision
                     } else {
@@ -2335,6 +2356,7 @@ impl EditorProjectSession {
                 PendingWorkspaceIntent::Exit(pending)
             }
         };
+        self.refresh_workspace_close_prompt(&mut pending);
         let should_retire = pending.phase() == EditorWorkspaceIntentPhase::RetiringRuntime;
         self.pending_workspace_intent = Some(pending);
         if should_retire {
@@ -2345,6 +2367,7 @@ impl EditorProjectSession {
 
     pub(crate) fn resolve_workspace_intent(
         &mut self,
+        prompt: EditorClosePromptToken,
         decision: EditorCloseDecision,
     ) -> EditorWorkspaceIntentRequestResult {
         let Some(mut pending) = self.pending_workspace_intent.take() else {
@@ -2358,6 +2381,13 @@ impl EditorProjectSession {
                 EditorWorkspaceIntentRejection::Busy,
             );
         }
+        if pending.prompt() != Some(prompt) {
+            self.pending_workspace_intent = Some(pending);
+            return EditorWorkspaceIntentRequestResult::Rejected(
+                EditorWorkspaceIntentRejection::StalePrompt,
+            );
+        }
+        pending.set_prompt(None);
         let intent = pending.intent();
         let Some(document) = pending.decision_document() else {
             self.pending_workspace_intent = Some(pending);
@@ -2382,6 +2412,7 @@ impl EditorProjectSession {
                         self.prepare_current_exit_document(exit);
                     }
                 }
+                self.refresh_workspace_close_prompt(&mut pending);
                 let should_retire = pending.phase() == EditorWorkspaceIntentPhase::RetiringRuntime;
                 self.pending_workspace_intent = Some(pending);
                 if should_retire {
@@ -2405,6 +2436,7 @@ impl EditorProjectSession {
                             EditorWorkspaceIntentRejection::PersistenceRejected(reason),
                         );
                     }
+                    self.refresh_workspace_close_prompt(&mut pending);
                     self.pending_workspace_intent = Some(pending);
                     return EditorWorkspaceIntentRequestResult::Rejected(
                         EditorWorkspaceIntentRejection::PersistenceRejected(reason),
@@ -2415,6 +2447,17 @@ impl EditorProjectSession {
             }
         }
         EditorWorkspaceIntentRequestResult::Accepted
+    }
+
+    fn refresh_workspace_close_prompt(&mut self, pending: &mut PendingWorkspaceIntent) {
+        let prompt = if pending.phase() == EditorWorkspaceIntentPhase::AwaitingDecision {
+            pending
+                .decision_document()
+                .map(|document| self.frame_clock.issue_close_prompt(document))
+        } else {
+            None
+        };
+        pending.set_prompt(prompt);
     }
 
     pub(crate) fn commit_prepared_workspace_intent(

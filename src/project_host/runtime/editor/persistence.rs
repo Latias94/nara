@@ -591,6 +591,9 @@ impl EditorProjectSession {
             }
             None => {}
         }
+        if pending.phase() == EditorWorkspaceIntentPhase::AwaitingDecision {
+            self.refresh_workspace_close_prompt(&mut pending);
+        }
         self.pending_workspace_intent = Some(pending);
     }
 

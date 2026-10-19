@@ -10,7 +10,7 @@ use dear_imgui_rs::{ConfigFlags, MouseButton};
 use nara::tooling::{
     EditorAction, EditorActionBatch, EditorActionOutcome, EditorCloseDecision, EditorDocumentKind,
     EditorPersistenceOperation, EditorPlayAction, EditorPlayOperation, EditorPlayOperationResult,
-    EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase,
+    EditorWorkspaceIntentPhase,
 };
 use winit::{
     application::ApplicationHandler,
@@ -452,7 +452,11 @@ impl SupervisedPlayTestHost {
                     EditorActionBatch::new(
                         frame.revision(),
                         [EditorAction::WorkspaceIntent(
-                            EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Discard),
+                            frame
+                                .workspace_intent()
+                                .decision_prompt()
+                                .unwrap()
+                                .resolve(EditorCloseDecision::Discard),
                         )],
                     ),
                     Duration::ZERO,

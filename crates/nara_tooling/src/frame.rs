@@ -26,12 +26,36 @@ pub struct EditorFrameRevision {
     generation: u64,
 }
 
+/// Identity of one document decision issued by the workspace-intent owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditorClosePromptToken {
+    source_id: u64,
+    generation: u64,
+    document: EditorDocumentId,
+}
+
+impl EditorClosePromptToken {
+    #[must_use]
+    pub const fn document(self) -> EditorDocumentId {
+        self.document
+    }
+
+    #[must_use]
+    pub const fn resolve(self, decision: EditorCloseDecision) -> EditorWorkspaceIntentAction {
+        EditorWorkspaceIntentAction::Resolve {
+            prompt: self,
+            decision,
+        }
+    }
+}
+
 /// Private publication clock used by the concrete Editor Host.
 #[doc(hidden)]
 #[derive(Debug)]
 pub struct EditorFrameClock {
     source_id: u64,
     generation: u64,
+    close_prompt_generation: u64,
 }
 
 impl EditorFrameClock {
@@ -45,6 +69,21 @@ impl EditorFrameClock {
         Self {
             source_id: previous + 1,
             generation: 0,
+            close_prompt_generation: 0,
+        }
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn issue_close_prompt(&mut self, document: EditorDocumentId) -> EditorClosePromptToken {
+        self.close_prompt_generation = self
+            .close_prompt_generation
+            .checked_add(1)
+            .expect("editor close prompt generation space is exhausted");
+        EditorClosePromptToken {
+            source_id: self.source_id,
+            generation: self.close_prompt_generation,
+            document,
         }
     }
 
@@ -472,7 +511,10 @@ pub enum EditorPersistenceAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorWorkspaceIntentAction {
     Request(EditorWorkspaceIntent),
-    Resolve(EditorCloseDecision),
+    Resolve {
+        prompt: EditorClosePromptToken,
+        decision: EditorCloseDecision,
+    },
     /// Commits one fully prepared non-destructive workspace exit.
     CommitPrepared,
     /// Aborts one fully prepared non-destructive workspace exit.

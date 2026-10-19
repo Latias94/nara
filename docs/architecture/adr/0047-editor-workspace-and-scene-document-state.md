@@ -169,7 +169,12 @@ ambiguous publication leaves the saved checkpoint unchanged and the document dir
 publication additionally blocks retry until explicit Reopen reconciliation.
 
 Dirty Close and Exit require Save, Discard, or Cancel and retain the document until the selected
-persistence action plus runtime retirement complete. Explicit Reopen may replace a dirty authoring
+persistence action plus runtime retirement complete. The Host issues a prompt token binding its
+session, prompt generation and exact decision document. Resolve consumes that token once;
+advancing to another document, cancelling, starting another intent or returning from failed Save
+invalidates the old token. Stale decisions reject without changing the current prompt or document.
+The native prompt identifies that document by title and admitted source locator, or an explicit
+unsaved label. Explicit Reopen may replace a dirty authoring
 session only through the same workspace-bound authority after bytes decode and validate; failed
 open, read, decode, validation, or workspace publication preserves the prior slot. This is a
 single-document `DetectOnly` policy, not a strong compare-and-swap claim against a non-cooperative

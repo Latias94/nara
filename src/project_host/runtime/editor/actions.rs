@@ -666,8 +666,10 @@ impl EditorProjectSession {
                 }
                 EditorActionOutcome::WorkspaceIntent(self.request_workspace_intent(intent))
             }
-            EditorWorkspaceIntentAction::Resolve(decision) => {
-                EditorActionOutcome::WorkspaceIntent(self.resolve_workspace_intent(decision))
+            EditorWorkspaceIntentAction::Resolve { prompt, decision } => {
+                EditorActionOutcome::WorkspaceIntent(
+                    self.resolve_workspace_intent(prompt, decision),
+                )
             }
             EditorWorkspaceIntentAction::CommitPrepared => {
                 EditorActionOutcome::WorkspaceIntent(self.commit_prepared_workspace_intent())

@@ -3728,6 +3728,149 @@ fn project_browser_rejects_unindexed_and_identity_replaced_sources_before_open()
 
 #[cfg(feature = "tooling")]
 #[test]
+fn duplicate_close_decision_cannot_approve_the_next_dirty_document() {
+    let project = TestProject::new("duplicate-close-decision");
+    fs::write(
+        project.root.join("scenes/startup.scene.json"),
+        editable_authoring_scene("scene").to_json_string().unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        project.root.join("prefabs/close.prefab.json"),
+        editable_authoring_prefab("prefab")
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let scene = editor.workspace().active_document().unwrap();
+    let index = editor.project_source_index_snapshot().unwrap();
+    let prefab = opened_document(editor.open_indexed_authoring_document(
+        index,
+        "prefabs/close.prefab.json",
+        crate::project_host::authoring::AuthoringDocumentKind::Prefab,
+    ));
+    if editor.workspace_intent_view().result().is_some() {
+        assert!(editor.acknowledge_workspace_intent_result());
+    }
+    make_authoring_name_dirty(&mut editor, scene, "dirty-scene");
+    make_authoring_name_dirty(&mut editor, prefab, "dirty-prefab");
+    assert_eq!(
+        editor.request_workspace_intent(EditorWorkspaceIntent::Exit),
+        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+    );
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    let first = frame.workspace_intent().decision_document().unwrap();
+    let decision = EditorAction::WorkspaceIntent(
+        frame
+            .workspace_intent()
+            .decision_prompt()
+            .unwrap()
+            .resolve(nara_tooling::EditorCloseDecision::Discard),
+    );
+    let report = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [decision.clone(), decision],
+        ))
+        .unwrap();
+    assert!(matches!(
+        report.outcomes()[0],
+        EditorActionOutcome::WorkspaceIntent(
+            nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+        )
+    ));
+    assert!(matches!(
+        report.outcomes()[1],
+        EditorActionOutcome::WorkspaceIntent(
+            nara_tooling::EditorWorkspaceIntentRequestResult::Rejected(_)
+        )
+    ));
+    let remaining = editor.workspace_intent_view();
+    assert_eq!(
+        remaining.phase(),
+        Some(nara_tooling::EditorWorkspaceIntentPhase::AwaitingDecision)
+    );
+    assert_ne!(remaining.decision_document(), Some(first));
+    assert!(editor.workspace().document_is_dirty(scene).unwrap());
+    assert!(editor.workspace().document_is_dirty(prefab).unwrap());
+}
+
+#[cfg(feature = "tooling")]
+#[test]
+fn close_prompt_replay_rejects_after_cancel_new_intent_and_failed_save() {
+    use nara_tooling::{
+        EditorCloseDecision, EditorPersistenceFailureStage, EditorWorkspaceIntentPhase,
+        EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
+    };
+
+    let project = TestProject::new("close-prompt-lifetime");
+    fs::write(
+        project.root.join("scenes/startup.scene.json"),
+        editable_authoring_scene("scene").to_json_string().unwrap(),
+    )
+    .unwrap();
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let document = editor.workspace().active_document().unwrap();
+    make_authoring_name_dirty(&mut editor, document, "retained-dirty");
+    assert_eq!(
+        editor.request_workspace_intent(EditorWorkspaceIntent::Exit),
+        EditorWorkspaceIntentRequestResult::Accepted
+    );
+    let old = editor.workspace_intent_view().decision_prompt().unwrap();
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(editor.workspace_intent_view().decision_prompt(), Some(old));
+    assert_eq!(
+        editor.resolve_workspace_intent(old, EditorCloseDecision::Cancel),
+        EditorWorkspaceIntentRequestResult::Accepted
+    );
+    assert!(editor.acknowledge_workspace_intent_result());
+    assert_eq!(
+        editor.request_workspace_intent(EditorWorkspaceIntent::Exit),
+        EditorWorkspaceIntentRequestResult::Accepted
+    );
+    let current = editor.workspace_intent_view().decision_prompt().unwrap();
+    assert_ne!(old, current);
+    let before = editor.workspace_intent_view();
+    assert_eq!(
+        editor.resolve_workspace_intent(old, EditorCloseDecision::Discard),
+        EditorWorkspaceIntentRequestResult::Rejected(EditorWorkspaceIntentRejection::StalePrompt)
+    );
+    assert_eq!(editor.workspace_intent_view(), before);
+    let disk_before = fs::read(project.root.join("scenes/startup.scene.json")).unwrap();
+    editor.test_fail_next_save(EditorPersistenceFailureStage::Encode);
+    assert_eq!(
+        editor.resolve_workspace_intent(current, EditorCloseDecision::Save),
+        EditorWorkspaceIntentRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    let retry = editor.workspace_intent_view();
+    assert_eq!(
+        retry.phase(),
+        Some(EditorWorkspaceIntentPhase::AwaitingDecision)
+    );
+    assert_ne!(retry.decision_prompt(), Some(current));
+    assert_eq!(
+        editor.resolve_workspace_intent(current, EditorCloseDecision::Discard),
+        EditorWorkspaceIntentRequestResult::Rejected(EditorWorkspaceIntentRejection::StalePrompt)
+    );
+    assert_eq!(editor.workspace_intent_view(), retry);
+    assert!(editor.workspace().document_is_dirty(document).unwrap());
+    assert_eq!(
+        fs::read(project.root.join("scenes/startup.scene.json")).unwrap(),
+        disk_before
+    );
+    assert_eq!(
+        editor.resolve_workspace_intent(
+            retry.decision_prompt().unwrap(),
+            EditorCloseDecision::Cancel
+        ),
+        EditorWorkspaceIntentRequestResult::Accepted
+    );
+}
+
+#[cfg(feature = "tooling")]
+#[test]
 fn dirty_scene_retarget_uses_cancel_discard_and_save_before_publication() {
     let project = TestProject::new("generic-scene-retarget");
     fs::create_dir_all(project.root.join("scripts")).unwrap();
@@ -3757,7 +3900,10 @@ fn dirty_scene_retarget_uses_cancel_discard_and_save_before_publication() {
         super::editor::EditorDocumentOpenRequestResult::AwaitingClose { document: first }
     );
     assert_eq!(
-        editor.resolve_workspace_intent(nara_tooling::EditorCloseDecision::Cancel),
+        editor.resolve_workspace_intent(
+            editor.workspace_intent_view().decision_prompt().unwrap(),
+            nara_tooling::EditorCloseDecision::Cancel
+        ),
         nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
     );
     assert_eq!(editor.workspace().active_document(), Some(first));
@@ -3773,7 +3919,10 @@ fn dirty_scene_retarget_uses_cancel_discard_and_save_before_publication() {
         super::editor::EditorDocumentOpenRequestResult::AwaitingClose { document } if document == first
     ));
     assert_eq!(
-        editor.resolve_workspace_intent(nara_tooling::EditorCloseDecision::Discard),
+        editor.resolve_workspace_intent(
+            editor.workspace_intent_view().decision_prompt().unwrap(),
+            nara_tooling::EditorCloseDecision::Discard
+        ),
         nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
     );
     let second = editor.workspace().active_document().unwrap();
@@ -3791,7 +3940,10 @@ fn dirty_scene_retarget_uses_cancel_discard_and_save_before_publication() {
         super::editor::EditorDocumentOpenRequestResult::AwaitingClose { document } if document == second
     ));
     assert_eq!(
-        editor.resolve_workspace_intent(nara_tooling::EditorCloseDecision::Save),
+        editor.resolve_workspace_intent(
+            editor.workspace_intent_view().decision_prompt().unwrap(),
+            nara_tooling::EditorCloseDecision::Save
+        ),
         nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
     );
     editor.drive_editor_frame(Duration::ZERO);
@@ -3873,7 +4025,10 @@ fn dirty_prefab_retarget_preserves_the_scene_lane_and_honors_cancel_or_discard()
         super::editor::EditorDocumentOpenRequestResult::AwaitingClose { document: first }
     );
     assert_eq!(
-        editor.resolve_workspace_intent(nara_tooling::EditorCloseDecision::Cancel),
+        editor.resolve_workspace_intent(
+            editor.workspace_intent_view().decision_prompt().unwrap(),
+            nara_tooling::EditorCloseDecision::Cancel
+        ),
         nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
     );
     assert!(editor.workspace().scene(scene).is_some());
@@ -3890,7 +4045,10 @@ fn dirty_prefab_retarget_preserves_the_scene_lane_and_honors_cancel_or_discard()
         super::editor::EditorDocumentOpenRequestResult::AwaitingClose { document } if document == first
     ));
     assert_eq!(
-        editor.resolve_workspace_intent(nara_tooling::EditorCloseDecision::Discard),
+        editor.resolve_workspace_intent(
+            editor.workspace_intent_view().decision_prompt().unwrap(),
+            nara_tooling::EditorCloseDecision::Discard
+        ),
         nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
     );
     let second = editor.workspace().active_document().unwrap();

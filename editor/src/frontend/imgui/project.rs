@@ -1329,11 +1329,16 @@ mod tests {
         }
         let mut closed = application.request_exit().exit_ready();
         if !closed {
+            let awaiting_close = application.current_frame().unwrap();
             submit(
                 &mut application,
-                EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Resolve(
-                    EditorCloseDecision::Discard,
-                )),
+                EditorAction::WorkspaceIntent(
+                    awaiting_close
+                        .workspace_intent()
+                        .decision_prompt()
+                        .unwrap()
+                        .resolve(EditorCloseDecision::Discard),
+                ),
             );
         }
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -1444,11 +1449,16 @@ mod tests {
             EditorWorkspaceIntent::CloseDocument { document },
         ));
         submit(&mut application, request.clone());
+        let requested = application.current_frame().unwrap();
         submit(
             &mut application,
-            EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Resolve(
-                EditorCloseDecision::Cancel,
-            )),
+            EditorAction::WorkspaceIntent(
+                requested
+                    .workspace_intent()
+                    .decision_prompt()
+                    .unwrap()
+                    .resolve(EditorCloseDecision::Cancel),
+            ),
         );
         let cancelled = application.current_frame().unwrap();
         let mut context = Context::create();
@@ -1485,17 +1495,26 @@ mod tests {
         let requested_again = application.current_frame().unwrap();
         submit(
             &mut application,
-            EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Resolve(
-                EditorCloseDecision::Cancel,
-            )),
+            EditorAction::WorkspaceIntent(
+                requested_again
+                    .workspace_intent()
+                    .decision_prompt()
+                    .unwrap()
+                    .resolve(EditorCloseDecision::Cancel),
+            ),
         );
         let mut closed = application.request_exit().exit_ready();
         if !closed {
+            let awaiting_close = application.current_frame().unwrap();
             submit(
                 &mut application,
-                EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Resolve(
-                    EditorCloseDecision::Discard,
-                )),
+                EditorAction::WorkspaceIntent(
+                    awaiting_close
+                        .workspace_intent()
+                        .decision_prompt()
+                        .unwrap()
+                        .resolve(EditorCloseDecision::Discard),
+                ),
             );
         }
         let deadline = Instant::now() + Duration::from_secs(10);

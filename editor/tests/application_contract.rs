@@ -36,8 +36,8 @@ use nara::{
         EditorFieldValidationFailure, EditorNavigationAction, EditorPlayAction,
         EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection, EditorPlayState,
         EditorRuntimeUnavailableReason, EditorSelectionSet, EditorWorkspaceIntent,
-        EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult,
-        SceneInspectorCommand, SceneInspectorReadOnlyReason,
+        EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult, SceneInspectorCommand,
+        SceneInspectorReadOnlyReason,
     },
     ui::__private::{UiAuthoringCanvasProjection, UiAuthoringFieldValue},
 };
@@ -135,7 +135,11 @@ fn dirty_exit_cancel_preserves_the_session_and_discard_closes_it() {
     let cancel = EditorActionBatch::new(
         awaiting_cancel.revision(),
         [EditorAction::WorkspaceIntent(
-            EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Cancel),
+            awaiting_cancel
+                .workspace_intent()
+                .decision_prompt()
+                .unwrap()
+                .resolve(EditorCloseDecision::Cancel),
         )],
     );
     let cancelled = application.submit_and_drive(cancel, Duration::ZERO);
@@ -159,7 +163,11 @@ fn dirty_exit_cancel_preserves_the_session_and_discard_closes_it() {
     let discard = EditorActionBatch::new(
         awaiting_discard.revision(),
         [EditorAction::WorkspaceIntent(
-            EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Discard),
+            awaiting_discard
+                .workspace_intent()
+                .decision_prompt()
+                .unwrap()
+                .resolve(EditorCloseDecision::Discard),
         )],
     );
     let discarded = application.submit_and_drive(discard, Duration::ZERO);
@@ -623,7 +631,11 @@ fn retry_and_replacement_close_are_failure_atomic() {
     let cancel = EditorActionBatch::new(
         awaiting_cancel.revision(),
         [EditorAction::WorkspaceIntent(
-            EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Cancel),
+            awaiting_cancel
+                .workspace_intent()
+                .decision_prompt()
+                .unwrap()
+                .resolve(EditorCloseDecision::Cancel),
         )],
     );
     let _ = application.submit_and_drive(cancel, Duration::ZERO);
@@ -649,7 +661,11 @@ fn retry_and_replacement_close_are_failure_atomic() {
     let save = EditorActionBatch::new(
         awaiting_failed_save.revision(),
         [EditorAction::WorkspaceIntent(
-            EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Save),
+            awaiting_failed_save
+                .workspace_intent()
+                .decision_prompt()
+                .unwrap()
+                .resolve(EditorCloseDecision::Save),
         )],
     );
     let _ = application.submit_and_drive(save, Duration::ZERO);
@@ -695,10 +711,50 @@ fn retry_and_replacement_close_are_failure_atomic() {
     assert!(application.request_project_replacement(replacement.root(), None));
     drive_replacement_to_close_decision(&mut application);
     let awaiting_discard = current_frame(&application);
+    let stale_save_prompt = awaiting_failed_save
+        .workspace_intent()
+        .decision_prompt()
+        .unwrap();
+    assert_ne!(
+        awaiting_discard.workspace_intent().decision_prompt(),
+        Some(stale_save_prompt)
+    );
+    let disk_before_replay = fs::read(retained.root().join("scenes/startup.scene.json")).unwrap();
+    let replayed_save = application.submit_and_drive(
+        EditorActionBatch::new(
+            awaiting_discard.revision(),
+            [EditorAction::WorkspaceIntent(
+                stale_save_prompt.resolve(EditorCloseDecision::Save),
+            )],
+        ),
+        Duration::ZERO,
+    );
+    assert!(replayed_save.actions_observed());
+    assert_eq!(
+        application.state(),
+        EditorApplicationState::OpeningReplacement
+    );
+    let after_stale_save = current_frame(&application);
+    assert_eq!(
+        after_stale_save.workspace_intent().decision_prompt(),
+        awaiting_discard.workspace_intent().decision_prompt()
+    );
+    assert_eq!(
+        active_scene_state(&after_stale_save),
+        active_scene_state(&awaiting_discard)
+    );
+    assert_eq!(
+        fs::read(retained.root().join("scenes/startup.scene.json")).unwrap(),
+        disk_before_replay
+    );
     let discard = EditorActionBatch::new(
         awaiting_discard.revision(),
         [EditorAction::WorkspaceIntent(
-            EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Discard),
+            awaiting_discard
+                .workspace_intent()
+                .decision_prompt()
+                .unwrap()
+                .resolve(EditorCloseDecision::Discard),
         )],
     );
     let _ = application.submit_and_drive(discard, Duration::ZERO);
@@ -848,7 +904,11 @@ fn close_project_reuses_the_exit_decision_without_exiting_the_process() {
         EditorActionBatch::new(
             awaiting_cancel.revision(),
             [EditorAction::WorkspaceIntent(
-                EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Cancel),
+                awaiting_cancel
+                    .workspace_intent()
+                    .decision_prompt()
+                    .unwrap()
+                    .resolve(EditorCloseDecision::Cancel),
             )],
         ),
         Duration::ZERO,
@@ -866,7 +926,11 @@ fn close_project_reuses_the_exit_decision_without_exiting_the_process() {
         EditorActionBatch::new(
             awaiting_discard.revision(),
             [EditorAction::WorkspaceIntent(
-                EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Discard),
+                awaiting_discard
+                    .workspace_intent()
+                    .decision_prompt()
+                    .unwrap()
+                    .resolve(EditorCloseDecision::Discard),
             )],
         ),
         Duration::ZERO,
@@ -896,7 +960,11 @@ fn replacement_same_root_alias_save_publishes_a_fresh_candidate() {
     let save = EditorActionBatch::new(
         awaiting_save.revision(),
         [EditorAction::WorkspaceIntent(
-            EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Save),
+            awaiting_save
+                .workspace_intent()
+                .decision_prompt()
+                .unwrap()
+                .resolve(EditorCloseDecision::Save),
         )],
     );
     let _ = application.submit_and_drive(save, Duration::ZERO);

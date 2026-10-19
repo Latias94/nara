@@ -20,8 +20,7 @@ use nara::{
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorCloseDecision, EditorFrameModel,
-        EditorPersistenceOperation, EditorPersistenceResult, EditorWorkspaceIntentAction,
-        EditorWorkspaceIntentPhase,
+        EditorPersistenceOperation, EditorPersistenceResult,
     },
     ui::__private::{UiAuthoringFieldValue, UiAuthoringHierarchyKind},
 };
@@ -414,11 +413,9 @@ impl Drop for UiInteraction {
             let Some(frame) = self.application.current_frame() else {
                 return;
             };
-            let decision = (frame.workspace_intent().phase()
-                == Some(EditorWorkspaceIntentPhase::AwaitingDecision))
-            .then_some(EditorAction::WorkspaceIntent(
-                EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Discard),
-            ));
+            let decision = frame.workspace_intent().decision_prompt().map(|prompt| {
+                EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
+            });
             let update = self.application.submit_and_drive(
                 EditorActionBatch::new(frame.revision(), decision),
                 Duration::ZERO,

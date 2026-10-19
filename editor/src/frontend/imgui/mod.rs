@@ -1,7 +1,7 @@
 use dear_imgui_rs::{Condition, TextureId, Ui};
 use nara::tooling::{
     EditorAction, EditorActionBatch, EditorCloseDecision, EditorFrameModel, EditorNavigationAction,
-    EditorPlayAction, EditorPlayState, EditorWorkspaceIntentAction,
+    EditorPlayAction, EditorPlayState,
 };
 
 mod authoring;
@@ -648,19 +648,28 @@ fn show_dirty_close_dialog(ui: &Ui, frame: &EditorFrameModel, actions: &mut Vec<
                     });
                     return;
                 }
+                let Some(prompt) = frame.workspace_intent().decision_prompt() else {
+                    return;
+                };
+                let Some(document) = frame.workspace().document(prompt.document()) else {
+                    return;
+                };
                 ui.text("Save changes before closing?");
+                ui.text(format!("Document: {}", document.title));
+                ui.text(format!(
+                    "Source: {}",
+                    document
+                        .source_binding
+                        .as_ref()
+                        .map_or("Unsaved", |binding| binding.locator())
+                ));
                 let save_enabled = frame.persistence().operation()
                     == EditorPersistenceOperation::Idle
-                    && frame
-                        .workspace_intent()
-                        .decision_document()
-                        .is_some_and(|document| {
-                            authoring::persistence_allows(
-                                frame.persistence().result(),
-                                EditorPersistenceRequestKind::Save,
-                                document,
-                            )
-                        });
+                    && authoring::persistence_allows(
+                        frame.persistence().result(),
+                        EditorPersistenceRequestKind::Save,
+                        prompt.document(),
+                    );
                 for (label, enabled, decision) in [
                     ("Save and continue", save_enabled, EditorCloseDecision::Save),
                     ("Discard and continue", true, EditorCloseDecision::Discard),
@@ -670,9 +679,7 @@ fn show_dirty_close_dialog(ui: &Ui, frame: &EditorFrameModel, actions: &mut Vec<
                     #[cfg(test)]
                     interaction_tests::record_control(ui, format!("close:{label}"));
                     if clicked {
-                        actions.push(EditorAction::WorkspaceIntent(
-                            EditorWorkspaceIntentAction::Resolve(decision),
-                        ));
+                        actions.push(EditorAction::WorkspaceIntent(prompt.resolve(decision)));
                     }
                 }
             });
