@@ -100,12 +100,25 @@ impl EditorPanelWorkspace {
         &mut self,
         descriptor: EditorPanelDescriptor,
     ) -> Result<(), EditorPanelRegistrationError> {
-        let kind = descriptor.kind().to_owned();
-        let open = descriptor.initially_open();
-        self.registry.register(descriptor)?;
-        if open {
-            self.open(&kind, EditorPanelTarget::ActiveDocument)?;
+        self.register_all([descriptor])
+    }
+
+    pub(crate) fn register_all(
+        &mut self,
+        descriptors: impl IntoIterator<Item = EditorPanelDescriptor>,
+    ) -> Result<(), EditorPanelRegistrationError> {
+        let mut registry = self.registry.clone();
+        let mut layout = self.layout.clone();
+        for descriptor in descriptors {
+            let kind = descriptor.kind().to_owned();
+            let open = descriptor.initially_open();
+            registry.register(descriptor)?;
+            if open {
+                layout.open(&registry, &kind, EditorPanelTarget::ActiveDocument)?;
+            }
         }
+        self.registry = registry;
+        self.layout = layout;
         Ok(())
     }
     pub fn open(

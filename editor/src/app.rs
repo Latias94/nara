@@ -770,6 +770,19 @@ impl EditorApplication {
                 project
                     .session
                     .drive_editor_frame_with_runtime(real_delta, drive_runtime);
+                let intent = project.session.current_frame().workspace_intent();
+                if self.session_retirement.is_none()
+                    && (intent.intent() == Some(EditorWorkspaceIntent::Exit)
+                        || matches!(
+                            intent.result(),
+                            Some(EditorWorkspaceIntentResult::Applied {
+                                intent: EditorWorkspaceIntent::Exit,
+                            })
+                        ))
+                {
+                    self.session_retirement = Some(EditorSessionRetirement::ExitProcess);
+                    self.session_close_retry_at = None;
+                }
                 if self.session_retirement.is_some() {
                     self.finish_session_retirement(actions_observed || external_observed)
                 } else {

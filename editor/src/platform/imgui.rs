@@ -32,7 +32,7 @@ use winit::{
 };
 
 use crate::frontend::imgui::{ImguiEditorFrontend, ImguiViewImage};
-use crate::{EditorApplication, supervised_play::SupervisedPlayWake};
+use crate::{EditorApplication, EditorNativeComposition, supervised_play::SupervisedPlayWake};
 
 use super::{
     EditorGpuRecovery, EditorRunError, earliest_deadline, editor_window_packet,
@@ -62,6 +62,8 @@ use canvas::ImguiUiCanvasPresenter;
 mod game_input_tests;
 #[cfg(all(test, target_os = "windows"))]
 mod lifecycle_tests;
+#[cfg(all(test, target_os = "windows"))]
+mod panel_workflow_tests;
 mod scene;
 #[cfg(all(test, target_os = "windows"))]
 mod scene_image_tests;
@@ -73,7 +75,10 @@ use super::game_input::EditorGamePresentedStamp;
 use input::ImguiInput;
 use scene::ImguiScenePresenter;
 
-pub(super) fn run_application(mut application: EditorApplication) -> Result<(), EditorRunError> {
+pub(super) fn run_application(
+    mut application: EditorApplication,
+    composition: EditorNativeComposition,
+) -> Result<(), EditorRunError> {
     if let Some(preferences) = crate::workspace::EditorWorkspacePreferences::user_default() {
         application
             .panel_workspace_mut()
@@ -90,17 +95,7 @@ pub(super) fn run_application(mut application: EditorApplication) -> Result<(), 
             .is_ok()
     });
     application.install_supervised_play_wake(supervised_play_wake.clone());
-    let mut host = NativeEditorHost {
-        application,
-        supervised_play_wake,
-        native: None,
-        window: None,
-        retained: None,
-        gpu_recovery: EditorGpuRecovery::Ready,
-        error: None,
-        last_drive: None,
-        repaint_deadline: None,
-    };
+    let mut host = NativeEditorHost::new(application, supervised_play_wake, composition)?;
     if let Err(error) = event_loop.run_app(&mut host) {
         host.error
             .get_or_insert_with(|| EditorRunError::EventLoop(error.to_string()));
@@ -133,11 +128,16 @@ struct NativeEditorHost {
     supervised_play_wake: SupervisedPlayWake,
     native: Option<NativeImgui>,
     window: Option<Arc<Window>>,
-    retained: Option<ImguiRetainedState>,
+    retained: Option<PendingImguiFrontend>,
     gpu_recovery: EditorGpuRecovery,
     error: Option<EditorRunError>,
     last_drive: Option<Instant>,
     repaint_deadline: Option<Instant>,
+}
+
+enum PendingImguiFrontend {
+    Fresh(ImguiEditorFrontend),
+    Recovered(ImguiRetainedState),
 }
 
 struct ImguiRetainedState {
@@ -1339,6 +1339,25 @@ impl NativeImgui {
 }
 
 impl NativeEditorHost {
+    fn new(
+        mut application: EditorApplication,
+        supervised_play_wake: SupervisedPlayWake,
+        composition: EditorNativeComposition,
+    ) -> Result<Self, EditorRunError> {
+        let frontend = composition.install(&mut application)?;
+        Ok(Self {
+            application,
+            supervised_play_wake,
+            native: None,
+            window: None,
+            retained: Some(PendingImguiFrontend::Fresh(frontend)),
+            gpu_recovery: EditorGpuRecovery::Ready,
+            error: None,
+            last_drive: None,
+            repaint_deadline: None,
+        })
+    }
+
     fn install_native(&mut self, event_loop: &ActiveEventLoop) -> Result<(), EditorRunError> {
         let window = self
             .window
@@ -1347,12 +1366,17 @@ impl NativeEditorHost {
             .ok_or_else(|| imgui_error("the primary window is unavailable"))?;
         let mut native = NativeImgui::new(event_loop, window)?;
         if let Some(retained) = self.retained.take() {
-            native.context.load_ini_settings(&retained.layout);
-            native.frontend = retained.frontend;
-            native.layout = retained.saved_layout;
-            native.frame_index = retained.frame_index;
-            native.next_view = retained.next_view;
-            native.layout_loaded = true;
+            match retained {
+                PendingImguiFrontend::Fresh(frontend) => native.frontend = frontend,
+                PendingImguiFrontend::Recovered(retained) => {
+                    native.context.load_ini_settings(&retained.layout);
+                    native.frontend = retained.frontend;
+                    native.layout = retained.saved_layout;
+                    native.frame_index = retained.frame_index;
+                    native.next_view = retained.next_view;
+                    native.layout_loaded = true;
+                }
+            }
         }
         native.window.set_title(super::EDITOR_TITLE);
         native.window.request_redraw();
@@ -1371,13 +1395,13 @@ impl NativeEditorHost {
                 eprintln!("Nara Editor GPU retirement: {error}");
             }
             native.publish_render_views(self.application.panel_workspace_mut());
-            self.retained = Some(ImguiRetainedState {
+            self.retained = Some(PendingImguiFrontend::Recovered(ImguiRetainedState {
                 frontend: std::mem::take(&mut native.frontend),
                 layout,
                 saved_layout: native.layout.take(),
                 frame_index: native.frame_index,
                 next_view: native.next_view,
-            });
+            }));
         }
     }
 

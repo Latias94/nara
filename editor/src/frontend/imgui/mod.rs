@@ -25,7 +25,7 @@ pub(crate) use ui_interaction_tests::{
 };
 mod view;
 mod workspace;
-pub use workspace::{ImguiEditorPanelContext, ImguiEditorPanelPainter};
+pub use workspace::{ImguiEditorPanel, ImguiEditorPanelContext};
 
 #[derive(Clone, Copy)]
 pub(crate) struct ImguiViewImage {
@@ -163,6 +163,7 @@ pub struct ImguiEditorFrontend {
     project: project::ImguiProjectPanels,
     toolbar: authoring::ImguiAuthoringPanels,
     workspace_generation: Option<u64>,
+    layout_lifecycle: Option<std::sync::Arc<()>>,
     #[cfg(test)]
     test_game_detached: Option<bool>,
     reset_windows: bool,
@@ -246,13 +247,12 @@ impl ImguiEditorFrontend {
         Self::default()
     }
 
-    /// Installs the optional frontend companion of a separately registered trusted contribution.
-    pub fn register_panel_painter(
+    pub(crate) fn register_panel_factory(
         &mut self,
-        kind: impl Into<String>,
-        painter: ImguiEditorPanelPainter,
+        kind: String,
+        factory: workspace::ImguiPanelFactory,
     ) {
-        self.presentation.painters.insert(kind.into(), painter);
+        self.presentation.factories.insert(kind, factory);
     }
 
     /// Draws the ordinary shell and workspace without a native render-view attachment.
@@ -345,6 +345,15 @@ impl ImguiEditorFrontend {
         detachment: &str,
     ) -> Result<ImguiFrontendOutput, String> {
         let generation = application.workspace_generation();
+        let layout_lifecycle = application.panel_workspace().layout().lifecycle();
+        if self
+            .layout_lifecycle
+            .as_ref()
+            .is_none_or(|previous| !std::sync::Arc::ptr_eq(previous, layout_lifecycle))
+        {
+            self.presentation.reset_widgets();
+            self.layout_lifecycle = Some(std::sync::Arc::clone(layout_lifecycle));
+        }
         if self.workspace_generation != generation {
             self.presentation.reset_widgets();
             self.project.reset_workspace();
@@ -398,8 +407,11 @@ impl ImguiEditorFrontend {
                 });
         }
         let Some(frame) = application.current_frame() else {
+            self.presentation.reset_widgets();
             return Ok(output);
         };
+        self.presentation
+            .reconcile_instances(&frame, application.panel_workspace());
         let default_layout = layout::default_layout(application.panel_workspace())?;
         ui.dockspace()
             .layout(
@@ -543,18 +555,23 @@ impl ImguiEditorFrontend {
                     }
                     return;
                 }
-                let Some(painter) = self.presentation.painters.get(instance.kind()).copied() else {
+                let Some(factory) = self.presentation.factories.get(instance.kind()) else {
                     ui.text("This contribution has no Dear ImGui painting companion.");
                     return;
                 };
                 let widgets = self.presentation.widgets.entry(instance.id()).or_default();
-                if widgets.document != document || widgets.target != *instance.target() {
+                if widgets.kind != instance.kind()
+                    || widgets.document != document
+                    || widgets.target != *instance.target()
+                {
                     *widgets = workspace::ImguiPanelWidgets {
+                        kind: instance.kind().to_owned(),
                         document,
                         target: instance.target().clone(),
                         ..Default::default()
                     };
                 }
+                let mut panel = widgets.panel.take().unwrap_or_else(factory);
                 let first_action = actions.len();
                 let scope = document
                     .and_then(|document| {
@@ -567,7 +584,7 @@ impl ImguiEditorFrontend {
                     })
                     .unwrap_or_else(|| format!("workspace:{generation:?}"));
                 let _scope = ui.push_id(scope.as_str());
-                painter(
+                panel.show(
                     ui,
                     &mut ImguiEditorPanelContext {
                         model: crate::workspace::EditorPanelModel::new(&frame, instance),
@@ -577,6 +594,7 @@ impl ImguiEditorFrontend {
                         output: &mut output,
                     },
                 );
+                widgets.panel = Some(panel);
                 if !widgets.project_inspector {
                     self.presentation.painted.insert(instance.id());
                 }

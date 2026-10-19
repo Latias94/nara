@@ -13,9 +13,27 @@ use crate::workspace::{
 
 use super::{ImguiFrontendOutput, ImguiPanelInput};
 
-/// Optional painting companion for a trusted source-built panel contribution.
-/// The companion observes projections and emits the same admitted application actions as built-ins.
-pub type ImguiEditorPanelPainter = fn(&Ui, &mut ImguiEditorPanelContext<'_, '_>);
+/// Frontend state for one open instance of a trusted source-built panel contribution.
+///
+/// State survives docking, window movement and GPU reconstruction. Closing or hiding the panel,
+/// changing its target/resolved document, replacing the project, or restoring/resetting the layout
+/// retires it. A later paint creates a fresh instance through the registered factory.
+/// Only read-only projections and admitted application actions cross this interface.
+pub trait ImguiEditorPanel {
+    fn show(&mut self, ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>);
+}
+
+pub(super) type ImguiPanelFactory = Box<dyn Fn() -> Box<dyn ImguiEditorPanel>>;
+
+type BuiltinPanelPainter = fn(&Ui, &mut ImguiEditorPanelContext<'_, '_>);
+
+struct BuiltinPanel(BuiltinPanelPainter);
+
+impl ImguiEditorPanel for BuiltinPanel {
+    fn show(&mut self, ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
+        (self.0)(ui, context);
+    }
+}
 
 pub struct ImguiEditorPanelContext<'scope, 'frame> {
     pub(super) model: EditorPanelModel<'frame>,
@@ -38,6 +56,8 @@ impl ImguiEditorPanelContext<'_, '_> {
 
 #[derive(Default)]
 pub(super) struct ImguiPanelWidgets {
+    pub panel: Option<Box<dyn ImguiEditorPanel>>,
+    pub kind: String,
     pub document: Option<EditorDocumentId>,
     pub target: EditorPanelTarget,
     pub authoring: super::authoring::ImguiAuthoringPanels,
@@ -55,7 +75,7 @@ struct PendingPanelGesture {
 }
 
 pub(super) struct ImguiPanelPresentation {
-    pub painters: BTreeMap<String, ImguiEditorPanelPainter>,
+    pub factories: BTreeMap<String, ImguiPanelFactory>,
     pub widgets: BTreeMap<EditorPanelInstanceId, ImguiPanelWidgets>,
     gesture_owner: Option<(EditorPanelInstanceId, EditorPanelTarget, EditorGestureId)>,
     gesture_owner_retired: bool,
@@ -65,7 +85,7 @@ pub(super) struct ImguiPanelPresentation {
 
 impl Default for ImguiPanelPresentation {
     fn default() -> Self {
-        let builtins: [(&str, ImguiEditorPanelPainter); 6] = [
+        let builtins: [(&str, BuiltinPanelPainter); 6] = [
             ("nara.hierarchy", super::paint_hierarchy),
             ("nara.project-browser", super::paint_project_browser),
             ("nara.authoring-view", super::paint_authoring_view),
@@ -74,9 +94,13 @@ impl Default for ImguiPanelPresentation {
             ("nara.diagnostics", super::paint_diagnostics),
         ];
         Self {
-            painters: builtins
+            factories: builtins
                 .into_iter()
-                .map(|(id, painter)| (id.to_owned(), painter))
+                .map(|(id, painter)| {
+                    let factory: ImguiPanelFactory =
+                        Box::new(move || Box::new(BuiltinPanel(painter)));
+                    (id.to_owned(), factory)
+                })
                 .collect(),
             widgets: BTreeMap::new(),
             gesture_owner: None,
@@ -91,6 +115,21 @@ impl ImguiPanelPresentation {
     pub fn reset_widgets(&mut self) {
         self.widgets.clear();
         self.gesture_owner_retired |= self.gesture_owner.is_some();
+    }
+
+    pub fn reconcile_instances(
+        &mut self,
+        frame: &nara::tooling::EditorFrameModel,
+        workspace: &EditorPanelWorkspace,
+    ) {
+        self.widgets.retain(|id, widgets| {
+            workspace.layout().instance(*id).is_some_and(|instance| {
+                instance.is_visible()
+                    && widgets.kind == instance.kind()
+                    && widgets.target == *instance.target()
+                    && widgets.document == instance.target().document(frame)
+            })
+        });
     }
 
     pub fn observe_panel_actions(

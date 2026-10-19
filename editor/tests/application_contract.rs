@@ -194,6 +194,126 @@ fn clean_ordinary_exit_reaches_the_process_terminal() {
 }
 
 #[test]
+fn ordinary_workspace_exit_action_joins_process_retirement_only_after_admission() {
+    let project = StarterProject::new("workspace-action-close");
+    let mut application = open_ordinary(project.root());
+    let frame = current_frame(&application);
+    let stale = EditorActionBatch::new(
+        frame.revision(),
+        [
+            EditorAction::Navigate(EditorNavigationAction::SetActiveDocument {
+                document: frame.workspace().active_document.unwrap(),
+            }),
+            EditorAction::WorkspaceIntent(nara::tooling::EditorWorkspaceIntentAction::Request(
+                EditorWorkspaceIntent::Exit,
+            )),
+        ],
+    );
+    application.submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
+    let rejected = application.submit_and_drive(stale, Duration::ZERO);
+    assert!(!rejected.exit_ready());
+    assert_eq!(
+        current_frame(&application).workspace_intent().intent(),
+        None
+    );
+    let frame = current_frame(&application);
+    let accepted = application.submit_and_drive(
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::WorkspaceIntent(
+                nara::tooling::EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::Exit),
+            )],
+        ),
+        Duration::ZERO,
+    );
+    assert!(!accepted.exit_ready());
+    assert!(drive_process_exit_to_terminal(&mut application));
+    assert!(application.current_frame().is_none());
+}
+
+#[test]
+fn public_workspace_exit_action_preserves_dirty_cancel_and_later_discard() {
+    let project = StarterProject::new("workspace-action-dirty-close");
+    let mut application = open_ordinary(project.root());
+    dirty_active_scene(&mut application);
+    let before = current_frame(&application)
+        .workspace()
+        .active_scene
+        .as_ref()
+        .unwrap()
+        .clone();
+    let request = |application: &mut EditorApplication| {
+        let frame = current_frame(application);
+        application.submit_and_drive(
+            EditorActionBatch::new(
+                frame.revision(),
+                [EditorAction::WorkspaceIntent(
+                    nara::tooling::EditorWorkspaceIntentAction::Request(
+                        EditorWorkspaceIntent::Exit,
+                    ),
+                )],
+            ),
+            Duration::ZERO,
+        )
+    };
+    assert!(!request(&mut application).exit_ready());
+    let frame = current_frame(&application);
+    let prompt = frame.workspace_intent().decision_prompt().unwrap();
+    assert!(
+        !application
+            .submit_and_drive(
+                EditorActionBatch::new(
+                    frame.revision(),
+                    [EditorAction::WorkspaceIntent(
+                        prompt.resolve(EditorCloseDecision::Cancel)
+                    ),]
+                ),
+                Duration::ZERO
+            )
+            .exit_ready()
+    );
+    assert_eq!(
+        current_frame(&application)
+            .workspace()
+            .active_scene
+            .as_ref()
+            .unwrap(),
+        &before
+    );
+    let frame = current_frame(&application);
+    application.submit_and_drive(
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::WorkspaceIntent(
+                nara::tooling::EditorWorkspaceIntentAction::AcknowledgeResult,
+            )],
+        ),
+        Duration::ZERO,
+    );
+    assert!(!request(&mut application).exit_ready());
+    let frame = current_frame(&application);
+    assert!(
+        !application
+            .submit_and_drive(
+                EditorActionBatch::new(
+                    frame.revision(),
+                    [EditorAction::WorkspaceIntent(
+                        frame
+                            .workspace_intent()
+                            .decision_prompt()
+                            .unwrap()
+                            .resolve(EditorCloseDecision::Discard,)
+                    ),]
+                ),
+                Duration::ZERO
+            )
+            .exit_ready()
+    );
+    assert!(drive_process_exit_to_terminal(&mut application));
+    assert!(application.current_frame().is_none());
+}
+
+#[test]
 fn field_failures_publish_inline_feedback_and_durable_diagnostics() {
     let project = StarterProject::new("field-feedback");
     let mut application = EditorApplication::open_trusted_compiled(

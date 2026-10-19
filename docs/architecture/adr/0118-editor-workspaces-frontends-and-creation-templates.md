@@ -44,6 +44,12 @@ A contribution consumes read-only projections and submits admitted actions; tool
 Ordinary project Open still does not compile/load arbitrary project Rust, native libraries or callbacks.
 This decision establishes no stable plugin ABI or dynamic hot-unload policy.
 
+The native composition admits each descriptor and per-instance frontend factory as one pair;
+admission failure cannot leave a partial contribution installed. Frontend state is owned by each
+panel instance. Close, hide, target/resolved-document change, project replacement and layout reset
+retire its drafts; moving/docking the panel preserves them. GPU reconstruction moves the retained
+frontend, including its factories and instance state, instead of reinstalling contributions.
+
 The native Host retains one event loop, device-creation authority and accountable close/recovery lifecycle.
 It may delegate secondary window/surface ownership to the selected platform/renderer adapter with explicit shutdown ordering.
 The adapter uses the engine-created GPU lineage rather than a second device/runtime.

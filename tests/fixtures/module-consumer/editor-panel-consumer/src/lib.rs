@@ -1,41 +1,58 @@
 //! A trusted source-built Editor contribution, independently compiled from the product module.
 
 use nara_editor::{
-    ImguiEditorFrontend, ImguiEditorPanelContext,
+    EditorLaunchOptions, EditorNativeComposition, EditorRunError, ImguiEditorPanel,
+    ImguiEditorPanelContext,
     workspace::{
         EditorPanelDescriptor, EditorPanelModel, EditorPanelMultiplicity, EditorPanelPlacement,
-        EditorPanelRegistrationError, EditorPanelWorkspace,
+        EditorPanelRegistrationError,
     },
 };
 use nara_tooling::{EditorAction, EditorNavigationAction};
 
 pub const PANEL_KIND: &str = "sample.selection-summary";
 
-pub fn install(workspace: &mut EditorPanelWorkspace) -> Result<(), EditorPanelRegistrationError> {
-    workspace.register(EditorPanelDescriptor::new(
-        PANEL_KIND,
-        "Selection summary",
-        EditorPanelMultiplicity::Multiple,
-        EditorPanelPlacement::Bottom,
-        true,
-    ))
+pub fn install(
+    composition: &mut EditorNativeComposition,
+) -> Result<(), EditorPanelRegistrationError> {
+    composition.register_panel(
+        EditorPanelDescriptor::new(
+            PANEL_KIND,
+            "Selection summary",
+            EditorPanelMultiplicity::Multiple,
+            EditorPanelPlacement::Bottom,
+            true,
+        ),
+        SelectionSummary::default,
+    )
 }
 
-pub fn install_imgui(frontend: &mut ImguiEditorFrontend) {
-    frontend.register_panel_painter(PANEL_KIND, paint);
+/// A normal native runner entry point, compiled outside the Editor crate.
+pub fn run(options: EditorLaunchOptions) -> Result<(), EditorRunError> {
+    let mut composition = EditorNativeComposition::new();
+    install(&mut composition)?;
+    composition.run(options)
 }
 
-fn paint(ui: &dear_imgui_rs::Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
-    ui.text(format!(
-        "Selected entities: {}",
-        selected_count(context.model())
-    ));
-    let action = clear_selection(context.model());
-    let _disabled = ui.begin_disabled_with_cond(action.is_none());
-    if ui.button("Clear selection")
-        && let Some(action) = action
-    {
-        context.emit(action);
+#[derive(Default)]
+struct SelectionSummary {
+    note: String,
+}
+
+impl ImguiEditorPanel for SelectionSummary {
+    fn show(&mut self, ui: &dear_imgui_rs::Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
+        ui.input_text("Draft note", &mut self.note).build();
+        ui.text(format!(
+            "Selected entities: {}",
+            selected_count(context.model())
+        ));
+        let action = clear_selection(context.model());
+        let _disabled = ui.begin_disabled_with_cond(action.is_none());
+        if ui.button("Clear selection")
+            && let Some(action) = action
+        {
+            context.emit(action);
+        }
     }
 }
 

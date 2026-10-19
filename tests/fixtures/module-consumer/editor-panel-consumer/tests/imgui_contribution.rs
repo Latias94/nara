@@ -7,24 +7,26 @@ use nara::{
     scene::{AuthoringFieldEdit, SceneEntityId},
 };
 use nara_editor::{
-    EditorApplication, EditorApplicationState, EditorLaunchOptions, ImguiEditorFrontend,
-    ImguiEditorPanelContext, workspace::EditorPanelTarget,
+    EditorApplication, EditorApplicationState, EditorLaunchOptions, EditorNativeComposition,
+    ImguiEditorPanel, ImguiEditorPanelContext,
+    workspace::{
+        EditorPanelDescriptor, EditorPanelMultiplicity, EditorPanelPlacement, EditorPanelTarget,
+    },
 };
-use nara_editor_panel_module_consumer::{
-    PANEL_KIND, clear_selection, install, install_imgui, selected_count,
-};
+use nara_editor_panel_module_consumer::{PANEL_KIND, clear_selection, selected_count};
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentMutation,
     EditorNavigationAction,
 };
 
-fn clear_selected_from_companion(
-    _ui: &dear_imgui_rs::Ui,
-    context: &mut ImguiEditorPanelContext<'_, '_>,
-) {
-    assert_eq!(context.model().instance().kind(), PANEL_KIND);
-    assert_eq!(selected_count(context.model()), 1);
-    context.emit(clear_selection(context.model()).unwrap());
+struct ClearSelected;
+
+impl ImguiEditorPanel for ClearSelected {
+    fn show(&mut self, _ui: &dear_imgui_rs::Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
+        assert_eq!(context.model().instance().kind(), PANEL_KIND);
+        assert_eq!(selected_count(context.model()), 1);
+        context.emit(clear_selection(context.model()).unwrap());
+    }
 }
 
 #[test]
@@ -43,7 +45,20 @@ fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selecti
         application.state(),
         EditorApplicationState::AuthoringDegraded
     );
-    install(application.panel_workspace_mut()).unwrap();
+    let mut composition = EditorNativeComposition::new();
+    composition
+        .register_panel(
+            EditorPanelDescriptor::new(
+                PANEL_KIND,
+                "Selection summary",
+                EditorPanelMultiplicity::Multiple,
+                EditorPanelPlacement::Bottom,
+                true,
+            ),
+            || ClearSelected,
+        )
+        .unwrap();
+    let mut frontend = composition.install(&mut application).unwrap();
     let instance_id = application
         .panel_workspace()
         .layout()
@@ -103,9 +118,6 @@ fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selecti
         .unwrap()
         .target()
         .clone();
-    let mut frontend = ImguiEditorFrontend::new();
-    install_imgui(&mut frontend);
-    frontend.register_panel_painter(PANEL_KIND, clear_selected_from_companion);
     let mut context = dear_imgui_rs::Context::create();
     context
         .set_ini_filename::<std::path::PathBuf>(None)

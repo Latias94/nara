@@ -1,6 +1,7 @@
 use std::{
     fs, io,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use serde::{Deserialize, Serialize};
@@ -70,6 +71,10 @@ impl EditorWindowBounds {
 /// User preferences only. This object has no source persistence or document mutation capability.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EditorWorkspaceLayout {
+    // Kept out of saved preferences and value equality. Holding the previous token prevents
+    // allocation reuse from making a fresh panel lifetime look like its retired predecessor.
+    #[serde(skip)]
+    lifecycle: Arc<()>,
     version: u32,
     next_instance: u64,
     panels: Vec<EditorPanelInstance>,
@@ -142,6 +147,7 @@ impl EditorWorkspaceLayout {
     #[must_use]
     pub fn default_for(registry: &EditorPanelRegistry) -> Self {
         let mut layout = Self {
+            lifecycle: Arc::new(()),
             version: LAYOUT_VERSION,
             next_instance: 1,
             panels: Vec::new(),
@@ -160,6 +166,9 @@ impl EditorWorkspaceLayout {
             );
         }
         layout
+    }
+    pub(crate) fn lifecycle(&self) -> &Arc<()> {
+        &self.lifecycle
     }
     #[must_use]
     pub fn instances(&self) -> &[EditorPanelInstance] {
@@ -282,6 +291,7 @@ impl EditorWorkspaceLayout {
         toolkit_version: u32,
         displays: &[EditorWindowBounds],
     ) -> EditorWorkspaceRestore {
+        saved.lifecycle = Arc::new(());
         let mut reasons = Vec::new();
         if saved.version != LAYOUT_VERSION {
             reasons.push(EditorWorkspaceRestoreReason::UnsupportedLayoutVersion);

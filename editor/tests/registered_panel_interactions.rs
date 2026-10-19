@@ -14,6 +14,9 @@ use nara_editor::{
 #[path = "support/imgui.rs"]
 mod imgui;
 
+#[path = "support/stateful_panel_interactions.rs"]
+mod stateful_panel_interactions;
+
 #[test]
 fn registered_panels_scroll_and_keep_independent_inspector_instances() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))

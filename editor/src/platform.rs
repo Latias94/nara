@@ -14,10 +14,12 @@ use winit::{
     window::Window,
 };
 
-use crate::{EditorApplication, EditorApplicationOpenError, EditorLaunchOptions};
+use crate::{EditorApplicationOpenError, EditorLaunchOptions};
 
+mod composition;
 mod game_input;
 mod imgui;
+pub use composition::EditorNativeComposition;
 
 const EDITOR_TITLE: &str = "Nara Editor";
 const EDITOR_GPU_UNAVAILABLE_TITLE: &str = "Nara Editor - GPU unavailable";
@@ -36,6 +38,8 @@ pub enum EditorRunError {
     Platform(String),
     #[error("native Editor GPU execution failed: {0}")]
     Gpu(#[source] WgpuEditorExecutionError),
+    #[error(transparent)]
+    PanelComposition(#[from] crate::workspace::EditorPanelRegistrationError),
 }
 
 impl EditorRunError {
@@ -48,7 +52,11 @@ impl EditorRunError {
     pub fn diagnostics(&self) -> Option<&nara::diagnostic::DiagnosticReport> {
         match self {
             Self::TrustedOpen(error) => error.diagnostics(),
-            Self::Usage(_) | Self::EventLoop(_) | Self::Platform(_) | Self::Gpu(_) => None,
+            Self::Usage(_)
+            | Self::EventLoop(_)
+            | Self::Platform(_)
+            | Self::Gpu(_)
+            | Self::PanelComposition(_) => None,
         }
     }
 
@@ -58,7 +66,7 @@ impl EditorRunError {
 }
 
 pub fn run(options: EditorLaunchOptions) -> Result<(), EditorRunError> {
-    imgui::run_application(EditorApplication::new(options))
+    EditorNativeComposition::new().run(options)
 }
 
 /// Runs one private first-party Editor with an explicitly trusted compiled product intent.
@@ -67,7 +75,7 @@ pub fn run_trusted_compiled(
     options: EditorLaunchOptions,
     intent: TrustedCompiledEditorProjectIntent,
 ) -> Result<(), EditorRunError> {
-    imgui::run_application(EditorApplication::open_trusted_compiled(options, intent)?)
+    EditorNativeComposition::new().run_trusted_compiled(options, intent)
 }
 
 fn earliest_deadline(left: Option<Instant>, right: Option<Instant>) -> Option<Instant> {
