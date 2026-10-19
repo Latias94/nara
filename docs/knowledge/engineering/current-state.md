@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "6e8598678247c814329f7dd80fc4690dbdd5b59f848101b7814306fab984ce25"
+source_fingerprint: "516ce1137ad3d28e4a022dcafb154dc65e484f5d7d11a7182d0ddacb796a96bf"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "6e8598678247c814329f7dd80fc4690dbdd5b59f848101b7814306fab98
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `6e8598678247c814329f7dd80fc4690dbdd5b59f848101b7814306fab984ce25`
-- Immutable records: 765
+- Source fingerprint: `516ce1137ad3d28e4a022dcafb154dc65e484f5d7d11a7182d0ddacb796a96bf`
+- Immutable records: 768
 - Active lane heads: 0
 
 # Active Registrations
@@ -39,6 +39,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
+- [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U18](registry/2026-07/2026-07-20T022923Z-reference-game-foundation-rgf-u18-codex-root-ff9c13e50df34a868c59c4ebd5435375.md): `completed` (reference-game-foundation-rgf-u18-codex-root; producer `codex-root`)
@@ -50,6 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [N05 safe plugin failure facts and invocation context](verification/2026-10/2026-10-19T170951Z-n05-safe-plugin-failure-facts-and-invocation-context-d01f7391b84348a8827a0daa760dd1a4.md) - Checked App plugin facts, actual invocation identity and retained primary/shutdown diagnostics through public product and Editor failure paths.
 - **Verification Evidence**: [Authoring S3 component constraints diagnostics and inventory](verification/2026-10/2026-10-19T162634Z-authoring-s3-component-constraints-diagnostics-and-inventory-64aacf18a3af432584d306af27d32eb3.md) - Shared interval contracts, safe domain facts, explicit UI evolution and independently compiled component authoring evidence.
 - **Verification Evidence**: [Authoring S2 exact results and retained field editing](verification/2026-10/2026-10-19T153834Z-authoring-s2-exact-results-and-retained-field-editing-2b09e865afc64b7990e2adc737fa2aa7.md) - Exact frontend dispatch correlation, retained Inspector drafts and public panel/native qualification within S2.
 - **Verification Evidence**: [Authoring S1 safety and field override recovery](verification/2026-10/2026-10-19T143606Z-authoring-s1-safety-and-field-override-recovery-0aca8f3bff914ffeaf0254f40a5cb118.md) - Owner-local Prefab/render rejection fixes and complete data-only Reset/Remove history with explicit test and platform limits.
@@ -61,7 +63,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Foundation U12 ordinary profile-default font configuration](verification/2026-10/2026-10-19-foundation-u12-profile-defaults.md) - One ProductRecipe configures compilation and presentation through direct composition, Check, Editor Play and actual exported native startup.
 - **Work Progress**: [Foundation consumer acceptance and final integration checkpoint](progress/2026-10/2026-10-19-foundation-correction-consumer-checkpoint.md) - Public consumers and saved-data migrations pass while actual Export and external native runner proof remain active.
 - **Verification Evidence**: [Foundation U10 closed Vec2 shapes and owner migration](verification/2026-10/2026-10-19-foundation-u10-closed-vec2.md) - Finite F32 vector records retain their wire encoding with explicit saved-owner lineage and external editing evidence.
-- **Verification Evidence**: [Foundation public consumer and saved-data integration](verification/2026-10/2026-10-19-foundation-public-consumer-integration.md) - Independent Scene and Editor consumers, candidate doctests and Reference Game workflows pass after fixture corrections.
 
 # Integration Notes
 

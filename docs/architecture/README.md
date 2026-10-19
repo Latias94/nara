@@ -74,8 +74,13 @@ workflows, with qualification at each changed boundary. S1 owner corrections and
 exact results are implemented within the linked verification scope. S3 adds typed finite intervals,
 safe component-domain diagnostics and one explicit component inventory, qualified through the
 linked external, owner and selected native workflows. ADRs 0045/0081 and 0047/0118 own the adopted
-contracts. Triggered asynchronous preparation, inline tools and multiple-document designs remain
-future work. This does not reopen the completed correction plan.
+contracts. A separate N05 App plugin-error follow-up under ADRs 0010/0068 is qualified at `40bcdc6`;
+it preserves checked code/summary and framework-owned invocation facts through existing product
+failure and cleanup reports. Direct App addition and `seal` errors retain the same invocation
+envelope; Editor reports terminal shutdown facts once while physical close is still pending.
+The design links its focused owner/product evidence separately from S3 and native release claims.
+Triggered asynchronous preparation, inline tools and multiple-document designs remain future work.
+This does not reopen the completed correction plan.
 
 The [UI foundation design](ui-foundation-design.md),
 [UI boundary study](ui-product-boundaries-editor-dogfood-and-porting-strategy.md), and

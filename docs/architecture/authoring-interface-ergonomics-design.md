@@ -1,11 +1,11 @@
 # Authoring Interface Ergonomics
 
-**Status:** S1-S3 implemented and qualified within their linked verification scope. D6 remains triggered future work.
+**Status:** S1-S3 and the separate N05 App plugin-error follow-up are implemented and qualified within their linked verification scopes. D6 remains triggered future work.
 **Date:** 2026-10-19.
 **Updated:** 2026-10-20.
 **Source baseline:** `f988852`.
 **Inputs:** [post-correction audit](../audits/2026-10-19-foundation-next-stage-review.md),
-[strategy](../../STRATEGY.md), Accepted ADRs 0045, 0047, 0081, 0116, 0117 and 0118.
+[strategy](../../STRATEGY.md), Accepted ADRs 0010, 0045, 0047, 0068, 0081, 0116, 0117 and 0118.
 
 This design addresses N01-N09 without reopening the completed correction plan. It records the
 selected interfaces, implementation sequence and caller-level acceptance. Rust sketches omit
@@ -21,6 +21,8 @@ S3 / E6-E5 implements D3's explicit inventory and D4's finite intervals and safe
 errors under the refinements in Accepted ADRs 0045/0081. Its owner, independent-consumer and
 selected native workflows pass within the [S3 verification record](../knowledge/engineering/verification/2026-10/2026-10-19T162634Z-authoring-s3-component-constraints-diagnostics-and-inventory-64aacf18a3af432584d306af27d32eb3.md)'s scope.
 D5 was delivered in S1; D6 and the App plugin-error portion of N05 remain outside S3.
+The separately authorized N05 follow-up implements owner-local plugin facts and product lowering;
+its focused qualification passes and does not extend S3's historical evidence.
 This status does not reopen U1-U15 or start another Goal.
 
 ## Start With The Developer's Work
@@ -520,7 +522,8 @@ strict Check and compiled Editor ingestion use the same component diagnostic pat
 
 Dependency direction matters: `nara_diagnostic` already depends on `nara_app`. Therefore app errors
 cannot import the diagnostics runtime/report crate. Extending App plugin failures with static
-namespaced codes requires a separate owner-local change; that part of N05 remains open.
+namespaced codes requires a separate owner-local change; the qualified N05 follow-up below
+does not change this component dependency direction.
 For component-domain errors, the implemented `nara_reflect -> nara_diagnostic -> nara_app` edge
 is acyclic and reuses existing checked code/summary primitives. Reflect-specific field identity
 stays in reflect and is validated at the bridge. Diagnostic does not depend on reflect; there is
@@ -663,6 +666,38 @@ with an actual adapter required. These runs do not establish OS IME candidate-wi
 accessibility, monitor scanout, native Linux/macOS support or full release qualification.
 The [S3 verification record](../knowledge/engineering/verification/2026-10/2026-10-19T162634Z-authoring-s3-component-constraints-diagnostics-and-inventory-64aacf18a3af432584d306af27d32eb3.md)
 owns numerical cohorts, commands, run identities, review results and execution limits.
+
+### N05 App Plugin-Error Follow-Up
+
+Implementation landed in `40bcdc6`.
+
+This follow-up is separate from S3's component-domain work. `PluginDomainError` admits only a
+checked static code and safe static summary. App shares its source-fact validation with
+`RuntimeFaultDetail` without depending on the diagnostic runtime. Factories return this same type
+in place of `PluginPrepareFailure`; hooks return it through `PluginError::Domain`.
+
+The framework retains the actual invoked plugin and hook, including a first retryable preflight
+failure. An error cannot replace those facts with a claimed owner. The existing borrowed failure
+report preserves primary and shutdown facts through source wrappers and retained-owner cleanup;
+this does not introduce a second report collection or copies in runtime-close evidence.
+Direct App callers receive the same invocation facts through `PluginCommitError` in
+`AddPluginsError::Plugin` and the direct `App::seal` result, with access to the original error
+and recorded plugin failure.
+
+Product adapters preserve the checked code/summary, add `project-context-code`, and retain bounded
+plugin/hook or preparation-phase context. They do not render raw error `Display` text. Existing
+Check, Export and data-only Open retain their behavior and execute no additional lifecycle hooks.
+Editor publishes terminal shutdown facts once per runtime generation even when physical close
+participants still keep the owner in `CloseIncomplete`. Polling and retrying that close neither
+hides the failure until completion nor duplicates it in the report.
+Qualification passes: all 121 App tests and the selected 133-test product cohort cover invocation,
+retry, ordinary recipe Headless Run and Editor Play failure/retirement paths. The locked workspace
+check passes with all features and targets. Independent review has no remaining findings.
+These cohorts are recorded separately and are not a unique combined test count. The follow-up
+changes no native controls and establishes no new platform or release qualification.
+D6 and G1-G9 remain consumer-triggered work.
+The [N05 verification record](../knowledge/engineering/verification/2026-10/2026-10-19T170951Z-n05-safe-plugin-failure-facts-and-invocation-context-d01f7391b84348a8827a0daa760dd1a4.md)
+owns this follow-up's actual results and limits separately from S3.
 
 ## Acceptance And Ergonomics Criteria
 
