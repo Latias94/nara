@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "49cab174d8f8d53a1be8c2f1b88d50a5d03b99772d8f13bfc936409eb4de6eb2"
+source_fingerprint: "6e8598678247c814329f7dd80fc4690dbdd5b59f848101b7814306fab984ce25"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "49cab174d8f8d53a1be8c2f1b88d50a5d03b99772d8f13bfc936409eb4d
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `49cab174d8f8d53a1be8c2f1b88d50a5d03b99772d8f13bfc936409eb4de6eb2`
-- Immutable records: 762
+- Source fingerprint: `6e8598678247c814329f7dd80fc4690dbdd5b59f848101b7814306fab984ce25`
+- Immutable records: 765
 - Active lane heads: 0
 
 # Active Registrations
@@ -21,6 +21,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
 - [Authoring S1 corrections complete; S2 remains proposed](registry/2026-10/2026-10-19T144026Z-authoring-workflow-s1-codex-root-2fbf60933b96475b84d9483c6acb0d3e.md): `completed` (authoring-workflow-s1-codex-root; producer `codex-root`)
 - [Authoring S2 field editing workflow complete](registry/2026-10/2026-10-19T154515Z-authoring-workflow-s2-codex-root-3cac208816154dd2b1c31ddf0272824b.md): `complete` (authoring-workflow-s2-codex-root; producer `codex-root`)
+- [Authoring S3 shared component constraints and inventory complete](registry/2026-10/2026-10-19T164247Z-authoring-workflow-s3-codex-root-abf223401a3146968d15996a72e6f905.md): `completed` (authoring-workflow-s3-codex-root; producer `codex-root`)
 - [Dear ImGui 0.21 upgrade complete](registry/2026-10/2026-10-17T135355Z-dear-imgui-021-upgrade-codex-root-c8d8fd35d7b34ca2845220d1113df8e7.md): `completed` (dear-imgui-021-upgrade-codex-root; producer `codex-root`)
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
@@ -49,6 +50,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Authoring S3 component constraints diagnostics and inventory](verification/2026-10/2026-10-19T162634Z-authoring-s3-component-constraints-diagnostics-and-inventory-64aacf18a3af432584d306af27d32eb3.md) - Shared interval contracts, safe domain facts, explicit UI evolution and independently compiled component authoring evidence.
 - **Verification Evidence**: [Authoring S2 exact results and retained field editing](verification/2026-10/2026-10-19T153834Z-authoring-s2-exact-results-and-retained-field-editing-2b09e865afc64b7990e2adc737fa2aa7.md) - Exact frontend dispatch correlation, retained Inspector drafts and public panel/native qualification within S2.
 - **Verification Evidence**: [Authoring S1 safety and field override recovery](verification/2026-10/2026-10-19T143606Z-authoring-s1-safety-and-field-override-recovery-0aca8f3bff914ffeaf0254f40a5cb118.md) - Owner-local Prefab/render rejection fixes and complete data-only Reset/Remove history with explicit test and platform limits.
 - **Work Progress**: [Authoring architecture refinements and workflow delivery order](progress/2026-10/2026-10-19T132019Z-authoring-architecture-refinements-and-workflow-delivery-order-9db915d26cb2407291ac76b756a2126c.md) - Keep existing owners, refine exact edit/result and value contracts, and qualify complete workflows within each stage.
@@ -60,7 +62,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Foundation consumer acceptance and final integration checkpoint](progress/2026-10/2026-10-19-foundation-correction-consumer-checkpoint.md) - Public consumers and saved-data migrations pass while actual Export and external native runner proof remain active.
 - **Verification Evidence**: [Foundation U10 closed Vec2 shapes and owner migration](verification/2026-10/2026-10-19-foundation-u10-closed-vec2.md) - Finite F32 vector records retain their wire encoding with explicit saved-owner lineage and external editing evidence.
 - **Verification Evidence**: [Foundation public consumer and saved-data integration](verification/2026-10/2026-10-19-foundation-public-consumer-integration.md) - Independent Scene and Editor consumers, candidate doctests and Reference Game workflows pass after fixture corrections.
-- **Verification Evidence**: [Foundation U13 stateful native panel composition](verification/2026-10/2026-10-19-foundation-u13-stateful-panels.md) - Paired source-built panel factories own independent drafts through native startup and GPU reconstruction.
 
 # Integration Notes
 

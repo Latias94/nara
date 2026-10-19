@@ -71,8 +71,11 @@ one complete field-edit entry, exact dispatch-result routing, a single component
 finite shared constraints. It compares alternative interfaces and defines caller-level acceptance;
 its implementation section groups corrections into complete editing and component-evolution
 workflows, with qualification at each changed boundary. S1 owner corrections and S2 field editing/
-exact results are implemented within the linked verification scope; ADRs 0047/0118 own the adopted
-contracts. S3 and the other designs remain proposed. It does not reopen the completed correction plan.
+exact results are implemented within the linked verification scope. S3 adds typed finite intervals,
+safe component-domain diagnostics and one explicit component inventory, qualified through the
+linked external, owner and selected native workflows. ADRs 0045/0081 and 0047/0118 own the adopted
+contracts. Triggered asynchronous preparation, inline tools and multiple-document designs remain
+future work. This does not reopen the completed correction plan.
 
 The [UI foundation design](ui-foundation-design.md),
 [UI boundary study](ui-product-boundaries-editor-dogfood-and-porting-strategy.md), and

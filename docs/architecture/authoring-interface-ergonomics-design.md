@@ -1,22 +1,27 @@
 # Authoring Interface Ergonomics
 
-**Status:** S1 and S2 implemented within their verification scope; D3-D6 / S3 remain proposed.
+**Status:** S1-S3 implemented and qualified within their linked verification scope. D6 remains triggered future work.
 **Date:** 2026-10-19.
+**Updated:** 2026-10-20.
 **Source baseline:** `f988852`.
 **Inputs:** [post-correction audit](../audits/2026-10-19-foundation-next-stage-review.md),
 [strategy](../../STRATEGY.md), Accepted ADRs 0045, 0047, 0081, 0116, 0117 and 0118.
 
-This design addresses N01-N09 without reopening the completed correction plan. It proposes the
-next implementation sequence and the interfaces its consumers should exercise. Rust sketches
-are directional design examples, not compiling examples of today's API. Pele is excluded.
+This design addresses N01-N09 without reopening the completed correction plan. It records the
+selected interfaces, implementation sequence and caller-level acceptance. Rust sketches omit
+imports and surrounding package setup; the guides and independently compiled fixtures demonstrate
+the implemented APIs. Pele is excluded.
 
 S1 / E1-E2 is implemented through `bfbd2b8`, with the
 [verification record](../knowledge/engineering/verification/2026-10/2026-10-19T143606Z-authoring-s1-safety-and-field-override-recovery-0aca8f3bff914ffeaf0254f40a5cb118.md)
 covering the existing Prefab/render failure and field-override corrections. S2 / E3-E4 implements
 D1's default field helper and D2's exact dispatch path under the refinements in Accepted ADRs
 0047/0118; see the [S2 verification record](../knowledge/engineering/verification/2026-10/2026-10-19T153834Z-authoring-s2-exact-results-and-retained-field-editing-2b09e865afc64b7990e2adc737fa2aa7.md).
-D3-D6, component inventory and shared interval metadata remain proposals. This status does not
-reopen U1-U15 or imply S3 completion.
+S3 / E6-E5 implements D3's explicit inventory and D4's finite intervals and safe component-domain
+errors under the refinements in Accepted ADRs 0045/0081. Its owner, independent-consumer and
+selected native workflows pass within the [S3 verification record](../knowledge/engineering/verification/2026-10/2026-10-19T162634Z-authoring-s3-component-constraints-diagnostics-and-inventory-64aacf18a3af432584d306af27d32eb3.md)'s scope.
+D5 was delivered in S1; D6 and the App plugin-error portion of N05 remain outside S3.
+This status does not reopen U1-U15 or start another Goal.
 
 ## Start With The Developer's Work
 
@@ -163,7 +168,8 @@ Current Nara caller contracts are in the [component guide](../guides/persistent-
 [recipe guide](../guides/rust-product-recipes.md) and [panel guide](../guides/editor-panels.md).
 The current [panel context](../../editor/src/frontend/imgui/workspace.rs) exposes `submit`, exact
 `action_finished` results and the D1 `edit_field` helper. The [panel guide](../guides/editor-panels.md)
-describes that implemented surface; D3-D6 remain proposals.
+describes that implemented surface. D3/D4 are implemented and qualified within S3's linked scope;
+D6 remains a set of consumer-triggered designs.
 
 #### What This Comparison Changes
 
@@ -181,7 +187,8 @@ addresses a concrete multi-field operation without automatic rebasing.
 
 This evidence does not establish that Nara's interfaces are as mature as either reference engine.
 S2's linked evidence covers field conflict recovery, native IME and the external panel surface.
-External component evolution and its full workflow qualification remain S3 work.
+S3's linked evidence covers external component evolution and the affected native controls.
+It does not establish complete game production or untested-platform readiness.
 
 ## D1. Ordinary Field Editing
 
@@ -406,7 +413,7 @@ A component package should expose that single helper; callers do not maintain a 
 list. Direct App, Headless/Desktop, Check, Editor Play and Export continue to use the same recipe.
 Do not add another global component installation mechanism.
 
-The package author's mechanical duplication can be reduced with a narrow proposed declaration:
+The package author's mechanical duplication is reduced with one explicit declaration:
 
 ```rust,ignore
 nara::persistent_components! {
@@ -435,8 +442,10 @@ The name `initial_catalog` makes the first-generation limit visible. Evolution s
 existing explicit current/predecessor source and registration callback, while reusing the generated
 schema list and native register function. A version-two package that later adds a new current
 component still updates only this inventory; its predecessor snapshots remain unchanged.
-Historical catalogs, tombstones and migrations are not inferred from today's type list. The macro
-does not become a package, migration or registration DSL.
+Historical catalogs, tombstones and migrations are not inferred from today's type list. Entries
+are type identifiers imported or aliased in the invocation module; qualified paths must first be
+imported. The generated module resolves those explicit parent-module identifiers. The macro does
+not become a package, migration or registration DSL.
 
 Keep owner ID, provider ID, binding versions, component version and catalog generation explicit.
 Do not derive stable identities from crate paths, automatically increment every version, or use
@@ -445,13 +454,13 @@ through the existing explicit provider path, with no compatibility shim that byp
 
 ## D4. Finite Shared Constraints And Safe Diagnostics
 
-Start with the actual positive `UiText.logical_size` and one external `Cooldown.seconds` range.
-The recommended descriptor extension is an optional finite numeric interval on Scalar shape,
+The implemented consumers are `UiText.logical_size` and an external `Cooldown.seconds` range.
+The descriptor extension is an optional finite numeric interval on Scalar shape,
 alongside its existing numeric domain. It does not create a new field wrapper or arbitrary rule DSL.
 Optional/container traversal remains the existing shape traversal; no new container attribute
 grammar is required by this first consumer.
 
-A directional component declaration is:
+The derive supports this component declaration:
 
 ```rust,ignore
 #[derive(Component, PersistentComponent)]
@@ -470,17 +479,18 @@ generic patch validation, native preflight and strict Check. UI slider/step/form
 presentation metadata if later needed; a slider hint must not silently become a persisted validator.
 UI input can be temporarily invalid without becoming accepted document data.
 
-Rules must be complete before adding persisted metadata:
+The shared interval contract is:
 
 - Bounds have the scalar's admitted signed, unsigned or finite floating domain; no integer-to-float
   coercion. Missing bounds are unbounded; contradictory or empty intervals reject at schema admission.
 - F32 intervals compare the deterministic F32-materialized value widened exactly for comparison.
   A tiny positive F64 which rounds to F32 zero must fail a positive F32 rule, matching native decode.
   Defaults, templates and generic/native validation share this rule without rewriting stored bytes.
-  `UiText.logical_size` currently has an F64 descriptor without an F32 domain: its explicit
-  successor must add both the F32 domain and the exclusive zero lower bound, preserving the
-  original predecessor catalog. Merely adding a positive F64 bound does not close the gap.
-  Its migration must report invalid historical values for deliberate repair rather than clamp them.
+  `UiText.logical_size` now has an F32 numeric domain and the complete native interval `(0, 256]`.
+  UiText advances from component v2 to v3 and the UI catalog from generation 2 to generation 3,
+  retaining the exact generation-2 predecessor. Other UI components retain their versions.
+  Its explicit migration preserves valid stored values and rejects invalid history for deliberate
+  repair; it does not clamp or rewrite the floating payload.
 - Nonfinite bounds reject, canonical signed zero is deterministic, and inclusive/exclusive endpoints
   have explicit tags. Constraint traversal consumes existing caller value-work budgets.
 - Absent metadata preserves the old fingerprint encoding. New metadata participates in catalog
@@ -493,8 +503,9 @@ Rules must be complete before adding persisted metadata:
   validity still does not imply complete Runtime readiness. This slice exposes that limit rather
   than claiming every codec can be reproduced from metadata.
 
-Errors need stable identity without revealing private values. A proposed component-domain error
-contains a static namespaced code and an optional stable root field ID. The diagnostic bridge
+Errors need stable identity without revealing private values. `ComponentDomainError` contains
+a checked static namespaced code, a checked safe summary and an optional stable root field ID.
+`ComponentCodecError::Domain` carries those facts through native validation. The diagnostic bridge
 receives an optional admitted component schema and publishes the field only after checking its
 membership; without that schema it retains the safe code/summary and omits field identity.
 Dynamic paths, map keys, asset locators and raw codec details do not become public diagnostic
@@ -503,17 +514,17 @@ The diagnostic adapter adds owner/component identity and preserves the domain co
 parsing Display text. Existing free-form native errors remain private fallback detail.
 Data-only range rejection uses an engine-defined code and known root field. It does not generate
 arbitrary project-native codes, execute a codec or require a metadata code registry. Preserve
-custom codes only where a real native/domain failure is already ingested. E6 includes both the
-Scene codec-error adapter and generic authoring-decode paths which currently erase those facts.
+custom codes only where a real native/domain failure is already ingested. Scene validation,
+generic authoring decode and the existing Play apply-changes bridge preserve these facts;
+strict Check and compiled Editor ingestion use the same component diagnostic path.
 
 Dependency direction matters: `nara_diagnostic` already depends on `nara_app`. Therefore app errors
-cannot import the diagnostics runtime/report crate. App plugin failures can retain a static
-namespaced code beside private free-form detail, lowered and sanitized in the existing product
-adapter. For component-domain errors, `nara_reflect -> nara_diagnostic -> nara_app` is acyclic and
-can reuse the existing checked code/summary primitives instead of inventing another validator;
-review that dependency before adoption. Keep reflect-specific field identity in reflect and
-validate it at the bridge. Do not make diagnostic depend on reflect, duplicate the diagnostics
-bus or publish an all-engine error enum.
+cannot import the diagnostics runtime/report crate. Extending App plugin failures with static
+namespaced codes requires a separate owner-local change; that part of N05 remains open.
+For component-domain errors, the implemented `nara_reflect -> nara_diagnostic -> nara_app` edge
+is acyclic and reuses existing checked code/summary primitives. Reflect-specific field identity
+stays in reflect and is validated at the bridge. Diagnostic does not depend on reflect; there is
+no second diagnostic bus or all-engine error enum.
 
 ## D5. Resource Failures Stay Inside Their Existing Owners
 
@@ -549,9 +560,9 @@ only after its consumer requires that choice. No generic operation service is ne
 
 ## Implementation Sequence And Ownership
 
-S1 / E1-E2 and S2 / E3-E4 are complete within their linked verification scope. The remaining units
-are proposed work, not an active Goal. Reconcile affected ADRs when adopting their durable
-contracts. Preserve the existing history and complete real consumers.
+S1 / E1-E2, S2 / E3-E4 and S3 / E6-E5 are complete within their linked verification scope.
+D6 remains triggered future work, not an active Goal. Preserve the existing history and complete
+real consumers.
 
 ### Architecture Adjustment After The Reference Comparison
 
@@ -564,14 +575,14 @@ closed; its G1-G9 entry conditions remain separate from the work below.
 | --- | --- | --- |
 | Field identity and mutation authority | Stable UI/draft binding is independent of document revision; exact revision/catalog/source basis still governs commit. Retained controller state remains private to its frontend instance. | Adopted in ADRs 0047/0118 for S2. |
 | Intent and acknowledgement | Keep existing semantic actions and owner reports. Carry their exact origin through dispatch/filtering, then settle one original live recipient after application drive. | Adopted in ADR 0118 for S2. |
-| Data rules and error facts | One schema-driven validator owns supported numeric rules; native preflight and Editor feedback consume it. Presentation hints and arbitrary native invariants remain distinct. Safe error facts cross adapters without parsing strings. | Reconcile ADRs 0045/0081 and affected saved-owner lineage before E6 writes new metadata. |
-| Component installation | Keep explicit package/recipe and atomic provider admission. One inventory generates mechanical callbacks and current schemas, while history stays explicit. | E5 is an ergonomic implementation over current ownership; do not add a registration authority or amend architecture merely to introduce a macro. |
+| Data rules and error facts | One schema-driven validator owns supported numeric rules; native preflight and Editor feedback consume it. Presentation hints and arbitrary native invariants remain distinct. Safe error facts cross adapters without parsing strings. | Adopted in ADRs 0045/0081 for S3, with explicit UiText/catalog succession. |
+| Component installation | Keep explicit package/recipe and atomic provider admission. One inventory generates mechanical callbacks and current schemas, while history stays explicit. | Implemented as an ergonomic helper over existing ProductRecipe/SchemaContribution authority; no additional registration owner. |
 | Waiting and retirement | Preserve a seam for owned preparation, attempt/result identity and owner-thread publication; decide cancel and physical-retirement behavior for the actual operation. | D6 and G1/G9 remain triggered work, not blanket async trait changes or prerequisites for current repairs. |
 
-ADRs 0047/0118 now adopt the S2 identity/result refinements; the other adoption points remain
-proposed. No shared controller framework, universal operation service or crate layer is required.
-D3's macro spelling remains provisional until its complete consumer demonstrates the interface;
-stable identity, strict authority and failure retention remain the governing invariants.
+ADRs 0047/0118 adopt the S2 identity/result refinements; ADRs 0045/0081 adopt S3's interval and
+component-authoring refinements. No shared controller framework, universal operation service or
+crate layer is required. Stable identity, strict authority and failure retention remain the
+governing invariants.
 
 ### Deliver Workflows, Qualify Each Changed Boundary
 
@@ -584,7 +595,7 @@ all implementation units have landed.
 | S0: establish the consumer and affected contracts | Use the existing independently compiled component/panel fixture to specify the D1-D4 calls and adoption points. Reuse a concrete field such as Cooldown; no new example game is required. | One type inventory, one product contribution and one ordinary field-edit entry; no manually routed reports or private engine hooks. This is a caller design check, not a requirement to implement E5/E6 before safety repairs. |
 | S1: repair existing failure and authored-state semantics | E1 and E2 as independent owner-local changes, with their focused portion of E7 | Raw invalid Prefab rejects without panic; failed target reservation preserves the old publication; terminal bad shader is not recreated per frame; Reset/Remove preserves raw authored semantics through affected history/persistence paths. |
 | S2: complete one reliable editing loop (implemented) | E3 followed by E4, with external/native evidence from E7 | Exact action result reaches the original live controller or panel; invalid/conflicting input survives; unrelated edits and native IME retain stable widget identity. Two fields from one basis have explicit conflict behavior; a cohesive multi-field operation uses one existing atomic patch. See S2 verification above for executed consumers and platform limits. |
-| S3: complete component declaration through evolution | Settle E6 validation/error semantics, then E5's inventory convenience, with E7 component workflow evidence | One external component can be installed, created, edited, rejected with an actionable error, saved/reopened and explicitly migrated. Adding a component after a successor catalog still changes only the current inventory, leaving historical membership intact. |
+| S3: complete component declaration through evolution (implemented) | E6 validation/error semantics and E5's inventory convenience, with E7 owner, independent-consumer and affected native evidence | The independent component is installed, created, edited, rejected with an actionable error, saved/reopened and explicitly migrated. Adding a component after a successor catalog changes only the current inventory, leaving historical membership intact. See S3 verification for executed paths and platform limits. |
 | Follow-up selection | D6 and existing G1-G9 only when their named consumer or measurement enters | Pick a concrete pending operation, frame workload, inline field tool or multi-document workflow, then design and verify that owner's next complete contract. These are not hidden exit conditions for S1-S3. |
 
 ```mermaid
@@ -631,6 +642,27 @@ E1's three independent owners should land separately; the row groups their user-
 boundary, not a requirement for one large commit. Extract private responsibilities in touched
 large files when useful, retaining exports and order. Do not make a whole-tree module shuffle a
 prerequisite for a local correctness repair. Build/test commands remain serialized in the shared target.
+
+### S3 Implementation And Qualification
+
+Finite interval semantics are private to the focused reflection module; derive supplies typed
+literal bounds and rejects unsupported field types or invalid declaration syntax at compile time.
+The existing shared validator owns admission and value checks. Component-domain facts reuse the
+existing diagnostic primitives, while Scene/tooling adapters validate field identity and redact
+dynamic codec details. The inventory remains a small mechanical helper over current provider
+admission rather than a new owner. A consumer may import only a renamed root `nara` dependency;
+derive ranges and the inventory resolve through that facade without a direct reflection dependency.
+
+Implementation landed in `64e8484` (shared bounds, diagnostics and inventory) and `2ca6771`
+(UiText succession, shipped fixtures and affected native controls). Owner tests, independent
+component workflows, strict Check/compiled Editor domain diagnostics, the renamed root-only
+facade and locked bundle checks pass. The independent consumer covers failure atomicity,
+creation/editing/rejection, Undo/Redo, actual Save/Check/Reopen and explicit migration.
+The affected native Windows/DX12 field/focus/IME and Canvas real-source Save/Reopen paths pass
+with an actual adapter required. These runs do not establish OS IME candidate-window delivery,
+accessibility, monitor scanout, native Linux/macOS support or full release qualification.
+The [S3 verification record](../knowledge/engineering/verification/2026-10/2026-10-19T162634Z-authoring-s3-component-constraints-diagnostics-and-inventory-64aacf18a3af432584d306af27d32eb3.md)
+owns numerical cohorts, commands, run identities, review results and execution limits.
 
 ## Acceptance And Ergonomics Criteria
 
