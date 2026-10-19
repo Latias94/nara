@@ -259,14 +259,15 @@ pub mod advanced_prelude {
     pub use crate::prelude::*;
     pub use nara_app::{
         AppExitRequests, AppFrameOutcome, EditedPluginGroup, FixedTimeError, PluginCategory,
-        PluginConfigurationFingerprint, PluginDeclaration, PluginDefinition, PluginDefinitionId,
-        PluginDefinitionKey, PluginFailure, PluginFailureReport, PluginGroupBuilder, PluginGroupId,
-        PluginHook, PluginHookMutation, PluginId, PluginInstantiationError, PluginLifecycleState,
-        PluginPlan, PluginPlanEntry, PluginPlanError, PluginPlanFingerprint, PluginPrepareError,
-        PluginPrepareFailure, PluginProductCapability, PluginSchemaProviderId,
-        PluginShutdownContext, PluginShutdownError, PluginShutdownObligationId, PluginSlot,
-        PluginSlotId, PluginSlotPresence, RenderTime, ResolvedPluginGroup, RuntimeFrameStatus,
-        SealedApp, TimeFrameError, TimeFrameResource, TimeSettingsError,
+        PluginCommitError, PluginConfigurationFingerprint, PluginDeclaration, PluginDefinition,
+        PluginDefinitionId, PluginDefinitionKey, PluginDomainError, PluginDomainErrorError,
+        PluginFailure, PluginFailureReport, PluginGroupBuilder, PluginGroupId, PluginHook,
+        PluginHookMutation, PluginId, PluginInstantiationError, PluginLifecycleState, PluginPlan,
+        PluginPlanEntry, PluginPlanError, PluginPlanFingerprint, PluginPrepareError,
+        PluginProductCapability, PluginSchemaProviderId, PluginShutdownContext,
+        PluginShutdownError, PluginShutdownObligationId, PluginSlot, PluginSlotId,
+        PluginSlotPresence, RenderTime, ResolvedPluginGroup, RuntimeFrameStatus, SealedApp,
+        TimeFrameError, TimeFrameResource, TimeSettingsError,
     };
     pub use nara_asset::{
         ArtifactFormatVersion, ArtifactLabel, AssetDatabaseError, AssetDependencyGraph, AssetError,

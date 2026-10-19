@@ -19,11 +19,12 @@ use nara::{
     ProductConfiguration, ProductRecipe,
     app::{
         App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
-        PluginDefinitionId, PluginError, PluginId, PluginShutdownContext,
+        PluginDefinitionId, PluginDomainError, PluginError, PluginId, PluginShutdownContext,
         PluginShutdownObligationId, RuntimeCloseContext, RuntimeCloseParticipant,
         RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress,
         StartupStage,
     },
+    diagnostic::{DiagnosticReport, DiagnosticValueRef},
     ecs::{Commands, Query, Res, Resource, schedule::IntoScheduleConfigs},
     project_host::{
         EditorGameViewBridgeFailure, EditorGameViewCompletion, EditorProjectSession,
@@ -278,10 +279,12 @@ impl Plugin for BuildFailurePlugin {
     }
 
     fn build(&self, _app: &mut App) -> Result<(), PluginError> {
-        Err(PluginError::SetupFailed {
-            plugin: BUILD_FAILURE_PLUGIN_ID,
-            message: "editor Host failure probe".to_owned(),
-        })
+        Err(PluginDomainError::new(
+            "demo.editor.build-unavailable",
+            "Editor plugin cannot complete this operation",
+        )
+        .unwrap()
+        .into())
     }
 }
 
@@ -298,10 +301,42 @@ impl Plugin for ShutdownFailurePlugin {
     }
 
     fn shutdown(&self, _context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
-        Err(PluginError::SetupFailed {
-            plugin: SHUTDOWN_FAILURE_PLUGIN_ID,
-            message: "editor shutdown failure probe".to_owned(),
-        })
+        Err(PluginDomainError::new(
+            "demo.editor.shutdown-unavailable",
+            "Editor plugin cannot complete this operation",
+        )
+        .unwrap()
+        .into())
+    }
+}
+
+fn assert_editor_plugin_domain(
+    report: &DiagnosticReport,
+    code: &str,
+    plugin: PluginId,
+    hook: &str,
+    context: &str,
+) {
+    let diagnostic = report
+        .iter()
+        .find(|diagnostic| diagnostic.code().as_str() == code)
+        .unwrap_or_else(|| panic!("missing plugin domain diagnostic: {report:#?}"));
+    assert_eq!(
+        diagnostic.summary().as_str(),
+        "Editor plugin cannot complete this operation"
+    );
+    for (key, value) in [
+        ("plugin", plugin.as_str()),
+        ("hook", hook),
+        ("project-context-code", context),
+    ] {
+        assert!(
+            diagnostic.fields().iter().any(|field| {
+                field.key().as_str() == key
+                    && field.value() == DiagnosticValueRef::Identifier(value)
+            }),
+            "missing {key}={value} in {diagnostic:#?}"
+        );
     }
 }
 
@@ -1980,6 +2015,9 @@ fn terminal_shutdown_failure_prevents_restart_from_reporting_success() {
     let intent = TrustedCompiledEditorProjectIntent::new().with_recipe(recipe);
     let mut editor =
         EditorProjectSession::open_trusted_compiled(project.root_capability(), intent).unwrap();
+    let frame = editor.current_frame();
+    let document = frame.workspace().active_document.unwrap();
+    let original_revision = frame.workspace().scene(document).unwrap().revision;
     assert_eq!(
         editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
@@ -1999,6 +2037,111 @@ fn terminal_shutdown_failure_prevents_restart_from_reporting_success() {
         Some(EditorPlayOperationResult::Failed {
             operation: EditorPlayOperation::Restart,
             failure: EditorPlayFailure::Close,
+        })
+    ));
+    assert_editor_plugin_domain(
+        editor.current_frame().diagnostics(),
+        "demo.editor.shutdown-unavailable",
+        SHUTDOWN_FAILURE_PLUGIN_ID,
+        "shutdown",
+        "project.run.cleanup-plugin-shutdown",
+    );
+    assert_eq!(
+        editor
+            .current_frame()
+            .workspace()
+            .scene(document)
+            .unwrap()
+            .revision,
+        original_revision
+    );
+    for _ in 0..3 {
+        editor.drive_editor_frame(Duration::ZERO);
+        assert_eq!(
+            editor.current_frame().play().state(),
+            EditorPlayState::Empty
+        );
+        assert_eq!(editor.current_frame().play().generation(), None);
+        assert!(matches!(
+            editor.current_frame().play().result(),
+            Some(EditorPlayOperationResult::Failed {
+                operation: EditorPlayOperation::Restart,
+                failure: EditorPlayFailure::Close,
+            })
+        ));
+    }
+}
+
+#[test]
+fn shutdown_domain_failure_is_visible_once_while_physical_close_waits() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let release = Arc::new(AtomicBool::new(false));
+    let recipe = ProductRecipe::new()
+        .add_plugin::<ShutdownFailurePlugin>()
+        .unwrap();
+    let intent = TrustedCompiledEditorProjectIntent::new()
+        .with_recipe(recipe)
+        .with_cleanup_timeout(Duration::ZERO);
+    let mut editor = open_trusted_compiled_editor_with_probe(
+        project.root_capability(),
+        intent,
+        RuntimeProbe::new(delayed_close_definition(Arc::clone(&release))),
+    )
+    .unwrap();
+    assert_eq!(
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
+        EditorPlayRequestResult::Accepted
+    );
+    drive_until(&mut editor, EditorPlayState::Running, 32);
+    let generation = editor.current_frame().play().generation();
+    assert_eq!(
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Stop),
+        EditorPlayRequestResult::Accepted
+    );
+    drive_until(&mut editor, EditorPlayState::CloseIncomplete, 32);
+    assert_eq!(editor.current_frame().play().generation(), generation);
+    assert_editor_plugin_domain(
+        editor.current_frame().diagnostics(),
+        "demo.editor.shutdown-unavailable",
+        SHUTDOWN_FAILURE_PLUGIN_ID,
+        "shutdown",
+        "project.run.cleanup-plugin-shutdown",
+    );
+    let occurrences = |editor: &EditorProjectSession| {
+        editor
+            .current_frame()
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.code().as_str() == "demo.editor.shutdown-unavailable")
+            .count()
+    };
+    assert_eq!(occurrences(&editor), 1);
+    for _ in 0..3 {
+        editor.drive_editor_frame(Duration::ZERO);
+    }
+    assert_eq!(occurrences(&editor), 1);
+    assert_eq!(
+        editor_driver::request_play(&mut editor, EditorPlayCommand::RetryClose),
+        EditorPlayRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    drive_until(&mut editor, EditorPlayState::CloseIncomplete, 32);
+    assert_eq!(occurrences(&editor), 1);
+    release.store(true, Ordering::Release);
+    assert_eq!(
+        editor_driver::request_play(&mut editor, EditorPlayCommand::RetryClose),
+        EditorPlayRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    drive_retryable_close_until_empty(&mut editor, 32);
+    assert_eq!(occurrences(&editor), 1);
+    assert_eq!(editor.current_frame().play().generation(), None);
+    assert!(matches!(
+        editor.current_frame().play().result(),
+        Some(EditorPlayOperationResult::Failed {
+            failure: EditorPlayFailure::Close,
+            ..
         })
     ));
 }
@@ -2079,7 +2222,9 @@ fn failed_start_retains_retirement_owner_until_retry_completes() {
         RuntimeProbe::new(delayed_close_definition(Arc::clone(&release))),
     )
     .unwrap();
-    let document = editor.current_frame().workspace().active_document.unwrap();
+    let frame = editor.current_frame();
+    let document = frame.workspace().active_document.unwrap();
+    let original_revision = frame.workspace().scene(document).unwrap().revision;
     assert_eq!(
         editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
@@ -2101,6 +2246,27 @@ fn failed_start_retains_retirement_owner_until_retry_completes() {
     );
     assert!(editor.current_frame().workspace().scene(document).is_some());
     assert_eq!(editor.current_frame().play().generation(), None);
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    assert!(matches!(
+        editor.take_game_view_candidate(),
+        Err(EditorGameViewBridgeFailure::RuntimeUnavailable)
+    ));
+    assert_editor_plugin_domain(
+        editor.current_frame().diagnostics(),
+        "demo.editor.build-unavailable",
+        BUILD_FAILURE_PLUGIN_ID,
+        "build",
+        "project.run.plugin-hook-failed",
+    );
+    assert_eq!(
+        editor
+            .current_frame()
+            .workspace()
+            .scene(document)
+            .unwrap()
+            .revision,
+        original_revision
+    );
 
     release.store(true, Ordering::Release);
     assert_eq!(
@@ -2117,6 +2283,22 @@ fn failed_start_retains_retirement_owner_until_retry_completes() {
             ..
         })
     ));
+    assert_editor_plugin_domain(
+        editor.current_frame().diagnostics(),
+        "demo.editor.build-unavailable",
+        BUILD_FAILURE_PLUGIN_ID,
+        "build",
+        "project.run.plugin-hook-failed",
+    );
+    assert_eq!(
+        editor
+            .current_frame()
+            .workspace()
+            .scene(document)
+            .unwrap()
+            .revision,
+        original_revision
+    );
 }
 
 #[test]

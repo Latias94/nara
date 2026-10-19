@@ -642,7 +642,7 @@ impl Plugin for ReentrantProductRecipePlugin {
         };
         assert!(matches!(
             error,
-            AddPluginsError::Plugin(PluginError::HookMutationForbidden {
+            AddPluginsError::Plugin(ref failure) if matches!(failure.error(), PluginError::HookMutationForbidden {
                 plugin: TEST_REENTRANT_PRODUCT_RECIPE_PLUGIN_ID,
                 hook: PluginHook::Build,
                 mutation: PluginHookMutation::PluginMembership,
@@ -849,7 +849,7 @@ fn schema_contribution_rejects_divergent_plugin_receipts_in_direct_and_file_back
     };
     assert!(matches!(
         direct_error,
-        AddPluginsError::Plugin(PluginError::ComponentRegistrationFailed {
+        AddPluginsError::Plugin(ref failure) if matches!(failure.error(), PluginError::ComponentRegistrationFailed {
             plugin: TEST_DIVERGENT_SCHEMA_PLUGIN_ID,
             ..
         })
@@ -1358,20 +1358,23 @@ fn validation_rejection_and_panic_have_direct_and_file_backed_parity() {
         else {
             panic!("rejecting schema validation unexpectedly admitted the direct App");
         };
+        let AddPluginsError::Plugin(failure) = direct_error else {
+            panic!("schema validation must fail during plugin commit");
+        };
         assert!(matches!(
-            (direct_error, panics),
+            (failure.error(), panics),
             (
-                AddPluginsError::Plugin(PluginError::ComponentRegistrationFailed {
+                PluginError::ComponentRegistrationFailed {
                     plugin: TEST_SCHEMA_PLUGIN_ID,
                     ..
-                }),
-                false,
+                },
+                false
             ) | (
-                AddPluginsError::Plugin(PluginError::HookPanicked {
+                PluginError::HookPanicked {
                     plugin: TEST_SCHEMA_PLUGIN_ID,
-                    hook: PluginHook::Build,
-                }),
-                true,
+                    hook: PluginHook::Build
+                },
+                true
             )
         ));
         assert_eq!(COUNTED_PROVIDER_VALIDATIONS.load(Ordering::SeqCst), 1);
@@ -1489,7 +1492,7 @@ fn product_recipe_app_input_preserves_hook_time_sticky_poison() {
 
     assert!(matches!(
         error,
-        AddPluginsError::Plugin(PluginError::HookMutationForbidden {
+        AddPluginsError::Plugin(ref failure) if matches!(failure.error(), PluginError::HookMutationForbidden {
             plugin: TEST_REENTRANT_PRODUCT_RECIPE_PLUGIN_ID,
             hook: PluginHook::Build,
             mutation: PluginHookMutation::PluginMembership,

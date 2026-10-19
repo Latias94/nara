@@ -15,8 +15,8 @@ use crate::{
 };
 
 use super::{
-    Plugin, PluginDeclaration, PluginError, PluginGroupId, PluginId, PluginSchemaProviderId,
-    PluginSlotId,
+    Plugin, PluginCommitError, PluginDeclaration, PluginError, PluginFailure, PluginFailureReport,
+    PluginGroupId, PluginId, PluginSchemaProviderId, PluginSlotId,
     definition::{PluginDefinition, PluginDefinitionKey, PluginPrepareError},
     fingerprint::{
         FingerprintEncoder, PluginPlanFingerprint, encode_definition, encode_edit, fingerprint_plan,
@@ -314,6 +314,10 @@ impl PluginPlan {
     }
 
     /// Freezes a replayable definition for advanced Host composition.
+    ///
+    /// This convenience projects failure into a raw error and drops its retained owner, losing
+    /// engine-observed invocation context and borrowed cleanup evidence. Use
+    /// [`Self::instantiate_retained`] when failures must remain inspectable or cleanup retryable.
     #[doc(hidden)]
     pub fn instantiate(&self) -> Result<SealedApp, PluginInstantiationError> {
         self.instantiate_retained()
@@ -337,13 +341,18 @@ impl PluginPlan {
             Err(error) => {
                 return Err(RetainedPluginInstantiationFailure::new(
                     error.into(),
+                    None,
                     RuntimePreparationRetirement::complete(),
                 ));
             }
         };
         self.commit_and_seal(App::new(), prepared, close_policy)
             .map_err(|failure| {
-                RetainedPluginInstantiationFailure::new(failure.error.into(), failure.retirement)
+                RetainedPluginInstantiationFailure::new(
+                    failure.error.into(),
+                    failure.failure,
+                    failure.retirement,
+                )
             })
     }
 
@@ -367,19 +376,26 @@ impl PluginPlan {
             Err(error) => {
                 return Err(RuntimeConstructionFailure::plugin(
                     error.into(),
+                    None,
                     RuntimePreparationRetirement::from_reserved_app(app, reservation, close_policy),
                 ));
             }
         };
-        if let Err(error) = app.commit_plugin_batch(self.commit_batch(prepared)) {
+        if let Err(failure) = app.commit_plugin_batch(self.commit_batch(prepared)) {
             return Err(RuntimeConstructionFailure::plugin(
-                error.into(),
+                failure.error.into(),
+                failure.failure,
                 RuntimePreparationRetirement::from_reserved_app(app, reservation, close_policy),
             ));
         }
         if let Err(error) = app.seal_internal() {
+            let failure = app
+                .plugin_failure_report()
+                .and_then(PluginFailureReport::primary)
+                .cloned();
             return Err(RuntimeConstructionFailure::plugin(
                 error.into(),
+                failure,
                 RuntimePreparationRetirement::from_reserved_app(app, reservation, close_policy),
             ));
         }
@@ -408,15 +424,21 @@ impl PluginPlan {
         prepared: Vec<Arc<dyn Plugin>>,
         close_policy: RuntimeClosePolicy,
     ) -> Result<SealedApp, PreparedAppFailure> {
-        if let Err(error) = app.commit_plugin_batch(self.commit_batch(prepared)) {
+        if let Err(failure) = app.commit_plugin_batch(self.commit_batch(prepared)) {
             return Err(PreparedAppFailure {
-                error,
+                error: failure.error,
+                failure: failure.failure,
                 retirement: RuntimePreparationRetirement::from_app(app, close_policy),
             });
         }
         if let Err(error) = app.seal_internal() {
+            let failure = app
+                .plugin_failure_report()
+                .and_then(PluginFailureReport::primary)
+                .cloned();
             return Err(PreparedAppFailure {
                 error,
+                failure,
                 retirement: RuntimePreparationRetirement::from_app(app, close_policy),
             });
         }
@@ -443,6 +465,7 @@ impl PluginPlan {
 
 struct PreparedAppFailure {
     error: PluginError,
+    failure: Option<PluginFailure>,
     retirement: RuntimePreparationRetirement,
 }
 
@@ -469,17 +492,49 @@ impl PluginInstantiationError {
 #[must_use = "plugin instantiation failures may retain unfinished cleanup authority"]
 pub struct RetainedPluginInstantiationFailure {
     error: PluginInstantiationError,
+    unreported_failure: Option<PluginFailure>,
     retirement: RuntimePreparationRetirement,
 }
 
 impl RetainedPluginInstantiationFailure {
-    fn new(error: PluginInstantiationError, retirement: RuntimePreparationRetirement) -> Self {
-        Self { error, retirement }
+    fn new(
+        error: PluginInstantiationError,
+        failure: Option<PluginFailure>,
+        retirement: RuntimePreparationRetirement,
+    ) -> Self {
+        let unreported_failure = if retirement
+            .plugin_failure_report()
+            .and_then(PluginFailureReport::primary)
+            .is_none()
+        {
+            failure
+        } else {
+            None
+        };
+        Self {
+            error,
+            unreported_failure,
+            retirement,
+        }
     }
 
     #[must_use]
     pub const fn error(&self) -> &PluginInstantiationError {
         &self.error
+    }
+
+    /// Actual invocation context, including a retryable first preflight rejection.
+    #[must_use]
+    pub fn plugin_failure(&self) -> Option<&PluginFailure> {
+        self.unreported_failure.as_ref().or_else(|| {
+            self.plugin_failure_report()
+                .and_then(PluginFailureReport::primary)
+        })
+    }
+
+    #[must_use]
+    pub fn plugin_failure_report(&self) -> Option<&PluginFailureReport> {
+        self.retirement.plugin_failure_report()
     }
 
     #[must_use]
@@ -496,6 +551,10 @@ impl RetainedPluginInstantiationFailure {
         self.retirement.drive_retirement()
     }
 
+    /// Projects the raw error, dropping retained ownership and losing invocation/cleanup evidence.
+    ///
+    /// Inspect [`Self::plugin_failure`] and [`Self::plugin_failure_report`] or drive retirement
+    /// before consuming the failure when that evidence or retryable cleanup is required.
     #[must_use]
     pub fn into_error(self) -> PluginInstantiationError {
         self.error
@@ -543,13 +602,28 @@ enum RuntimeConstructionCleanup {
 #[must_use = "runtime construction failures may retain unfinished cleanup authority"]
 pub struct RuntimeConstructionFailure {
     error: RuntimeConstructionError,
+    unreported_failure: Option<PluginFailure>,
     cleanup: RuntimeConstructionCleanup,
 }
 
 impl RuntimeConstructionFailure {
-    fn plugin(error: PluginInstantiationError, retirement: RuntimePreparationRetirement) -> Self {
+    fn plugin(
+        error: PluginInstantiationError,
+        failure: Option<PluginFailure>,
+        retirement: RuntimePreparationRetirement,
+    ) -> Self {
+        let unreported_failure = if retirement
+            .plugin_failure_report()
+            .and_then(PluginFailureReport::primary)
+            .is_none()
+        {
+            failure
+        } else {
+            None
+        };
         Self {
             error: RuntimeConstructionError::Plugin(error),
+            unreported_failure,
             cleanup: RuntimeConstructionCleanup::Plugin(retirement),
         }
     }
@@ -557,6 +631,7 @@ impl RuntimeConstructionFailure {
     fn admission(error: RuntimeAdmissionError, retirement: RuntimeAdmissionRetirement) -> Self {
         Self {
             error: RuntimeConstructionError::Admission(error),
+            unreported_failure: None,
             cleanup: RuntimeConstructionCleanup::Admission(retirement),
         }
     }
@@ -564,6 +639,23 @@ impl RuntimeConstructionFailure {
     #[must_use]
     pub const fn error(&self) -> &RuntimeConstructionError {
         &self.error
+    }
+
+    /// Actual invocation context, never inferred from a plugin's self-reported error fields.
+    #[must_use]
+    pub fn plugin_failure(&self) -> Option<&PluginFailure> {
+        self.unreported_failure.as_ref().or_else(|| {
+            self.plugin_failure_report()
+                .and_then(PluginFailureReport::primary)
+        })
+    }
+
+    #[must_use]
+    pub fn plugin_failure_report(&self) -> Option<&PluginFailureReport> {
+        match &self.cleanup {
+            RuntimeConstructionCleanup::Plugin(retirement) => retirement.plugin_failure_report(),
+            RuntimeConstructionCleanup::Admission(retirement) => retirement.plugin_failure_report(),
+        }
     }
 
     #[must_use]
@@ -619,7 +711,23 @@ pub enum AddPluginsError {
     #[error("plugin preparation failed: {0}")]
     Prepare(#[from] PluginPrepareError),
     #[error("plugin lifecycle commit failed: {0}")]
-    Plugin(#[from] PluginError),
+    Plugin(#[from] PluginCommitError),
+}
+
+impl From<PluginError> for AddPluginsError {
+    fn from(error: PluginError) -> Self {
+        Self::Plugin(error.into())
+    }
+}
+
+impl AddPluginsError {
+    #[must_use]
+    pub const fn plugin_failure(&self) -> Option<&PluginFailure> {
+        match self {
+            Self::Plugin(error) => error.plugin_failure(),
+            Self::Plan(_) | Self::Prepare(_) => None,
+        }
+    }
 }
 
 /// Frozen configuration retained by the first-party staged-admission bridge.
@@ -663,7 +771,14 @@ pub(crate) fn install_plugins<M>(
     app: &mut App,
     plugins: impl Plugins<M>,
 ) -> Result<(), AddPluginsError> {
-    app.reject_hook_composition_mutation()?;
+    app.reject_hook_composition_mutation().map_err(|error| {
+        PluginCommitError::recorded(
+            error,
+            app.plugin_failure_report()
+                .and_then(PluginFailureReport::primary)
+                .cloned(),
+        )
+    })?;
     let mut collection = PluginInputCollection::default();
     catch_unwind(AssertUnwindSafe(|| {
         sealed::Plugins::<M>::collect(plugins, &mut collection);

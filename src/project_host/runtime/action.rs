@@ -33,7 +33,8 @@ use super::{
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use super::{
-    attach_identifier, runtime_fault_diagnostic, runtime_fault_kind_id, single_diagnostic,
+    append_plugin_shutdown_diagnostics, attach_identifier, runtime_fault_diagnostic,
+    runtime_fault_kind_id, single_diagnostic,
 };
 use crate::ProductRecipe;
 
@@ -511,6 +512,10 @@ impl DesktopRun {
             runtime_state,
             &close_evidence,
             &mut self.diagnostics,
+        );
+        append_plugin_shutdown_diagnostics(
+            &mut self.diagnostics,
+            host.running_runtime_plugin_failure_report(),
         );
         if let Some(verification) = verification {
             match verification.outcome() {

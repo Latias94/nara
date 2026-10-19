@@ -39,8 +39,8 @@ fn seal_rejects_disabled_automatic_deferred_insertion() {
         .unwrap();
 
     assert_eq!(
-        app.seal().unwrap_err(),
-        PluginError::ScheduleCompatibility(
+        app.seal().unwrap_err().error(),
+        &PluginError::ScheduleCompatibility(
             ScheduleCompatibilityError::AutomaticDeferredInsertionDisabled {
                 schedule: CoreStage::FixedUpdate,
             }
@@ -60,8 +60,8 @@ fn seal_rejects_disabled_automatic_deferred_insertion_for_cleanup_anchor() {
         .unwrap();
 
     assert_eq!(
-        app.seal().unwrap_err(),
-        PluginError::ScheduleCompatibility(
+        app.seal().unwrap_err().error(),
+        &PluginError::ScheduleCompatibility(
             ScheduleCompatibilityError::AutomaticDeferredInsertionDisabled {
                 schedule: CoreStage::Cleanup,
             }
@@ -83,11 +83,11 @@ fn seal_rejects_invalid_public_anchor_graph_without_panicking() {
     assert!(sealed.is_ok(), "schedule validation panicked");
     let error = sealed.unwrap().unwrap_err();
     assert!(matches!(
-        error,
+        error.error(),
         PluginError::ScheduleGraph(ScheduleGraphError::BuildFailed {
             schedule,
             ..
-        }) if schedule == CoreStage::FixedUpdate.intern()
+        }) if *schedule == CoreStage::FixedUpdate.intern()
     ));
 }
 
@@ -114,11 +114,11 @@ fn seal_rejects_invalid_cleanup_anchor_graph_without_panicking() {
     assert!(sealed.is_ok(), "schedule validation panicked");
     let error = sealed.unwrap().unwrap_err();
     assert!(matches!(
-        error,
+        error.error(),
         PluginError::ScheduleGraph(ScheduleGraphError::BuildFailed {
             schedule,
             ..
-        }) if schedule == CoreStage::Cleanup.intern()
+        }) if *schedule == CoreStage::Cleanup.intern()
     ));
 }
 

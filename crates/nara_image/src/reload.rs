@@ -419,7 +419,11 @@ pub fn plugin(limits: ImageImportLimits) -> nara_app::PluginDefinition {
         canonical_configuration,
         move || {
             ImagePlugin::with_limits(limits).map_err(|_| {
-                nara_app::PluginPrepareFailure::new("nara.image.invalid-import-limits")
+                nara_app::PluginDomainError::new(
+                    "nara.image.invalid-import-limits",
+                    "Image import limits are invalid",
+                )
+                .expect("image preparation uses safe static failure facts")
             })
         },
     )

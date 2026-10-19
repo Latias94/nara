@@ -549,12 +549,13 @@ mod tests {
 
         assert!(matches!(
             error,
-            nara_app::AddPluginsError::Plugin(PluginError::ComponentRegistrationFailed {
+            nara_app::AddPluginsError::Plugin(ref failure) if matches!(failure.error(), PluginError::ComponentRegistrationFailed {
                 plugin,
                 component,
                 ..
-            }) if plugin == PluginId::new("nara.transform")
+            } if *plugin == PluginId::new("nara.transform")
                 && component == "nara.transform.Transform2d"
+            )
         ));
         assert_eq!(
             app.plugin_lifecycle_state(),

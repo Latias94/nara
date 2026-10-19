@@ -25,9 +25,10 @@ use std::fs::OpenOptions;
 
 use nara_app::{
     App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
-    PluginError, PluginId, PluginPrepareFailure, PluginShutdownContext, PluginShutdownObligationId,
-    RuntimeAdmissionReservation, RuntimeCloseContext, RuntimeCloseParticipant,
-    RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress, RuntimeFault,
+    PluginDomainError, PluginError, PluginId, PluginInstantiationError, PluginPrepareError,
+    PluginShutdownContext, PluginShutdownObligationId, RuntimeAdmissionReservation,
+    RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
+    RuntimeCloseParticipantId, RuntimeCloseProgress, RuntimeConstructionError, RuntimeFault,
     RuntimeFaultDetail, RuntimeFaultKind, RuntimeFaultReporter, StartupStage,
     drive_runtime_quarantine, runtime_quarantine_status,
 };
@@ -6108,7 +6109,7 @@ fn every_start_phase_failure_keeps_runtime_invisible_and_closes_acquired_owners_
     assert_start_phase_failure(
         &project,
         prepare_failure_definition(),
-        "project.run.plugin-prepare-failed",
+        "nara.test.project-prepare-failure",
         0,
     );
     assert_start_phase_failure(
@@ -6241,31 +6242,37 @@ fn public_failure_diagnostics_preserve_safe_phase_and_owner_identity() {
         Some(CLOSE_PROBE_PLUGIN_ID.as_str())
     );
 
-    let preparation = runtime_construction_failure_report(&RuntimeConstructionError::Plugin(
-        PluginInstantiationError::Prepare(PluginPrepareError::Failed {
-            plugin: PREPARE_FAILURE_PLUGIN_ID,
-            code: "nara.test.prepare-rejected",
-        }),
-    ));
+    let preparation = runtime_construction_failure_report(
+        &RuntimeConstructionError::Plugin(PluginInstantiationError::Prepare(
+            PluginPrepareError::Failed {
+                plugin: PREPARE_FAILURE_PLUGIN_ID,
+                source: PluginDomainError::new(
+                    "nara.test.prepare-rejected",
+                    "Plugin preparation was rejected",
+                )
+                .unwrap(),
+            },
+        )),
+        None,
+    );
     assert_eq!(
-        identifier_field(&preparation, "project.run.plugin-prepare-failed", "plugin"),
+        identifier_field(&preparation, "nara.test.prepare-rejected", "plugin"),
         Some(PREPARE_FAILURE_PLUGIN_ID.as_str())
     );
     assert_eq!(
-        identifier_field(
-            &preparation,
-            "project.run.plugin-prepare-failed",
-            "failure-code"
-        ),
+        identifier_field(&preparation, "nara.test.prepare-rejected", "failure-code"),
         Some("nara.test.prepare-rejected")
     );
 
-    let hook = runtime_construction_failure_report(&RuntimeConstructionError::Plugin(
-        PluginInstantiationError::Plugin(PluginError::HookPanicked {
-            plugin: FINISH_FAILURE_PLUGIN_ID,
-            hook: nara_app::PluginHook::Finish,
-        }),
-    ));
+    let hook = runtime_construction_failure_report(
+        &RuntimeConstructionError::Plugin(PluginInstantiationError::Plugin(
+            PluginError::HookPanicked {
+                plugin: FINISH_FAILURE_PLUGIN_ID,
+                hook: nara_app::PluginHook::Finish,
+            },
+        )),
+        None,
+    );
     assert_eq!(
         identifier_field(&hook, "project.run.plugin-hook-failed", "plugin"),
         Some(FINISH_FAILURE_PLUGIN_ID.as_str())
@@ -6476,9 +6483,11 @@ fn prepare_failure_definition() -> PluginDefinition {
         PREPARE_FAILURE_DEFINITION_ID,
         b"project-prepare-failure-v1",
         || {
-            Err(PluginPrepareFailure::new(
+            Err(PluginDomainError::new(
                 "nara.test.project-prepare-failure",
-            ))
+                "Project plugin preparation failed",
+            )
+            .unwrap())
         },
     )
 }

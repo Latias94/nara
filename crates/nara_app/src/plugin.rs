@@ -6,14 +6,16 @@ use thiserror::Error;
 use crate::{App, RuntimeCloseParticipantId, ScheduleCompatibilityError, ScheduleGraphError};
 
 mod definition;
+mod domain_error;
 mod fingerprint;
 mod group;
 mod resolve;
 
 pub use definition::{
     PluginConfigurationFingerprint, PluginDefinition, PluginDefinitionId, PluginDefinitionKey,
-    PluginPrepareError, PluginPrepareFailure,
+    PluginPrepareError,
 };
+pub use domain_error::{PluginDomainError, PluginDomainErrorError};
 pub use fingerprint::PluginPlanFingerprint;
 pub use group::{
     EditedPluginGroup, EditedPluginGroupMarker, PluginGroup, PluginGroupBuilder, PluginSlot,
@@ -325,6 +327,8 @@ pub trait Plugin: Send + Sync + 'static {
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum PluginError {
+    #[error(transparent)]
+    Domain(#[from] PluginDomainError),
     #[error("plugin hook {plugin} attempted forbidden {mutation} mutation during {hook}")]
     HookMutationForbidden {
         plugin: PluginId,
@@ -390,6 +394,19 @@ pub enum PluginError {
 }
 
 impl PluginError {
+    /// Returns safe domain facts, including through a committed preflight rejection.
+    #[must_use]
+    pub fn domain_error(&self) -> Option<&PluginDomainError> {
+        let mut error = self;
+        loop {
+            match error {
+                Self::Domain(domain) => return Some(domain),
+                Self::CommittedPreflightRejected { source, .. } => error = source,
+                _ => return None,
+            }
+        }
+    }
+
     #[must_use]
     pub fn component_registration(
         plugin: PluginId,
@@ -420,5 +437,49 @@ pub(crate) fn failure(plugin: PluginId, hook: PluginHook, error: PluginError) ->
         plugin,
         hook,
         error,
+    }
+}
+
+/// A rejected plugin commit with engine-observed invocation context when a hook ran.
+///
+/// A first typed preflight rejection remains retryable and need not create an App failure report.
+/// Its returned error still identifies the hook invocation that rejected the attempt.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[error("{error}")]
+pub struct PluginCommitError {
+    #[source]
+    error: PluginError,
+    failure: Option<PluginFailure>,
+}
+
+impl From<PluginError> for PluginCommitError {
+    fn from(error: PluginError) -> Self {
+        Self {
+            error,
+            failure: None,
+        }
+    }
+}
+
+impl PluginCommitError {
+    #[must_use]
+    pub const fn error(&self) -> &PluginError {
+        &self.error
+    }
+
+    #[must_use]
+    pub const fn plugin_failure(&self) -> Option<&PluginFailure> {
+        self.failure.as_ref()
+    }
+
+    pub(crate) fn recorded(error: PluginError, failure: Option<PluginFailure>) -> Self {
+        Self { error, failure }
+    }
+
+    pub(crate) fn invoked(plugin: PluginId, hook: PluginHook, error: PluginError) -> Self {
+        Self {
+            failure: Some(failure(plugin, hook, error.clone())),
+            error,
+        }
     }
 }

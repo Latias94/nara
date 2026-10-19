@@ -1533,11 +1533,11 @@ mod tests {
         let error = app.seal().unwrap_err();
 
         assert!(matches!(
-            error,
+            error.error(),
             PluginError::ScheduleGraph(ScheduleGraphError::BuildFailed {
                 schedule,
                 ..
-            }) if schedule == CoreStage::FixedUpdate.intern()
+            }) if *schedule == CoreStage::FixedUpdate.intern()
         ));
     }
 

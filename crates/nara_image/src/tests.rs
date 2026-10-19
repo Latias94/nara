@@ -5227,9 +5227,9 @@ fn invalid_image_plugin_limits_fail_during_preparation() {
         Err(nara_app::PluginInstantiationError::Prepare(
             nara_app::PluginPrepareError::Failed {
                 plugin: IMAGE_PLUGIN_ID,
-                code: "nara.image.invalid-import-limits",
+                source,
             }
-        ))
+        )) if source.code() == "nara.image.invalid-import-limits"
     ));
 }
 

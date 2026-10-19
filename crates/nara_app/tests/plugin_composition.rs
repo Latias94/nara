@@ -8,13 +8,13 @@ use std::{
 
 use nara_app::{
     AddPluginsError, App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
-    PluginDefinitionId, PluginError, PluginGroup, PluginGroupBuilder, PluginGroupId, PluginHook,
-    PluginHookMutation, PluginId, PluginInstantiationError, PluginLifecycleState, PluginPlan,
-    PluginPlanError, PluginPrepareFailure, PluginProductCapability, PluginShutdownContext,
-    PluginShutdownObligationId, PluginSlot, PluginSlotId, RuntimeAdmissionReservation,
-    RuntimeCandidateRetirementState, RuntimeCloseContext, RuntimeCloseParticipant,
-    RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeClosePolicy,
-    RuntimeCloseProgress, RuntimeConstructionError, RuntimeObligationLedger,
+    PluginDefinitionId, PluginDomainError, PluginError, PluginGroup, PluginGroupBuilder,
+    PluginGroupId, PluginHook, PluginHookMutation, PluginId, PluginInstantiationError,
+    PluginLifecycleState, PluginPlan, PluginPlanError, PluginProductCapability,
+    PluginShutdownContext, PluginShutdownObligationId, PluginSlot, PluginSlotId,
+    RuntimeAdmissionReservation, RuntimeCandidateRetirementState, RuntimeCloseContext,
+    RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
+    RuntimeClosePolicy, RuntimeCloseProgress, RuntimeConstructionError, RuntimeObligationLedger,
 };
 use nara_ecs::Resource;
 
@@ -886,7 +886,10 @@ fn plan_failures_happen_before_app_mutation_and_are_retryable() {
 fn preparation_failure_creates_no_app_and_a_corrected_plan_still_instantiates() {
     let failing =
         PluginDefinition::fallible::<CorePlugin, _>(CORE_POLICY_A, b"core-config-v1", || {
-            Err(PluginPrepareFailure::new("test.prepare.rejected"))
+            Err(
+                PluginDomainError::new("test.prepare.rejected", "Plugin preparation was rejected")
+                    .unwrap(),
+            )
         });
     let plan = PluginPlan::resolve(failing).unwrap();
 
@@ -1295,7 +1298,13 @@ fn runtime_prepare_failure_retains_the_host_owner_for_exactly_once_retry() {
     let failing = PluginDefinition::fallible::<CorePlugin, _>(
         CORE_POLICY_A,
         b"runtime-prepare-failure-v1",
-        || Err(PluginPrepareFailure::new("test.runtime.prepare.rejected")),
+        || {
+            Err(PluginDomainError::new(
+                "test.runtime.prepare.rejected",
+                "Runtime preparation was rejected",
+            )
+            .unwrap())
+        },
     );
     let plan = PluginPlan::resolve(failing).unwrap();
 
@@ -1449,11 +1458,11 @@ fn ignored_hook_plugin_and_group_mutation_are_sticky_failures() {
         };
         assert!(matches!(
             error,
-            AddPluginsError::Plugin(PluginError::HookMutationForbidden {
+            AddPluginsError::Plugin(error) if matches!(error.error(), PluginError::HookMutationForbidden {
                 plugin: VIOLATOR_ID,
                 hook: PluginHook::Build,
                 mutation,
-            }) if mutation == expected_mutation
+            } if *mutation == expected_mutation)
         ));
         assert!(app.plugin_failure_report().is_some());
         assert!(!app.has_plugin(OPTIONAL_ID));
@@ -1498,12 +1507,12 @@ fn ignored_finish_hook_composition_mutation_is_sticky() {
             .unwrap();
         let error = app.seal().unwrap_err();
         assert!(matches!(
-            error,
+            error.error(),
             PluginError::HookMutationForbidden {
                 plugin: VIOLATOR_ID,
                 hook: PluginHook::Finish,
                 mutation,
-            } if mutation == expected_mutation
+            } if *mutation == expected_mutation
         ));
     }
 }
@@ -1533,8 +1542,8 @@ fn direct_app_sealing_requires_declared_shutdown_obligations() {
         .add_plugins(ObligationPlugin { register: false })
         .unwrap();
     assert_eq!(
-        missing.seal().unwrap_err(),
-        PluginError::MissingShutdownObligation {
+        missing.seal().unwrap_err().error(),
+        &PluginError::MissingShutdownObligation {
             plugin: OBLIGATION_PLUGIN_ID,
             obligation: TEST_OBLIGATION,
         }
@@ -1612,7 +1621,7 @@ fn later_preflight_rejection_retires_the_committed_prefix_once() {
 
     assert!(matches!(
         error,
-        AddPluginsError::Plugin(PluginError::CommittedPreflightRejected {
+        AddPluginsError::Plugin(error) if matches!(error.error(), PluginError::CommittedPreflightRejected {
             plugin: PREFLIGHT_PLUGIN_ID,
             ..
         })
@@ -1637,7 +1646,15 @@ fn first_preflight_rejection_is_retryable_but_a_panic_poison_is_sticky() {
     else {
         panic!("typed preflight rejection must stay in the plugin phase");
     };
-    assert!(matches!(rejection, PluginError::SetupFailed { .. }));
+    assert!(matches!(rejection.error(), PluginError::SetupFailed { .. }));
+    assert_eq!(
+        rejection.plugin_failure().unwrap().plugin(),
+        PREFLIGHT_PLUGIN_ID
+    );
+    assert_eq!(
+        rejection.plugin_failure().unwrap().hook(),
+        PluginHook::Preflight
+    );
     assert_eq!(
         retryable.plugin_lifecycle_state(),
         PluginLifecycleState::Configuring
@@ -1655,8 +1672,8 @@ fn first_preflight_rejection_is_retryable_but_a_panic_poison_is_sticky() {
         panic!("preflight panic must be captured in the plugin phase");
     };
     assert_eq!(
-        panic_error,
-        PluginError::HookPanicked {
+        panic_error.error(),
+        &PluginError::HookPanicked {
             plugin: PREFLIGHT_PLUGIN_ID,
             hook: PluginHook::Preflight,
         }
@@ -1842,7 +1859,10 @@ fn committed_hook_failures_shutdown_immediately_and_preserve_typed_reports() {
     else {
         panic!("build rejection must stay in the plugin phase");
     };
-    assert!(matches!(build_error, PluginError::SetupFailed { .. }));
+    assert!(matches!(
+        build_error.error(),
+        PluginError::SetupFailed { .. }
+    ));
     assert_eq!(build_shutdowns.load(Ordering::SeqCst), 1);
     assert_eq!(
         build_app.plugin_lifecycle_state(),
@@ -1858,7 +1878,7 @@ fn committed_hook_failures_shutdown_immediately_and_preserve_typed_reports() {
         .add_plugins(FailingFinishPlugin(Arc::clone(&finish_shutdowns)))
         .unwrap();
     assert!(matches!(
-        finish_app.seal().unwrap_err(),
+        finish_app.seal().unwrap_err().error(),
         PluginError::SetupFailed { .. }
     ));
     assert_eq!(finish_shutdowns.load(Ordering::SeqCst), 1);

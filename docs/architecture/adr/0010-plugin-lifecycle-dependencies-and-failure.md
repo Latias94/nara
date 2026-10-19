@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-17
+**Last Revised**: 2026-10-20
 **Refines**: ADR 0003
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0046:
 Plugin Metadata and Default Plugin Groups
@@ -38,6 +38,22 @@ explicit shutdown remain available. Shutdown of a poisoned app returns to `Poiso
 `shutdown_complete = true`; it never makes the app runnable again.
 
 ### Hook Classification
+
+Plugin-owned expected failures carry `PluginDomainError`: bounded, checked, source-authored static
+code and summary. Factory preparation and lifecycle hooks use the same facts; preparation remains
+distinct from a committed hook. App reuses its runtime-fault metadata validation without depending
+on the diagnostic runtime. Arbitrary error messages remain private fallback detail.
+
+The framework records actual plugin and hook identity at invocation. A failure's self-reported
+legacy plugin identity cannot replace that context. Retained construction failures preserve even
+the first retryable preflight rejection without poisoning App or installing the rejecting plugin.
+Direct installation and consuming `App::seal` return `PluginCommitError` with this invocation
+context; non-hook admission failures retain no fabricated hook. An explicitly lossy advanced
+error projection does not promise the retained owner's invocation or cleanup view.
+Later preflight wrappers retain their source's domain identity; the original poison-causing
+failure and secondary shutdown failures remain separate. Existing owners expose borrowed reports
+for product adapters; close evidence does not duplicate raw error strings or become a second
+failure collection. Static diagnostic facts do not alter retry, publication or shutdown policy.
 
 - `Plugin::declaration()` is a static, type-owned declaration available without constructing an
   instance. Replayable definitions capture it before factory invocation; direct callers may have

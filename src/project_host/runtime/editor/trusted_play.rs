@@ -524,8 +524,29 @@ impl EditorProjectSession {
         let runtime_state = self
             .trusted_compiled()
             .and_then(|lane| lane.runtime_host.running_runtime_state());
+        let (close_failed, close_diagnostics) =
+            self.trusted_compiled_mut().map_or((false, None), |lane| {
+                let failed = lane
+                    .runtime_host
+                    .running_runtime_has_terminal_close_failure();
+                let generation = lane.runtime_host.running_runtime_generation();
+                if failed && generation != lane.reported_close_failure_generation {
+                    lane.reported_close_failure_generation = generation;
+                    (
+                        failed,
+                        lane.runtime_host.running_runtime_close_failure_report(),
+                    )
+                } else {
+                    (failed, None)
+                }
+            });
+        // Shutdown is terminal even while a separate physical close participant waits.
+        // Publish once for this generation, rather than on every frame or retry.
+        if let Some(diagnostics) = close_diagnostics {
+            self.diagnostics.extend(diagnostics);
+        }
         if runtime_state == Some(RuntimeState::Stopped) {
-            let (pending, control_failed, close_failure, generation) = {
+            let (pending, control_failed, generation) = {
                 let Some(lane) = self.trusted_compiled_mut() else {
                     return EditorRuntimeOwnerState::Empty;
                 };
@@ -536,27 +557,18 @@ impl EditorProjectSession {
                         Some(RuntimeControlStatus::Failed(_))
                     )
                 });
-                let close_failure = lane
-                    .runtime_host
-                    .running_runtime_close_evidence()
-                    .filter(super::super::close_evidence_has_terminal_failure);
                 let generation = lane.runtime_host.running_runtime_generation();
                 let released = lane.runtime_host.release_stopped_runtime();
                 debug_assert!(released);
-                (pending, control_failed, close_failure, generation)
+                (pending, control_failed, generation)
             };
             let operation = pending.map_or(EditorPlayOperation::Stop, |pending| pending.operation);
-            if control_failed || close_failure.is_some() {
+            if control_failed || close_failed {
                 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
                 {
                     if let Some(lane) = self.trusted_compiled_mut() {
                         lane.pending_step_presentation = None;
                     }
-                }
-                if let Some(evidence) = close_failure {
-                    let _ = self
-                        .diagnostics
-                        .extend(super::super::cleanup_failed_report(&evidence));
                 }
                 self.play_result = Some(EditorPlayOperationResult::Failed {
                     operation,

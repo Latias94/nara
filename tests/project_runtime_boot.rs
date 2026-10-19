@@ -34,13 +34,15 @@ use std::{
 };
 
 use nara::{
-    ProductRecipe,
+    ProductConfiguration, ProductRecipe,
     app::{
         App, AppExitRequests, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginCategory,
-        PluginDeclaration, PluginDefinition, PluginDefinitionId, PluginError, PluginId,
+        PluginDeclaration, PluginDefinition, PluginDefinitionId, PluginDomainError, PluginError,
+        PluginHook, PluginId, PluginPreflightContext, PluginShutdownContext,
         PluginShutdownObligationId, RuntimeCloseContext, RuntimeCloseParticipant,
         RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress,
     },
+    diagnostic::{DiagnosticReport, DiagnosticValueRef},
     ecs::{Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs},
     gameplay::{
         GAMEPLAY_COMMAND_PLUGIN_ID, GameplayCommandDraft, GameplayCommandIngressSource,
@@ -83,6 +85,111 @@ const STALLED_CLOSE_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(STALLED_CLOSE_PLUGIN_ID, PluginCategory::Service)
         .requires_plugins(STALLED_CLOSE_REQUIREMENTS)
         .shutdown_obligations(&[STALLED_CLOSE_OBLIGATION]);
+const FAILURE_PLUGIN_ID: PluginId = PluginId::new("nara.test.project-domain-failure");
+const FAILURE_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(FAILURE_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_plugins(&[BOOT_OUTCOME_PLUGIN_ID]);
+const PRIVATE_PLUGIN_CANARY: &str = "qvM7k2p8Nx4J";
+const PRIVATE_PLUGIN_PATH: &str = r"C:\Users\PrivateOwner\Documents\private-runtime-state.json";
+const FORGED_PLUGIN_ID: PluginId = PluginId::new("nara.test.forged-plugin");
+
+#[derive(Debug, Clone)]
+struct FailureConfiguration {
+    hook: PluginHook,
+    legacy: bool,
+    shutdowns: Arc<AtomicUsize>,
+}
+
+impl ProductConfiguration for FailureConfiguration {
+    fn write_canonical(&self, output: &mut Vec<u8>) {
+        output.extend_from_slice(b"project-domain-failure-v1");
+        output.push(match self.hook {
+            PluginHook::Preflight => 0,
+            PluginHook::Build => 1,
+            PluginHook::Finish => 2,
+            PluginHook::Shutdown => 3,
+        });
+        output.push(u8::from(self.legacy));
+    }
+}
+
+#[derive(Debug)]
+struct FailurePlugin(FailureConfiguration);
+
+impl FailurePlugin {
+    fn fail_at(&self, hook: PluginHook) -> Result<(), PluginError> {
+        // A build failure followed by a distinct shutdown failure must retain both facts.
+        if self.0.hook != hook
+            && !(self.0.hook == PluginHook::Build && hook == PluginHook::Shutdown)
+        {
+            return Ok(());
+        }
+        if self.0.legacy {
+            return Err(PluginError::SetupFailed {
+                plugin: FORGED_PLUGIN_ID,
+                message: format!("{PRIVATE_PLUGIN_CANARY}: {PRIVATE_PLUGIN_PATH}"),
+            });
+        }
+        Err(PluginDomainError::new(
+            domain_code(hook),
+            "Project plugin cannot complete this operation",
+        )
+        .unwrap()
+        .into())
+    }
+}
+
+impl Plugin for FailurePlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &FAILURE_DECLARATION
+    }
+
+    fn preflight(&self, _context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
+        self.fail_at(PluginHook::Preflight)
+    }
+
+    fn build(&self, _app: &mut App) -> Result<(), PluginError> {
+        self.fail_at(PluginHook::Build)
+    }
+
+    fn finish(&self, _app: &mut App) -> Result<(), PluginError> {
+        self.fail_at(PluginHook::Finish)
+    }
+
+    fn shutdown(&self, _context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
+        self.0.shutdowns.fetch_add(1, Ordering::SeqCst);
+        self.fail_at(PluginHook::Shutdown)
+    }
+}
+
+fn domain_code(hook: PluginHook) -> &'static str {
+    match hook {
+        PluginHook::Preflight => "demo.project.preflight-unavailable",
+        PluginHook::Build => "demo.project.build-unavailable",
+        PluginHook::Finish => "demo.project.finish-unavailable",
+        PluginHook::Shutdown => "demo.project.shutdown-unavailable",
+    }
+}
+
+fn assert_private_plugin_details_are_absent(report: &DiagnosticReport) {
+    for published in [
+        format!("{report:#?}"),
+        serde_json::to_string(report).unwrap(),
+    ] {
+        for private in [
+            PRIVATE_PLUGIN_CANARY,
+            PRIVATE_PLUGIN_PATH,
+            "PrivateOwner",
+            "private-runtime-state.json",
+            FORGED_PLUGIN_ID.as_str(),
+        ] {
+            assert!(
+                !published.contains(private),
+                "private plugin detail was published"
+            );
+        }
+    }
+}
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Resource)]
 struct BootOutcome {
@@ -329,6 +436,130 @@ where
         assert!(Instant::now() < deadline, "product cleanup did not finish");
         std::thread::yield_now();
     }
+}
+
+#[test]
+fn recipe_lifecycle_domain_failures_preserve_public_facts_through_terminal_cleanup() {
+    for hook in [
+        PluginHook::Preflight,
+        PluginHook::Build,
+        PluginHook::Finish,
+        PluginHook::Shutdown,
+    ] {
+        let project = TestProject::with_prefab_startup();
+        project.select_local_headless_profile();
+        let shutdowns = Arc::new(AtomicUsize::new(0));
+        let recipe = boot_recipe()
+            .add_configured_plugin(
+                FailureConfiguration {
+                    hook,
+                    legacy: false,
+                    shutdowns: Arc::clone(&shutdowns),
+                },
+                |configuration: &FailureConfiguration| FailurePlugin(configuration.clone()),
+            )
+            .unwrap();
+        let mut run: HeadlessRun<BootOutcome> = HeadlessRun::from_recipe(
+            project.root_capability(),
+            recipe,
+            NonZeroU32::new(1).unwrap(),
+            Vec::new(),
+        );
+
+        let report = execute_to_terminal(&mut run);
+
+        assert_eq!(report.outcome(), &HeadlessRunOutcome::Failed, "{report:#?}");
+        let diagnostics = report.diagnostics();
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code().as_str() == domain_code(hook))
+            .unwrap_or_else(|| panic!("missing {hook} domain failure: {report:#?}"));
+        assert_eq!(
+            diagnostic.summary().as_str(),
+            "Project plugin cannot complete this operation"
+        );
+        let context = if hook == PluginHook::Shutdown {
+            "project.run.cleanup-plugin-shutdown"
+        } else {
+            "project.run.plugin-hook-failed"
+        };
+        let hook_name = hook.to_string();
+        for (key, value) in [
+            ("plugin", FAILURE_PLUGIN_ID.as_str()),
+            ("hook", hook_name.as_str()),
+            ("project-context-code", context),
+        ] {
+            assert!(
+                diagnostic.fields().iter().any(|field| {
+                    field.key().as_str() == key
+                        && field.value() == DiagnosticValueRef::Identifier(value)
+                }),
+                "missing {key}={value} in {diagnostic:#?}"
+            );
+        }
+        assert_private_plugin_details_are_absent(diagnostics);
+        let completed_shutdowns = shutdowns.load(Ordering::SeqCst);
+        if hook == PluginHook::Build {
+            assert!(diagnostics.iter().any(|diagnostic| {
+                diagnostic.code().as_str() == domain_code(PluginHook::Shutdown)
+                    && diagnostic.fields().iter().any(|field| {
+                        field.key().as_str() == "hook"
+                            && field.value() == DiagnosticValueRef::Identifier("shutdown")
+                    })
+            }));
+        }
+        if hook != PluginHook::Preflight {
+            assert_eq!(completed_shutdowns, 1);
+        } else {
+            assert_eq!(completed_shutdowns, 0);
+        }
+
+        let repeated = run.execute_bounded();
+        assert_eq!(repeated.outcome(), report.outcome());
+        assert_eq!(repeated.diagnostics(), report.diagnostics());
+        assert_eq!(shutdowns.load(Ordering::SeqCst), completed_shutdowns);
+    }
+}
+
+#[test]
+fn recipe_legacy_failure_publishes_actual_hook_identity_without_dynamic_error_text() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let recipe = boot_recipe()
+        .add_configured_plugin(
+            FailureConfiguration {
+                hook: PluginHook::Build,
+                legacy: true,
+                shutdowns: Arc::new(AtomicUsize::new(0)),
+            },
+            |configuration: &FailureConfiguration| FailurePlugin(configuration.clone()),
+        )
+        .unwrap();
+    let mut run: HeadlessRun<BootOutcome> = HeadlessRun::from_recipe(
+        project.root_capability(),
+        recipe,
+        NonZeroU32::new(1).unwrap(),
+        Vec::new(),
+    );
+
+    let report = execute_to_terminal(&mut run);
+
+    assert_eq!(report.outcome(), &HeadlessRunOutcome::Failed, "{report:#?}");
+    let diagnostic = report
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code().as_str() == "project.run.plugin-hook-failed")
+        .unwrap();
+    for (key, value) in [("plugin", FAILURE_PLUGIN_ID.as_str()), ("hook", "build")] {
+        assert!(
+            diagnostic.fields().iter().any(|field| {
+                field.key().as_str() == key
+                    && field.value() == DiagnosticValueRef::Identifier(value)
+            }),
+            "missing {key}={value} in {diagnostic:#?}"
+        );
+    }
+    assert_private_plugin_details_are_absent(report.diagnostics());
 }
 
 #[test]

@@ -112,7 +112,7 @@ fn caller_owned_pools_remain_explicitly_shutdown_capable_after_app_poison() {
 
     assert!(matches!(
         error,
-        AddPluginsError::Plugin(PluginError::SetupFailed {
+        AddPluginsError::Plugin(ref failure) if matches!(failure.error(), PluginError::SetupFailed {
             plugin: FAILING_TASK_OWNER_PLUGIN_ID,
             ..
         })

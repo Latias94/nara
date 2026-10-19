@@ -70,26 +70,8 @@ impl PluginDefinitionKey {
     }
 }
 
-#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
-#[error("plugin preparation rejected with {code}")]
-pub struct PluginPrepareFailure {
-    code: &'static str,
-}
-
-impl PluginPrepareFailure {
-    #[must_use]
-    pub const fn new(code: &'static str) -> Self {
-        Self { code }
-    }
-
-    #[must_use]
-    pub const fn code(self) -> &'static str {
-        self.code
-    }
-}
-
 trait ErasedPluginFactory: Send + Sync {
-    fn prepare(&self) -> Result<Arc<dyn Plugin>, PluginPrepareFailure>;
+    fn prepare(&self) -> Result<Arc<dyn Plugin>, super::PluginDomainError>;
 }
 
 struct TypedPluginFactory<P, F> {
@@ -100,9 +82,9 @@ struct TypedPluginFactory<P, F> {
 impl<P, F> ErasedPluginFactory for TypedPluginFactory<P, F>
 where
     P: Plugin,
-    F: Fn() -> Result<P, PluginPrepareFailure> + Send + Sync + 'static,
+    F: Fn() -> Result<P, super::PluginDomainError> + Send + Sync + 'static,
 {
-    fn prepare(&self) -> Result<Arc<dyn Plugin>, PluginPrepareFailure> {
+    fn prepare(&self) -> Result<Arc<dyn Plugin>, super::PluginDomainError> {
         (self.factory)().map(|plugin| Arc::new(plugin) as Arc<dyn Plugin>)
     }
 }
@@ -160,7 +142,7 @@ impl PluginDefinition {
     ) -> Self
     where
         P: Plugin,
-        F: Fn() -> Result<P, PluginPrepareFailure> + Send + Sync + 'static,
+        F: Fn() -> Result<P, super::PluginDomainError> + Send + Sync + 'static,
     {
         Self::new::<P, F>(Some(definition), canonical_configuration, factory)
     }
@@ -172,7 +154,7 @@ impl PluginDefinition {
     ) -> Self
     where
         P: Plugin,
-        F: Fn() -> Result<P, PluginPrepareFailure> + Send + Sync + 'static,
+        F: Fn() -> Result<P, super::PluginDomainError> + Send + Sync + 'static,
     {
         let canonical_configuration: Arc<[u8]> = canonical_configuration.as_ref().into();
         let mut encoder = FingerprintEncoder::new(b"nara.plugin-configuration.v2");
@@ -247,19 +229,19 @@ impl PluginDefinition {
             .map_err(|_| PluginPrepareError::Panicked {
                 plugin: declaration.id,
             })?
-            .map_err(|failure| PluginPrepareError::Failed {
+            .map_err(|source| PluginPrepareError::Failed {
                 plugin: declaration.id,
-                code: failure.code,
+                source,
             })
     }
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum PluginPrepareError {
-    #[error("plugin {plugin} preparation failed with {code}")]
+    #[error("plugin {plugin} preparation failed: {source}")]
     Failed {
         plugin: PluginId,
-        code: &'static str,
+        source: super::PluginDomainError,
     },
     #[error("plugin {plugin} preparation panicked")]
     Panicked { plugin: PluginId },
@@ -269,8 +251,16 @@ impl PluginPrepareError {
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {
-            Self::Failed { code, .. } => code,
+            Self::Failed { source, .. } => source.code(),
             Self::Panicked { .. } => "plugin.prepare.panicked",
+        }
+    }
+
+    #[must_use]
+    pub const fn summary(&self) -> &'static str {
+        match self {
+            Self::Failed { source, .. } => source.summary(),
+            Self::Panicked { .. } => "Plugin preparation panicked",
         }
     }
 }

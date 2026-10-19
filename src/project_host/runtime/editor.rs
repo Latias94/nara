@@ -706,6 +706,7 @@ struct TrustedCompiledEditorLane {
     runtime_host: ProjectHost,
     runtime_owner: EditorRuntimeOwnerState,
     pending_control: Option<PendingEditorControl>,
+    reported_close_failure_generation: Option<u64>,
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     pending_step_presentation: Option<EditorStepPresentationState>,
     runtime_edit_result: Option<EditorRuntimeEditResult>,
@@ -1484,6 +1485,7 @@ impl EditorProjectSession {
                 runtime_host: ProjectHost::new(cleanup_policy),
                 runtime_owner: EditorRuntimeOwnerState::Empty,
                 pending_control: None,
+                reported_close_failure_generation: None,
                 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
                 pending_step_presentation: None,
                 runtime_edit_result: None,

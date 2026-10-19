@@ -26,20 +26,22 @@ use nara_ecs::{
 };
 use thiserror::Error;
 
+mod failure_metadata;
 mod plugin;
 mod runtime;
 
 pub use plugin::{
     AddPluginsError, EditedPluginGroup, EditedPluginGroupMarker, Plugin, PluginCategory,
-    PluginConfigurationFingerprint, PluginDeclaration, PluginDefinition, PluginDefinitionId,
-    PluginDefinitionKey, PluginError, PluginFailure, PluginFailureReport, PluginGroup,
-    PluginGroupBuilder, PluginGroupId, PluginHook, PluginHookMutation, PluginId,
-    PluginInstantiationError, PluginLifecycleState, PluginPlan, PluginPlanEntry, PluginPlanError,
-    PluginPlanFingerprint, PluginPreflightContext, PluginPreflightResource, PluginPrepareError,
-    PluginPrepareFailure, PluginProductCapability, PluginSchemaProviderId, PluginShutdownContext,
-    PluginShutdownError, PluginShutdownObligationId, PluginSlot, PluginSlotId, PluginSlotPresence,
-    Plugins, ReplayablePlugins, ResolvedPluginGroup, RetainedPluginInstantiationFailure,
-    RuntimeConstructionError, RuntimeConstructionFailure, SealedApp,
+    PluginCommitError, PluginConfigurationFingerprint, PluginDeclaration, PluginDefinition,
+    PluginDefinitionId, PluginDefinitionKey, PluginDomainError, PluginDomainErrorError,
+    PluginError, PluginFailure, PluginFailureReport, PluginGroup, PluginGroupBuilder,
+    PluginGroupId, PluginHook, PluginHookMutation, PluginId, PluginInstantiationError,
+    PluginLifecycleState, PluginPlan, PluginPlanEntry, PluginPlanError, PluginPlanFingerprint,
+    PluginPreflightContext, PluginPreflightResource, PluginPrepareError, PluginProductCapability,
+    PluginSchemaProviderId, PluginShutdownContext, PluginShutdownError, PluginShutdownObligationId,
+    PluginSlot, PluginSlotId, PluginSlotPresence, Plugins, ReplayablePlugins, ResolvedPluginGroup,
+    RetainedPluginInstantiationFailure, RuntimeConstructionError, RuntimeConstructionFailure,
+    SealedApp,
 };
 pub use runtime::*;
 
@@ -1462,8 +1464,15 @@ impl App {
     ///
     /// Ordinary execution consumes configuration directly through [`RuntimeInstance::start`].
     #[doc(hidden)]
-    pub fn seal(mut self) -> Result<SealedApp, PluginError> {
-        self.seal_internal()?;
+    pub fn seal(mut self) -> Result<SealedApp, PluginCommitError> {
+        if let Err(error) = self.seal_internal() {
+            return Err(PluginCommitError::recorded(
+                error,
+                self.plugin_failure_report()
+                    .and_then(PluginFailureReport::primary)
+                    .cloned(),
+            ));
+        }
         Ok(SealedApp { app: self })
     }
 
@@ -1663,16 +1672,16 @@ impl App {
     pub(crate) fn commit_plugin_batch(
         &mut self,
         batch: plugin::PluginCommitBatch,
-    ) -> Result<(), PluginError> {
+    ) -> Result<(), plugin::PluginCommitError> {
         self.reject_hook_composition_mutation()?;
         if self.owner.plugin_lifecycle != PluginLifecycleState::Configuring {
-            return Err(PluginError::AppSealed);
+            return Err(PluginError::AppSealed.into());
         }
         if batch.prefix_len != self.plugin_entries.len()
             || batch.entries.len() != batch.witnesses.len()
             || batch.entries.len().saturating_sub(batch.prefix_len) != batch.prepared.len()
         {
-            return Err(PluginError::LifecyclePoisoned);
+            return Err(PluginError::LifecyclePoisoned.into());
         }
 
         for (committed_in_batch, ((entry, witness), plugin)) in batch.entries[batch.prefix_len..]
@@ -1694,9 +1703,19 @@ impl App {
                     };
                     self.poison(plugin_id, PluginHook::Preflight, error.clone());
                     self.owner.shutdown_plugins_internal();
-                    return Err(error);
+                    return Err(plugin::PluginCommitError::invoked(
+                        plugin_id,
+                        PluginHook::Preflight,
+                        error,
+                    ));
                 }
-                Ok(Err(error)) if committed_in_batch == 0 => return Err(error),
+                Ok(Err(error)) if committed_in_batch == 0 => {
+                    return Err(plugin::PluginCommitError::invoked(
+                        plugin_id,
+                        PluginHook::Preflight,
+                        error,
+                    ));
+                }
                 Ok(Err(error)) => {
                     let error = PluginError::CommittedPreflightRejected {
                         plugin: plugin_id,
@@ -1704,7 +1723,11 @@ impl App {
                     };
                     self.poison(plugin_id, PluginHook::Preflight, error.clone());
                     self.owner.shutdown_plugins_internal();
-                    return Err(error);
+                    return Err(plugin::PluginCommitError::invoked(
+                        plugin_id,
+                        PluginHook::Preflight,
+                        error,
+                    ));
                 }
                 Ok(Ok(())) => {}
             }
@@ -1730,7 +1753,12 @@ impl App {
             if self.owner.plugin_lifecycle == PluginLifecycleState::Poisoned {
                 let error = self.primary_plugin_error();
                 self.owner.shutdown_plugins_internal();
-                return Err(error);
+                return Err(plugin::PluginCommitError::recorded(
+                    error,
+                    self.plugin_failure_report()
+                        .and_then(|report| report.primary())
+                        .cloned(),
+                ));
             }
         }
 
@@ -3954,14 +3982,14 @@ mod tests {
             Err(error) => error,
         };
 
-        assert_eq!(
+        assert!(matches!(
             error,
-            AddPluginsError::Plugin(PluginError::DuplicateRuntimeCloseParticipant {
+            AddPluginsError::Plugin(error) if matches!(error.error(), PluginError::DuplicateRuntimeCloseParticipant {
                 plugin: SECOND_COLLIDING_CLOSE_PLUGIN_ID,
                 obligation: SECOND_COLLIDING_CLOSE_OBLIGATION,
                 participant_id: COLLIDING_CLOSE_PARTICIPANT_ID,
             })
-        );
+        ));
         assert_eq!(first_begins.load(Ordering::SeqCst), 0);
         assert_eq!(second_begins.load(Ordering::SeqCst), 0);
 

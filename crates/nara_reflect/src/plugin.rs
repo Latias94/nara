@@ -7,7 +7,7 @@ use std::{
 
 use nara_app::{
     App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
-    PluginError, PluginId, PluginPreflightContext, PluginPreflightResource, PluginPrepareFailure,
+    PluginDomainError, PluginError, PluginId, PluginPreflightContext, PluginPreflightResource,
     RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter, RuntimeGeneration,
 };
 use nara_ecs::{Resource, World, lifecycle::HookContext, world::DeferredWorld};
@@ -46,7 +46,13 @@ pub fn preloaded_component_registry_plugin(
                 .get()
                 .cloned()
                 .map(|snapshot| PreloadedComponentRegistryPlugin { snapshot })
-                .ok_or_else(|| PluginPrepareFailure::new("component-registry-snapshot-missing"))
+                .ok_or_else(|| {
+                    PluginDomainError::new(
+                        "component-registry-snapshot-missing",
+                        "The component registry snapshot is unavailable",
+                    )
+                    .expect("registry preparation uses safe static failure facts")
+                })
         },
     )
 }
@@ -617,7 +623,7 @@ mod tests {
         };
 
         assert!(matches!(
-            error,
+            error.error(),
             PluginError::ComponentRegistrationFailed {
                 plugin: COMPONENT_REGISTRY_PLUGIN_ID,
                 ..
@@ -646,7 +652,7 @@ mod tests {
             };
 
             assert!(matches!(
-                error,
+                error.error(),
                 PluginError::ComponentRegistrationFailed {
                     plugin: COMPONENT_REGISTRY_PLUGIN_ID,
                     ..
@@ -672,7 +678,7 @@ mod tests {
         };
 
         assert!(matches!(
-            error,
+            error.error(),
             PluginError::SetupFailed {
                 plugin: COMPONENT_REGISTRY_PLUGIN_ID,
                 ..

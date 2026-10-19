@@ -803,7 +803,8 @@ fn plugin_rejects_root_that_differs_from_existing_asset_source_root() {
 
     assert!(matches!(
         error,
-        nara_app::AddPluginsError::Plugin(PluginError::SetupFailed { .. })
+        nara_app::AddPluginsError::Plugin(ref failure)
+            if matches!(failure.error(), PluginError::SetupFailed { .. })
     ));
     remove_temp_root(&configured_root);
 }

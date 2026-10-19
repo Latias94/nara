@@ -88,6 +88,44 @@ let recipe = ProductRecipe::new()
 The recipe rejects duplicate plugin IDs and mismatched provider declarations before any `App` or
 runtime is created.
 
+## Report Expected Plugin Failures
+
+Return checked static facts for an expected domain failure. The framework records the actual
+invoking plugin and hook, so the error does not need to repeat that context:
+
+```rust
+use nara::app::{PluginDomainError, PluginError};
+
+fn validate_settings(max_agents: u32) -> Result<(), PluginError> {
+    if max_agents == 0 {
+        return Err(PluginDomainError::new(
+            "example.agents.empty-capacity",
+            "Agent capacity must be greater than zero",
+        ).expect("the failure facts are safe static literals").into());
+    }
+    Ok(())
+}
+```
+
+Use this error from preflight, build, finish or shutdown. Advanced fallible `PluginDefinition`
+factories return `PluginDomainError` directly. Codes and summaries accept only static text and
+validate length, character and privacy rules. Keep runtime values, paths and third-party error
+messages in their typed owner; do not format them into public facts. Existing free-form
+`SetupFailed` and component-registration errors use the private fallback diagnostic.
+
+Product runtime and compiled Editor Play preserve the domain code/summary and actual hook context.
+Direct `App::add_plugins` returns `AddPluginsError::Plugin(PluginCommitError)` for commit failures;
+inspect `error()` for the typed cause and `plugin_failure()` for actual plugin/hook context. The
+first rejected preflight has this context even though it leaves App configurable with no failure
+report. `PluginPrepareError::Failed` now retains `source: PluginDomainError` instead of a bare code.
+The advanced consuming `App::seal` path returns `PluginCommitError` as well, preserving a failing
+finish invocation after the App is consumed. Use retained plan instantiation when cleanup and
+invocation evidence are required; `instantiate`/`into_error` deliberately project only the cause.
+Shutdown failures remain terminal cleanup failures and do not replace the earlier startup error.
+Data-only Open and strict Check/Export do not run plugin hooks to discover these errors. Factory
+or hook failure still follows the existing retained-retirement contract; an error code never
+authorizes retrying a partially committed App.
+
 ## Strict tools use the compiled project
 
 The project owns one recipe function shared by headless, desktop, Check, Export, and startup-Scene

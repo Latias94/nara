@@ -67,6 +67,14 @@ flowchart LR
 
 ### Diagnostic identity and safe text
 
+App-owned plugin failures use the same bounded static-fact policy as `RuntimeFaultDetail` without
+depending on `nara_diagnostic`. Product adapters revalidate code/summary into diagnostic primitives,
+retain generic product context as a field, and attach framework-recorded plugin/hook identity.
+They lower each retained secondary shutdown failure separately, preserving the primary failure
+and terminal cleanup result. No adapter parses Display text or republishes legacy dynamic details.
+Strict Check, Export and ordinary Editor Open do not acquire permission to execute plugin factories
+or hooks merely to obtain diagnostic facts.
+
 - Diagnostic code, domain, producer, field key, pressure source ID, and pressure metric ID are
   validated source-authored `&'static str` identities. Runtime text cannot enter those identities.
   Public identifiers are the separate dynamic exception: a bounded ASCII alphanumeric locator

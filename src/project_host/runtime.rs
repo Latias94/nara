@@ -13,15 +13,14 @@ use super::{
 };
 use crate::startup_scene::{StartupSceneSource, materialize_startup_scene};
 use nara_app::{
-    AppExit, PluginError, PluginHook, PluginHookMutation, PluginInstantiationError,
-    PluginPlanError, PluginPrepareError, RuntimeAdmissionError, RuntimeAdmissionReservation,
-    RuntimeCandidateFailure, RuntimeCandidateRetirementState, RuntimeCloseCause,
-    RuntimeCloseErrorDisposition, RuntimeCloseEvidence, RuntimeCloseParticipantPhase,
-    RuntimeClosePolicy, RuntimeConstructionError, RuntimeConstructionFailure, RuntimeControl,
-    RuntimeControlRequestResult, RuntimeControlStatus, RuntimeControlTicket, RuntimeFault,
-    RuntimeFaultDetail, RuntimeFaultKind, RuntimeFaultReporter, RuntimeGeneration, RuntimeInstance,
-    RuntimeObligationLedger, RuntimePublicationFailure, RuntimePublicationSlot, RuntimeRetirement,
-    RuntimeState,
+    AppExit, PluginFailureReport, PluginHook, PluginHookMutation, PluginPlanError,
+    RuntimeAdmissionError, RuntimeAdmissionReservation, RuntimeCandidateFailure,
+    RuntimeCandidateRetirementState, RuntimeCloseCause, RuntimeCloseErrorDisposition,
+    RuntimeCloseEvidence, RuntimeCloseParticipantPhase, RuntimeClosePolicy,
+    RuntimeConstructionFailure, RuntimeControl, RuntimeControlRequestResult, RuntimeControlStatus,
+    RuntimeControlTicket, RuntimeFault, RuntimeFaultDetail, RuntimeFaultKind, RuntimeFaultReporter,
+    RuntimeGeneration, RuntimeInstance, RuntimeObligationLedger, RuntimePublicationFailure,
+    RuntimePublicationSlot, RuntimeRetirement, RuntimeState,
 };
 use nara_asset::{
     AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, Assets, SourceHash,
@@ -38,6 +37,7 @@ use nara_reflect::{
     validate_component_registry_authority,
 };
 use nara_tilemap::TileSet;
+use plugin_diagnostics::{append_plugin_shutdown_diagnostics, runtime_construction_failure_report};
 
 const PROJECT_MANIFEST: &str = "nara.toml";
 
@@ -48,6 +48,8 @@ mod desktop_verification;
 
 #[cfg(feature = "tooling")]
 mod editor;
+
+mod plugin_diagnostics;
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 pub use action::{DesktopRun, DesktopRunIntent, DesktopRunOutcome, DesktopRunReport};
@@ -334,12 +336,24 @@ impl CleanupOwner {
         }
     }
 
+    fn plugin_failure_report(&self) -> Option<&PluginFailureReport> {
+        match self {
+            Self::Construction(owner) => owner.plugin_failure_report(),
+            Self::Candidate(owner) => owner.plugin_failure_report(),
+            Self::Publication(owner) => owner.plugin_failure_report(),
+            Self::Startup(owner) => owner.plugin_failure_report(),
+        }
+    }
+
     fn completion_failure_report(&self) -> DiagnosticReport {
         let mut diagnostics = DiagnosticReport::default();
         if let Some(evidence) = self.close_evidence()
             && close_evidence_has_terminal_failure(evidence)
         {
-            diagnostics.extend(cleanup_failed_report(evidence));
+            diagnostics.extend(cleanup_failed_report(
+                evidence,
+                self.plugin_failure_report(),
+            ));
         }
         if matches!(self, Self::Candidate(owner) if owner.fault().is_some()) {
             diagnostics.extend(runtime_faulted_report());
@@ -377,6 +391,39 @@ impl ProjectHost {
             ProjectHostSlot::Running(published) => {
                 Some(published.runtime().close_evidence().clone())
             }
+            ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => None,
+        }
+    }
+
+    fn running_runtime_close_failure_report(&self) -> Option<DiagnosticReport> {
+        match &self.slot {
+            ProjectHostSlot::Running(published)
+                if close_evidence_has_terminal_failure(published.runtime().close_evidence()) =>
+            {
+                Some(cleanup_failed_report(
+                    published.runtime().close_evidence(),
+                    published.runtime().plugin_failure_report(),
+                ))
+            }
+            ProjectHostSlot::Empty
+            | ProjectHostSlot::Cleaning { .. }
+            | ProjectHostSlot::Running(_) => None,
+        }
+    }
+
+    fn running_runtime_has_terminal_close_failure(&self) -> bool {
+        match &self.slot {
+            ProjectHostSlot::Running(published) => {
+                close_evidence_has_terminal_failure(published.runtime().close_evidence())
+            }
+            ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => false,
+        }
+    }
+
+    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+    fn running_runtime_plugin_failure_report(&self) -> Option<&PluginFailureReport> {
+        match &self.slot {
+            ProjectHostSlot::Running(published) => published.runtime().plugin_failure_report(),
             ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => None,
         }
     }
@@ -573,7 +620,9 @@ impl ProjectHost {
         ) {
             Ok(candidate) => candidate,
             Err(owner) => {
-                let diagnostics = runtime_construction_failure_report(owner.error());
+                let mut diagnostics =
+                    runtime_construction_failure_report(owner.error(), owner.plugin_failure());
+                append_plugin_shutdown_diagnostics(&mut diagnostics, owner.plugin_failure_report());
                 self.install_start_cleanup(epoch, CleanupOwner::Construction(owner));
                 return Err(HostFault::new(diagnostics));
             }
@@ -880,6 +929,7 @@ impl ProjectHost {
                 if close_evidence_has_terminal_failure(published.runtime().close_evidence()) {
                     Err(HostFault::new(cleanup_failed_report(
                         published.runtime().close_evidence(),
+                        published.runtime().plugin_failure_report(),
                     )))
                 } else if published.runtime().fault().is_some() {
                     Err(HostFault::new(runtime_faulted_report()))
@@ -889,8 +939,10 @@ impl ProjectHost {
             }
             RuntimeState::Stopping | RuntimeState::CloseIncomplete => {
                 let epoch = published.epoch;
-                let mut diagnostics =
-                    cleanup_incomplete_report(published.runtime().close_evidence());
+                let mut diagnostics = cleanup_incomplete_report(
+                    published.runtime().close_evidence(),
+                    published.runtime().plugin_failure_report(),
+                );
                 if published.runtime().fault().is_some() {
                     diagnostics.extend(runtime_faulted_report());
                 }
@@ -1436,119 +1488,6 @@ fn runtime_plan_selected_report(plan: &RuntimePlan) -> DiagnosticReport {
     single_diagnostic(diagnostic)
 }
 
-fn runtime_construction_failure_report(error: &RuntimeConstructionError) -> DiagnosticReport {
-    match error {
-        RuntimeConstructionError::Plugin(PluginInstantiationError::Prepare(error)) => {
-            plugin_prepare_failure_report(error)
-        }
-        RuntimeConstructionError::Plugin(PluginInstantiationError::Plugin(error)) => {
-            plugin_hook_failure_report(error)
-        }
-        RuntimeConstructionError::Admission(error) => admission_failure_report(error),
-    }
-}
-
-fn plugin_prepare_failure_report(error: &PluginPrepareError) -> DiagnosticReport {
-    let (reason, plugin, failure_code) = match error {
-        PluginPrepareError::Failed { plugin, code } => ("failed", *plugin, Some(*code)),
-        PluginPrepareError::Panicked { plugin } => ("panicked", *plugin, None),
-    };
-    let mut diagnostic = failure_diagnostic(
-        "project.run.plugin-prepare-failed",
-        "Project plugin preparation failed",
-        reason,
-    );
-    diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
-    if let Some(code) = failure_code {
-        diagnostic = attach_identifier(diagnostic, "failure-code", code);
-    }
-    single_diagnostic(diagnostic)
-}
-
-fn plugin_hook_failure_report(error: &PluginError) -> DiagnosticReport {
-    let mut diagnostic = failure_diagnostic(
-        "project.run.plugin-hook-failed",
-        "Project plugin lifecycle hook failed",
-        plugin_error_reason(error),
-    );
-    match error {
-        PluginError::HookMutationForbidden {
-            plugin,
-            hook,
-            mutation,
-        } => {
-            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
-            diagnostic = attach_identifier(diagnostic, "hook", plugin_hook_id(*hook));
-            diagnostic = attach_identifier(diagnostic, "mutation", plugin_mutation_id(*mutation));
-        }
-        PluginError::SetupFailed { plugin, .. }
-        | PluginError::ComponentRegistrationFailed { plugin, .. } => {
-            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
-            if let PluginError::ComponentRegistrationFailed { component, .. } = error {
-                diagnostic = attach_identifier(diagnostic, "component", component);
-            }
-        }
-        PluginError::HookPanicked { plugin, hook } => {
-            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
-            diagnostic = attach_identifier(diagnostic, "hook", plugin_hook_id(*hook));
-        }
-        PluginError::CommittedPreflightRejected { plugin, source } => {
-            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
-            diagnostic = attach_identifier(diagnostic, "cause", plugin_error_reason(source));
-        }
-        PluginError::MissingShutdownObligation { plugin, obligation }
-        | PluginError::UndeclaredShutdownObligation { plugin, obligation }
-        | PluginError::DuplicateShutdownObligation { plugin, obligation } => {
-            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
-            diagnostic = attach_identifier(diagnostic, "obligation", obligation.as_str());
-        }
-        PluginError::DuplicateRuntimeCloseParticipant {
-            plugin,
-            obligation,
-            participant_id,
-        } => {
-            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
-            diagnostic = attach_identifier(diagnostic, "obligation", obligation.as_str());
-            diagnostic = attach_identifier(diagnostic, "participant", participant_id.as_str());
-        }
-        PluginError::AppSealed
-        | PluginError::DuplicateDriverPort { .. }
-        | PluginError::RawBuiltInScheduleMutationForbidden
-        | PluginError::ScheduleCompatibility(_)
-        | PluginError::ScheduleGraph(_)
-        | PluginError::ShutdownObligationOutsideBuild
-        | PluginError::LifecycleShutdown
-        | PluginError::LifecyclePoisoned
-        | PluginError::FinishReentered => {}
-    }
-    single_diagnostic(diagnostic)
-}
-
-fn plugin_error_reason(error: &PluginError) -> &'static str {
-    match error {
-        PluginError::HookMutationForbidden { .. } => "hook-mutation-forbidden",
-        PluginError::AppSealed => "app-sealed",
-        PluginError::DuplicateDriverPort { .. } => "duplicate-driver-port",
-        PluginError::RawBuiltInScheduleMutationForbidden => "raw-schedule-mutation-forbidden",
-        PluginError::ScheduleCompatibility(_) => "schedule-compatibility",
-        PluginError::ScheduleGraph(_) => "schedule-graph",
-        PluginError::SetupFailed { .. } => "setup-failed",
-        PluginError::ComponentRegistrationFailed { .. } => "component-registration-failed",
-        PluginError::HookPanicked { .. } => "hook-panicked",
-        PluginError::CommittedPreflightRejected { .. } => "committed-preflight-rejected",
-        PluginError::MissingShutdownObligation { .. } => "missing-shutdown-obligation",
-        PluginError::UndeclaredShutdownObligation { .. } => "undeclared-shutdown-obligation",
-        PluginError::DuplicateShutdownObligation { .. } => "duplicate-shutdown-obligation",
-        PluginError::DuplicateRuntimeCloseParticipant { .. } => {
-            "duplicate-runtime-close-participant"
-        }
-        PluginError::ShutdownObligationOutsideBuild => "shutdown-obligation-outside-build",
-        PluginError::LifecycleShutdown => "lifecycle-shutdown",
-        PluginError::LifecyclePoisoned => "lifecycle-poisoned",
-        PluginError::FinishReentered => "finish-reentered",
-    }
-}
-
 fn admission_failure_report(error: &RuntimeAdmissionError) -> DiagnosticReport {
     let reason = match error {
         RuntimeAdmissionError::AppNotReady { .. } => "app-not-ready",
@@ -1669,21 +1608,29 @@ fn runtime_authority_invalid_report() -> DiagnosticReport {
     )
 }
 
-fn cleanup_incomplete_report(evidence: &RuntimeCloseEvidence) -> DiagnosticReport {
+fn cleanup_incomplete_report(
+    evidence: &RuntimeCloseEvidence,
+    plugins: Option<&PluginFailureReport>,
+) -> DiagnosticReport {
     let mut report = single_warning(
         "project.run.cleanup-incomplete",
         "Project runtime cleanup is incomplete",
     );
     append_close_cause_diagnostics(&mut report, evidence);
+    append_plugin_shutdown_diagnostics(&mut report, plugins);
     report
 }
 
-fn cleanup_failed_report(evidence: &RuntimeCloseEvidence) -> DiagnosticReport {
+fn cleanup_failed_report(
+    evidence: &RuntimeCloseEvidence,
+    plugins: Option<&PluginFailureReport>,
+) -> DiagnosticReport {
     let mut report = single_error(
         "project.run.cleanup-failed",
         "Project runtime cleanup reported a terminal failure",
     );
     append_close_cause_diagnostics(&mut report, evidence);
+    append_plugin_shutdown_diagnostics(&mut report, plugins);
     report
 }
 
