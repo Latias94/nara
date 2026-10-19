@@ -143,6 +143,13 @@ flowchart LR
 - `nara_text` owns bounded deterministic font admission, shaping, bidi/line layout, measurement,
   glyph keys/raster requests, and diagnostics without system-font discovery. Atlas allocation and
   GPU residency remain presentation-owner responsibilities.
+- A node's own text uses the compiler's resolved content box for measurement, final shaping and
+  paint origin/clip. Background, hit, focus and semantic facts retain the outer node box. Render
+  lowering consumes that published content geometry instead of recomputing layout padding.
+  The B10/U9 correction reopens the neutral conformance checkpoint for this invariant, supported by
+  the independent Bevy/Godot comparison and the existing padded layout-gallery consumer. Its
+  successor evidence must include auto-height Flow/Absolute layout, packet geometry and the
+  amended neutral gallery before the shared change is closed.
 - One immutable admitted `FontFace` is the source for both compiler shaping and presentation
   rasterization. Code-configured UI and presentation plugins capture that face in their frozen
   configuration identity; the bundled face is their convenience default. A planner rejects glyph

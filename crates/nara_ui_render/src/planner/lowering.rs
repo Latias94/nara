@@ -226,13 +226,16 @@ pub(super) fn lower_packet(
                 )?;
             }
             UiPaintPrimitive::Text {
-                rect,
+                rect: content_rect,
                 clip_rect,
                 color,
                 layout,
                 ..
             } => {
-                let Some(text_rect) = environment.physical_rect(*rect).and_then(packet_rect) else {
+                let Some(text_rect) = environment
+                    .physical_rect(*content_rect)
+                    .and_then(packet_rect)
+                else {
                     continue;
                 };
                 let Some(clip) = packet_clip(*clip_rect, environment, text_rect) else {
@@ -244,7 +247,7 @@ pub(super) fn lower_packet(
                     &mut glyph_page_indices,
                     layout,
                     GlyphAppendContext {
-                        text_rect: *rect,
+                        content_rect: *content_rect,
                         clip,
                         color: *color,
                         environment,
@@ -281,7 +284,7 @@ fn map_image_error(error: UiPreparedImageError) -> UiPresentationContentError {
 }
 
 struct GlyphAppendContext<'a> {
-    text_rect: UiRect,
+    content_rect: UiRect,
     clip: Option<UiPacketRect>,
     color: nara_ui_kernel::UiColor,
     environment: UiEnvironment,
@@ -296,7 +299,7 @@ fn append_glyphs(
     layout: &nara_text::TextLayout,
     context: GlyphAppendContext<'_>,
 ) -> Result<(), UiPresentationContentError> {
-    let origin = context.text_rect.origin();
+    let origin = context.content_rect.origin();
     for glyph in layout.glyphs() {
         let Some(slot) = context.atlas.slot(glyph.key()) else {
             return Err(UiPresentationContentError::ArithmeticOverflow);

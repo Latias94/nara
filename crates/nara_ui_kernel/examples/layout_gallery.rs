@@ -101,6 +101,14 @@ fn gallery_snapshot() -> Result<UiAuthoringSnapshot, Box<dyn Error>> {
     .with_key(local_key("absolute-badge")?)
     .with_visual(UiVisual::role(UiColorRole::Accent))
     .with_text(UiText::new("absolute", 13.0)?);
+    let padded_label = UiNode::new(
+        UiStyle::absolute(12.0, 56.0, 100.0, 1.0)
+            .with_height(UiDimension::auto())
+            .with_padding(UiEdges::symmetric(20.0, 5.0)?),
+    )
+    .with_key(local_key("padded-label")?)
+    .with_visual(UiVisual::role(UiColorRole::Panel))
+    .with_text(UiText::new("One two three four", 14.0)?);
     let content = UiNode::new(
         UiStyle::flex()
             .with_width(UiDimension::percent(0.70)?)
@@ -110,7 +118,7 @@ fn gallery_snapshot() -> Result<UiAuthoringSnapshot, Box<dyn Error>> {
     )
     .with_key(local_key("content")?)
     .with_visual(UiVisual::role(UiColorRole::Surface))
-    .with_children([clipped_label, absolute_badge]);
+    .with_children([clipped_label, absolute_badge, padded_label]);
 
     let nested_row = UiNode::new(
         UiStyle::flex()
@@ -141,15 +149,17 @@ fn gallery_snapshot() -> Result<UiAuthoringSnapshot, Box<dyn Error>> {
     .with_visual(UiVisual::role(UiColorRole::Warning))
     .with_text(UiText::new("overlay", 13.0)?);
 
-    let modal_action = UiNode::new(UiStyle::absolute(16.0, 14.0, 96.0, 32.0))
-        .with_key(local_key("modal-action")?)
-        .with_visual(UiVisual::role(UiColorRole::Accent))
-        .with_text(UiText::new("Activate", 15.0)?)
-        .with_interaction(UiInteraction::focus_target())
-        .with_semantics(UiSemantics::new(
-            UiSemanticRole::Button,
-            "Activate gallery action",
-        )?);
+    let modal_action = UiNode::new(
+        UiStyle::absolute(16.0, 14.0, 96.0, 32.0).with_padding(UiEdges::symmetric(6.0, 4.0)?),
+    )
+    .with_key(local_key("modal-action")?)
+    .with_visual(UiVisual::role(UiColorRole::Accent))
+    .with_text(UiText::new("Activate", 15.0)?)
+    .with_interaction(UiInteraction::focus_target())
+    .with_semantics(UiSemantics::new(
+        UiSemanticRole::Button,
+        "Activate gallery action",
+    )?);
     let modal = UiRoot::new(
         root_key("modal")?,
         UiLayer::Modal,
@@ -204,6 +214,37 @@ fn assert_gallery_contract(
 
     let sidebar = layout(unit_scale, "sidebar");
     assert!(sidebar.rect().size().width() < unit_content.rect().size().width());
+    for frame in [unit_scale, fractional_scale] {
+        let padded = layout(frame, "padded-label");
+        let (content, text_layout) = frame
+            .paint()
+            .iter()
+            .find_map(|primitive| match primitive {
+                UiPaintPrimitive::Text {
+                    key, rect, layout, ..
+                } if key.as_ref() == padded.key() => Some((*rect, layout)),
+                _ => None,
+            })
+            .expect("the padded gallery label must publish text");
+        assert_eq!(padded.rect().size().width(), 100.0);
+        assert_eq!(content.size().width(), 60.0);
+        assert_eq!(content.origin().x(), padded.rect().origin().x() + 20.0);
+        assert_eq!(content.origin().y(), padded.rect().origin().y() + 5.0);
+        assert_eq!(padded.rect().size().height(), text_layout.height() + 10.0);
+        assert!(text_layout.lines().len() > 1);
+        assert!(frame.paint().iter().any(|primitive| matches!(
+            primitive,
+            UiPaintPrimitive::Rect { key, rect, .. }
+                if key.as_ref() == padded.key() && *rect == padded.rect()
+        )));
+        let action = layout(frame, "modal-action");
+        assert!(
+            frame
+                .hit_regions()
+                .iter()
+                .any(|hit| { Some(hit.key()) == action.key() && hit.rect() == action.rect() })
+        );
+    }
     assert!(
         layout(unit_scale, "absolute-badge").structural_index()
             > layout(unit_scale, "clipped-label").structural_index()

@@ -354,6 +354,8 @@ pub enum UiPaintPrimitive {
     },
     Text {
         key: Option<UiKey>,
+        /// Compiler-resolved content box used for both shaping and the glyph origin. Padding is
+        /// excluded; the node's layout, background, hit and semantic bounds retain its outer box.
         rect: UiRect,
         physical_rect: UiPhysicalRect,
         clip_rect: Option<UiRect>,

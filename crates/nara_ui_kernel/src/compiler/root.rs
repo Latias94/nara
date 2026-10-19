@@ -104,7 +104,7 @@ pub(super) fn compile_root(
             width: AvailableSpace::Definite(environment.logical_size().width()),
             height: AvailableSpace::Definite(environment.logical_size().height()),
         },
-        |known, available, _node_id, context, _style| {
+        |_known, available, _node_id, context, _style| {
             if measurement_error.is_some() {
                 return TaffySize::ZERO;
             }
@@ -114,15 +114,18 @@ pub(super) fn compile_root(
             let Some(text) = flat[index].node.text.as_ref() else {
                 return TaffySize::ZERO;
             };
-            let wrap_width = known.width.or_else(|| definite(available.width));
+            // Taffy's known dimensions are outer sizes during ComputeSize, while available
+            // space has already had padding and borders removed. The callback measures only
+            // content; Taffy applies known outer dimensions and adds the insets itself.
+            let wrap_width = definite(available.width);
             match text
                 .request(wrap_width, scale_factor)
                 .map_err(TextCompileError::Layout)
                 .and_then(|request| text_session.layout(text_engine, request))
             {
                 Ok(layout) => TaffySize {
-                    width: known.width.unwrap_or_else(|| layout.width()),
-                    height: known.height.unwrap_or_else(|| layout.height()),
+                    width: layout.width(),
+                    height: layout.height(),
                 },
                 Err(error) => {
                     measurement_error.get_or_insert(text_compile_error(error));
@@ -242,50 +245,65 @@ pub(super) fn compile_root(
             }
         }
         if let Some(text) = &node.node.text {
-            let wrap_width = (text.overflow == UiTextOverflow::Wrap)
-                .then_some(rect.size().width())
-                .filter(|width| *width > 0.0);
-            let request = text
-                .request(wrap_width, scale_factor)
-                .map_err(|error| text_compile_error(TextCompileError::Layout(error)))?;
-            let text_layout = text_session
-                .layout(text_engine, request)
-                .map_err(text_compile_error)?;
-            let candidate_glyphs = budget
-                .used_shaped_glyphs
-                .saturating_add(shaped_glyphs)
-                .saturating_add(text_layout.glyphs().len());
-            if candidate_glyphs > budget.max_shaped_glyphs {
-                return Err(RootCompileError::ShapedGlyphLimitExceeded {
-                    actual: candidate_glyphs,
-                    maximum: budget.max_shaped_glyphs,
-                });
-            }
-            shaped_glyphs = shaped_glyphs.saturating_add(text_layout.glyphs().len());
+            let content_rect = UiRect::from_origin_size(
+                parent_origin.x() + layout.content_box_x(),
+                parent_origin.y() + layout.content_box_y(),
+                layout.content_box_width().max(0.0),
+                layout.content_box_height().max(0.0),
+            )
+            .ok_or_else(|| {
+                RootCompileError::Local(UiRootDiagnostic::LayoutRejected {
+                    message: "Taffy produced invalid text content geometry".to_owned(),
+                })
+            })?;
             let text_clip = if text.overflow == UiTextOverflow::Clip {
-                inherited_clip.intersect(rect).rect()
+                inherited_clip.intersect(content_rect)
             } else {
-                inherited_clip.rect()
+                inherited_clip
             };
-            paint_entries.push(RootOrdered::new(
-                root_order(node, 1),
-                UiPaintPrimitive::Text {
-                    key: node.key.clone(),
-                    rect,
-                    physical_rect: environment.snap(rect),
-                    clip_rect: text_clip,
-                    color: match text.brush.resolve(theme) {
-                        crate::UiResolvedBrush::Solid(color) => color,
-                        crate::UiResolvedBrush::Image { .. } => {
-                            return Err(RootCompileError::Local(UiRootDiagnostic::InvalidStyle {
-                                message: "text brushes cannot reference images".to_owned(),
-                            }));
-                        }
+            if !content_rect.size().is_empty() && !matches!(text_clip, ClipState::Empty) {
+                let wrap_width = (text.overflow == UiTextOverflow::Wrap)
+                    .then_some(content_rect.size().width())
+                    .filter(|width| *width > 0.0);
+                let request = text
+                    .request(wrap_width, scale_factor)
+                    .map_err(|error| text_compile_error(TextCompileError::Layout(error)))?;
+                let text_layout = text_session
+                    .layout(text_engine, request)
+                    .map_err(text_compile_error)?;
+                let candidate_glyphs = budget
+                    .used_shaped_glyphs
+                    .saturating_add(shaped_glyphs)
+                    .saturating_add(text_layout.glyphs().len());
+                if candidate_glyphs > budget.max_shaped_glyphs {
+                    return Err(RootCompileError::ShapedGlyphLimitExceeded {
+                        actual: candidate_glyphs,
+                        maximum: budget.max_shaped_glyphs,
+                    });
+                }
+                shaped_glyphs = shaped_glyphs.saturating_add(text_layout.glyphs().len());
+                paint_entries.push(RootOrdered::new(
+                    root_order(node, 1),
+                    UiPaintPrimitive::Text {
+                        key: node.key.clone(),
+                        rect: content_rect,
+                        physical_rect: environment.snap(content_rect),
+                        clip_rect: text_clip.rect(),
+                        color: match text.brush.resolve(theme) {
+                            crate::UiResolvedBrush::Solid(color) => color,
+                            crate::UiResolvedBrush::Image { .. } => {
+                                return Err(RootCompileError::Local(
+                                    UiRootDiagnostic::InvalidStyle {
+                                        message: "text brushes cannot reference images".to_owned(),
+                                    },
+                                ));
+                            }
+                        },
+                        layout: text_layout,
                     },
-                    layout: text_layout,
-                },
-            ));
-            ensure_paint_capacity(budget.used_paint, paint_entries.len(), budget.max_paint)?;
+                ));
+                ensure_paint_capacity(budget.used_paint, paint_entries.len(), budget.max_paint)?;
+            }
         }
         if node.node.interaction.hit_testable {
             hit_entries.push(RootOrdered::new(

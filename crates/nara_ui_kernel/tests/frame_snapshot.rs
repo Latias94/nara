@@ -90,7 +90,7 @@ fn deterministic_headless_frame_matches_the_reviewed_fixture() {
     assert_eq!(first.semantics(), second.semantics());
     assert_eq!(
         render_snapshot(&first),
-        include_str!("fixtures/reference_frame.txt")
+        include_str!("fixtures/reference_frame.txt").replace("\r\n", "\n")
     );
 }
 

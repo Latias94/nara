@@ -12,10 +12,10 @@ use nara_image::{
 use nara_render::{RenderResourceKey, RenderResourceKind, RenderResourceSnapshot, RenderTarget};
 use nara_text::{FontFace, bundled_font_face};
 use nara_ui_kernel::{
-    UiAuthoringSnapshotBuilder, UiBorder, UiBrush, UiColor, UiCompiler, UiCornerRadii,
-    UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiRoot, UiRootKey, UiSafeAreaInsets,
-    UiSize, UiStyle, UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId, UiText, UiTheme,
-    UiThemePalette, UiVisual,
+    UiAuthoringSnapshotBuilder, UiBorder, UiBrush, UiColor, UiCompiler, UiCornerRadii, UiEdges,
+    UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiOverflow, UiPaintPrimitive, UiRoot,
+    UiRootKey, UiSafeAreaInsets, UiSize, UiStyle, UiSurfaceContentTransform, UiSurfaceGenerations,
+    UiSurfaceId, UiText, UiTextOverflow, UiTheme, UiThemePalette, UiVisual,
 };
 use nara_window::WindowId;
 
@@ -267,6 +267,130 @@ fn packet_preserves_rect_then_nonblank_glyph_order() {
             .skip(1)
             .any(|primitive| matches!(primitive, UiPacketPrimitive::Glyph { .. }))
     );
+}
+
+#[test]
+fn padded_text_packet_matches_an_equivalent_unpadded_content_box() {
+    for scale in [1.0, 1.25] {
+        let environment = UiEnvironment::new(
+            UiSurfaceId::new(1).unwrap(),
+            320.0,
+            180.0,
+            scale,
+            1,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+        let text = UiText::new("One two three four five six seven eight", 16.0).unwrap();
+        let padded = UiNode::new(
+            UiStyle::absolute(10.0, 10.0, 100.0, 150.0)
+                .with_padding(UiEdges::symmetric(20.0, 7.0).unwrap()),
+        )
+        .with_key(UiLocalKey::runtime("packet-test", "padded").unwrap())
+        .with_text(text.clone());
+        let content = UiNode::new(UiStyle::absolute(30.0, 17.0, 60.0, 136.0))
+            .with_key(UiLocalKey::runtime("packet-test", "content").unwrap())
+            .with_text(text);
+        let padded_frame = frame_with_environment(1, vec![padded], environment);
+        let content_frame = frame_with_environment(1, vec![content], environment);
+        assert!(padded_frame.diagnostics().is_empty());
+        assert!(content_frame.diagnostics().is_empty());
+        let UiPaintPrimitive::Text {
+            layout: padded_layout,
+            ..
+        } = &padded_frame.paint()[0]
+        else {
+            panic!("the padded node must publish text")
+        };
+        let UiPaintPrimitive::Text {
+            layout: content_layout,
+            ..
+        } = &content_frame.paint()[0]
+        else {
+            panic!("the content node must publish text")
+        };
+        assert!(padded_layout.lines().len() > 1);
+        assert_eq!(padded_layout, content_layout);
+
+        let mut planner = UiPresentationPlanner::default();
+        let padded_packet = planner
+            .plan(
+                padded_frame,
+                RenderTarget::Window(WindowId::PRIMARY),
+                &UiPreparedImages::default(),
+            )
+            .unwrap();
+        let content_packet = planner
+            .plan(
+                content_frame,
+                RenderTarget::Window(WindowId::PRIMARY),
+                &UiPreparedImages::default(),
+            )
+            .unwrap();
+        let glyph_boxes = |packet: &crate::UiPaintPacket| {
+            packet
+                .primitives()
+                .iter()
+                .filter_map(|primitive| match primitive {
+                    UiPacketPrimitive::Glyph { rect, clip, .. } => Some((*rect, *clip)),
+                    UiPacketPrimitive::Rect { .. } => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let padded_glyphs = glyph_boxes(&padded_packet);
+        assert!(!padded_glyphs.is_empty());
+        assert_eq!(padded_glyphs, glyph_boxes(&content_packet));
+    }
+}
+
+#[test]
+fn padded_text_packet_preserves_nested_clip_at_fractional_scale() {
+    let environment =
+        UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 320.0, 180.0, 1.25, 1, 1, 1, 1).unwrap();
+    let child = UiNode::new(
+        UiStyle::absolute(40.0, 0.0, 100.0, 55.0)
+            .with_padding(UiEdges::symmetric(20.0, 5.0).unwrap()),
+    )
+    .with_key(UiLocalKey::runtime("packet-test", "nested-padded").unwrap())
+    .with_visual(UiVisual::solid(UiColor::rgba(0.1, 0.2, 0.3, 1.0)))
+    .with_text(
+        UiText::new("Mmmmmmmmmmm", 16.0)
+            .unwrap()
+            .with_overflow(UiTextOverflow::Clip),
+    );
+    let parent =
+        UiNode::new(UiStyle::absolute(10.0, 10.0, 80.0, 55.0).with_overflow(UiOverflow::Clip))
+            .with_child(child);
+    let candidate = frame_with_environment(1, vec![parent], environment);
+    assert!(candidate.diagnostics().is_empty());
+    let content_clip = nara_ui_kernel::UiRect::from_origin_size(70.0, 15.0, 20.0, 45.0).unwrap();
+    let expected_clip = environment.physical_rect(content_clip).unwrap();
+    let packet = UiPresentationPlanner::default()
+        .plan(
+            candidate,
+            RenderTarget::Window(WindowId::PRIMARY),
+            &UiPreparedImages::default(),
+        )
+        .unwrap();
+    let mut glyphs = 0;
+    for primitive in packet.primitives() {
+        let UiPacketPrimitive::Glyph { clip, .. } = primitive else {
+            continue;
+        };
+        let clip = clip.expect("nested text must retain its clip");
+        assert!(clip.min_x() >= expected_clip.min_x());
+        assert!(clip.min_y() >= expected_clip.min_y());
+        assert!(clip.max_x() <= expected_clip.max_x());
+        assert!(clip.max_y() <= expected_clip.max_y());
+        glyphs += 1;
+    }
+    assert!(glyphs > 0);
+    let UiPacketPrimitive::Rect { rect, .. } = packet.primitives()[0] else {
+        panic!("the background must precede glyphs")
+    };
+    assert!(rect.min_x() < expected_clip.min_x());
 }
 
 #[test]
