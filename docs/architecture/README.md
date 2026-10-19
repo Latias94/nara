@@ -66,6 +66,11 @@ records new raw-Prefab, Inspector and render error-path findings, and the next a
 component-validation, code-generation and document-ownership design triggers. It keeps current
 defects separate from deliberate capability limits and the completed U1-U15 corrections.
 
+The [authoring interface ergonomics design](authoring-interface-ergonomics-design.md) proposes
+one complete field-edit entry, exact dispatch-result routing, a single component inventory and
+finite shared constraints. It compares alternative interfaces and defines caller-level acceptance;
+it is not an Accepted contract or implemented API.
+
 The [UI foundation design](ui-foundation-design.md),
 [UI boundary study](ui-product-boundaries-editor-dogfood-and-porting-strategy.md), and
 [render pressure matrix](render-capability-pressure-matrix.md) provide design context when a task

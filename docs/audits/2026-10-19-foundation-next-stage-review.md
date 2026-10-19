@@ -321,3 +321,8 @@ framework. N01 can be corrected in its existing owner without a whole Scene rewr
 This order prevents avoidable interface debt while retaining the valid ownership foundation.
 It does not declare the findings fixed, authorize implementation of every future capability, or
 reopen the completed U1-U15 goal.
+
+The subsequent [authoring interface ergonomics design](../architecture/authoring-interface-ergonomics-design.md)
+compares three interface directions and proposes the default field editor, exact dispatch
+correlation, component inventory and bounded constraint contracts. Its implementation units and
+acceptance criteria remain proposed rather than completion evidence for these findings.
