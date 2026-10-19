@@ -37,6 +37,9 @@ const UNKNOWN: &str = "studio.missing.Reference";
 const OWNER: &str = "studio.composition.components";
 static NEXT_ROOT: AtomicU64 = AtomicU64::new(1);
 
+#[path = "support/recursive_component_values.rs"]
+mod recursive_component_values;
+
 #[test]
 fn trusted_project_opens_ordinary_prefab_through_source_navigation() {
     let project = CompositionProject::new();

@@ -20,6 +20,9 @@ use nara::{
 
 use super::{ImguiTextOwner, observe_text_owner};
 
+mod recursive_controls;
+mod value_draft;
+
 #[derive(Default)]
 pub(super) struct ImguiAuthoringPanels {
     scope: Option<(
@@ -28,6 +31,7 @@ pub(super) struct ImguiAuthoringPanels {
         Option<SceneEntityId>,
     )>,
     drafts: HashMap<EditorFieldTarget, FieldDraft>,
+    structured_drafts: HashMap<EditorFieldTarget, value_draft::RootDraft>,
     pending_removal: Option<SceneEntityId>,
     read_only: bool,
 }
@@ -45,6 +49,7 @@ impl ImguiAuthoringPanels {
     pub(super) fn retire(&mut self) {
         self.scope = None;
         self.drafts.clear();
+        self.structured_drafts.clear();
         self.pending_removal = None;
     }
 
@@ -562,49 +567,84 @@ impl ImguiAuthoringPanels {
         text_owner: &mut Option<ImguiTextOwner>,
     ) {
         let _id = ui.push_id(field.id.as_str());
+        let editable = editable && value_draft::supported(&field.shape);
         ui.text(format!(
             "{}{}",
             field.path,
             if field.required { " *" } else { "" }
         ));
-        match field.value_kind {
-            ComponentValueKind::Bool => {
-                let mut value = field
-                    .value
-                    .as_ref()
-                    .or(field.default_value.as_ref())
-                    .and_then(ComponentValue::as_bool)
-                    .unwrap_or(false);
-                let changed = ui.with_disabled_if(!editable, || ui.checkbox("##value", &mut value));
-                if changed {
-                    self.drafts.remove(&target);
-                    actions.push(field_action(
-                        &target,
-                        SceneInspectorCommand::SetField {
-                            entity: target.entity().clone(),
-                            component: target.component().clone(),
-                            component_version: target.component_version(),
-                            field: target.field().clone(),
-                            value: ComponentValue::Bool(value),
-                        },
-                    ));
+        if !matches!(
+            field.shape,
+            nara::reflect::ComponentValueShape::Scalar { .. }
+                | nara::reflect::ComponentValueShape::AssetRef
+        ) && value_draft::supported(&field.shape)
+        {
+            let draft = self.structured_drafts.entry(target.clone()).or_default();
+            match recursive_controls::show_root(
+                ui,
+                &target,
+                &field.shape,
+                field.value.as_ref().or(field.default_value.as_ref()),
+                draft,
+                editable,
+                text_owner,
+            ) {
+                Some(Ok(value)) => actions.push(field_action(
+                    &target,
+                    SceneInspectorCommand::SetField {
+                        entity: target.entity().clone(),
+                        component: target.component().clone(),
+                        component_version: target.component_version(),
+                        field: target.field().clone(),
+                        value,
+                    },
+                )),
+                Some(Err(())) => actions.push(EditorAction::ReportFieldValidation(
+                    EditorFieldValidationFailure::new(target.clone(), field.value_kind),
+                )),
+                None => {}
+            }
+        } else {
+            match field.value_kind {
+                ComponentValueKind::Bool => {
+                    let mut value = field
+                        .value
+                        .as_ref()
+                        .or(field.default_value.as_ref())
+                        .and_then(ComponentValue::as_bool)
+                        .unwrap_or(false);
+                    let changed =
+                        ui.with_disabled_if(!editable, || ui.checkbox("##value", &mut value));
+                    if changed {
+                        self.drafts.remove(&target);
+                        actions.push(field_action(
+                            &target,
+                            SceneInspectorCommand::SetField {
+                                entity: target.entity().clone(),
+                                component: target.component().clone(),
+                                component_version: target.component_version(),
+                                field: target.field().clone(),
+                                value: ComponentValue::Bool(value),
+                            },
+                        ));
+                    }
                 }
-            }
-            ComponentValueKind::I64
-            | ComponentValueKind::U64
-            | ComponentValueKind::F64
-            | ComponentValueKind::String
-            | ComponentValueKind::AssetRef => {
-                self.show_text_field(ui, &target, field, editable, actions, text_owner);
-            }
-            ComponentValueKind::Null
-            | ComponentValueKind::List
-            | ComponentValueKind::Map
-            | ComponentValueKind::EntityRef => {
-                ui.text_wrapped(value_label(
-                    field.value.as_ref().or(field.default_value.as_ref()),
-                ));
-                ui.text_disabled("This field kind is read-only in the generic Inspector");
+                ComponentValueKind::I64
+                | ComponentValueKind::U64
+                | ComponentValueKind::F64
+                | ComponentValueKind::String
+                | ComponentValueKind::AssetRef => {
+                    self.show_text_field(ui, &target, field, editable, actions, text_owner);
+                }
+                ComponentValueKind::Null
+                | ComponentValueKind::List
+                | ComponentValueKind::Map
+                | ComponentValueKind::EntityRef => {
+                    ui.text_wrapped(value_label(
+                        field.value.as_ref().or(field.default_value.as_ref()),
+                    ));
+                    ui.text_disabled("This field kind is read-only in the generic Inspector");
+                }
             }
         }
         if enabled_button(
@@ -629,6 +669,11 @@ impl ImguiAuthoringPanels {
             .drafts
             .get(&target)
             .and_then(|draft| draft.error.as_deref())
+            .or_else(|| {
+                self.structured_drafts
+                    .get(&target)
+                    .and_then(|draft| draft.error.as_deref())
+            })
         {
             ui.text_colored([1.0, 0.4, 0.3, 1.0], error);
         } else if let Some(feedback) = frame.field_feedback()
@@ -1086,12 +1131,17 @@ mod tests {
                 error: None,
             },
         );
+        panel
+            .structured_drafts
+            .insert(key.clone(), value_draft::RootDraft::default());
         panel.synchronize(Some(&scene));
         assert_eq!(panel.drafts[&key].text, "unapplied");
+        assert!(panel.structured_drafts.contains_key(&key));
 
         scene.editor.inspector.selected_entity = Some(SceneEntityId::new("owner").unwrap());
         panel.synchronize(Some(&scene));
         assert!(panel.drafts.is_empty());
+        assert!(panel.structured_drafts.is_empty());
         panel.drafts.insert(
             key.clone(),
             FieldDraft {
@@ -1111,9 +1161,13 @@ mod tests {
             },
         );
         panel.pending_removal = Some(SceneEntityId::new("owner").unwrap());
+        panel
+            .structured_drafts
+            .insert(target(&scene), value_draft::RootDraft::default());
         panel.retire();
         assert!(panel.scope.is_none());
         assert!(panel.drafts.is_empty());
+        assert!(panel.structured_drafts.is_empty());
         assert!(panel.pending_removal.is_none());
         assert!(!scene.dirty);
     }

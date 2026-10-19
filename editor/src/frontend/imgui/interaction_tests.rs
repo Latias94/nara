@@ -30,6 +30,8 @@ use nara::{
 use super::ImguiEditorFrontend;
 use crate::{EditorApplication, EditorLaunchOptions};
 
+mod recursive_shapes;
+
 pub(super) const CUSTOM_COMPONENT: &str = "studio.interaction.Health";
 const UNKNOWN_COMPONENT: &str = "studio.unavailable.Payload";
 
@@ -49,6 +51,12 @@ pub(crate) struct InteractionProject {
 }
 
 impl InteractionProject {
+    pub(crate) fn new_recursive() -> Self {
+        let project = Self::new();
+        recursive_shapes::configure(&project);
+        project
+    }
+
     pub(crate) fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
             "nara-imgui-interaction-{}-{}",

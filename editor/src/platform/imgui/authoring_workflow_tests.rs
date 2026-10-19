@@ -31,6 +31,8 @@ use crate::{
 
 const CUSTOM_COMPONENT: &str = "studio.interaction.Health";
 
+mod recursive_shapes;
+
 struct DocumentObservation {
     kind: EditorDocumentKind,
     values: [Option<i64>; 9],
@@ -124,6 +126,14 @@ fn run_authoring(
     event_loop: &ActiveEventLoop,
     project: &Path,
 ) -> Result<AuthoringObservation, String> {
+    run_native_workflow(event_loop, project, |workflow| workflow.run(project))
+}
+
+fn run_native_workflow<T>(
+    event_loop: &ActiveEventLoop,
+    project: &Path,
+    run: impl FnOnce(AuthoringWorkflow<'_>) -> Result<T, String>,
+) -> Result<T, String> {
     let window = Arc::new(
         event_loop
             .create_window(
@@ -144,14 +154,13 @@ fn run_authoring(
     let mut application =
         EditorApplication::new(EditorLaunchOptions::new(project).with_profile("desktop"));
     application.native_shell_ready();
-    let result = AuthoringWorkflow {
+    let result = run(AuthoringWorkflow {
         native: &mut native,
         application: &mut application,
         event_loop,
         pointer: [-1000.0, -1000.0],
         presents: 0,
-    }
-    .run(project);
+    });
     let graphics = native
         .shutdown_graphics()
         .map_err(|error| error.to_string());
@@ -244,7 +253,17 @@ impl AuthoringWorkflow<'_> {
     }
 
     fn replace_integer(&mut self) -> Result<(), String> {
-        self.click(&format!("field:{CUSTOM_COMPONENT}:value"))?;
+        self.replace_text(&format!("field:{CUSTOM_COMPONENT}:value"), "42")?;
+        self.paint(|context| context.io_mut().add_key_event(Key::Enter, true))?;
+        self.paint(|context| context.io_mut().add_key_event(Key::Enter, false))?;
+        for _ in 0..3 {
+            self.paint(|_| {})?;
+        }
+        Ok(())
+    }
+
+    fn replace_text(&mut self, label: &str, value: &str) -> Result<(), String> {
+        self.click(label)?;
         self.paint(|context| {
             context.io_mut().add_key_event(Key::ModCtrl, true);
             context.io_mut().add_key_event(Key::A, true);
@@ -253,12 +272,7 @@ impl AuthoringWorkflow<'_> {
             context.io_mut().add_key_event(Key::A, false);
             context.io_mut().add_key_event(Key::ModCtrl, false);
         })?;
-        self.paint(|context| context.io_mut().add_input_characters_utf8("42"))?;
-        self.paint(|context| context.io_mut().add_key_event(Key::Enter, true))?;
-        self.paint(|context| context.io_mut().add_key_event(Key::Enter, false))?;
-        for _ in 0..3 {
-            self.paint(|_| {})?;
-        }
+        self.paint(|context| context.io_mut().add_input_characters_utf8(value))?;
         Ok(())
     }
 
