@@ -396,6 +396,26 @@ impl WgpuFrameTransactionStats {
     }
 }
 
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[derive(Debug)]
+enum WgpuCachedQuadPipeline {
+    Ready(WgpuQuadPipeline),
+    Rejected {
+        key: WgpuQuadPipelineKey,
+        message: String,
+    },
+}
+
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+impl WgpuCachedQuadPipeline {
+    fn key(&self) -> WgpuQuadPipelineKey {
+        match self {
+            Self::Ready(pipeline) => pipeline.key,
+            Self::Rejected { key, .. } => *key,
+        }
+    }
+}
+
 #[derive(Debug, Default, Resource)]
 pub struct WgpuRenderBackend {
     instance_id: WgpuBackendInstanceId,
@@ -420,7 +440,9 @@ pub struct WgpuRenderBackend {
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     quad_material_bind_group_layout: Option<wgpu::BindGroupLayout>,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    quad_pipelines: Vec<WgpuQuadPipeline>,
+    quad_pipelines: Vec<WgpuCachedQuadPipeline>,
+    #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+    quad_pipeline_attempts: usize,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     quad_textures: WgpuSpriteTextureCache,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -1647,12 +1669,20 @@ impl WgpuRenderBackend {
 
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     fn ensure_quad_pipeline(&mut self, key: WgpuQuadPipelineKey) -> Result<(), WgpuRenderError> {
-        if self
+        self.fail_if_device_lost()?;
+        if let Some(cached) = self
             .quad_pipelines
             .iter()
-            .any(|pipeline| pipeline.key == key)
+            .find(|cached| cached.key() == key)
         {
-            return Ok(());
+            return match cached {
+                WgpuCachedQuadPipeline::Ready(_) => Ok(()),
+                WgpuCachedQuadPipeline::Rejected { message, .. } => {
+                    Err(WgpuRenderError::ContentRejected {
+                        message: message.clone(),
+                    })
+                }
+            };
         }
         let texture_layout = self.ensure_quad_texture_bind_group_layout()?;
         let material_layout = self.ensure_quad_material_bind_group_layout()?;
@@ -1660,13 +1690,28 @@ impl WgpuRenderBackend {
             .device
             .as_ref()
             .ok_or(WgpuRenderError::BackendNotReady)?;
-        self.quad_pipelines.push(create_quad_pipeline(
-            device,
-            key,
-            &texture_layout,
-            &material_layout,
-        )?);
-        Ok(())
+        #[cfg(test)]
+        {
+            self.quad_pipeline_attempts += 1;
+        }
+        let result = create_quad_pipeline(device, key, &texture_layout, &material_layout);
+        // Device loss is a namespace failure even if it also invalidated a shader handle.
+        self.fail_if_device_lost()?;
+        match result {
+            Ok(pipeline) => {
+                self.quad_pipelines
+                    .push(WgpuCachedQuadPipeline::Ready(pipeline));
+                Ok(())
+            }
+            Err(WgpuRenderError::ContentRejected { message }) => {
+                self.quad_pipelines.push(WgpuCachedQuadPipeline::Rejected {
+                    key,
+                    message: message.clone(),
+                });
+                Err(WgpuRenderError::ContentRejected { message })
+            }
+            Err(error) => Err(error),
+        }
     }
 
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -1679,7 +1724,12 @@ impl WgpuRenderBackend {
                 let pipeline = self
                     .quad_pipelines
                     .iter()
-                    .find(|pipeline| pipeline.key == *key)
+                    .find_map(|cached| match cached {
+                        WgpuCachedQuadPipeline::Ready(pipeline) if pipeline.key == *key => {
+                            Some(pipeline)
+                        }
+                        _ => None,
+                    })
                     .ok_or_else(|| WgpuRenderError::QuadPipelineMissing {
                         format: format!("{:?}", key.format),
                         alpha_mode: format!("{:?}", key.alpha_mode),
@@ -1758,6 +1808,201 @@ mod tests {
     };
 
     use super::*;
+
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[test]
+    fn permanent_pipeline_rejection_is_cached_per_device_and_valid_material_renders() {
+        use crate::quad::{
+            WgpuMaterial2d, WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture,
+            WgpuQuadTextureKey, draw_quad_batch_buffers,
+        };
+        use crate::readback_tests::{
+            image_versions, readback_pixel, readback_viewport, render_to_rgba,
+        };
+        use nara_material::{Material2dDefinition, Material2dInput, SamplerDescriptor};
+
+        let bad_material = Material2dDefinition {
+            id: "test.pipeline-rejection",
+            fragment_shader: "this is not valid WGSL",
+            input: Material2dInput::SPRITE_FRAGMENT_V1,
+            alpha_mode: AlphaMode2d::Opaque,
+        };
+        let good_material = Material2dDefinition {
+            fragment_shader: "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return vec4<f32>(0.0, 1.0, 0.0, 1.0); }",
+            ..bad_material
+        };
+        let (pixels, (mut backend, bad_key)) =
+            render_to_rgba(|device, queue, format, output_view, encoder| {
+                let mut backend =
+                    WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
+                let bad_key = WgpuQuadPipelineKey {
+                    format,
+                    alpha_mode: AlphaMode2d::Opaque,
+                    material: Some(bad_material),
+                };
+                for frame in 1..=4 {
+                    backend.begin_frame_transaction(frame, None);
+                    assert!(matches!(
+                        backend.ensure_quad_pipeline(bad_key),
+                        Err(WgpuRenderError::ContentRejected { .. })
+                    ));
+                }
+                assert_eq!(backend.quad_pipeline_attempts, 1);
+                assert_eq!(backend.quad_pipelines.len(), 1);
+                let good_key = WgpuQuadPipelineKey {
+                    material: Some(good_material),
+                    ..bad_key
+                };
+                for frame in 5..=8 {
+                    backend.begin_frame_transaction(frame, None);
+                    backend.ensure_quad_pipeline(good_key)?;
+                }
+                assert_eq!(backend.quad_pipeline_attempts, 2);
+                let [image, _] = image_versions(1, 1);
+                let batches = [WgpuQuadBatch {
+                    material: WgpuQuadMaterialKey {
+                        texture: WgpuQuadTextureKey::Fallback,
+                        sampler: SamplerDescriptor::NEAREST_CLAMP,
+                        alpha_mode: AlphaMode2d::Opaque,
+                    },
+                    texture: WgpuQuadTexture::Fallback,
+                    scissor: None,
+                    instances: vec![WgpuQuadInstance {
+                        center: [0.0; 2],
+                        x_axis: [1.0, 0.0],
+                        y_axis: [0.0, 1.0],
+                        color: [1.0; 4],
+                        uv_min: [0.0; 2],
+                        uv_size: [1.0; 2],
+                        texture_mode: 0,
+                        shape_mode: 0,
+                        rect_size: [1.0; 2],
+                        corner_radius: 0.0,
+                        border_width: 0.0,
+                    }],
+                    counts_as_sprites: true,
+                    material_extension: Some(WgpuMaterial2d {
+                        definition: good_material,
+                        parameters: [0.0; 4],
+                        texture: image,
+                    }),
+                }];
+                let texture_layout = backend.ensure_quad_texture_bind_group_layout()?;
+                let material_layout = backend.ensure_quad_material_bind_group_layout()?;
+                let buffers = create_quad_batch_buffers(
+                    device,
+                    queue,
+                    &batches,
+                    &texture_layout,
+                    &material_layout,
+                    &mut backend.quad_textures,
+                    8,
+                )
+                .unwrap();
+                let pipelines = backend.quad_pipeline_draw_refs(&[good_key])?;
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("nara_pipeline_rejection_recovery"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: output_view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    });
+                    draw_quad_batch_buffers(&mut pass, &pipelines, &buffers, readback_viewport());
+                }
+                Ok((backend, bad_key))
+            })
+            .unwrap();
+        assert_eq!(readback_pixel(&pixels, 32, 32), &[0, 255, 0, 255]);
+        backend
+            .clear_gpu_resources(SurfaceDropReason::BackendCleanup)
+            .unwrap();
+        assert!(backend.quad_pipelines.is_empty());
+        render_to_rgba(|device, queue, _, _, _| {
+            backend.device = Some(device.clone());
+            backend.queue = Some(queue.clone());
+            backend.device_epoch += 1;
+            for _ in 0..3 {
+                assert!(matches!(
+                    backend.ensure_quad_pipeline(bad_key),
+                    Err(WgpuRenderError::ContentRejected { .. })
+                ));
+            }
+            assert_eq!(
+                backend.quad_pipeline_attempts, 3,
+                "replacement device must revalidate once"
+            );
+            let mut replacement =
+                WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
+            assert_ne!(replacement.instance_id(), backend.instance_id());
+            assert!(matches!(
+                replacement.ensure_quad_pipeline(bad_key),
+                Err(WgpuRenderError::ContentRejected { .. })
+            ));
+            assert_eq!(
+                replacement.quad_pipeline_attempts, 1,
+                "replacement owner must revalidate"
+            );
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[test]
+    fn pipeline_allocation_failure_is_retryable_and_device_loss_is_not_content_rejection() {
+        use crate::quad::QUAD_PIPELINE_ALLOCATION_FAILURE;
+        use nara_material::{Material2dDefinition, Material2dInput};
+
+        crate::readback_tests::render_to_rgba(|device, queue, format, _, _| {
+            let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
+            let key = WgpuQuadPipelineKey {
+                format,
+                alpha_mode: AlphaMode2d::Opaque,
+                material: Some(Material2dDefinition {
+                    id: "test.pipeline-allocation",
+                    fragment_shader: "invalid WGSL",
+                    input: Material2dInput::SPRITE_FRAGMENT_V1,
+                    alpha_mode: AlphaMode2d::Opaque,
+                }),
+            };
+            // Inject allocation failure alongside real WGSL validation failure. Allocation
+            // takes priority and cannot leave terminal rejection in the device cache.
+            QUAD_PIPELINE_ALLOCATION_FAILURE.with(|failure| failure.set(true));
+            assert!(matches!(
+                backend.ensure_quad_pipeline(key),
+                Err(WgpuRenderError::UploadDeferred { .. })
+            ));
+            assert!(backend.quad_pipelines.is_empty());
+            assert_eq!(backend.quad_pipeline_attempts, 1);
+            assert!(matches!(
+                backend.ensure_quad_pipeline(key),
+                Err(WgpuRenderError::ContentRejected { .. })
+            ));
+            assert_eq!(backend.quad_pipeline_attempts, 2);
+            let signal = Arc::new(DeviceLossSignal::default());
+            signal.mark_lost();
+            backend.device_loss_signal = Some(signal);
+            assert_eq!(
+                backend.ensure_quad_pipeline(key),
+                Err(WgpuRenderError::DeviceLost)
+            );
+            assert_eq!(backend.quad_pipeline_attempts, 2);
+            backend.mark_error(&WgpuRenderError::DeviceLost);
+            assert!(backend.quad_pipelines.is_empty());
+            Ok(())
+        })
+        .unwrap();
+    }
 
     #[test]
     fn fallback_adapter_environment_is_absent_or_explicitly_boolean() {

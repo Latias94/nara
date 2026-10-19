@@ -217,13 +217,53 @@ pub(crate) fn create_quad_texture_bind_group_layout(
     })
 }
 
+#[cfg(test)]
+std::thread_local! {
+    pub(crate) static QUAD_PIPELINE_ALLOCATION_FAILURE: std::cell::Cell<bool> = const {
+        std::cell::Cell::new(false)
+    };
+}
+
+fn finish_quad_pipeline_stage(
+    allocation_scope: wgpu::ErrorScopeGuard,
+    validation_scope: wgpu::ErrorScopeGuard,
+    key: WgpuQuadPipelineKey,
+) -> Result<(), crate::WgpuRenderError> {
+    let validation_error = pollster::block_on(validation_scope.pop());
+    let allocation_error =
+        pollster::block_on(allocation_scope.pop()).map(|error| error.to_string());
+    #[cfg(test)]
+    let allocation_error = allocation_error.or_else(|| {
+        QUAD_PIPELINE_ALLOCATION_FAILURE.with(|failure| {
+            failure
+                .replace(false)
+                .then(|| "injected pipeline allocation failure".to_owned())
+        })
+    });
+    // Allocation failure can leave invalid handles that also produce validation errors.
+    // It must remain retryable rather than poisoning this immutable material definition.
+    if let Some(message) = allocation_error {
+        return Err(crate::WgpuRenderError::UploadDeferred {
+            message: format!("2D pipeline allocation: {message}"),
+        });
+    }
+    if let Some(error) = validation_error {
+        return Err(crate::WgpuRenderError::ContentRejected {
+            message: format!(
+                "2D material {:?}: {error}",
+                key.material.map(|material| material.id)
+            ),
+        });
+    }
+    Ok(())
+}
+
 pub(crate) fn create_quad_pipeline(
     device: &wgpu::Device,
     key: WgpuQuadPipelineKey,
     texture_bind_group_layout: &wgpu::BindGroupLayout,
     material_bind_group_layout: &wgpu::BindGroupLayout,
 ) -> Result<WgpuQuadPipeline, crate::WgpuRenderError> {
-    let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let fragment = key.material.map_or(
         "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return sampled * tint; }",
         |material| material.fragment_shader,
@@ -234,20 +274,28 @@ pub(crate) fn create_quad_pipeline(
         ""
     };
     let source = format!("{}\n{bindings}\n{fragment}", include_str!("sprite.wgsl"));
+    let allocation_scope = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+    let validation_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("nara_wgpu_quad_shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),
     });
+    finish_quad_pipeline_stage(allocation_scope, validation_scope, key)?;
     let mut layouts = vec![Some(texture_bind_group_layout)];
     if key.material.is_some() {
         layouts.push(Some(material_bind_group_layout));
     }
+    let allocation_scope = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+    let validation_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("nara_wgpu_quad_pipeline_layout"),
         bind_group_layouts: &layouts,
         immediate_size: 0,
     });
+    finish_quad_pipeline_stage(allocation_scope, validation_scope, key)?;
     let vertex_buffer_layout = quad_instance_buffer_layout();
+    let allocation_scope = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+    let validation_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("nara_wgpu_quad_pipeline"),
         layout: Some(&pipeline_layout),
@@ -273,14 +321,7 @@ pub(crate) fn create_quad_pipeline(
         cache: None,
     });
 
-    if let Some(error) = pollster::block_on(error_scope.pop()) {
-        return Err(crate::WgpuRenderError::ContentRejected {
-            message: format!(
-                "2D material {:?}: {error}",
-                key.material.map(|material| material.id)
-            ),
-        });
-    }
+    finish_quad_pipeline_stage(allocation_scope, validation_scope, key)?;
     Ok(WgpuQuadPipeline { key, pipeline })
 }
 
