@@ -123,6 +123,8 @@ pub struct WgpuFrameTransactionStats {
     surface_acquires: u64,
     queue_submissions: u64,
     presents: u64,
+    candidate_instance_buffer_demand_bytes: u64,
+    submitted_instance_buffer_demand_bytes: u64,
     #[cfg(feature = "ui-submitter")]
     ui_packet_count: u64,
     #[cfg(feature = "ui-submitter")]
@@ -318,6 +320,22 @@ impl WgpuFrameTransactionStats {
         self.presents
     }
 
+    /// Scope demand held by prepared draws that have not been submitted yet.
+    ///
+    /// Dropping a candidate refunds this demand. This does not measure GPU residency.
+    #[must_use]
+    pub const fn candidate_instance_buffer_demand_bytes(self) -> u64 {
+        self.candidate_instance_buffer_demand_bytes
+    }
+
+    /// Cumulative instance demand submitted in this transaction, until the next transaction.
+    ///
+    /// GPU completion does not refund this demand. Physical completion accounting is separate.
+    #[must_use]
+    pub const fn submitted_instance_buffer_demand_bytes(self) -> u64 {
+        self.submitted_instance_buffer_demand_bytes
+    }
+
     /// Returns the number of UI packets admitted for this exact backend frame transaction.
     #[cfg(feature = "ui-submitter")]
     #[must_use]
@@ -483,8 +501,18 @@ impl WgpuRenderBackend {
     }
 
     #[must_use]
-    pub const fn frame_transaction_stats(&self) -> WgpuFrameTransactionStats {
-        self.frame_transaction_stats
+    pub fn frame_transaction_stats(&self) -> WgpuFrameTransactionStats {
+        let stats = self.frame_transaction_stats;
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        let stats = {
+            let mut stats = stats;
+            (
+                stats.candidate_instance_buffer_demand_bytes,
+                stats.submitted_instance_buffer_demand_bytes,
+            ) = self.instance_budget.charges();
+            stats
+        };
+        stats
     }
 
     pub(crate) const fn presented_frame_this_transaction(
@@ -1118,6 +1146,11 @@ impl WgpuRenderBackend {
         bytes: u64,
     ) -> Result<crate::budget::InstanceReservation, crate::budget::InstanceBudgetError> {
         self.instance_budget.reserve(bytes)
+    }
+
+    #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+    pub(crate) fn set_instance_budget_limit(&mut self, maximum: u64) {
+        self.instance_budget = InstanceBudget::with_limit(maximum);
     }
 
     pub(super) fn record_editor_window_presentation(&mut self) {
@@ -1979,6 +2012,81 @@ mod tests {
             .reserve_instance_buffer_bytes(64 * 1024 * 1024)
             .expect("the new scope starts empty even while the old holder is dropped");
         drop(new_reservation);
+    }
+
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[test]
+    fn new_frame_demand_is_independent_of_older_physical_completion() {
+        let mut backend = WgpuRenderBackend::default();
+        backend.configure_telemetry(WgpuBackendTelemetryConfig::new(2, 2).unwrap());
+        backend.telemetry.begin_device_epoch(7);
+        backend.begin_frame_transaction(1, Some(1));
+        let mut old_reservation = backend.reserve_instance_buffer_bytes(64).unwrap();
+        old_reservation.commit();
+        backend.telemetry.observe_gpu_resources(4, 64);
+        let old_completion = backend
+            .telemetry
+            .begin_frame_submission(1, 1, 7, std::time::Instant::now())
+            .unwrap();
+        backend.telemetry.finish_prepared_gpu_resources();
+
+        backend.begin_frame_transaction(2, Some(2));
+        let scope = backend.frame_transaction_stats();
+        assert_eq!(scope.candidate_instance_buffer_demand_bytes(), 0);
+        assert_eq!(scope.submitted_instance_buffer_demand_bytes(), 0);
+        assert_eq!(
+            backend.gpu_resource_stats().current_instance_buffer_bytes(),
+            64
+        );
+        assert_eq!(backend.gpu_resource_stats().pending_retirements(), 1);
+
+        let mut new_reservation = backend.reserve_instance_buffer_bytes(32).unwrap();
+        assert_eq!(
+            backend
+                .frame_transaction_stats()
+                .candidate_instance_buffer_demand_bytes(),
+            32
+        );
+        new_reservation.commit();
+        backend.telemetry.observe_gpu_resources(4, 32);
+        let new_completion = backend
+            .telemetry
+            .begin_frame_submission(2, 2, 7, std::time::Instant::now())
+            .unwrap();
+        backend.telemetry.finish_prepared_gpu_resources();
+        assert_eq!(
+            backend.gpu_resource_stats().current_instance_buffer_bytes(),
+            96
+        );
+        assert_eq!(backend.gpu_resource_stats().pending_retirements(), 2);
+
+        old_completion.complete();
+        drop(old_reservation);
+        assert_eq!(
+            backend.gpu_resource_stats().current_instance_buffer_bytes(),
+            32
+        );
+        assert_eq!(backend.gpu_resource_stats().pending_retirements(), 1);
+        assert_eq!(
+            backend
+                .frame_transaction_stats()
+                .submitted_instance_buffer_demand_bytes(),
+            32
+        );
+        new_completion.complete();
+        drop(new_reservation);
+        assert_eq!(
+            backend.gpu_resource_stats().current_instance_buffer_bytes(),
+            0
+        );
+        assert_eq!(backend.gpu_resource_stats().pending_retirements(), 0);
+        assert_eq!(
+            backend
+                .frame_transaction_stats()
+                .submitted_instance_buffer_demand_bytes(),
+            32,
+            "physical completion cannot refund demand in the current frame"
+        );
     }
 
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]

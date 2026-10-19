@@ -16,29 +16,48 @@ pub(crate) struct InstanceBudget {
     state: Arc<BudgetState>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct BudgetState {
-    reserved: Mutex<u64>,
+    maximum: u64,
+    charges: Mutex<BudgetCharges>,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct BudgetCharges {
+    reserved: u64,
+    committed: u64,
+}
+
+impl Default for BudgetState {
+    fn default() -> Self {
+        Self {
+            maximum: MAX_INSTANCE_BUFFER_BYTES_PER_SCOPE,
+            charges: Mutex::default(),
+        }
+    }
 }
 
 impl InstanceBudget {
     pub(crate) fn reserve(&self, bytes: u64) -> Result<InstanceReservation, InstanceBudgetError> {
-        let mut reserved = self
+        let mut charges = self
             .state
-            .reserved
+            .charges
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let next = reserved.checked_add(bytes).ok_or(InstanceBudgetError {
-            required: u64::MAX,
-            maximum: MAX_INSTANCE_BUFFER_BYTES_PER_SCOPE,
-        })?;
-        if next > MAX_INSTANCE_BUFFER_BYTES_PER_SCOPE {
+        let next = charges
+            .reserved
+            .checked_add(bytes)
+            .ok_or(InstanceBudgetError {
+                required: u64::MAX,
+                maximum: self.state.maximum,
+            })?;
+        if next > self.state.maximum {
             return Err(InstanceBudgetError {
                 required: next,
-                maximum: MAX_INSTANCE_BUFFER_BYTES_PER_SCOPE,
+                maximum: self.state.maximum,
             });
         }
-        *reserved = next;
+        charges.reserved = next;
         Ok(InstanceReservation {
             state: Arc::downgrade(&self.state),
             bytes,
@@ -46,13 +65,29 @@ impl InstanceBudget {
         })
     }
 
+    pub(crate) fn charges(&self) -> (u64, u64) {
+        let charges = *self
+            .state
+            .charges
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (charges.reserved - charges.committed, charges.committed)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_limit(maximum: u64) -> Self {
+        Self {
+            state: Arc::new(BudgetState {
+                maximum: maximum.min(MAX_INSTANCE_BUFFER_BYTES_PER_SCOPE),
+                charges: Mutex::default(),
+            }),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn reserved(&self) -> u64 {
-        *self
-            .state
-            .reserved
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        let (candidate, submitted) = self.charges();
+        candidate + submitted
     }
 }
 
@@ -65,6 +100,17 @@ pub(crate) struct InstanceReservation {
 
 impl InstanceReservation {
     pub(crate) fn commit(&mut self) {
+        if self.committed {
+            return;
+        }
+        if let Some(state) = self.state.upgrade() {
+            let mut charges = state
+                .charges
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            // Every committed reservation is already included in the bounded reserved total.
+            charges.committed += self.bytes;
+        }
         self.committed = true;
     }
 }
@@ -77,11 +123,11 @@ impl Drop for InstanceReservation {
         let Some(state) = self.state.upgrade() else {
             return;
         };
-        let mut reserved = state
-            .reserved
+        let mut charges = state
+            .charges
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *reserved = reserved.saturating_sub(self.bytes);
+        charges.reserved = charges.reserved.saturating_sub(self.bytes);
     }
 }
 

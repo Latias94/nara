@@ -783,7 +783,7 @@ impl WgpuEditorExecution {
     }
 
     #[must_use]
-    pub const fn frame_transaction_stats(&self) -> WgpuFrameTransactionStats {
+    pub fn frame_transaction_stats(&self) -> WgpuFrameTransactionStats {
         self.backend.frame_transaction_stats()
     }
 

@@ -55,6 +55,10 @@ flowchart LR
 - Expensive lowering should avoid known invisible work before allocation or upload when a current
   view and bounds make that decision correct; the exact culling/cache representation is private.
 - Per-frame and retained GPU work has explicit admission limits or a measured finite upper bound.
+- Instance-buffer demand shares one cumulative reservation owner across a Runtime frame's views
+  and passes, or all targets in one Editor Host render transaction. Unsubmitted candidates refund
+  their reservations on drop; queue submission commits the demand until the next scope. Scope
+  demand is distinct from physical GPU completion and residency, which may span multiple frames.
 - The backend exposes requested, admitted, completed, rejected or deferred work, allocation churn,
   and failure diagnostics at a cost appropriate to the product profile.
 - Device loss invalidates device-dependent work and caches without publishing stale objects under a

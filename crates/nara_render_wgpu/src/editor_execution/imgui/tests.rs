@@ -205,13 +205,36 @@ mod bare_primary {
         let mut builder = EventLoop::builder();
         builder.with_any_thread(true);
         let event_loop = builder.build().unwrap();
-        let mut app = BarePrimaryApp { result: None };
+        let mut app = BarePrimaryApp {
+            result: None,
+            #[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
+            instance_budget_probe: false,
+        };
         event_loop.run_app(&mut app).unwrap();
         app.result.expect("the primary lifecycle must run").unwrap();
     }
 
+    #[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[test]
+    #[ignore = "requires an interactive Windows desktop and a working WGPU adapter"]
+    fn editor_targets_share_submitted_scope_budget_and_recover_next_frame() {
+        let mut builder = EventLoop::builder();
+        builder.with_any_thread(true);
+        let event_loop = builder.build().unwrap();
+        let mut app = BarePrimaryApp {
+            result: None,
+            instance_budget_probe: true,
+        };
+        event_loop.run_app(&mut app).unwrap();
+        app.result
+            .expect("the Editor budget trajectory must run")
+            .unwrap();
+    }
+
     struct BarePrimaryApp {
         result: Option<Result<(), String>>,
+        #[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
+        instance_budget_probe: bool,
     }
 
     impl ApplicationHandler for BarePrimaryApp {
@@ -250,6 +273,13 @@ mod bare_primary {
                         );
                     })
                     .map_err(|error| error.to_string())?;
+                #[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
+                if self.instance_budget_probe {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        verify_instance_budget(&mut execution, packet)
+                    }))
+                    .map_err(|_| "the Editor instance budget assertions failed".to_owned())??;
+                }
                 execution
                     .wait_for_idle()
                     .map_err(|error| error.to_string())?;
@@ -274,6 +304,179 @@ mod bare_primary {
             _event: WindowEvent,
         ) {
         }
+    }
+
+    #[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
+    fn verify_instance_budget(
+        execution: &mut WgpuEditorExecution,
+        window: RenderWindowPacket,
+    ) -> Result<(), String> {
+        use crate::editor_execution::{WgpuEditorExecutionError, WgpuEditorViewId};
+        use nara_ecs::Entity;
+        use nara_render::{
+            __private::{
+                EditorRenderGeneration, build_editor_render_frame_packet,
+                editor_viewport_image_target,
+            },
+            Color, Extent2d, ExtractedView, ExtractedViews, RenderImage2d, RenderTarget,
+            ViewportRect,
+        };
+
+        let generation = EditorRenderGeneration::try_acquire().unwrap();
+        let instance_bytes = std::mem::size_of::<crate::quad::WgpuQuadInstance>() as u64;
+        let mut targets = Vec::new();
+        execution
+            .begin_editor_frame(window, 1)
+            .map_err(|error| error.to_string())?;
+        execution.backend.set_instance_budget_limit(instance_bytes);
+        for index in 1..=2 {
+            let image = RenderImage2d::allocate_handle().unwrap();
+            let target =
+                editor_viewport_image_target(image, Extent2d::new(64, 64).unwrap()).unwrap();
+            let viewport = ViewportRect::new(0, 0, 64, 64).unwrap();
+            let mut views = ExtractedViews::default();
+            views.push(ExtractedView {
+                camera_entity: Entity::PLACEHOLDER,
+                target: RenderTarget::Image(image),
+                viewport,
+                mapping: nara_render::ViewMapping2d::orthographic(
+                    nara_core::Mat3::IDENTITY,
+                    64.0,
+                    viewport,
+                )
+                .unwrap(),
+                order: 0,
+                load: nara_render::ViewLoadOp::Clear(Color::BLACK),
+            });
+            let packet = build_editor_render_frame_packet(generation, 1, &views, target)
+                .unwrap()
+                .unwrap();
+            let view_id = WgpuEditorViewId::new(index);
+            let (reservation, ()) = execution
+                .reserve_viewport_target_with_texture(
+                    view_id,
+                    window,
+                    packet.source_generation(),
+                    target,
+                    |_, _| (),
+                )
+                .map_err(|error| error.to_string())?;
+            execution
+                .activate_viewport_target(reservation)
+                .map_err(|error| error.to_string())?;
+            targets.push((view_id, target, views, packet));
+        }
+
+        let (first_view, first_target, first_views, first_packet) = targets.remove(0);
+        let first = execution
+            .submit_authoring_ui_image(
+                first_view,
+                window,
+                first_packet,
+                crate::view_probe::overlay_packet(RenderTarget::Image(first_target.image())),
+            )
+            .map_err(|error| error.to_string())?;
+        assert_eq!(
+            execution
+                .frame_transaction_stats()
+                .candidate_instance_buffer_demand_bytes(),
+            0
+        );
+        assert_eq!(
+            execution
+                .frame_transaction_stats()
+                .submitted_instance_buffer_demand_bytes(),
+            instance_bytes
+        );
+        let (second_view, second_target, second_views, second_packet) = targets.remove(0);
+        let error = execution
+            .submit_authoring_ui_image(
+                second_view,
+                window,
+                second_packet,
+                crate::view_probe::overlay_packet(RenderTarget::Image(second_target.image())),
+            )
+            .expect_err("a second target must share the first submitted target's demand");
+        assert!(matches!(
+            error,
+            WgpuEditorExecutionError::Backend(crate::WgpuRenderError::ContentRejected { .. })
+        ));
+        assert_eq!(execution.frame_transaction_stats().queue_submissions(), 1);
+        assert_eq!(
+            execution
+                .frame_transaction_stats()
+                .submitted_instance_buffer_demand_bytes(),
+            instance_bytes
+        );
+        assert_eq!(
+            execution.views[&first_view]
+                .target
+                .as_ref()
+                .unwrap()
+                .last_submitted_frame_index,
+            Some(first.render_transaction_frame_index())
+        );
+
+        execution
+            .wait_for_idle()
+            .map_err(|error| error.to_string())?;
+        assert_eq!(
+            execution
+                .frame_transaction_stats()
+                .submitted_instance_buffer_demand_bytes(),
+            instance_bytes,
+            "GPU completion cannot refund this frame's submitted demand"
+        );
+        execution
+            .begin_editor_frame(window, 2)
+            .map_err(|error| error.to_string())?;
+        execution
+            .backend
+            .set_instance_budget_limit(2 * instance_bytes);
+        assert_eq!(
+            execution
+                .frame_transaction_stats()
+                .submitted_instance_buffer_demand_bytes(),
+            0
+        );
+        let next_first_packet =
+            build_editor_render_frame_packet(generation, 2, &first_views, first_target)
+                .unwrap()
+                .unwrap();
+        execution
+            .submit_authoring_ui_image(
+                first_view,
+                window,
+                next_first_packet,
+                crate::view_probe::overlay_packet(RenderTarget::Image(first_target.image())),
+            )
+            .map_err(|error| error.to_string())?;
+        let next_packet =
+            build_editor_render_frame_packet(generation, 2, &second_views, second_target)
+                .unwrap()
+                .unwrap();
+        execution
+            .submit_authoring_ui_image(
+                second_view,
+                window,
+                next_packet,
+                crate::view_probe::overlay_packet(RenderTarget::Image(second_target.image())),
+            )
+            .map_err(|error| error.to_string())?;
+        assert_eq!(execution.frame_transaction_stats().queue_submissions(), 2);
+        assert_eq!(
+            execution
+                .frame_transaction_stats()
+                .candidate_instance_buffer_demand_bytes(),
+            0
+        );
+        assert_eq!(
+            execution
+                .frame_transaction_stats()
+                .submitted_instance_buffer_demand_bytes(),
+            2 * instance_bytes
+        );
+        Ok(())
     }
 }
 
