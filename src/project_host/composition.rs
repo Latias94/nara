@@ -251,9 +251,8 @@ impl PluginGroup for ProjectRuntimeAppPlugins {
     const ID: PluginGroupId = PluginGroupId::new("nara.plugins.project-runtime-app");
 
     fn build(self) -> PluginGroupBuilder {
-        let builder = PluginGroupBuilder::new()
-            .add_edited_group(self.plugins)
-            .add_group(self.recipe);
+        let builder =
+            PluginGroupBuilder::new().add_group(self.recipe.with_edited_defaults(self.plugins));
         let builder = match self.overlay {
             Some(overlay) => builder.add_group(RuntimeOverlayPlugins {
                 definition: overlay.definition,
@@ -483,6 +482,9 @@ impl RuntimePlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompositionError {
     ProjectLineageMismatch,
+    UnsupportedDefaultConfiguration {
+        plugin: PluginId,
+    },
     AdvancedProbeProvidesSchema {
         plugin: PluginId,
     },
@@ -534,6 +536,9 @@ impl fmt::Display for CompositionError {
         formatter.write_str(match self {
             Self::ProjectLineageMismatch => {
                 "project runtime request lineage does not match candidate"
+            }
+            Self::UnsupportedDefaultConfiguration { .. } => {
+                "product recipe configures a default absent from the selected profile"
             }
             Self::AdvancedProbeProvidesSchema { .. } => {
                 "advanced Host probes cannot declare schema authority"
@@ -777,6 +782,13 @@ pub fn resolve_runtime_plan(
 ) -> Result<RuntimePlan, RuntimePlanError> {
     if request.lineage != candidate.lineage {
         return Err(CompositionError::ProjectLineageMismatch.into());
+    }
+
+    if let Some(plugin) = request
+        .recipe
+        .unsupported_default_plugin(candidate.normalized_capabilities())
+    {
+        return Err(CompositionError::UnsupportedDefaultConfiguration { plugin }.into());
     }
 
     let recipe_providers = request.recipe.schema_providers().collect::<Vec<_>>();

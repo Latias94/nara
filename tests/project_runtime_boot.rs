@@ -3,6 +3,27 @@
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
+#[cfg(feature = "presentation-ui")]
+#[path = "support/profile_font_boot.rs"]
+mod profile_font_boot;
+
+#[cfg(feature = "presentation-ui")]
+#[path = "support/profile_font_product.rs"]
+mod profile_font_product;
+
+#[cfg(all(feature = "presentation-ui", feature = "tooling"))]
+#[path = "support/profile_font_editor_play.rs"]
+mod profile_font_editor_play;
+
+#[cfg(all(
+    feature = "presentation-ui",
+    feature = "project-workflow-cli",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
+#[path = "support/profile_font_native_trajectory.rs"]
+mod profile_font_native_trajectory;
+
 use std::{
     num::NonZeroU32,
     sync::{

@@ -135,7 +135,7 @@ Direct `App` composition retains raw one-shot plugin support. A one-shot value c
 
 ```rust
 let mut app = App::new();
-app.add_plugins((MinimalPlugins, recipe()?))?;
+app.add_plugins(recipe()?.with_defaults(MinimalPlugins))?;
 app.add_plugins(OneShotDebugPlugin::new())?;
 let mut runtime = RuntimeInstance::start(app)?;
 runtime.drive(std::time::Duration::ZERO)?;
@@ -171,22 +171,52 @@ selection, or process authority into a recipe.
 
 ## One Custom Runtime UI Font
 
-With Runtime UI and UI presentation enabled, admit one immutable face and configure both plugin
-owners with clones of it. The public `nara::ui::FontFace` type validates the supplied bytes; no
-system-font lookup or project-font asset pipeline is implied. Default plugin groups use the
-bundled face.
+Admit one immutable face and select it once in the ordinary recipe. The public
+`nara::ui::FontFace` type validates the supplied bytes; no system-font lookup or project-font asset
+pipeline is implied. Unconfigured defaults use the bundled face.
 
 ```rust
-use nara::app::PluginGroup;
-use nara::prelude::{PresentationUiPlugins, RuntimeUiPlugins};
-
 let face = nara::ui::FontFace::from_bytes(font_bytes, 0)?;
-let runtime_ui = RuntimeUiPlugins.edit().configure(nara::ui::plugin(face.clone()));
-let presentation_ui = PresentationUiPlugins.edit().configure(nara::ui_render::plugin(face));
+let recipe = ProductRecipe::new().with_ui_font(face)?;
+let mut run = HeadlessRun::<GameOutcome>::from_recipe(
+    project_root, recipe, fixed_ticks, commands,
+);
 ```
 
-Install these configured groups in the same composition as their required runtime/render domains.
-Each definition's identity includes the face content ID, so fresh runtime reconstruction selects
-the same face. Direct App composition can instead use `UiPlugin::with_font(face.clone())` and
-`UiRenderPlugin::with_font(face)`. A planner rejects a foreign face before replacing its retained
-packet; glyph packets own their atlas pixels through backend submission.
+The selected profile must request `runtime-ui`. A runtime-only profile configures its UI compiler;
+when the profile also requests `presentation-ui`, the same face configures its renderer. Repeated
+font selection returns `ProductRecipeError::DuplicateDefaultConfiguration`; a profile without the
+UI default returns `CompositionError::UnsupportedDefaultConfiguration` during admission. Check,
+Export, Desktop and compiled Editor Play receive this setting through the same product recipe.
+
+For a direct `App`, give the recipe the group that owns its defaults. A runtime-only UI app uses
+`recipe.with_defaults(RuntimeUiPlugins)`. A product that presents UI can define one group containing
+its runtime and presentation domains:
+
+```rust
+use nara::app::{PluginGroup, PluginGroupBuilder, PluginGroupId};
+use nara::{PresentationUiPlugins, RuntimeUiPlugins};
+
+struct UiDefaults;
+
+impl PluginGroup for UiDefaults {
+    const ID: PluginGroupId = PluginGroupId::new("game.ui-defaults");
+
+    fn build(self) -> PluginGroupBuilder {
+        PluginGroupBuilder::new()
+            .add_group(RuntimeUiPlugins)
+            .add_group(PresentationUiPlugins)
+    }
+}
+
+let mut app = App::new();
+app.add_plugins(recipe.with_defaults(UiDefaults))?;
+```
+
+The enclosing group gives the configuration an explicit owner. Adding a configured recipe beside
+an unrelated defaults group returns a missing-slot error instead of silently ignoring the setting.
+Defaults are configured before the existing resolver checks identity, dependencies, schema and
+fingerprints; an explicitly added duplicate plugin still rejects. Each definition's identity
+includes the font content ID. Fresh runtime construction shares immutable font bytes while
+constructing independent UI and rasterization state. A planner rejects a foreign face before
+replacing its retained packet; glyph packets retain their atlas pixels through backend submission.

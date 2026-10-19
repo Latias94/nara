@@ -181,6 +181,7 @@ impl EditTarget {
 pub(super) enum PluginEdit {
     Disable(EditTarget),
     Configure(EditTarget, PluginDefinition),
+    ConfigureSlotIfPresent(PluginSlotId, PluginDefinition),
     InsertAfter(EditTarget, PluginDefinition),
     InsertBefore(EditTarget, PluginDefinition),
 }
@@ -189,6 +190,7 @@ pub(super) enum PluginEdit {
 pub(super) enum ResolvedPluginEdit {
     Disable(ResolvedEditTarget),
     Configure(ResolvedEditTarget, PluginDefinition),
+    ConfigureSlotIfPresent(PluginSlotId, PluginDefinition),
     InsertAfter(ResolvedEditTarget, PluginDefinition),
     InsertBefore(ResolvedEditTarget, PluginDefinition),
 }
@@ -201,6 +203,9 @@ impl PluginEdit {
                 target.resolve()?,
                 definition.resolve_declaration()?,
             )),
+            Self::ConfigureSlotIfPresent(slot, definition) => Ok(
+                ResolvedPluginEdit::ConfigureSlotIfPresent(slot, definition.resolve_declaration()?),
+            ),
             Self::InsertAfter(target, definition) => Ok(ResolvedPluginEdit::InsertAfter(
                 target.resolve()?,
                 definition.resolve_declaration()?,
@@ -251,6 +256,22 @@ impl<G: PluginGroup> EditedPluginGroup<G> {
     pub fn configure_slot(mut self, slot: PluginSlotId, definition: PluginDefinition) -> Self {
         self.edits
             .push(PluginEdit::Configure(EditTarget::Slot(slot), definition));
+        self
+    }
+
+    /// Configures every occurrence of one logical slot when this group contains it.
+    ///
+    /// An absent slot is allowed. A present slot retains the same identity, ambiguity,
+    /// dependency, schema and duplicate-definition checks as [`Self::configure_slot`].
+    /// Use this for a paired optional domain, not to suppress an incompatible composition.
+    #[must_use]
+    pub fn configure_slot_if_present(
+        mut self,
+        slot: PluginSlotId,
+        definition: PluginDefinition,
+    ) -> Self {
+        self.edits
+            .push(PluginEdit::ConfigureSlotIfPresent(slot, definition));
         self
     }
 

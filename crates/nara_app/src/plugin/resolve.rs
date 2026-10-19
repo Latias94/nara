@@ -185,6 +185,8 @@ pub enum PluginPlanError {
     },
     #[error("plugin edit target is missing")]
     MissingEditTarget,
+    #[error("plugin slot edit target {slot} is missing")]
+    MissingSlotEditTarget { slot: PluginSlotId },
     #[error("plugin edit target is ambiguous")]
     AmbiguousEditTarget,
     #[error("required plugin slot {slot} cannot be disabled")]
@@ -992,23 +994,26 @@ impl PluginResolver {
                         self.disabled_slots.insert(slot.id);
                     }
                     ResolvedPluginEdit::Configure(target, definition) => {
-                        let indices = self.logical_targets(group, target)?;
-                        let declaration = definition.resolved_declaration();
-                        if self.drafts[indices[0]].declaration.id != declaration.id {
-                            return Err(PluginPlanError::SlotPluginMismatch {
-                                slot: self.drafts[indices[0]]
-                                    .slot
-                                    .map(PluginSlot::id)
-                                    .unwrap_or(PluginSlotId::new("nara.plugin.unslotted")),
-                                expected: self.drafts[indices[0]].declaration.id,
-                                actual: declaration.id,
-                            });
-                        }
-                        for index in indices {
-                            self.drafts[index].declaration = declaration;
-                            self.drafts[index].materializer =
-                                PluginMaterializer::Definition(definition.clone());
-                        }
+                        let indices =
+                            self.logical_targets(group, target).map_err(|error| {
+                                match (error, target) {
+                                    (
+                                        PluginPlanError::MissingEditTarget,
+                                        ResolvedEditTarget::Slot(slot),
+                                    ) => PluginPlanError::MissingSlotEditTarget { slot },
+                                    (error, _) => error,
+                                }
+                            })?;
+                        self.configure_targets(indices, definition)?;
+                    }
+                    ResolvedPluginEdit::ConfigureSlotIfPresent(slot, definition) => {
+                        let indices =
+                            match self.logical_targets(group, ResolvedEditTarget::Slot(slot)) {
+                                Ok(indices) => indices,
+                                Err(PluginPlanError::MissingEditTarget) => continue,
+                                Err(error) => return Err(error),
+                            };
+                        self.configure_targets(indices, definition)?;
                     }
                     ResolvedPluginEdit::InsertAfter(target, definition) => {
                         let indices = self.logical_targets(group, target)?;
@@ -1038,6 +1043,29 @@ impl PluginResolver {
                     }
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn configure_targets(
+        &mut self,
+        indices: Vec<usize>,
+        definition: PluginDefinition,
+    ) -> Result<(), PluginPlanError> {
+        let declaration = definition.resolved_declaration();
+        if self.drafts[indices[0]].declaration.id != declaration.id {
+            return Err(PluginPlanError::SlotPluginMismatch {
+                slot: self.drafts[indices[0]]
+                    .slot
+                    .map(PluginSlot::id)
+                    .unwrap_or(PluginSlotId::new("nara.plugin.unslotted")),
+                expected: self.drafts[indices[0]].declaration.id,
+                actual: declaration.id,
+            });
+        }
+        for index in indices {
+            self.drafts[index].declaration = declaration;
+            self.drafts[index].materializer = PluginMaterializer::Definition(definition.clone());
         }
         Ok(())
     }

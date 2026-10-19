@@ -47,6 +47,10 @@ use nara::app::PluginPlanError;
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(feature = "runtime-ui")]
+#[path = "support/product_default_configuration.rs"]
+mod product_default_configuration;
+
 const RUNTIME_2D_REQUIREMENT: PluginProductCapability = PluginProductCapability::new("runtime-2d");
 const RUNTIME_CORE_REQUIREMENT: PluginProductCapability =
     PluginProductCapability::new("runtime-core");

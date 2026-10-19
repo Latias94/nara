@@ -1245,6 +1245,9 @@ fn runtime_plan_failure_report(error: &RuntimePlanError) -> DiagnosticReport {
 fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
     let reason = match error {
         CompositionError::ProjectLineageMismatch => "project-lineage-mismatch",
+        CompositionError::UnsupportedDefaultConfiguration { .. } => {
+            "unsupported-default-configuration"
+        }
         CompositionError::AdvancedProbeProvidesSchema { .. } => "advanced-probe-provides-schema",
         CompositionError::UnknownProductCapability { .. } => "unknown-product-capability",
         CompositionError::UncompiledProductCapability { .. } => "uncompiled-product-capability",
@@ -1267,7 +1270,8 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
         reason,
     );
     match error {
-        CompositionError::AdvancedProbeProvidesSchema { plugin } => {
+        CompositionError::AdvancedProbeProvidesSchema { plugin }
+        | CompositionError::UnsupportedDefaultConfiguration { plugin } => {
             diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
         }
         CompositionError::UnknownProductCapability { plugin, capability } => {
@@ -1333,6 +1337,7 @@ fn plugin_plan_failure_report(error: &PluginPlanError) -> DiagnosticReport {
         PluginPlanError::DivergentGroup { .. } => "divergent-group",
         PluginPlanError::SlotPluginMismatch { .. } => "slot-plugin-mismatch",
         PluginPlanError::MissingEditTarget => "missing-edit-target",
+        PluginPlanError::MissingSlotEditTarget { .. } => "missing-slot-edit-target",
         PluginPlanError::AmbiguousEditTarget => "ambiguous-edit-target",
         PluginPlanError::RequiredSlotDisabled { .. } => "required-slot-disabled",
         PluginPlanError::DuplicateSlot { .. } => "duplicate-slot",
@@ -1370,7 +1375,8 @@ fn plugin_plan_failure_report(error: &PluginPlanError) -> DiagnosticReport {
             diagnostic = attach_identifier(diagnostic, "expected-plugin", expected.as_str());
             diagnostic = attach_identifier(diagnostic, "actual-plugin", actual.as_str());
         }
-        PluginPlanError::RequiredSlotDisabled { slot }
+        PluginPlanError::MissingSlotEditTarget { slot }
+        | PluginPlanError::RequiredSlotDisabled { slot }
         | PluginPlanError::DivergentSlotContract { slot }
         | PluginPlanError::ActiveSlotDisabled { slot } => {
             diagnostic = attach_identifier(diagnostic, "slot", slot.as_str());

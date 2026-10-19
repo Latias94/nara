@@ -156,6 +156,11 @@ pub(super) fn encode_edit(encoder: &mut FingerprintEncoder, edit: &ResolvedPlugi
             encode_edit_target(encoder, *target);
             encode_definition(encoder, definition, None);
         }
+        ResolvedPluginEdit::ConfigureSlotIfPresent(slot, definition) => {
+            encoder.bytes(b"edit-kind", b"configure-slot-if-present");
+            encode_edit_target(encoder, ResolvedEditTarget::Slot(*slot));
+            encode_definition(encoder, definition, None);
+        }
         ResolvedPluginEdit::InsertAfter(target, definition) => {
             encoder.bytes(b"edit-kind", b"insert-after");
             encode_edit_target(encoder, *target);

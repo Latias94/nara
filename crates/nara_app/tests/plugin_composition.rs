@@ -18,6 +18,9 @@ use nara_app::{
 };
 use nara_ecs::Resource;
 
+#[path = "support/optional_slot_configuration.rs"]
+mod optional_slot_configuration;
+
 const CORE_ID: PluginId = PluginId::new("nara.test.plan.core");
 const OPTIONAL_ID: PluginId = PluginId::new("nara.test.plan.optional");
 const CONSUMER_ID: PluginId = PluginId::new("nara.test.plan.consumer");

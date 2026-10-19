@@ -15,6 +15,7 @@ use nara_app::{
 use nara_reflect::ComponentSchemaProviderDefinition;
 use thiserror::Error;
 
+mod default_settings;
 mod profile;
 #[cfg(feature = "runtime-ui")]
 mod ui_surface;
@@ -204,14 +205,16 @@ impl<P: Plugin> SchemaContribution<P> {
 /// without creating an `App`, opening project data, or acquiring runtime authority. Full
 /// cross-provider schema validation remains the responsibility of the selected composition path;
 /// the file-backed Project Host performs it during admission. A recipe is also a normal
-/// [`PluginGroup`], so the same value can be used by direct `App` composition and by the
-/// file-backed Project Host. Schema contributions install their provider authority before their
+/// [`PluginGroup`]. Direct `App` composition supplies the owner of configured defaults through
+/// [`Self::with_defaults`]; the file-backed Project Host supplies its selected profile. Schema
+/// contributions install their provider authority before their
 /// plugin builds in a direct `App`, while a file-backed Host preloads the same provider set into
 /// its admitted registry snapshot. The contribution owns registration; its plugin builds runtime
 /// behavior without registering the provider a second time.
 #[derive(Clone, Default)]
 pub struct ProductRecipe {
     entries: BTreeMap<PluginId, ProductRecipeEntry>,
+    defaults: default_settings::ProductDefaultSettings,
 }
 
 impl fmt::Debug for ProductRecipe {
@@ -219,6 +222,7 @@ impl fmt::Debug for ProductRecipe {
         formatter
             .debug_struct("ProductRecipe")
             .field("entries", &self.entries.values().collect::<Vec<_>>())
+            .field("defaults", &self.defaults)
             .finish()
     }
 }
@@ -228,17 +232,19 @@ impl ProductRecipe {
     pub const fn new() -> Self {
         Self {
             entries: BTreeMap::new(),
+            defaults: default_settings::ProductDefaultSettings::new(),
         }
     }
 
     #[must_use]
+    /// Returns the number of explicit plugin entries, excluding default selections.
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.entries.is_empty() && self.defaults.is_empty()
     }
 
     pub fn entries(&self) -> impl ExactSizeIterator<Item = &ProductRecipeEntry> {
@@ -404,24 +410,35 @@ impl ProductRecipe {
             },
         ))
     }
-}
 
-impl PluginGroup for ProductRecipe {
-    const ID: PluginGroupId = PRODUCT_RECIPE_GROUP_ID;
-
-    fn build(self) -> PluginGroupBuilder {
-        let schema_authority = self.schema_authority_definition();
-        let builder = schema_authority.map_or_else(PluginGroupBuilder::new, |definition| {
-            PluginGroupBuilder::new().add_definition(definition)
-        });
+    fn build_entries(self, builder: PluginGroupBuilder) -> PluginGroupBuilder {
+        let builder = match self.schema_authority_definition() {
+            Some(definition) => builder.add_definition(definition),
+            None => builder,
+        };
         self.entries.into_values().fold(builder, |builder, entry| {
             builder.add_definition(entry.definition)
         })
     }
 }
 
+impl PluginGroup for ProductRecipe {
+    const ID: PluginGroupId = PRODUCT_RECIPE_GROUP_ID;
+
+    fn build(self) -> PluginGroupBuilder {
+        if self.defaults.is_empty() {
+            self.build_entries(PluginGroupBuilder::new())
+        } else {
+            self.with_defaults(default_settings::MissingProductDefaults)
+                .build()
+        }
+    }
+}
+
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ProductRecipeError {
+    #[error("default plugin {plugin} is configured more than once in the product recipe")]
+    DuplicateDefaultConfiguration { plugin: PluginId },
     #[error("plugin declaration for {plugin_type} panicked")]
     DeclarationPanicked { plugin_type: &'static str },
     #[error("plugin {plugin} configuration encoding panicked")]
