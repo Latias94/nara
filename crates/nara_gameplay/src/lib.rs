@@ -36,7 +36,7 @@ use nara_app::{
     RuntimeWorldAccessError,
 };
 use nara_ecs::{Res, ResMut, schedule::IntoScheduleConfigs, system::ScheduleSystem};
-use nara_input::ActionOutcomes;
+use nara_input::SemanticActions;
 
 use crate::schedule::GameplayCommandInternalSet;
 
@@ -163,7 +163,7 @@ impl Plugin for GameplayCommandPlugin {
 
 fn map_action_outcomes_to_commands(
     command_map: Res<ActionCommandMap>,
-    outcomes: Option<Res<ActionOutcomes>>,
+    outcomes: Option<Res<SemanticActions>>,
     mut local_commands: ResMut<LocalGameplayCommands>,
     mut queue: ResMut<GameplayCommandQueue>,
     faults: Res<RuntimeFaultReporter>,

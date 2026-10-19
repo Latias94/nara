@@ -3,28 +3,208 @@
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
-use std::{num::NonZeroU64, time::Duration};
+use std::{
+    num::NonZeroU64,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use nara::{
     advanced_prelude::materialize_startup_scene,
     app::{
-        RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeFaultKind, RuntimeInstance,
-        RuntimeObligationLedger, RuntimeState,
+        App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
+        PluginDefinitionId, PluginError, PluginId, RuntimeAdmissionReservation, RuntimeClosePolicy,
+        RuntimeFaultKind, RuntimeInstance, RuntimeObligationLedger, RuntimeState,
+        RuntimeTimeSettings,
     },
     core::ItemLimit,
+    ecs::schedule::IntoScheduleConfigs,
     gameplay::{GameplayCommandQueue, GameplayCommandQueueSettings},
-    input::{ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
-    prelude::{FixedTime, Transform2d},
-    project_host::ProjectContentLoader,
+    input::{ActionContext, ActionMap, ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
+    prelude::{FixedTime, ResMut, Transform2d},
+    project_host::{
+        ProjectContentLoader,
+        advanced::{RuntimeProbe, resolve_product_recipe_with_probe},
+    },
 };
 use nara_reference_game::{
     MovementDirection, PlayerRole, WaveOutcome, WaveRetryPhase, WaveRetryStatus, WaveRunGeneration,
-    WaveSnapshot, movement_command,
+    WaveSnapshot, desktop_wave_recipe, movement_command,
 };
 use project_content_fixture::{desktop_candidate_plan_and_root, stop_runtime};
 
 const DESKTOP_FRAME_DELTA: Duration = Duration::from_millis(10);
 const DESKTOP_FIXED_TIMESTEP: Duration = Duration::from_millis(100);
+
+#[derive(Debug)]
+struct InputContextProbe(Arc<AtomicBool>);
+
+impl Plugin for InputContextProbe {
+    fn declaration() -> &'static PluginDeclaration {
+        static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("reference-game.test.input-context"),
+            PluginCategory::Tooling,
+        )
+        .requires_plugins(&[nara::input::INPUT_PLUGIN_ID]);
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        let enabled = Arc::clone(&self.0);
+        app.add_systems(
+            CoreStage::First,
+            (move |mut actions: ResMut<ActionMap>| {
+                if enabled.load(Ordering::Relaxed) {
+                    actions.enable_context(&ActionContext::gameplay());
+                } else {
+                    actions.disable_context(ActionContext::gameplay());
+                }
+            })
+            .before(nara::input::__private::InputSet::StageActions),
+        )?;
+        Ok(())
+    }
+}
+
+#[test]
+fn semantic_movement_aggregates_alternate_keys_and_context_restore_requires_fresh_press() {
+    let enabled = Arc::new(AtomicBool::new(true));
+    let mut runtime = desktop_runtime_with_context(Some(Arc::clone(&enabled)));
+    // The desktop clock clamps each real frame to 250 ms. Accumulate half of the 100 ms
+    // timestep first so one unclamped 250 ms frame can exercise three catch-up ticks.
+    let half_step = DESKTOP_FIXED_TIMESTEP / 2;
+    let priming = runtime.drive(half_step).unwrap().frame().unwrap();
+    assert_eq!(priming.status.fixed_steps, 0);
+    assert_eq!(priming.status.fixed_tick, 0);
+    assert_eq!(priming.status.fixed_remainder, half_step);
+    assert_eq!(player_position(&runtime), nara::prelude::Vec2::ZERO);
+    keyboard(
+        &mut runtime,
+        ButtonDriverInput::Press(KeyCode::Character('w')),
+    );
+    keyboard(&mut runtime, ButtonDriverInput::Press(KeyCode::ArrowUp));
+    let captured = runtime.drive(Duration::ZERO).unwrap().frame().unwrap();
+    assert_eq!(captured.status.fixed_steps, 0);
+    assert_eq!(captured.status.fixed_tick, 0);
+    assert_eq!(captured.status.fixed_remainder, half_step);
+    assert_eq!(player_position(&runtime), nara::prelude::Vec2::ZERO);
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<GameplayCommandQueue>()
+            .stats()
+            .accepted,
+        1
+    );
+    let catch_up_delta = DESKTOP_FIXED_TIMESTEP * 2 + half_step;
+    assert!(
+        catch_up_delta
+            <= runtime
+                .world()
+                .resource::<RuntimeTimeSettings>()
+                .max_delta()
+    );
+    let catch_up = runtime.drive(catch_up_delta).unwrap().frame().unwrap();
+    assert!(!catch_up.status.real_delta_clamped);
+    assert_eq!(catch_up.status.virtual_delta, catch_up_delta);
+    assert_eq!(catch_up.status.fixed_steps, 3);
+    assert_eq!(catch_up.status.fixed_tick, 3);
+    assert_eq!(catch_up.status.fixed_remainder, Duration::ZERO);
+    assert_eq!(runtime.world().resource::<WaveSnapshot>().tick, 3);
+    let first = player_position(&runtime);
+    assert_eq!(
+        first.y, 3.0,
+        "one aggregate start must survive a zero-tick frame and three catch-up ticks"
+    );
+
+    keyboard(
+        &mut runtime,
+        ButtonDriverInput::Release(KeyCode::Character('w')),
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+    drive_fixed(&mut runtime);
+    let alternate_held = player_position(&runtime);
+    assert!(
+        alternate_held.y > first.y,
+        "Up must keep moving after W releases"
+    );
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<GameplayCommandQueue>()
+            .stats()
+            .accepted,
+        1
+    );
+
+    enabled.store(false, Ordering::Relaxed);
+    runtime.drive(Duration::ZERO).unwrap();
+    drive_fixed(&mut runtime);
+    assert_eq!(
+        player_position(&runtime),
+        alternate_held,
+        "context exit must lower one terminal command to the real movement consumer"
+    );
+    enabled.store(true, Ordering::Relaxed);
+    runtime.drive(Duration::ZERO).unwrap();
+    drive_fixed(&mut runtime);
+    assert_eq!(
+        player_position(&runtime),
+        alternate_held,
+        "restoring the context must not resume an already-held Up key"
+    );
+    keyboard(&mut runtime, ButtonDriverInput::Release(KeyCode::ArrowUp));
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<GameplayCommandQueue>()
+            .stats()
+            .accepted,
+        2,
+        "the cancelled physical release must not duplicate the context's terminal command"
+    );
+
+    keyboard(&mut runtime, ButtonDriverInput::Press(KeyCode::ArrowUp));
+    keyboard(
+        &mut runtime,
+        ButtonDriverInput::Press(KeyCode::Character('s')),
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+    drive_fixed(&mut runtime);
+    assert_eq!(
+        player_position(&runtime),
+        alternate_held,
+        "opposite semantic directions cancel in the game-owned movement consumer"
+    );
+    keyboard(
+        &mut runtime,
+        ButtonDriverInput::Release(KeyCode::Character('s')),
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+    drive_fixed(&mut runtime);
+    let resumed = player_position(&runtime);
+    assert!(
+        resumed.y > alternate_held.y,
+        "releasing the opposite direction preserves the freshly-pressed Up action"
+    );
+    keyboard(&mut runtime, ButtonDriverInput::Release(KeyCode::ArrowUp));
+    runtime.drive(Duration::ZERO).unwrap();
+    drive_fixed(&mut runtime);
+    assert_eq!(player_position(&runtime), resumed);
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<GameplayCommandQueue>()
+            .stats()
+            .accepted,
+        6
+    );
+    stop_runtime(runtime);
+}
 
 #[test]
 fn desktop_wave_starts_without_input_and_applies_wasd_movement() {
@@ -293,7 +473,24 @@ fn rejected_physical_local_command_faults_the_managed_runtime() {
 }
 
 fn desktop_runtime() -> RuntimeInstance {
+    desktop_runtime_with_context(None)
+}
+
+fn desktop_runtime_with_context(context: Option<Arc<AtomicBool>>) -> RuntimeInstance {
     let (candidate, plan, root) = desktop_candidate_plan_and_root();
+    let plan = match context {
+        Some(enabled) => resolve_product_recipe_with_probe(
+            &candidate,
+            desktop_wave_recipe().unwrap(),
+            RuntimeProbe::new(PluginDefinition::infallible::<InputContextProbe, _>(
+                PluginDefinitionId::new("reference-game.test.input-context", 1),
+                [],
+                move || InputContextProbe(Arc::clone(&enabled)),
+            )),
+        )
+        .unwrap(),
+        None => plan,
+    };
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&candidate, &plan).unwrap();
     let runtime_time = plan.settings().runtime.runtime_time_settings();

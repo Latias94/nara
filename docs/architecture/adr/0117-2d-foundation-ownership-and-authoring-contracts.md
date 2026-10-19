@@ -150,6 +150,22 @@ and supported renderer capabilities, proven by one palette example. Shader code 
 in this scope. Scripts/data select admitted definitions and values without Device/Queue authority.
 Unused duplicate material descriptors are removed; public intermediate renderer orchestration is narrowed.
 
+### Semantic input owns held-action lifetimes
+
+Physical button state and per-binding `ActionOutcomes` remain distinct from gameplay-facing
+`SemanticActions`. Semantic state aggregates active physical bindings and endpoints per
+action/context, and emits one terminal edge after the final contribution releases. Context exit
+ends a delivered semantic action once; restoring that context while inputs remain held requires
+release and a fresh press. Reconfiguring the mapping expires its previous held actions. Deferred
+presses retain their mapping/context lifetime and cannot revive actions after a lifetime change.
+One staging owner covers normalized and synthetic input and preserves observed lifetime exits even
+when a prior configuration snapshot is restored. Configuration values do not themselves authorize
+reviving delivered or deferred actions.
+The gameplay command bridge consumes aggregate semantic edges before fixed-tick admission; zero
+or multiple fixed ticks do not duplicate those edges. This refines ADR 0041 without replacing the
+bounded physical timeline, independent frame cursors, UI press/release ownership or exact-step
+observation contract.
+
 ### Document transactions and toolkit-neutral presentation
 
 Non-geometric authoring edits use explicit base-revision transactions, one atomic commit and undo entry.

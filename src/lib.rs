@@ -195,7 +195,7 @@ pub mod prelude {
         ActionBinding, ActionContext, ActionId, ActionMap, ActionOutcome, ActionOutcomes,
         ActionPhase, ActionValue, ButtonInput, ButtonInputError, ButtonTransition,
         ButtonTransitionPhase, InputBinding, KeyCode, MAX_RETAINED_BUTTON_TRANSITIONS, MouseButton,
-        PointerState,
+        PointerState, SemanticActionCause, SemanticActionOutcome, SemanticActions,
     };
     pub use nara_reflect::{
         ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,

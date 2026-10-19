@@ -59,6 +59,23 @@ Rules:
 - Action maps should be able to produce semantic gameplay commands or action outcomes that can be
   consumed by replay, AI drivers, and future server-authoritative worlds without exposing raw
   device events.
+- `ActionOutcomes` exposes ordered low-level edges for each enabled physical binding.
+  `SemanticActions` separately owns aggregate held state for each action/context and exposes one
+  `Started` edge when its first physical contribution begins and one `Released` edge when its final
+  contribution ends. Gameplay command mapping consumes this semantic projection; releasing one
+  of several held bindings or endpoints cannot stop the action.
+- Disabling a context terminates its delivered semantic actions once. Re-enabling it while an
+  input remains physically held leaves that action inactive until release and a fresh press.
+  A mapping change ends the previous mapping lifetime with the same fresh-press requirement.
+  Context/mapping lifetime identity survives deferred action resolution while paused, including
+  disable/enable between resolution passes; an obsolete staged press cannot revive an old action.
+  One staging owner issues these lifetime identities for both normalized timeline events and direct
+  synthetic button mutations. Observed context/mapping exits cannot be erased by restoring a cloned
+  or moved configuration snapshot. Synthetic edges capture identity at the same First staging
+  boundary; later synthetic edges are captured at resolution, without changing physical observation
+  retention or admitting an event-time configuration promise.
+  Low-level binding outcomes retain their physical meaning and do not synthesize cancellation
+  releases. Semantic cancellation identifies its context/mapping cause without physical provenance.
 - UI routing happens before gameplay action delivery for inputs captured or consumed by focused UI,
   unless a context explicitly opts into global shortcuts.
 - Text input and IME composition are separate from key/button actions. Composition text, commit

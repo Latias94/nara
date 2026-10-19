@@ -2130,8 +2130,17 @@ fn update_input(input: &mut ButtonInput<KeyCode>) -> Result<(), ButtonInputError
 
 Advanced Adapter code replaces each generic scope read/write with a resource-owned
 `__RuntimeDriverPort` operation and calls `RuntimeDriverScope::__apply_port`. That hidden carrier
-may change before 1.0. Ordinary gameplay code should consume `ActionOutcomes` or submit semantic
-gameplay commands rather than driving platform resources.
+may change before 1.0. Ordinary gameplay code should consume `SemanticActions` or submit semantic
+gameplay commands rather than driving platform resources. `ActionOutcomes` remains available for
+low-level per-binding observations; it does not own aggregate held state or context cancellation.
+
+**Held-action correction (2026-10-19)**: `GameplayCommandPlugin` now maps `SemanticActions` into
+commands. Multiple physical bindings for one action emit one aggregate Started/Released pair.
+Context exit ends the action once; restoring the context while its key is held requires release
+and a fresh press. Mapping replacement also expires held actions and deferred old presses.
+Consumers that need held gameplay behavior should replace raw `ActionOutcomes` edge counting with
+`SemanticActions::pressed` or its frame outcomes. Physical binding diagnostics keep the raw API.
+This changes Rust runtime behavior, not the persisted `ActionMap` format or replay command format.
 
 **Affected examples and fixtures**: `nara_winit`, root runtime/Host tests, the native surface smoke,
 and the independent reference-game headless/desktop paths now use the typed port and fallible

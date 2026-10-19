@@ -158,7 +158,7 @@ or private. ADR 0089 remains Proposed; the implementation ledger is the authorit
 | `nara_sprite_render` | `SpriteRenderPlugin`, `SpriteRenderStats`; a doc-hidden read-only backend bridge | Completed-global affine sprite/tile extraction; shared layer/group/Y/source order before adjacent compatible batching; resource-complete captured image/material inputs and private retained frame scratch |
 | `nara_ui` | `UiRoot`, `UiNode`, `UiPanel`, `UiPanelMaterial`, `ComputedUiLayouts`, `UiInteractionState`, `UiPointerRoute`, `UiInteractionTarget` | Runtime ECS UI authoring data, layout projection, and target/view-aware pointer hover/capture/focus state; no editor UI toolkit or backend handles |
 | `nara_ui_render` | `UiRenderPlugin` | Private backend-neutral UI panel extraction, image/color material queueing, clipping, sort, and batching; the doc-hidden read-only WGPU batch bridge is transitional until ADR 0105's resource-complete packet lands, and root consumers receive no technical pipeline DTOs |
-| `nara_input` | `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, bounded ordered `ButtonTransition`, `PointerState`, `ActionMap`, `ActionOutcomes`, `InputSet` | Backend-normalized retained state plus atomic retained-edge admission, independent frame-observation/action-resolution cursors, deterministic transition-order action resolution, focus-loss release, action contexts, future UI focus/capture integration, text routing, and replay diagnostics |
+| `nara_input` | `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, bounded ordered `ButtonTransition`, `PointerState`, `ActionMap`, `ActionOutcomes`, `SemanticActions`, `InputSet` | Backend-normalized retained state, bounded edge admission, independent observation/action cursors, per-binding outcomes, aggregate held-action lifetimes, focus-loss release, contexts, UI routing and replay provenance |
 | `nara_gameplay` | `GameplayCommandDraft`, `GameplayCommandSubmission`, `GameplayCommandIngressSource`, `GameplayCommandEnvelope`, `GameplayCommandQueue`, `GameplayCommandBatch`, bounded `ActionCommandMap`, command schedule sets, settings and stats | Canonically ordered fixed-tick admission with reserved local-action authority, pending/active/quarantine accounting, terminal fail-closed lifecycle state, and action/replay/AI/test/external producer bridges without networking transports or runtime entity handles |
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events, owning backend handle providers, atomic non-cloneable surface bindings, target lifecycle authority, scoped retirement driver | Raw platform windows, winit event loop, backend surfaces |
 | `nara_winit` | `WinitRunner` and desktop event-loop integration | Top-level-selected desktop driver over `RuntimeInstance` that owns native windows, updates normalized input/window state through short driver scopes, invokes scoped renderer retirement only for its targets, joins registered runtime close with provider/native teardown, and preserves distinct primary-runner and teardown failures |
@@ -586,9 +586,14 @@ second real adapter or stronger isolation pressure.
   before stale repeats are gated.
 - `nara_input::ActionMap` resolves those ordered key/mouse transitions into frame-transient
   `ActionOutcomes` in `InputSet::ResolveActions`, with action IDs, contexts, key/mouse bindings,
-  started/released phases, and deterministic binding order.
+  started/released phases, and deterministic binding order. These are low-level binding edges.
+  `SemanticActions` owns the separate gameplay projection: aggregate held state and one terminal
+  edge after the final contribution releases or its context/mapping expires. A restored context
+  requires release and a fresh press. Deferred edges retain their original configuration lifetime,
+  so pausing cannot resurrect a press from a superseded mapping or context.
 - `nara_gameplay` owns bounded semantic gameplay command admission. The local action mapper targets
-  the next open authoritative tick through its reserved source stream; explicit producers submit a
+  the next open authoritative tick from `SemanticActions` through its reserved source stream;
+  explicit producers submit a
   validated ingress source, tick, sequence, and draft. Fixed Prepare closes the tick and admits one
   canonical batch, current-gated Consume and Capture observe it, and engine-owned Ack retires it
   after Capture. Zero-step frames retain commands, there is no frame-cleanup clear, and lifecycle

@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+};
 
 use nara_app::{__RuntimeDriverPort, RuntimeState};
 use nara_core::Vec2;
@@ -6,6 +9,7 @@ use nara_ecs::Resource;
 
 use crate::{
     ActionMap, ButtonDriverInput, ButtonTransitionPhase, KeyCode, MouseButton, PointerDriverInput,
+    StagedActionRevision,
 };
 
 #[path = "timeline/types.rs"]
@@ -78,7 +82,7 @@ impl HeldInput {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct RetainedInput {
     entry: InputTimelineEntry,
     projection_pending: bool,
@@ -87,6 +91,7 @@ struct RetainedInput {
     ui_consumed: bool,
     action: ActionRetention,
     action_delivery: ActionDelivery,
+    action_revision: Option<Arc<StagedActionRevision>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1403,6 +1408,7 @@ impl InputTimeline {
                 ui_consumed: false,
                 action: ActionRetention::Unscanned,
                 action_delivery: draft.action_delivery,
+                action_revision: None,
             });
         }
         self.next_sequence = last_sequence;
@@ -1463,7 +1469,11 @@ impl InputTimeline {
         }
     }
 
-    pub(crate) fn stage_actions(&mut self, action_map: &ActionMap) {
+    pub(crate) fn stage_actions(
+        &mut self,
+        action_map: &ActionMap,
+        revision: &Arc<StagedActionRevision>,
+    ) {
         for retained in &mut self.retained {
             if retained.action != ActionRetention::Unscanned {
                 continue;
@@ -1480,11 +1490,16 @@ impl InputTimeline {
                 }
                 _ => ActionRetention::Done,
             };
+            if retained.action == ActionRetention::Deferred {
+                retained.action_revision = Some(Arc::clone(revision));
+            }
             self.action_scanned_cursor = retained.entry.sequence;
         }
     }
 
-    pub(crate) fn take_deferred_actions(&mut self) -> Vec<InputTimelineEntry> {
+    pub(crate) fn take_deferred_action_inputs(
+        &mut self,
+    ) -> Vec<(InputTimelineEntry, Arc<StagedActionRevision>)> {
         let press_delivery = self
             .retained
             .iter()
@@ -1506,10 +1521,26 @@ impl InputTimeline {
                 }
             };
             if deliver {
-                entries.push(retained.entry);
+                entries.push((
+                    retained.entry,
+                    retained
+                        .action_revision
+                        .take()
+                        .expect("a deferred action retains its mapping lifetime"),
+                ));
+            } else {
+                retained.action_revision = None;
             }
         }
         entries
+    }
+
+    #[cfg(test)]
+    fn take_deferred_actions(&mut self) -> Vec<InputTimelineEntry> {
+        self.take_deferred_action_inputs()
+            .into_iter()
+            .map(|(entry, _)| entry)
+            .collect()
     }
 
     pub(crate) fn reclaim_completed(&mut self) {
@@ -1640,7 +1671,7 @@ mod tests {
         let mut observations = InputFrameObservations::default();
         timeline.publish_observations(&mut observations);
         timeline.finalize_ui_routing();
-        timeline.stage_actions(&ActionMap::default());
+        timeline.stage_actions(&ActionMap::default(), &Arc::default());
         timeline.reclaim_completed();
         timeline
     }
@@ -2461,14 +2492,14 @@ mod tests {
             )
             .unwrap();
         gameplay_owned.finalize_ui_routing();
-        gameplay_owned.stage_actions(&actions);
+        gameplay_owned.stage_actions(&actions, &Arc::default());
         assert_eq!(gameplay_owned.take_deferred_actions().len(), 2);
 
         gameplay_owned
             .retire_presented_endpoint(window, seat, Some(gameplay_route))
             .unwrap();
         gameplay_owned.finalize_ui_routing();
-        gameplay_owned.stage_actions(&actions);
+        gameplay_owned.stage_actions(&actions, &Arc::default());
         let gameplay_releases = gameplay_owned.take_deferred_actions();
         assert_eq!(gameplay_releases.len(), 2);
         assert!(gameplay_releases.iter().any(|entry| {
@@ -2523,14 +2554,14 @@ mod tests {
             )
             .unwrap();
         ui_owned.finalize_ui_routing();
-        ui_owned.stage_actions(&actions);
+        ui_owned.stage_actions(&actions, &Arc::default());
         assert!(ui_owned.take_deferred_actions().is_empty());
 
         ui_owned
             .retire_presented_endpoint(window, seat, Some(ui_route))
             .unwrap();
         ui_owned.finalize_ui_routing();
-        ui_owned.stage_actions(&actions);
+        ui_owned.stage_actions(&actions, &Arc::default());
         assert!(ui_owned.take_deferred_actions().is_empty());
     }
 
@@ -2836,7 +2867,7 @@ mod tests {
             .__finalize_ui_entry(3, InputUiDisposition::Consumed)
             .unwrap();
         timeline.finalize_ui_routing();
-        timeline.stage_actions(&actions);
+        timeline.stage_actions(&actions, &Arc::default());
         let cursors = timeline.cursors();
         assert_eq!(cursors.ui(), 3);
         assert_eq!(cursors.action_scanned(), 3);

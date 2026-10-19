@@ -5,6 +5,7 @@ use std::{
     error::Error,
     fmt::{self, Display, Formatter},
     hash::Hash,
+    sync::Arc,
 };
 
 use nara_app::{
@@ -15,9 +16,12 @@ use nara_core::Vec2;
 use nara_ecs::{Res, ResMut, Resource, error::BevyError, schedule::IntoScheduleConfigs};
 
 mod schedule;
+mod semantic;
 mod timeline;
 
 use schedule::InputSet;
+use semantic::{ActionMapRevision, ActionStaging, StagedActionRevision};
+pub use semantic::{SemanticActionCause, SemanticActionOutcome, SemanticActions};
 
 #[doc(hidden)]
 pub use timeline::{__InputDriverEvent, __InputDriverOutput};
@@ -133,6 +137,9 @@ impl Error for ButtonInputError {}
 pub struct ButtonInput<T> {
     pressed: BTreeMap<T, BTreeSet<ButtonInputEndpoint>>,
     transitions: Vec<ButtonTransition<T>>,
+    // Exactly one private metadata slot per retained edge, appended and drained together.
+    action_revisions: Vec<Option<Arc<StagedActionRevision>>>,
+    action_staged_prefix_len: usize,
     action_resolved_prefix_len: usize,
     frame_observed_prefix_len: usize,
     transition_sequence: u64,
@@ -163,6 +170,8 @@ impl<T> Default for ButtonInput<T> {
         Self {
             pressed: BTreeMap::new(),
             transitions: Vec::new(),
+            action_revisions: Vec::new(),
+            action_staged_prefix_len: 0,
             action_resolved_prefix_len: 0,
             frame_observed_prefix_len: 0,
             transition_sequence: 0,
@@ -286,6 +295,22 @@ where
         &self.transitions[self.action_resolved_prefix_len..]
     }
 
+    fn has_unstaged_action_transitions(&self) -> bool {
+        self.action_staged_prefix_len != self.transitions.len()
+    }
+
+    fn stage_action_transitions(&mut self, revision: &Arc<StagedActionRevision>) {
+        for (transition, captured) in self.transitions[self.action_staged_prefix_len..]
+            .iter()
+            .zip(&mut self.action_revisions[self.action_staged_prefix_len..])
+        {
+            if transition.timeline_sequence().is_none() {
+                *captured = Some(Arc::clone(revision));
+            }
+        }
+        self.action_staged_prefix_len = self.transitions.len();
+    }
+
     fn needs_frame_cleanup(&self) -> bool {
         self.frame_observed_prefix_len != self.transitions.len()
             || self.action_resolved_prefix_len != 0
@@ -298,6 +323,10 @@ where
             return;
         }
         self.transitions.drain(..consumed_prefix_len);
+        self.action_revisions.drain(..consumed_prefix_len);
+        self.action_staged_prefix_len = self
+            .action_staged_prefix_len
+            .saturating_sub(consumed_prefix_len);
         self.action_resolved_prefix_len = 0;
         self.frame_observed_prefix_len -= consumed_prefix_len;
     }
@@ -387,6 +416,7 @@ where
             button,
             phase,
         });
+        self.action_revisions.push(None);
     }
 }
 
@@ -812,6 +842,8 @@ pub struct ActionMap {
     disabled_contexts: BTreeSet<ActionContext>,
     #[cfg_attr(feature = "serde", serde(skip))]
     bindings_by_input: BTreeMap<InputBinding, Vec<usize>>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    revision: Arc<ActionMapRevision>,
 }
 
 impl PartialEq for ActionMap {
@@ -847,7 +879,12 @@ impl<'de> serde::Deserialize<'de> for ActionMap {
 }
 
 impl ActionMap {
+    /// Adds a physical binding and begins a new mapping lifetime.
+    ///
+    /// Reconfiguring the map ends delivered semantic held actions on the next resolution pass;
+    /// inputs already held do not become presses in the replacement mapping.
     pub fn bind(&mut self, binding: ActionBinding) {
+        ActionMapRevision::mapping_changed(&mut self.revision);
         self.bindings_by_input
             .entry(binding.input)
             .or_default()
@@ -864,11 +901,27 @@ impl ActionMap {
     }
 
     pub fn disable_context(&mut self, context: ActionContext) {
-        self.disabled_contexts.insert(context);
+        if self.disabled_contexts.insert(context.clone()) {
+            if self
+                .bindings
+                .iter()
+                .any(|binding| binding.context == context)
+            {
+                ActionMapRevision::context_changed(&mut self.revision, context);
+            }
+        }
     }
 
     pub fn enable_context(&mut self, context: &ActionContext) {
-        self.disabled_contexts.remove(context);
+        if self.disabled_contexts.remove(context) {
+            if self
+                .bindings
+                .iter()
+                .any(|binding| &binding.context == context)
+            {
+                ActionMapRevision::context_changed(&mut self.revision, context.clone());
+            }
+        }
     }
 
     #[must_use]
@@ -933,11 +986,12 @@ pub struct ActionOutcome {
     pub provenance: ActionInputProvenance,
 }
 
-/// Frame-transient semantic input outcomes.
+/// Frame-transient low-level outcomes for each enabled physical binding.
 ///
 /// Producer: `resolve_action_outcomes` in `InputSet::ResolveActions`.
-/// Consumers: gameplay command mapping and gameplay systems that need local
-/// action observations before replay/server boundaries. Retention is one app
+/// Multiple bindings can emit multiple Started/Released edges for the same action. Context changes
+/// do not synthesize physical releases. Gameplay held-state and command consumers should use
+/// [`SemanticActions`] instead. Retention is one app
 /// frame; `InputPlugin` owns cleanup after all ordinary or exact-step frame observers finish.
 /// Replay and diagnostics should capture these outcomes before cleanup when they need local
 /// physical-input provenance.
@@ -997,6 +1051,12 @@ impl Plugin for InputPlugin {
         }
         if !app.world().contains_resource::<ActionOutcomes>() {
             app.insert_resource(ActionOutcomes::default())?;
+        }
+        if !app.world().contains_resource::<SemanticActions>() {
+            app.insert_resource(SemanticActions::default())?;
+        }
+        if !app.world().contains_resource::<ActionStaging>() {
+            app.insert_resource(ActionStaging::default())?;
         }
         if !app.world().contains_resource::<PointerState>() {
             app.insert_resource(PointerState::default())?;
@@ -1098,23 +1158,41 @@ fn publish_timeline_observations(
     timeline.publish_observations(&mut observations);
 }
 
-fn finalize_timeline_routing(action_map: Res<ActionMap>, mut timeline: ResMut<InputTimeline>) {
+fn finalize_timeline_routing(
+    action_map: Res<ActionMap>,
+    mut staging: ResMut<ActionStaging>,
+    mut timeline: ResMut<InputTimeline>,
+    mut keyboard: ResMut<ButtonInput<KeyCode>>,
+    mut mouse: ResMut<ButtonInput<MouseButton>>,
+) {
+    let revision = staging.observe(&action_map);
     timeline.finalize_ui_routing();
-    timeline.stage_actions(&action_map);
+    timeline.stage_actions(&action_map, &revision);
+    if keyboard.has_unstaged_action_transitions() {
+        keyboard.stage_action_transitions(&revision);
+    }
+    if mouse.has_unstaged_action_transitions() {
+        mouse.stage_action_transitions(&revision);
+    }
     timeline.reclaim_completed();
 }
 
 fn resolve_action_outcomes(
     action_map: Res<ActionMap>,
+    mut staging: ResMut<ActionStaging>,
     mut timeline: ResMut<InputTimeline>,
     mut keyboard: ResMut<ButtonInput<KeyCode>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut outcomes: ResMut<ActionOutcomes>,
+    mut semantic: ResMut<SemanticActions>,
 ) {
     if !outcomes.is_empty() {
         outcomes.clear();
     }
-    for entry in timeline.take_deferred_actions() {
+    semantic.clear_outcomes();
+    let revision = staging.observe(&action_map);
+    semantic.reconcile(&action_map, &revision);
+    for (entry, staged_revision) in timeline.take_deferred_action_inputs() {
         let Some((input, transition_phase)) = entry.action_transition() else {
             continue;
         };
@@ -1125,39 +1203,61 @@ fn resolve_action_outcomes(
             entry.action_provenance(),
             &mut outcomes,
         );
+        semantic.apply(
+            &action_map,
+            &revision,
+            &staged_revision,
+            input,
+            transition_phase,
+            entry.action_provenance(),
+        );
     }
     // Keyboard and mouse retain independent physical timelines. Resolve each timeline in event
     // order for direct legacy mutations. Timeline-projected edges were already resolved above in
     // their global platform order.
     if keyboard.has_unresolved_action_transitions() {
+        if keyboard.has_unstaged_action_transitions() {
+            keyboard.stage_action_transitions(&revision);
+        }
         resolve_button_transitions(
             &action_map,
-            keyboard.unresolved_action_transitions(),
+            &revision,
+            &keyboard,
             InputBinding::Key,
             &mut outcomes,
+            &mut semantic,
         );
         keyboard.mark_action_transitions_resolved();
     }
     if mouse.has_unresolved_action_transitions() {
+        if mouse.has_unstaged_action_transitions() {
+            mouse.stage_action_transitions(&revision);
+        }
         resolve_button_transitions(
             &action_map,
-            mouse.unresolved_action_transitions(),
+            &revision,
+            &mouse,
             InputBinding::Mouse,
             &mut outcomes,
+            &mut semantic,
         );
         mouse.mark_action_transitions_resolved();
     }
 }
 
-fn resolve_button_transitions<T: Copy>(
+fn resolve_button_transitions<T: Copy + Eq + Hash + Ord>(
     action_map: &ActionMap,
-    transitions: &[ButtonTransition<T>],
+    revision: &StagedActionRevision,
+    buttons: &ButtonInput<T>,
     input_binding: impl Fn(T) -> InputBinding,
     outcomes: &mut ActionOutcomes,
+    semantic: &mut SemanticActions,
 ) {
-    for transition in transitions
+    for (transition, staged_revision) in buttons
+        .unresolved_action_transitions()
         .iter()
-        .filter(|transition| transition.timeline_sequence().is_none())
+        .zip(&buttons.action_revisions[buttons.action_resolved_prefix_len..])
+        .filter(|(transition, _)| transition.timeline_sequence().is_none())
     {
         let input = input_binding(transition.button());
         resolve_input_binding(
@@ -1166,6 +1266,16 @@ fn resolve_button_transitions<T: Copy>(
             transition.phase(),
             ActionInputProvenance::synthetic(),
             outcomes,
+        );
+        semantic.apply(
+            action_map,
+            revision,
+            staged_revision
+                .as_deref()
+                .expect("a synthetic action captures its staging lifetime before resolution"),
+            input,
+            transition.phase(),
+            ActionInputProvenance::synthetic(),
         );
     }
 }
@@ -1202,6 +1312,7 @@ fn clear_input_transitions(
     mut keyboard: ResMut<ButtonInput<KeyCode>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut outcomes: ResMut<ActionOutcomes>,
+    mut semantic: ResMut<SemanticActions>,
     mut observations: ResMut<InputFrameObservations>,
     mut timeline: ResMut<InputTimeline>,
 ) {
@@ -1213,6 +1324,9 @@ fn clear_input_transitions(
     }
     if !outcomes.is_empty() {
         outcomes.clear();
+    }
+    if !semantic.as_slice().is_empty() {
+        semantic.clear_outcomes();
     }
     observations.clear();
     timeline.reclaim_completed();

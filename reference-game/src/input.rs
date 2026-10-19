@@ -18,21 +18,25 @@ pub(crate) fn install_desktop_input(app: &mut App) -> Result<(), PluginError> {
         (
             MOVE_LEFT_ACTION,
             KeyCode::Character('a'),
+            KeyCode::ArrowLeft,
             MovementDirection::Left,
         ),
         (
             MOVE_RIGHT_ACTION,
             KeyCode::Character('d'),
+            KeyCode::ArrowRight,
             MovementDirection::Right,
         ),
         (
             MOVE_UP_ACTION,
             KeyCode::Character('w'),
+            KeyCode::ArrowUp,
             MovementDirection::Up,
         ),
         (
             MOVE_DOWN_ACTION,
             KeyCode::Character('s'),
+            KeyCode::ArrowDown,
             MovementDirection::Down,
         ),
     ];
@@ -40,15 +44,16 @@ pub(crate) fn install_desktop_input(app: &mut App) -> Result<(), PluginError> {
     {
         let world = app.world_mut()?;
         let mut action_map = world.resource_mut::<ActionMap>();
-        for (id, key, _) in bindings {
+        for (id, key, alternate, _) in bindings {
             action_map.bind(ActionBinding::key(action_id(id), key));
+            action_map.bind(ActionBinding::key(action_id(id), alternate));
         }
     }
 
     {
         let world = app.world_mut()?;
         let mut command_map = world.resource_mut::<ActionCommandMap>();
-        for (id, _, direction) in bindings {
+        for (id, _, _, direction) in bindings {
             bind_movement(
                 &mut command_map,
                 id,
