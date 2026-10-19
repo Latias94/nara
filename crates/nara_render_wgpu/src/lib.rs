@@ -4,6 +4,8 @@
 use std::sync::Arc;
 
 mod backend;
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+mod budget;
 mod editor_execution;
 mod error;
 mod frame;
@@ -362,6 +364,8 @@ struct PreparedSubmitterDraw {
     sprites: u32,
     #[cfg(feature = "ui-submitter")]
     image_sprites: u32,
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    instance_reservation: Option<budget::InstanceReservation>,
 }
 
 #[derive(Debug)]
@@ -383,6 +387,15 @@ struct PreparedTargetDraw {
 }
 
 impl PreparedTargetDraw {
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    fn commit_instance_reservations(&mut self) {
+        for view in &mut self.views {
+            if let Some(reservation) = view.draw.instance_reservation.as_mut() {
+                reservation.commit();
+            }
+        }
+    }
+
     fn retain_images_until_submission_complete(&self, queue: &wgpu::Queue) {
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         for view in &self.views {
@@ -669,7 +682,7 @@ fn render_acquired_texture(
     window_id: WindowId,
     surface_state: &WgpuSurfaceState,
     surface_texture: wgpu::SurfaceTexture,
-    draw: &PreparedTargetDraw,
+    draw: &mut PreparedTargetDraw,
 ) -> Result<(), WgpuRenderError> {
     let config = surface_state
         .config
@@ -686,6 +699,8 @@ fn render_acquired_texture(
     });
     encode_target_draw(&mut encoder, &view, draw);
     queue.submit([encoder.finish()]);
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    draw.commit_instance_reservations();
     draw.retain_images_until_submission_complete(queue);
     queue.present(surface_texture);
     Ok(())

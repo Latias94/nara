@@ -28,6 +28,8 @@ use nara_window::{
     backend::{BackendWindowHandles, WindowTargetError},
 };
 
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+use crate::budget::InstanceBudget;
 use crate::frame::{WgpuCapturedFrame, WgpuFramePayload};
 use crate::presented::WgpuPresentedFrameReceipt;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -403,6 +405,8 @@ pub struct WgpuRenderBackend {
     quad_pipelines: Vec<WgpuQuadPipeline>,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     quad_textures: WgpuSpriteTextureCache,
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    instance_budget: InstanceBudget,
     last_error: Option<String>,
 }
 
@@ -620,6 +624,10 @@ impl WgpuRenderBackend {
     ) {
         self.frame_transaction_stats =
             WgpuFrameTransactionStats::begin(render_transaction_frame_index, app_frame_index);
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        {
+            self.instance_budget = InstanceBudget::default();
+        }
         self.presented_frame_this_transaction = None;
         #[cfg(feature = "ui-submitter")]
         self.clear_submitted_ui_facts();
@@ -937,7 +945,7 @@ impl WgpuRenderBackend {
             let ui = payload.ui_facts(packet.views()[0].target);
             self.frame_transaction_stats.record_ui_payload(ui);
         }
-        let draw = match self.prepare_target_draw(view_format, &packet, &payload, frame.index) {
+        let mut draw = match self.prepare_target_draw(view_format, &packet, &payload, frame.index) {
             Ok(draw) => draw,
             Err(error) => {
                 self.telemetry
@@ -971,7 +979,7 @@ impl WgpuRenderBackend {
             .observe_gpu_resources(submitted_texture_bytes, submitted_instance_buffer_bytes);
         let presented = self.render_window(
             window.id,
-            &draw,
+            &mut draw,
             runtime_generation,
             app_frame_index,
             packet.frame_index(),
@@ -1101,6 +1109,15 @@ impl WgpuRenderBackend {
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     pub(super) fn begin_editor_submitter_frame(&mut self, frame_index: u64) {
         self.quad_textures.begin_frame(frame_index);
+    }
+
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[cfg(test)]
+    pub(crate) fn reserve_instance_buffer_bytes(
+        &self,
+        bytes: u64,
+    ) -> Result<crate::budget::InstanceReservation, crate::budget::InstanceBudgetError> {
+        self.instance_budget.reserve(bytes)
     }
 
     pub(super) fn record_editor_window_presentation(&mut self) {
@@ -1245,7 +1262,7 @@ impl WgpuRenderBackend {
     fn render_window(
         &mut self,
         window_id: WindowId,
-        draw: &PreparedTargetDraw,
+        draw: &mut PreparedTargetDraw,
         runtime_generation: RuntimeGeneration,
         app_frame_index: u64,
         render_transaction_frame_index: u64,
@@ -1477,11 +1494,17 @@ impl WgpuRenderBackend {
                     ..PreparedSubmitterDraw::default()
                 });
             }
-            admit_quad_instance_buffers(&batches).map_err(|error| {
+            let required_bytes = admit_quad_instance_buffers(&batches).map_err(|error| {
                 WgpuRenderError::ContentRejected {
                     message: error.to_string(),
                 }
             })?;
+            let instance_reservation =
+                self.instance_budget
+                    .reserve(required_bytes)
+                    .map_err(|error| WgpuRenderError::ContentRejected {
+                        message: error.to_string(),
+                    })?;
             let pipeline_keys = crate::required_quad_pipeline_keys(&batches, view_format);
             let texture_layout = self.ensure_quad_texture_bind_group_layout()?;
             let material_layout = self.ensure_quad_material_bind_group_layout()?;
@@ -1528,6 +1551,7 @@ impl WgpuRenderBackend {
                 sprites: stats.sprites,
                 #[cfg(feature = "ui-submitter")]
                 image_sprites: stats.image_sprites,
+                instance_reservation: Some(instance_reservation),
             })
         }
 
@@ -1917,6 +1941,44 @@ mod tests {
         assert_ne!(first.instance_id(), 0);
         assert_ne!(second.instance_id(), 0);
         assert_ne!(first.instance_id(), second.instance_id());
+    }
+
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[test]
+    fn cumulative_instance_budget_rejects_two_admissible_views_in_one_frame() {
+        let mut backend = WgpuRenderBackend::default();
+        backend.begin_frame_transaction(1, None);
+
+        let per_view = 40 * 1024 * 1024;
+        let first = backend
+            .reserve_instance_buffer_bytes(per_view)
+            .expect("the first view fits the cumulative frame budget");
+        assert!(
+            backend.reserve_instance_buffer_bytes(per_view).is_err(),
+            "two individually admissible views must not exceed one 64 MiB scope"
+        );
+        drop(first);
+        let recovered = backend
+            .reserve_instance_buffer_bytes(64 * 1024 * 1024)
+            .expect("dropping an uncommitted view must refund its reservation");
+        drop(recovered);
+    }
+
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[test]
+    fn replacing_frame_scope_does_not_let_old_reservation_charge_the_new_scope() {
+        let mut backend = WgpuRenderBackend::default();
+        backend.begin_frame_transaction(1, None);
+        let mut old_reservation = backend
+            .reserve_instance_buffer_bytes(40 * 1024 * 1024)
+            .unwrap();
+        old_reservation.commit();
+        backend.begin_frame_transaction(2, None);
+        drop(old_reservation);
+        let new_reservation = backend
+            .reserve_instance_buffer_bytes(64 * 1024 * 1024)
+            .expect("the new scope starts empty even while the old holder is dropped");
+        drop(new_reservation);
     }
 
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]

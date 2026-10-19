@@ -1048,7 +1048,7 @@ impl WgpuEditorExecution {
         if let (Some(ui), Some(backend_generation)) = (ui.as_deref_mut(), ui_backend_generation) {
             ui.bind_backend(backend_generation)?;
         }
-        let draw = self.backend.prepare_target_draw(
+        let mut draw = self.backend.prepare_target_draw(
             EDITOR_IMAGE_FORMAT,
             &packet,
             &payload,
@@ -1067,6 +1067,8 @@ impl WgpuEditorExecution {
                 });
         crate::encode_target_draw(&mut encoder, &viewport_target.view, &draw);
         namespace.queue.submit([encoder.finish()]);
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        draw.commit_instance_reservations();
         draw.retain_images_until_submission_complete(&namespace.queue);
         viewport_target.last_submitted_frame_index = Some(packet.frame_index());
         self.backend.record_editor_image_submission();

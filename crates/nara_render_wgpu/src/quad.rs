@@ -10,8 +10,9 @@ use nara_ui_render::{UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot};
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
+use crate::budget::MAX_INSTANCE_BUFFER_BYTES_PER_SCOPE;
+
 const VERTICES_PER_QUAD: u32 = 6;
-const MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME: u64 = 64 * 1024 * 1024;
 pub(crate) const WGPU_QUAD_SHAPE_PLAIN: u32 = 0;
 #[cfg(feature = "ui-submitter")]
 pub(crate) const WGPU_QUAD_SHAPE_ROUNDED_FILL: u32 = 1;
@@ -182,7 +183,9 @@ pub(crate) struct WgpuQuadDrawStats {
 }
 
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
-#[error("quad instances require {required} bytes; per-frame instance-buffer maximum is {maximum}")]
+#[error(
+    "quad instances require {required} bytes; render-scope instance-buffer maximum is {maximum}"
+)]
 pub(crate) struct WgpuQuadInstanceBudgetError {
     required: u64,
     maximum: u64,
@@ -433,10 +436,10 @@ pub(crate) fn admit_quad_instance_buffers(
 }
 
 fn admit_quad_instance_bytes(required: u64) -> Result<u64, WgpuQuadInstanceBudgetError> {
-    if required > MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME {
+    if required > MAX_INSTANCE_BUFFER_BYTES_PER_SCOPE {
         return Err(WgpuQuadInstanceBudgetError {
             required,
-            maximum: MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME,
+            maximum: MAX_INSTANCE_BUFFER_BYTES_PER_SCOPE,
         });
     }
     Ok(required)
@@ -512,14 +515,14 @@ mod tests {
     #[test]
     fn instance_buffer_budget_is_checked_without_allocating_the_payload() {
         assert_eq!(
-            admit_quad_instance_bytes(MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME),
-            Ok(MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME)
+            admit_quad_instance_bytes(MAX_INSTANCE_BUFFER_BYTES_PER_SCOPE),
+            Ok(MAX_INSTANCE_BUFFER_BYTES_PER_SCOPE)
         );
         assert_eq!(
-            admit_quad_instance_bytes(MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME + 1),
+            admit_quad_instance_bytes(MAX_INSTANCE_BUFFER_BYTES_PER_SCOPE + 1),
             Err(WgpuQuadInstanceBudgetError {
-                required: MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME + 1,
-                maximum: MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME,
+                required: MAX_INSTANCE_BUFFER_BYTES_PER_SCOPE + 1,
+                maximum: MAX_INSTANCE_BUFFER_BYTES_PER_SCOPE,
             })
         );
     }
