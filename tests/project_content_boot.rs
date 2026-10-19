@@ -5,7 +5,10 @@ mod project_content_fixture;
 
 use std::sync::Arc;
 
+use nara::advanced_prelude::Component;
+
 use nara::asset::AssetMeta;
+use nara::diagnostic::DiagnosticValueRef;
 use nara::image::{ImageColorSpace, ImageImportSettings};
 use nara::project_host::{
     ProjectContentBudgetKind, ProjectContentLoader, StartupContentMemberKind,
@@ -15,6 +18,366 @@ use nara::scene::{PrefabDocument, SceneComponentRecord, SceneDocument, SceneEnti
 use project_content_fixture::{TestProject, player_image_meta, scene_id, tileset_meta};
 
 struct EscapeOwner;
+
+#[derive(Default)]
+struct DeclaredContentPlugin;
+
+#[derive(Component)]
+struct DeclaredContentValue(ComponentValue);
+
+impl nara::app::Plugin for DeclaredContentPlugin {
+    fn declaration() -> &'static nara::app::PluginDeclaration {
+        static DECLARATION: nara::app::PluginDeclaration = nara::app::PluginDeclaration::new(
+            nara::app::PluginId::new("test.declared-content"),
+            nara::app::PluginCategory::Runtime,
+        )
+        .requires_plugins(&[nara::reflect::COMPONENT_REGISTRY_PLUGIN_ID])
+        .provides_schema(&[nara::app::PluginSchemaProviderId::new(
+            "test.declared-content.schema",
+        )]);
+        &DECLARATION
+    }
+
+    fn build(&self, _app: &mut nara::app::App) -> Result<(), nara::app::PluginError> {
+        Ok(())
+    }
+}
+
+fn declared_content_schema() -> nara::reflect::ComponentSchema {
+    use nara::reflect::{
+        ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
+        ComponentSchema, ComponentValueKind, ComponentValueShape,
+    };
+    ComponentSchema::new(
+        ComponentTypeId::new("test.DeclaredContent"),
+        "Declared Content",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_fields([
+        ComponentFieldSchema::required(
+            ComponentFieldId::new("nested"),
+            "Nested",
+            ComponentFieldPath::from_fields(["nested"]),
+            ComponentValueShape::list(ComponentValueShape::record([(
+                "asset".to_owned(),
+                ComponentValueKind::AssetRef.into(),
+            )])),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_capability(ComponentCapability::AssetRef),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("default_asset"),
+            "Default",
+            ComponentFieldPath::from_fields(["default_asset"]),
+            ComponentValueKind::AssetRef,
+            content_asset_reference("tilesets/terrain.tileset.ron"),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_capability(ComponentCapability::AssetRef),
+    ])
+}
+
+fn declared_content_provider() -> nara::reflect::ComponentSchemaProviderDefinition {
+    nara::reflect::ComponentSchemaProviderDefinition::new(
+        nara::reflect::ComponentSchemaOwnerId::new("test.declared-content"),
+        nara::app::PluginSchemaProviderId::new("test.declared-content.schema"),
+        nara::reflect::ComponentSchemaProviderBindingId::new("test.declared-content.native", 1),
+        || {
+            Ok(nara::reflect::ComponentSchemaCatalog {
+                components: vec![declared_content_schema()],
+                ..Default::default()
+            })
+        },
+        |registry| {
+            registry
+                .register_persistent_component_with_codec::<DeclaredContentValue, _, _>(
+                    declared_content_schema(),
+                    |value| Ok(DeclaredContentValue(value.clone())),
+                    |value| Ok(value.0.clone()),
+                )
+                .map(|_| ())
+        },
+    )
+}
+
+fn content_asset_reference(path: &str) -> ComponentValue {
+    ComponentValue::map([
+        ("kind", ComponentValue::String("path".to_owned())),
+        ("value", ComponentValue::String(path.to_owned())),
+    ])
+}
+
+fn persisted_tilemap(tileset: Option<&str>, tile: Option<u32>) -> SceneEntityRecord {
+    SceneEntityRecord::new(scene_id("terrain"))
+        .with_component(
+            ComponentTypeId::new("nara.transform.Transform2d"),
+            project_content_fixture::identity_transform_record(),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.tilemap.Tilemap"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([
+                    (
+                        "tile_size",
+                        ComponentValue::map([
+                            ("x", ComponentValue::f64(1.0).unwrap()),
+                            ("y", ComponentValue::f64(1.0).unwrap()),
+                        ]),
+                    ),
+                    (
+                        "tileset",
+                        tileset
+                            .map(content_asset_reference)
+                            .unwrap_or(ComponentValue::Null),
+                    ),
+                    (
+                        "cells",
+                        ComponentValue::List(
+                            tile.map(|tile| {
+                                vec![ComponentValue::map([
+                                    (
+                                        "coord",
+                                        ComponentValue::map([
+                                            ("x", ComponentValue::I64(-3)),
+                                            ("y", ComponentValue::I64(7)),
+                                        ]),
+                                    ),
+                                    (
+                                        "cell",
+                                        ComponentValue::map([
+                                            ("tile", ComponentValue::U64(u64::from(tile))),
+                                            (
+                                                "color",
+                                                ComponentValue::map([
+                                                    ("r", ComponentValue::f64(1.0).unwrap()),
+                                                    ("g", ComponentValue::f64(1.0).unwrap()),
+                                                    ("b", ComponentValue::f64(1.0).unwrap()),
+                                                    ("a", ComponentValue::f64(1.0).unwrap()),
+                                                ]),
+                                            ),
+                                        ]),
+                                    ),
+                                ])]
+                            })
+                            .unwrap_or_default(),
+                        ),
+                    ),
+                ]),
+            ),
+        )
+}
+
+#[test]
+fn strict_content_rejects_cells_outside_the_admitted_tileset() {
+    let project = TestProject::with_prefab_startup();
+    let path = "tilesets/地形 atlas.tileset.ron";
+    let source = nara::tilemap::TileSetSource::new(
+        nara::asset::AssetRef::path("textures/player.png").unwrap(),
+        nara::tilemap::TileAtlasLayout::grid(nara::core::Vec2::ONE, 1, 1),
+    );
+    project.write_tileset_source(
+        path,
+        &source,
+        &tileset_meta("d3d3f9a6-f7a9-4db0-ae3c-e1d4264d6f12", path),
+    );
+    project.write_scene_source(&SceneDocument::from_ordered_roots([persisted_tilemap(
+        Some(path),
+        Some(1),
+    )]));
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    let error = loader.load(&candidate, &plan).unwrap_err();
+    let diagnostic = error
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code().as_str() == "project.content.tile-index-out-of-range")
+        .unwrap();
+    for (key, expected) in [
+        ("entity-id", DiagnosticValueRef::Identifier("terrain")),
+        (
+            "source-entity-id",
+            DiagnosticValueRef::Identifier("terrain"),
+        ),
+        ("tileset", DiagnosticValueRef::ProjectRelative(path)),
+        ("x", DiagnosticValueRef::Signed(-3)),
+        ("y", DiagnosticValueRef::Signed(7)),
+        ("tile", DiagnosticValueRef::Unsigned(1)),
+    ] {
+        assert_eq!(
+            diagnostic
+                .fields()
+                .iter()
+                .find(|field| field.key().as_str() == key)
+                .map(|field| field.value()),
+            Some(expected),
+            "missing or incorrect membership diagnostic field {key}",
+        );
+    }
+    assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+
+    for (tileset, tile) in [
+        (Some(path), Some(0)),
+        (Some(path), None),
+        (None, Some(u32::MAX)),
+    ] {
+        project.write_scene_source(&SceneDocument::from_ordered_roots([persisted_tilemap(
+            tileset, tile,
+        )]));
+        let snapshot = loader.load(&candidate, &plan).unwrap();
+        assert_eq!(snapshot.expanded_startup_scene().entities.len(), 1);
+    }
+}
+
+#[test]
+fn declared_nested_and_default_tilesets_are_loaded_by_metadata_kind() {
+    let project = TestProject::with_prefab_startup();
+    let source = nara::tilemap::TileSetSource::new(
+        nara::asset::AssetRef::path("textures/player.png").unwrap(),
+        nara::tilemap::TileAtlasLayout::grid(nara::core::Vec2::ONE, 1, 1),
+    );
+    let path = "tilesets/terrain.tileset.ron";
+    project.write_tileset_source(
+        path,
+        &source,
+        &tileset_meta("d3d3f9a6-f7a9-4db0-ae3c-e1d4264d6f12", path),
+    );
+    std::fs::write(
+        project.path().join("assets/unrelated.meta"),
+        b"unrelated invalid sidecar",
+    )
+    .unwrap();
+    let entity = SceneEntityRecord::new(scene_id("content")).with_component(
+        ComponentTypeId::new("test.DeclaredContent"),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::map([(
+                "nested",
+                ComponentValue::List(vec![ComponentValue::map([(
+                    "asset",
+                    content_asset_reference(path),
+                )])]),
+            )]),
+        ),
+    );
+    project.write_scene_source(&SceneDocument::from_ordered_roots([entity]));
+    let (candidate, _, root) = project.candidate_plan_and_root();
+    let recipe = nara::ProductRecipe::new()
+        .add_contribution(
+            nara::SchemaContribution::<DeclaredContentPlugin>::for_default([
+                declared_content_provider(),
+            ])
+            .unwrap(),
+        )
+        .unwrap();
+    let plan = nara::project_host::resolve_product_recipe(&candidate, recipe).unwrap();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    let snapshot = loader.load(&candidate, &plan).unwrap();
+    assert_eq!(snapshot.tilesets().len(), 1);
+    assert_eq!(snapshot.images().len(), 1);
+    assert_eq!(snapshot.tilesets()[0].path().as_str(), path);
+}
+
+#[test]
+fn path_tileset_discovery_completes_the_catalogue_for_a_later_stable_image_dependency() {
+    let project = TestProject::with_prefab_startup();
+    let path = "tilesets/terrain.tileset.ron";
+    let source = nara::tilemap::TileSetSource::new(
+        nara::asset::AssetRef::StableId(player_image_meta().identity().stable_id()),
+        nara::tilemap::TileAtlasLayout::grid(nara::core::Vec2::ONE, 1, 1),
+    );
+    project.write_tileset_source(
+        path,
+        &source,
+        &tileset_meta("d3d3f9a6-f7a9-4db0-ae3c-e1d4264d6f12", path),
+    );
+    project.write_scene_source(&SceneDocument::from_ordered_roots([persisted_tilemap(
+        Some(path),
+        Some(0),
+    )]));
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    let snapshot = loader.load(&candidate, &plan).unwrap();
+
+    assert_eq!(snapshot.tilesets().len(), 1);
+    assert_eq!(
+        snapshot.tilesets()[0].image_path().as_str(),
+        "textures/player.png"
+    );
+    assert_eq!(snapshot.images().len(), 1);
+    assert_eq!(
+        snapshot.images()[0].image().source().stable_id(),
+        player_image_meta().identity().stable_id()
+    );
+    assert!(
+        loader
+            .budget_snapshot()
+            .high_water(ProjectContentBudgetKind::DirectoryEntries)
+            > 0
+    );
+}
+
+#[test]
+fn strict_content_rejects_an_image_in_a_tilemap_tileset_field() {
+    let project = TestProject::with_prefab_startup();
+    project.write_scene_source(&SceneDocument::from_ordered_roots([persisted_tilemap(
+        Some("textures/player.png"),
+        None,
+    )]));
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let error = ProjectContentLoader::new(root)
+        .unwrap()
+        .load(&candidate, &plan)
+        .unwrap_err();
+
+    assert!(
+        error
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.invalid-component-payload" }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn strict_content_rejects_a_tileset_in_a_sprite_image_field() {
+    let project = TestProject::with_prefab_startup();
+    let path = "tilesets/terrain.tileset.ron";
+    project.write_tileset_source(
+        path,
+        &nara::tilemap::TileSetSource::new(
+            nara::asset::AssetRef::path("textures/player.png").unwrap(),
+            nara::tilemap::TileAtlasLayout::grid(nara::core::Vec2::ONE, 1, 1),
+        ),
+        &tileset_meta("d3d3f9a6-f7a9-4db0-ae3c-e1d4264d6f12", path),
+    );
+    let entity = SceneEntityRecord::new(scene_id("sprite"))
+        .with_component(
+            ComponentTypeId::new("nara.transform.Transform2d"),
+            project_content_fixture::identity_transform_record(),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.sprite.Sprite"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                project_content_fixture::sprite_value(&nara::asset::AssetRef::path(path).unwrap()),
+            ),
+        );
+    project.write_scene_source(&SceneDocument::from_ordered_roots([entity]));
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let error = ProjectContentLoader::new(root)
+        .unwrap()
+        .load(&candidate, &plan)
+        .unwrap_err();
+    assert!(
+        error
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.invalid-component-payload" }),
+        "{error:?}"
+    );
+}
 
 #[test]
 fn strict_project_content_load_uses_the_persisted_linear_recipe() {

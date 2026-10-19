@@ -9,11 +9,16 @@ use super::*;
 pub(super) struct ReferenceCatalogue {
     metadata: BTreeMap<AssetPath, (usize, ContentDigest)>,
     work_bytes: usize,
+    complete: bool,
 }
 
 impl LoadContext<'_> {
     pub(super) fn ensure_reference_catalogue(&mut self) -> Result<(), ProjectContentError> {
-        if self.catalogue.is_some() {
+        if self
+            .catalogue
+            .as_ref()
+            .is_some_and(|catalogue| catalogue.complete)
+        {
             return Ok(());
         }
         let roots = self
@@ -21,7 +26,8 @@ impl LoadContext<'_> {
             .as_ref()
             .expect("content loading binds the manifest directories before decoding")
             .clone();
-        self.catalogue = Some(ReferenceCatalogue::default());
+        self.catalogue
+            .get_or_insert_with(ReferenceCatalogue::default);
         for (root_index, path) in roots.iter().enumerate() {
             let directory = self.open_directory(path)?;
             let result = self.scan_metadata_directory(&directory, root_index);
@@ -29,6 +35,10 @@ impl LoadContext<'_> {
             self.subtract_budget(ProjectContentBudgetKind::OpenHandles, 1);
             result?;
         }
+        self.catalogue
+            .as_mut()
+            .expect("catalogue was initialized")
+            .complete = true;
         Ok(())
     }
 
@@ -153,6 +163,28 @@ impl LoadContext<'_> {
                 .map_err(|_| invalid_metadata(&path))?
                 .into_identity();
         self.subtract_budget(ProjectContentBudgetKind::WorkBytes, reservation.reserved);
+        if let Some((indexed_root, indexed_digest)) = self
+            .catalogue
+            .as_ref()
+            .and_then(|catalogue| catalogue.metadata.get(&path))
+        {
+            if *indexed_root != root_index {
+                return Err(identity_conflict(&path));
+            }
+            if *indexed_digest != digest {
+                return Err(ProjectContentError::with_identifier(
+                    ProjectContentErrorKind::HostAuthorityRejected,
+                    "project.content.asset-metadata-source-changed",
+                    "Asset metadata changed after reference discovery; retry content loading",
+                    "asset",
+                    path.as_str(),
+                ));
+            }
+            if self.asset_database.record_for_path(&path) == Some(&AssetRecord::from(identity)) {
+                return Ok(());
+            }
+            return Err(identity_conflict(&path));
+        }
         self.reserve_asset_database_work(&AssetRecord::from(identity.clone()))?;
         self.reserve_catalogue_work(
             size_of::<(AssetPath, (usize, ContentDigest))>() + source.len() + BTREE_ENTRY_OVERHEAD,
@@ -255,6 +287,34 @@ impl LoadContext<'_> {
                 "project.content.stable-asset-reference-unresolved",
                 "Stable asset reference is missing from the admitted catalogue or has the wrong source kind",
             ))
+    }
+
+    pub(super) fn discover_source_reference(
+        &mut self,
+        assets: &DirectoryCapability,
+        reference: &AssetRef,
+    ) -> Result<AssetRecord, ProjectContentError> {
+        match reference {
+            AssetRef::Path(path) => {
+                if self.asset_database.record_for_path(path).is_none() {
+                    self.catalogue
+                        .get_or_insert_with(ReferenceCatalogue::default);
+                    let meta_path = path.meta_path();
+                    self.index_metadata(assets, 0, meta_path.as_str())?;
+                }
+            }
+            AssetRef::StableId(_) => self.ensure_reference_catalogue()?,
+        }
+        self.asset_database
+            .resolve_ref(reference)
+            .cloned()
+            .map_err(|_| {
+                ProjectContentError::single(
+                    ProjectContentErrorKind::AssetMetaMismatch,
+                    "project.content.stable-asset-reference-unresolved",
+                    "Asset reference is missing from the admitted source identities",
+                )
+            })
     }
 
     pub(super) fn verify_catalogued_metadata(

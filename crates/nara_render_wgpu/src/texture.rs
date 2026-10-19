@@ -1,4 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
+#[cfg(feature = "ui-submitter")]
+use std::collections::BTreeSet;
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Weak},
+};
 
 use nara_image::{ImageColorSpace, ImageFormat, PreparedImageSnapshot};
 use nara_material::{AddressMode, FilterMode, SamplerDescriptor};
@@ -14,23 +19,27 @@ const RGBA8_BYTES_PER_PIXEL: u32 = 4;
 const R8_BYTES_PER_PIXEL: u32 = 1;
 const DEFAULT_UNUSED_GRACE_FRAMES: u64 = 2;
 const MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME: usize = 64 * 1_024 * 1_024;
+const MAX_RESIDENT_IMAGE_VERSIONS: usize = 1_024;
+const MAX_RESIDENT_IMAGE_BYTES: u64 = 256 * 1_024 * 1_024;
 
 #[derive(Debug, Default)]
 pub(crate) struct WgpuSpriteTextureCache {
     policy: WgpuTextureCachePolicy,
     stats: WgpuTextureCacheStats,
     fallback_texture: Option<WgpuTextureResource>,
-    images: BTreeMap<RenderResourceKey, WgpuImageTextureResource>,
+    images: BTreeMap<RenderResourceKey, Vec<WgpuImageTextureEntry>>,
+    resident_images: Vec<ResidentImageTexture>,
+    residency_limits: WgpuImageResidencyLimits,
     #[cfg(feature = "ui-submitter")]
     glyph_pages: BTreeMap<UiGlyphAtlasPageKey, WgpuGlyphTextureResource>,
-    bindings: BTreeMap<WgpuQuadMaterialKey, WgpuTextureBinding>,
+    bindings: BTreeMap<WgpuQuadMaterialKey, Vec<WgpuTextureBinding>>,
     upload_bytes: usize,
 }
 
 impl WgpuSpriteTextureCache {
     #[must_use]
     pub(crate) fn image_count(&self) -> usize {
-        self.images.len() + {
+        self.resident_image_count() + {
             #[cfg(feature = "ui-submitter")]
             {
                 self.glyph_pages.len()
@@ -45,25 +54,28 @@ impl WgpuSpriteTextureCache {
     #[must_use]
     pub(crate) fn stats(&self) -> WgpuTextureCacheStats {
         let mut stats = self.stats;
-        stats.image_textures = self.images.len();
+        stats.image_textures = self.resident_image_count();
         stats.image_bindings = self
             .bindings
-            .keys()
-            .filter(|material| matches!(material.texture, WgpuQuadTextureKey::Image(_)))
-            .count();
+            .iter()
+            .filter(|(material, _)| matches!(material.texture, WgpuQuadTextureKey::Image(_)))
+            .map(|(_, bindings)| bindings.len())
+            .sum();
         stats.fallback_bindings = self
             .bindings
-            .keys()
-            .filter(|material| material.texture == WgpuQuadTextureKey::Fallback)
-            .count();
+            .iter()
+            .filter(|(material, _)| material.texture == WgpuQuadTextureKey::Fallback)
+            .map(|(_, bindings)| bindings.len())
+            .sum();
         #[cfg(feature = "ui-submitter")]
         {
             stats.glyph_textures = self.glyph_pages.len();
             stats.glyph_bindings = self
                 .bindings
-                .keys()
-                .filter(|material| matches!(material.texture, WgpuQuadTextureKey::Glyph(_)))
-                .count();
+                .iter()
+                .filter(|(material, _)| matches!(material.texture, WgpuQuadTextureKey::Glyph(_)))
+                .map(|(_, bindings)| bindings.len())
+                .sum();
         }
         stats.has_fallback_texture = self.fallback_texture.is_some();
         stats.texture_bytes = self.logical_texture_bytes();
@@ -72,9 +84,13 @@ impl WgpuSpriteTextureCache {
 
     #[must_use]
     pub(crate) fn logical_texture_bytes(&self) -> u64 {
-        let images = self.images.values().fold(0_u64, |total, image| {
-            total.saturating_add(image.texture.logical_bytes)
-        });
+        let images = self
+            .resident_images
+            .iter()
+            .filter_map(|resident| resident.image.upgrade())
+            .fold(0_u64, |total, image| {
+                total.saturating_add(image.texture.logical_bytes)
+            });
         #[cfg(feature = "ui-submitter")]
         let glyphs = self.glyph_pages.values().fold(0_u64, |total, page| {
             total.saturating_add(page.texture.logical_bytes)
@@ -94,6 +110,10 @@ impl WgpuSpriteTextureCache {
         #[cfg(feature = "ui-submitter")]
         self.glyph_pages.clear();
         self.bindings.clear();
+        self.resident_images.retain_mut(|resident| {
+            resident.reusable = false;
+            resident.image.strong_count() > 0
+        });
         self.stats = WgpuTextureCacheStats::default();
         self.upload_bytes = 0;
     }
@@ -112,7 +132,7 @@ impl WgpuSpriteTextureCache {
         material: WgpuQuadMaterialKey,
         texture: &WgpuQuadTexture,
         frame_index: u64,
-    ) -> Result<wgpu::BindGroup, WgpuTextureError> {
+    ) -> Result<WgpuCachedTextureBinding, WgpuTextureError> {
         let actual = texture.key();
         if material.texture != actual {
             return Err(WgpuTextureError::TextureIdentityMismatch {
@@ -120,39 +140,61 @@ impl WgpuSpriteTextureCache {
                 actual,
             });
         }
-        match texture {
+        let image = match texture {
             WgpuQuadTexture::Fallback => {
                 self.ensure_fallback(device, queue)?;
+                None
             }
             WgpuQuadTexture::Image(snapshot) => {
-                self.ensure_image(device, queue, snapshot, frame_index)?;
+                Some(self.ensure_image(device, queue, snapshot, frame_index)?)
             }
             #[cfg(feature = "ui-submitter")]
             WgpuQuadTexture::Glyph(page) => {
                 self.ensure_glyph_page(device, queue, page, frame_index)?;
+                None
             }
-        }
+        };
 
-        if !self.bindings.contains_key(&material) {
-            let view = self.texture_view(actual)?.clone();
-            self.bindings.insert(
-                material,
-                create_texture_binding(
+        let binding_index = self.bindings.get(&material).and_then(|bindings| {
+            bindings
+                .iter()
+                .position(|binding| match (&binding.image, &image) {
+                    (Some(existing), Some(image)) => Arc::ptr_eq(existing, image),
+                    (None, None) => true,
+                    _ => false,
+                })
+        });
+        let binding_index = match binding_index {
+            Some(index) => index,
+            None => {
+                let view = match &image {
+                    Some(image) => image.texture.view.clone(),
+                    None => self.texture_view(actual)?.clone(),
+                };
+                let mut binding = create_texture_binding(
                     device,
                     layout,
                     "nara_wgpu_quad_texture_binding",
                     &view,
                     material.sampler,
                     frame_index,
-                ),
-            );
-        }
-        let binding = self
+                );
+                binding.image = image.clone();
+                let bindings = self.bindings.entry(material).or_default();
+                let index = bindings.len();
+                bindings.push(binding);
+                index
+            }
+        };
+        let binding = &mut self
             .bindings
             .get_mut(&material)
-            .expect("the binding was inserted above");
+            .expect("binding was inserted")[binding_index];
         binding.last_used_frame = frame_index;
-        Ok(binding.bind_group.clone())
+        Ok(WgpuCachedTextureBinding {
+            bind_group: binding.bind_group.clone(),
+            image,
+        })
     }
 
     pub(crate) fn prepared_image_view(
@@ -161,11 +203,12 @@ impl WgpuSpriteTextureCache {
         queue: &wgpu::Queue,
         snapshot: &PreparedImageSnapshot,
         frame_index: u64,
-    ) -> Result<wgpu::TextureView, WgpuTextureError> {
-        self.ensure_image(device, queue, snapshot, frame_index)?;
-        Ok(self
-            .texture_view(WgpuQuadTextureKey::Image(snapshot.identity().key()))?
-            .clone())
+    ) -> Result<WgpuCachedImageView, WgpuTextureError> {
+        let image = self.ensure_image(device, queue, snapshot, frame_index)?;
+        Ok(WgpuCachedImageView {
+            view: image.texture.view.clone(),
+            image,
+        })
     }
 
     fn ensure_fallback(
@@ -202,7 +245,7 @@ impl WgpuSpriteTextureCache {
         queue: &wgpu::Queue,
         snapshot: &PreparedImageSnapshot,
         frame_index: u64,
-    ) -> Result<(), WgpuTextureError> {
+    ) -> Result<Arc<WgpuImageTextureResource>, WgpuTextureError> {
         let key = snapshot.identity().key();
         if key.kind() != RenderResourceKind::IMAGE_2D {
             return Err(WgpuTextureError::WrongImageResourceKind {
@@ -211,54 +254,105 @@ impl WgpuSpriteTextureCache {
             });
         }
         validate_image_snapshot(snapshot)?;
-        let action = match self.images.get(&key) {
-            None => TextureUploadAction::Upload,
-            Some(existing) if &existing.identity == snapshot.identity() => {
-                TextureUploadAction::Reuse
-            }
-            Some(_) => TextureUploadAction::Reupload,
-        };
-        if action != TextureUploadAction::Reuse {
+        if let Some(existing) = self.images.get_mut(&key).and_then(|versions| {
+            versions
+                .iter_mut()
+                .find(|entry| &entry.image.identity == snapshot.identity())
+        }) {
+            existing.last_used_frame = frame_index;
+            self.stats.reused_images = self.stats.reused_images.saturating_add(1);
+            return Ok(Arc::clone(&existing.image));
+        }
+        self.resident_images
+            .retain(|resident| resident.image.strong_count() > 0);
+        if let Some(image) = self
+            .resident_images
+            .iter()
+            .filter(|resident| resident.reusable)
+            .filter_map(|resident| resident.image.upgrade())
+            .find(|image| &image.identity == snapshot.identity())
+        {
+            self.images
+                .entry(key)
+                .or_default()
+                .push(WgpuImageTextureEntry {
+                    image: Arc::clone(&image),
+                    last_used_frame: frame_index,
+                });
+            self.stats.reused_images = self.stats.reused_images.saturating_add(1);
+            return Ok(image);
+        }
+        let reupload = self.images.contains_key(&key);
+        {
             let resource = snapshot.resource();
             let required = resource.pixels().len();
             self.admit_image_upload(key, required)?;
+            self.admit_image_residency(key, required as u64)?;
             let format = image_texture_format(resource.format(), resource.color_space());
-            self.images.insert(
-                key,
-                WgpuImageTextureResource {
-                    identity: snapshot.identity().clone(),
-                    texture: create_texture_resource(
-                        device,
-                        queue,
-                        "nara_wgpu_image_texture",
-                        resource.pixels(),
-                        resource.extent().width,
-                        resource.extent().height,
-                        RGBA8_BYTES_PER_PIXEL,
-                        format,
-                    ),
+            let image = Arc::new(WgpuImageTextureResource {
+                identity: snapshot.identity().clone(),
+                texture: create_texture_resource(
+                    device,
+                    queue,
+                    "nara_wgpu_image_texture",
+                    resource.pixels(),
+                    resource.extent().width,
+                    resource.extent().height,
+                    RGBA8_BYTES_PER_PIXEL,
+                    format,
+                ),
+            });
+            self.resident_images.push(ResidentImageTexture {
+                image: Arc::downgrade(&image),
+                reusable: true,
+            });
+            self.images
+                .entry(key)
+                .or_default()
+                .push(WgpuImageTextureEntry {
+                    image: Arc::clone(&image),
                     last_used_frame: frame_index,
-                },
-            );
-            self.bindings
-                .retain(|material, _| material.texture != WgpuQuadTextureKey::Image(key));
-            match action {
-                TextureUploadAction::Upload => {
-                    self.stats.uploaded_images = self.stats.uploaded_images.saturating_add(1);
-                }
-                TextureUploadAction::Reupload => {
-                    self.stats.reuploaded_images = self.stats.reuploaded_images.saturating_add(1);
-                }
-                TextureUploadAction::Reuse => unreachable!(),
+                });
+            if reupload {
+                self.stats.reuploaded_images = self.stats.reuploaded_images.saturating_add(1);
+            } else {
+                self.stats.uploaded_images = self.stats.uploaded_images.saturating_add(1);
             }
             self.upload_bytes = self.upload_bytes.saturating_add(required);
-        } else {
-            self.stats.reused_images = self.stats.reused_images.saturating_add(1);
+            Ok(image)
         }
-        self.images
-            .get_mut(&key)
-            .expect("the image texture exists after preparation")
-            .last_used_frame = frame_index;
+    }
+
+    fn resident_image_count(&self) -> usize {
+        self.resident_images
+            .iter()
+            .filter(|resident| resident.image.strong_count() > 0)
+            .count()
+    }
+
+    fn admit_image_residency(
+        &self,
+        key: RenderResourceKey,
+        required: u64,
+    ) -> Result<(), WgpuTextureError> {
+        let resident_bytes = self
+            .resident_images
+            .iter()
+            .filter_map(|resident| resident.image.upgrade())
+            .fold(0_u64, |bytes, image| {
+                bytes.saturating_add(image.texture.logical_bytes)
+            });
+        if self.resident_image_count() >= self.residency_limits.versions
+            || resident_bytes.saturating_add(required) > self.residency_limits.bytes
+        {
+            return Err(WgpuTextureError::ImageResidencyDeferred {
+                key,
+                required,
+                resident_bytes,
+                maximum_bytes: self.residency_limits.bytes,
+                maximum_versions: self.residency_limits.versions,
+            });
+        }
         Ok(())
     }
 
@@ -365,11 +459,7 @@ impl WgpuSpriteTextureCache {
                 .as_ref()
                 .map(|texture| &texture.view)
                 .ok_or(WgpuTextureError::MissingFallbackTexture),
-            WgpuQuadTextureKey::Image(key) => self
-                .images
-                .get(&key)
-                .map(|image| &image.texture.view)
-                .ok_or(WgpuTextureError::MissingImageTexture { key }),
+            WgpuQuadTextureKey::Image(key) => Err(WgpuTextureError::MissingImageTexture { key }),
             #[cfg(feature = "ui-submitter")]
             WgpuQuadTextureKey::Glyph(key) => self
                 .glyph_pages
@@ -381,10 +471,13 @@ impl WgpuSpriteTextureCache {
 
     fn evict_unused(&mut self, frame_index: u64) {
         let grace = self.policy.unused_grace_frames;
-        let before_images = self.images.len();
-        self.images
-            .retain(|_, image| !unused_past_grace(frame_index, image.last_used_frame, grace));
-        self.stats.evicted_image_textures = before_images.saturating_sub(self.images.len());
+        let before_images = self.images.values().map(Vec::len).sum::<usize>();
+        self.images.retain(|_, versions| {
+            versions.retain(|entry| !unused_past_grace(frame_index, entry.last_used_frame, grace));
+            !versions.is_empty()
+        });
+        self.stats.evicted_image_textures =
+            before_images.saturating_sub(self.images.values().map(Vec::len).sum());
 
         #[cfg(feature = "ui-submitter")]
         {
@@ -395,20 +488,39 @@ impl WgpuSpriteTextureCache {
                 before_glyphs.saturating_sub(self.glyph_pages.len());
         }
 
-        let live_images = self.images.keys().copied().collect::<BTreeSet<_>>();
         #[cfg(feature = "ui-submitter")]
         let live_glyphs = self.glyph_pages.keys().copied().collect::<BTreeSet<_>>();
-        let before_bindings = self.bindings.len();
-        self.bindings.retain(|material, binding| {
+        let binding_counts = |bindings: &BTreeMap<WgpuQuadMaterialKey, Vec<WgpuTextureBinding>>| {
+            let mut images = 0_usize;
+            let mut fallback = 0_usize;
+            for (material, bindings) in bindings {
+                match material.texture {
+                    WgpuQuadTextureKey::Image(_) => images += bindings.len(),
+                    WgpuQuadTextureKey::Fallback => fallback += bindings.len(),
+                    #[cfg(feature = "ui-submitter")]
+                    WgpuQuadTextureKey::Glyph(_) => {}
+                }
+            }
+            (images, fallback)
+        };
+        let (before_images, before_fallback) = binding_counts(&self.bindings);
+        self.bindings.retain(|material, bindings| {
             let texture_live = match material.texture {
                 WgpuQuadTextureKey::Fallback => true,
-                WgpuQuadTextureKey::Image(key) => live_images.contains(&key),
+                WgpuQuadTextureKey::Image(_) => true,
                 #[cfg(feature = "ui-submitter")]
                 WgpuQuadTextureKey::Glyph(key) => live_glyphs.contains(&key),
             };
-            texture_live && !unused_past_grace(frame_index, binding.last_used_frame, grace)
+            bindings.retain(|binding| {
+                texture_live && !unused_past_grace(frame_index, binding.last_used_frame, grace)
+            });
+            !bindings.is_empty()
         });
-        self.stats.evicted_image_bindings = before_bindings.saturating_sub(self.bindings.len());
+        let (after_images, after_fallback) = binding_counts(&self.bindings);
+        self.stats.evicted_image_bindings = before_images.saturating_sub(after_images);
+        self.stats.evicted_fallback_bindings = before_fallback.saturating_sub(after_fallback);
+        self.resident_images
+            .retain(|resident| resident.image.strong_count() > 0);
 
         let has_fallback_binding = self
             .bindings
@@ -421,11 +533,19 @@ impl WgpuSpriteTextureCache {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TextureUploadAction {
-    Upload,
-    Reupload,
-    Reuse,
+#[derive(Debug)]
+struct WgpuImageResidencyLimits {
+    versions: usize,
+    bytes: u64,
+}
+
+impl Default for WgpuImageResidencyLimits {
+    fn default() -> Self {
+        Self {
+            versions: MAX_RESIDENT_IMAGE_VERSIONS,
+            bytes: MAX_RESIDENT_IMAGE_BYTES,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -466,7 +586,46 @@ pub struct WgpuTextureCacheStats {
 struct WgpuImageTextureResource {
     identity: RenderResourceSnapshot,
     texture: WgpuTextureResource,
+}
+
+#[derive(Debug)]
+struct ResidentImageTexture {
+    image: Weak<WgpuImageTextureResource>,
+    reusable: bool,
+}
+
+#[derive(Debug)]
+struct WgpuImageTextureEntry {
+    image: Arc<WgpuImageTextureResource>,
     last_used_frame: u64,
+}
+
+#[derive(Debug)]
+pub(crate) struct WgpuCachedTextureBinding {
+    pub(crate) bind_group: wgpu::BindGroup,
+    image: Option<Arc<WgpuImageTextureResource>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct WgpuCachedImageView {
+    pub(crate) view: wgpu::TextureView,
+    image: Arc<WgpuImageTextureResource>,
+}
+
+impl WgpuCachedTextureBinding {
+    pub(crate) fn retain_until_submission_complete(&self, queue: &wgpu::Queue) {
+        if let Some(image) = &self.image {
+            let image = Arc::clone(image);
+            queue.on_submitted_work_done(move || drop(image));
+        }
+    }
+}
+
+impl WgpuCachedImageView {
+    pub(crate) fn retain_until_submission_complete(&self, queue: &wgpu::Queue) {
+        let image = Arc::clone(&self.image);
+        queue.on_submitted_work_done(move || drop(image));
+    }
 }
 
 #[cfg(feature = "ui-submitter")]
@@ -488,6 +647,7 @@ struct WgpuTextureBinding {
     bind_group: wgpu::BindGroup,
     _sampler: wgpu::Sampler,
     last_used_frame: u64,
+    image: Option<Arc<WgpuImageTextureResource>>,
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -529,6 +689,16 @@ pub(crate) enum WgpuTextureError {
         required: usize,
         remaining: usize,
     },
+    #[error(
+        "image {key:?} residency requires {required} bytes with {resident_bytes} resident; limits are {maximum_bytes} bytes and {maximum_versions} versions"
+    )]
+    ImageResidencyDeferred {
+        key: RenderResourceKey,
+        required: u64,
+        resident_bytes: u64,
+        maximum_bytes: u64,
+        maximum_versions: usize,
+    },
     #[error("glyph page {key:?} upload requires {required} bytes; per-frame maximum is {maximum}")]
     #[cfg(feature = "ui-submitter")]
     GlyphUploadLimitExceeded {
@@ -556,7 +726,9 @@ impl WgpuTextureError {
     pub(crate) const fn is_deferred(&self) -> bool {
         if matches!(
             self,
-            Self::FallbackUploadDeferred { .. } | Self::ImageUploadDeferred { .. }
+            Self::FallbackUploadDeferred { .. }
+                | Self::ImageUploadDeferred { .. }
+                | Self::ImageResidencyDeferred { .. }
         ) {
             return true;
         }
@@ -688,6 +860,7 @@ fn create_texture_binding(
         bind_group,
         _sampler: sampler,
         last_used_frame,
+        image: None,
     }
 }
 
@@ -834,5 +1007,168 @@ mod tests {
         cache.begin_frame(2);
         assert_eq!(cache.upload_bytes, 0);
         assert!(cache.admit_image_upload(key, 8).is_ok());
+    }
+
+    #[test]
+    fn image_residency_capacity_preserves_existing_versions_and_counts_actual_holders() {
+        let [first, second] = crate::readback_tests::two_image_versions();
+        crate::readback_tests::render_to_rgba(|device, queue, _, _, _| {
+            let layout = crate::quad::create_quad_texture_bind_group_layout(device);
+            for limits in [
+                WgpuImageResidencyLimits {
+                    versions: 1,
+                    bytes: 8,
+                },
+                WgpuImageResidencyLimits {
+                    versions: 2,
+                    bytes: 4,
+                },
+            ] {
+                let mut cache = WgpuSpriteTextureCache {
+                    residency_limits: limits,
+                    ..Default::default()
+                };
+                let material = WgpuQuadMaterialKey {
+                    texture: WgpuQuadTextureKey::Image(first.identity().key()),
+                    sampler: SamplerDescriptor::NEAREST_CLAMP,
+                    alpha_mode: nara_material::AlphaMode2d::Opaque,
+                };
+                cache.begin_frame(1);
+                let held = cache
+                    .bind_group(
+                        device,
+                        queue,
+                        &layout,
+                        material,
+                        &WgpuQuadTexture::Image(first.clone()),
+                        1,
+                    )
+                    .unwrap();
+                assert!(matches!(
+                    cache.ensure_image(device, queue, &second, 1),
+                    Err(WgpuTextureError::ImageResidencyDeferred { .. })
+                ));
+                assert_eq!(cache.stats().image_textures, 1);
+                assert_eq!(
+                    cache.stats().uploaded_images + cache.stats().reuploaded_images,
+                    1
+                );
+                cache.begin_frame(4);
+                assert!(cache.images.is_empty());
+                assert!(cache.bindings.is_empty());
+                assert_eq!(cache.stats().image_textures, 1);
+                assert_eq!(cache.logical_texture_bytes(), 4);
+                assert!(matches!(
+                    cache.ensure_image(device, queue, &second, 4),
+                    Err(WgpuTextureError::ImageResidencyDeferred { .. })
+                ));
+                cache.ensure_image(device, queue, &first, 4).unwrap();
+                assert_eq!(cache.stats().reused_images, 1);
+                assert_eq!(
+                    cache.stats().uploaded_images + cache.stats().reuploaded_images,
+                    0
+                );
+                cache.clear();
+                assert_eq!(cache.logical_texture_bytes(), 4);
+                drop(held);
+                assert_eq!(cache.logical_texture_bytes(), 0);
+                cache.begin_frame(8);
+                cache.ensure_image(device, queue, &second, 8).unwrap();
+                assert_eq!(cache.stats().image_textures, 1);
+                assert_eq!(cache.logical_texture_bytes(), 4);
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn clearing_image_cache_retires_namespace_without_forgetting_live_allocations() {
+        let [snapshot, _] = crate::readback_tests::two_image_versions();
+        crate::readback_tests::render_to_rgba(|device, queue, _, _, _| {
+            let layout = crate::quad::create_quad_texture_bind_group_layout(device);
+            let material = WgpuQuadMaterialKey {
+                texture: WgpuQuadTextureKey::Image(snapshot.identity().key()),
+                sampler: SamplerDescriptor::NEAREST_CLAMP,
+                alpha_mode: nara_material::AlphaMode2d::Opaque,
+            };
+            let mut cache = WgpuSpriteTextureCache {
+                residency_limits: WgpuImageResidencyLimits {
+                    versions: 1,
+                    bytes: 4,
+                },
+                ..Default::default()
+            };
+            let old_binding = cache
+                .bind_group(
+                    device,
+                    queue,
+                    &layout,
+                    material,
+                    &WgpuQuadTexture::Image(snapshot.clone()),
+                    1,
+                )
+                .unwrap();
+            cache.clear();
+            assert_eq!(cache.stats().image_textures, 1);
+            assert!(matches!(
+                cache.ensure_image(device, queue, &snapshot, 2),
+                Err(WgpuTextureError::ImageResidencyDeferred { .. })
+            ));
+            cache.residency_limits = WgpuImageResidencyLimits {
+                versions: 2,
+                bytes: 8,
+            };
+            let new_binding = cache
+                .bind_group(
+                    device,
+                    queue,
+                    &layout,
+                    material,
+                    &WgpuQuadTexture::Image(snapshot),
+                    2,
+                )
+                .unwrap();
+            assert!(!Arc::ptr_eq(
+                old_binding.image.as_ref().unwrap(),
+                new_binding.image.as_ref().unwrap()
+            ));
+            assert_eq!(cache.stats().image_textures, 2);
+            assert_eq!(cache.stats().reused_images, 0);
+            assert_eq!(cache.stats().uploaded_images, 1);
+            assert_eq!(cache.logical_texture_bytes(), 8);
+            drop(old_binding);
+            assert_eq!(cache.logical_texture_bytes(), 4);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn fallback_binding_eviction_does_not_count_as_an_image_binding() {
+        crate::readback_tests::render_to_rgba(|device, queue, _, _, _| {
+            let layout = crate::quad::create_quad_texture_bind_group_layout(device);
+            let material = WgpuQuadMaterialKey {
+                texture: WgpuQuadTextureKey::Fallback,
+                sampler: SamplerDescriptor::NEAREST_CLAMP,
+                alpha_mode: nara_material::AlphaMode2d::Opaque,
+            };
+            let mut cache = WgpuSpriteTextureCache::default();
+            cache
+                .bind_group(
+                    device,
+                    queue,
+                    &layout,
+                    material,
+                    &WgpuQuadTexture::Fallback,
+                    1,
+                )
+                .unwrap();
+            cache.begin_frame(4);
+            assert_eq!(cache.stats().evicted_image_bindings, 0);
+            assert_eq!(cache.stats().evicted_fallback_bindings, 1);
+            Ok(())
+        })
+        .unwrap();
     }
 }

@@ -569,6 +569,10 @@ impl AuthoringProjectSessionSnapshot {
         self.assets.iter().map(AuthoringAssetSource::record)
     }
 
+    pub(crate) fn asset_sources(&self) -> impl Iterator<Item = &AuthoringAssetSource> {
+        self.assets.iter()
+    }
+
     pub(crate) fn image_asset_sources(&self) -> impl Iterator<Item = &AuthoringAssetSource> {
         self.assets
             .iter()

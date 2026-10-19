@@ -12,6 +12,166 @@ use std::{sync::mpsc, time::Duration};
 pub(crate) const READBACK_EXTENT: u32 = 64;
 pub(crate) const READBACK_BYTES_PER_PIXEL: u32 = 4;
 
+pub(crate) fn two_image_versions() -> [nara_image::PreparedImageSnapshot; 2] {
+    use nara_asset::{
+        ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetVersion, Assets, ImportArtifactKey,
+        ImportArtifactRecord, ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId,
+        ImporterVersion, SourceHash, StableAssetId,
+    };
+    use nara_image::{
+        ImageAsset, ImageExtent, ImageFormat, ImageImportSettings, ImageSourceMetadata,
+        PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash, image_resource_key,
+    };
+    let handle = nara_asset::allocate_anonymous_handle::<ImageAsset>().unwrap();
+    let mut images = Assets::<ImageAsset>::default();
+    [[255, 0, 0, 255], [0, 255, 0, 255]].map(|pixels| {
+        let settings = ImageImportSettings::default();
+        let artifact = ImportArtifactRecord::new(ImportArtifactKey::new(
+            StableAssetId::parse_str("d7961f69-0e25-41d5-8893-0ef85ab19615").unwrap(),
+            SourceHash::from_bytes(&pixels),
+            ImportDependencyDigest::empty(),
+            ImporterId::new("nara-wgpu-test").unwrap(),
+            ImporterVersion::new(1),
+            settings.settings_hash(),
+            ImportProfile::default(),
+            ImportedAssetType::new("image").unwrap(),
+            ArtifactLabel::default(),
+            ArtifactFormatVersion::new(1),
+        ))
+        .unwrap();
+        let image = ImageAsset::new(
+            ImageSourceMetadata::new(
+                AssetPath::new("readback/versions.png").unwrap(),
+                settings,
+                artifact,
+            )
+            .unwrap(),
+            ImageExtent::new(1, 1),
+            ImageFormat::Rgba8,
+            pixels.to_vec(),
+        )
+        .unwrap();
+        images.insert(handle, image);
+        let image = images.get(handle).unwrap();
+        PreparedImageSnapshot::new(
+            nara_render::RenderResourceSnapshot::new(
+                image_resource_key(handle),
+                AssetVersion::from_raw(1),
+                images.slot_revision(handle),
+                image_descriptor_hash(image),
+            ),
+            PreparedImageResource::from_image(image),
+        )
+    })
+}
+
+#[test]
+fn exact_image_versions_render_together_and_repeat_without_reupload() {
+    use crate::quad::{WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture, WgpuQuadTextureKey};
+    use nara_material::{AlphaMode2d, SamplerDescriptor};
+    let [old, new] = two_image_versions();
+    assert_eq!(old.identity().key(), new.identity().key());
+    assert_ne!(old.identity(), new.identity());
+    let batches = [old.clone(), new, old]
+        .into_iter()
+        .enumerate()
+        .map(|(index, snapshot)| WgpuQuadBatch {
+            material: WgpuQuadMaterialKey {
+                texture: WgpuQuadTextureKey::Image(snapshot.identity().key()),
+                sampler: SamplerDescriptor::NEAREST_CLAMP,
+                alpha_mode: AlphaMode2d::Opaque,
+            },
+            texture: WgpuQuadTexture::Image(snapshot),
+            scissor: None,
+            instances: vec![WgpuQuadInstance {
+                center: [-2.0 / 3.0 + index as f32 * 2.0 / 3.0, 0.0],
+                x_axis: [1.0 / 3.0, 0.0],
+                y_axis: [0.0, 1.0],
+                color: [1.0; 4],
+                uv_min: [0.0; 2],
+                uv_size: [1.0; 2],
+                texture_mode: 0,
+                shape_mode: 0,
+                rect_size: [1.0; 2],
+                corner_radius: 0.0,
+                border_width: 0.0,
+            }],
+            counts_as_sprites: true,
+            material_extension: None,
+        })
+        .collect::<Vec<_>>();
+    let (pixels, (first, repeated)) =
+        render_to_rgba(|device, queue, format, output_view, encoder| {
+            let texture_layout = create_quad_texture_bind_group_layout(device);
+            let material_layout = create_material_bind_group_layout(device);
+            let pipelines = crate::required_quad_pipeline_keys(&batches, format)
+                .into_iter()
+                .map(|key| {
+                    let pipeline =
+                        create_quad_pipeline(device, key, &texture_layout, &material_layout)?;
+                    Ok(WgpuQuadPipelineDrawRef {
+                        alpha_mode: key.alpha_mode,
+                        material: key.material,
+                        pipeline: pipeline.pipeline,
+                    })
+                })
+                .collect::<Result<Vec<_>, crate::WgpuRenderError>>()?;
+            let mut cache = WgpuSpriteTextureCache::default();
+            cache.begin_frame(1);
+            let first_buffers = create_quad_batch_buffers(
+                device,
+                queue,
+                &batches,
+                &texture_layout,
+                &material_layout,
+                &mut cache,
+                1,
+            )
+            .unwrap();
+            let first = cache.stats();
+            cache.begin_frame(2);
+            let repeated_buffers = create_quad_batch_buffers(
+                device,
+                queue,
+                &batches,
+                &texture_layout,
+                &material_layout,
+                &mut cache,
+                2,
+            )
+            .unwrap();
+            let repeated = cache.stats();
+            for buffers in [&first_buffers, &repeated_buffers] {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("nara_exact_version_readback"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: output_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                draw_quad_batch_buffers(&mut pass, &pipelines, buffers, readback_viewport());
+            }
+            Ok((first, repeated))
+        })
+        .unwrap();
+    assert_eq!(readback_pixel(&pixels, 10, 32), &[255, 0, 0, 255]);
+    assert_eq!(readback_pixel(&pixels, 32, 32), &[0, 255, 0, 255]);
+    assert_eq!(readback_pixel(&pixels, 53, 32), &[255, 0, 0, 255]);
+    assert_eq!(first.image_textures, 2);
+    assert_eq!(first.uploaded_images + first.reuploaded_images, 2);
+    assert_eq!(repeated.uploaded_images + repeated.reuploaded_images, 0);
+    assert_eq!(repeated.reused_images, 3);
+}
+
 pub(crate) fn readback_viewport() -> ViewportRect {
     ViewportRect::new(0, 0, READBACK_EXTENT, READBACK_EXTENT).unwrap()
 }

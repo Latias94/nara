@@ -204,6 +204,39 @@ impl ImageAsset {
         })
     }
 
+    pub(crate) fn share_immutable(&self) -> Self {
+        Self {
+            source: self.source.clone(),
+            extent: self.extent,
+            format: self.format,
+            pixels: Arc::clone(&self.pixels),
+            retention: self.retention.clone(),
+        }
+    }
+
+    pub(crate) fn same_allocation(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.pixels, &other.pixels)
+    }
+
+    pub(crate) fn retain_with_owner<R>(&self, owner: Arc<R>) -> Self
+    where
+        R: Send + Sync + 'static,
+    {
+        struct CompositeOwner<R> {
+            _source: Option<ImagePixelRetention>,
+            _owner: Arc<R>,
+        }
+
+        let mut shared = self.share_immutable();
+        shared.retention = Some(ImagePixelRetention::LifetimeOwner {
+            _owner: Arc::new(CompositeOwner {
+                _source: self.retention.clone(),
+                _owner: owner,
+            }),
+        });
+        shared
+    }
+
     #[must_use]
     pub const fn source(&self) -> &ImageSourceMetadata {
         &self.source

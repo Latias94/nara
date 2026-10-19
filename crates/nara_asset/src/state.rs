@@ -9,7 +9,7 @@ use nara_core::ItemLimit;
 use nara_ecs::Resource;
 
 use crate::revision::{RevisionCounter, RevisionIdentity};
-use crate::{AssetId, ImportArtifactDigest, SourceHash, StableAssetId};
+use crate::{AssetId, AssetSlotRevision, ImportArtifactDigest, SourceHash, StableAssetId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -53,6 +53,18 @@ impl fmt::Debug for AssetStateRevision {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("AssetStateRevision")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Opaque publication authority retained across replacement and revoked by removal or invalidation.
+#[derive(Clone, PartialEq, Eq)]
+pub struct AssetPublicationRevision(RevisionIdentity);
+
+impl fmt::Debug for AssetPublicationRevision {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AssetPublicationRevision")
             .finish_non_exhaustive()
     }
 }
@@ -144,6 +156,8 @@ pub struct AssetStates {
     store_revision: Arc<()>,
     states: BTreeMap<AssetId, AssetState>,
     state_revisions: BTreeMap<AssetId, RevisionCounter>,
+    publication_revisions: BTreeMap<AssetId, RevisionCounter>,
+    published_slots: BTreeMap<AssetId, AssetSlotRevision>,
 }
 
 impl Default for AssetStates {
@@ -152,6 +166,8 @@ impl Default for AssetStates {
             store_revision: Arc::new(()),
             states: BTreeMap::new(),
             state_revisions: BTreeMap::new(),
+            publication_revisions: BTreeMap::new(),
+            published_slots: BTreeMap::new(),
         }
     }
 }
@@ -188,6 +204,25 @@ impl AssetStates {
     #[must_use]
     pub fn state_revision(&self, id: AssetId) -> AssetStateRevision {
         AssetStateRevision::new(&self.store_revision, self.state_revisions.get(&id))
+    }
+
+    /// Returns authority that an immutable last-good value may retain until explicitly revoked.
+    #[must_use]
+    pub fn publication_revision(&self, id: AssetId) -> AssetPublicationRevision {
+        AssetPublicationRevision(RevisionIdentity::capture(
+            &self.store_revision,
+            self.publication_revisions.get(&id),
+        ))
+    }
+
+    /// Returns the exact storage slot written by the latest managed publication.
+    #[must_use]
+    pub fn published_slot_revision(&self, id: AssetId) -> Option<&AssetSlotRevision> {
+        self.published_slots.get(&id)
+    }
+
+    pub(crate) fn bind_published_slot(&mut self, id: AssetId, slot: AssetSlotRevision) {
+        self.published_slots.insert(id, slot);
     }
 
     #[must_use]
@@ -229,6 +264,7 @@ impl AssetStates {
         source_hash: Option<SourceHash>,
         import_hash: Option<ImportArtifactDigest>,
     ) {
+        self.published_slots.remove(&id);
         self.insert_state(
             id,
             AssetState::new(version, LoadState::Loaded, source_hash, import_hash),
@@ -236,6 +272,8 @@ impl AssetStates {
     }
 
     pub(crate) fn set_removed_at(&mut self, id: AssetId, version: AssetVersion) {
+        self.published_slots.remove(&id);
+        self.advance_publication_revision(id);
         self.insert_state(id, AssetState::new(version, LoadState::Removed, None, None));
     }
 
@@ -281,12 +319,14 @@ impl AssetStates {
     /// Retained CPU data and the latest diagnostic remain available for inspection, but cannot
     /// authorize derived resources. A subsequent successful publication restores availability.
     pub fn invalidate_publication(&mut self, id: AssetId) {
+        self.published_slots.remove(&id);
         let Some(current) = self.states.get_mut(&id) else {
             return;
         };
         if current.published_available {
             current.published_available = false;
             self.advance_state_revision(id);
+            self.advance_publication_revision(id);
         }
     }
 
@@ -297,6 +337,13 @@ impl AssetStates {
 
     fn advance_state_revision(&mut self, id: AssetId) {
         self.state_revisions
+            .entry(id)
+            .and_modify(RevisionCounter::advance)
+            .or_default();
+    }
+
+    fn advance_publication_revision(&mut self, id: AssetId) {
+        self.publication_revisions
             .entry(id)
             .and_modify(RevisionCounter::advance)
             .or_default();
@@ -658,6 +705,23 @@ mod tests {
         let second = AssetStates::default();
 
         assert_ne!(first.state_revision(id), second.state_revision(id));
+    }
+
+    #[test]
+    fn publication_revision_survives_replacement_and_rotates_on_removal() {
+        let handle = handle();
+        let mut states = AssetStates::default();
+        let initial = states.publication_revision(handle.id());
+        states.set_loading(handle.id());
+        assert_eq!(states.publication_revision(handle.id()), initial);
+        states.set_loaded_at(handle.id(), AssetVersion::from_raw(1), None, None);
+        let published = states.publication_revision(handle.id());
+        assert_eq!(published, initial);
+        states.invalidate_publication(handle.id());
+        assert_ne!(states.publication_revision(handle.id()), published);
+        let revoked = states.publication_revision(handle.id());
+        states.set_loaded_at(handle.id(), AssetVersion::from_raw(2), None, None);
+        assert_eq!(states.publication_revision(handle.id()), revoked);
     }
 
     #[test]

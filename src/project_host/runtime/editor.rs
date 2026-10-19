@@ -2216,6 +2216,14 @@ impl EditorProjectSession {
     }
 
     #[cfg(test)]
+    pub(super) fn test_tile_set(
+        &self,
+        path: &nara_asset::AssetPath,
+    ) -> Option<nara_tilemap::TileSet> {
+        self.authoring_runtime.test_tile_set(path)
+    }
+
+    #[cfg(test)]
     pub(super) fn test_reject_next_valid_image_metadata_receipt(&mut self) {
         self.image_import.test_reject_next_valid_metadata_receipt();
     }

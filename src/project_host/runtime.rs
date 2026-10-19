@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeMap,
     sync::{
         Arc, OnceLock,
         atomic::{AtomicU64, Ordering},
@@ -25,8 +24,7 @@ use nara_app::{
     RuntimeState,
 };
 use nara_asset::{
-    AssetEvents, AssetPath, AssetRecord, AssetServer, AssetSourceKind, AssetStates, Assets, Handle,
-    SourceHash,
+    AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, Assets, SourceHash,
 };
 use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
@@ -1063,7 +1061,6 @@ fn publish_snapshot_assets(
     }
 
     let mut publications = Vec::with_capacity(snapshot.images().len());
-    let mut image_handles = BTreeMap::new();
     {
         let mut server = world.resource_mut::<AssetServer>();
         for (index, content) in snapshot.images().iter().enumerate() {
@@ -1079,7 +1076,6 @@ fn publish_snapshot_assets(
                     "Project runtime image identity could not be reserved",
                 ))
             })?;
-            image_handles.insert(content.path().clone(), handle);
             let image = snapshot.share_image_for_consumer(index).ok_or_else(|| {
                 HostFault::new(single_error(
                     "project.run.image-snapshot-invalid",
@@ -1094,8 +1090,6 @@ fn publish_snapshot_assets(
             ));
         }
     }
-
-    let tileset_publications = prepare_snapshot_tilesets(world, snapshot, &image_handles)?;
 
     world.resource_scope(
         |world, mut images: Mut<'_, Assets<ImageAsset>>| -> Result<(), HostFault> {
@@ -1124,88 +1118,84 @@ fn publish_snapshot_assets(
             )
         },
     )?;
-    publish_snapshot_tilesets(world, tileset_publications)?;
+    world.insert_resource(snapshot.asset_database().clone());
+    publish_snapshot_tilesets(world, snapshot)?;
     Ok(())
-}
-
-fn prepare_snapshot_tilesets(
-    world: &mut World,
-    snapshot: &ProjectContentSnapshot,
-    image_handles: &BTreeMap<AssetPath, Handle<ImageAsset>>,
-) -> Result<Vec<(Handle<TileSet>, TileSet, SourceHash)>, HostFault> {
-    if snapshot.tilesets().is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut publications = Vec::with_capacity(snapshot.tilesets().len());
-    let mut server = world.resource_mut::<AssetServer>();
-    for content in snapshot.tilesets() {
-        let image = image_handles.get(content.image_path()).ok_or_else(|| {
-            HostFault::new(single_error(
-                "project.run.tileset-image-missing",
-                "Project TileSet image dependency was not published",
-            ))
-        })?;
-        let record = AssetRecord::new(
-            content.stable_id(),
-            content.path().clone(),
-            AssetSourceKind::Other("tileset".to_string()),
-        );
-        let handle = server.reserve_record::<TileSet>(&record).map_err(|_| {
-            HostFault::new(single_error(
-                "project.run.tileset-identity-failed",
-                "Project runtime TileSet identity could not be reserved",
-            ))
-        })?;
-        let tileset = content.source().clone().into_tileset(*image).map_err(|_| {
-            HostFault::new(single_error(
-                "project.run.tileset-source-invalid",
-                "Project runtime TileSet source is invalid",
-            ))
-        })?;
-        publications.push((
-            handle,
-            tileset,
-            SourceHash::from_digest(*content.source_hash().as_bytes()),
-        ));
-    }
-    Ok(publications)
 }
 
 fn publish_snapshot_tilesets(
     world: &mut World,
-    publications: Vec<(Handle<TileSet>, TileSet, SourceHash)>,
+    snapshot: &ProjectContentSnapshot,
 ) -> Result<(), HostFault> {
-    if publications.is_empty() {
+    if snapshot.tilesets().is_empty() {
         return Ok(());
     }
-
-    world.resource_scope(
-        |world, mut tilesets: Mut<'_, Assets<TileSet>>| -> Result<(), HostFault> {
-            world.resource_scope(
-                |world, mut states: Mut<'_, AssetStates>| -> Result<(), HostFault> {
-                    let mut events = world.resource_mut::<AssetEvents>();
-                    for (handle, tileset, source_hash) in publications {
-                        tilesets
-                            .commit_loaded(
-                                handle,
-                                tileset,
-                                &mut states,
-                                &mut events,
-                                Some(source_hash),
-                                None,
-                            )
-                            .map_err(|_| {
-                                HostFault::new(single_error(
-                                    "project.run.tileset-publication-failed",
-                                    "Project runtime TileSet publication failed",
-                                ))
-                            })?;
-                    }
-                    Ok(())
-                },
+    if !world.contains_resource::<nara_tilemap::TileSetAssets>() {
+        return Err(HostFault::new(single_error(
+            "project.run.tileset-owner-missing",
+            "Project runtime TileSet publication owner is unavailable",
+        )));
+    }
+    let mut access = nara_ecs::system::SystemState::<(
+        nara_ecs::ResMut<nara_tilemap::TileSetAssets>,
+        nara_ecs::ResMut<AssetServer>,
+        nara_ecs::Res<nara_asset::ProjectAssetDatabase>,
+        nara_ecs::Res<Assets<ImageAsset>>,
+        nara_ecs::ResMut<Assets<TileSet>>,
+        nara_ecs::ResMut<AssetStates>,
+        nara_ecs::ResMut<AssetEvents>,
+    )>::new(world);
+    let (mut owner, mut server, database, images, mut tilesets, mut states, mut events) =
+        access.get_mut(world).map_err(|_| {
+            HostFault::new(single_error(
+                "project.run.tileset-resources-missing",
+                "Project runtime TileSet resources are unavailable",
+            ))
+        })?;
+    let mut handles = Vec::with_capacity(snapshot.tilesets().len());
+    for content in snapshot.tilesets() {
+        let record = AssetRecord::new(
+            content.stable_id(),
+            content.path().clone(),
+            AssetSourceKind::Other(String::from("tileset")),
+        );
+        let handle = owner
+            .request(
+                record,
+                content.source().clone(),
+                SourceHash::from_digest(*content.source_hash().as_bytes()),
+                &mut server,
+                &tilesets,
+                &mut states,
             )
-        },
-    )
+            .map_err(|_| {
+                HostFault::new(single_error(
+                    "project.run.tileset-request-failed",
+                    "Project runtime TileSet source could not be admitted",
+                ))
+            })?;
+        handles.push(handle);
+    }
+    owner.reconcile(
+        &mut server,
+        &database,
+        &images,
+        &mut tilesets,
+        &mut states,
+        &mut events,
+    );
+    if handles.into_iter().any(|handle| {
+        owner.error(handle).is_some()
+            || !tilesets
+                .get(handle)
+                .is_some_and(|tileset| tileset.image_content().is_some())
+    }) {
+        return Err(HostFault::new(single_error(
+            "project.run.tileset-publication-failed",
+            "Project runtime TileSet publication failed",
+        )));
+    }
+    Ok(())
 }
 
 fn verify_runtime_registry(world: &World, plan: &RuntimePlan) -> Result<(), HostFault> {

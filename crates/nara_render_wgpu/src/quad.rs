@@ -1,4 +1,6 @@
-use crate::texture::{WgpuSpriteTextureCache, WgpuTextureError};
+use crate::texture::{
+    WgpuCachedImageView, WgpuCachedTextureBinding, WgpuSpriteTextureCache, WgpuTextureError,
+};
 use bytemuck::{Pod, Zeroable};
 use nara_image::PreparedImageSnapshot;
 use nara_material::{AlphaMode2d, Material2dDefinition, SamplerDescriptor};
@@ -128,8 +130,9 @@ pub(crate) struct WgpuQuadPipelineDrawRef {
 #[derive(Debug)]
 pub(crate) struct WgpuQuadBatchBuffer {
     buffer: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
+    bind_group: WgpuCachedTextureBinding,
     material_bind_group: Option<wgpu::BindGroup>,
+    material_image: Option<WgpuCachedImageView>,
     material: Option<Material2dDefinition>,
     alpha_mode: AlphaMode2d,
     scissor: Option<WgpuScissorRect>,
@@ -299,35 +302,37 @@ pub(crate) fn create_quad_batch_buffers(
                 &batch.texture,
                 frame_index,
             )?;
-            let material_bind_group = if let Some(material) = &batch.material_extension {
-                let view = texture_cache.prepared_image_view(
-                    device,
-                    queue,
-                    &material.texture,
-                    frame_index,
-                )?;
-                let parameters = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("nara_material_2d_parameters"),
-                    contents: bytemuck::cast_slice(&material.parameters),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
-                Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("nara_material_2d_bind_group"),
-                    layout: material_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: parameters.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::TextureView(&view),
-                        },
-                    ],
-                }))
-            } else {
-                None
-            };
+            let (material_bind_group, material_image) =
+                if let Some(material) = &batch.material_extension {
+                    let view = texture_cache.prepared_image_view(
+                        device,
+                        queue,
+                        &material.texture,
+                        frame_index,
+                    )?;
+                    let parameters = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("nara_material_2d_parameters"),
+                        contents: bytemuck::cast_slice(&material.parameters),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+                    let binding = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("nara_material_2d_bind_group"),
+                        layout: material_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: parameters.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(&view.view),
+                            },
+                        ],
+                    });
+                    (Some(binding), Some(view))
+                } else {
+                    (None, None)
+                };
             let instance_count = saturating_u32(batch.instances.len());
             let logical_bytes = quad_instance_byte_len(batch.instances.len());
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -340,6 +345,7 @@ pub(crate) fn create_quad_batch_buffers(
                 buffer,
                 bind_group,
                 material_bind_group,
+                material_image,
                 material: batch
                     .material_extension
                     .as_ref()
@@ -351,6 +357,15 @@ pub(crate) fn create_quad_batch_buffers(
             })
         })
         .collect()
+}
+
+impl WgpuQuadBatchBuffer {
+    pub(crate) fn retain_images_until_submission_complete(&self, queue: &wgpu::Queue) {
+        self.bind_group.retain_until_submission_complete(queue);
+        if let Some(image) = &self.material_image {
+            image.retain_until_submission_complete(queue);
+        }
+    }
 }
 
 pub(crate) fn draw_quad_batch_buffers<'pass>(
@@ -381,7 +396,7 @@ pub(crate) fn draw_quad_batch_buffers<'pass>(
             height: viewport.physical_height,
         });
         render_pass.set_scissor_rect(scissor.x, scissor.y, scissor.width, scissor.height);
-        render_pass.set_bind_group(0, &buffer.bind_group, &[]);
+        render_pass.set_bind_group(0, &buffer.bind_group.bind_group, &[]);
         if let Some(material) = &buffer.material_bind_group {
             render_pass.set_bind_group(1, material, &[]);
         }

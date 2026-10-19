@@ -5,6 +5,7 @@ extern crate nara_ecs as bevy_ecs;
 
 mod asset;
 mod budget;
+mod content;
 mod import;
 mod limits;
 #[cfg(any(feature = "render-prepare", test))]
@@ -17,6 +18,7 @@ pub use asset::{
     ImageSourceMetadata, ImageSourceMetadataCreateError,
 };
 pub use budget::{ImageImportBudgetHost, ImageImportBudgetSnapshot};
+pub use content::{ImageContentError, ImageContentSnapshot};
 pub use import::{
     AdmittedImageImport, ImageBytesImportRequest, ImageFileImportRequest, ImageImportError,
     ImageImportStage, ImageImportedAsset, ImageImporter, ImageImporterCreateError,

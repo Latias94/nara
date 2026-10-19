@@ -42,6 +42,10 @@ The [2026-10-18 foundation audit](../audits/2026-10-18-foundation-contract-audit
 confirmed ownership repairs and proposed refactor dependencies. Its standalone HTML deliverable
 is kept outside the repository. The audit does not change Accepted ADRs.
 
+The [post-publication architecture review](../audits/2026-10-19-post-publication-architecture-review.md)
+records the TileSet/Image corrections and the remaining concrete module-interface refactor order.
+Its implementation and verification limits remain separate from future tile authoring tools.
+
 The [UI foundation design](ui-foundation-design.md),
 [UI boundary study](ui-product-boundaries-editor-dogfood-and-porting-strategy.md), and
 [render pressure matrix](render-capability-pressure-matrix.md) provide design context when a task

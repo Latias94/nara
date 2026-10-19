@@ -156,6 +156,7 @@ impl<T: Asset> Assets<T> {
             AssetEventKind::Added
         };
         states.set_loaded_at(id, version, source_hash, import_hash);
+        states.bind_published_slot(id, self.slot_revision(handle));
         let _ = events.push(id, version, event_kind);
         Ok(version)
     }

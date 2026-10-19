@@ -383,6 +383,17 @@ struct PreparedTargetDraw {
 }
 
 impl PreparedTargetDraw {
+    fn retain_images_until_submission_complete(&self, queue: &wgpu::Queue) {
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        for view in &self.views {
+            for buffer in &view.draw.buffers {
+                buffer.retain_images_until_submission_complete(queue);
+            }
+        }
+        #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
+        let _ = queue;
+    }
+
     fn push(
         &mut self,
         viewport: nara_render::ViewportRect,
@@ -675,6 +686,7 @@ fn render_acquired_texture(
     });
     encode_target_draw(&mut encoder, &view, draw);
     queue.submit([encoder.finish()]);
+    draw.retain_images_until_submission_complete(queue);
     queue.present(surface_texture);
     Ok(())
 }

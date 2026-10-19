@@ -1,12 +1,16 @@
-use std::{collections::BTreeSet, time::Duration};
+#[cfg(feature = "runtime-ui")]
+use std::collections::BTreeSet;
+use std::time::Duration;
 
 use nara_app::{
     __RuntimeDriverPort, App, RuntimeControl, RuntimeInstance, RuntimeState,
     RuntimeWorldAccessError,
 };
+#[cfg(feature = "runtime-ui")]
+use nara_asset::AssetId;
 use nara_asset::{
-    AssetEvents, AssetId, AssetRecord, AssetServer, AssetSourceKind, AssetStates, AssetVersion,
-    Assets, Handle,
+    AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, AssetVersion, Assets,
+    Handle,
 };
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Mut, Resource, World};
@@ -22,9 +26,12 @@ use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskShutdownReport, TaskSpawnRequest,
     TaskTerminal,
 };
-use nara_tilemap::TileSet;
+use nara_tilemap::{TileSet, TileSetAssetPlugin};
+
+mod tilesets;
 #[cfg(feature = "presentation-2d")]
 use nara_tooling::{EditorDocumentId, WorldIdentitySnapshot};
+pub(super) use tilesets::EditorTileSetSourceUpdate;
 
 #[cfg(test)]
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
@@ -165,6 +172,7 @@ pub(super) enum EditorAuthoringRuntimeCloseProgress {
 /// reuse this owner instead of creating another `App`, task pool, or image store.
 pub(super) struct EditorAuthoringRuntime {
     runtime: RuntimeInstance,
+    tileset_records: Vec<AssetRecord>,
     image_revocation_failure: Option<EditorImageRuntimeFailure>,
     #[cfg(feature = "presentation-2d")]
     preview: EditorPreviewSession,
@@ -203,6 +211,7 @@ impl EditorAuthoringRuntime {
             .map_err(|_| runtime_error("project.editor.preview-runtime-start-failed"))?;
         Ok(Self {
             runtime,
+            tileset_records: Vec::new(),
             image_revocation_failure: None,
             #[cfg(feature = "presentation-2d")]
             preview,
@@ -232,6 +241,13 @@ impl EditorAuthoringRuntime {
             .map_err(|_| runtime_error("project.editor.preview-runtime-start-failed"))?;
         Ok(Self {
             runtime,
+            tileset_records: project
+                .asset_records()
+                .filter(|record| {
+                    record.source_kind() == &AssetSourceKind::Other(String::from("tileset"))
+                })
+                .cloned()
+                .collect(),
             image_revocation_failure: None,
             #[cfg(feature = "presentation-2d")]
             preview,
@@ -561,9 +577,9 @@ fn build_authoring_app() -> Result<App, DiagnosticReport> {
         nara_render::RenderComponentsPlugin,
     ))
     .and_then(|app| app.add_plugins(nara_image::ImagePlugin::default()))
+    .and_then(|app| app.add_plugins(TileSetAssetPlugin))
     .map_err(|_| runtime_error("project.editor.preview-plugin-install-failed"))?;
-    app.init_resource::<Assets<TileSet>>()
-        .map_err(|_| runtime_error("project.editor.preview-state-install-failed"))?;
+    tilesets::install(&mut app)?;
     app.insert_resource(EditorImageAdmissionPort)
         .and_then(|app| app.insert_resource(EditorImagePublicationPort))
         .and_then(|app| app.insert_resource(EditorImageRevocationPort))
@@ -749,7 +765,6 @@ impl EditorImagePublicationPort {
         Result<AssetVersion, EditorImageRuntimeFailure>,
         (RuntimeWorldAccessError, ImageImportedAsset),
     > {
-        #[cfg(feature = "presentation-2d")]
         let record = {
             let source = imported.image().source();
             let record = AssetRecord::new(
@@ -757,8 +772,15 @@ impl EditorImagePublicationPort {
                 source.path().clone(),
                 AssetSourceKind::Image,
             );
+            #[cfg(feature = "presentation-2d")]
             if let Err(reason) = super::preview::validate_authoring_image_identity(world, &record) {
                 return Ok(Err(reason));
+            }
+            let database = world.resource::<nara_asset::ProjectAssetDatabase>();
+            if database.record_for_path(record.path()) != Some(&record)
+                && database.validate_insert(&record).is_err()
+            {
+                return Ok(Err(EditorImageRuntimeFailure::AssetIdentity));
             }
             record
         };
@@ -771,8 +793,15 @@ impl EditorImagePublicationPort {
                 })
             },
         );
-        #[cfg(feature = "presentation-2d")]
         if result.is_ok() {
+            let mut database = world.resource_mut::<nara_asset::ProjectAssetDatabase>();
+            if database.record_for_path(record.path()) != Some(&record) {
+                database
+                    .insert(record.clone())
+                    .expect("exclusive image identity admission was preflighted");
+            }
+            drop(database);
+            #[cfg(feature = "presentation-2d")]
             super::preview::publish_authoring_image_identity(world, record);
         }
         Ok(result.map_err(|_| EditorImageRuntimeFailure::Publication))
@@ -833,6 +862,7 @@ fn publish_authoring_image_records(
     world: &mut World,
     snapshot: &AuthoringProjectSessionSnapshot,
 ) -> Result<(), DiagnosticReport> {
+    world.insert_resource((*snapshot.asset_database()).clone());
     let mut server = world.resource_mut::<AssetServer>();
     for record in snapshot
         .asset_records()
@@ -842,7 +872,8 @@ fn publish_authoring_image_records(
             .reserve_record::<ImageAsset>(record)
             .map_err(|_| runtime_error("project.editor.preview-image-identity-failed"))?;
     }
-    Ok(())
+    drop(server);
+    tilesets::publish_initial(world, snapshot)
 }
 
 fn runtime_error(code: &'static str) -> DiagnosticReport {
@@ -888,6 +919,7 @@ mod preview_content_tests {
         (
             EditorAuthoringRuntime {
                 runtime: RuntimeInstance::start(app).unwrap(),
+                tileset_records: Vec::new(),
                 image_revocation_failure: None,
                 preview,
                 image_publication_revision: 0,

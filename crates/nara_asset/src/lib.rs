@@ -48,8 +48,8 @@ pub use reload::{
 pub use server::{AssetError, AssetServer};
 pub use state::{
     AssetDependencyGraph, AssetEvent, AssetEventKind, AssetEventLimits, AssetEventPushOutcome,
-    AssetEvents, AssetState, AssetStateError, AssetStateRevision, AssetStates, AssetVersion,
-    LoadState,
+    AssetEvents, AssetPublicationRevision, AssetState, AssetStateError, AssetStateRevision,
+    AssetStates, AssetVersion, LoadState,
 };
 pub use storage::{Asset, AssetSlotRevision, Assets, Handle, allocate_anonymous_handle};
 

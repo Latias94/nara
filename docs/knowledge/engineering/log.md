@@ -5,6 +5,7 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-10-19
+* **Verification Evidence**: [TileSet exact publication and dependency recovery](verification/2026-10/2026-10-19-tileset-publication-and-recovery.md) - Strict atlas membership, exact Image retention, desired dependency recovery, GPU coexistence and reviewed module seams.
 * **Verification Evidence**: [Image lifecycle contract repairs](verification/2026-10/2026-10-19T021717Z-image-lifecycle-contract-repairs-95901fe367a149bc90ec922ad0384a73.md) - R0 event coalescing, removal recovery, foreground admission and shared authoring revocation.
 * **Subagent Finding**: [TileSet dependency and Editor loading research](subagents/2026-10/2026-10-19T012524Z-tileset-dependency-and-editor-loading-research-768c093b92ed44b581556093dc20d059.md) - Source-confirmed Image lifecycle gaps and a reviewed sequence for coherent TileSet publication.
 
@@ -132,4 +133,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 
 ## 2026-10-15
 * **Work Registration**: [Foundation U1-U13 completes with reviewed integrated consumer evidence](registry/2026-10/2026-10-15T202335Z-nara-2d-foundation-contracts-codex-root-88b6faf455454957bc7e0f79e76b9850.md) - Work Registration for Foundation U1-U13 completes with reviewed integrated consumer evidence.
-* **Work Progress**: [Foundation U1-U13 implementation and full review are complete in the integrated worktree](progress/2026-10/2026-10-15T202259Z-foundation-u1-u13-implementation-and-full-review-are-complete-in-the-integrated-worktree-d237cddc6a5444559bb013eac57c4fe5.md) - Work Progress for Foundation U1-U13 implementation and full review are complete in the integrated worktree.

@@ -6,7 +6,7 @@ use std::{
 
 use nara_asset::{
     AssetDatabaseError, AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath, AssetRecord,
-    AssetSourceKind, ProjectAssetDatabase, StableAssetId,
+    AssetRef, AssetSourceKind, ProjectAssetDatabase, StableAssetId,
 };
 use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity, RelativePath};
 use nara_image::ImageImportSettings;
@@ -123,9 +123,38 @@ pub(super) struct EditorImageCatalogSnapshot {
     source_index: Arc<ProjectSourceIndexSnapshot>,
     entries: Box<[EditorImageCatalogEntry]>,
     known_stable_ids: BTreeSet<StableAssetId>,
+    admitted_identities: BTreeMap<AssetPath, AdmittedAssetIdentity>,
 }
 
 impl EditorImageCatalogSnapshot {
+    pub(super) fn asset_identity(
+        &self,
+        path: &AssetPath,
+    ) -> Option<(AssetRecord, FileIdentity, ContentDigest)> {
+        let admitted = self.admitted_identities.get(path)?;
+        Some((
+            AssetRecord::new(
+                admitted.stable_id,
+                path.clone(),
+                admitted.source_kind.clone(),
+            ),
+            admitted.identity,
+            admitted.digest,
+        ))
+    }
+
+    pub(super) fn image_entry(&self, reference: &AssetRef) -> Option<&EditorImageCatalogEntry> {
+        self.entries.iter().find(|entry| {
+            let EditorImageMetadataStatus::Ready(metadata) = entry.metadata() else {
+                return false;
+            };
+            match reference {
+                AssetRef::Path(path) => entry.asset_path() == path,
+                AssetRef::StableId(stable_id) => metadata.stable_id() == *stable_id,
+            }
+        })
+    }
+
     #[must_use]
     pub(super) const fn root_identity(&self) -> FileIdentity {
         self.root_identity
@@ -243,6 +272,8 @@ struct AdmittedMetadataIdentity {
 struct AdmittedAssetIdentity {
     stable_id: StableAssetId,
     source_kind: AssetSourceKind,
+    identity: FileIdentity,
+    digest: ContentDigest,
 }
 
 pub(super) struct EditorImageCatalogAttempt {
@@ -579,6 +610,8 @@ impl EditorImageCatalogAttempt {
             AdmittedAssetIdentity {
                 stable_id,
                 source_kind: source_kind.clone(),
+                identity: expected_identity,
+                digest,
             },
         );
         if !image_candidate {
@@ -646,8 +679,13 @@ impl EditorImageCatalogAttempt {
     fn publish(&mut self) -> Result<EditorImageCatalogSnapshot, EditorImageCatalogBuildError> {
         let metadata = mem::take(&mut self.metadata);
         let metadata_invalid = mem::take(&mut self.metadata_invalid);
-        let (conflicts, known_stable_ids) =
-            find_identity_conflicts(self.metadata_identities.iter())?;
+        let (conflicts, known_stable_ids) = find_identity_conflicts(
+            self.metadata_identities
+                .iter()
+                .map(|(path, identity)| (path, identity.stable_id, &identity.source_kind)),
+        )?;
+        let mut admitted_identities = mem::take(&mut self.metadata_identities);
+        admitted_identities.retain(|path, _| !conflicts.contains_key(path));
         let sources = mem::take(&mut self.sources);
         let mut entries = Vec::new();
         entries
@@ -706,12 +744,13 @@ impl EditorImageCatalogAttempt {
             source_index,
             entries: entries.into_boxed_slice(),
             known_stable_ids,
+            admitted_identities,
         })
     }
 }
 
 fn find_identity_conflicts<'a>(
-    identities: impl Iterator<Item = (&'a AssetPath, &'a AdmittedAssetIdentity)>,
+    identities: impl Iterator<Item = (&'a AssetPath, StableAssetId, &'a AssetSourceKind)>,
 ) -> Result<
     (BTreeMap<AssetPath, StableAssetId>, BTreeSet<StableAssetId>),
     EditorImageCatalogBuildError,
@@ -719,10 +758,9 @@ fn find_identity_conflicts<'a>(
     let mut duplicate_probe = ProjectAssetDatabase::default();
     let mut conflicts = BTreeMap::new();
     let mut known_stable_ids = BTreeSet::new();
-    for (path, identity) in identities {
-        let stable_id = identity.stable_id;
+    for (path, stable_id, source_kind) in identities {
         known_stable_ids.insert(stable_id);
-        let record = AssetRecord::new(stable_id, path.clone(), identity.source_kind.clone());
+        let record = AssetRecord::new(stable_id, path.clone(), source_kind.clone());
         match duplicate_probe.insert(record) {
             Ok(()) => {}
             Err(AssetDatabaseError::DuplicateStableId {
@@ -801,15 +839,12 @@ mod tests {
         let duplicate = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
         let first_path = AssetPath::new("first.png").unwrap();
         let second_path = AssetPath::new("second.png").unwrap();
-        let first = AdmittedAssetIdentity {
-            stable_id: duplicate,
-            source_kind: AssetSourceKind::Image,
-        };
-        let second = AdmittedAssetIdentity {
-            stable_id: duplicate,
-            source_kind: AssetSourceKind::Other("audio".to_owned()),
-        };
-        let identities = [(&first_path, &first), (&second_path, &second)];
+        let first = AssetSourceKind::Image;
+        let second = AssetSourceKind::Other("audio".to_owned());
+        let identities = [
+            (&first_path, duplicate, &first),
+            (&second_path, duplicate, &second),
+        ];
         let (conflicts, known) = find_identity_conflicts(identities.into_iter()).unwrap();
 
         assert_eq!(conflicts.get(&first_path), Some(&duplicate));

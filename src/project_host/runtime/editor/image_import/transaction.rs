@@ -1,14 +1,15 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     sync::Arc,
 };
 
 use nara_asset::{
     AssetId, AssetMeta, AssetMetaIdentity, AssetPath, AssetRecord, AssetSourceKind, AssetVersion,
-    StableAssetId,
+    SourceHash, StableAssetId,
 };
 use nara_fs::{FileIdentity, RelativePath};
 use nara_image::ImageImportSettings;
+use nara_tilemap::{TileSetSource, TileSetSourceFileLimits};
 
 use crate::project_host::{
     authoring::{
@@ -31,7 +32,7 @@ use super::store::{EditorImageLastGood, EditorImageLastGoodStore, EditorImageSou
 use crate::project_host::runtime::editor::authoring_images;
 use crate::project_host::runtime::editor::authoring_runtime::{
     EditorAuthoringRuntime, EditorImageRuntimeFailure, EditorImageRuntimeTask,
-    EditorImageRuntimeTerminal, EditorImageSourceCompletion,
+    EditorImageRuntimeTerminal, EditorImageSourceCompletion, EditorTileSetSourceUpdate,
 };
 
 const MAX_STABLE_ID_ATTEMPTS: usize = 16;
@@ -217,6 +218,7 @@ pub(crate) struct EditorImageImportHost {
     catalog_basis: Option<Arc<ProjectSourceIndexSnapshot>>,
     catalog_attempt: Option<EditorImageCatalogAttempt>,
     catalog: Option<Arc<EditorImageCatalogSnapshot>>,
+    tile_source_refresh: Option<VecDeque<AssetRecord>>,
     catalog_failure: Option<EditorImageCatalogBuildError>,
     runtime_revocation_failure: Option<EditorImageRuntimeFailure>,
     next_attempt_generation: u64,
@@ -240,6 +242,7 @@ impl Default for EditorImageImportHost {
             catalog_basis: None,
             catalog_attempt: None,
             catalog: None,
+            tile_source_refresh: None,
             catalog_failure: None,
             runtime_revocation_failure: None,
             next_attempt_generation: 1,
@@ -338,6 +341,7 @@ impl EditorImageImportHost {
     #[must_use]
     pub(crate) fn has_pending_work(&self) -> bool {
         self.catalog_attempt.is_some()
+            || self.tile_source_refresh.is_some()
             || self.pending.is_some()
             || self.refresh.is_some()
             || self.hydration.has_pending_work()
@@ -402,11 +406,15 @@ impl EditorImageImportHost {
         let previous_failure = self.runtime_revocation_failure;
         self.advance_refresh(project);
         self.advance_catalog(project, runtime);
+        self.advance_tile_sources(project, runtime);
         self.advance_reconciliation(project);
         self.advance_import(project, runtime);
         if self.pending.is_none() {
             self.hydration
                 .advance(project, runtime, &mut self.last_good);
+        }
+        if let Err(failure) = runtime.reconcile_tile_sets(Vec::new()) {
+            self.runtime_revocation_failure = Some(failure);
         }
         self.runtime_revocation_failure
             .filter(|_| previous_failure.is_none())
@@ -720,6 +728,8 @@ impl EditorImageImportHost {
         runtime: &mut EditorAuthoringRuntime,
     ) {
         if self.refresh.is_some() || project.source_index_failure().is_some() {
+            self.tile_source_refresh = None;
+            self.hydration.cancel_dependencies();
             self.catalog_basis = None;
             self.catalog_attempt = None;
             self.catalog = None;
@@ -727,6 +737,8 @@ impl EditorImageImportHost {
             return;
         }
         let Some(source_index) = project.source_index_snapshot() else {
+            self.tile_source_refresh = None;
+            self.hydration.cancel_dependencies();
             self.catalog_basis = None;
             self.catalog_attempt = None;
             self.catalog = None;
@@ -745,6 +757,8 @@ impl EditorImageImportHost {
             .as_ref()
             .is_some_and(|basis| Arc::ptr_eq(basis, &source_index))
         {
+            self.tile_source_refresh = None;
+            self.hydration.cancel_dependencies();
             self.catalog = None;
             self.catalog_failure = None;
             self.catalog_attempt =
@@ -799,6 +813,8 @@ impl EditorImageImportHost {
                         image.source_identity(),
                     )
                 });
+                self.tile_source_refresh =
+                    Some(runtime.tile_set_records().iter().cloned().collect());
                 self.catalog = Some(Arc::new(snapshot));
                 self.catalog_attempt = None;
                 self.catalog_failure = None;
@@ -807,6 +823,36 @@ impl EditorImageImportHost {
             Err(error) => {
                 self.catalog_attempt = None;
                 self.catalog_failure = Some(error);
+            }
+        }
+    }
+
+    fn advance_tile_sources(
+        &mut self,
+        project: &AuthoringProjectSessionSnapshot,
+        runtime: &mut EditorAuthoringRuntime,
+    ) {
+        let Some(catalog) = self.catalog.as_ref() else {
+            return;
+        };
+        let Some(pending) = self.tile_source_refresh.as_mut() else {
+            return;
+        };
+        let updates = (0..2)
+            .filter_map(|_| pending.pop_front())
+            .map(|record| refresh_tile_set_source(project, catalog, &record))
+            .collect();
+        match runtime.reconcile_tile_sets(updates) {
+            Ok(demands) => {
+                if pending.is_empty() {
+                    self.hydration
+                        .refresh_dependencies(project, catalog, &demands);
+                    self.tile_source_refresh = None;
+                }
+            }
+            Err(failure) => {
+                self.runtime_revocation_failure = Some(failure);
+                self.tile_source_refresh = None;
             }
         }
     }
@@ -1048,6 +1094,8 @@ impl EditorImageImportHost {
     }
 
     fn invalidate_catalog(&mut self) {
+        self.tile_source_refresh = None;
+        self.hydration.cancel_dependencies();
         self.catalog_basis = None;
         self.catalog_attempt = None;
         self.catalog = None;
@@ -1108,6 +1156,91 @@ impl EditorImageImportHost {
             .as_mut()
             .expect("an allocated image import attempt owns its latest state")
             .state = state;
+    }
+}
+
+fn refresh_tile_set_source(
+    project: &AuthoringProjectSessionSnapshot,
+    catalog: &EditorImageCatalogSnapshot,
+    record: &AssetRecord,
+) -> EditorTileSetSourceUpdate {
+    let Some((current, metadata_identity, metadata_digest)) = catalog.asset_identity(record.path())
+    else {
+        return EditorTileSetSourceUpdate::Remove(record.clone());
+    };
+    if &current != record {
+        return EditorTileSetSourceUpdate::Remove(record.clone());
+    }
+    let project_path = format!(
+        "{}/{}",
+        project.settings().paths.assets.as_str(),
+        record.path().as_str()
+    );
+    let Some(index) = project.source_index_snapshot() else {
+        return EditorTileSetSourceUpdate::Remove(record.clone());
+    };
+    let Some(source_identity) = index
+        .entry(&project_path)
+        .and_then(|entry| entry.scoped_identity())
+    else {
+        return EditorTileSetSourceUpdate::Remove(record.clone());
+    };
+    let root = project.project_root();
+    let files = RelativePath::new(&project_path)
+        .ok()
+        .and_then(|path| root.open_file(&path).ok())
+        .zip(
+            RelativePath::new(format!("{project_path}.meta"))
+                .ok()
+                .and_then(|path| root.open_file(&path).ok()),
+        );
+    let Some((source_file, metadata_file)) = files else {
+        return EditorTileSetSourceUpdate::Remove(record.clone());
+    };
+    if source_file.identity() != source_identity
+        || metadata_file.identity() != metadata_identity
+        || metadata_file
+            .verify_digest(metadata_digest, metadata_byte_limit())
+            .is_err()
+    {
+        return EditorTileSetSourceUpdate::Remove(record.clone());
+    }
+    let limits = TileSetSourceFileLimits::default();
+    let Ok(bytes) = source_file
+        .read_to_end_bounded(u64::try_from(limits.encoded_bytes().get()).unwrap_or(u64::MAX))
+    else {
+        return EditorTileSetSourceUpdate::Reject(record.clone());
+    };
+    let digest = nara_fs::ContentDigest::of_bytes(&bytes);
+    let current_source = RelativePath::new(&project_path)
+        .ok()
+        .and_then(|path| root.open_file(&path).ok());
+    let current_metadata = RelativePath::new(format!("{project_path}.meta"))
+        .ok()
+        .and_then(|path| root.open_file(&path).ok());
+    if current_source.is_none_or(|file| {
+        file.identity() != source_identity
+            || file
+                .verify_digest(
+                    digest,
+                    u64::try_from(limits.encoded_bytes().get()).unwrap_or(u64::MAX),
+                )
+                .is_err()
+    }) || current_metadata.is_none_or(|file| {
+        file.identity() != metadata_identity
+            || file
+                .verify_digest(metadata_digest, metadata_byte_limit())
+                .is_err()
+    }) {
+        return EditorTileSetSourceUpdate::Remove(record.clone());
+    }
+    match TileSetSource::decode_ron_bytes(&bytes, limits) {
+        Ok(source) => EditorTileSetSourceUpdate::Request(
+            record.clone(),
+            source,
+            SourceHash::from_bytes(&bytes),
+        ),
+        Err(_) => EditorTileSetSourceUpdate::Reject(record.clone()),
     }
 }
 

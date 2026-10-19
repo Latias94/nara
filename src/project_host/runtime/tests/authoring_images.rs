@@ -1,5 +1,257 @@
 use super::*;
 
+fn write_editor_tileset(project: &TestProject, image: AssetRef) {
+    let source = nara_tilemap::TileSetSource::new(
+        image,
+        nara_tilemap::TileAtlasLayout::grid(nara_core::Vec2::ONE, 1, 1),
+    );
+    fs::create_dir_all(project.root.join("assets/tilesets")).unwrap();
+    fs::write(
+        project.root.join("assets/tilesets/terrain.tileset.ron"),
+        source.encode_ron_bytes().unwrap(),
+    )
+    .unwrap();
+    let metadata = AssetMeta::new(
+        AssetMetaIdentity::new(
+            StableAssetId::parse_str("d3d3f9a6-f7a9-4db0-ae3c-e1d4264d6f12").unwrap(),
+            AssetPath::new("tilesets/terrain.tileset.ron").unwrap(),
+            AssetSourceKind::Other(String::from("tileset")),
+        ),
+        (),
+    );
+    fs::write(
+        project
+            .root
+            .join("assets/tilesets/terrain.tileset.ron.meta"),
+        metadata.to_json_string().unwrap(),
+    )
+    .unwrap();
+}
+
+fn editor_tileset_project(name: &str) -> TestProject {
+    let project = TestProject::new(name);
+    project.configure_authoring_ui(name);
+    let entity = SceneEntityRecord::new(nara_identity::SceneEntityId::new("terrain").unwrap())
+        .with_component(
+            ComponentTypeId::new("nara.transform.Transform2d"),
+            identity_transform_record(),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.tilemap.Tilemap"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([
+                    (
+                        "tile_size",
+                        ComponentValue::map([
+                            ("x", ComponentValue::f64(1.0).unwrap()),
+                            ("y", ComponentValue::f64(1.0).unwrap()),
+                        ]),
+                    ),
+                    (
+                        "tileset",
+                        ComponentValue::map([
+                            ("kind", ComponentValue::String(String::from("path"))),
+                            (
+                                "value",
+                                ComponentValue::String(String::from(
+                                    "tilesets/terrain.tileset.ron",
+                                )),
+                            ),
+                        ]),
+                    ),
+                    ("cells", ComponentValue::List(Vec::new())),
+                ]),
+            ),
+        );
+    fs::write(
+        project.root.join("scenes/startup.scene.json"),
+        SceneDocument::from_ordered_roots([entity])
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    project
+}
+
+#[test]
+fn generic_editor_reconciles_tileset_latest_dependency_and_revocation_without_a_visible_scene() {
+    let project = editor_tileset_project("generic-tileset-latest-dependency");
+    let bytes = fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/images/valid-rgba-1x1.png"),
+    )
+    .unwrap();
+    project.write_canonical_image(
+        "textures/a.png",
+        "c58dfd3b-6f62-41c9-9d48-357159936609",
+        ImageImportSettings::default(),
+        &bytes,
+    );
+    write_editor_tileset(&project, AssetRef::path("textures/a.png").unwrap());
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    drive_image_import_host_until_idle(&mut editor);
+    let path = AssetPath::new("tilesets/terrain.tileset.ron").unwrap();
+    let published = editor
+        .test_tile_set(&path)
+        .expect("TileSet publishes without a preview extent");
+    let old_image = published.image_content().unwrap().clone();
+    assert!(
+        editor
+            .editor_image_last_good(&AssetPath::new("textures/a.png").unwrap())
+            .is_some()
+    );
+
+    write_editor_tileset(&project, AssetRef::path("textures/b.png").unwrap());
+    assert!(editor.request_project_source_index_refresh());
+    drive_image_import_host_until_idle(&mut editor);
+    assert!(
+        editor
+            .test_tile_set(&path)
+            .unwrap()
+            .image_content()
+            .unwrap()
+            .same_allocation(&old_image)
+    );
+    assert!(!project.root.join("assets/textures/b.png.meta").exists());
+
+    fs::remove_file(project.root.join("assets/textures/a.png.meta")).unwrap();
+    assert!(editor.request_project_source_index_refresh());
+    drive_image_import_host_until_idle(&mut editor);
+    assert!(
+        editor.test_tile_set(&path).is_none(),
+        "published A is revoked while desired B is absent"
+    );
+
+    project.write_canonical_image(
+        "textures/a.png",
+        "c58dfd3b-6f62-41c9-9d48-357159936609",
+        ImageImportSettings::default(),
+        &bytes,
+    );
+    assert!(editor.request_project_source_index_refresh());
+    drive_image_import_host_until_idle(&mut editor);
+    assert!(
+        editor.test_tile_set(&path).is_none(),
+        "recovering old A cannot resurrect its publication"
+    );
+
+    project.write_canonical_image(
+        "textures/b.png",
+        "18c8e1c0-aeb7-43dd-bc73-09f36507812e",
+        ImageImportSettings::default(),
+        b"invalid PNG",
+    );
+    fs::remove_file(project.root.join("assets/textures/b.png")).unwrap();
+    assert!(editor.request_project_source_index_refresh());
+    drive_image_import_host_until_idle(&mut editor);
+    assert!(
+        editor.test_tile_set(&path).is_none(),
+        "a sidecar alone cannot authorize missing source pixels"
+    );
+    fs::write(project.root.join("assets/textures/b.png"), b"invalid PNG").unwrap();
+    assert!(editor.request_project_source_index_refresh());
+    drive_image_import_host_until_idle(&mut editor);
+    assert!(editor.test_tile_set(&path).is_none());
+    fs::write(project.root.join("assets/textures/b.png"), &bytes).unwrap();
+    assert!(editor.request_project_source_index_refresh());
+    drive_image_import_host_until_idle(&mut editor);
+    let recovered = editor
+        .test_tile_set(&path)
+        .expect("latest B recovers after a transient decode failure");
+    assert_ne!(
+        recovered.image_content().unwrap().handle(),
+        old_image.handle()
+    );
+    assert!(
+        editor
+            .editor_image_last_good(&AssetPath::new("textures/b.png").unwrap())
+            .is_some()
+    );
+}
+
+#[test]
+fn generic_editor_rejects_a_malformed_tileset_before_a_late_image_can_publish() {
+    let project = editor_tileset_project("generic-tileset-malformed-late-image");
+    let bytes = fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/images/valid-rgba-1x1.png"),
+    )
+    .unwrap();
+    for (path, identity) in [
+        ("textures/a.png", "c58dfd3b-6f62-41c9-9d48-357159936609"),
+        ("textures/b.png", "18c8e1c0-aeb7-43dd-bc73-09f36507812e"),
+    ] {
+        project.write_canonical_image(path, identity, ImageImportSettings::default(), &bytes);
+    }
+    write_editor_tileset(&project, AssetRef::path("textures/a.png").unwrap());
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    drive_image_import_host_until_idle(&mut editor);
+    let path = AssetPath::new("tilesets/terrain.tileset.ron").unwrap();
+    let old_image = editor
+        .test_tile_set(&path)
+        .unwrap()
+        .image_content()
+        .unwrap()
+        .clone();
+    let held = editor.test_hold_next_image_import_through_shutdown();
+    write_editor_tileset(&project, AssetRef::path("textures/b.png").unwrap());
+    assert!(editor.request_project_source_index_refresh());
+    for _ in 0..128 {
+        editor.drive_editor_frame(Duration::ZERO);
+    }
+    assert!(held.wait_until_started());
+    fs::write(
+        project.root.join("assets/tilesets/terrain.tileset.ron"),
+        b"invalid TileSet",
+    )
+    .unwrap();
+    assert!(editor.request_project_source_index_refresh());
+    drive_image_import_host_until_idle(&mut editor);
+    let _ = held.release();
+    assert!(
+        editor
+            .test_tile_set(&path)
+            .unwrap()
+            .image_content()
+            .unwrap()
+            .same_allocation(&old_image)
+    );
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        editor.request_editor_image_import(
+            frame.revision(),
+            "assets/textures/b.png",
+            ImageImportSettings::default()
+        ),
+        super::editor::EditorImageImportRequestResult::Started(_)
+    ));
+    assert!(matches!(
+        drive_image_import_to_terminal(&mut editor),
+        super::editor::EditorImageImportState::Succeeded { .. }
+    ));
+    drive_image_import_host_until_idle(&mut editor);
+    assert!(
+        editor
+            .test_tile_set(&path)
+            .unwrap()
+            .image_content()
+            .unwrap()
+            .same_allocation(&old_image),
+        "an independently imported B cannot fulfill a rejected desired source"
+    );
+    write_editor_tileset(&project, AssetRef::path("textures/b.png").unwrap());
+    assert!(editor.request_project_source_index_refresh());
+    drive_image_import_host_until_idle(&mut editor);
+    assert_ne!(
+        editor
+            .test_tile_set(&path)
+            .unwrap()
+            .image_content()
+            .unwrap()
+            .handle(),
+        old_image.handle()
+    );
+}
+
 #[test]
 fn generic_editor_hydrates_only_referenced_images_and_retains_a_complete_canvas_on_failure() {
     let project = TestProject::new("generic-image-hydration");

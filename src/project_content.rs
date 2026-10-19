@@ -38,7 +38,10 @@ use nara_scene::{
     SceneDocumentCandidate, SceneEntityProvenanceMap, SceneEntityRecord, SceneFormatError,
     ScenePatchDocument, ScenePatchOperation,
 };
-use nara_tilemap::{TileSetSource, TileSetSourceFileLimits};
+use nara_tilemap::{
+    TileSetSource, TileSetSourceFileLimits, TilemapMembershipError,
+    validate_persisted_tilemap_membership,
+};
 
 use crate::project_diagnostic_ids::{fs_operation_id, io_error_kind_id};
 use crate::project_host::{
@@ -299,6 +302,10 @@ impl ProjectContentSnapshot {
     #[must_use]
     pub fn tilesets(&self) -> &[ProjectTileSetContent] {
         &self.inner.tilesets
+    }
+
+    pub(crate) fn asset_database(&self) -> &ProjectAssetDatabase {
+        self.inner.assets.database()
     }
 
     pub(crate) fn share_image_for_consumer(&self, index: usize) -> Option<ImageAsset> {
@@ -1039,8 +1046,7 @@ impl<'a> LoadContext<'a> {
             )?;
         }
 
-        let image_paths = self.collect_image_candidates(&expanded)?;
-        let tileset_paths = self.collect_tileset_candidates(&expanded)?;
+        let (image_paths, tileset_paths) = self.collect_source_candidates(&expanded, &assets)?;
         let (tilesets, tileset_work) =
             self.load_tilesets(&assets, &settings.paths.assets, tileset_paths)?;
         let mut image_paths = image_paths;
@@ -1051,7 +1057,16 @@ impl<'a> LoadContext<'a> {
         }
         let images = self.load_images(&assets, &settings.paths.assets, image_paths)?;
         self.validate_tileset_image_extents(&tilesets, &images)?;
+        self.validate_tilemap_membership(&expanded, &provenance, &tilesets)?;
         self.commit_tileset_identities(&settings.paths.assets, &tilesets)?;
+        let diagnostics =
+            expanded.validate_with_asset_database(self.validation.registry(), &self.asset_database);
+        if diagnostics.has_errors() {
+            return Err(map_scene_diagnostics(
+                ProjectContentErrorKind::ScenePublication,
+                diagnostics,
+            ));
+        }
         self.commit_work_as_retained(tileset_work, tileset_work.reserved)?;
         let database = self.retain_loaded_asset_identities(&loaded_prefabs, &images, &tilesets)?;
         self.release_catalogue_work();
@@ -1533,11 +1548,13 @@ impl<'a> LoadContext<'a> {
         Ok(())
     }
 
-    fn collect_image_candidates(
+    fn collect_source_candidates(
         &mut self,
         document: &SceneDocument,
-    ) -> Result<BTreeSet<AssetPath>, ProjectContentError> {
-        let mut paths = BTreeSet::new();
+        assets: &DirectoryCapability,
+    ) -> Result<(BTreeSet<AssetPath>, BTreeSet<AssetPath>), ProjectContentError> {
+        let mut image_paths = BTreeSet::new();
+        let mut tileset_paths = BTreeSet::new();
         for entity in &document.entities {
             for (component, record) in &entity.components {
                 let references = collect_declared_asset_references(
@@ -1548,60 +1565,31 @@ impl<'a> LoadContext<'a> {
                 )
                 .map_err(map_asset_reference_error)?;
                 for reference in references {
-                    if component.as_str() == "nara.tilemap.Tilemap"
-                        && reference.path().to_string() == "tileset"
-                    {
-                        continue;
-                    }
                     self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
-                    let path = self
-                        .resolve_reference_path(reference.asset_ref(), &AssetSourceKind::Image)?;
+                    let source = self.discover_source_reference(assets, reference.asset_ref())?;
+                    let path = source.path();
                     self.observe_path(path.as_str())?;
-                    if !paths.contains(&path) {
+                    let paths = match source.source_kind() {
+                        AssetSourceKind::Image => &mut image_paths,
+                        AssetSourceKind::Other(kind) if kind == "tileset" => &mut tileset_paths,
+                        _ => {
+                            return Err(ProjectContentError::with_identifier(
+                                ProjectContentErrorKind::UnsupportedAssetKind,
+                                "project.content.asset-kind-unsupported",
+                                "Project startup content references an unsupported asset kind",
+                                "asset",
+                                path.as_str(),
+                            ));
+                        }
+                    };
+                    if !paths.contains(path) {
                         self.add_budget(ProjectContentBudgetKind::QueuedJobs, 1)?;
                         paths.insert(path.clone());
                     }
                 }
             }
         }
-        Ok(paths)
-    }
-
-    fn collect_tileset_candidates(
-        &mut self,
-        document: &SceneDocument,
-    ) -> Result<BTreeSet<AssetPath>, ProjectContentError> {
-        let mut paths = BTreeSet::new();
-        for entity in &document.entities {
-            for (component, record) in &entity.components {
-                if component.as_str() != "nara.tilemap.Tilemap" {
-                    continue;
-                }
-                let references = collect_declared_asset_references(
-                    self.validation.registry(),
-                    component,
-                    record.version,
-                    &record.value,
-                )
-                .map_err(map_asset_reference_error)?;
-                for reference in references {
-                    if reference.path().to_string() != "tileset" {
-                        continue;
-                    }
-                    self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
-                    let path = self.resolve_reference_path(
-                        reference.asset_ref(),
-                        &AssetSourceKind::Other("tileset".to_string()),
-                    )?;
-                    self.observe_path(path.as_str())?;
-                    if !paths.contains(&path) {
-                        self.add_budget(ProjectContentBudgetKind::QueuedJobs, 1)?;
-                        paths.insert(path);
-                    }
-                }
-            }
-        }
-        Ok(paths)
+        Ok((image_paths, tileset_paths))
     }
 
     fn prepare_component_asset_references(
@@ -1699,24 +1687,11 @@ impl<'a> LoadContext<'a> {
                         tileset.path.as_str(),
                     )
                 })?;
-            let atlas = tileset.source.atlas;
-            let atlas_extent = atlas.atlas_size();
-            let image_extent = image.image.extent();
-            let exact_extent = exact_atlas_axis_matches(
-                atlas.tile_size.x,
-                atlas.columns,
-                atlas.margin.x,
-                atlas.spacing.x,
-                image_extent.width,
-            ) && exact_atlas_axis_matches(
-                atlas.tile_size.y,
-                atlas.rows,
-                atlas.margin.y,
-                atlas.spacing.y,
-                image_extent.height,
-            ) && f64::from(atlas_extent.x) == f64::from(image_extent.width)
-                && f64::from(atlas_extent.y) == f64::from(image_extent.height);
-            if !exact_extent {
+            if tileset
+                .source
+                .validate_image_extent(image.image.extent())
+                .is_err()
+            {
                 return Err(ProjectContentError::with_identifier(
                     ProjectContentErrorKind::AssetMetaMismatch,
                     "project.content.tileset-image-extent-mismatch",
@@ -1724,6 +1699,35 @@ impl<'a> LoadContext<'a> {
                     "asset",
                     tileset.path.as_str(),
                 ));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_tilemap_membership(
+        &mut self,
+        document: &SceneDocument,
+        provenance: &SceneEntityProvenanceMap,
+        tilesets: &[ProjectTileSetContent],
+    ) -> Result<(), ProjectContentError> {
+        for entity in &document.entities {
+            let Some(record) = entity
+                .components
+                .get(&nara_reflect::ComponentTypeId::new("nara.tilemap.Tilemap"))
+            else {
+                continue;
+            };
+            let result = validate_persisted_tilemap_membership(&record.value, |reference| {
+                tilesets
+                    .iter()
+                    .find(|tileset| match reference {
+                        AssetRef::Path(path) => &tileset.path == path,
+                        AssetRef::StableId(id) => &tileset.stable_id == id,
+                    })
+                    .map(|tileset| tileset.source.atlas)
+            });
+            if let Err(error) = result {
+                return Err(tilemap_membership_error(entity, provenance, error));
             }
         }
         Ok(())
@@ -2248,6 +2252,90 @@ fn map_scene_diagnostics(
     ProjectContentError::with_report(kind, diagnostics)
 }
 
+fn tilemap_membership_error(
+    entity: &SceneEntityRecord,
+    provenance: &SceneEntityProvenanceMap,
+    error: TilemapMembershipError,
+) -> ProjectContentError {
+    let (code, summary, tileset, coord, tile) = match error {
+        TilemapMembershipError::InvalidValue(_error) => (
+            "project.content.tilemap-value-invalid",
+            "Tilemap component value is invalid",
+            None,
+            None,
+            None,
+        ),
+        TilemapMembershipError::TileSetUnavailable { tileset } => (
+            "project.content.tileset-unavailable",
+            "TileSet dependency was not admitted",
+            Some(tileset),
+            None,
+            None,
+        ),
+        TilemapMembershipError::TileOutsideAtlas {
+            tileset,
+            coord,
+            tile,
+        } => (
+            "project.content.tile-index-out-of-range",
+            "Tilemap cell refers to a tile outside its admitted TileSet atlas",
+            Some(tileset),
+            Some(coord),
+            Some(tile),
+        ),
+    };
+    let mut diagnostic = diagnostic(code, summary);
+    diagnostic = attach_field(
+        diagnostic,
+        DiagnosticField::public_identifier(
+            field_key("entity-id"),
+            PublicDiagnosticIdentifier::new(entity.id.as_str()).unwrap_or_else(|_| {
+                PublicDiagnosticIdentifier::new("invalid-entity-id").expect("literal is valid")
+            }),
+        ),
+    );
+    if let Some(source) = provenance.get(&entity.id) {
+        diagnostic = attach_field(
+            diagnostic,
+            DiagnosticField::public_identifier(
+                field_key("source-entity-id"),
+                PublicDiagnosticIdentifier::new(source.source_entity_id().as_str()).unwrap_or_else(
+                    |_| {
+                        PublicDiagnosticIdentifier::new("invalid-source-entity-id")
+                            .expect("literal is valid")
+                    },
+                ),
+            ),
+        );
+    }
+    if let Some(tileset) = tileset {
+        diagnostic = attach_field(
+            diagnostic,
+            DiagnosticField::project_relative(field_key("tileset"), tileset.to_string().as_str())
+                .unwrap_or_else(|_| DiagnosticField::sensitive(field_key("tileset"))),
+        );
+    }
+    if let Some(coord) = coord {
+        diagnostic = attach_field(
+            diagnostic,
+            DiagnosticField::public_i64(field_key("x"), i64::from(coord.x)),
+        );
+        diagnostic = attach_field(
+            diagnostic,
+            DiagnosticField::public_i64(field_key("y"), i64::from(coord.y)),
+        );
+    }
+    if let Some(tile) = tile {
+        diagnostic = attach_field(
+            diagnostic,
+            DiagnosticField::public_u64(field_key("tile"), u64::from(tile.raw())),
+        );
+    }
+    let mut report = DiagnosticReport::default();
+    report.push(diagnostic);
+    ProjectContentError::with_report(ProjectContentErrorKind::ScenePublication, report)
+}
+
 struct LoadedPrefabResolver<'a> {
     prefabs: &'a BTreeMap<AssetPath, Arc<PrefabDocument>>,
     database: &'a ProjectAssetDatabase,
@@ -2377,52 +2465,6 @@ fn scene_decode_work_plan(
             limits.component_value_bytes().get(),
         ],
     )
-}
-
-fn exact_atlas_axis_matches(
-    tile_size: f32,
-    count: u32,
-    margin: f32,
-    spacing: f32,
-    extent: u32,
-) -> bool {
-    let tile_size = f64::from(tile_size);
-    let count = f64::from(count);
-    let spacing = f64::from(spacing);
-    let tiles = tile_size * count;
-    let gaps = spacing * (count - 1.0);
-    let terms = [
-        tiles,
-        tile_size.mul_add(count, -tiles),
-        f64::from(margin) * 2.0,
-        gaps,
-        spacing.mul_add(count - 1.0, -gaps),
-        -f64::from(extent),
-    ];
-    let mut expansion = [0.0; 6];
-    let mut length = 0;
-    for term in terms {
-        let mut accumulator = term;
-        let mut next_length = 0;
-        for index in 0..length {
-            let component = expansion[index];
-            let sum = accumulator + component;
-            let component_in_sum = sum - accumulator;
-            let residual =
-                (accumulator - (sum - component_in_sum)) + (component - component_in_sum);
-            if residual != 0.0 {
-                expansion[next_length] = residual;
-                next_length += 1;
-            }
-            accumulator = sum;
-        }
-        if accumulator != 0.0 {
-            expansion[next_length] = accumulator;
-            next_length += 1;
-        }
-        length = next_length;
-    }
-    length == 0
 }
 
 fn prefab_expansion_work_plan(

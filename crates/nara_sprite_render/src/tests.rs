@@ -124,6 +124,7 @@ fn extraction_clears_stale_sprites_and_uses_explicit_identity_transform() {
             source_order: 99,
             kind: ExtractedSpriteKind::Sprite,
             material: ExtractedSpriteMaterial::from_color(Color::WHITE),
+            image_content: None,
             material_extension: None,
             texture_region: TextureUvRect::FULL,
             world_center: Vec2::new(9.0, 9.0),
@@ -173,7 +174,7 @@ fn sprite_extraction_preserves_rotation_axes() {
 
     let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
     runtime.drive(Duration::ZERO).unwrap();
-    let extracted = runtime.world().resource::<ExtractedSprites>().as_slice()[0];
+    let extracted = &runtime.world().resource::<ExtractedSprites>().as_slice()[0];
 
     assert!(
         extracted
@@ -401,7 +402,7 @@ fn parented_sprite_uses_the_completed_global_affine() {
     runtime.drive(Duration::ZERO).unwrap();
 
     let expected = parent_transform.matrix() * child_transform.matrix();
-    let extracted = runtime.world().resource::<ExtractedSprites>().as_slice()[0];
+    let extracted = &runtime.world().resource::<ExtractedSprites>().as_slice()[0];
     assert_eq!(extracted.entity, child);
     assert!(
         extracted
@@ -487,7 +488,7 @@ fn parented_tilemap_uses_the_completed_global_affine() {
     runtime.drive(Duration::ZERO).unwrap();
 
     let expected = parent_transform.matrix() * child_transform.matrix();
-    let extracted = runtime.world().resource::<ExtractedSprites>().as_slice()[0];
+    let extracted = &runtime.world().resource::<ExtractedSprites>().as_slice()[0];
     assert_eq!(extracted.entity, child);
     assert!(
         extracted
@@ -514,7 +515,7 @@ fn missing_sprite_local_transform_preserves_the_prior_extraction() {
     app.world_mut()
         .unwrap()
         .resource_mut::<ExtractedSprites>()
-        .push(prior);
+        .push(prior.clone());
     let sprite = app
         .world_mut()
         .unwrap()
@@ -541,7 +542,7 @@ fn missing_tilemap_global_transform_preserves_the_prior_extraction() {
     app.world_mut()
         .unwrap()
         .resource_mut::<ExtractedSprites>()
-        .push(prior);
+        .push(prior.clone());
     let tilemap = app
         .world_mut()
         .unwrap()
@@ -1238,6 +1239,48 @@ fn tilemap_extraction_applies_tileset_image_and_atlas_uvs() {
 }
 
 #[test]
+fn a_missing_tileset_handle_does_not_render_its_cells_as_white_quads() {
+    let mut app = sprite_app();
+    app.world_mut().unwrap().spawn((
+        Camera2d {
+            target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
+            viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
+            viewport_height: 100.0,
+            ..Camera2d::default()
+        },
+        Transform2d::default(),
+    ));
+    let missing = nara_asset::allocate_anonymous_handle::<TileSet>().unwrap();
+    let mut tilemap = Tilemap::new(Vec2::new(16.0, 16.0)).with_tileset(missing);
+    tilemap.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(0)));
+    let entity = app
+        .world_mut()
+        .unwrap()
+        .spawn((tilemap, Transform2d::default()))
+        .id();
+    place_roots(app.world_mut().unwrap(), &[entity]);
+
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let extracted = runtime.world().resource::<ExtractedSprites>().len();
+    let queued = runtime.world().resource::<QueuedSpriteItems>().len();
+    let instances = runtime
+        .world()
+        .resource::<SpriteBatches>()
+        .total_instances();
+    let missing_tilesets = runtime
+        .world()
+        .resource::<SpriteRenderStats>()
+        .missing_tilesets;
+    runtime.finish().unwrap();
+
+    assert_eq!(extracted, 0);
+    assert_eq!(queued, 0);
+    assert_eq!(instances, 0);
+    assert_eq!(missing_tilesets, 1);
+}
+
+#[test]
 fn tilemap_extraction_skips_out_of_range_atlas_tiles() {
     let tileset = nara_asset::allocate_anonymous_handle().unwrap();
     let image = nara_asset::allocate_anonymous_handle().unwrap();
@@ -1297,6 +1340,7 @@ fn placeholder_extracted_sprite() -> ExtractedSprite {
         source_order: 99,
         kind: ExtractedSpriteKind::Sprite,
         material: ExtractedSpriteMaterial::from_color(Color::WHITE),
+        image_content: None,
         material_extension: None,
         texture_region: TextureUvRect::FULL,
         world_center: Vec2::new(9.0, 9.0),

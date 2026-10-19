@@ -21,3 +21,5 @@ thiserror.workspace = true
 
 [dev-dependencies]
 nara_reflect.workspace = true
+nara_tasks.workspace = true
+nara_tilemap = { workspace = true, features = ["serde"] }

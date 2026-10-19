@@ -20,8 +20,19 @@ use nara_reflect::{
     ComponentValue, ComponentValueKind, PreparedComponentCandidate,
 };
 
+mod admission;
+#[cfg(feature = "serde")]
+mod content;
 #[cfg(feature = "serde")]
 mod source;
+
+pub use admission::{TilemapMembershipError, validate_persisted_tilemap_membership};
+
+#[cfg(feature = "serde")]
+pub use content::{
+    TILESET_ASSET_PLUGIN_DECLARATION, TILESET_ASSET_PLUGIN_ID, TileSetAssetError,
+    TileSetAssetLimits, TileSetAssetPlugin, TileSetAssets, TileSetRetentionSnapshot,
+};
 
 #[cfg(feature = "serde")]
 pub use source::{
@@ -214,6 +225,11 @@ impl TileAtlasLayout {
     }
 
     #[must_use]
+    pub fn contains_tile(self, tile: TileIndex) -> bool {
+        self.is_valid() && tile.raw() / self.columns < self.rows
+    }
+
+    #[must_use]
     pub fn is_valid(self) -> bool {
         let atlas_size = self.atlas_size();
         self.columns > 0
@@ -240,11 +256,12 @@ pub struct TileAtlasRegion {
     pub size: Vec2,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TileSet {
-    pub tile_size: Vec2,
-    pub material: TileSetMaterial,
-    pub atlas: Option<TileAtlasLayout>,
+    tile_size: Vec2,
+    material: TileSetMaterial,
+    atlas: Option<TileAtlasLayout>,
+    image_content: Option<nara_image::ImageContentSnapshot>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -308,6 +325,7 @@ impl TileSet {
             tile_size,
             material: TileSetMaterial::default(),
             atlas: None,
+            image_content: None,
         }
     }
 
@@ -317,6 +335,7 @@ impl TileSet {
             tile_size: atlas.tile_size,
             material: TileSetMaterial::from_image(image),
             atlas: Some(atlas),
+            image_content: None,
         }
     }
 
@@ -325,31 +344,58 @@ impl TileSet {
         self.tile_size = atlas.tile_size;
         self.material.image = Some(image);
         self.atlas = Some(atlas);
+        self.image_content = None;
         self
     }
 
     #[must_use]
-    pub const fn with_sampler(mut self, sampler: SamplerDescriptor) -> Self {
+    pub fn with_sampler(mut self, sampler: SamplerDescriptor) -> Self {
         self.material.sampler = sampler;
         self
     }
 
     #[must_use]
-    pub const fn with_alpha_mode(mut self, alpha_mode: AlphaMode2d) -> Self {
+    pub fn with_alpha_mode(mut self, alpha_mode: AlphaMode2d) -> Self {
         self.material.alpha_mode = alpha_mode;
         self
     }
 
     #[must_use]
-    pub const fn with_tint(mut self, tint: Color) -> Self {
+    pub fn with_tint(mut self, tint: Color) -> Self {
         self.material.tint = tint;
         self
     }
 
     #[must_use]
-    pub fn normalized_region(self, tile: TileIndex) -> Option<TileAtlasRegion> {
+    pub fn normalized_region(&self, tile: TileIndex) -> Option<TileAtlasRegion> {
         let _image = self.material.image?;
         self.atlas?.normalized_region(tile)
+    }
+
+    #[cfg(feature = "serde")]
+    pub(crate) fn with_image_content(mut self, image: nara_image::ImageContentSnapshot) -> Self {
+        self.image_content = Some(image);
+        self
+    }
+
+    #[must_use]
+    pub fn image_content(&self) -> Option<&nara_image::ImageContentSnapshot> {
+        self.image_content.as_ref()
+    }
+
+    #[must_use]
+    pub const fn tile_size(&self) -> Vec2 {
+        self.tile_size
+    }
+
+    #[must_use]
+    pub const fn material(&self) -> TileSetMaterial {
+        self.material
+    }
+
+    #[must_use]
+    pub const fn atlas(&self) -> Option<TileAtlasLayout> {
+        self.atlas
     }
 }
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use nara_asset::Handle;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Resource};
-use nara_image::{ImageAsset, PreparedImageSnapshot};
+use nara_image::{ImageAsset, ImageContentSnapshot, PreparedImageSnapshot};
 use nara_material::{AlphaMode2d, Material2dInstance, SamplerDescriptor};
 use nara_render::RenderTarget;
 use nara_sprite::TextureRegion;
@@ -31,12 +31,13 @@ impl SpriteBatchKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExtractedSprite {
     pub entity: Entity,
     pub source_order: u64,
     pub kind: ExtractedSpriteKind,
     pub material: ExtractedSpriteMaterial,
+    pub image_content: Option<ImageContentSnapshot>,
     pub material_extension: Option<Material2dInstance>,
     pub texture_region: TextureUvRect,
     pub world_center: Vec2,
@@ -50,7 +51,7 @@ pub struct ExtractedSprite {
 
 impl ExtractedSprite {
     #[must_use]
-    pub fn is_textured(self) -> bool {
+    pub fn is_textured(&self) -> bool {
         self.material.image.is_some()
     }
 }

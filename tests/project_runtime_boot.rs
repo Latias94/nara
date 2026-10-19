@@ -74,6 +74,7 @@ struct TileSetPublicationOutcome {
     tileset_count: usize,
     image_count: usize,
     resolved_tilemap_count: usize,
+    coherent_tileset_count: usize,
     #[cfg(feature = "presentation-2d")]
     rendered_tile_cells: u32,
     #[cfg(feature = "presentation-2d")]
@@ -211,11 +212,26 @@ fn capture_tileset_publication(
 ) {
     outcome.tileset_count = tilesets.iter().count();
     outcome.image_count = images.iter().count();
+    outcome.coherent_tileset_count = tilesets
+        .iter()
+        .filter(|(_, tileset)| {
+            tileset.image_content().is_some_and(|image| {
+                tileset.material().image == Some(image.handle())
+                    && tileset.atlas().is_some_and(|atlas| {
+                        atlas.atlas_size()
+                            == nara::core::Vec2::new(
+                                image.extent().width as f32,
+                                image.extent().height as f32,
+                            )
+                    })
+            })
+        })
+        .count();
     outcome.resolved_tilemap_count = tilemaps
         .iter()
         .filter_map(|tilemap| tilemap.tileset)
         .filter_map(|handle| tilesets.get(handle))
-        .filter_map(|tileset| tileset.material.image)
+        .filter_map(|tileset| tileset.material().image)
         .filter(|handle| images.get(*handle).is_some())
         .count();
 }
@@ -535,6 +551,7 @@ fn headless_run_publishes_file_backed_tilesets_after_image_dependencies() {
             tileset_count: 2,
             image_count: 1,
             resolved_tilemap_count: 2,
+            coherent_tileset_count: 2,
             #[cfg(feature = "presentation-2d")]
             rendered_tile_cells: 2,
             #[cfg(feature = "presentation-2d")]

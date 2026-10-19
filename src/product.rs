@@ -610,6 +610,8 @@ const SLOT_SERVER_TIME_POLICY: PluginSlotId =
 const SLOT_SPRITE: PluginSlotId = PluginSlotId::new("nara.plugins.slot.sprite");
 #[cfg(feature = "runtime-2d")]
 const SLOT_TILEMAP: PluginSlotId = PluginSlotId::new("nara.plugins.slot.tilemap");
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+const SLOT_TILESET_ASSETS: PluginSlotId = PluginSlotId::new("nara.plugins.slot.tileset-assets");
 #[cfg(any(
     feature = "runtime-2d",
     feature = "presentation-2d",
@@ -804,7 +806,7 @@ impl PluginGroup for Runtime2dPlugins {
     const ID: PluginGroupId = PluginGroupId::new("nara.plugins.runtime-2d");
 
     fn build(self) -> PluginGroupBuilder {
-        PluginGroupBuilder::new()
+        let builder = PluginGroupBuilder::new()
             .add_group(MinimalPlugins)
             .add_slot(
                 PluginSlot::required(
@@ -824,7 +826,13 @@ impl PluginGroup for Runtime2dPlugins {
             .add_slot(
                 PluginSlot::required(SLOT_IMAGE, nara_image::IMAGE_PLUGIN_ID),
                 PluginDefinition::for_default::<nara_image::ImagePlugin>(),
-            )
+            );
+        #[cfg(feature = "serde")]
+        let builder = builder.add_slot(
+            PluginSlot::optional(SLOT_TILESET_ASSETS, nara_tilemap::TILESET_ASSET_PLUGIN_ID),
+            PluginDefinition::for_default::<nara_tilemap::TileSetAssetPlugin>(),
+        );
+        builder
     }
 }
 

@@ -49,6 +49,9 @@ and ordering constraints.
 
 ## Persistent schema contributions
 
+For the separate Tilemap schema/data and TileSet file-publication plugins, see
+[File-Backed TileSets](file-backed-tilesets.md).
+
 A crate that owns persistent components exposes one typed helper. Its callers pass one value, not a
 plugin definition plus a separate schema-provider list:
 

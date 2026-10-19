@@ -1,14 +1,22 @@
 # File-Backed TileSets
 
-The `runtime-2d` and `serde` features support file-backed TileSet sources during strict project
-checking, cold startup, and trusted compiled Editor startup. Enable `presentation-2d` to render
-their cells. Generic Editor TileSet import/hydration and in-place TileSet hot reload are not yet
-supported.
+Tilemap is scene data: one layer per entity, cells addressed by signed TileCoord, and an optional
+TileSet handle. TilemapPlugin owns its persistent schema and codec. TileSetAssetPlugin owns
+decoded file-backed sources and Image-dependent publication; it does not require TilemapPlugin.
 
-## Source And Metadata
+## Composition
 
-A TileSet source is a versioned RON `PersistentFileEnvelope` with kind `tileset`. Use the domain
-encoder to produce the header and payload:
+Enable `serde` for TileSetSource and file-backed execution. Runtime2dPlugins includes the optional
+TileSetAssetPlugin slot in that profile. Direct App consumers install AssetPlugin and
+TileSetAssetPlugin together with their ordinary Task/Image composition. Managed project Hosts
+admit filesystem content; the asset plugin does not scan directories or read files.
+
+A TileSetSource names an Image by project AssetRef and describes a uniform TileAtlasLayout.
+Its canonical source envelope has bounded encoded bytes. Metadata must declare the `tileset`
+source kind and an identity matching its logical source path. The decoded atlas must match the
+Image extent exactly, including margin and spacing.
+
+Use the domain encoder to create the versioned RON PersistentFileEnvelope with kind `tileset`:
 
 ```rust
 use nara::{
@@ -24,47 +32,56 @@ let source = TileSetSource::new(
 let source_text = source.encode_ron_bytes()?;
 ```
 
-Save the returned text beneath the project's asset root, for example as
-`tilesets/terrain.tileset.ron`. Store canonical JSON metadata alongside it as
-`tilesets/terrain.tileset.ron.meta`. Its `AssetMeta<()>` identity must contain the exact asset path,
-a unique `StableAssetId`, and `AssetSourceKind::Other("tileset".to_owned())`; settings serialize as
-`null`. Generate metadata with `AssetMeta::to_json_string` rather than writing a bare JSON record.
+Save it under the asset root as `tilesets/terrain.tileset.ron` with canonical JSON metadata at
+`tilesets/terrain.tileset.ron.meta`. Generate AssetMeta<()> through AssetMeta::to_json_string;
+its identity contains the exact logical path, a unique StableAssetId and
+AssetSourceKind::Other("tileset".to_owned()), with settings `null`. The Image has its own source
+and AssetMeta<ImageImportSettings>. All paths are relative to the asset root. The default TileSet
+decoder limits encoded input to 64 KiB and bounds nesting, collections and strings. Dimensions
+are positive/finite, counts nonzero, margin/spacing nonnegative and tint finite.
 
-The Image reference can be a path or stable ID. The Image requires its own source and typed
-`AssetMeta<ImageImportSettings>` metadata. All paths are relative to the project's asset root.
+Persist project paths or stable IDs, then resolve typed handles in each runtime through AssetServer
+or AssetRef. A principal source cannot claim two incompatible Rust asset types. A process-local
+handle is not a serialized identity or a residency lease.
 
-Atlas dimensions must be positive and finite, row/column counts nonzero, and margin/spacing
-nonnegative. The decoded Image extent must exactly equal the atlas's computed full extent,
-including margin and spacing; fractional or otherwise unrepresentable extents are rejected rather
-than truncated. Tint channels must be finite; finite HDR values remain supported. The default
-source decoder limits encoded data to 64 KiB and also bounds nesting, collection sizes, and
-strings.
+Strict Check, startup and Export validate every persisted cell against the admitted atlas.
+TileIndex is currently a row-major atlas-local index. An out-of-range value reports the entity,
+source entity, TileSet, signed coordinate and index. Empty maps and maps explicitly lacking a
+TileSet remain valid. The renderer defensively rejects invalid runtime regions.
 
-## Scene References
+## Publication And Recovery
 
-A persisted `nara.tilemap.Tilemap` component references the TileSet through its `tileset` AssetRef.
-The codec rejects duplicate cell coordinates and dimensions that become nonpositive when narrowed
-to `f32`. Deliberate in-memory cell replacement through `Tilemap::set_cell` remains supported.
+TileSetAssets keeps the latest desired source separately from its published Image content.
+A published TileSet owns the exact immutable pixels and atlas it validated. Sprite consumers can
+advance to a newer Image while a TileSet whose successor fails retains its coherent old picture.
+Image/source identity revocation removes the publication; retaining a handle does not retain
+authority. Removing and recreating an Image cannot revive an old revoked publication.
 
-Project content admission resolves the TileSet metadata/source and dependent Image metadata/source
-into one immutable startup closure. Every Image is decoded before the TileSet extents are checked
-and TileSet identities are admitted; an invalid dependency rejects the whole successor snapshot.
-Runtime and trusted Editor startup share publication: Image values publish before TileSets are
-constructed with their resolved Image handles. TileSet asset state retains the source hash. The
-source contains no runtime handles or GPU resources. Code-first `TileSet::from_image` construction
-keeps image compatibility under the caller's authority and does not imply this file-backed
-admission proof.
+The managed Editor refreshes known TileSet sources through its source catalogue and processes
+at most two source files per advance. Missing Image metadata retains a semantic dependency demand;
+after a source-index refresh admits that metadata and source, existing serial Image hydration can
+recover the latest desired dependency. This progresses without a visible Scene panel. Bad source
+content suspends pending desired publication until corrected, while eligible last-good remains.
+Refresh does not create Image metadata automatically.
 
-Runtime TileSet and Image handles come from typed `AssetServer::reserve_record` or `AssetRef`
-resolution. A catalogue rejects assigning a second Rust asset type to one principal source.
-`AssetServer::claim` converts a known runtime ID after checking catalogue membership and its type;
-`get_handle` only retrieves an existing matching claim. Persist paths or stable IDs, then resolve
-them again in a fresh runtime. Raw runtime ID/handle constructors are private.
+Entry count, distinct retained Image allocations and retained pixel bytes have explicit limits.
+A rejected successor preserves eligible last-good. After capacity is released, an explicit same
+source request/refresh or TileSetAssets::retry permits another attempt. Unchanged frame observations
+do not continually retry failed decoding or re-emit failures. Prepared packets retain the matching
+pixel charge until their final holder retires; WGPU applies its separate exact-version budget.
 
-Reloading the project content snapshot creates a new immutable revision; failed dependency loading
-does not mutate an earlier snapshot. This whole-snapshot refresh does not provide concurrent typed
-TileSet hot reload. That later workflow must define dependency generations, last-good publication,
-source removal, and stale completion rejection.
+## Layout And Code-First Content
 
-The [foundation slice plan](../plans/2026-10-18-tilemap-file-backed-foundation-plan.md) records
-verification and the remaining consumer gates.
+The first successful publication fixes that entry's atlas layout. A different live layout returns
+AtlasLayoutChangeRequiresRebuild, including after automatic source or Image removal/recovery.
+Rebuild consumers and explicitly remove/re-admit the TileSet, or reopen the project through strict
+admission, before changing layout. No tile-ID remapping or brush/terrain workflow is provided yet.
+
+TileSet fields are read through tile_size(), material() and atlas(). Appearance builders preserve
+the captured Image because tint, sampler and alpha do not change atlas membership. with_image()
+changes Image/layout and clears the captured snapshot. A manually constructed code-first TileSet
+uses its caller-owned live handle and defensive renderer checks; it does not acquire file-backed
+publication/recovery guarantees by construction alone.
+
+The owning decisions are in [ADR 0117](../architecture/adr/0117-2d-foundation-ownership-and-authoring-contracts.md).
+Tile painting, durable TileId migration, Tiled import and map streaming remain separate workflows.

@@ -2423,6 +2423,7 @@ dependencies = [
  "nara_reflect",
  "nara_render",
  "nara_sprite",
+ "nara_tasks",
  "nara_tilemap",
  "nara_transform",
  "thiserror 2.0.18",

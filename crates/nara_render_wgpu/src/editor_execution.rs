@@ -1067,6 +1067,7 @@ impl WgpuEditorExecution {
                 });
         crate::encode_target_draw(&mut encoder, &viewport_target.view, &draw);
         namespace.queue.submit([encoder.finish()]);
+        draw.retain_images_until_submission_complete(&namespace.queue);
         viewport_target.last_submitted_frame_index = Some(packet.frame_index());
         self.backend.record_editor_image_submission();
         Ok(WgpuSubmittedImageReceipt::new(

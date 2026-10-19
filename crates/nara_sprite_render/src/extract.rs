@@ -1,4 +1,4 @@
-use nara_asset::Assets;
+use nara_asset::{AssetServer, AssetStates, Assets};
 use nara_core::{Color, Mat3, Vec2};
 use nara_ecs::{Entity, Query, Res, ResMut, Resource, error::BevyError};
 use nara_hierarchy::HierarchyOrder;
@@ -58,6 +58,9 @@ pub(crate) fn extract_sprites(
         Option<&Material2dInstance>,
     )>,
     tilesets: Option<Res<Assets<TileSet>>>,
+    server: Option<Res<AssetServer>>,
+    states: Option<Res<AssetStates>>,
+    images: Option<Res<Assets<nara_image::ImageAsset>>>,
 ) -> Result<(), BevyError> {
     let completed_projection = completed_projection
         .ok_or(SpriteExtractionError::ProjectionIncomplete)
@@ -132,7 +135,26 @@ pub(crate) fn extract_sprites(
                 .as_deref()
                 .and_then(|tilesets| tilesets.get(handle))
         });
+        let missing_coherent_content = tileset.is_some_and(|tileset| {
+            let Some(image) = tileset.image_content() else {
+                return false;
+            };
+            match (server.as_deref(), states.as_deref(), images.as_deref()) {
+                (Some(server), Some(states), Some(images)) => {
+                    !image.is_authorized(server, states, images)
+                }
+                _ => true,
+            }
+        });
+        if missing_coherent_content {
+            scratch.stats.missing_tilesets = scratch.stats.missing_tilesets.saturating_add(1);
+            continue;
+        }
         let missing_tileset = tilemap.tileset.is_some() && tileset.is_none();
+        if missing_tileset {
+            scratch.stats.missing_tilesets = scratch.stats.missing_tilesets.saturating_add(1);
+            continue;
+        }
         for (coord, cell) in tilemap.cells() {
             let source_order = scratch.sprites.len() as u64;
             let Some(mut extracted_cell) = extract_tile_cell(
@@ -150,9 +172,6 @@ pub(crate) fn extract_sprites(
                 continue;
             };
             extracted_cell.material_extension = material.copied();
-            if missing_tileset {
-                scratch.stats.missing_tilesets = scratch.stats.missing_tilesets.saturating_add(1);
-            }
             scratch.sprites.push(extracted_cell);
             scratch.stats.extracted_tile_cells =
                 scratch.stats.extracted_tile_cells.saturating_add(1);
@@ -185,6 +204,7 @@ pub fn extract_sprite(
             alpha_mode: sprite.material.alpha_mode,
             tint: sprite.material.tint,
         },
+        image_content: None,
         material_extension: None,
         texture_region: sprite
             .texture_region
@@ -222,21 +242,25 @@ pub fn extract_tile_cell(
     let local_y_axis = Vec2::new(0.0, tile_size.y * 0.5);
     let tile_texture = tileset.and_then(|tileset| {
         Some((
-            tileset.material.image?,
+            tileset.material().image?,
             tileset
                 .normalized_region(tile)
                 .map(|region| TextureUvRect::new(region.min, region.size))?,
         ))
     });
-    if tileset.and_then(|tileset| tileset.material.image).is_some() && tile_texture.is_none() {
+    if tileset
+        .and_then(|tileset| tileset.material().image)
+        .is_some()
+        && tile_texture.is_none()
+    {
         return None;
     }
     let material = tileset
         .map(|tileset| ExtractedSpriteMaterial {
-            image: tileset.material.image,
-            sampler: tileset.material.sampler,
-            alpha_mode: tileset.material.alpha_mode,
-            tint: tileset.material.tint,
+            image: tileset.material().image,
+            sampler: tileset.material().sampler,
+            alpha_mode: tileset.material().alpha_mode,
+            tint: tileset.material().tint,
         })
         .unwrap_or_else(|| ExtractedSpriteMaterial::from_color(Color::WHITE));
 
@@ -245,6 +269,7 @@ pub fn extract_tile_cell(
         source_order,
         kind: ExtractedSpriteKind::TilemapCell { coord, tile },
         material,
+        image_content: tileset.and_then(TileSet::image_content).cloned(),
         material_extension: None,
         texture_region: tile_texture
             .map(|(_, texture_region)| texture_region)

@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use nara_asset::{AssetPath, AssetRecord, StableAssetId};
+use nara_asset::{AssetPath, AssetRecord, AssetRef, AssetSourceKind, StableAssetId};
 use nara_fs::{ContentDigest, FileIdentity, RelativePath};
 use nara_image::{ImageImportSettings, ImageImportedAsset};
 
@@ -12,6 +12,7 @@ use crate::project_host::runtime::editor::authoring_runtime::{
     EditorImageRuntimeTerminal, EditorImageSourceCompletion,
 };
 
+use super::catalog::{EditorImageCatalogSnapshot, EditorImageMetadataStatus};
 use super::store::{
     EditorImageLastGood, EditorImageLastGoodStore, EditorImageSourceProof, MAX_LAST_GOOD_IMAGES,
 };
@@ -52,7 +53,7 @@ struct EditorImageHydrationSource {
     record: AssetRecord,
     source_path: RelativePath,
     source_identity: FileIdentity,
-    source_digest: ContentDigest,
+    source_digest: Option<ContentDigest>,
     metadata_path: RelativePath,
     metadata_identity: FileIdentity,
     metadata_digest: ContentDigest,
@@ -143,11 +144,91 @@ impl EditorImageHydrationHost {
                 record: record.clone(),
                 source_path,
                 source_identity: source.source().identity(),
-                source_digest: source.source().digest(),
+                source_digest: Some(source.source().digest()),
                 metadata_path,
                 metadata_identity: source.metadata_source().identity(),
                 metadata_digest: source.metadata_source().digest(),
                 settings,
+            });
+        }
+    }
+
+    pub(super) fn refresh_dependencies(
+        &mut self,
+        project: &AuthoringProjectSessionSnapshot,
+        catalog: &EditorImageCatalogSnapshot,
+        demands: &[AssetRef],
+    ) {
+        let entries = demands
+            .iter()
+            .filter_map(|reference| catalog.image_entry(reference))
+            .collect::<Vec<_>>();
+        self.queued.retain(|source| {
+            source.source_digest.is_some()
+                || entries.iter().any(|entry| {
+                    entry.asset_path() == source.asset_path()
+                        && matches!(entry.metadata(), EditorImageMetadataStatus::Ready(metadata)
+                    if metadata.stable_id() == source.stable_id()
+                        && metadata.digest() == source.metadata_digest)
+                })
+        });
+        if self.pending.as_ref().is_some_and(|pending| {
+            pending.source.source_digest.is_none()
+                && !entries.iter().any(|entry| {
+                    entry.asset_path() == pending.source.asset_path()
+                        && matches!(entry.metadata(), EditorImageMetadataStatus::Ready(metadata)
+                        if metadata.stable_id() == pending.source.stable_id()
+                            && metadata.digest() == pending.source.metadata_digest)
+                })
+        }) {
+            self.pending = None;
+        }
+        for entry in entries {
+            if self
+                .queued
+                .iter()
+                .any(|source| source.asset_path() == entry.asset_path())
+                || self
+                    .pending
+                    .as_ref()
+                    .is_some_and(|pending| pending.source.asset_path() == entry.asset_path())
+            {
+                continue;
+            }
+            if self.queued.len() + usize::from(self.pending.is_some()) >= MAX_LAST_GOOD_IMAGES {
+                self.remember_failure(failure(
+                    entry.asset_path().clone(),
+                    EditorImageHydrationFailureKind::CapacityExceeded,
+                ));
+                break;
+            }
+            let EditorImageMetadataStatus::Ready(metadata) = entry.metadata() else {
+                continue;
+            };
+            let Some(source_identity) = entry.source_identity() else {
+                continue;
+            };
+            let (Ok(source_path), Ok(metadata_path)) = (
+                RelativePath::new(entry.project_relative_path()),
+                RelativePath::new(entry.metadata_project_relative_path()),
+            ) else {
+                continue;
+            };
+            self.queued.push_back(EditorImageHydrationSource {
+                attempt_generation: project.attempt_generation(),
+                project_root_identity: project.project_root().identity(),
+                record: AssetRecord::new(
+                    metadata.stable_id(),
+                    entry.asset_path().clone(),
+                    AssetSourceKind::Image,
+                ),
+                source_path,
+                source_identity,
+                source_digest: None,
+                metadata_path,
+                metadata_identity: metadata.identity(),
+                metadata_digest: metadata.digest(),
+                settings: metadata.settings(),
             });
         }
     }
@@ -160,6 +241,17 @@ impl EditorImageHydrationHost {
     pub(super) fn cancel_pending(&mut self) {
         self.pending = None;
         self.queued.clear();
+    }
+
+    pub(super) fn cancel_dependencies(&mut self) {
+        self.queued.retain(|source| source.source_digest.is_some());
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.source.source_digest.is_none())
+        {
+            self.pending = None;
+        }
     }
 
     pub(super) fn surrender_source(&mut self, asset_path: &AssetPath) {
@@ -319,8 +411,17 @@ impl EditorImageHydrationHost {
                         pending.source.stable_id(),
                         handle,
                         pending.source.source_identity,
-                        EditorImageSourceProof::AuthoringClosure {
-                            attempt_generation: pending.source.attempt_generation,
+                        if pending.source.source_digest.is_some() {
+                            EditorImageSourceProof::AuthoringClosure {
+                                attempt_generation: pending.source.attempt_generation,
+                            }
+                        } else {
+                            EditorImageSourceProof::SourceIndex {
+                                generation: project
+                                    .source_index_snapshot()
+                                    .ok_or(EditorImageHydrationFailureKind::SourceChanged)?
+                                    .generation(),
+                            }
                         },
                         source_digest,
                         settings_hash,
@@ -351,8 +452,10 @@ impl EditorImageHydrationHost {
             return Err(EditorImageHydrationFailureKind::SourceChanged);
         }
         if completed_source.identity() != expected.source_identity
-            || completed_source.digest() != expected.source_digest
-            || imported.source_digest() != expected.source_digest
+            || completed_source.digest() != imported.source_digest()
+            || expected
+                .source_digest
+                .is_some_and(|digest| completed_source.digest() != digest)
         {
             return Err(EditorImageHydrationFailureKind::SourceChanged);
         }

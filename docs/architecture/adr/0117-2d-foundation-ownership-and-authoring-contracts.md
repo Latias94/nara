@@ -83,6 +83,38 @@ Preparation consumes the published revision even if a later attempt failed. Remo
 invalidation, or successful replacement invalidates the corresponding derivation. Async completions
 still validate their owner/revision at publication. This clarifies ADRs 0033/0037/0115.
 
+File-backed TileSets publish their validated atlas together with the exact immutable Image content
+that passed extent admission. A later valid Image publication may advance a Sprite independently;
+an incompatible TileSet successor retains its coherent eligible last-good atlas and pixels. An
+Image publication epoch distinguishes replacement from removal or identity revocation. The current
+managed Image publication must also match the exact storage slot: raw mutable storage access cannot
+authorize retained derived content. Resolved TileSet fields are private; changing its Image/atlas
+through a code-first builder discards the admitted content snapshot.
+
+The concrete TileSet asset owner keeps one latest desired source separately from its published Image
+dependency. Failed or missing desired dependencies do not erase published dependency revocation.
+Current metadata admission and source/catalog changes drive recovery, including a dependency path
+that initially has no metadata. Reconciliation does not scan the filesystem or introduce a generic
+import executor; Host capabilities own discovery and existing Image work owns decoding/publication.
+Unchanged observations do not repeat failures. Entry and retained-pixel limits reject a successor
+before publication, and retained charges follow actual immutable holders through prepared packets.
+After the first successful publication, an entry retains its admitted atlas layout even if its
+Image or source is later automatically revoked. A live successor with a different layout is rejected with an explicit
+rebuild-required diagnostic; the latest desired source remains available for correction. This
+prevents changed local indices or UV interpretation without a migration. Explicit TileSet removal
+and fresh admission, including strict project reopen, may establish another layout. Image retargets
+with the same layout and appearance-only changes remain eligible for live reconciliation.
+
+Persisted cells with an admitted TileSet must belong to its atlas before strict Check, startup or
+Export publishes the content closure. The current identifier is an atlas-local `TileIndex`, not a
+durable tile definition ID. Empty maps and explicitly untextured maps remain valid. Rendering keeps
+defensive checks for code-first runtime mutation. Tile authoring tools and durable tile-ID migration
+require a separate workflow and decision.
+
+Prepared rendering carries exact snapshots, so multiple Image revisions sharing a logical handle
+may coexist in a frame. Batching and backend reuse distinguish those snapshots; bounded cache and
+submitted-work retention account for coexistence instead of overwriting one logical-key entry.
+
 ### Structural mutation uses one baseline
 
 Admitted deferred work is materialized before resolving structural topology. Preparation and commit

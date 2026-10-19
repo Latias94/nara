@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "3231a3eb2036d791a8a07053a322fcd21223230b0274b39d4486875162bd918a"
+source_fingerprint: "23a7d2fb04cd4a1749d9085130b4f5462e22eedc6fe5b6d65bc40f563eb5094b"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "3231a3eb2036d791a8a07053a322fcd21223230b0274b39d4486875162b
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `3231a3eb2036d791a8a07053a322fcd21223230b0274b39d4486875162bd918a`
-- Immutable records: 734
+- Source fingerprint: `23a7d2fb04cd4a1749d9085130b4f5462e22eedc6fe5b6d65bc40f563eb5094b`
+- Immutable records: 735
 - Active lane heads: 0
 
 # Active Registrations
@@ -47,6 +47,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [TileSet exact publication and dependency recovery](verification/2026-10/2026-10-19-tileset-publication-and-recovery.md) - Strict atlas membership, exact Image retention, desired dependency recovery, GPU coexistence and reviewed module seams.
 - **Verification Evidence**: [Image lifecycle contract repairs](verification/2026-10/2026-10-19T021717Z-image-lifecycle-contract-repairs-95901fe367a149bc90ec922ad0384a73.md) - R0 event coalescing, removal recovery, foreground admission and shared authoring revocation.
 - **Subagent Finding**: [TileSet dependency and Editor loading research](subagents/2026-10/2026-10-19T012524Z-tileset-dependency-and-editor-loading-research-768c093b92ed44b581556093dc20d059.md) - Source-confirmed Image lifecycle gaps and a reviewed sequence for coherent TileSet publication.
 - **Verification Evidence**: [Component plugin and asset contract refactor](verification/2026-10/2026-10-18T164837Z-component-plugin-and-asset-contract-refactor-b4c2497eff5d4bdb90cebe1de995ceb3.md) - Checked runtime identities and typed claims, schema closure, exact TileSet admission, and consumer migration.
@@ -58,7 +59,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Foundation fearless refactor goal and reviewed plan](progress/2026-10/2026-10-18T031900Z-foundation-refactor-goal-and-plan.md) - Reviewed dependency-ordered foundation plan, external HTML delivery, active goal and first implementation boundary.
 - **Decision**: [Agent workflow and design cleanup](decisions/2026-10/2026-10-17T152243Z-agent-workflow-and-design-cleanup-c85f611fef834769b7488de6e5ffcc15.md) - Keep engineering continuity while removing registration gates and retiring stale design entrances.
 - **Verification Evidence**: [Dear ImGui 0.21 published backend acceptance](verification/2026-10/2026-10-17T135132Z-dear-imgui-0-21-published-backend-acceptance-5cf11eaec8ea42a986d4953c4a4a00b8.md) - Published registry cohort, owned renderer mapping, native IME and Windows DX12 product qualification with bounded text-intent cadence.
-- **Memory Event**: [Verification: Green Editor run8d5467b0 passes132/132 with bounded text-intent followup; fourte](logs/2026-10/2026-10-17T135008Z-verification-green-editor-run8d5467b0-passes132-132-with-bounded-text-intent-followup-fourte-01d5279ca83145e497911729d884cfef.md) - Green Editor run8d5467b0 passes132/132 with bounded text-intent followup; fourteen native cases remain outside ordinary suite. Independent i
 
 # Integration Notes
 
