@@ -1136,22 +1136,13 @@ fn publish_snapshot_tilesets(
             "Project runtime TileSet publication owner is unavailable",
         )));
     }
-    let mut access = nara_ecs::system::SystemState::<(
-        nara_ecs::ResMut<nara_tilemap::TileSetAssets>,
-        nara_ecs::ResMut<AssetServer>,
-        nara_ecs::Res<nara_asset::ProjectAssetDatabase>,
-        nara_ecs::Res<Assets<ImageAsset>>,
-        nara_ecs::ResMut<Assets<TileSet>>,
-        nara_ecs::ResMut<AssetStates>,
-        nara_ecs::ResMut<AssetEvents>,
-    )>::new(world);
-    let (mut owner, mut server, database, images, mut tilesets, mut states, mut events) =
-        access.get_mut(world).map_err(|_| {
-            HostFault::new(single_error(
-                "project.run.tileset-resources-missing",
-                "Project runtime TileSet resources are unavailable",
-            ))
-        })?;
+    let mut access = nara_ecs::system::SystemState::<nara_tilemap::TileSetContent>::new(world);
+    let mut tilesets = access.get_mut(world).map_err(|_| {
+        HostFault::new(single_error(
+            "project.run.tileset-resources-missing",
+            "Project runtime TileSet resources are unavailable",
+        ))
+    })?;
     let mut handles = Vec::with_capacity(snapshot.tilesets().len());
     for content in snapshot.tilesets() {
         let record = AssetRecord::new(
@@ -1159,14 +1150,11 @@ fn publish_snapshot_tilesets(
             content.path().clone(),
             AssetSourceKind::Other(String::from("tileset")),
         );
-        let handle = owner
+        let handle = tilesets
             .request(
                 record,
                 content.source().clone(),
                 SourceHash::from_digest(*content.source_hash().as_bytes()),
-                &mut server,
-                &tilesets,
-                &mut states,
             )
             .map_err(|_| {
                 HostFault::new(single_error(
@@ -1176,16 +1164,9 @@ fn publish_snapshot_tilesets(
             })?;
         handles.push(handle);
     }
-    owner.reconcile(
-        &mut server,
-        &database,
-        &images,
-        &mut tilesets,
-        &mut states,
-        &mut events,
-    );
+    tilesets.reconcile();
     if handles.into_iter().any(|handle| {
-        owner.error(handle).is_some()
+        tilesets.error(handle).is_some()
             || !tilesets
                 .get(handle)
                 .is_some_and(|tileset| tileset.image_content().is_some())

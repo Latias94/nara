@@ -31,7 +31,8 @@ pub use admission::{TilemapMembershipError, validate_persisted_tilemap_membershi
 #[cfg(feature = "serde")]
 pub use content::{
     TILESET_ASSET_PLUGIN_DECLARATION, TILESET_ASSET_PLUGIN_ID, TileSetAssetError,
-    TileSetAssetLimits, TileSetAssetPlugin, TileSetAssets, TileSetRetentionSnapshot,
+    TileSetAssetLimits, TileSetAssetPlugin, TileSetAssets, TileSetContent,
+    TileSetRetentionSnapshot,
 };
 
 #[cfg(feature = "serde")]

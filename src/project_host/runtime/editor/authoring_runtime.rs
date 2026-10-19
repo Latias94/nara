@@ -26,7 +26,7 @@ use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskShutdownReport, TaskSpawnRequest,
     TaskTerminal,
 };
-use nara_tilemap::{TileSet, TileSetAssetPlugin};
+use nara_tilemap::TileSetAssetPlugin;
 
 mod tilesets;
 #[cfg(feature = "presentation-2d")]

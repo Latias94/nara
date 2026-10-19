@@ -1,5 +1,9 @@
-use nara_asset::{AssetRef, ProjectAssetDatabase, SourceHash};
-use nara_tilemap::{TileSetAssetError, TileSetAssets, TileSetSource, TileSetSourceFileLimits};
+use nara_asset::{AssetRef, SourceHash};
+#[cfg(test)]
+use nara_tilemap::TileSet;
+use nara_tilemap::{
+    TileSetAssetError, TileSetAssets, TileSetContent, TileSetSource, TileSetSourceFileLimits,
+};
 
 use super::*;
 
@@ -112,131 +116,50 @@ fn apply_in_world(
     Result<(bool, Vec<AssetRef>), EditorImageRuntimeFailure>,
     (RuntimeWorldAccessError, Vec<EditorTileSetSourceUpdate>),
 > {
-    let result = with_assets(
-        world,
-        |owner, server, database, images, tilesets, states, events| {
-            let before = owner
-                .sources()
-                .map(|(handle, _, _)| {
-                    (
-                        handle,
-                        tilesets.slot_revision(handle),
-                        states.state_revision(handle.id()),
+    let mut access = nara_ecs::system::SystemState::<TileSetContent>::new(world);
+    let mut content = match access.get_mut(world) {
+        Ok(content) => content,
+        Err(_) => {
+            return Err((
+                RuntimeWorldAccessError::MissingResource {
+                    type_name: std::any::type_name::<TileSetContent>(),
+                },
+                updates,
+            ));
+        }
+    };
+    let result = (|| {
+        let before = content.source_revisions().collect::<Vec<_>>();
+        for update in updates {
+            let result = match update {
+                EditorTileSetSourceUpdate::Request(record, source, hash) => {
+                    content.request(record, source, hash).map(|_| ())
+                }
+                EditorTileSetSourceUpdate::Reject(record) => content.reject_source(&record),
+                EditorTileSetSourceUpdate::Remove(record) => {
+                    content.revoke_source(&record).map(|_| ())
+                }
+            };
+            result.map_err(|_| EditorImageRuntimeFailure::Publication)?;
+        }
+        content.reconcile();
+        let after = content.source_revisions().collect::<Vec<_>>();
+        let demands = content
+            .sources()
+            .filter(|(handle, _, _)| {
+                !matches!(
+                    content.error(*handle),
+                    Some(
+                        TileSetAssetError::InvalidSource
+                            | TileSetAssetError::Superseded
+                            | TileSetAssetError::AtlasLayoutChangeRequiresRebuild
+                            | TileSetAssetError::IdentityMismatch
                     )
-                })
-                .collect::<Vec<_>>();
-            for update in updates {
-                let result = match update {
-                    EditorTileSetSourceUpdate::Request(record, source, hash) => owner
-                        .request(record, source, hash, server, tilesets, states)
-                        .map(|_| ()),
-                    EditorTileSetSourceUpdate::Reject(record) => {
-                        let handle = owner
-                            .sources()
-                            .find(|(_, existing, _)| *existing == &record)
-                            .map(|(handle, _, _)| handle);
-                        if let Some(handle) = handle {
-                            owner
-                                .reject_source(handle, tilesets, states, events)
-                                .map(|_| ())
-                        } else {
-                            server
-                                .reserve_record::<TileSet>(&record)
-                                .map_err(TileSetAssetError::Asset)
-                                .and_then(|handle| {
-                                    states.set_loading(handle.id());
-                                    tilesets
-                                        .record_load_failure(
-                                            handle,
-                                            states,
-                                            events,
-                                            TileSetAssetError::InvalidSource.to_string(),
-                                        )
-                                        .map(|_| ())
-                                        .map_err(TileSetAssetError::State)
-                                })
-                        }
-                    }
-                    EditorTileSetSourceUpdate::Remove(record) => {
-                        let handle = owner
-                            .sources()
-                            .find(|(_, existing, _)| *existing == &record)
-                            .map(|(handle, _, _)| handle);
-                        if let Some(handle) = handle {
-                            owner
-                                .revoke_source(handle, tilesets, states, events)
-                                .map(|_| ())
-                        } else {
-                            Ok(())
-                        }
-                    }
-                };
-                result.map_err(|_| EditorImageRuntimeFailure::Publication)?;
-            }
-            owner.reconcile(server, database, images, tilesets, states, events);
-            let after = owner
-                .sources()
-                .map(|(handle, _, _)| {
-                    (
-                        handle,
-                        tilesets.slot_revision(handle),
-                        states.state_revision(handle.id()),
-                    )
-                })
-                .collect::<Vec<_>>();
-            let demands = owner
-                .sources()
-                .filter(|(handle, _, _)| {
-                    !matches!(
-                        owner.error(*handle),
-                        Some(
-                            TileSetAssetError::InvalidSource
-                                | TileSetAssetError::Superseded
-                                | TileSetAssetError::AtlasLayoutChangeRequiresRebuild
-                                | TileSetAssetError::IdentityMismatch
-                        )
-                    )
-                })
-                .map(|(_, _, source)| source.image.clone())
-                .collect();
-            Ok((before != after, demands))
-        },
-    );
-    Ok(result)
-}
-
-fn with_assets<ResultValue>(
-    world: &mut World,
-    apply: impl FnOnce(
-        &mut TileSetAssets,
-        &mut AssetServer,
-        &ProjectAssetDatabase,
-        &Assets<ImageAsset>,
-        &mut Assets<TileSet>,
-        &mut AssetStates,
-        &mut AssetEvents,
-    ) -> ResultValue,
-) -> ResultValue {
-    world.resource_scope(|world, mut owner: Mut<'_, TileSetAssets>| {
-        world.resource_scope(|world, mut server: Mut<'_, AssetServer>| {
-            world.resource_scope(|world, database: Mut<'_, ProjectAssetDatabase>| {
-                world.resource_scope(|world, images: Mut<'_, Assets<ImageAsset>>| {
-                    world.resource_scope(|world, mut tilesets: Mut<'_, Assets<TileSet>>| {
-                        world.resource_scope(|world, mut states: Mut<'_, AssetStates>| {
-                            let mut events = world.resource_mut::<AssetEvents>();
-                            apply(
-                                &mut owner,
-                                &mut server,
-                                &database,
-                                &images,
-                                &mut tilesets,
-                                &mut states,
-                                &mut events,
-                            )
-                        })
-                    })
-                })
+                )
             })
-        })
-    })
+            .map(|(_, _, source)| source.image.clone())
+            .collect();
+        Ok((before != after, demands))
+    })();
+    Ok(result)
 }

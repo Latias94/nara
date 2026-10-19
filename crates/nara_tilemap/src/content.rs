@@ -12,10 +12,14 @@ use nara_asset::{
     LoadState, ProjectAssetDatabase, SourceHash,
 };
 use nara_core::{ByteLimit, ItemLimit};
-use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
+use nara_ecs::{Resource, schedule::IntoScheduleConfigs};
 use nara_image::{ImageAsset, ImageContentSnapshot};
 
 use crate::{TileAtlasLayout, TileSet, TileSetSource};
+
+mod access;
+
+pub use access::TileSetContent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TileSetAssetLimits {
@@ -626,24 +630,8 @@ impl Plugin for TileSetAssetPlugin {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn reconcile_tilesets(
-    mut owner: ResMut<TileSetAssets>,
-    mut server: ResMut<AssetServer>,
-    database: Res<ProjectAssetDatabase>,
-    images: Res<Assets<ImageAsset>>,
-    mut tilesets: ResMut<Assets<TileSet>>,
-    mut states: ResMut<AssetStates>,
-    mut events: ResMut<AssetEvents>,
-) {
-    owner.reconcile(
-        &mut server,
-        &database,
-        &images,
-        &mut tilesets,
-        &mut states,
-        &mut events,
-    );
+fn reconcile_tilesets(mut content: TileSetContent) {
+    content.reconcile();
 }
 
 #[cfg(test)]
@@ -658,6 +646,8 @@ mod tests {
     use nara_image::{ImageExtent, ImageFormat, ImageImportSettings, ImageSourceMetadata};
 
     use crate::{TileAtlasLayout, TileIndex};
+
+    mod access;
 
     struct Fixture {
         server: AssetServer,

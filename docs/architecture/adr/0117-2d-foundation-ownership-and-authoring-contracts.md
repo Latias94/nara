@@ -96,6 +96,11 @@ dependency. Failed or missing desired dependencies do not erase published depend
 Current metadata admission and source/catalog changes drive recovery, including a dependency path
 that initially has no metadata. Reconciliation does not scan the filesystem or introduce a generic
 import executor; Host capabilities own discovery and existing Image work owns decoding/publication.
+Runtime snapshot publication, managed Editor refresh and TaskUpdate use the same concrete
+`TileSetContent` SystemParam for source requests and reconciliation. Its resource join is private;
+the independently testable `TileSetAssets` state machine retains publication and retention ownership.
+Host code supplies admitted decoded sources, rejection or revocation observations and dependency demand,
+without transferring filesystem authority to the domain or introducing an erased importer executor.
 Unchanged observations do not repeat failures. Entry and retained-pixel limits reject a successor
 before publication, and retained charges follow actual immutable holders through prepared packets.
 After the first successful publication, an entry retains its admitted atlas layout even if its
