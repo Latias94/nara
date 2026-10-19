@@ -20,7 +20,7 @@ use nara_asset::{
 };
 #[cfg(feature = "serde")]
 use nara_asset::{AssetMeta, AssetMetaIdentity};
-use nara_core::{ByteLimit, ItemLimit};
+use nara_core::{ByteLimit, ItemLimit, TimeLimit};
 use nara_diagnostic::{
     Diagnostic, DiagnosticFieldClass, DiagnosticReport, DiagnosticSeverity, DiagnosticValueRef,
 };
@@ -3410,6 +3410,325 @@ fn budget_rejected_reload_preserves_last_good_value_and_asset_version() {
 
     remove_temp_root(&temp_root);
     runtime.finish().unwrap();
+}
+
+#[test]
+fn superseded_image_generation_publishes_while_obsolete_task_is_running() {
+    let record = image_record("textures/player.png");
+    let task_pools = TaskPools::try_new(bounded_task_config(2, 8)).unwrap();
+    let mut app = app_with_image_plugin_pools(Path::new("."), [record.clone()], task_pools);
+    let (handle, first_request) = reserve_loading_request(&mut app, &record);
+    let importer = ImageImporter::default();
+    let first_imported = imported_image_for_request(
+        app.world(),
+        &importer,
+        &record,
+        &first_request,
+        &[255, 0, 0, 255],
+    );
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let first = accepted_image_handle(app.world().resource::<TaskPools>().spawn(
+        TaskPoolKind::Io,
+        TaskSpawnRequest::new(1, IMAGE_RELOAD_TASK_DOMAIN),
+        move |_| {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            Ok(first_imported)
+        },
+    ));
+    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    track_image_task(&mut app, first_request, first);
+
+    let generation = app
+        .world_mut()
+        .unwrap()
+        .resource_mut::<AssetLoadGenerations>()
+        .begin_request(handle.id());
+    let expected_version = app
+        .world_mut()
+        .unwrap()
+        .resource_mut::<AssetStates>()
+        .set_loading(handle.id());
+    let second_request = AssetReloadRequest::new(
+        AssetReloadRequestId::from_raw(1),
+        handle.id(),
+        record.clone(),
+        AssetReloadRequestKind::LoadOrReload,
+        AssetSourceChangeKind::Modified,
+        expected_version,
+        generation,
+        Vec::new(),
+    );
+    let second_imported = imported_image_for_request(
+        app.world(),
+        &importer,
+        &record,
+        &second_request,
+        &[0, 255, 0, 255],
+    );
+    let second_hash = second_imported.image().source().source_hash();
+    let second = accepted_image_handle(app.world().resource::<TaskPools>().spawn(
+        TaskPoolKind::Io,
+        TaskSpawnRequest::new(2, IMAGE_RELOAD_TASK_DOMAIN),
+        move |_| Ok(second_imported),
+    ));
+    wait_for_task(&second);
+    track_image_task(&mut app, second_request, second);
+
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let published_before_release = runtime
+        .world()
+        .resource::<Assets<ImageAsset>>()
+        .get(handle)
+        .map(|image| image.source().source_hash());
+    let running_before_release = runtime
+        .world()
+        .resource::<TaskPools>()
+        .stats()
+        .for_kind(TaskPoolKind::Io)
+        .running;
+    release_tx.send(()).unwrap();
+    wait_for_completed_tasks(runtime.world(), 2);
+    runtime.drive(Duration::ZERO).unwrap();
+    let published_after_release = runtime
+        .world()
+        .resource::<Assets<ImageAsset>>()
+        .get(handle)
+        .map(|image| image.source().source_hash());
+    runtime.finish().unwrap();
+
+    assert!(running_before_release >= 1);
+    assert_eq!(
+        published_before_release,
+        Some(second_hash),
+        "the desired generation must publish before obsolete physical work retires"
+    );
+    assert_eq!(published_after_release, Some(second_hash));
+}
+
+#[test]
+fn superseded_image_task_cannot_restore_revoked_source_without_a_successor() {
+    let record = image_record("textures/player.png");
+    let task_pools = TaskPools::try_new(bounded_task_config(2, 8)).unwrap();
+    let mut app = app_with_image_plugin_pools(Path::new("."), [record.clone()], task_pools);
+    let (handle, request) = reserve_loading_request(&mut app, &record);
+    let imported = imported_image_for_request(
+        app.world(),
+        &ImageImporter::default(),
+        &record,
+        &request,
+        &[255, 0, 0, 255],
+    );
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let task = accepted_image_handle(app.world().resource::<TaskPools>().spawn(
+        TaskPoolKind::Io,
+        TaskSpawnRequest::new(1, IMAGE_RELOAD_TASK_DOMAIN),
+        move |_| {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            Ok(imported)
+        },
+    ));
+    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    track_image_task(&mut app, request, task);
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetLoadGenerations>()
+        .begin_request(handle.id());
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    assert!(
+        runtime
+            .world()
+            .resource::<PendingImageJobs>()
+            .imports
+            .is_empty()
+    );
+    assert_eq!(runtime.world().resource::<ImageReloadStats>().stale, 1);
+    edit_image_pipeline(&mut runtime, ImagePipelineEdit::Invalidate(handle.id()));
+    release_tx.send(()).unwrap();
+    wait_for_completed_tasks(runtime.world(), 1);
+    runtime.drive(Duration::ZERO).unwrap();
+    assert!(
+        runtime
+            .world()
+            .resource::<Assets<ImageAsset>>()
+            .get(handle)
+            .is_none()
+    );
+    assert_eq!(runtime.world().resource::<ImageReloadStats>().stale, 1);
+    assert!(runtime.world().resource::<AssetEvents>().is_empty());
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn superseded_image_bookkeeping_and_budget_stay_bounded_until_physical_close() {
+    let record = image_record("textures/player.png");
+    let importer = ImageImporter::default();
+    let (server, handle, images, states, _) =
+        loaded_image_store(&importer, &record, &[255, 255, 255, 255]);
+    let expected_version = states.version(handle.id()).unwrap();
+    let first_request = reload_request(&record, handle, expected_version);
+    let bytes = rgba_png(1, 1, &[255, 0, 0, 255]);
+    let first_imported = importer
+        .import_image(
+            bytes_request(&record, &bytes),
+            handle,
+            expected_version,
+            &server,
+            &images,
+            &states,
+        )
+        .unwrap();
+    let blocked_bytes = importer.budget_snapshot().active_bytes();
+    let config = bounded_task_config(2, 8)
+        .with_shutdown_policy(TaskShutdownPolicy::new(
+            TimeLimit::MIN,
+            TimeLimit::MIN,
+            TimeLimit::MIN,
+        ))
+        .unwrap();
+    let pools = TaskPools::try_new(config).unwrap();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let first = accepted_image_handle(pools.spawn(
+        TaskPoolKind::Io,
+        TaskSpawnRequest::new(0, IMAGE_RELOAD_TASK_DOMAIN),
+        move |_| {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            Ok(first_imported)
+        },
+    ));
+    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let mut pending = PendingImageJobs::default();
+    pending
+        .imports
+        .entry(handle.id())
+        .or_default()
+        .push(
+            ImageReloadAttempt::capture(first_request, handle, &images, &states),
+            first,
+        )
+        .unwrap();
+    let mut generations = AssetLoadGenerations::default();
+    for request_id in 1..=32 {
+        let request = AssetReloadRequest::new(
+            AssetReloadRequestId::from_raw(request_id),
+            handle.id(),
+            record.clone(),
+            AssetReloadRequestKind::LoadOrReload,
+            AssetSourceChangeKind::Modified,
+            expected_version,
+            generations.begin_request(handle.id()),
+            Vec::new(),
+        );
+        let failed = accepted_image_handle(pools.spawn(
+            TaskPoolKind::Io,
+            TaskSpawnRequest::new(request_id, IMAGE_RELOAD_TASK_DOMAIN),
+            |_| Err(ImageReloadError::MissingSourceDirectory),
+        ));
+        wait_for_task(&failed);
+        pending
+            .imports
+            .entry(handle.id())
+            .or_default()
+            .push(
+                ImageReloadAttempt::capture(request, handle, &images, &states),
+                failed,
+            )
+            .unwrap();
+        assert_eq!(pending.imports.len(), 1);
+        assert_eq!(pending.imports[&handle.id()].len(), 1);
+        assert_eq!(importer.budget_snapshot().active_bytes(), blocked_bytes);
+    }
+
+    let (other_started_tx, other_started_rx) = mpsc::channel();
+    let (other_release_tx, other_release_rx) = mpsc::channel();
+    let mut other = accepted_image_handle(pools.spawn(
+        TaskPoolKind::Io,
+        TaskSpawnRequest::new(33, IMAGE_RELOAD_TASK_DOMAIN),
+        move |_| {
+            other_started_tx.send(()).unwrap();
+            other_release_rx.recv().unwrap();
+            Err(ImageReloadError::MissingSourceDirectory)
+        },
+    ));
+    other_started_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
+    for request_id in 34..=97 {
+        let request = AssetReloadRequest::new(
+            AssetReloadRequestId::from_raw(request_id),
+            handle.id(),
+            record.clone(),
+            AssetReloadRequestKind::LoadOrReload,
+            AssetSourceChangeKind::Modified,
+            expected_version,
+            generations.begin_request(handle.id()),
+            Vec::new(),
+        );
+        let imported = importer
+            .import_image(
+                bytes_request(&record, &bytes),
+                handle,
+                expected_version,
+                &server,
+                &images,
+                &states,
+            )
+            .unwrap();
+        let outcome = pools.spawn(
+            TaskPoolKind::Io,
+            TaskSpawnRequest::new(request_id, IMAGE_RELOAD_TASK_DOMAIN).with_overload(
+                TaskOverloadPolicy::CoalescePending(TaskCoalesceKey::new(handle.id().raw())),
+            ),
+            move |_| Ok(imported),
+        );
+        if request_id > 34 {
+            assert!(matches!(&outcome, TaskSpawnOutcome::Coalesced { .. }));
+        }
+        pending
+            .imports
+            .entry(handle.id())
+            .or_default()
+            .push(
+                ImageReloadAttempt::capture(request, handle, &images, &states),
+                accepted_image_handle(outcome),
+            )
+            .unwrap();
+        assert_eq!(pending.imports.len(), 1);
+        assert_eq!(pending.imports[&handle.id()].len(), 1);
+        assert_eq!(importer.budget_snapshot().active_bytes(), blocked_bytes * 2);
+        assert_eq!(pools.stats().for_kind(TaskPoolKind::Io).queued, 1);
+    }
+    other_release_tx.send(()).unwrap();
+    wait_for_task(&other);
+    drop(other.try_take());
+    wait_for_io_completions(&pools, 34);
+    let ready = drain_ready_image_jobs(&pools, &mut pending);
+    assert_eq!(ready.len(), 1);
+    drop(ready);
+    assert!(pending.imports.is_empty());
+    assert_eq!(importer.budget_snapshot().active_bytes(), blocked_bytes);
+
+    let incomplete = pools.shutdown_blocking().unwrap();
+    assert!(!incomplete.is_complete());
+    assert!(incomplete.timed_out());
+    assert_eq!(pools.stats().for_kind(TaskPoolKind::Io).running, 1);
+    assert_eq!(importer.budget_snapshot().active_bytes(), blocked_bytes);
+    release_tx.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut complete = pools.shutdown_blocking().unwrap();
+    while !complete.is_complete() && Instant::now() < deadline {
+        thread::yield_now();
+        complete = pools.shutdown_blocking().unwrap();
+    }
+    assert!(complete.is_complete());
+    assert_budget_released(importer.budget_snapshot());
 }
 
 #[test]

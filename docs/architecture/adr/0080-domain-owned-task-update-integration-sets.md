@@ -117,6 +117,15 @@ The asset chain has three exact cases:
 Apply systems continue to enforce expected generation/version, ordered-prefix, and last-good asset
 policy. Schedule ordering does not authorize stale results or partial publication.
 
+Image ordered-prefix eligibility is scoped to the current desired asset generation.
+When a generation loses publication authority, the Image owner retires its logical handles and
+attempt metadata independently of whether their physical worker has completed. Superseded work
+cannot block the current generation or retain completed successors in an historical prefix.
+Within the same eligible generation, ordered predecessors and the captured Poll cutoff still apply.
+TaskPools retains queued/running work, captures, decoded-byte reservations and physical close
+obligations until their actual retirement. Image pending/stale statistics describe logical
+publication work and do not replace TaskPools' physical running/close evidence.
+
 ### Watcher admission and loss semantics
 
 The native watcher callback publishes whole translated event batches through a bounded,

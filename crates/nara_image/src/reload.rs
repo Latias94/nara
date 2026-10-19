@@ -18,10 +18,10 @@ use nara_app::{App, CoreStage, Plugin, PluginError, RealTime};
 #[cfg(feature = "serde")]
 use nara_asset::AssetMetaIdentityCandidate;
 use nara_asset::{
-    AssetEvents, AssetId, AssetLoadGenerations, AssetPath, AssetReloadDiagnostics,
-    AssetReloadRequest, AssetReloadRequestKind, AssetReloadRequests, AssetServer,
-    AssetSourceChangeKind, AssetStateError, AssetStates, AssetTaskUpdateSet, Assets, Handle,
-    ImageReloadConsumer, ImageReloadDrainError, ImageReloadRegistrationError,
+    AssetEvents, AssetId, AssetLoadGeneration, AssetLoadGenerations, AssetPath,
+    AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestKind, AssetReloadRequests,
+    AssetServer, AssetSourceChangeKind, AssetStateError, AssetStates, AssetTaskUpdateSet, Assets,
+    Handle, ImageReloadConsumer, ImageReloadDrainError, ImageReloadRegistrationError,
     register_image_reload_consumer,
 };
 use nara_diagnostic::{
@@ -142,8 +142,10 @@ pub(super) type ImageImportTaskResult = Result<ImageImportedAsset, ImageReloadEr
 
 #[derive(Default)]
 pub(super) struct PendingImageImportStream {
+    generation: Option<AssetLoadGeneration>,
     ordered: OrderedTaskResults<ImageImportTaskResult>,
     attempts: BTreeMap<TaskOrderKey, ImageReloadAttempt>,
+    retired_attempts: usize,
 }
 
 impl PendingImageImportStream {
@@ -153,13 +155,32 @@ impl PendingImageImportStream {
         handle: TaskHandle<ImageImportTaskResult>,
     ) -> Result<(), Box<(ImageReloadAttempt, TaskHandle<ImageImportTaskResult>)>> {
         let order_key = handle.order_key();
+        let generation = attempt.request.generation();
+        if self.generation.is_some_and(|current| current > generation) {
+            return Err(Box::new((attempt, handle)));
+        }
+        self.retire_superseded(generation);
         match self.ordered.push(handle) {
             Ok(()) => {
+                self.generation = Some(generation);
                 self.attempts.insert(order_key, attempt);
                 Ok(())
             }
             Err(handle) => Err(Box::new((attempt, handle))),
         }
+    }
+
+    fn retire_superseded(&mut self, desired: AssetLoadGeneration) {
+        if self.generation.is_some_and(|tracked| tracked != desired) {
+            self.retired_attempts = self.retired_attempts.saturating_add(self.attempts.len());
+            self.ordered = OrderedTaskResults::default();
+            self.attempts.clear();
+            self.generation = None;
+        }
+    }
+
+    fn take_retired_attempts(&mut self) -> usize {
+        std::mem::take(&mut self.retired_attempts)
     }
 
     fn validate_completion_cutoff(
@@ -213,6 +234,17 @@ impl PendingImageJobs {
             .values()
             .map(PendingImageImportStream::len)
             .sum()
+    }
+
+    fn retire_superseded(&mut self, generations: &AssetLoadGenerations) -> u32 {
+        let mut retired = 0_u32;
+        for (&asset_id, stream) in &mut self.imports {
+            stream.retire_superseded(generations.current(asset_id));
+            retired = retired
+                .saturating_add(stream.take_retired_attempts().min(u32::MAX as usize) as u32);
+        }
+        self.imports.retain(|_, stream| !stream.is_empty());
+        retired
     }
 
     pub(super) fn capture_ready_prefixes(
@@ -457,6 +489,7 @@ impl Plugin for ImagePlugin {
                    asset_server: ResMut<AssetServer>,
                    images: Res<Assets<ImageAsset>>,
                    states: Res<AssetStates>,
+                   generations: Res<AssetLoadGenerations>,
                    task_pools: Res<TaskPools>,
                    real_time: Res<RealTime>,
                    pending: ResMut<PendingImageJobs>,
@@ -472,6 +505,7 @@ impl Plugin for ImagePlugin {
                     asset_server,
                     images,
                     states,
+                    generations,
                     task_pools,
                     real_time,
                     pending,
@@ -513,6 +547,7 @@ fn spawn_image_reload_jobs(
     mut asset_server: ResMut<AssetServer>,
     images: Res<Assets<ImageAsset>>,
     states: Res<AssetStates>,
+    generations: Res<AssetLoadGenerations>,
     task_pools: Res<TaskPools>,
     real_time: Res<RealTime>,
     mut pending: ResMut<PendingImageJobs>,
@@ -521,6 +556,9 @@ fn spawn_image_reload_jobs(
     mut diagnostics: ResMut<AssetReloadDiagnostics>,
     mut stats: ResMut<ImageReloadStats>,
 ) -> Result<(), ImageReloadDrainError> {
+    stats.stale = stats
+        .stale
+        .saturating_add(pending.retire_superseded(&generations));
     for request in requests.drain_images(consumer)? {
         let previous_recovery = recoveries.images.remove(&request.asset_id());
         if request
@@ -697,11 +735,15 @@ fn admit_metadata_reload_settings(
 
 fn poll_image_reload_results(
     task_pools: Res<TaskPools>,
+    generations: Res<AssetLoadGenerations>,
     mut pending: ResMut<PendingImageJobs>,
     mut ready: ResMut<ReadyImageJobs>,
     mut stats: ResMut<ImageReloadStats>,
 ) -> Result<(), BevyError> {
     let cutoff = task_pools.capture_completion_cutoff();
+    stats.stale = stats
+        .stale
+        .saturating_add(pending.retire_superseded(&generations));
     let snapshots = pending
         .capture_ready_prefixes(&cutoff)
         .map_err(BevyError::error)?;
