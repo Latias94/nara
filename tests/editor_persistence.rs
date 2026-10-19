@@ -3,6 +3,9 @@
 #[path = "support/editor_action_driver.rs"]
 mod editor_action_driver;
 
+#[path = "support/editor_responsiveness_measurement.rs"]
+mod responsiveness_measurement;
+
 #[cfg(feature = "presentation-2d")]
 #[path = "support/fake_preview_toolkit.rs"]
 mod fake_preview_toolkit;
