@@ -541,6 +541,71 @@ only after its consumer requires that choice. No generic operation service is ne
 These units are proposed future work, not an active implementation goal. Reconcile affected ADRs
 when adopting the durable contracts. Preserve the existing history and complete real consumers.
 
+### Architecture Adjustment After The Reference Comparison
+
+Retain the existing ECS, managed Runtime, product composition and document-owner structure.
+The evidence calls for deeper interfaces at those owners, not a replacement architecture.
+Keep the completed [U1-U15 plan](../plans/2026-10-19-1335-refactor-foundation-correction-plan.md)
+closed; its G1-G9 entry conditions remain separate from the work below.
+
+| Boundary | Recommended adjustment | Adoption point |
+| --- | --- | --- |
+| Field identity and mutation authority | Stable UI/draft binding is independent of document revision; exact revision/catalog/source basis still governs commit. Retained controller state remains private to its frontend instance. | Reconcile ADRs 0047/0118 with D1 before E3/E4 changes this boundary. |
+| Intent and acknowledgement | Keep existing semantic actions and owner reports. Carry their exact origin through dispatch/filtering, then settle one original live recipient after application drive. | Record the D2 refinement in ADR 0118 before replacing the public frontend submission seam. |
+| Data rules and error facts | One schema-driven validator owns supported numeric rules; native preflight and Editor feedback consume it. Presentation hints and arbitrary native invariants remain distinct. Safe error facts cross adapters without parsing strings. | Reconcile ADRs 0045/0081 and affected saved-owner lineage before E6 writes new metadata. |
+| Component installation | Keep explicit package/recipe and atomic provider admission. One inventory generates mechanical callbacks and current schemas, while history stays explicit. | E5 is an ergonomic implementation over current ownership; do not add a registration authority or amend architecture merely to introduce a macro. |
+| Waiting and retirement | Preserve a seam for owned preparation, attempt/result identity and owner-thread publication; decide cancel and physical-retirement behavior for the actual operation. | D6 and G1/G9 remain triggered work, not blanket async trait changes or prerequisites for current repairs. |
+
+These are recommended refinements, not amendments to Accepted ADRs in this document-only change.
+No new public trait, shared controller framework, universal operation service or crate layer is
+required to express them. API names and the macro spelling remain provisional until the complete
+consumer demonstrates the interface; stable identity, strict authority and failure retention are
+the invariants being designed.
+
+### Deliver Workflows, Qualify Each Changed Boundary
+
+The E labels below identify implementation responsibilities, not seven consecutive release stages.
+In particular, E7 qualification is part of each affected delivery; it must not be deferred until
+all implementation units have landed.
+
+| Stage | Included work | Exit evidence |
+| --- | --- | --- |
+| S0: establish the consumer and affected contracts | Use the existing independently compiled component/panel fixture to specify the D1-D4 calls and adoption points. Reuse a concrete field such as Cooldown; no new example game is required. | One type inventory, one product contribution and one ordinary field-edit entry; no manually routed reports or private engine hooks. This is a caller design check, not a requirement to implement E5/E6 before safety repairs. |
+| S1: repair existing failure and authored-state semantics | E1 and E2 as independent owner-local changes, with their focused portion of E7 | Raw invalid Prefab rejects without panic; failed target reservation preserves the old publication; terminal bad shader is not recreated per frame; Reset/Remove preserves raw authored semantics through affected history/persistence paths. |
+| S2: complete one reliable editing loop | E3 followed by E4, with external/native evidence from E7 | Exact action result reaches the original live controller or panel; invalid/conflicting input survives; unrelated edits and native IME retain stable widget identity. Two fields from one basis have explicit conflict behavior; a cohesive multi-field operation uses one existing atomic patch. |
+| S3: complete component declaration through evolution | Settle E6 validation/error semantics, then E5's inventory convenience, with E7 component workflow evidence | One external component can be installed, created, edited, rejected with an actionable error, saved/reopened and explicitly migrated. Adding a component after a successor catalog still changes only the current inventory, leaving historical membership intact. |
+| Follow-up selection | D6 and existing G1-G9 only when their named consumer or measurement enters | Pick a concrete pending operation, frame workload, inline field tool or multi-document workflow, then design and verify that owner's next complete contract. These are not hidden exit conditions for S1-S3. |
+
+```mermaid
+flowchart LR
+    S0[Caller sketch and affected contract review] --> S1[Existing safety and Reset fixes]
+    S1 --> S2[Exact result plus retained field draft]
+    S2 --> S3[Component constraints inventory and evolution]
+    S3 --> Next[Select the next real workflow]
+    Evidence[Focused owner tests and affected public or native consumer] -.-> S1
+    Evidence -.-> S2
+    Evidence -.-> S3
+```
+
+This stage order is a risk/learning preference, not a fabricated source dependency. E3 may land
+in reviewable internal steps, but the public editing experience is not complete until E3/E4 work
+together. E5 and E6 are independently implementable once their respective contracts are clear;
+the preferred order settles supported value/error semantics before polishing declaration syntax.
+E3/E4 can use today's shared validator and need not wait for new interval metadata.
+
+During S2, keep native painting and private draft/result state in frontend modules, semantic
+actions/projections in tooling, and dispatch/publication in the application/document owners.
+During S3, keep descriptor validation in reflection and diagnostic lowering in its adapters.
+Extract these responsibilities privately as their large files change; line count alone does not
+justify a new crate or public trait, and the field helper must not grow into another owner.
+
+Keep verification proportional: use focused `cargo nextest run` and affected external fixtures,
+and apply the existing native procedure to controls/lifetimes actually changed. Integrate one
+complete affected author workflow at stage closure rather than repeating every platform/export
+qualification after each internal commit. Report untested platforms explicitly.
+
+### Responsibility Map
+
 | Unit | Delivers | Existing owning files and consumers | Dependencies |
 | --- | --- | --- | --- |
 | E1 | N01 source graph rejection, N08 allocation-error result, N09 terminal failure cache as separate reviewable changes | `crates/nara_scene/src/prefab.rs`, `validation.rs`, Scene tests; `crates/nara_render_wgpu/src/editor_execution.rs`, `texture.rs`, `backend.rs`, `quad.rs`, native allocation/pipeline tests | None |
@@ -549,7 +614,7 @@ when adopting the durable contracts. Preserve the existing history and complete 
 | E4 | D1 stable draft/widget identity, exact-basis conflict and default field helper | `editor/src/frontend/imgui/mod.rs`, `authoring.rs`, `authoring/recursive_controls.rs`, native IME/interactions and external panel fixture | E2, E3 |
 | E5 | D3 one component inventory over current contribution | `crates/nara_reflect`, root macro facade, independent module-consumer and public guides | Explicit first-generation and migration example |
 | E6 | D4 interval constraints and safe error identity for the two real consumers | `crates/nara_reflect/src/schema.rs`, validation/codec/provider owners, `nara_reflect_derive`, `nara_scene` diagnostic adapters, `nara_ui` codec and external component fixture | Saved-data lineage and dependency review before writing |
-| E7 | Qualification and concise guides | Existing native Editor procedure, external component/panel fixtures, Reference Game and affected guides | Affected implementation units |
+| E7 | Qualification and concise guides inside every affected stage | Existing native Editor procedure, external component/panel fixtures, Reference Game and affected guides | Accompanies each changed owner; integrated workflow at stage closure |
 
 E1's three independent owners should land separately; the row groups their user-visible failure
 boundary, not a requirement for one large commit. Extract private responsibilities in touched

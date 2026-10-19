@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "4fd46c155e861b17066bcf496bd69588d0e563e896ea57f4a0699734c65d07fa"
+source_fingerprint: "f83b5e0fd7c94e24cc57eebd4c79f367916151a8ee3fe298b6e67735a9f1ef60"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "4fd46c155e861b17066bcf496bd69588d0e563e896ea57f4a0699734c65
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `4fd46c155e861b17066bcf496bd69588d0e563e896ea57f4a0699734c65d07fa`
-- Immutable records: 755
+- Source fingerprint: `f83b5e0fd7c94e24cc57eebd4c79f367916151a8ee3fe298b6e67735a9f1ef60`
+- Immutable records: 756
 - Active lane heads: 0
 
 # Active Registrations
@@ -47,6 +47,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Work Progress**: [Authoring architecture refinements and workflow delivery order](progress/2026-10/2026-10-19T132019Z-authoring-architecture-refinements-and-workflow-delivery-order-9db915d26cb2407291ac76b756a2126c.md) - Keep existing owners, refine exact edit/result and value contracts, and qualify complete workflows within each stage.
 - **Work Progress**: [Ergonomic authoring interface design and independent challenge](progress/2026-10/2026-10-19T120824Z-ergonomic-authoring-interface-design-and-independent-challenge-510d6c4813604051a07a6f1e7009019b.md) - Proposed caller-first field editing, correlated dispatch, component inventory and bounded validation; design-only outcome.
 - **Work Progress**: [Post-correction foundation audit and withdrawn reference](progress/2026-10/2026-10-19T113248Z-post-correction-foundation-audit-and-withdrawn-reference-4b9d308fc38e4a31bdbe594c037e9b11.md) - Open post-correction findings, bounded Prefab failure proof and exclusion of the withdrawn reference.
 - **Verification Evidence**: [Foundation correction U1-U15 integration and review](verification/2026-10/2026-10-19-foundation-correction-completion.md) - Final source, consumer, native and review evidence with explicit deferred and platform limits.
@@ -58,7 +59,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Foundation U13 stateful native panel composition](verification/2026-10/2026-10-19-foundation-u13-stateful-panels.md) - Paired source-built panel factories own independent drafts through native startup and GPU reconstruction.
 - **Verification Evidence**: [Foundation U11 explicit recursive Inspector drafts](verification/2026-10/2026-10-19-foundation-u11-recursive-inspector.md) - Shape-driven native controls commit complete root fields through existing document authority.
 - **Verification Evidence**: [Foundation U15 concrete TileSet resource access](verification/2026-10/2026-10-19-foundation-u15-tileset-access.md) - Runtime, managed Editor and TaskUpdate share one concrete publication resource join.
-- **Verification Evidence**: [Foundation U14 aggregate input lifetimes and paused restoration](verification/2026-10/2026-10-19-foundation-u14-semantic-lifetimes.md) - One staging owner prevents normalized and synthetic presses from reviving after configuration exits.
 
 # Integration Notes
 

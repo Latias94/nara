@@ -69,7 +69,9 @@ defects separate from deliberate capability limits and the completed U1-U15 corr
 The [authoring interface ergonomics design](authoring-interface-ergonomics-design.md) proposes
 one complete field-edit entry, exact dispatch-result routing, a single component inventory and
 finite shared constraints. It compares alternative interfaces and defines caller-level acceptance;
-it is not an Accepted contract or implemented API.
+its implementation section groups corrections into complete editing and component-evolution
+workflows, with qualification at each changed boundary. It is not an Accepted contract or
+implemented API, and it does not reopen the completed correction plan.
 
 The [UI foundation design](ui-foundation-design.md),
 [UI boundary study](ui-product-boundaries-editor-dogfood-and-porting-strategy.md), and
