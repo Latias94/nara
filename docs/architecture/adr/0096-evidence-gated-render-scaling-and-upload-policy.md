@@ -59,6 +59,10 @@ flowchart LR
   and failure diagnostics at a cost appropriate to the product profile.
 - Device loss invalidates device-dependent work and caches without publishing stale objects under a
   new epoch.
+- Texture admission uses the live requested device capabilities before cache reuse or allocation.
+  CPU import limits remain independent of a particular device. Unsupported content is rejected
+  through the typed content path; expected allocation exhaustion uses the backend's retryable
+  upload-deferral path without publishing or charging a failed allocation.
 - A correctness-preserving simple path is acceptable until a named workload exceeds an agreed
   frame-time, memory, or upload budget.
 - The current `RenderPassPlan` is an engine-owned static ordered plan. Domain plugins may own batch

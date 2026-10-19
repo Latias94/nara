@@ -217,6 +217,7 @@ impl WgpuSpriteTextureCache {
         queue: &wgpu::Queue,
     ) -> Result<(), WgpuTextureError> {
         if self.fallback_texture.is_none() {
+            admit_texture_extent(device, WgpuQuadTextureKey::Fallback, 1, 1)?;
             let required = RGBA8_BYTES_PER_PIXEL as usize;
             if self.upload_bytes.saturating_add(required) > MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME {
                 return Err(WgpuTextureError::FallbackUploadDeferred {
@@ -233,7 +234,7 @@ impl WgpuSpriteTextureCache {
                 1,
                 RGBA8_BYTES_PER_PIXEL,
                 wgpu::TextureFormat::Rgba8UnormSrgb,
-            ));
+            )?);
             self.upload_bytes = self.upload_bytes.saturating_add(required);
         }
         Ok(())
@@ -254,6 +255,13 @@ impl WgpuSpriteTextureCache {
             });
         }
         validate_image_snapshot(snapshot)?;
+        let extent = snapshot.resource().extent();
+        admit_texture_extent(
+            device,
+            WgpuQuadTextureKey::Image(key),
+            extent.width,
+            extent.height,
+        )?;
         if let Some(existing) = self.images.get_mut(&key).and_then(|versions| {
             versions
                 .iter_mut()
@@ -300,7 +308,7 @@ impl WgpuSpriteTextureCache {
                     resource.extent().height,
                     RGBA8_BYTES_PER_PIXEL,
                     format,
-                ),
+                )?,
             });
             self.resident_images.push(ResidentImageTexture {
                 image: Arc::downgrade(&image),
@@ -365,6 +373,12 @@ impl WgpuSpriteTextureCache {
         frame_index: u64,
     ) -> Result<(), WgpuTextureError> {
         let key = page.key();
+        admit_texture_extent(
+            device,
+            WgpuQuadTextureKey::Glyph(key),
+            page.width(),
+            page.height(),
+        )?;
         let expected = usize::try_from(page.width())
             .ok()
             .and_then(|width| {
@@ -418,7 +432,7 @@ impl WgpuSpriteTextureCache {
                     page.height(),
                     R8_BYTES_PER_PIXEL,
                     wgpu::TextureFormat::R8Unorm,
-                ),
+                )?,
                 last_used_frame: frame_index,
             },
         );
@@ -652,6 +666,20 @@ struct WgpuTextureBinding {
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub(crate) enum WgpuTextureError {
+    #[error(
+        "texture {texture:?} extent {width}x{height} is unsupported by the active device; dimensions must be nonzero and at most {maximum}"
+    )]
+    TextureExtentUnsupported {
+        texture: WgpuQuadTextureKey,
+        width: u32,
+        height: u32,
+        maximum: u32,
+    },
+    #[error("texture {label} allocation failed: {message}")]
+    TextureAllocationFailed {
+        label: &'static str,
+        message: String,
+    },
     #[error("quad material texture identity mismatch: expected {expected:?}, got {actual:?}")]
     TextureIdentityMismatch {
         expected: WgpuQuadTextureKey,
@@ -729,6 +757,7 @@ impl WgpuTextureError {
             Self::FallbackUploadDeferred { .. }
                 | Self::ImageUploadDeferred { .. }
                 | Self::ImageResidencyDeferred { .. }
+                | Self::TextureAllocationFailed { .. }
         ) {
             return true;
         }
@@ -738,6 +767,24 @@ impl WgpuTextureError {
         }
         false
     }
+}
+
+fn admit_texture_extent(
+    device: &wgpu::Device,
+    texture: WgpuQuadTextureKey,
+    width: u32,
+    height: u32,
+) -> Result<(), WgpuTextureError> {
+    let maximum = device.limits().max_texture_dimension_2d;
+    if width == 0 || height == 0 || width > maximum || height > maximum {
+        return Err(WgpuTextureError::TextureExtentUnsupported {
+            texture,
+            width,
+            height,
+            maximum,
+        });
+    }
+    Ok(())
 }
 
 fn validate_image_snapshot(snapshot: &PreparedImageSnapshot) -> Result<(), WgpuTextureError> {
@@ -782,7 +829,8 @@ fn create_texture_resource(
     height: u32,
     bytes_per_pixel: u32,
     format: wgpu::TextureFormat,
-) -> WgpuTextureResource {
+) -> Result<WgpuTextureResource, WgpuTextureError> {
+    let allocation_scope = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
         size: wgpu::Extent3d {
@@ -797,6 +845,12 @@ fn create_texture_resource(
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
+    if let Some(error) = pollster::block_on(allocation_scope.pop()) {
+        return Err(WgpuTextureError::TextureAllocationFailed {
+            label,
+            message: error.to_string(),
+        });
+    }
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture: &texture,
@@ -817,11 +871,11 @@ fn create_texture_resource(
         },
     );
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    WgpuTextureResource {
+    Ok(WgpuTextureResource {
         _texture: texture,
         view,
         logical_bytes: u64::try_from(pixels.len()).unwrap_or(u64::MAX),
-    }
+    })
 }
 
 fn create_texture_binding(
@@ -893,6 +947,42 @@ fn address_mode(address_mode: AddressMode) -> wgpu::AddressMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejected_image_extent_preserves_upload_and_residency_capacity() {
+        crate::readback_tests::render_to_rgba(|device, queue, _, _, _| {
+            let mut cache = WgpuSpriteTextureCache {
+                residency_limits: WgpuImageResidencyLimits {
+                    versions: 1,
+                    bytes: 8_192 * 4,
+                },
+                ..Default::default()
+            };
+            for (width, height) in [(8_193, 1), (16_384, 1), (1, 8_193), (1, 16_384)] {
+                let [snapshot, _] = crate::readback_tests::image_versions(width, height);
+                assert_eq!(
+                    cache.ensure_image(device, queue, &snapshot, 1).unwrap_err(),
+                    WgpuTextureError::TextureExtentUnsupported {
+                        texture: WgpuQuadTextureKey::Image(snapshot.identity().key()),
+                        width,
+                        height,
+                        maximum: 8_192,
+                    },
+                );
+                assert_eq!(cache.upload_bytes, 0);
+                assert_eq!(cache.logical_texture_bytes(), 0);
+                assert_eq!(cache.stats(), WgpuTextureCacheStats::default());
+            }
+            let [legal, _] = crate::readback_tests::image_versions(8_192, 1);
+            cache.ensure_image(device, queue, &legal, 1).unwrap();
+            assert_eq!(cache.upload_bytes, 8_192 * 4);
+            assert_eq!(cache.logical_texture_bytes(), 8_192 * 4);
+            assert_eq!(cache.stats().image_textures, 1);
+            assert_eq!(cache.stats().uploaded_images, 1);
+            Ok(())
+        })
+        .unwrap();
+    }
 
     #[test]
     fn cache_policy_retains_two_presented_epochs() {

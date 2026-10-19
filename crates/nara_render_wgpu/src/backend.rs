@@ -1995,6 +1995,93 @@ mod tests {
         );
     }
 
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[test]
+    fn reconstructed_backend_readmits_exact_image_against_replacement_device_limits() {
+        use crate::quad::{WgpuQuadMaterialKey, WgpuQuadTexture, WgpuQuadTextureKey};
+        use crate::readback_tests::{image_versions, render_to_rgba, render_to_rgba_with_limits};
+        use crate::texture::WgpuTextureError;
+        use nara_material::SamplerDescriptor;
+
+        let [snapshot, _] = image_versions(4_096, 1);
+        let material = WgpuQuadMaterialKey {
+            texture: WgpuQuadTextureKey::Image(snapshot.identity().key()),
+            sampler: SamplerDescriptor::NEAREST_CLAMP,
+            alpha_mode: AlphaMode2d::Opaque,
+        };
+        let (_, (mut backend, old_binding)) = render_to_rgba(|device, queue, _, _, _| {
+            let mut backend = WgpuRenderBackend::with_probe_device(device.clone(), queue.clone());
+            backend.device_epoch = 1;
+            let layout = backend.ensure_quad_texture_bind_group_layout()?;
+            let binding = backend
+                .quad_textures
+                .bind_group(
+                    device,
+                    queue,
+                    &layout,
+                    material,
+                    &WgpuQuadTexture::Image(snapshot.clone()),
+                    1,
+                )
+                .unwrap();
+            assert_eq!(backend.texture_stats().uploaded_images, 1);
+            Ok((backend, binding))
+        })
+        .unwrap();
+        backend
+            .clear_gpu_resources(SurfaceDropReason::BackendCleanup)
+            .unwrap();
+        assert_eq!(backend.logical_texture_bytes(), 4_096 * 4);
+
+        render_to_rgba_with_limits(
+            wgpu::Limits {
+                max_texture_dimension_2d: 2_048,
+                ..Default::default()
+            },
+            |device, queue, _, _, _| {
+                backend.device = Some(device.clone());
+                backend.queue = Some(queue.clone());
+                backend.device_epoch += 1;
+                let layout = backend.ensure_quad_texture_bind_group_layout()?;
+                let error = backend
+                    .quad_textures
+                    .bind_group(
+                        device,
+                        queue,
+                        &layout,
+                        material,
+                        &WgpuQuadTexture::Image(snapshot),
+                        2,
+                    )
+                    .unwrap_err();
+                assert_eq!(
+                    error,
+                    WgpuTextureError::TextureExtentUnsupported {
+                        texture: material.texture,
+                        width: 4_096,
+                        height: 1,
+                        maximum: 2_048,
+                    },
+                );
+                assert_eq!(backend.texture_stats().image_bindings, 0);
+                assert_eq!(backend.texture_stats().uploaded_images, 0);
+                assert_eq!(backend.texture_stats().reused_images, 0);
+                drop(old_binding);
+                assert_eq!(backend.logical_texture_bytes(), 0);
+                let [legal, _] = image_versions(2_048, 1);
+                backend
+                    .quad_textures
+                    .prepared_image_view(device, queue, &legal, 2)
+                    .unwrap();
+                assert_eq!(backend.logical_texture_bytes(), 2_048 * 4);
+                assert_eq!(backend.texture_stats().uploaded_images, 1);
+                assert_eq!(backend.device_epoch(), 2);
+                Ok(())
+            },
+        )
+        .unwrap();
+    }
+
     fn test_runtime_generation() -> RuntimeGeneration {
         let candidate = RuntimeAdmissionReservation::try_acquire()
             .unwrap()

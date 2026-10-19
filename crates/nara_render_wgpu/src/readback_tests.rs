@@ -13,6 +13,10 @@ pub(crate) const READBACK_EXTENT: u32 = 64;
 pub(crate) const READBACK_BYTES_PER_PIXEL: u32 = 4;
 
 pub(crate) fn two_image_versions() -> [nara_image::PreparedImageSnapshot; 2] {
+    image_versions(1, 1)
+}
+
+pub(crate) fn image_versions(width: u32, height: u32) -> [nara_image::PreparedImageSnapshot; 2] {
     use nara_asset::{
         ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetVersion, Assets, ImportArtifactKey,
         ImportArtifactRecord, ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId,
@@ -24,7 +28,8 @@ pub(crate) fn two_image_versions() -> [nara_image::PreparedImageSnapshot; 2] {
     };
     let handle = nara_asset::allocate_anonymous_handle::<ImageAsset>().unwrap();
     let mut images = Assets::<ImageAsset>::default();
-    [[255, 0, 0, 255], [0, 255, 0, 255]].map(|pixels| {
+    [[255, 0, 0, 255], [0, 255, 0, 255]].map(|color| {
+        let pixels = color.repeat((width * height) as usize);
         let settings = ImageImportSettings::default();
         let artifact = ImportArtifactRecord::new(ImportArtifactKey::new(
             StableAssetId::parse_str("d7961f69-0e25-41d5-8893-0ef85ab19615").unwrap(),
@@ -46,9 +51,9 @@ pub(crate) fn two_image_versions() -> [nara_image::PreparedImageSnapshot; 2] {
                 artifact,
             )
             .unwrap(),
-            ImageExtent::new(1, 1),
+            ImageExtent::new(width, height),
             ImageFormat::Rgba8,
-            pixels.to_vec(),
+            pixels,
         )
         .unwrap();
         images.insert(handle, image);
@@ -63,6 +68,155 @@ pub(crate) fn two_image_versions() -> [nara_image::PreparedImageSnapshot; 2] {
             PreparedImageResource::from_image(image),
         )
     })
+}
+
+#[test]
+fn primary_image_extent_admission_rejects_device_excess_and_recovers() {
+    image_extent_admission_readback(false);
+}
+
+#[test]
+fn auxiliary_image_extent_admission_rejects_device_excess_and_recovers() {
+    image_extent_admission_readback(true);
+}
+
+fn image_extent_admission_readback(auxiliary: bool) {
+    let (pixels, ()) = render_to_rgba(|device, queue, format, output_view, encoder| {
+        assert_eq!(device.limits().max_texture_dimension_2d, 8_192);
+        let texture_layout = create_quad_texture_bind_group_layout(device);
+        let material_layout = create_material_bind_group_layout(device);
+        let mut cache = WgpuSpriteTextureCache::default();
+        cache.begin_frame(1);
+        for width in [8_192, 8_193, 16_384] {
+            let [snapshot, _] = image_versions(width, 1);
+            let texture = crate::quad::WgpuQuadTextureKey::Image(snapshot.identity().key());
+            let batch = image_extent_admission_batch(snapshot, auxiliary);
+            let before = cache.stats();
+            let result = create_quad_batch_buffers(
+                device,
+                queue,
+                &[batch],
+                &texture_layout,
+                &material_layout,
+                &mut cache,
+                1,
+            );
+            if width == 8_192 {
+                assert_eq!(result.unwrap().len(), 1);
+            } else {
+                let error = result.expect_err("CPU-valid image exceeds the requested device limit");
+                assert!(
+                    !error.is_deferred(),
+                    "unsupported extents cannot become legal later"
+                );
+                assert_eq!(
+                    error,
+                    crate::texture::WgpuTextureError::TextureExtentUnsupported {
+                        texture,
+                        width,
+                        height: 1,
+                        maximum: 8_192,
+                    },
+                );
+                assert_eq!(
+                    cache.stats(),
+                    before,
+                    "rejection cannot publish or charge an image"
+                );
+            }
+        }
+        let [snapshot, _] = two_image_versions();
+        let batch = image_extent_admission_batch(snapshot, auxiliary);
+        let pipelines = crate::required_quad_pipeline_keys(std::slice::from_ref(&batch), format)
+            .into_iter()
+            .map(|key| {
+                let pipeline =
+                    create_quad_pipeline(device, key, &texture_layout, &material_layout)?;
+                Ok(WgpuQuadPipelineDrawRef {
+                    alpha_mode: key.alpha_mode,
+                    material: key.material,
+                    pipeline: pipeline.pipeline,
+                })
+            })
+            .collect::<Result<Vec<_>, crate::WgpuRenderError>>()?;
+        let buffers = create_quad_batch_buffers(
+            device,
+            queue,
+            &[batch],
+            &texture_layout,
+            &material_layout,
+            &mut cache,
+            1,
+        )
+        .unwrap();
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("nara_image_extent_admission_recovery"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: output_view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        draw_quad_batch_buffers(&mut pass, &pipelines, &buffers, readback_viewport());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(readback_pixel(&pixels, 32, 32), &[255, 0, 0, 255]);
+}
+
+fn image_extent_admission_batch(
+    snapshot: nara_image::PreparedImageSnapshot,
+    auxiliary: bool,
+) -> WgpuQuadBatch {
+    use crate::quad::{WgpuMaterial2d, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture};
+    use nara_material::{AlphaMode2d, Material2dDefinition, Material2dInput, SamplerDescriptor};
+
+    let texture = if auxiliary {
+        WgpuQuadTexture::Fallback
+    } else {
+        WgpuQuadTexture::Image(snapshot.clone())
+    };
+    WgpuQuadBatch {
+        material: WgpuQuadMaterialKey {
+            texture: texture.key(),
+            sampler: SamplerDescriptor::NEAREST_CLAMP,
+            alpha_mode: AlphaMode2d::Opaque,
+        },
+        texture,
+        scissor: None,
+        instances: vec![WgpuQuadInstance {
+            center: [0.0; 2],
+            x_axis: [1.0, 0.0],
+            y_axis: [0.0, 1.0],
+            color: [1.0; 4],
+            uv_min: [0.0; 2],
+            uv_size: [1.0; 2],
+            texture_mode: 0,
+            shape_mode: 0,
+            rect_size: [1.0; 2],
+            corner_radius: 0.0,
+            border_width: 0.0,
+        }],
+        counts_as_sprites: true,
+        material_extension: auxiliary.then_some(WgpuMaterial2d {
+            definition: Material2dDefinition {
+                id: "readback.extent-admission",
+                fragment_shader: "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return textureLoad(material_texture, vec2<i32>(0, 0), 0) * tint; }",
+                input: Material2dInput::SPRITE_FRAGMENT_V1,
+                alpha_mode: AlphaMode2d::Opaque,
+            },
+            parameters: [0.0; 4],
+            texture: snapshot,
+        }),
+    }
 }
 
 #[test]
@@ -253,6 +407,19 @@ pub(crate) fn render_to_rgba<R>(
         &mut wgpu::CommandEncoder,
     ) -> Result<R, crate::WgpuRenderError>,
 ) -> Result<(Vec<u8>, R), crate::WgpuRenderError> {
+    render_to_rgba_with_limits(wgpu::Limits::default(), render)
+}
+
+pub(crate) fn render_to_rgba_with_limits<R>(
+    limits: wgpu::Limits,
+    render: impl FnOnce(
+        &wgpu::Device,
+        &wgpu::Queue,
+        wgpu::TextureFormat,
+        &wgpu::TextureView,
+        &mut wgpu::CommandEncoder,
+    ) -> Result<R, crate::WgpuRenderError>,
+) -> Result<(Vec<u8>, R), crate::WgpuRenderError> {
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::LowPower,
@@ -269,9 +436,11 @@ pub(crate) fn render_to_rgba<R>(
         }))
     })
     .expect("quad readback requires a wgpu adapter");
-    let (device, queue) =
-        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-            .expect("quad readback requires a wgpu device");
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: limits,
+        ..Default::default()
+    }))
+    .expect("quad readback requires a wgpu device");
 
     let format = wgpu::TextureFormat::Rgba8UnormSrgb;
     let output = device.create_texture(&wgpu::TextureDescriptor {
