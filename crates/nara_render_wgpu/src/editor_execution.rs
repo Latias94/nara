@@ -38,6 +38,43 @@ use crate::{
 
 const EDITOR_IMAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
+#[cfg(test)]
+std::thread_local! {
+    // Fail the selected texture/view allocation check without exhausting GPU memory.
+    static VIEWPORT_ALLOCATION_FAILURE: std::cell::Cell<Option<u8>> = const {
+        std::cell::Cell::new(None)
+    };
+}
+
+fn finish_viewport_allocation(
+    scope: wgpu::ErrorScopeGuard,
+    extent: Extent2d,
+) -> Result<(), WgpuEditorExecutionError> {
+    let error = pollster::block_on(scope.pop()).map(|error| error.to_string());
+    #[cfg(test)]
+    let error = error.or_else(|| {
+        VIEWPORT_ALLOCATION_FAILURE.with(|failure| match failure.get() {
+            Some(1) => {
+                failure.set(None);
+                Some("injected viewport allocation failure".to_owned())
+            }
+            Some(remaining) => {
+                failure.set(Some(remaining - 1));
+                None
+            }
+            None => None,
+        })
+    });
+    match error {
+        Some(message) => Err(WgpuEditorExecutionError::ViewportTargetAllocationDeferred {
+            width: extent.width,
+            height: extent.height,
+            message,
+        }),
+        None => Ok(()),
+    }
+}
+
 /// Host-assigned, process-local identity of one non-reused Editor render view.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -85,6 +122,12 @@ pub enum WgpuEditorExecutionError {
         height: u32,
         maximum: u32,
     },
+    #[error("the Editor viewport target allocation {width}x{height} was deferred: {message}")]
+    ViewportTargetAllocationDeferred {
+        width: u32,
+        height: u32,
+        message: String,
+    },
     #[error("the Editor viewport reservation no longer matches the live source or GPU namespace")]
     StaleViewportReservation,
     #[error("an Editor Host render transaction must begin before image submission or presentation")]
@@ -115,7 +158,8 @@ impl WgpuEditorExecutionError {
 
     #[must_use]
     pub const fn is_deferred(&self) -> bool {
-        matches!(self, Self::Backend(error) if error.is_deferred())
+        matches!(self, Self::ViewportTargetAllocationDeferred { .. })
+            || matches!(self, Self::Backend(error) if error.is_deferred())
     }
 
     #[must_use]
@@ -315,6 +359,7 @@ impl WgpuEditorUiSubmission {
             | WgpuEditorExecutionError::ViewportTargetAlreadyActive
             | WgpuEditorExecutionError::ViewportTargetUnavailable
             | WgpuEditorExecutionError::ViewportTargetExtentUnsupported { .. }
+            | WgpuEditorExecutionError::ViewportTargetAllocationDeferred { .. }
             | WgpuEditorExecutionError::StaleViewportReservation => {
                 UiPresentationBackendFaultDomain::Target
             }
@@ -1248,6 +1293,9 @@ impl WgpuEditorExecution {
                 maximum,
             });
         }
+        let allocation_scope = namespace
+            .device
+            .push_error_scope(wgpu::ErrorFilter::OutOfMemory);
         let texture = namespace.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("nara_editor_viewport_target"),
             size: wgpu::Extent3d {
@@ -1262,10 +1310,17 @@ impl WgpuEditorExecution {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[EDITOR_IMAGE_FORMAT],
         });
+        // A failed texture is an invalid WGPU handle. Reject it before attempting a view,
+        // otherwise the expected allocation failure also produces a validation failure.
+        finish_viewport_allocation(allocation_scope, extent)?;
+        let allocation_scope = namespace
+            .device
+            .push_error_scope(wgpu::ErrorFilter::OutOfMemory);
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             format: Some(EDITOR_IMAGE_FORMAT),
             ..Default::default()
         });
+        finish_viewport_allocation(allocation_scope, extent)?;
         Ok(WgpuEditorViewportTargetReservation {
             stamp,
             texture,
@@ -1345,6 +1400,140 @@ mod tests {
         UiPaintPacket, UiPresentationAttemptId, UiPresentationCapabilityGeneration,
         UiPresentationEpoch, UiPresentationOutcome, UiPresentationRuntimeGeneration,
     };
+
+    #[test]
+    fn viewport_allocation_failure_preserves_publication_and_smaller_retry() {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let force_fallback_adapter = match std::env::var("NARA_WGPU_FORCE_FALLBACK").as_deref() {
+            Ok("1") => true,
+            Ok("0") | Err(std::env::VarError::NotPresent) => false,
+            value => panic!("invalid NARA_WGPU_FORCE_FALLBACK: {value:?}"),
+        };
+        let adapter =
+            match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::LowPower,
+                compatible_surface: None,
+                force_fallback_adapter,
+                ..Default::default()
+            })) {
+                Ok(adapter) => adapter,
+                Err(error)
+                    if std::env::var("DEAR_IMGUI_REQUIRE_WGPU_ADAPTER").as_deref() != Ok("1") =>
+                {
+                    eprintln!("skipping viewport allocation test without a WGPU adapter: {error}");
+                    return;
+                }
+                Err(error) => panic!("the required WGPU adapter is unavailable: {error}"),
+            };
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+        let mut execution = test_execution();
+        let namespace = WgpuEditorDeviceNamespace {
+            instance,
+            adapter,
+            device,
+            queue,
+            surface_format: EDITOR_IMAGE_FORMAT,
+            surface_extent: Extent2d::new(64, 64).unwrap(),
+            backend_instance_id: execution.backend.instance_id(),
+            device_epoch: execution.backend.device_epoch(),
+        };
+        let frame = test_image_frame();
+        let target = image_target(&frame);
+        let source = frame.source_generation();
+        let view_id = WgpuEditorViewId::new(1);
+        let initial = execution
+            .reserve_viewport_target_in_namespace(view_id, &namespace, source, target)
+            .unwrap();
+        let initial_stamp = initial.stamp;
+        execution.activate_viewport_target(initial).unwrap();
+        execution
+            .views
+            .get_mut(&view_id)
+            .unwrap()
+            .target
+            .as_mut()
+            .unwrap()
+            .last_submitted_frame_index = Some(7);
+        let receipt = WgpuSubmittedImageReceipt::new(
+            view_id,
+            target,
+            initial_stamp.generation,
+            source,
+            initial_stamp.source_handoff_generation,
+            namespace.backend_instance_id,
+            namespace.device_epoch,
+            7,
+        );
+        let larger = nara_render::__private::editor_viewport_image_target(
+            target.image(),
+            Extent2d::new(128, 128).unwrap(),
+        )
+        .unwrap();
+        // Check both texture allocation and view allocation failures. Neither candidate may
+        // consume a generation, replace the live target or create a new registered view.
+        for failure_stage in [1, 2] {
+            VIEWPORT_ALLOCATION_FAILURE.with(|failure| failure.set(Some(failure_stage)));
+            let error = execution
+                .reserve_viewport_target_in_namespace(view_id, &namespace, source, larger)
+                .unwrap_err();
+            assert!(error.is_deferred());
+            assert!(!error.is_content_rejected());
+            assert!(!error.requires_owner_replacement());
+            assert_eq!(execution.views.len(), 1);
+            assert_eq!(
+                execution.views[&view_id].target.as_ref().unwrap().stamp,
+                initial_stamp
+            );
+            assert_eq!(
+                execution.views[&view_id].admission.last_target_generation,
+                1
+            );
+            execution
+                .validate_viewport_submission(&namespace, receipt)
+                .unwrap();
+        }
+        let unregistered = WgpuEditorViewId::new(2);
+        VIEWPORT_ALLOCATION_FAILURE.with(|failure| failure.set(Some(1)));
+        assert!(
+            execution
+                .reserve_viewport_target_in_namespace(unregistered, &namespace, source, larger,)
+                .is_err()
+        );
+        assert!(!execution.views.contains_key(&unregistered));
+
+        let smaller = nara_render::__private::editor_viewport_image_target(
+            target.image(),
+            Extent2d::new(32, 32).unwrap(),
+        )
+        .unwrap();
+        let retry = execution
+            .reserve_viewport_target_in_namespace(view_id, &namespace, source, smaller)
+            .unwrap();
+        assert_eq!(retry.stamp.generation, initial_stamp.generation + 1);
+        execution
+            .validate_viewport_submission(&namespace, receipt)
+            .unwrap();
+        execution.retire_viewport_target(view_id);
+        execution.activate_viewport_target(retry).unwrap();
+        assert_eq!(
+            execution.views[&view_id]
+                .target
+                .as_ref()
+                .unwrap()
+                .stamp
+                .target,
+            smaller
+        );
+        assert!(
+            execution
+                .validate_viewport_submission(&namespace, receipt)
+                .is_err()
+        );
+        execution.retire_view(view_id);
+        assert!(execution.views.is_empty());
+    }
 
     #[test]
     fn editor_independent_producers_keep_their_own_admission_clock() {
