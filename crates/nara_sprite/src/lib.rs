@@ -1075,7 +1075,7 @@ pub mod prelude {
 mod tests {
     use super::*;
     use nara_asset::{
-        AssetId, AssetPath, AssetRecord, AssetSourceKind, ProjectAssetDatabase, StableAssetId,
+        AssetPath, AssetRecord, AssetSourceKind, ProjectAssetDatabase, StableAssetId,
     };
     use nara_reflect::ComponentDecodeContext;
 
@@ -1139,7 +1139,7 @@ mod tests {
 
     #[test]
     fn creates_texture_sprite_without_backend_handles() {
-        let texture = Handle::new(AssetId::from_raw(7));
+        let texture = nara_asset::allocate_anonymous_handle().unwrap();
         let sprite = Sprite::from_texture(texture, Vec2::new(32.0, 32.0))
             .with_texture_region(TextureRegion::new(Vec2::ZERO, Vec2::splat(0.5)));
 
@@ -1261,7 +1261,7 @@ mod tests {
             }) if field == "material.image.value"
                 && asset_ref == format!("stable_id:{unknown_stable_id}")
         ));
-        assert_eq!(asset_server.path(AssetId::from_raw(1)), None);
+        assert_eq!(asset_server, AssetServer::new());
     }
 
     #[test]
@@ -1292,7 +1292,7 @@ mod tests {
             result,
             Err(ComponentCodecError::InvalidAssetRef { field, .. }) if field == "material.image.value"
         ));
-        assert_eq!(asset_server.path(AssetId::from_raw(1)), None);
+        assert_eq!(asset_server, AssetServer::new());
     }
 
     #[test]

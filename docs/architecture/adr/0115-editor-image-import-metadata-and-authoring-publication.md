@@ -136,6 +136,18 @@ the Host retires the previous pixels from authoring choices and prepared resourc
 retirement is distinct from a recoverable decode failure under the same admitted identity, which
 preserves last-good.
 
+Retirement updates the single managed authoring runtime's typed Image value, usable state,
+prepared resources and Scene content revision before publishing subsequent projections. The Host
+also cancels ineligible explicit/hydration work, so a late completion cannot restore revoked
+authority. Immutable identity reservations may remain for same-identity recovery; resolution and
+retained allocation alone authorize neither pixels nor a new preview packet.
+
+If runtime revocation itself fails, the completed catalog still installs and ineligible choices
+retire. The session records a terminal Image publication failure: it retires Scene candidates,
+rejects further Image publication and rejects explicit requests before metadata writes. Task
+cleanup remains owned and valid selected UI images can still project. Reopening the project
+creates a fresh managed runtime; a failed revocation is not silently retried as a completed scan.
+
 ### 3. Accepted pixels are session-retained authoring state
 
 The concrete Editor image store is Host-private and scoped to one Authoring Project session. Every
@@ -163,6 +175,12 @@ The explicit Import/Reimport lane and the hydration worklist are distinct. Hydra
 the user-action lane, and the user lane never turns into an unbounded reopen queue. Selecting a
 Ready but session-unhydrated referenced image may request or prioritize its read-only hydration.
 The Host does not eagerly decode every catalogued project image.
+
+An explicit request can enter while hydration is queued or running. At admission it supersedes
+same-source hydration, including queued work, and pauses unrelated hydration publication while
+the user attempt is pending. Superseded task outputs cannot publish; task cancellation and
+physical cleanup remain with the existing runtime. Each accepted last-good change can publish a
+complete image catalog without waiting for the entire hydration worklist to drain.
 
 Recoverable Scene or UI preview replacement failure may retire or retry that preview candidate, but
 it does not close the shared task pools or the Editor image store. Only project replacement or

@@ -943,7 +943,10 @@ fn imported_image_for_request(
     importer
         .import_image(
             bytes_request(record, &bytes),
-            Handle::new(request.asset_id()),
+            world
+                .resource::<AssetServer>()
+                .get_handle::<ImageAsset>(request.asset_id())
+                .unwrap(),
             request.expected_version(),
             world.resource::<AssetServer>(),
             world.resource::<Assets<ImageAsset>>(),
@@ -979,6 +982,123 @@ fn imported_image_stores_under_reserved_handle() {
     let stored = images.get(handle).unwrap();
     assert_eq!(stored.extent(), ImageExtent::new(1, 1));
     assert_eq!(server.stable_id(handle.id()), Some(stable_id()));
+}
+
+#[test]
+fn image_publication_rejects_a_catalog_fork_with_an_incompatible_type_claim() {
+    let record = image_record("textures/player.png");
+    let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
+    let importer = ImageImporter::default();
+    let mut base = AssetServer::new();
+    let id = base.reserve_record_id(&record).unwrap();
+    let mut image_server = base.clone();
+    let handle = image_server.claim::<ImageAsset>(id).unwrap();
+    base.claim::<u32>(id).unwrap();
+    let mut images = Assets::<ImageAsset>::default();
+    let mut states = AssetStates::default();
+    let mut events = AssetEvents::default();
+    let revision = states.state_revision(id);
+
+    let rejected = importer
+        .import_image(
+            bytes_request(&record, &bytes),
+            handle,
+            AssetVersion::ZERO,
+            &base,
+            &images,
+            &states,
+        )
+        .unwrap_err();
+    assert_eq!(
+        rejected,
+        ImageImportError::Publication(ImagePublicationFailureKind::TargetMismatch)
+    );
+
+    let imported = importer
+        .import_image(
+            bytes_request(&record, &bytes),
+            handle,
+            AssetVersion::ZERO,
+            &image_server,
+            &images,
+            &states,
+        )
+        .unwrap();
+    assert_eq!(
+        imported.commit(&base, &mut images, &mut states, &mut events),
+        Err(ImagePublicationFailureKind::TargetMismatch)
+    );
+    assert!(images.is_empty());
+    assert_eq!(states.state_revision(id), revision);
+    assert!(states.state(id).is_none());
+    assert!(events.drain().is_empty());
+    assert_budget_released(importer.budget_snapshot());
+}
+
+#[test]
+fn pending_image_terminals_reject_an_incompatible_catalog_fork() {
+    #[derive(nara_ecs::Resource, Default)]
+    struct Observation {
+        state: Option<nara_asset::AssetState>,
+        revision: Option<nara_asset::AssetStateRevision>,
+    }
+
+    for removed in [false, true] {
+        let temp_root = unique_temp_root();
+        fs::create_dir_all(&temp_root).unwrap();
+        let record = image_record("textures/player.png");
+        let mut base = AssetServer::new();
+        let id = base.reserve_record_id(&record).unwrap();
+        let mut incompatible = base.clone();
+        incompatible.claim::<u32>(id).unwrap();
+        let mut app = app_with_image_plugin(&temp_root, record.clone());
+        app.insert_resource(base).unwrap();
+        app.init_resource::<Observation>().unwrap();
+        app.add_systems(
+            CoreStage::TaskUpdate,
+            (move |mut server: nara_ecs::ResMut<AssetServer>,
+                   states: nara_ecs::Res<AssetStates>,
+                   mut observed: nara_ecs::ResMut<Observation>| {
+                observed.state = states.state(id).cloned();
+                observed.revision = Some(states.state_revision(id));
+                *server = incompatible.clone();
+            })
+            .in_set(AssetTaskUpdateSet::ApplyResults)
+            .before(ImageReloadInternalSet::ApplyResults),
+        )
+        .unwrap();
+        let world = app.world_mut().unwrap();
+        if removed {
+            world
+                .resource_mut::<AssetSourceChanges>()
+                .removed(record.path().clone())
+                .unwrap();
+        } else {
+            world
+                .resource_mut::<AssetSourceChanges>()
+                .modified(record.path().clone())
+                .unwrap();
+        }
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+
+        runtime.drive(Duration::ZERO).unwrap();
+
+        let world = runtime.world();
+        let observed = world.resource::<Observation>();
+        assert_eq!(
+            world.resource::<AssetStates>().state(id),
+            observed.state.as_ref()
+        );
+        assert_eq!(
+            Some(world.resource::<AssetStates>().state_revision(id)),
+            observed.revision
+        );
+        assert!(world.resource::<AssetEvents>().iter().next().is_none());
+        assert_eq!(world.resource::<ImageReloadStats>().stale, 1);
+        assert_eq!(world.resource::<ImageReloadStats>().failed, 0);
+        runtime.finish().unwrap();
+        remove_temp_root(&temp_root);
+    }
 }
 
 #[test]
@@ -1123,7 +1243,7 @@ fn publication_admission_rejects_a_mismatched_stable_target_without_charging() {
 }
 
 #[test]
-fn publication_candidate_rejects_a_changed_path_for_the_same_stable_id() {
+fn publication_candidate_rejects_another_runtime_with_the_same_stable_id() {
     let admitted_record = image_record("textures/player.png");
     let rebound_record = image_record("textures/renamed.png");
     let importer = ImageImporter::default();
@@ -1149,9 +1269,9 @@ fn publication_candidate_rejects_a_changed_path_for_the_same_stable_id() {
     let rebound_handle = rebound_server
         .reserve_record::<ImageAsset>(&rebound_record)
         .unwrap();
-    assert_eq!(rebound_handle.id(), handle.id());
+    assert_ne!(rebound_handle.id(), handle.id());
     assert_eq!(
-        rebound_server.stable_id(handle.id()),
+        rebound_server.stable_id(rebound_handle.id()),
         Some(admitted_record.stable_id())
     );
 
@@ -1159,7 +1279,7 @@ fn publication_candidate_rejects_a_changed_path_for_the_same_stable_id() {
         .commit(&rebound_server, &mut images, &mut states, &mut events)
         .unwrap_err();
 
-    assert_eq!(error, ImagePublicationFailureKind::TargetMismatch);
+    assert_eq!(error, ImagePublicationFailureKind::UnknownAsset);
     assert!(images.get(handle).is_none());
     assert!(states.state(handle.id()).is_none());
     assert!(events.drain().is_empty());
@@ -2160,6 +2280,739 @@ fn image_plugin_reloads_a_linear_image_with_its_accepted_recipe() {
 
 #[cfg(feature = "serde")]
 #[test]
+fn image_plugin_coalesced_source_and_metadata_changes_use_the_latest_recipe() {
+    for kinds in [
+        [
+            AssetSourceChangeKind::MetaModified,
+            AssetSourceChangeKind::Modified,
+        ],
+        [
+            AssetSourceChangeKind::Modified,
+            AssetSourceChangeKind::MetaModified,
+        ],
+    ] {
+        let temp_root = unique_temp_root();
+        let texture_path = temp_root.join("textures").join("player.png");
+        let metadata_path = texture_path.with_extension("png.meta");
+        fs::create_dir_all(texture_path.parent().unwrap()).unwrap();
+        let record = image_record("textures/player.png");
+        let mut app = app_with_image_plugin(&temp_root, record.clone());
+        let importer = app.world().resource::<ImageImporter>().clone();
+        let (server, handle, images, states, events) =
+            loaded_image_store(&importer, &record, &[255, 0, 0, 255]);
+        let previous_version = states.version(handle.id()).unwrap();
+        let settings = ImageImportSettings::new(ImageColorSpace::Linear);
+        let metadata = AssetMeta::new(
+            AssetMetaIdentity::new(
+                record.stable_id(),
+                record.path().clone(),
+                record.source_kind().clone(),
+            ),
+            settings,
+        );
+        fs::write(&metadata_path, metadata.to_json_string().unwrap()).unwrap();
+        fs::write(&texture_path, rgba_png(1, 1, &[0, 255, 0, 255])).unwrap();
+        app.world_mut().unwrap().insert_resource(server);
+        app.world_mut().unwrap().insert_resource(images);
+        app.world_mut().unwrap().insert_resource(states);
+        app.world_mut().unwrap().insert_resource(events);
+        for kind in kinds {
+            app.world_mut()
+                .unwrap()
+                .resource_mut::<AssetSourceChanges>()
+                .push(nara_asset::AssetSourceChange::new(
+                    record.path().clone(),
+                    kind,
+                ))
+                .unwrap();
+        }
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        drive_image_jobs(&mut runtime);
+
+        let image = runtime
+            .world()
+            .resource::<Assets<ImageAsset>>()
+            .get(handle)
+            .map(|image| {
+                (
+                    image.source().settings(),
+                    image.color_space(),
+                    image.pixels().to_vec(),
+                    image.source().artifact().key().settings_hash(),
+                )
+            });
+        let version = runtime
+            .world()
+            .resource::<AssetStates>()
+            .version(handle.id());
+        let claimed = runtime
+            .world()
+            .resource::<AssetServer>()
+            .get_handle::<ImageAsset>(handle.id());
+        let applied = runtime.world().resource::<ImageReloadStats>().applied;
+        let budget = importer.budget_snapshot();
+        runtime.finish().unwrap();
+        remove_temp_root(&temp_root);
+
+        let (actual_settings, color_space, pixels, settings_hash) = image.unwrap();
+        assert_eq!(actual_settings, settings, "event order {kinds:?}");
+        assert_eq!(color_space, ImageColorSpace::Linear);
+        assert_eq!(pixels, &[0, 255, 0, 255]);
+        assert_eq!(settings_hash, settings.settings_hash());
+        assert_eq!(
+            version,
+            Some(AssetVersion::from_raw(previous_version.raw() + 1))
+        );
+        assert_eq!(claimed, Some(handle));
+        assert_eq!(applied, 1);
+        assert_budget_released(budget);
+    }
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn image_plugin_coalesced_removal_and_recreation_preserves_metadata_dirtiness() {
+    let temp_root = unique_temp_root();
+    let texture_path = temp_root.join("textures").join("player.png");
+    let metadata_path = texture_path.with_extension("png.meta");
+    fs::create_dir_all(texture_path.parent().unwrap()).unwrap();
+    let record = image_record("textures/player.png");
+    let mut app = app_with_image_plugin(&temp_root, record.clone());
+    let importer = app.world().resource::<ImageImporter>().clone();
+    let (server, handle, images, states, events) =
+        loaded_image_store(&importer, &record, &[255, 0, 0, 255]);
+    let previous_version = states.version(handle.id()).unwrap();
+    let settings = ImageImportSettings::new(ImageColorSpace::Linear);
+    let metadata = AssetMeta::new(
+        AssetMetaIdentity::new(
+            record.stable_id(),
+            record.path().clone(),
+            record.source_kind().clone(),
+        ),
+        settings,
+    );
+    fs::write(&metadata_path, metadata.to_json_string().unwrap()).unwrap();
+    fs::write(&texture_path, rgba_png(1, 1, &[0, 255, 0, 255])).unwrap();
+    app.world_mut().unwrap().insert_resource(server);
+    app.world_mut().unwrap().insert_resource(images);
+    app.world_mut().unwrap().insert_resource(states);
+    app.world_mut().unwrap().insert_resource(events);
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetSourceChanges>()
+        .try_extend([
+            nara_asset::AssetSourceChange::new(
+                record.path().clone(),
+                AssetSourceChangeKind::Removed,
+            ),
+            nara_asset::AssetSourceChange::new(
+                record.path().clone(),
+                AssetSourceChangeKind::MetaModified,
+            ),
+            nara_asset::AssetSourceChange::new(
+                record.path().clone(),
+                AssetSourceChangeKind::Modified,
+            ),
+        ])
+        .unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    drive_image_jobs(&mut runtime);
+    let recreated = runtime
+        .world()
+        .resource::<Assets<ImageAsset>>()
+        .get(handle)
+        .map(|image| (image.source().settings(), image.pixels().to_vec()));
+    let recreated_version = runtime
+        .world()
+        .resource::<AssetStates>()
+        .version(handle.id());
+
+    fs::remove_file(&texture_path).unwrap();
+    for kind in [
+        AssetSourceChangeKind::Removed,
+        AssetSourceChangeKind::MetaModified,
+    ] {
+        edit_image_pipeline(
+            &mut runtime,
+            ImagePipelineEdit::SourceChange {
+                path: record.path().clone(),
+                kind,
+            },
+        );
+    }
+    drive_image_jobs(&mut runtime);
+    let removed = runtime
+        .world()
+        .resource::<Assets<ImageAsset>>()
+        .get(handle)
+        .is_none();
+    let removed_state = runtime
+        .world()
+        .resource::<AssetStates>()
+        .state(handle.id())
+        .map(|state| state.load_state().clone());
+    let prepared_removed = runtime
+        .world()
+        .resource::<PreparedRenderResources<PreparedImageResource>>()
+        .get_ready(image_resource_key(handle))
+        .is_none();
+    let budget = importer.budget_snapshot();
+    runtime.finish().unwrap();
+    remove_temp_root(&temp_root);
+
+    assert_eq!(recreated, Some((settings, vec![0, 255, 0, 255])));
+    assert_eq!(
+        recreated_version,
+        Some(AssetVersion::from_raw(previous_version.raw() + 1))
+    );
+    assert!(removed);
+    assert_eq!(removed_state, Some(LoadState::Removed));
+    assert!(prepared_removed);
+    assert_budget_released(budget);
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn image_plugin_recovers_a_removed_image_from_same_identity_metadata() {
+    let temp_root = unique_temp_root();
+    let texture_path = temp_root.join("textures").join("player.png");
+    let metadata_path = texture_path.with_extension("png.meta");
+    fs::create_dir_all(texture_path.parent().unwrap()).unwrap();
+    let record = image_record("textures/player.png");
+    let mut app = app_with_image_plugin(&temp_root, record.clone());
+    let importer = app.world().resource::<ImageImporter>().clone();
+    let (server, handle, images, states, events) =
+        loaded_image_store(&importer, &record, &[255, 0, 0, 255]);
+    let previous_version = states.version(handle.id()).unwrap();
+    app.world_mut().unwrap().insert_resource(server);
+    app.world_mut().unwrap().insert_resource(images);
+    app.world_mut().unwrap().insert_resource(states);
+    app.world_mut().unwrap().insert_resource(events);
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetSourceChanges>()
+        .removed(record.path().clone())
+        .unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    drive_image_jobs(&mut runtime);
+    let removed_version = runtime
+        .world()
+        .resource::<AssetStates>()
+        .version(handle.id())
+        .unwrap();
+    let removed = runtime
+        .world()
+        .resource::<Assets<ImageAsset>>()
+        .get(handle)
+        .is_none();
+    let prepared_removed = runtime
+        .world()
+        .resource::<PreparedRenderResources<PreparedImageResource>>()
+        .get_ready(image_resource_key(handle))
+        .is_none();
+    let removed_count = runtime.world().resource::<ImageReloadStats>().removed;
+
+    let settings = ImageImportSettings::new(ImageColorSpace::Linear);
+    let metadata = AssetMeta::new(
+        AssetMetaIdentity::new(
+            record.stable_id(),
+            record.path().clone(),
+            record.source_kind().clone(),
+        ),
+        settings,
+    );
+    fs::write(&metadata_path, metadata.to_json_string().unwrap()).unwrap();
+    fs::write(&texture_path, b"not a PNG").unwrap();
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::SourceChange {
+            path: record.path().clone(),
+            kind: AssetSourceChangeKind::Modified,
+        },
+    );
+    drive_image_jobs(&mut runtime);
+    let failed_absent = runtime
+        .world()
+        .resource::<Assets<ImageAsset>>()
+        .get(handle)
+        .is_none();
+    let failed_state = runtime
+        .world()
+        .resource::<AssetStates>()
+        .state(handle.id())
+        .map(|state| (state.load_state().clone(), state.usable_version()));
+    let failed_version = runtime
+        .world()
+        .resource::<AssetStates>()
+        .version(handle.id());
+    fs::write(&texture_path, rgba_png(1, 1, &[0, 255, 0, 255])).unwrap();
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::SourceChange {
+            path: record.path().clone(),
+            kind: AssetSourceChangeKind::Modified,
+        },
+    );
+    drive_image_jobs(&mut runtime);
+    let image = runtime
+        .world()
+        .resource::<Assets<ImageAsset>>()
+        .get(handle)
+        .map(|image| {
+            (
+                image.source().settings(),
+                image.color_space(),
+                image.pixels().to_vec(),
+            )
+        });
+    let version = runtime
+        .world()
+        .resource::<AssetStates>()
+        .version(handle.id());
+    let claimed = runtime
+        .world()
+        .resource::<AssetServer>()
+        .get_handle::<ImageAsset>(handle.id());
+    let applied = runtime.world().resource::<ImageReloadStats>().applied;
+    let prepared = runtime
+        .world()
+        .resource::<PreparedRenderResources<PreparedImageResource>>()
+        .get_ready(image_resource_key(handle))
+        .is_some();
+    let budget = importer.budget_snapshot();
+    runtime.finish().unwrap();
+    remove_temp_root(&temp_root);
+
+    assert_eq!(removed_version.raw(), previous_version.raw() + 1);
+    assert!(removed && prepared_removed);
+    assert_eq!(removed_count, 1);
+    assert!(failed_absent);
+    assert!(matches!(
+        failed_state,
+        Some((LoadState::Failed { .. }, None))
+    ));
+    assert_eq!(failed_version, Some(removed_version));
+    assert_eq!(
+        image,
+        Some((settings, ImageColorSpace::Linear, vec![0, 255, 0, 255]))
+    );
+    assert_eq!(
+        version,
+        Some(AssetVersion::from_raw(removed_version.raw() + 1))
+    );
+    assert_eq!(claimed, Some(handle));
+    assert_eq!(applied, 1);
+    assert!(prepared);
+    assert_budget_released(budget);
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn image_plugin_removed_image_recovery_rejects_a_post_resolution_state_write() {
+    let temp_root = unique_temp_root();
+    let texture_path = temp_root.join("textures").join("player.png");
+    fs::create_dir_all(texture_path.parent().unwrap()).unwrap();
+    let record = image_record("textures/player.png");
+    let mut app = app_with_image_plugin(&temp_root, record.clone());
+    let importer = app.world().resource::<ImageImporter>().clone();
+    let (server, handle, images, states, events) =
+        loaded_image_store(&importer, &record, &[255, 0, 0, 255]);
+    app.world_mut().unwrap().insert_resource(server);
+    app.world_mut().unwrap().insert_resource(images);
+    app.world_mut().unwrap().insert_resource(states);
+    app.world_mut().unwrap().insert_resource(events);
+    let fail_recovery = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let failure_flag = Arc::clone(&fail_recovery);
+    app.add_systems(
+        CoreStage::TaskUpdate,
+        (move |mut images: ResMut<Assets<ImageAsset>>,
+               mut states: ResMut<AssetStates>,
+               mut events: ResMut<AssetEvents>| {
+            if failure_flag.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                images
+                    .record_load_failure(
+                        handle,
+                        &mut states,
+                        &mut events,
+                        "image.intervening-state-write",
+                    )
+                    .unwrap();
+            }
+        })
+        .after(AssetTaskUpdateSet::ResolveSourceChanges)
+        .before(AssetTaskUpdateSet::SpawnJobs),
+    )
+    .unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetSourceChanges>()
+        .removed(record.path().clone())
+        .unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    drive_image_jobs(&mut runtime);
+    let removed_version = runtime
+        .world()
+        .resource::<AssetStates>()
+        .version(handle.id());
+    let metadata = AssetMeta::new(
+        AssetMetaIdentity::new(
+            record.stable_id(),
+            record.path().clone(),
+            record.source_kind().clone(),
+        ),
+        ImageImportSettings::new(ImageColorSpace::Linear),
+    );
+    fs::write(
+        texture_path.with_extension("png.meta"),
+        metadata.to_json_string().unwrap(),
+    )
+    .unwrap();
+    fs::write(&texture_path, rgba_png(1, 1, &[0, 255, 0, 255])).unwrap();
+    fail_recovery.store(true, std::sync::atomic::Ordering::SeqCst);
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::SourceChange {
+            path: record.path().clone(),
+            kind: AssetSourceChangeKind::Modified,
+        },
+    );
+    drive_image_jobs(&mut runtime);
+    let absent = runtime
+        .world()
+        .resource::<Assets<ImageAsset>>()
+        .get(handle)
+        .is_none();
+    let state = runtime
+        .world()
+        .resource::<AssetStates>()
+        .state(handle.id())
+        .map(|state| state.load_state().clone());
+    let version = runtime
+        .world()
+        .resource::<AssetStates>()
+        .version(handle.id());
+    let applied = runtime.world().resource::<ImageReloadStats>().applied;
+    let budget = importer.budget_snapshot();
+    runtime.finish().unwrap();
+    remove_temp_root(&temp_root);
+
+    assert!(absent);
+    assert_eq!(
+        state,
+        Some(LoadState::Failed {
+            message: "image.intervening-state-write".to_owned(),
+        })
+    );
+    assert_eq!(version, removed_version);
+    assert_eq!(applied, 0);
+    assert_budget_released(budget);
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn image_plugin_removal_cannot_mint_recovery_after_a_post_resolution_state_write() {
+    let temp_root = unique_temp_root();
+    let texture_path = temp_root.join("textures").join("player.png");
+    fs::create_dir_all(texture_path.parent().unwrap()).unwrap();
+    let record = image_record("textures/player.png");
+    let mut app = app_with_image_plugin(&temp_root, record.clone());
+    let importer = app.world().resource::<ImageImporter>().clone();
+    let (server, handle, images, states, events) =
+        loaded_image_store(&importer, &record, &[255, 0, 0, 255]);
+    app.world_mut().unwrap().insert_resource(server);
+    app.world_mut().unwrap().insert_resource(images);
+    app.world_mut().unwrap().insert_resource(states);
+    app.world_mut().unwrap().insert_resource(events);
+    let mut fail_removal = true;
+    app.add_systems(
+        CoreStage::TaskUpdate,
+        (move |mut images: ResMut<Assets<ImageAsset>>,
+               mut states: ResMut<AssetStates>,
+               mut events: ResMut<AssetEvents>| {
+            if std::mem::take(&mut fail_removal) {
+                images
+                    .record_reload_failure(
+                        handle,
+                        &mut states,
+                        &mut events,
+                        "image.intervening-removal-failure",
+                    )
+                    .unwrap();
+            }
+        })
+        .after(AssetTaskUpdateSet::ResolveSourceChanges)
+        .before(AssetTaskUpdateSet::SpawnJobs),
+    )
+    .unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetSourceChanges>()
+        .removed(record.path().clone())
+        .unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    drive_image_jobs(&mut runtime);
+    let rejected_version = runtime
+        .world()
+        .resource::<AssetStates>()
+        .version(handle.id());
+    let settings = ImageImportSettings::new(ImageColorSpace::Linear);
+    let metadata = AssetMeta::new(
+        AssetMetaIdentity::new(
+            record.stable_id(),
+            record.path().clone(),
+            record.source_kind().clone(),
+        ),
+        settings,
+    );
+    fs::write(
+        texture_path.with_extension("png.meta"),
+        metadata.to_json_string().unwrap(),
+    )
+    .unwrap();
+    fs::write(&texture_path, rgba_png(1, 1, &[0, 255, 0, 255])).unwrap();
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::SourceChange {
+            path: record.path().clone(),
+            kind: AssetSourceChangeKind::Modified,
+        },
+    );
+    drive_image_jobs(&mut runtime);
+    let state = runtime
+        .world()
+        .resource::<AssetStates>()
+        .state(handle.id())
+        .map(|state| (state.load_state().clone(), state.usable_version()));
+    let version = runtime
+        .world()
+        .resource::<AssetStates>()
+        .version(handle.id());
+    let prepared_absent = runtime
+        .world()
+        .resource::<PreparedRenderResources<PreparedImageResource>>()
+        .get_ready(image_resource_key(handle))
+        .is_none();
+    let applied = runtime.world().resource::<ImageReloadStats>().applied;
+    let budget = importer.budget_snapshot();
+    runtime.finish().unwrap();
+    remove_temp_root(&temp_root);
+
+    assert!(matches!(state, Some((LoadState::Failed { message }, None))
+        if message == "image.reload-settings-missing"));
+    assert_eq!(version, rejected_version);
+    assert!(prepared_absent);
+    assert_eq!(applied, 0);
+    assert_budget_released(budget);
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn image_plugin_removal_does_not_authorize_an_unusable_or_empty_image() {
+    for prior_image in [false, true] {
+        let temp_root = unique_temp_root();
+        let texture_path = temp_root.join("textures").join("player.png");
+        fs::create_dir_all(texture_path.parent().unwrap()).unwrap();
+        let record = image_record("textures/player.png");
+        let mut app = app_with_image_plugin(&temp_root, record.clone());
+        let importer = app.world().resource::<ImageImporter>().clone();
+        let (server, handle, images, mut states, events) = if prior_image {
+            loaded_image_store(&importer, &record, &[255, 0, 0, 255])
+        } else {
+            let mut server = AssetServer::new();
+            let handle = server.reserve_record::<ImageAsset>(&record).unwrap();
+            (
+                server,
+                handle,
+                Assets::default(),
+                AssetStates::default(),
+                AssetEvents::default(),
+            )
+        };
+        states.invalidate_publication(handle.id());
+        app.world_mut().unwrap().insert_resource(server);
+        app.world_mut().unwrap().insert_resource(images);
+        app.world_mut().unwrap().insert_resource(states);
+        app.world_mut().unwrap().insert_resource(events);
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<AssetSourceChanges>()
+            .removed(record.path().clone())
+            .unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        drive_image_jobs(&mut runtime);
+        let metadata = AssetMeta::new(
+            AssetMetaIdentity::new(
+                record.stable_id(),
+                record.path().clone(),
+                record.source_kind().clone(),
+            ),
+            ImageImportSettings::new(ImageColorSpace::Linear),
+        );
+        fs::write(
+            texture_path.with_extension("png.meta"),
+            metadata.to_json_string().unwrap(),
+        )
+        .unwrap();
+        fs::write(&texture_path, rgba_png(1, 1, &[0, 255, 0, 255])).unwrap();
+        edit_image_pipeline(
+            &mut runtime,
+            ImagePipelineEdit::SourceChange {
+                path: record.path().clone(),
+                kind: AssetSourceChangeKind::Modified,
+            },
+        );
+        drive_image_jobs(&mut runtime);
+        let absent = runtime
+            .world()
+            .resource::<Assets<ImageAsset>>()
+            .get(handle)
+            .is_none();
+        let state = runtime
+            .world()
+            .resource::<AssetStates>()
+            .state(handle.id())
+            .map(|state| state.load_state().clone());
+        let applied = runtime.world().resource::<ImageReloadStats>().applied;
+        let budget = importer.budget_snapshot();
+        runtime.finish().unwrap();
+        remove_temp_root(&temp_root);
+
+        assert!(absent);
+        assert!(matches!(
+            state,
+            Some(LoadState::Failed { message }) if message == "image.reload-settings-missing"
+        ));
+        assert_eq!(applied, 0);
+        assert_budget_released(budget);
+    }
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn image_plugin_removed_image_recovery_cannot_bypass_metadata_identity() {
+    let temp_root = unique_temp_root();
+    let texture_path = temp_root.join("textures").join("player.png");
+    let metadata_path = texture_path.with_extension("png.meta");
+    fs::create_dir_all(texture_path.parent().unwrap()).unwrap();
+    let record = image_record("textures/player.png");
+    let mut app = app_with_image_plugin(&temp_root, record.clone());
+    let importer = app.world().resource::<ImageImporter>().clone();
+    let (server, handle, images, states, events) =
+        loaded_image_store(&importer, &record, &[255, 0, 0, 255]);
+    app.world_mut().unwrap().insert_resource(server);
+    app.world_mut().unwrap().insert_resource(images);
+    app.world_mut().unwrap().insert_resource(states);
+    app.world_mut().unwrap().insert_resource(events);
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetSourceChanges>()
+        .removed(record.path().clone())
+        .unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    drive_image_jobs(&mut runtime);
+    let removed_version = runtime
+        .world()
+        .resource::<AssetStates>()
+        .version(handle.id())
+        .unwrap();
+    let mismatched_metadata = AssetMeta::new(
+        AssetMetaIdentity::new(
+            StableAssetId::parse_str("3f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap(),
+            record.path().clone(),
+            record.source_kind().clone(),
+        ),
+        ImageImportSettings::new(ImageColorSpace::Linear),
+    );
+    fs::write(
+        &metadata_path,
+        mismatched_metadata.to_json_string().unwrap(),
+    )
+    .unwrap();
+    fs::write(&texture_path, rgba_png(1, 1, &[0, 255, 0, 255])).unwrap();
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::SourceChange {
+            path: record.path().clone(),
+            kind: AssetSourceChangeKind::Modified,
+        },
+    );
+    drive_image_jobs(&mut runtime);
+    let rejected_absent = runtime
+        .world()
+        .resource::<Assets<ImageAsset>>()
+        .get(handle)
+        .is_none();
+    let rejected_state = runtime
+        .world()
+        .resource::<AssetStates>()
+        .state(handle.id())
+        .map(|state| state.load_state().clone());
+    let rejected_version = runtime
+        .world()
+        .resource::<AssetStates>()
+        .version(handle.id());
+    let claimed = runtime
+        .world()
+        .resource::<AssetServer>()
+        .get_handle::<ImageAsset>(handle.id());
+    let settings = ImageImportSettings::new(ImageColorSpace::Linear);
+    let valid_metadata = AssetMeta::new(
+        AssetMetaIdentity::new(
+            record.stable_id(),
+            record.path().clone(),
+            record.source_kind().clone(),
+        ),
+        settings,
+    );
+    fs::write(&metadata_path, valid_metadata.to_json_string().unwrap()).unwrap();
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::SourceChange {
+            path: record.path().clone(),
+            kind: AssetSourceChangeKind::Modified,
+        },
+    );
+    drive_image_jobs(&mut runtime);
+    let modified_absent = runtime
+        .world()
+        .resource::<Assets<ImageAsset>>()
+        .get(handle)
+        .is_none();
+    let modified_state = runtime
+        .world()
+        .resource::<AssetStates>()
+        .state(handle.id())
+        .map(|state| state.load_state().clone());
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::SourceChange {
+            path: record.path().clone(),
+            kind: AssetSourceChangeKind::MetaModified,
+        },
+    );
+    drive_image_jobs(&mut runtime);
+    let image = runtime
+        .world()
+        .resource::<Assets<ImageAsset>>()
+        .get(handle)
+        .map(|image| (image.source().settings(), image.pixels().to_vec()));
+    let budget = importer.budget_snapshot();
+    runtime.finish().unwrap();
+    remove_temp_root(&temp_root);
+
+    assert!(rejected_absent && modified_absent);
+    assert!(matches!(rejected_state,
+        Some(LoadState::Failed { message }) if message == "image.reload-metadata-identity-mismatch"));
+    assert_eq!(rejected_version, Some(removed_version));
+    assert_eq!(claimed, Some(handle));
+    assert!(matches!(modified_state,
+        Some(LoadState::Failed { message }) if message == "image.reload-settings-missing"));
+    assert_eq!(image, Some((settings, vec![0, 255, 0, 255])));
+    assert_budget_released(budget);
+}
+
+#[cfg(feature = "serde")]
+#[test]
 fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
     let temp_root = unique_temp_root();
     let texture_path = temp_root.join("textures").join("player.png");
@@ -2691,14 +3544,13 @@ fn image_ordering_is_per_asset_and_ready_snapshots_follow_task_order_keys() {
         StableAssetId::parse_str("933965e8-6d5a-4a72-9bda-65af6bc52296").unwrap(),
     );
     let second_record = image_record("textures/b.png");
-    let first_asset = AssetId::from_raw(20);
-    let second_asset = AssetId::from_raw(10);
-    let first_request = reload_request(&first_record, Handle::new(first_asset), AssetVersion::ZERO);
-    let second_request = reload_request(
-        &second_record,
-        Handle::new(second_asset),
-        AssetVersion::ZERO,
-    );
+    let mut server = AssetServer::new();
+    let second_handle = server.reserve_record::<ImageAsset>(&second_record).unwrap();
+    let first_handle = server.reserve_record::<ImageAsset>(&first_record).unwrap();
+    let first_asset = first_handle.id();
+    let second_asset = second_handle.id();
+    let first_request = reload_request(&first_record, first_handle, AssetVersion::ZERO);
+    let second_request = reload_request(&second_record, second_handle, AssetVersion::ZERO);
     let pools = TaskPools::try_new(bounded_task_config(4, 8)).unwrap();
     let (first_started_tx, first_started_rx) = mpsc::channel();
     let (first_release_tx, first_release_rx) = mpsc::channel();
@@ -2734,19 +3586,25 @@ fn image_ordering_is_per_asset_and_ready_snapshots_follow_task_order_keys() {
         .imports
         .entry(first_asset)
         .or_default()
-        .push(detached_attempt(first_request.clone()), first)
+        .push(detached_attempt(first_request.clone(), first_handle), first)
         .unwrap();
     pending
         .imports
         .entry(first_asset)
         .or_default()
-        .push(detached_attempt(first_request.clone()), first_later)
+        .push(
+            detached_attempt(first_request.clone(), first_handle),
+            first_later,
+        )
         .unwrap();
     pending
         .imports
         .entry(second_asset)
         .or_default()
-        .push(detached_attempt(second_request.clone()), unrelated)
+        .push(
+            detached_attempt(second_request.clone(), second_handle),
+            unrelated,
+        )
         .unwrap();
 
     wait_for_io_completions(&pools, 2);
@@ -2771,7 +3629,10 @@ fn image_ordering_is_per_asset_and_ready_snapshots_follow_task_order_keys() {
         .imports
         .entry(second_asset)
         .or_default()
-        .push(detached_attempt(second_request), second_later)
+        .push(
+            detached_attempt(second_request, second_handle),
+            second_later,
+        )
         .unwrap();
     wait_for_io_completions(&pools, 3);
 
@@ -2811,8 +3672,11 @@ fn image_ready_capture_rejects_mixed_task_pools_without_mutating_any_stream() {
         StableAssetId::parse_str("933965e8-6d5a-4a72-9bda-65af6bc52296").unwrap(),
     );
     let second_record = image_record("textures/b.png");
-    let first_asset = AssetId::from_raw(10);
-    let second_asset = AssetId::from_raw(20);
+    let mut server = AssetServer::new();
+    let first_handle = server.reserve_record::<ImageAsset>(&first_record).unwrap();
+    let second_handle = server.reserve_record::<ImageAsset>(&second_record).unwrap();
+    let first_asset = first_handle.id();
+    let second_asset = second_handle.id();
     let own_pools = TaskPools::inline_for_tests(bounded_task_config(2, 2)).unwrap();
     let foreign_pools = TaskPools::inline_for_tests(bounded_task_config(2, 2)).unwrap();
     let own_task = accepted_image_handle(own_pools.spawn(
@@ -2832,11 +3696,10 @@ fn image_ready_capture_rejects_mixed_task_pools_without_mutating_any_stream() {
         .entry(first_asset)
         .or_default()
         .push(
-            detached_attempt(reload_request(
-                &first_record,
-                Handle::new(first_asset),
-                AssetVersion::ZERO,
-            )),
+            detached_attempt(
+                reload_request(&first_record, first_handle, AssetVersion::ZERO),
+                first_handle,
+            ),
             own_task,
         )
         .unwrap();
@@ -2845,11 +3708,10 @@ fn image_ready_capture_rejects_mixed_task_pools_without_mutating_any_stream() {
         .entry(second_asset)
         .or_default()
         .push(
-            detached_attempt(reload_request(
-                &second_record,
-                Handle::new(second_asset),
-                AssetVersion::ZERO,
-            )),
+            detached_attempt(
+                reload_request(&second_record, second_handle, AssetVersion::ZERO),
+                second_handle,
+            ),
             foreign_task,
         )
         .unwrap();
@@ -3315,7 +4177,7 @@ fn publication_failure_releases_candidate_charge_for_the_failure_recorder() {
         0
     );
     let request = reload_request(&record, handle, AssetVersion::ZERO);
-    let attempt = ImageReloadAttempt::capture(request, &images, &states);
+    let attempt = ImageReloadAttempt::capture(request, handle, &images, &states);
     let mut stats = ImageReloadStats::default();
     let unknown_server = AssetServer::new();
 
@@ -3348,6 +4210,7 @@ fn publication_failure_releases_candidate_charge_for_the_failure_recorder() {
     record_image_reload_failure(
         attempt,
         error.unwrap(),
+        &server,
         &mut images,
         &mut states,
         &mut events,
@@ -3372,7 +4235,7 @@ fn stale_first_load_failure_cannot_overwrite_newer_state() {
     let mut events = AssetEvents::default();
     let expected_version = states.set_loading(handle.id());
     let request = reload_request(&record, handle, expected_version);
-    let attempt = ImageReloadAttempt::capture(request, &images, &states);
+    let attempt = ImageReloadAttempt::capture(request, handle, &images, &states);
     images
         .remove_with_state(handle, &mut states, &mut events)
         .unwrap();
@@ -3383,6 +4246,7 @@ fn stale_first_load_failure_cannot_overwrite_newer_state() {
     record_image_reload_failure(
         attempt,
         ImageReloadError::MissingSourceDirectory,
+        &server,
         &mut images,
         &mut states,
         &mut events,
@@ -3409,6 +4273,7 @@ fn same_version_state_aba_retires_an_old_failure_as_stale() {
     let expected_version = states.set_loading(handle.id());
     let attempt = ImageReloadAttempt::capture(
         reload_request(&record, handle, expected_version),
+        handle,
         &images,
         &states,
     );
@@ -3423,6 +4288,7 @@ fn same_version_state_aba_retires_an_old_failure_as_stale() {
     record_image_reload_failure(
         attempt,
         ImageReloadError::MissingSourceDirectory,
+        &server,
         &mut images,
         &mut states,
         &mut events,
@@ -3444,11 +4310,12 @@ fn same_version_state_aba_retires_an_old_failure_as_stale() {
 fn slot_replacement_retires_an_old_failure_as_stale() {
     let record = image_record("textures/player.png");
     let importer = ImageImporter::default();
-    let (_server, handle, mut images, mut states, mut events) =
+    let (server, handle, mut images, mut states, mut events) =
         loaded_image_store(&importer, &record, &[255, 0, 0, 255]);
     let expected_version = states.set_loading(handle.id());
     let attempt = ImageReloadAttempt::capture(
         reload_request(&record, handle, expected_version),
+        handle,
         &images,
         &states,
     );
@@ -3466,6 +4333,7 @@ fn slot_replacement_retires_an_old_failure_as_stale() {
     record_image_reload_failure(
         attempt,
         ImageReloadError::MissingSourceDirectory,
+        &server,
         &mut images,
         &mut states,
         &mut events,
@@ -4160,8 +5028,15 @@ fn track_image_task(
     handle: TaskHandle<ImageImportTaskResult>,
 ) {
     let asset_id = request.asset_id();
+    let image_handle = app
+        .world_mut()
+        .unwrap()
+        .resource_mut::<AssetServer>()
+        .claim::<ImageAsset>(asset_id)
+        .unwrap();
     let attempt = ImageReloadAttempt::capture(
         request,
+        image_handle,
         app.world().resource::<Assets<ImageAsset>>(),
         app.world().resource::<AssetStates>(),
     );
@@ -4176,9 +5051,10 @@ fn track_image_task(
     assert!(tracked.is_ok());
 }
 
-fn detached_attempt(request: AssetReloadRequest) -> ImageReloadAttempt {
+fn detached_attempt(request: AssetReloadRequest, handle: Handle<ImageAsset>) -> ImageReloadAttempt {
     ImageReloadAttempt::capture(
         request,
+        handle,
         &Assets::<ImageAsset>::default(),
         &AssetStates::default(),
     )

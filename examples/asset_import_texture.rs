@@ -56,9 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Name::new("camera"),
                 Transform2d::default(),
                 Camera2d {
-                    target: RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(
-                        500,
-                    ))),
+                    target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
                     viewport: Some(ViewportRect::new(0, 0, 64, 64).unwrap()),
                     viewport_height: 64.0,
                     clear_color: Some(Color::rgb(0.02, 0.03, 0.04)),

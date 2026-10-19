@@ -1,6 +1,117 @@
 use super::*;
 
 #[test]
+fn reload_resolution_claims_the_consumer_type_before_publishing_loading() {
+    #[derive(Resource, Default)]
+    struct CompetingClaim(bool);
+
+    let mut app = App::new();
+    install_asset_plugin(&mut app);
+    install_test_reload_consumer(&mut app);
+    let record = image_record("textures/player.png", stable_id());
+    let world = app.world_mut().unwrap();
+    world
+        .resource_mut::<ProjectAssetDatabase>()
+        .insert(record.clone())
+        .unwrap();
+    let id = world
+        .resource_mut::<AssetServer>()
+        .reserve_record_id(&record)
+        .unwrap();
+    world
+        .resource_mut::<AssetSourceChanges>()
+        .modified(record.path().clone())
+        .unwrap();
+    app.init_resource::<CompetingClaim>().unwrap();
+    app.add_systems(
+        CoreStage::TaskUpdate,
+        (move |mut server: ResMut<AssetServer>, mut claim: ResMut<CompetingClaim>| {
+            claim.0 = server.claim::<u32>(id).is_ok();
+        })
+        .after(AssetTaskUpdateSet::ResolveSourceChanges)
+        .before(AssetTaskUpdateSet::SpawnJobs),
+    )
+    .unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+
+    runtime.drive(std::time::Duration::ZERO).unwrap();
+
+    assert!(!runtime.world().resource::<CompetingClaim>().0);
+    assert!(
+        runtime
+            .world()
+            .resource::<AssetServer>()
+            .get_handle::<String>(id)
+            .is_some()
+    );
+    assert_eq!(
+        runtime.world().resource::<CapturedReloadRequests>().0.len(),
+        1
+    );
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn incompatible_reload_routing_preserves_the_owning_types_state() {
+    for removed in [false, true] {
+        let mut app = App::new();
+        install_asset_plugin(&mut app);
+        install_test_reload_consumer(&mut app);
+        let record = image_record("textures/player.png", stable_id());
+        let world = app.world_mut().unwrap();
+        world
+            .resource_mut::<ProjectAssetDatabase>()
+            .insert(record.clone())
+            .unwrap();
+        let handle = world
+            .resource_mut::<AssetServer>()
+            .reserve_record::<u32>(&record)
+            .unwrap();
+        world.resource_mut::<AssetStates>().set_loaded_at(
+            handle.id(),
+            AssetVersion::from_raw(1),
+            None,
+            None,
+        );
+        let baseline = world
+            .resource::<AssetStates>()
+            .state(handle.id())
+            .unwrap()
+            .clone();
+        let revision = world.resource::<AssetStates>().state_revision(handle.id());
+        let mut changes = world.resource_mut::<AssetSourceChanges>();
+        if removed {
+            changes.removed(record.path().clone()).unwrap();
+        } else {
+            changes.modified(record.path().clone()).unwrap();
+        }
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+
+        runtime.drive(std::time::Duration::ZERO).unwrap();
+
+        let world = runtime.world();
+        assert_eq!(
+            world.resource::<AssetStates>().state(handle.id()),
+            Some(&baseline)
+        );
+        assert_eq!(
+            world.resource::<AssetStates>().state_revision(handle.id()),
+            revision
+        );
+        assert!(world.resource::<CapturedReloadRequests>().0.is_empty());
+        assert_eq!(
+            world
+                .resource::<AssetLoadGenerations>()
+                .current(handle.id()),
+            AssetLoadGeneration::ZERO
+        );
+        assert_eq!(world.resource::<AssetReloadDiagnostics>().iter().count(), 1);
+        assert_eq!(world.resource::<AssetEvents>().iter().count(), 0);
+        runtime.finish().unwrap();
+    }
+}
+
+#[test]
 fn asset_plugin_resolves_manual_changes_into_generation_requests() {
     let mut app = App::new();
     install_asset_plugin(&mut app);

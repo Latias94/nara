@@ -218,6 +218,7 @@ pub(crate) struct EditorImageImportHost {
     catalog_attempt: Option<EditorImageCatalogAttempt>,
     catalog: Option<Arc<EditorImageCatalogSnapshot>>,
     catalog_failure: Option<EditorImageCatalogBuildError>,
+    runtime_revocation_failure: Option<EditorImageRuntimeFailure>,
     next_attempt_generation: u64,
     pending: Option<PendingImageImport>,
     latest: Option<EditorImageImportLatestAttempt>,
@@ -240,6 +241,7 @@ impl Default for EditorImageImportHost {
             catalog_attempt: None,
             catalog: None,
             catalog_failure: None,
+            runtime_revocation_failure: None,
             next_attempt_generation: 1,
             pending: None,
             latest: None,
@@ -329,10 +331,6 @@ impl EditorImageImportHost {
     }
 
     #[must_use]
-    pub(crate) fn authoring_catalog_publication_ready(&self) -> bool {
-        !self.hydration.has_pending_work()
-    }
-
     pub(crate) fn take_hydration_failure(&mut self) -> Option<EditorImageHydrationFailure> {
         self.hydration.take_failure()
     }
@@ -347,9 +345,11 @@ impl EditorImageImportHost {
 
     #[must_use]
     pub(crate) fn request_blocker(&self) -> Option<EditorImageImportFailure> {
-        if self.publication_cleanup.is_some() {
+        if let Some(failure) = self.runtime_revocation_failure {
+            Some(EditorImageImportFailure::Runtime(failure))
+        } else if self.publication_cleanup.is_some() {
             Some(EditorImageImportFailure::CleanupPending)
-        } else if self.pending.is_some() || self.hydration.has_pending_work() {
+        } else if self.pending.is_some() {
             Some(EditorImageImportFailure::Busy)
         } else if self.reconciliation.is_some() {
             Some(EditorImageImportFailure::ReconcileRequired)
@@ -398,15 +398,18 @@ impl EditorImageImportHost {
         &mut self,
         project: &mut AuthoringProjectSessionSnapshot,
         runtime: &mut EditorAuthoringRuntime,
-    ) {
+    ) -> Option<EditorImageRuntimeFailure> {
+        let previous_failure = self.runtime_revocation_failure;
         self.advance_refresh(project);
-        self.advance_catalog(project);
+        self.advance_catalog(project, runtime);
         self.advance_reconciliation(project);
         self.advance_import(project, runtime);
         if self.pending.is_none() {
             self.hydration
                 .advance(project, runtime, &mut self.last_good);
         }
+        self.runtime_revocation_failure
+            .filter(|_| previous_failure.is_none())
     }
 
     pub(crate) fn request(
@@ -581,6 +584,7 @@ impl EditorImageImportHost {
             }
         };
         let metadata_changed = previous_settings != Some(settings);
+        self.hydration.surrender_source(entry.asset_path());
         let mut detail_revision = source_index.generation().get();
         if metadata_changed {
             #[cfg(test)]
@@ -710,7 +714,11 @@ impl EditorImageImportHost {
         EditorImageImportRequestResult::Started(generation)
     }
 
-    fn advance_catalog(&mut self, project: &AuthoringProjectSessionSnapshot) {
+    fn advance_catalog(
+        &mut self,
+        project: &AuthoringProjectSessionSnapshot,
+        runtime: &mut EditorAuthoringRuntime,
+    ) {
         if self.refresh.is_some() || project.source_index_failure().is_some() {
             self.catalog_basis = None;
             self.catalog_attempt = None;
@@ -754,6 +762,36 @@ impl EditorImageImportHost {
         };
         match attempt.advance(project) {
             Ok(Some(snapshot)) => {
+                self.hydration
+                    .retain_catalog_eligible(|path, stable_id, source_identity| {
+                        snapshot.retains_imported_image(path, stable_id, source_identity)
+                    });
+                if self.pending.as_ref().is_some_and(|pending| {
+                    !snapshot.retains_imported_image(
+                        &pending.asset_path,
+                        pending.stable_id,
+                        pending.source_identity,
+                    )
+                }) {
+                    let pending = self
+                        .pending
+                        .take()
+                        .expect("an ineligible import remains owned until cancellation");
+                    self.set_latest_state(EditorImageImportState::Failed {
+                        generation: pending.generation,
+                        failure: EditorImageImportFailure::MetadataInvalid,
+                    });
+                }
+                let revoked = self.last_good.ineligible_handles(|path, image| {
+                    snapshot.retains_imported_image(
+                        path,
+                        image.stable_id(),
+                        image.source_identity(),
+                    )
+                });
+                if let Err(failure) = runtime.revoke_images(revoked) {
+                    self.runtime_revocation_failure = Some(failure);
+                }
                 self.last_good.retain_catalog_eligible(|asset_path, image| {
                     snapshot.retains_imported_image(
                         asset_path,

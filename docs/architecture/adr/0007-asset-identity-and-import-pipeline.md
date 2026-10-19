@@ -34,6 +34,18 @@ flowchart TD
 Core rules:
 
 - User code and scene data refer to assets through typed `Handle<T>` or serialized asset references, not raw filesystem access.
+- Runtime `AssetId` allocation is process-unique, checked, monotonic, and never reused or wrapped.
+  `AssetServer` clones are isolated catalogue snapshots: existing bindings are copied, while new
+  allocations from divergent snapshots remain distinct. Allocator progress is not persistent
+  asset identity and does not participate in catalogue equality.
+- One principal source identity has at most one Rust asset type per catalogue. Identity-only
+  resolution may reserve an unclaimed ID; typed reservation or `AssetServer::claim` establishes
+  the type. Incompatible claims reject before changing bindings. Catalogue equality includes
+  type claims and anonymous identities, so rejected staged work cannot publish them.
+- Runtime IDs and typed handles have no public raw constructor or retype operation.
+  `AssetServer::get_handle` retrieves an existing matching claim. Render domains may allocate
+  fresh anonymous typed identities without source-catalog membership; these are neither
+  residency leases nor GPU ownership authority.
 - Phase 1 can use path-first identity for speed.
 - The model must be UUID-ready so Phase 2 can add `.meta` files without changing scene/prefab semantics.
 - Hot reload changes asset versions behind stable handles; it should not require all scenes to rewrite references.
@@ -77,6 +89,10 @@ Core rules:
 - `nara_asset` now separates persistent identity (`AssetRef`, `AssetPath`, `StableAssetId`,
   `.meta`, and `ProjectAssetDatabase`) from runtime identity (`AssetId`, `Handle<T>`, and
   `AssetVersion`).
+- Runtime IDs come from one checked process allocator. A discarded staged catalogue may consume an
+  opaque ID, but it cannot publish a binding, value, state, or event; later work never reuses that
+  ID. Equality for catalogue snapshots compares source bindings and type claims, not allocator
+  progress. Source identity allocation and detached render identities share that allocator.
 - Source changes enter asset loading through `AssetSourceChanges` and `SourceChangeResolver`.
   The resolver coalesces source changes, maps `.meta` updates to source assets, walks source
   dependency edges, and emits `AssetReloadRequest` values.

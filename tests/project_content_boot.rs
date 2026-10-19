@@ -10,8 +10,9 @@ use nara::image::{ImageColorSpace, ImageImportSettings};
 use nara::project_host::{
     ProjectContentBudgetKind, ProjectContentLoader, StartupContentMemberKind,
 };
-use nara::scene::{PrefabDocument, SceneComponentRecord, SceneEntityRecord};
-use project_content_fixture::{TestProject, player_image_meta, scene_id};
+use nara::reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue};
+use nara::scene::{PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityRecord};
+use project_content_fixture::{TestProject, player_image_meta, scene_id, tileset_meta};
 
 struct EscapeOwner;
 
@@ -34,6 +35,284 @@ fn strict_project_content_load_uses_the_persisted_linear_recipe() {
         image.source().artifact().key().settings_hash(),
         meta.settings().settings_hash()
     );
+}
+
+#[test]
+fn file_backed_tileset_enters_the_startup_closure_with_its_image_dependency() {
+    let project = TestProject::with_prefab_startup();
+    let tileset_id = "d3d3f9a6-f7a9-4db0-ae3c-e1d4264d6f12";
+    let tilemap = SceneEntityRecord::new(scene_id("terrain"))
+        .with_component(
+            ComponentTypeId::new("nara.transform.Transform2d"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([
+                    (
+                        "translation",
+                        ComponentValue::map([
+                            ("x", ComponentValue::f64(0.0).unwrap()),
+                            ("y", ComponentValue::f64(0.0).unwrap()),
+                        ]),
+                    ),
+                    ("rotation", ComponentValue::f64(0.0).unwrap()),
+                    (
+                        "scale",
+                        ComponentValue::map([
+                            ("x", ComponentValue::f64(1.0).unwrap()),
+                            ("y", ComponentValue::f64(1.0).unwrap()),
+                        ]),
+                    ),
+                ]),
+            ),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.tilemap.Tilemap"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([
+                    (
+                        "tile_size",
+                        ComponentValue::map([
+                            ("x", ComponentValue::f64(1.0).unwrap()),
+                            ("y", ComponentValue::f64(1.0).unwrap()),
+                        ]),
+                    ),
+                    (
+                        "tileset",
+                        ComponentValue::map([
+                            ("kind", ComponentValue::String("stable_id".to_owned())),
+                            ("value", ComponentValue::String(tileset_id.to_owned())),
+                        ]),
+                    ),
+                    ("cells", ComponentValue::List(Vec::new())),
+                ]),
+            ),
+        );
+    project.write_scene_source(&SceneDocument::from_ordered_roots([tilemap]));
+    let source = nara::tilemap::TileSetSource::new(
+        nara::asset::AssetRef::StableId(player_image_meta().identity().stable_id()),
+        nara::tilemap::TileAtlasLayout::grid(nara::core::Vec2::new(0.25, 0.25), 2, 2)
+            .with_margin(nara::core::Vec2::new(0.125, 0.125))
+            .with_spacing(nara::core::Vec2::new(0.25, 0.25)),
+    );
+    project.write_tileset_source(
+        "tilesets/terrain.tileset.ron",
+        &source,
+        &tileset_meta(tileset_id, "tilesets/terrain.tileset.ron"),
+    );
+
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    let snapshot = loader.load(&candidate, &plan).unwrap();
+
+    assert_eq!(snapshot.tilesets().len(), 1);
+    assert_eq!(
+        snapshot.tilesets()[0].path().as_str(),
+        "tilesets/terrain.tileset.ron"
+    );
+    assert_eq!(
+        snapshot.tilesets()[0].image_path().as_str(),
+        "textures/player.png"
+    );
+    assert_eq!(snapshot.images().len(), 1);
+    assert!(
+        snapshot
+            .startup_content_closure()
+            .members()
+            .iter()
+            .any(|member| { member.path().as_str() == "assets/tilesets/terrain.tileset.ron" })
+    );
+    assert!(
+        snapshot
+            .startup_content_closure()
+            .members()
+            .iter()
+            .any(|member| { member.path().as_str() == "assets/tilesets/terrain.tileset.ron.meta" })
+    );
+    assert!(
+        snapshot
+            .startup_content_closure()
+            .members()
+            .iter()
+            .any(|member| { member.path().as_str() == "assets/textures/player.png" })
+    );
+    assert!(
+        snapshot
+            .startup_content_closure()
+            .members()
+            .iter()
+            .any(|member| { member.path().as_str() == "assets/textures/player.png.meta" })
+    );
+
+    let changed_source = source
+        .clone()
+        .with_tint(nara::core::Color::rgb(0.5, 1.0, 1.0));
+    project.write_tileset_source(
+        "tilesets/terrain.tileset.ron",
+        &changed_source,
+        &tileset_meta(tileset_id, "tilesets/terrain.tileset.ron"),
+    );
+    let successor = loader.load(&candidate, &plan).unwrap();
+    assert_ne!(successor.revision(), snapshot.revision());
+    assert_ne!(
+        successor.tilesets()[0].source_hash(),
+        snapshot.tilesets()[0].source_hash()
+    );
+    assert_eq!(snapshot.tilesets()[0].source(), &source);
+    assert_eq!(successor.tilesets()[0].source(), &changed_source);
+
+    for atlas in [
+        nara::tilemap::TileAtlasLayout::grid(nara::core::Vec2::ONE, 1, 1)
+            .with_margin(nara::core::Vec2::new(1.0e-20, 0.0)),
+        nara::tilemap::TileAtlasLayout::grid(
+            nara::core::Vec2::new(2.0_f32.powi(-24), 1.0),
+            16_777_217,
+            1,
+        ),
+        nara::tilemap::TileAtlasLayout::grid(nara::core::Vec2::ONE, 1, 1)
+            .with_margin(nara::core::Vec2::new(1.0e-8, 0.0)),
+        nara::tilemap::TileAtlasLayout::grid(nara::core::Vec2::new(0.5, 1.0), 2, 1)
+            .with_spacing(nara::core::Vec2::new(1.0e-8, 0.0)),
+        nara::tilemap::TileAtlasLayout::grid(nara::core::Vec2::new(0.5, 1.0), 1, 1),
+        nara::tilemap::TileAtlasLayout::grid(nara::core::Vec2::new(2.0, 1.0), 1, 1),
+        nara::tilemap::TileAtlasLayout::grid(nara::core::Vec2::new(1.5, 1.0), 1, 1),
+        nara::tilemap::TileAtlasLayout::grid(nara::core::Vec2::ONE, 1, 1)
+            .with_margin(nara::core::Vec2::new(0.5, 0.0)),
+        nara::tilemap::TileAtlasLayout::grid(nara::core::Vec2::new(0.5, 1.0), 2, 1)
+            .with_spacing(nara::core::Vec2::new(0.5, 0.0)),
+    ] {
+        let mismatched_source = nara::tilemap::TileSetSource::new(
+            nara::asset::AssetRef::path("textures/player.png").unwrap(),
+            atlas,
+        );
+        project.write_tileset_source(
+            "tilesets/terrain.tileset.ron",
+            &mismatched_source,
+            &tileset_meta(tileset_id, "tilesets/terrain.tileset.ron"),
+        );
+        let before_rejection = loader.budget_snapshot();
+        let error = loader.load(&candidate, &plan).unwrap_err();
+        assert!(
+            error.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code().as_str() == "project.content.tileset-image-extent-mismatch"
+            }),
+            "{error:?}"
+        );
+        let after_rejection = loader.budget_snapshot();
+        for kind in ProjectContentBudgetKind::ALL {
+            assert_eq!(
+                after_rejection.active(*kind),
+                before_rejection.active(*kind)
+            );
+        }
+        assert_eq!(
+            after_rejection.active_reservations(),
+            before_rejection.active_reservations()
+        );
+        assert_eq!(snapshot.tilesets()[0].source(), &source);
+        assert_eq!(successor.tilesets()[0].source(), &changed_source);
+    }
+
+    let before_rejection = loader.budget_snapshot();
+    project.write_tileset_source(
+        "tilesets/terrain.tileset.ron",
+        &nara::tilemap::TileSetSource::new(
+            nara::asset::AssetRef::path("textures/missing.png").unwrap(),
+            source.atlas,
+        ),
+        &tileset_meta(tileset_id, "tilesets/terrain.tileset.ron"),
+    );
+    assert!(loader.load(&candidate, &plan).is_err());
+    let after_rejection = loader.budget_snapshot();
+    for kind in ProjectContentBudgetKind::ALL {
+        assert_eq!(
+            after_rejection.active(*kind),
+            before_rejection.active(*kind)
+        );
+    }
+    assert_eq!(
+        after_rejection.active_reservations(),
+        before_rejection.active_reservations()
+    );
+    assert_eq!(snapshot.tilesets()[0].source(), &source);
+    assert_eq!(successor.tilesets()[0].source(), &changed_source);
+}
+
+#[test]
+fn file_backed_tilesets_sharing_an_image_validate_each_atlas_before_snapshot_publication() {
+    let project = TestProject::with_prefab_startup();
+    let tilemaps = ["tilesets/ground.tileset.ron", "tilesets/water.tileset.ron"];
+    project.write_scene_source(&SceneDocument::from_ordered_roots(tilemaps.map(|path| {
+        SceneEntityRecord::new(scene_id(path))
+            .with_component(
+                ComponentTypeId::new("nara.transform.Transform2d"),
+                project_content_fixture::identity_transform_record(),
+            )
+            .with_component(
+                ComponentTypeId::new("nara.tilemap.Tilemap"),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::map([
+                        (
+                            "tile_size",
+                            ComponentValue::map([
+                                ("x", ComponentValue::f64(1.0).unwrap()),
+                                ("y", ComponentValue::f64(1.0).unwrap()),
+                            ]),
+                        ),
+                        (
+                            "tileset",
+                            ComponentValue::map([
+                                ("kind", ComponentValue::String("path".to_owned())),
+                                ("value", ComponentValue::String(path.to_owned())),
+                            ]),
+                        ),
+                        ("cells", ComponentValue::List(Vec::new())),
+                    ]),
+                ),
+            )
+    })));
+    let ground = nara::tilemap::TileSetSource::new(
+        nara::asset::AssetRef::path("textures/player.png").unwrap(),
+        nara::tilemap::TileAtlasLayout::grid(nara::core::Vec2::ONE, 1, 1),
+    );
+    let water = nara::tilemap::TileSetSource::new(
+        nara::asset::AssetRef::StableId(player_image_meta().identity().stable_id()),
+        nara::tilemap::TileAtlasLayout::grid(nara::core::Vec2::new(0.5, 1.0), 2, 1),
+    );
+    let ground_meta = tileset_meta("d3d3f9a6-f7a9-4db0-ae3c-e1d4264d6f12", tilemaps[0]);
+    let water_meta = tileset_meta("7bbab959-d42c-43f0-9406-472929854a3a", tilemaps[1]);
+    project.write_tileset_source(tilemaps[0], &ground, &ground_meta);
+    project.write_tileset_source(tilemaps[1], &water, &water_meta);
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    let snapshot = loader.load(&candidate, &plan).unwrap();
+    assert_eq!(snapshot.tilesets().len(), 2);
+    assert_eq!(snapshot.images().len(), 1);
+
+    let invalid_water = nara::tilemap::TileSetSource::new(
+        water.image.clone(),
+        water.atlas.with_spacing(nara::core::Vec2::new(0.5, 0.0)),
+    );
+    project.write_tileset_source(tilemaps[1], &invalid_water, &water_meta);
+    let before_rejection = loader.budget_snapshot();
+    let error = loader.load(&candidate, &plan).unwrap_err();
+    assert!(error.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "project.content.tileset-image-extent-mismatch"
+    }));
+    let after_rejection = loader.budget_snapshot();
+    for kind in ProjectContentBudgetKind::ALL {
+        assert_eq!(
+            after_rejection.active(*kind),
+            before_rejection.active(*kind)
+        );
+    }
+    assert_eq!(
+        after_rejection.active_reservations(),
+        before_rejection.active_reservations()
+    );
+    assert_eq!(snapshot.tilesets()[0].source(), &ground);
+    assert_eq!(snapshot.tilesets()[1].source(), &water);
 }
 
 #[test]

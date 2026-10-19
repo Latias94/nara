@@ -1330,7 +1330,6 @@ impl WgpuEditorExecution {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_asset::{AssetId, Handle};
     use nara_ecs::Entity;
     use nara_render::{
         __private::{EditorRenderGeneration, build_editor_render_frame_packet},
@@ -1756,7 +1755,11 @@ mod tests {
         )
         .unwrap();
         let duplicate = first;
-        let resized_target = image_target(&test_image_frame());
+        let resized_target = nara_render::__private::editor_viewport_image_target(
+            first_target.image(),
+            nara_render::Extent2d::new(128, 64).unwrap(),
+        )
+        .unwrap();
         let successor = next_viewport_reservation_stamp(
             WgpuEditorViewId::new(1),
             first.generation,
@@ -2019,10 +2022,11 @@ mod tests {
 
     fn test_image_frame() -> RenderFramePacket {
         let generation = EditorRenderGeneration::try_acquire().unwrap();
+        let image = RenderImage2d::allocate_handle().unwrap();
         let mut views = ExtractedViews::default();
         views.push(ExtractedView {
             camera_entity: Entity::PLACEHOLDER,
-            target: RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(17))),
+            target: RenderTarget::Image(image),
             viewport: ViewportRect::new(0, 0, 64, 64).unwrap(),
             mapping: nara_render::ViewMapping2d::orthographic(
                 nara_core::Mat3::IDENTITY,
@@ -2038,7 +2042,7 @@ mod tests {
             1,
             &views,
             nara_render::__private::editor_viewport_image_target(
-                Handle::<RenderImage2d>::new(AssetId::from_raw(17)),
+                image,
                 nara_render::Extent2d::new(64, 64).unwrap(),
             )
             .unwrap(),

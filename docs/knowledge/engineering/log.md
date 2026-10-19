@@ -4,7 +4,12 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-10-19
+* **Verification Evidence**: [Image lifecycle contract repairs](verification/2026-10/2026-10-19T021717Z-image-lifecycle-contract-repairs-95901fe367a149bc90ec922ad0384a73.md) - R0 event coalescing, removal recovery, foreground admission and shared authoring revocation.
+* **Subagent Finding**: [TileSet dependency and Editor loading research](subagents/2026-10/2026-10-19T012524Z-tileset-dependency-and-editor-loading-research-768c093b92ed44b581556093dc20d059.md) - Source-confirmed Image lifecycle gaps and a reviewed sequence for coherent TileSet publication.
+
 ## 2026-10-18
+* **Verification Evidence**: [Component plugin and asset contract refactor](verification/2026-10/2026-10-18T164837Z-component-plugin-and-asset-contract-refactor-b4c2497eff5d4bdb90cebe1de995ceb3.md) - Checked runtime identities and typed claims, schema closure, exact TileSet admission, and consumer migration.
 * **Verification Evidence**: [F11 hierarchy candidate cost refactor](verification/2026-10/2026-10-18T095114Z-f11-hierarchy-candidate-cost-refactor-8570db0da1ef433dbab5368a9d0f59e6.md) - Sparse candidate overlay and private validated baseline reduce measured hierarchy transaction cost while preserving raw-dirty and lifecycle contracts.
 * **Verification Evidence**: [Foundation contract refactor scoped completion](verification/2026-10/2026-10-18T064513Z-foundation-contract-refactor-scoped-completion-299571832cbc4aa28cc9d5d3743bd527.md) - Final closure, durable references, real multi-owner reconciliation and measured scale evidence complete the required foundation slice.
 * **Work Progress**: [Foundation U3 effective values and reference closure](progress/2026-10/2026-10-18T053959Z-u3-effective-closure.md) - Effective default materialization, scene/prefab/export closure, asset collection limits, and Inspector projection landed after U2.
@@ -128,6 +133,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 ## 2026-10-15
 * **Work Registration**: [Foundation U1-U13 completes with reviewed integrated consumer evidence](registry/2026-10/2026-10-15T202335Z-nara-2d-foundation-contracts-codex-root-88b6faf455454957bc7e0f79e76b9850.md) - Work Registration for Foundation U1-U13 completes with reviewed integrated consumer evidence.
 * **Work Progress**: [Foundation U1-U13 implementation and full review are complete in the integrated worktree](progress/2026-10/2026-10-15T202259Z-foundation-u1-u13-implementation-and-full-review-are-complete-in-the-integrated-worktree-d237cddc6a5444559bb013eac57c4fe5.md) - Work Progress for Foundation U1-U13 implementation and full review are complete in the integrated worktree.
-* **Verification Evidence**: [Foundation U1-U13 acceptance closes with actual consumers and completed full review](verification/2026-10/2026-10-15T202228Z-foundation-u1-u13-acceptance-closes-with-actual-consumers-and-completed-full-review-b09676d3fa354aa899a795a5dfe9d2ba.md) - Verification Evidence for Foundation U1-U13 acceptance closes with actual consumers and completed full review.
-* **Subagent Finding**: [Full foundation review completes with resolved display coverage and explicit platform limits](subagents/2026-10/2026-10-15T202150Z-full-foundation-review-completes-with-resolved-display-coverage-and-explicit-platform-limits-2f0fee3044664b538a2590f95e61131a.md) - Subagent Finding for Full foundation review completes with resolved display coverage and explicit platform limits.
-* **Work Registration**: [Foundation workflows verified with final full review and evidence closure active](registry/2026-10/2026-10-15T200459Z-nara-2d-foundation-contracts-codex-root-03aaf854138f457298d2a41ad8d1cac3.md) - Work Registration for Foundation workflows verified with final full review and evidence closure active.

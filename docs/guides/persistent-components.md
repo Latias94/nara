@@ -82,6 +82,11 @@ callbacks. Each selected validation and registration callback runs once against 
 owner-local candidate. A failed source, callback, freeze, or merge leaves the aggregate registry
 unchanged; a frozen registry rejects every mutation.
 
+At App sealing, the registry owner checks the final installed `provides_schema` union against
+actual provider receipts. Missing declarations or registrations reject before schema authority
+is published. Several plugins may select the same provider, and a recipe may register it on
+their behalf. Standalone `ComponentRegistry` users can still register and freeze directly.
+
 Only a frozen registry may turn codec output into an applicable component. A building registry
 returns no runtime preflight result, so plugin preparation cannot publish a value before the final
 schema, native binding, and stable identity are fixed.

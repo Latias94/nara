@@ -1,7 +1,7 @@
 use nara_app::{App, RuntimeInstance};
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetId, AssetPath, AssetStates, Assets,
-    Handle, ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
+    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetPath, AssetStates, Assets, Handle,
+    ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
     ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
 };
 use nara_core::{Color, Vec2};
@@ -88,21 +88,18 @@ fn captured_batches() -> Vec<WgpuQuadBatch> {
     let indices = publish_image(
         &mut images,
         &mut states,
-        1,
         &[0, 0, 0, 255],
         ImageColorSpace::Linear,
     );
     let palette = publish_image(
         &mut images,
         &mut states,
-        2,
         &[255, 0, 0, 255, 0, 255, 0, 255],
         ImageColorSpace::Srgb,
     );
     let alternate = publish_image(
         &mut images,
         &mut states,
-        3,
         &[255, 255, 0, 255, 0, 0, 255, 255],
         ImageColorSpace::Srgb,
     );
@@ -115,9 +112,7 @@ fn captured_batches() -> Vec<WgpuQuadBatch> {
         world
             .spawn((
                 Camera2d {
-                    target: RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(
-                        100,
-                    ))),
+                    target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
                     viewport: Some(ViewportRect::new(0, 0, 64, 64).unwrap()),
                     viewport_height: 64.0,
                     ..Default::default()
@@ -216,7 +211,6 @@ fn captured_batches() -> Vec<WgpuQuadBatch> {
 fn publish_image(
     images: &mut Assets<ImageAsset>,
     states: &mut AssetStates,
-    id: u64,
     pixels: &[u8],
     color_space: ImageColorSpace,
 ) -> Handle<ImageAsset> {
@@ -246,7 +240,7 @@ fn publish_image(
         pixels.to_vec(),
     )
     .unwrap();
-    let handle = Handle::new(AssetId::from_raw(id));
+    let handle = nara_asset::allocate_anonymous_handle().unwrap();
     let source_hash = image.source().source_hash();
     let import_hash = image.source().artifact().key().digest();
     images

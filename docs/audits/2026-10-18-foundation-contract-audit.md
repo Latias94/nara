@@ -31,6 +31,11 @@ before implementation. Permanent persistent-identity claims at the audited basel
 replaced under the revised ADR 0058. Strict lifecycle-free transactions remain valid until their
 consumers migrate, and native failure must not be disguised as a promise of arbitrary rollback.
 
+The [post-refactor assessment](2026-10-18-next-foundation-refactor-assessment.md) records the next
+file-backed asset, semantic editing, Editor reconciliation and streaming boundaries. Its Tilemap
+codec finding and first file-backed TileSet cold-start slice now have focused regression evidence;
+they remain outside the seventeen-finding validation totals below.
+
 ## Reading the findings
 
 - **P1:** repair a confirmed defect or settle a contract before expanding its consumers. This is

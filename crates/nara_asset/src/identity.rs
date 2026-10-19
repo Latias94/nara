@@ -2,22 +2,74 @@ use std::{
     error::Error,
     fmt::{self, Debug, Display, Formatter},
     str::FromStr,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use uuid::{Builder, Uuid};
 
+static NEXT_RUNTIME_ASSET_ID: AtomicU64 = AtomicU64::new(1);
+
+/// An opaque process-local identity; persist an `AssetRef` instead.
+///
+/// ```compile_fail,E0599
+/// let _ = nara_asset::AssetId::from_raw(1);
+/// ```
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AssetId(u64);
 
 impl AssetId {
     #[must_use]
-    pub const fn from_raw(raw: u64) -> Self {
+    #[cfg(test)]
+    pub(crate) const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0
+    }
+
+    pub(crate) fn allocate() -> Result<Self, crate::AssetError> {
+        Self::allocate_from(&NEXT_RUNTIME_ASSET_ID)
+    }
+
+    fn allocate_from(allocator: &AtomicU64) -> Result<Self, crate::AssetError> {
+        loop {
+            let current = allocator.load(Ordering::Relaxed);
+            let next = current
+                .checked_add(1)
+                .ok_or(crate::AssetError::IdSpaceExhausted)?;
+            if allocator
+                .compare_exchange(current, next, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+            {
+                return Ok(Self(current));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod allocation_tests {
+    use super::*;
+
+    #[test]
+    fn runtime_asset_id_exhaustion_never_wraps_or_reuses_an_id() {
+        let allocator = AtomicU64::new(u64::MAX - 1);
+
+        assert_eq!(
+            AssetId::allocate_from(&allocator).unwrap().raw(),
+            u64::MAX - 1
+        );
+        assert_eq!(
+            AssetId::allocate_from(&allocator),
+            Err(crate::AssetError::IdSpaceExhausted)
+        );
+        assert_eq!(
+            AssetId::allocate_from(&allocator),
+            Err(crate::AssetError::IdSpaceExhausted)
+        );
+        assert_eq!(allocator.load(Ordering::Relaxed), u64::MAX);
     }
 }
 

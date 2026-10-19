@@ -153,7 +153,7 @@ fn removed_publication_is_revoked_without_a_consumer() {
 fn removed_publication_is_revoked_when_the_consumer_does_not_claim() {
     let mut app = App::new();
     install_asset_plugin(&mut app);
-    let _consumer = register_image_reload_consumer(&mut app).unwrap();
+    let _consumer = register_image_reload_consumer::<String>(&mut app).unwrap();
 
     assert_rejected_removal_revokes_publication(app, "asset.reload-consumer-did-not-claim");
 }
@@ -220,7 +220,7 @@ fn modified_publication_survives_request_admission_failure() {
 fn registered_reload_consumer_must_claim_requests_in_the_same_frame() {
     let mut app = App::new();
     install_asset_plugin(&mut app);
-    let _consumer = register_image_reload_consumer(&mut app).unwrap();
+    let _consumer = register_image_reload_consumer::<String>(&mut app).unwrap();
     let record = image_record("textures/unclaimed.png", stable_id());
     app.world_mut()
         .unwrap()
@@ -279,7 +279,7 @@ fn registered_reload_consumer_must_claim_requests_in_the_same_frame() {
 fn stale_unclaimed_request_cannot_overwrite_newer_asset_state() {
     let mut app = App::new();
     install_asset_plugin(&mut app);
-    let _consumer = register_image_reload_consumer(&mut app).unwrap();
+    let _consumer = register_image_reload_consumer::<String>(&mut app).unwrap();
     let record = image_record("textures/stale.png", stable_id());
     app.world_mut()
         .unwrap()
@@ -332,7 +332,7 @@ fn stale_unclaimed_request_cannot_overwrite_newer_asset_state() {
 fn unclaimed_request_cannot_overwrite_a_newer_asset_version() {
     let mut app = App::new();
     install_asset_plugin(&mut app);
-    let _consumer = register_image_reload_consumer(&mut app).unwrap();
+    let _consumer = register_image_reload_consumer::<String>(&mut app).unwrap();
     let record = image_record("textures/version-stale.png", stable_id());
     app.world_mut()
         .unwrap()
@@ -599,7 +599,7 @@ fn reload_request_byte_limit_rejects_work_without_retention() {
 fn reload_request_charges_the_actual_owned_spare_capacity() {
     let mut app = App::new();
     app.insert_resource(AssetReloadRequests::new()).unwrap();
-    let consumer = register_image_reload_consumer(&mut app).unwrap();
+    let consumer = register_image_reload_consumer::<String>(&mut app).unwrap();
     let authority = Arc::clone(&app.world().resource::<ImageReloadRegistration>().authority);
     let mut path = String::with_capacity(4_096);
     path.push_str("textures/capacity.png");
@@ -635,6 +635,7 @@ fn reload_request_charges_the_actual_owned_spare_capacity() {
             AssetLoadGeneration::ZERO,
             artifacts,
             authority,
+            None,
         )
         .unwrap();
 
@@ -651,7 +652,7 @@ fn image_reload_consumer_authority_is_scoped_to_its_app() {
     owner_app
         .insert_resource(AssetReloadRequests::new())
         .unwrap();
-    let owner_consumer = register_image_reload_consumer(&mut owner_app).unwrap();
+    let owner_consumer = register_image_reload_consumer::<String>(&mut owner_app).unwrap();
     let owner_authority = Arc::clone(
         &owner_app
             .world()
@@ -663,7 +664,7 @@ fn image_reload_consumer_authority_is_scoped_to_its_app() {
     foreign_app
         .insert_resource(AssetReloadRequests::new())
         .unwrap();
-    let foreign_consumer = register_image_reload_consumer(&mut foreign_app).unwrap();
+    let foreign_consumer = register_image_reload_consumer::<String>(&mut foreign_app).unwrap();
 
     let mut requests = owner_app
         .world_mut()
@@ -679,6 +680,7 @@ fn image_reload_consumer_authority_is_scoped_to_its_app() {
             AssetLoadGeneration::ZERO,
             Vec::new(),
             owner_authority,
+            None,
         )
         .unwrap();
     let retained_bytes = requests.retained_payload_bytes();
@@ -697,10 +699,10 @@ fn image_reload_consumer_authority_is_scoped_to_its_app() {
 fn image_reload_consumer_rejects_duplicate_owners() {
     let mut app = App::new();
     app.insert_resource(AssetReloadRequests::new()).unwrap();
-    let _consumer = register_image_reload_consumer(&mut app).unwrap();
+    let _consumer = register_image_reload_consumer::<String>(&mut app).unwrap();
 
     assert!(matches!(
-        register_image_reload_consumer(&mut app),
+        register_image_reload_consumer::<String>(&mut app),
         Err(ImageReloadRegistrationError::AlreadyRegistered)
     ));
 }
@@ -710,7 +712,7 @@ fn image_reload_consumer_requires_asset_plugin_resources() {
     let mut app = App::new();
 
     assert!(matches!(
-        register_image_reload_consumer(&mut app),
+        register_image_reload_consumer::<String>(&mut app),
         Err(ImageReloadRegistrationError::AssetPluginMissing)
     ));
 }

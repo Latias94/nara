@@ -162,6 +162,40 @@ impl EditorImageHydrationHost {
         self.queued.clear();
     }
 
+    pub(super) fn surrender_source(&mut self, asset_path: &AssetPath) {
+        self.queued
+            .retain(|source| source.asset_path() != asset_path);
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.source.asset_path() == asset_path)
+        {
+            self.pending = None;
+        }
+    }
+
+    pub(super) fn retain_catalog_eligible(
+        &mut self,
+        mut retain: impl FnMut(&AssetPath, StableAssetId, FileIdentity) -> bool,
+    ) {
+        self.queued.retain(|source| {
+            retain(
+                source.asset_path(),
+                source.stable_id(),
+                source.source_identity,
+            )
+        });
+        if self.pending.as_ref().is_some_and(|pending| {
+            !retain(
+                pending.source.asset_path(),
+                pending.source.stable_id(),
+                pending.source.source_identity,
+            )
+        }) {
+            self.pending = None;
+        }
+    }
+
     pub(super) fn take_failure(&mut self) -> Option<EditorImageHydrationFailure> {
         self.failure.take()
     }

@@ -34,8 +34,6 @@ impl Default for ClearColor {
 #[cfg(test)]
 use nara_app::RuntimeGeneration;
 use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext};
-#[cfg(test)]
-use nara_asset::Handle;
 pub use nara_core::Color;
 #[cfg(test)]
 use nara_core::Vec2;
@@ -827,7 +825,6 @@ mod tests {
         App, CoreStage, RuntimeAdmissionReservation, RuntimeCandidateRetirementState,
         RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
     };
-    use nara_asset::AssetId;
     use nara_ecs::{Entity, Resource, World, schedule::IntoScheduleConfigs};
     use nara_hierarchy::{
         HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyPlugin,
@@ -999,7 +996,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
         let target = RenderImagePacket {
-            image: Handle::new(AssetId::from_raw(23)),
+            image: nara_asset::allocate_anonymous_handle().unwrap(),
             extent: Extent2d {
                 width: 1280,
                 height: 720,
@@ -1113,7 +1110,7 @@ mod tests {
     #[test]
     fn split_image_uses_explicit_physical_extent_and_rejects_mixed_targets() {
         let generation = test_runtime_generation();
-        let image = Handle::new(AssetId::from_raw(17));
+        let image = nara_asset::allocate_anonymous_handle().unwrap();
         let target =
             __private::editor_viewport_image_target(image, Extent2d::new(320, 180).unwrap())
                 .unwrap();
@@ -1207,7 +1204,7 @@ mod tests {
         let camera = world
             .spawn((
                 Camera2d {
-                    target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
+                    target: RenderTarget::Image(nara_asset::allocate_anonymous_handle().unwrap()),
                     viewport: Some(ViewportRect::new(40, 20, 320, 180).unwrap()),
                     viewport_height: 180.0,
                     ..Default::default()
@@ -1245,7 +1242,7 @@ mod tests {
             .push(prior);
         app.world_mut().unwrap().spawn((
             Camera2d {
-                target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
+                target: RenderTarget::Image(nara_asset::allocate_anonymous_handle().unwrap()),
                 viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
                 ..Default::default()
             },
@@ -1335,7 +1332,7 @@ mod tests {
             .expect("app should allow world mutation")
             .spawn((
                 Camera2d {
-                    target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
+                    target: RenderTarget::Image(nara_asset::allocate_anonymous_handle().unwrap()),
                     viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
                     clear_color: Some(Color::WHITE),
                     ..Camera2d::default()
@@ -1393,7 +1390,7 @@ mod tests {
         let camera = world
             .spawn((
                 Camera2d {
-                    target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
+                    target: RenderTarget::Image(nara_asset::allocate_anonymous_handle().unwrap()),
                     viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
                     ..Camera2d::default()
                 },
@@ -1423,7 +1420,7 @@ mod tests {
             .resource_mut::<ExtractedViews>()
             .push(prior);
         app.world_mut().unwrap().spawn(Camera2d {
-            target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
+            target: RenderTarget::Image(nara_asset::allocate_anonymous_handle().unwrap()),
             viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
             ..Camera2d::default()
         });
@@ -1453,7 +1450,7 @@ mod tests {
             .unwrap()
             .spawn((
                 Camera2d {
-                    target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
+                    target: RenderTarget::Image(nara_asset::allocate_anonymous_handle().unwrap()),
                     viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
                     ..Camera2d::default()
                 },

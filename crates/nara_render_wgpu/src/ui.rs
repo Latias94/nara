@@ -354,9 +354,9 @@ mod tests {
     use super::*;
 
     use nara_asset::{
-        ArtifactFormatVersion, ArtifactLabel, AssetId, AssetPath, AssetVersion, Assets, Handle,
-        ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
-        ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
+        ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetVersion, Assets, ImportArtifactKey,
+        ImportArtifactRecord, ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId,
+        ImporterVersion, SourceHash, StableAssetId,
     };
 
     use nara_image::{
@@ -532,12 +532,8 @@ mod tests {
 
     #[test]
     fn image_target_ui_packets_match_only_their_exact_target() {
-        let first = RenderTarget::Image(Handle::<nara_render::RenderImage2d>::new(
-            AssetId::from_raw(41),
-        ));
-        let second = RenderTarget::Image(Handle::<nara_render::RenderImage2d>::new(
-            AssetId::from_raw(42),
-        ));
+        let first = RenderTarget::Image(nara_render::RenderImage2d::allocate_handle().unwrap());
+        let second = RenderTarget::Image(nara_render::RenderImage2d::allocate_handle().unwrap());
         let packet = text_packet_for_target(first);
         let viewport = readback_viewport();
 
@@ -757,7 +753,7 @@ mod tests {
             vec![240, 16, 120, 255],
         )
         .unwrap();
-        let handle = Handle::new(AssetId::from_raw(17));
+        let handle = nara_asset::allocate_anonymous_handle().unwrap();
         let mut images = Assets::<ImageAsset>::default();
         assert!(images.insert(handle, image).is_none());
         let image = images.get(handle).unwrap();

@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     error::Error,
     fmt,
     sync::{Arc, OnceLock},
@@ -215,6 +216,8 @@ pub fn component_registry(world: &World) -> Option<&ComponentRegistry> {
 ///
 /// The private owner resource keeps mutation scoped to this operation. A preloaded frozen
 /// registry accepts only an exact compatible provider; it cannot be replaced through this API.
+/// `plugin` and `component` identify failures in diagnostics; durable ownership comes from the
+/// provider receipt and registration may be delegated by a recipe.
 pub fn register_schema_provider_for_plugin(
     app: &mut App,
     plugin: PluginId,
@@ -321,6 +324,10 @@ fn finish_component_registry(
     app: &mut App,
     expected: Option<&ComponentRegistrySnapshot>,
 ) -> Result<(), PluginError> {
+    let declared_providers = app
+        .installed_plugins()
+        .flat_map(|declaration| declaration.provides_schema.iter().copied())
+        .collect::<BTreeSet<_>>();
     let (snapshot, instance_token) = {
         let world = app.world_mut()?;
         let seed = world
@@ -348,6 +355,16 @@ fn finish_component_registry(
                 "component registry authority changed after installation",
             ));
         }
+        registry
+            .registry
+            .validate_declared_providers(&declared_providers)
+            .map_err(|error| {
+                PluginError::component_registration(
+                    COMPONENT_REGISTRY_PLUGIN_ID,
+                    "component-schema-catalog",
+                    error,
+                )
+            })?;
         let snapshot = registry
             .registry
             .freeze()

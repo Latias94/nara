@@ -3,7 +3,7 @@
 // Bevy derives resolve this path; Nara's ECS facade remains the actual dependency.
 extern crate nara_ecs as bevy_ecs;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use nara_app::{App, Plugin, PluginError, PluginPreflightContext};
 use nara_asset::{AssetRef, AssetRefError, AssetServer, AssetSourceKind, Assets, Handle};
@@ -18,6 +18,14 @@ use nara_reflect::{
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
     ComponentRegistryError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue, ComponentValueKind, PreparedComponentCandidate,
+};
+
+#[cfg(feature = "serde")]
+mod source;
+
+#[cfg(feature = "serde")]
+pub use source::{
+    TILESET_FORMAT_KIND, TileSetSource, TileSetSourceFileLimits, TileSetSourceFormatError,
 };
 
 pub const DEFAULT_TILE_SIZE: Vec2 = Vec2::new(16.0, 16.0);
@@ -534,7 +542,7 @@ pub fn register_tilemap_components(
     registry.register_persistent_component_codec_with_context::<Tilemap, _, _>(
         tilemap_schema(),
         |value, context| {
-            let tile_size = read_vec2(value.field("tile_size")?, "tile_size")?;
+            let tile_size = read_positive_vec2(value.field("tile_size")?, "tile_size")?;
             let layer = optional_i32(value, "layer")?.unwrap_or(0);
             let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
             let y_sort_anchor = match value.get("y_sort_anchor") {
@@ -840,11 +848,28 @@ fn read_vec2(value: &ComponentValue, field: &str) -> Result<Vec2, ComponentCodec
     ))
 }
 
+fn read_positive_vec2(value: &ComponentValue, field: &str) -> Result<Vec2, ComponentCodecError> {
+    let value = read_vec2(value, field)?;
+    if value.x <= 0.0 {
+        return Err(ComponentCodecError::invalid_field(
+            format!("{field}.x"),
+            "positive finite f32",
+        ));
+    }
+    if value.y <= 0.0 {
+        return Err(ComponentCodecError::invalid_field(
+            format!("{field}.y"),
+            "positive finite f32",
+        ));
+    }
+    Ok(value)
+}
+
 fn read_f32(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
     let value = value
         .as_f64()
         .ok_or_else(|| ComponentCodecError::invalid_field(field, "finite f32"))?;
-    if value < f64::from(f32::MIN) || value > f64::from(f32::MAX) {
+    if !value.is_finite() || value < f64::from(f32::MIN) || value > f64::from(f32::MAX) {
         return Err(ComponentCodecError::invalid_field(field, "finite f32"));
     }
     Ok(value as f32)
@@ -884,16 +909,25 @@ fn read_cells(
     let ComponentValue::List(entries) = value else {
         return Err(ComponentCodecError::invalid_field("cells", "list"));
     };
+    let mut coordinates = BTreeSet::new();
     entries
         .iter()
-        .map(|entry| {
+        .enumerate()
+        .map(|(index, entry)| {
             let coord = entry.field("coord")?;
             let cell = entry.field("cell")?;
+            let coord = TileCoord::new(
+                read_i32(coord, "x", "cells[].coord.x")?,
+                read_i32(coord, "y", "cells[].coord.y")?,
+            );
+            if !coordinates.insert(coord) {
+                return Err(ComponentCodecError::invalid_field(
+                    format!("cells[{index}].coord"),
+                    "unique tile coordinate",
+                ));
+            }
             Ok((
-                TileCoord::new(
-                    read_i32(coord, "x", "cells[].coord.x")?,
-                    read_i32(coord, "y", "cells[].coord.y")?,
-                ),
+                coord,
                 TileCell::new(TileIndex::new(read_u32(cell, "tile", "cells[].cell.tile")?))
                     .with_color(read_color(cell.field("color")?, "cell.color")?),
             ))
@@ -1002,7 +1036,7 @@ pub mod prelude {
 mod tests {
     use super::*;
     use nara_asset::{
-        AssetId, AssetPath, AssetRecord, AssetSourceKind, ProjectAssetDatabase, StableAssetId,
+        AssetPath, AssetRecord, AssetSourceKind, ProjectAssetDatabase, StableAssetId,
     };
     use nara_reflect::ComponentDecodeContext;
 
@@ -1100,7 +1134,7 @@ mod tests {
 
     #[test]
     fn records_tileset_layer_and_sort_controls() {
-        let tileset = Handle::new(AssetId::from_raw(11));
+        let tileset = nara_asset::allocate_anonymous_handle().unwrap();
         let tilemap = Tilemap::new(Vec2::new(8.0, 8.0))
             .with_tileset(tileset)
             .with_layer(4)
@@ -1138,8 +1172,61 @@ mod tests {
     }
 
     #[test]
+    fn tilemap_codec_rejects_duplicate_cell_coordinates() {
+        let registry = frozen_tilemap_registry();
+        let value = tilemap_value_with_cells(
+            Vec2::new(16.0, 16.0),
+            vec![tile_cell_value(2, 3, 1), tile_cell_value(2, 3, 2)],
+        );
+
+        let result = registry
+            .preflight_component(&tilemap_type_id(), &value)
+            .unwrap();
+
+        assert!(matches!(
+            result,
+            Err(ComponentCodecError::InvalidField { field, expected })
+                if field == "cells[1].coord" && expected == "unique tile coordinate"
+        ));
+    }
+
+    #[test]
+    fn tilemap_codec_rejects_non_positive_tile_size() {
+        let registry = frozen_tilemap_registry();
+        for (width, height, expected_field) in [
+            (0.0, 16.0, "tile_size.x"),
+            (-1.0, 16.0, "tile_size.x"),
+            (1e-100, 16.0, "tile_size.x"),
+            (16.0, 0.0, "tile_size.y"),
+            (16.0, -1.0, "tile_size.y"),
+            (16.0, 1e-100, "tile_size.y"),
+        ] {
+            let value = ComponentValue::map([
+                (
+                    "tile_size",
+                    ComponentValue::map([
+                        ("x", ComponentValue::f64(width).unwrap()),
+                        ("y", ComponentValue::f64(height).unwrap()),
+                    ]),
+                ),
+                ("tileset", ComponentValue::Null),
+                ("cells", ComponentValue::List(Vec::new())),
+            ]);
+            let result = registry
+                .preflight_component(&tilemap_type_id(), &value)
+                .unwrap();
+
+            assert!(matches!(
+                result,
+                Err(ComponentCodecError::InvalidField { field, expected })
+                    if field == expected_field && expected == "positive finite f32"
+            ));
+        }
+    }
+
+    #[test]
     fn tileset_records_image_handle_and_atlas_regions() {
-        let image = Handle::new(AssetId::from_raw(31));
+        let image = nara_asset::allocate_anonymous_handle().unwrap();
         let atlas = TileAtlasLayout::grid(Vec2::new(16.0, 8.0), 4, 2);
         let tileset = TileSet::from_image(image, atlas);
 
@@ -1220,7 +1307,7 @@ mod tests {
             }) if field == "tileset.value"
                 && asset_ref == format!("stable_id:{unknown_stable_id}")
         ));
-        assert_eq!(asset_server.path(AssetId::from_raw(1)), None);
+        assert_eq!(asset_server, AssetServer::new());
     }
 
     #[test]
@@ -1251,7 +1338,7 @@ mod tests {
             result,
             Err(ComponentCodecError::InvalidAssetRef { field, .. }) if field == "tileset.value"
         ));
-        assert_eq!(asset_server.path(AssetId::from_raw(1)), None);
+        assert_eq!(asset_server, AssetServer::new());
     }
 
     #[test]
@@ -1311,6 +1398,35 @@ mod tests {
             ("sort_key", ComponentValue::I64(0)),
             ("tileset", asset_ref_value(&tileset).unwrap()),
             ("cells", ComponentValue::List(Vec::new())),
+        ])
+    }
+
+    fn tilemap_value_with_cells(tile_size: Vec2, cells: Vec<ComponentValue>) -> ComponentValue {
+        ComponentValue::map([
+            ("tile_size", vec2_value(tile_size).unwrap()),
+            ("layer", ComponentValue::I64(0)),
+            ("sort_key", ComponentValue::I64(0)),
+            ("tileset", ComponentValue::Null),
+            ("cells", ComponentValue::List(cells)),
+        ])
+    }
+
+    fn tile_cell_value(x: i32, y: i32, tile: u32) -> ComponentValue {
+        ComponentValue::map([
+            (
+                "coord",
+                ComponentValue::map([
+                    ("x", ComponentValue::I64(i64::from(x))),
+                    ("y", ComponentValue::I64(i64::from(y))),
+                ]),
+            ),
+            (
+                "cell",
+                ComponentValue::map([
+                    ("tile", ComponentValue::U64(u64::from(tile))),
+                    ("color", color_value(Color::WHITE).unwrap()),
+                ]),
+            ),
         ])
     }
 

@@ -5,6 +5,28 @@ use nara_reflect::{
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 
+#[test]
+fn public_asset_claims_preserve_durable_refs_across_independent_runtimes() {
+    use nara_asset::{AssetRef, AssetServer, Assets};
+
+    let source = AssetRef::path("textures/player.png").unwrap();
+    let mut first_server = AssetServer::new();
+    let mut second_server = AssetServer::new();
+    let first = source.resolve::<String>(&mut first_server).unwrap();
+    let second = source.resolve::<String>(&mut second_server).unwrap();
+    let mut assets = Assets::default();
+    assets.insert(first, String::from("pixels"));
+
+    assert_ne!(first.id(), second.id());
+    assert!(assets.get(second).is_none());
+    assert_eq!(AssetRef::from_handle(&first_server, first).unwrap(), source);
+    assert_eq!(
+        AssetRef::from_handle(&second_server, second).unwrap(),
+        source
+    );
+    assert!(first_server.claim::<u32>(first.id()).is_err());
+}
+
 #[derive(Component)]
 struct Health {
     current: i64,

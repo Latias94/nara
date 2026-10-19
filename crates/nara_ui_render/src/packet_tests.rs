@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetId, AssetPath, AssetVersion, Assets, Handle,
-    ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
-    ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
+    ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetVersion, Assets, ImportArtifactKey,
+    ImportArtifactRecord, ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId,
+    ImporterVersion, SourceHash, StableAssetId,
 };
 use nara_image::{
     ImageAsset, ImageExtent, ImageFormat, ImageImportSettings, ImageSourceMetadata,
@@ -119,7 +119,7 @@ fn captured_image_snapshot() -> PreparedImageSnapshot {
         vec![240, 16, 120, 255],
     )
     .unwrap();
-    let handle = Handle::new(AssetId::from_raw(17));
+    let handle = nara_asset::allocate_anonymous_handle().unwrap();
     let mut images = Assets::<ImageAsset>::default();
     assert!(images.insert(handle, image).is_none());
     let image = images.get(handle).unwrap();

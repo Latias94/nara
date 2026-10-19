@@ -4,7 +4,7 @@ use std::{
 };
 
 use nara_app::{App, CoreStage, RuntimeInstance};
-use nara_asset::{AssetId, AssetRecord, Handle, ProjectAssetDatabase};
+use nara_asset::{AssetRecord, Handle, ProjectAssetDatabase};
 use nara_core::Vec2;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, Resource, With, World};
@@ -329,7 +329,8 @@ impl EditorPreviewSession {
         Ok(Self {
             input,
             generation,
-            target: Handle::new(AssetId::from_raw(1)),
+            target: RenderImage2d::allocate_handle()
+                .map_err(|_| preview_error("project.editor.preview-target-id-exhausted"))?,
             extent: None,
             geometry_revision: 0,
             candidate: None,
@@ -488,6 +489,11 @@ impl EditorPreviewSession {
 
     pub(super) fn take_candidate(&mut self) -> Option<EditorPreviewCandidate> {
         self.candidate.take()
+    }
+
+    pub(super) fn retire_candidate(&mut self) {
+        self.candidate = None;
+        self.world_snapshot = None;
     }
 
     pub(super) fn world_snapshot(&self) -> Option<&WorldIdentitySnapshot> {

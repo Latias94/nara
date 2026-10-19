@@ -31,6 +31,13 @@ pub struct RenderImage2d {
     pub height: u32,
 }
 
+impl RenderImage2d {
+    /// Allocates the logical identity of one image target. Retain it across frame and extent changes.
+    pub fn allocate_handle() -> Result<Handle<Self>, nara_asset::AssetError> {
+        nara_asset::allocate_anonymous_handle()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RenderTarget {
     PrimaryWindow,
@@ -147,5 +154,26 @@ impl RenderFrameTarget {
             },
             Self::Image(image) => image.extent,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_target_identity_is_distinct_per_view_and_stable_during_resize() {
+        let first = RenderImage2d::allocate_handle().unwrap();
+        let second = RenderImage2d::allocate_handle().unwrap();
+        let initial =
+            crate::__private::editor_viewport_image_target(first, Extent2d::new(64, 64).unwrap())
+                .unwrap();
+        let resized =
+            crate::__private::editor_viewport_image_target(first, Extent2d::new(128, 64).unwrap())
+                .unwrap();
+
+        assert_ne!(first.id(), second.id());
+        assert_eq!(initial.image(), resized.image());
+        assert_ne!(initial.extent(), resized.extent());
     }
 }

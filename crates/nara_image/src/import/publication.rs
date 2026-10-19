@@ -212,6 +212,9 @@ impl ImagePublicationSnapshot {
         if bound_path != self.source_path.as_str() {
             return Err(ImagePublicationFailureKind::TargetMismatch);
         }
+        if asset_server.get_handle::<ImageAsset>(self.handle.id()) != Some(self.handle) {
+            return Err(ImagePublicationFailureKind::TargetMismatch);
+        }
         Ok(())
     }
 
@@ -228,8 +231,27 @@ impl ImagePublicationSnapshot {
         Ok(())
     }
 
-    pub(crate) fn is_current(&self, images: &Assets<ImageAsset>, states: &AssetStates) -> bool {
-        self.validate_state(states).is_ok()
+    pub(crate) fn is_current(
+        &self,
+        asset_server: &AssetServer,
+        images: &Assets<ImageAsset>,
+        states: &AssetStates,
+    ) -> bool {
+        self.validate_binding(asset_server).is_ok()
+            && self.validate_state(states).is_ok()
+            && self.previous_slot.validate(self.handle, images).is_ok()
+    }
+
+    pub(crate) fn matches_previous_state(
+        &self,
+        asset_server: &AssetServer,
+        images: &Assets<ImageAsset>,
+        expected_version: AssetVersion,
+        previous_state_revision: Option<&AssetStateRevision>,
+    ) -> bool {
+        self.validate_binding(asset_server).is_ok()
+            && self.expected_version == expected_version
+            && previous_state_revision == Some(&self.expected_state_revision)
             && self.previous_slot.validate(self.handle, images).is_ok()
     }
 }

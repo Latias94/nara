@@ -720,7 +720,6 @@ fn address_mode(address_mode: AddressMode) -> wgpu::AddressMode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_asset::AssetId;
 
     #[test]
     fn cache_policy_retains_two_presented_epochs() {
@@ -810,7 +809,10 @@ mod tests {
 
     #[test]
     fn image_upload_observes_prior_shared_upload_work() {
-        let key = RenderResourceKey::new(AssetId::from_raw(7), RenderResourceKind::IMAGE_2D);
+        let key = RenderResourceKey::new(
+            nara_asset::allocate_anonymous_handle::<()>().unwrap().id(),
+            RenderResourceKind::IMAGE_2D,
+        );
         let mut cache = WgpuSpriteTextureCache {
             upload_bytes: MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME - 4,
             ..Default::default()

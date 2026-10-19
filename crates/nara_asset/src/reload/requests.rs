@@ -5,8 +5,8 @@ use nara_core::{ByteLimit, ItemLimit};
 use nara_ecs::Resource;
 
 use crate::{
-    AssetId, AssetPath, AssetRecord, AssetSourceKind, AssetVersion, ImportArtifactDigest,
-    StableAssetId,
+    AssetError, AssetId, AssetPath, AssetRecord, AssetServer, AssetSourceKind, AssetStateRevision,
+    AssetVersion, ImportArtifactDigest, StableAssetId,
 };
 
 use super::AssetSourceChangeKind;
@@ -140,6 +140,8 @@ pub struct ImageReloadConsumer {
 #[derive(Debug, Resource)]
 pub(super) struct ImageReloadRegistration {
     pub(super) authority: Arc<()>,
+    pub(super) validate_asset_type: fn(&AssetServer, AssetId) -> Result<(), AssetError>,
+    pub(super) claim_asset_type: fn(&mut AssetServer, AssetId) -> Result<(), AssetError>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,7 +191,7 @@ impl std::error::Error for ImageReloadRegistrationError {
 }
 
 #[doc(hidden)]
-pub fn register_image_reload_consumer(
+pub fn register_image_reload_consumer<T: 'static>(
     app: &mut App,
 ) -> Result<ImageReloadConsumer, ImageReloadRegistrationError> {
     if !app.world().contains_resource::<AssetReloadRequests>() {
@@ -202,6 +204,8 @@ pub fn register_image_reload_consumer(
     let authority = Arc::new(());
     app.insert_resource(ImageReloadRegistration {
         authority: Arc::clone(&authority),
+        validate_asset_type: AssetServer::validate_type_claim::<T>,
+        claim_asset_type: |server, id| server.claim::<T>(id).map(|_| ()),
     })
     .map_err(ImageReloadRegistrationError::AppMutation)?;
     Ok(ImageReloadConsumer { authority })
@@ -274,6 +278,8 @@ pub struct AssetReloadRequest {
     request_kind: AssetReloadRequestKind,
     source_change_kind: AssetSourceChangeKind,
     expected_version: AssetVersion,
+    previous_state: Option<(AssetStateRevision, Option<AssetVersion>)>,
+    resolved_state_revision: Option<AssetStateRevision>,
     generation: AssetLoadGeneration,
     affected_artifacts: Vec<ImportArtifactDigest>,
     image_authority: Option<Arc<()>>,
@@ -299,6 +305,8 @@ impl AssetReloadRequest {
             request_kind,
             source_change_kind,
             expected_version,
+            previous_state: None,
+            resolved_state_revision: None,
             generation,
             affected_artifacts,
             image_authority: None,
@@ -316,6 +324,7 @@ impl AssetReloadRequest {
         generation: AssetLoadGeneration,
         affected_artifacts: Vec<ImportArtifactDigest>,
         image_authority: Arc<()>,
+        previous_state: Option<(AssetStateRevision, Option<AssetVersion>)>,
     ) -> Self {
         let mut request = Self::new(
             id,
@@ -328,6 +337,7 @@ impl AssetReloadRequest {
             affected_artifacts,
         );
         request.image_authority = Some(image_authority);
+        request.previous_state = previous_state;
         request
     }
 
@@ -369,6 +379,30 @@ impl AssetReloadRequest {
     #[must_use]
     pub const fn expected_version(&self) -> AssetVersion {
         self.expected_version
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn previous_state_revision(&self) -> Option<&AssetStateRevision> {
+        self.previous_state.as_ref().map(|(revision, _)| revision)
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn previous_usable_version(&self) -> Option<AssetVersion> {
+        self.previous_state
+            .as_ref()
+            .and_then(|(_, version)| *version)
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn resolved_state_revision(&self) -> Option<&AssetStateRevision> {
+        self.resolved_state_revision.as_ref()
+    }
+
+    pub(super) fn set_resolved_state_revision(&mut self, revision: AssetStateRevision) {
+        self.resolved_state_revision = Some(revision);
     }
 
     #[must_use]
@@ -442,7 +476,8 @@ impl AssetReloadRequests {
         generation: AssetLoadGeneration,
         affected_artifacts: Vec<ImportArtifactDigest>,
         image_authority: Arc<()>,
-    ) -> Result<AssetReloadRequestId, AssetReloadRequestAdmissionError> {
+        previous_state: Option<(AssetStateRevision, Option<AssetVersion>)>,
+    ) -> Result<&mut AssetReloadRequest, AssetReloadRequestAdmissionError> {
         self.check_item_capacity()?;
         let id = AssetReloadRequestId(self.next_id);
         let request = AssetReloadRequest::new_admitted_image(
@@ -455,6 +490,7 @@ impl AssetReloadRequests {
             generation,
             affected_artifacts,
             image_authority,
+            previous_state,
         );
         let request_bytes = request.retained_payload_bytes();
         let attempted_bytes =
@@ -476,8 +512,9 @@ impl AssetReloadRequests {
 
         self.next_id = self.next_id.saturating_add(1);
         self.retained_payload_bytes = attempted_bytes;
+        let request_index = self.requests.len();
         self.requests.push(request);
-        Ok(id)
+        Ok(&mut self.requests[request_index])
     }
 
     pub(super) fn check_item_capacity(&self) -> Result<(), AssetReloadRequestAdmissionError> {

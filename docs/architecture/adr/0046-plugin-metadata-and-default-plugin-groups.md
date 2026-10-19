@@ -133,10 +133,15 @@ The plugin metadata contract is:
   hook failures use `PluginError`. Panic-based prerequisite checks remain invalid.
 - Schema-contributing declarations name stable provider IDs. Root product resolution binds the
   selected IDs to exact typed provider definitions with an explicit stable versioned native
-  binding ID, rejects divergent bindings or multiple plugin
-  owners, registers them into a scratch `ComponentRegistry`, and freezes that registry before
+  binding ID, rejects divergent bindings or multiple distinct provider definitions for one durable
+  schema owner, registers them into a scratch `ComponentRegistry`, and freezes that registry before
   publishing `SchemaValidationInput`. A `RuntimePlan` retains the sorted provider IDs and catalog
   fingerprint without retaining an App, World, native authority, or live plugin instance.
+- Multiple plugin declarations may select the same provider. When `ComponentRegistryPlugin`
+  publishes runtime schema authority, the union of the final installed declarations' provider IDs
+  must exactly match actual provider receipts before freezing. This applies to direct Apps and
+  preloaded Host snapshots. Delegated `SchemaContribution` registration remains valid; a
+  standalone registry has no App declaration-closure requirement.
 - `App::add_plugins` preserves a Bevy-like single/group/tuple call through a sealed input trait, but
   all inputs lower through collection, resolution, optional private preparation, and closed commit.
   Plugin build/finish hooks cannot install hidden dependencies.

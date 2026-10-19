@@ -272,7 +272,8 @@ mod tests {
     struct MockPreparedResource(&'static str);
 
     fn handle() -> Handle<String> {
-        Handle::new(AssetId::from_raw(7))
+        static HANDLE: std::sync::OnceLock<Handle<String>> = std::sync::OnceLock::new();
+        *HANDLE.get_or_init(|| nara_asset::allocate_anonymous_handle().unwrap())
     }
 
     fn key() -> RenderResourceKey {

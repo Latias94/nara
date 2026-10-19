@@ -1028,7 +1028,7 @@ impl EditorProjectSession {
     }
 
     fn advance_editor_image_import(&mut self) {
-        {
+        let revocation_failure = {
             let EditorProjectSession {
                 execution,
                 authoring_runtime,
@@ -1036,8 +1036,16 @@ impl EditorProjectSession {
                 ..
             } = self;
             if let EditorExecutionLane::Authoring(project) = execution {
-                image_import.advance(project, authoring_runtime);
+                image_import.advance(project, authoring_runtime)
+            } else {
+                None
             }
+        };
+        if revocation_failure.is_some() {
+            let _ = self.diagnostics.extend(single_warning(
+                "project.editor.authoring-image-revocation-failed",
+                "authoring image revocation failed; reopen the project before importing images or generating Scene previews",
+            ));
         }
 
         #[cfg(feature = "runtime-ui")]
@@ -1083,9 +1091,7 @@ impl EditorProjectSession {
 
     #[cfg(feature = "runtime-ui")]
     fn publish_authoring_image_successor_if_changed(&mut self) {
-        if !self.image_import.authoring_catalog_publication_ready()
-            || !self.image_import.last_good_store_changed()
-        {
+        if !self.image_import.last_good_store_changed() {
             return;
         }
         let selected = self.image_import.authoring_image_asset_ids();
@@ -2180,6 +2186,13 @@ impl EditorProjectSession {
             .expect("project content is available only in the trusted compiled lane")
             .content_loader
             .budget_snapshot()
+    }
+
+    #[cfg(test)]
+    #[cfg(feature = "presentation-2d")]
+    pub(super) fn test_exhaust_image_publication_revision(&mut self) {
+        self.authoring_runtime
+            .test_exhaust_image_publication_revision();
     }
 
     #[cfg(test)]

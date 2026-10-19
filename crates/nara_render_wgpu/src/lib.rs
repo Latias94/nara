@@ -1913,7 +1913,7 @@ mod tests {
         let packet = ui_outcome_packet();
         let packet_identity = packet.identity();
         let image_target =
-            RenderTarget::Image(nara_asset::Handle::new(nara_asset::AssetId::from_raw(912)));
+            RenderTarget::Image(nara_render::RenderImage2d::allocate_handle().unwrap());
         let payload = frame::WgpuFramePayload::for_editor_runtime_ui(vec![packet]);
         let viewport = ViewportRect::new(0, 0, 16, 16).unwrap();
 

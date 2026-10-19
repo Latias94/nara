@@ -53,6 +53,7 @@ pub enum ImageReloadError {
     TaskFailed(TaskFailure),
     TaskTracking,
     Publication(ImagePublicationFailureKind),
+    Asset(nara_asset::AssetError),
 }
 
 impl Display for ImageReloadError {
@@ -78,6 +79,7 @@ impl Display for ImageReloadError {
             Self::TaskFailed(_) => formatter.write_str("image import task failed"),
             Self::TaskTracking => formatter.write_str("image import task tracking failed"),
             Self::Publication(error) => Display::fmt(error, formatter),
+            Self::Asset(error) => Display::fmt(error, formatter),
         }
     }
 }
@@ -99,6 +101,7 @@ impl ImageReloadError {
             Self::TaskFailed(_) => "image.reload-task-failed",
             Self::TaskTracking => "image.reload-task-tracking-failed",
             Self::Publication(_) => "image.reload-publication-failed",
+            Self::Asset(_) => "image.reload-asset-identity-failed",
         }
     }
 
@@ -118,6 +121,7 @@ impl ImageReloadError {
             Self::TaskFailed(_) => "Image import task failed",
             Self::TaskTracking => "Image import task tracking failed",
             Self::Publication(_) => "Image publication failed",
+            Self::Asset(_) => "Image asset identity validation failed",
         }
     }
 }
@@ -264,17 +268,19 @@ enum ReadyImageImportOutcome {
 #[derive(Debug)]
 pub(super) struct ImageReloadAttempt {
     request: AssetReloadRequest,
+    handle: Handle<ImageAsset>,
     publication: ImagePublicationSnapshot,
     settings: Option<ImageImportSettings>,
+    recovering_removed: bool,
 }
 
 impl ImageReloadAttempt {
     pub(super) fn capture(
         request: AssetReloadRequest,
+        handle: Handle<ImageAsset>,
         images: &Assets<ImageAsset>,
         states: &AssetStates,
     ) -> Self {
-        let handle = Handle::<ImageAsset>::new(request.asset_id());
         let (publication, settings) = ImagePublicationSnapshot::capture_with_settings(
             &request.record(),
             handle,
@@ -284,13 +290,20 @@ impl ImageReloadAttempt {
         );
         Self {
             request,
+            handle,
             publication,
             settings,
+            recovering_removed: false,
         }
     }
 
-    fn is_current(&self, images: &Assets<ImageAsset>, states: &AssetStates) -> bool {
-        self.publication.is_current(images, states)
+    fn is_current(
+        &self,
+        asset_server: &AssetServer,
+        images: &Assets<ImageAsset>,
+        states: &AssetStates,
+    ) -> bool {
+        self.publication.is_current(asset_server, images, states)
     }
 }
 
@@ -334,6 +347,11 @@ impl ReadyImageImportJob {
 struct ReadyImageJobs {
     imports: Vec<ReadyImageImportJob>,
     removals: Vec<ImageReloadAttempt>,
+}
+
+#[derive(Default, Resource)]
+struct RemovedImageRecoveries {
+    images: BTreeMap<AssetId, ImagePublicationSnapshot>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
@@ -423,9 +441,10 @@ impl Plugin for ImagePlugin {
         app.init_resource::<ImageReloadStats>()?;
         app.init_resource::<PendingImageJobs>()?;
         app.init_resource::<ReadyImageJobs>()?;
+        app.init_resource::<RemovedImageRecoveries>()?;
         app.insert_resource(self.importer.clone())?;
-        let reload_consumer =
-            register_image_reload_consumer(app).map_err(image_reload_registration_plugin_error)?;
+        let reload_consumer = register_image_reload_consumer::<ImageAsset>(app)
+            .map_err(image_reload_registration_plugin_error)?;
         app.add_systems(
             CoreStage::TaskUpdate,
             poll_image_reload_results.in_set(AssetTaskUpdateSet::Poll),
@@ -435,13 +454,15 @@ impl Plugin for ImagePlugin {
             CoreStage::TaskUpdate,
             (move |requests: ResMut<AssetReloadRequests>,
                    importer: Res<ImageImporter>,
-                   asset_server: Res<AssetServer>,
+                   asset_server: ResMut<AssetServer>,
                    images: Res<Assets<ImageAsset>>,
                    states: Res<AssetStates>,
                    task_pools: Res<TaskPools>,
                    real_time: Res<RealTime>,
                    pending: ResMut<PendingImageJobs>,
                    ready: ResMut<ReadyImageJobs>,
+                   recoveries: ResMut<RemovedImageRecoveries>,
+                   diagnostics: ResMut<AssetReloadDiagnostics>,
                    stats: ResMut<ImageReloadStats>| {
                 spawn_image_reload_jobs(
                     source_directory.as_deref(),
@@ -455,6 +476,8 @@ impl Plugin for ImagePlugin {
                     real_time,
                     pending,
                     ready,
+                    recoveries,
+                    diagnostics,
                     stats,
                 )
                 .map_err(BevyError::error)
@@ -487,17 +510,52 @@ fn spawn_image_reload_jobs(
     mut requests: ResMut<AssetReloadRequests>,
     consumer: &ImageReloadConsumer,
     importer: Res<ImageImporter>,
-    asset_server: Res<AssetServer>,
+    mut asset_server: ResMut<AssetServer>,
     images: Res<Assets<ImageAsset>>,
     states: Res<AssetStates>,
     task_pools: Res<TaskPools>,
     real_time: Res<RealTime>,
     mut pending: ResMut<PendingImageJobs>,
     mut ready: ResMut<ReadyImageJobs>,
+    mut recoveries: ResMut<RemovedImageRecoveries>,
+    mut diagnostics: ResMut<AssetReloadDiagnostics>,
     mut stats: ResMut<ImageReloadStats>,
 ) -> Result<(), ImageReloadDrainError> {
     for request in requests.drain_images(consumer)? {
-        let attempt = ImageReloadAttempt::capture(request, &images, &states);
+        let previous_recovery = recoveries.images.remove(&request.asset_id());
+        if request
+            .resolved_state_revision()
+            .is_none_or(|expected| expected != &states.state_revision(request.asset_id()))
+        {
+            stats.stale = stats.stale.saturating_add(1);
+            continue;
+        }
+        let handle = match asset_server.claim::<ImageAsset>(request.asset_id()) {
+            Ok(handle) => handle,
+            Err(error) => {
+                diagnostics.push(image_reload_diagnostic(
+                    request.path(),
+                    &ImageReloadError::Asset(error),
+                ));
+                stats.failed = stats.failed.saturating_add(1);
+                continue;
+            }
+        };
+        let recovering_removed = previous_recovery.is_some_and(|snapshot| {
+            snapshot.matches_previous_state(
+                &asset_server,
+                &images,
+                request.expected_version(),
+                request.previous_state_revision(),
+            )
+        });
+        let mut attempt = ImageReloadAttempt::capture(request, handle, &images, &states);
+        attempt.recovering_removed = recovering_removed;
+        if recovering_removed {
+            recoveries
+                .images
+                .insert(handle.id(), attempt.publication.clone());
+        }
         match attempt.request.request_kind() {
             AssetReloadRequestKind::Remove => ready.removals.push(attempt),
             AssetReloadRequestKind::LoadOrReload => {
@@ -577,6 +635,9 @@ fn spawn_image_reload_jobs(
             }
         }
     }
+    recoveries
+        .images
+        .retain(|_, snapshot| snapshot.is_current(&asset_server, &images, &states));
     stats.pending = pending.len().min(u32::MAX as usize) as u32;
     Ok(())
 }
@@ -587,9 +648,13 @@ fn accepted_reload_settings(
     record: &nara_asset::AssetRecord,
 ) -> Result<ImageImportSettings, ImageReloadError> {
     match attempt.request.source_change_kind() {
-        AssetSourceChangeKind::Modified => attempt
-            .settings
-            .ok_or(ImageReloadError::MissingImportSettings),
+        AssetSourceChangeKind::Modified => match attempt.settings {
+            Some(settings) => Ok(settings),
+            None if attempt.recovering_removed => {
+                admit_metadata_reload_settings(source_directory, record)
+            }
+            None => Err(ImageReloadError::MissingImportSettings),
+        },
         AssetSourceChangeKind::MetaModified => {
             admit_metadata_reload_settings(source_directory, record)
         }
@@ -652,6 +717,7 @@ fn poll_image_reload_results(
 #[allow(clippy::too_many_arguments)]
 fn apply_image_reload_results(
     mut ready: ResMut<ReadyImageJobs>,
+    mut recoveries: ResMut<RemovedImageRecoveries>,
     pending: Res<PendingImageJobs>,
     asset_server: Res<AssetServer>,
     mut images: ResMut<Assets<ImageAsset>>,
@@ -666,14 +732,35 @@ fn apply_image_reload_results(
     for attempt in removals {
         let request = &attempt.request;
         if !generations.is_current(request.asset_id(), request.generation())
-            || !attempt.is_current(&images, &states)
+            || !attempt.is_current(&asset_server, &images, &states)
         {
             stats.stale = stats.stale.saturating_add(1);
             continue;
         }
-        let handle = Handle::<ImageAsset>::new(request.asset_id());
-        match images.remove_with_state(handle, &mut states, &mut events) {
-            Ok(_) => stats.removed = stats.removed.saturating_add(1),
+        let restore_eligible = attempt.recovering_removed
+            || (request.previous_usable_version() == Some(request.expected_version())
+                && images.get(attempt.handle).is_some_and(|image| {
+                    image.source().stable_id() == request.stable_id()
+                        && image.source().path() == request.path()
+                }));
+        match images.remove_with_state(attempt.handle, &mut states, &mut events) {
+            Ok(_) => {
+                stats.removed = stats.removed.saturating_add(1);
+                if restore_eligible
+                    && let Some(removed_version) = states.version(request.asset_id())
+                {
+                    recoveries.images.insert(
+                        request.asset_id(),
+                        ImagePublicationSnapshot::capture(
+                            &request.record(),
+                            attempt.handle,
+                            removed_version,
+                            &images,
+                            &states,
+                        ),
+                    );
+                }
+            }
             Err(_) => stats.failed = stats.failed.saturating_add(1),
         }
     }
@@ -740,17 +827,43 @@ fn apply_image_reload_results(
             ReadyImageImportOutcome::TrackingFailure => Some(ImageReloadError::TaskTracking),
         };
         if let Some(error) = failure {
-            record_image_reload_failure(
+            let preserve_recovery = attempt.recovering_removed
+                && !matches!(error, ImageReloadError::MetadataIdentityMismatch);
+            let recovery = preserve_recovery.then(|| {
+                (
+                    attempt.request.record(),
+                    attempt.handle,
+                    attempt.request.expected_version(),
+                )
+            });
+            if record_image_reload_failure(
                 attempt,
                 error,
+                &asset_server,
                 &mut images,
                 &mut states,
                 &mut events,
                 &mut diagnostics,
                 &mut stats,
-            );
+            ) && let Some((record, handle, expected_version)) = recovery
+            {
+                recoveries.images.insert(
+                    handle.id(),
+                    ImagePublicationSnapshot::capture(
+                        &record,
+                        handle,
+                        expected_version,
+                        &images,
+                        &states,
+                    ),
+                );
+            }
         }
     }
+
+    recoveries
+        .images
+        .retain(|_, snapshot| snapshot.is_current(&asset_server, &images, &states));
 
     stats.pending = pending.len().min(u32::MAX as usize) as u32;
 }
@@ -779,18 +892,19 @@ pub(super) fn apply_imported_image(
 pub(super) fn record_image_reload_failure(
     attempt: ImageReloadAttempt,
     error: ImageReloadError,
+    asset_server: &AssetServer,
     images: &mut Assets<ImageAsset>,
     states: &mut AssetStates,
     events: &mut AssetEvents,
     diagnostics: &mut AssetReloadDiagnostics,
     stats: &mut ImageReloadStats,
-) {
+) -> bool {
     let request = &attempt.request;
-    if !attempt.is_current(images, states) {
+    if !attempt.is_current(asset_server, images, states) {
         stats.stale = stats.stale.saturating_add(1);
-        return;
+        return false;
     }
-    let handle = Handle::<ImageAsset>::new(request.asset_id());
+    let handle = attempt.handle;
     if let Err(state_error) = states.ensure_version(handle.id(), request.expected_version()) {
         match state_error {
             AssetStateError::StaleReload { .. } => stats.stale = stats.stale.saturating_add(1),
@@ -799,7 +913,7 @@ pub(super) fn record_image_reload_failure(
                 stats.failed = stats.failed.saturating_add(1);
             }
         }
-        return;
+        return false;
     }
     diagnostics.push(image_reload_diagnostic(request.path(), &error));
     let result = if images.get(handle).is_some() {
@@ -812,8 +926,14 @@ pub(super) fn record_image_reload_failure(
     }
 
     match result {
-        Ok(_) => stats.failed = stats.failed.saturating_add(1),
-        Err(_) => stats.stale = stats.stale.saturating_add(1),
+        Ok(_) => {
+            stats.failed = stats.failed.saturating_add(1);
+            true
+        }
+        Err(_) => {
+            stats.stale = stats.stale.saturating_add(1);
+            false
+        }
     }
 }
 
@@ -927,6 +1047,7 @@ pub(super) fn image_reload_diagnostic(path: &AssetPath, error: &ImageReloadError
             );
         }
         ImageReloadError::TaskTracking => {}
+        ImageReloadError::Asset(_) => {}
         ImageReloadError::Publication(kind) => {
             diagnostic = with_image_public_identifier(diagnostic, "reason", kind.as_str());
         }

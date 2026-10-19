@@ -76,6 +76,9 @@ pub enum ComponentRegistryError {
     MissingSchemaProviderReceipt {
         provider: nara_app::PluginSchemaProviderId,
     },
+    UndeclaredSchemaProviderReceipt {
+        provider: nara_app::PluginSchemaProviderId,
+    },
     DivergentSchemaProviderReceipt {
         provider: nara_app::PluginSchemaProviderId,
     },
@@ -276,6 +279,10 @@ impl Display for ComponentRegistryError {
             Self::MissingSchemaProviderReceipt { provider } => write!(
                 formatter,
                 "component schema provider '{provider}' has no executable behavior receipt"
+            ),
+            Self::UndeclaredSchemaProviderReceipt { provider } => write!(
+                formatter,
+                "component schema provider '{provider}' is not declared by the installed plugins"
             ),
             Self::DivergentSchemaProviderReceipt { provider } => write!(
                 formatter,
@@ -876,6 +883,27 @@ impl ComponentRegistry {
     #[must_use]
     pub const fn is_frozen(&self) -> bool {
         matches!(self.state, RegistryState::Frozen(_))
+    }
+
+    pub(crate) fn validate_declared_providers(
+        &self,
+        declared: &BTreeSet<nara_app::PluginSchemaProviderId>,
+    ) -> Result<(), ComponentRegistryError> {
+        let actual = &self.data().provider_owners;
+        if let Some(provider) = declared
+            .iter()
+            .find(|provider| !actual.contains_key(provider))
+        {
+            return Err(ComponentRegistryError::MissingSchemaProviderReceipt {
+                provider: *provider,
+            });
+        }
+        if let Some(provider) = actual.keys().find(|provider| !declared.contains(provider)) {
+            return Err(ComponentRegistryError::UndeclaredSchemaProviderReceipt {
+                provider: *provider,
+            });
+        }
+        Ok(())
     }
 
     pub fn freeze(&mut self) -> Result<&mut Self, ComponentRegistryError> {

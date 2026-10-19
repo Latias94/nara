@@ -36,6 +36,68 @@ fn source_changes_keep_last_semantic_event_for_atomic_save_sequences() {
 }
 
 #[test]
+fn source_changes_preserve_metadata_dirtiness_across_source_events_and_batches() {
+    let path = AssetPath::new("textures/player.png").unwrap();
+    for kinds in [
+        vec![
+            AssetSourceChangeKind::MetaModified,
+            AssetSourceChangeKind::Modified,
+        ],
+        vec![
+            AssetSourceChangeKind::Modified,
+            AssetSourceChangeKind::MetaModified,
+        ],
+        vec![
+            AssetSourceChangeKind::Removed,
+            AssetSourceChangeKind::MetaModified,
+            AssetSourceChangeKind::Modified,
+        ],
+    ] {
+        for batch in [false, true] {
+            let mut changes = AssetSourceChanges::new();
+            for kind in kinds.iter().copied() {
+                let change = AssetSourceChange::new(path.clone(), kind);
+                if batch {
+                    changes.try_extend([change]).unwrap();
+                } else {
+                    changes.push(change).unwrap();
+                }
+            }
+            assert_eq!(
+                changes.drain_coalesced(),
+                vec![AssetSourceChange::new(
+                    path.clone(),
+                    AssetSourceChangeKind::MetaModified,
+                )],
+                "source and metadata facts must survive {kinds:?}, batch={batch}"
+            );
+        }
+    }
+}
+
+#[test]
+fn source_changes_metadata_does_not_resurrect_a_removed_source() {
+    let path = AssetPath::new("textures/player.png").unwrap();
+    for batch in [false, true] {
+        let mut changes = AssetSourceChanges::new();
+        changes.removed(path.clone()).unwrap();
+        let metadata = AssetSourceChange::new(path.clone(), AssetSourceChangeKind::MetaModified);
+        if batch {
+            changes.try_extend([metadata]).unwrap();
+        } else {
+            changes.push(metadata).unwrap();
+        }
+        assert_eq!(
+            changes.drain_coalesced(),
+            vec![AssetSourceChange::new(
+                path.clone(),
+                AssetSourceChangeKind::Removed,
+            )]
+        );
+    }
+}
+
+#[test]
 fn source_changes_are_bounded_and_duplicate_paths_do_not_consume_capacity() {
     let mut changes = AssetSourceChanges::with_limits(AssetSourceChangeLimits::new(
         ItemLimit::ONE,

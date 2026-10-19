@@ -204,11 +204,13 @@ impl LoadContext<'_> {
         &mut self,
         prefabs: &BTreeMap<AssetPath, Arc<PrefabDocument>>,
         images: &[ProjectImageContent],
+        tilesets: &[ProjectTileSetContent],
     ) -> Result<ProjectAssetDatabase, ProjectContentError> {
         let paths = || {
             prefabs
                 .keys()
                 .chain(images.iter().map(ProjectImageContent::path))
+                .chain(tilesets.iter().map(ProjectTileSetContent::path))
         };
         let mut bytes = size_of::<ProjectContentAssets>() + ARC_CONTROL_BLOCK_BYTES;
         for path in paths() {

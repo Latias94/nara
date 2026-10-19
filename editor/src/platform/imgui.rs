@@ -7,7 +7,6 @@ use dear_imgui_rs::{Context, FontConfig, FontSource, StbTrueTypeFontData};
 use dear_imgui_wgpu::{ExternalTextureId, wgpu};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform, WinitPlatformAction};
 use nara::{
-    asset::{AssetId, Handle},
     project_host::{
         EditorGameStartRequest, EditorGameViewCandidateIdentity, EditorGameViewCompletion,
     },
@@ -73,8 +72,6 @@ mod supervised_play_tests;
 use super::game_input::EditorGamePresentedStamp;
 use input::ImguiInput;
 use scene::ImguiScenePresenter;
-
-const GAME_TARGET_ID: u64 = 2;
 
 pub(super) fn run_application(mut application: EditorApplication) -> Result<(), EditorRunError> {
     if let Some(preferences) = crate::workspace::EditorWorkspacePreferences::user_default() {
@@ -1128,7 +1125,7 @@ impl NativeImgui {
             return Ok(());
         }
         if let Some(request) = application.pending_game_start_request() {
-            let (source, target) = game_target(request)?;
+            let (source, target) = game_target(request, &self.game)?;
             if self.frontend.game_open(application.panel_workspace()) {
                 self.game.ensure(
                     &mut self.gpu,
@@ -1166,7 +1163,7 @@ impl NativeImgui {
                 self.game_source_active = true;
                 application.drive_editor_frame(Duration::ZERO, false, true);
             }
-            let (source, target) = game_target(request)?;
+            let (source, target) = game_target(request, &self.game)?;
             self.game.ensure(
                 &mut self.gpu,
                 &mut self.renderer,
@@ -2010,17 +2007,18 @@ mod opening_tests {
 
 fn game_target(
     request: EditorGameStartRequest,
+    current: &ImguiTarget,
 ) -> Result<(RenderFrameSourceGeneration, RenderImagePacket), EditorRunError> {
     let resolution = request.logical_window().resolution;
     let extent = Extent2d::new(resolution.physical_width, resolution.physical_height)
         .ok_or_else(|| imgui_error("Game logical window has zero extent"))?;
-    let target =
-        editor_viewport_image_target(Handle::new(AssetId::from_raw(GAME_TARGET_ID)), extent)
-            .map_err(imgui_error)?;
-    Ok((
-        RenderFrameSourceGeneration::from(request.runtime_generation()),
-        target,
-    ))
+    let source = RenderFrameSourceGeneration::from(request.runtime_generation());
+    let image = match current.target.filter(|_| current.source == Some(source)) {
+        Some(target) => target.image(),
+        None => nara::render::RenderImage2d::allocate_handle().map_err(imgui_error)?,
+    };
+    let target = editor_viewport_image_target(image, extent).map_err(imgui_error)?;
+    Ok((source, target))
 }
 
 fn imgui_error(error: impl std::fmt::Display) -> EditorRunError {

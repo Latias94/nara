@@ -18,14 +18,28 @@ pub trait Asset: Send + Sync + 'static {}
 
 impl<T> Asset for T where T: Send + Sync + 'static {}
 
+/// A typed runtime identity. Source-backed handles come from `AssetServer`.
+///
+/// ```compile_fail,E0624
+/// use nara_asset::{AssetServer, Handle};
+/// let handle = AssetServer::new().reserve::<String>("image.png").unwrap();
+/// let _ = Handle::<u32>::new(handle.id());
+/// ```
 pub struct Handle<T> {
     id: AssetId,
     marker: PhantomData<fn() -> T>,
 }
 
+/// Allocates a fresh typed runtime identity without a source catalog binding.
+///
+/// Render domains may retain it for a view or session. Use `AssetServer` for source-backed assets.
+pub fn allocate_anonymous_handle<T>() -> Result<Handle<T>, AssetError> {
+    AssetId::allocate().map(Handle::new)
+}
+
 impl<T> Handle<T> {
     #[must_use]
-    pub const fn new(id: AssetId) -> Self {
+    pub(crate) const fn new(id: AssetId) -> Self {
         Self {
             id,
             marker: PhantomData,
@@ -115,15 +129,9 @@ impl<T: Asset> Assets<T> {
         asset_server: &mut AssetServer,
         value: T,
     ) -> Result<Handle<T>, AssetError> {
-        loop {
-            let handle = asset_server.reserve_anonymous::<T>()?;
-            if let std::collections::hash_map::Entry::Vacant(entry) = self.values.entry(handle.id())
-            {
-                entry.insert(value);
-                self.touch_slot(handle.id());
-                return Ok(handle);
-            }
-        }
+        let handle = asset_server.reserve_anonymous::<T>()?;
+        self.insert(handle, value);
+        Ok(handle)
     }
 
     pub fn insert(&mut self, handle: Handle<T>, value: T) -> Option<T> {
@@ -210,6 +218,11 @@ impl<T: Asset> Assets<T> {
     #[must_use]
     pub fn get(&self, handle: Handle<T>) -> Option<&T> {
         self.values.get(&handle.id())
+    }
+
+    #[must_use]
+    pub fn contains_id(&self, id: AssetId) -> bool {
+        self.values.contains_key(&id)
     }
 
     pub fn get_mut(&mut self, handle: Handle<T>) -> Option<&mut T> {

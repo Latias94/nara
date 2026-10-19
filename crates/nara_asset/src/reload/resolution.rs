@@ -207,6 +207,19 @@ impl AssetReloadResolutionContext<'_> {
             self.asset_server.id_for_path(record.path()),
             self.asset_server.id_for_stable_id(record.stable_id()),
         ];
+        if let Some(registration) = self.image_registration
+            && record.source_kind() == &AssetSourceKind::Image
+        {
+            for id in known_ids.into_iter().flatten() {
+                if let Err(source) = (registration.validate_asset_type)(self.asset_server, id) {
+                    return Err(AssetReloadResolutionError::Asset {
+                        path: record.path().clone(),
+                        change_kind,
+                        source,
+                    });
+                }
+            }
+        }
         let asset_id = match self.asset_server.reserve_record_id(&record) {
             Ok(asset_id) => asset_id,
             Err(source) => {
@@ -222,6 +235,23 @@ impl AssetReloadResolutionContext<'_> {
                 return Err(error);
             }
         };
+        if let Some(registration) = self.image_registration
+            && record.source_kind() == &AssetSourceKind::Image
+        {
+            (registration.claim_asset_type)(self.asset_server, asset_id).map_err(|source| {
+                AssetReloadResolutionError::Asset {
+                    path: record.path().clone(),
+                    change_kind,
+                    source,
+                }
+            })?;
+        }
+        let previous_state = (
+            self.states.state_revision(asset_id),
+            self.states
+                .state(asset_id)
+                .and_then(|state| state.usable_version()),
+        );
         let generation = self.generations.begin_request(asset_id);
         if change_kind == AssetSourceChangeKind::Removed {
             // Source removal revokes derivation authority before optional cleanup is admitted.
@@ -259,7 +289,7 @@ impl AssetReloadResolutionContext<'_> {
         let request_path = record.path().clone();
         let request_source_kind = record.source_kind().clone();
 
-        if let Err(source) = self.requests.try_push_resolved(
+        let request = match self.requests.try_push_resolved(
             asset_id,
             record,
             request_kind,
@@ -268,16 +298,21 @@ impl AssetReloadResolutionContext<'_> {
             generation,
             affected_artifacts,
             image_authority,
+            Some(previous_state),
         ) {
-            let error = AssetReloadResolutionError::RequestAdmission {
-                path: request_path,
-                source_kind: request_source_kind,
-                change_kind,
-                source,
-            };
-            return Err(self.reject_request(asset_id, error));
-        }
+            Ok(request) => request,
+            Err(source) => {
+                let error = AssetReloadResolutionError::RequestAdmission {
+                    path: request_path,
+                    source_kind: request_source_kind,
+                    change_kind,
+                    source,
+                };
+                return Err(self.reject_request(asset_id, error));
+            }
+        };
         let loading_version = self.states.set_loading(asset_id);
+        request.set_resolved_state_revision(self.states.state_revision(asset_id));
         debug_assert_eq!(loading_version, expected_version);
         Ok(())
     }

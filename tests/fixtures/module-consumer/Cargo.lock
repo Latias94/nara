@@ -2311,6 +2311,7 @@ dependencies = [
  "nara_image",
  "nara_material",
  "nara_reflect",
+ "ron",
  "serde",
 ]
 

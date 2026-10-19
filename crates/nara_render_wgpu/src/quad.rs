@@ -526,7 +526,7 @@ mod tests {
         let image = WgpuQuadBatch {
             material: WgpuQuadMaterialKey {
                 texture: WgpuQuadTextureKey::Image(RenderResourceKey::new(
-                    nara_asset::AssetId::from_raw(7),
+                    nara_asset::allocate_anonymous_handle::<()>().unwrap().id(),
                     nara_render::RenderResourceKind::IMAGE_2D,
                 )),
                 ..fallback.material

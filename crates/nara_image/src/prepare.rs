@@ -4,7 +4,7 @@ use std::{
 };
 
 use nara_app::{App, CoreStage, Plugin, PluginError};
-use nara_asset::{AssetStates, Assets, Handle, ImportArtifactDigest, SourceHash};
+use nara_asset::{AssetStates, Assets, ImportArtifactDigest, SourceHash};
 use nara_ecs::{Res, ResMut, Resource};
 use nara_render::{
     PreparedRenderResources, RenderResourceKey, RenderResourceKind, RenderResourceSnapshot,
@@ -179,8 +179,7 @@ pub fn prepare_images(
         .keys()
         .filter(|key| key.kind() == RenderResourceKind::IMAGE_2D)
         .filter(|key| {
-            let handle = Handle::<ImageAsset>::new(key.asset_id());
-            images.get(handle).is_none()
+            !images.contains_id(key.asset_id())
                 || states
                     .state(key.asset_id())
                     .is_none_or(|state| state.usable_version().is_none())

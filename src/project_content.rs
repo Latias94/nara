@@ -38,6 +38,7 @@ use nara_scene::{
     SceneDocumentCandidate, SceneEntityProvenanceMap, SceneEntityRecord, SceneFormatError,
     ScenePatchDocument, ScenePatchOperation,
 };
+use nara_tilemap::{TileSetSource, TileSetSourceFileLimits};
 
 use crate::project_diagnostic_ids::{fs_operation_id, io_error_kind_id};
 use crate::project_host::{
@@ -138,6 +139,43 @@ pub struct ProjectImageContent {
     image: ImageAsset,
 }
 
+#[derive(Debug)]
+pub struct ProjectTileSetContent {
+    stable_id: nara_asset::StableAssetId,
+    path: AssetPath,
+    image_path: AssetPath,
+    metadata_digest: ContentDigest,
+    source_hash: ContentDigest,
+    source: TileSetSource,
+}
+
+impl ProjectTileSetContent {
+    #[must_use]
+    pub const fn stable_id(&self) -> nara_asset::StableAssetId {
+        self.stable_id
+    }
+
+    #[must_use]
+    pub const fn path(&self) -> &AssetPath {
+        &self.path
+    }
+
+    #[must_use]
+    pub const fn image_path(&self) -> &AssetPath {
+        &self.image_path
+    }
+
+    #[must_use]
+    pub const fn source_hash(&self) -> ContentDigest {
+        self.source_hash
+    }
+
+    #[must_use]
+    pub const fn source(&self) -> &TileSetSource {
+        &self.source
+    }
+}
+
 impl ProjectImageContent {
     #[must_use]
     pub const fn path(&self) -> &AssetPath {
@@ -164,6 +202,7 @@ struct ProjectContentSnapshotInner {
     expanded_startup_scene_provenance: Arc<SceneEntityProvenanceMap>,
     prefabs: Box<[ProjectPrefabContent]>,
     images: Box<[ProjectImageContent]>,
+    tilesets: Box<[ProjectTileSetContent]>,
     assets: Arc<ProjectContentAssets>,
     _generation_lease: ProjectContentGenerationLease,
     _runtime_lease: ProjectContentLease,
@@ -255,6 +294,11 @@ impl ProjectContentSnapshot {
     #[must_use]
     pub fn images(&self) -> &[ProjectImageContent] {
         &self.inner.images
+    }
+
+    #[must_use]
+    pub fn tilesets(&self) -> &[ProjectTileSetContent] {
+        &self.inner.tilesets
     }
 
     pub(crate) fn share_image_for_consumer(&self, index: usize) -> Option<ImageAsset> {
@@ -376,6 +420,7 @@ impl fmt::Debug for ProjectContentSnapshot {
             .field("content_digest", &self.content_digest())
             .field("prefab_count", &self.inner.prefabs.len())
             .field("image_count", &self.inner.images.len())
+            .field("tileset_count", &self.inner.tilesets.len())
             .finish_non_exhaustive()
     }
 }
@@ -994,9 +1039,21 @@ impl<'a> LoadContext<'a> {
             )?;
         }
 
-        let asset_refs = self.collect_image_candidates(&expanded)?;
-        let images = self.load_images(&assets, &settings.paths.assets, asset_refs)?;
-        let database = self.retain_loaded_asset_identities(&loaded_prefabs, &images)?;
+        let image_paths = self.collect_image_candidates(&expanded)?;
+        let tileset_paths = self.collect_tileset_candidates(&expanded)?;
+        let (tilesets, tileset_work) =
+            self.load_tilesets(&assets, &settings.paths.assets, tileset_paths)?;
+        let mut image_paths = image_paths;
+        for tileset in &tilesets {
+            if image_paths.insert(tileset.image_path.clone()) {
+                self.add_budget(ProjectContentBudgetKind::QueuedJobs, 1)?;
+            }
+        }
+        let images = self.load_images(&assets, &settings.paths.assets, image_paths)?;
+        self.validate_tileset_image_extents(&tilesets, &images)?;
+        self.commit_tileset_identities(&settings.paths.assets, &tilesets)?;
+        self.commit_work_as_retained(tileset_work, tileset_work.reserved)?;
+        let database = self.retain_loaded_asset_identities(&loaded_prefabs, &images, &tilesets)?;
         self.release_catalogue_work();
         drop((scenes, prefabs, assets));
         let open_handles = self.budget_value(ProjectContentBudgetKind::OpenHandles);
@@ -1019,7 +1076,8 @@ impl<'a> LoadContext<'a> {
                 content_digest,
             );
 
-        let snapshot_overhead = snapshot_retained_overhead(&loaded_prefabs, images.as_slice())?;
+        let snapshot_overhead =
+            snapshot_retained_overhead(&loaded_prefabs, images.as_slice(), tilesets.as_slice())?;
         let startup_closure_retained = startup_closure_retained_bytes(&startup_closure)?;
         let retained_bytes = self
             .budget_value(ProjectContentBudgetKind::RetainedBytes)
@@ -1041,6 +1099,7 @@ impl<'a> LoadContext<'a> {
         );
         let prefabs = prefab_values.into_boxed_slice();
         let mut images = images.into_boxed_slice();
+        let tilesets = tilesets.into_boxed_slice();
 
         let mut startup_closure_budget = self.loader.budget_host.reserve();
         startup_closure_budget
@@ -1122,6 +1181,7 @@ impl<'a> LoadContext<'a> {
                 expanded_startup_scene_provenance,
                 prefabs,
                 images,
+                tilesets,
                 assets,
                 _generation_lease: generation_lease,
                 _runtime_lease: runtime_lease,
@@ -1488,6 +1548,11 @@ impl<'a> LoadContext<'a> {
                 )
                 .map_err(map_asset_reference_error)?;
                 for reference in references {
+                    if component.as_str() == "nara.tilemap.Tilemap"
+                        && reference.path().to_string() == "tileset"
+                    {
+                        continue;
+                    }
                     self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
                     let path = self
                         .resolve_reference_path(reference.asset_ref(), &AssetSourceKind::Image)?;
@@ -1495,6 +1560,43 @@ impl<'a> LoadContext<'a> {
                     if !paths.contains(&path) {
                         self.add_budget(ProjectContentBudgetKind::QueuedJobs, 1)?;
                         paths.insert(path.clone());
+                    }
+                }
+            }
+        }
+        Ok(paths)
+    }
+
+    fn collect_tileset_candidates(
+        &mut self,
+        document: &SceneDocument,
+    ) -> Result<BTreeSet<AssetPath>, ProjectContentError> {
+        let mut paths = BTreeSet::new();
+        for entity in &document.entities {
+            for (component, record) in &entity.components {
+                if component.as_str() != "nara.tilemap.Tilemap" {
+                    continue;
+                }
+                let references = collect_declared_asset_references(
+                    self.validation.registry(),
+                    component,
+                    record.version,
+                    &record.value,
+                )
+                .map_err(map_asset_reference_error)?;
+                for reference in references {
+                    if reference.path().to_string() != "tileset" {
+                        continue;
+                    }
+                    self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
+                    let path = self.resolve_reference_path(
+                        reference.asset_ref(),
+                        &AssetSourceKind::Other("tileset".to_string()),
+                    )?;
+                    self.observe_path(path.as_str())?;
+                    if !paths.contains(&path) {
+                        self.add_budget(ProjectContentBudgetKind::QueuedJobs, 1)?;
+                        paths.insert(path);
                     }
                 }
             }
@@ -1551,6 +1653,192 @@ impl<'a> LoadContext<'a> {
         }
         self.commit_work_as_retained(result_reservation, result_bytes)?;
         Ok(images)
+    }
+
+    fn load_tilesets(
+        &mut self,
+        assets: &DirectoryCapability,
+        asset_root: &nara_project::ProjectPath,
+        paths: BTreeSet<AssetPath>,
+    ) -> Result<(Vec<ProjectTileSetContent>, WorkReservation), ProjectContentError> {
+        let result_bytes = checked_plan_product(
+            ProjectContentBudgetKind::WorkBytes,
+            paths.len(),
+            size_of::<ProjectTileSetContent>(),
+        )?;
+        let result_reservation = self.reserve_work(result_bytes)?;
+        let mut tilesets = Vec::new();
+        tilesets
+            .try_reserve_exact(paths.len())
+            .map_err(|_| allocation_failed("project.content.tileset-list-allocation-failed"))?;
+        for path in paths {
+            self.subtract_budget(ProjectContentBudgetKind::QueuedJobs, 1);
+            self.add_budget(ProjectContentBudgetKind::InFlightJobs, 1)?;
+            let result = self.load_tileset(assets, asset_root, &path);
+            self.subtract_budget(ProjectContentBudgetKind::InFlightJobs, 1);
+            tilesets.push(result?);
+        }
+        Ok((tilesets, result_reservation))
+    }
+
+    fn validate_tileset_image_extents(
+        &self,
+        tilesets: &[ProjectTileSetContent],
+        images: &[ProjectImageContent],
+    ) -> Result<(), ProjectContentError> {
+        for tileset in tilesets {
+            let image = images
+                .iter()
+                .find(|image| image.path() == &tileset.image_path)
+                .ok_or_else(|| {
+                    ProjectContentError::with_identifier(
+                        ProjectContentErrorKind::AssetMetaMismatch,
+                        "project.content.tileset-image-missing",
+                        "TileSet image dependency was not admitted",
+                        "asset",
+                        tileset.path.as_str(),
+                    )
+                })?;
+            let atlas = tileset.source.atlas;
+            let atlas_extent = atlas.atlas_size();
+            let image_extent = image.image.extent();
+            let exact_extent = exact_atlas_axis_matches(
+                atlas.tile_size.x,
+                atlas.columns,
+                atlas.margin.x,
+                atlas.spacing.x,
+                image_extent.width,
+            ) && exact_atlas_axis_matches(
+                atlas.tile_size.y,
+                atlas.rows,
+                atlas.margin.y,
+                atlas.spacing.y,
+                image_extent.height,
+            ) && f64::from(atlas_extent.x) == f64::from(image_extent.width)
+                && f64::from(atlas_extent.y) == f64::from(image_extent.height);
+            if !exact_extent {
+                return Err(ProjectContentError::with_identifier(
+                    ProjectContentErrorKind::AssetMetaMismatch,
+                    "project.content.tileset-image-extent-mismatch",
+                    "TileSet atlas extent does not match its decoded Image extent",
+                    "asset",
+                    tileset.path.as_str(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn commit_tileset_identities(
+        &mut self,
+        asset_root: &nara_project::ProjectPath,
+        tilesets: &[ProjectTileSetContent],
+    ) -> Result<(), ProjectContentError> {
+        for tileset in tilesets {
+            self.verify_catalogued_metadata(&tileset.path, asset_root, tileset.metadata_digest)?;
+            let record = AssetRecord::new(
+                tileset.stable_id,
+                tileset.path.clone(),
+                AssetSourceKind::Other("tileset".to_string()),
+            );
+            if let Some(indexed) = self.asset_database.record_for_path(&tileset.path) {
+                if indexed != &record {
+                    return Err(catalogue::identity_conflict(&tileset.path));
+                }
+            } else {
+                self.reserve_asset_database_work(&record)?;
+                self.asset_database
+                    .insert(record)
+                    .map_err(|_| catalogue::identity_conflict(&tileset.path))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn load_tileset(
+        &mut self,
+        assets: &DirectoryCapability,
+        asset_root: &nara_project::ProjectPath,
+        path: &AssetPath,
+    ) -> Result<ProjectTileSetContent, ProjectContentError> {
+        let meta_path = path.meta_path();
+        let (meta_bytes, meta_digest) = self.read_file(
+            assets,
+            &meta_path,
+            nara_asset::AssetMetaFileLimits::default()
+                .encoded_bytes()
+                .get(),
+        )?;
+        self.verify_catalogued_metadata(path, asset_root, meta_digest)?;
+        self.record_member(
+            StartupContentMemberKind::AssetMetadata,
+            asset_root,
+            &meta_path,
+            meta_digest,
+        )?;
+        let (identity, ()) = AssetMetaCandidate::<()>::decode_json_bytes(&meta_bytes)
+            .map_err(|_| {
+                ProjectContentError::with_identifier(
+                    ProjectContentErrorKind::AssetMeta,
+                    "project.content.tileset-meta-invalid",
+                    "TileSet asset metadata is invalid",
+                    "asset",
+                    path.as_str(),
+                )
+            })?
+            .into_meta()
+            .into_parts();
+        if identity.path() != path {
+            return Err(ProjectContentError::with_identifier(
+                ProjectContentErrorKind::AssetMetaMismatch,
+                "project.content.tileset-meta-path-mismatch",
+                "TileSet asset metadata path does not match its source",
+                "asset",
+                path.as_str(),
+            ));
+        }
+        if identity.source_kind() != &AssetSourceKind::Other("tileset".to_string()) {
+            return Err(ProjectContentError::with_identifier(
+                ProjectContentErrorKind::UnsupportedAssetKind,
+                "project.content.tileset-kind-unsupported",
+                "TileSet metadata does not declare the tileset source kind",
+                "asset",
+                path.as_str(),
+            ));
+        }
+        let record = AssetRecord::from(identity);
+        let stable_id = record.stable_id();
+        let source_ceiling = TileSetSourceFileLimits::default().encoded_bytes().get();
+        let (source_bytes, source_digest) =
+            self.read_file(assets, path.as_str(), source_ceiling)?;
+        let source =
+            TileSetSource::decode_ron_bytes(&source_bytes, TileSetSourceFileLimits::default())
+                .map_err(|_| {
+                    ProjectContentError::with_identifier(
+                        ProjectContentErrorKind::AssetMeta,
+                        "project.content.tileset-source-invalid",
+                        "TileSet source data is invalid",
+                        "asset",
+                        path.as_str(),
+                    )
+                })?;
+        let image_path = self.resolve_reference_path(&source.image, &AssetSourceKind::Image)?;
+        self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
+        self.verify_catalogued_metadata(path, asset_root, meta_digest)?;
+        self.record_member(
+            StartupContentMemberKind::AssetSource,
+            asset_root,
+            path.as_str(),
+            source_digest,
+        )?;
+        Ok(ProjectTileSetContent {
+            stable_id,
+            path: path.clone(),
+            image_path,
+            metadata_digest: meta_digest,
+            source_hash: source_digest,
+            source,
+        })
     }
 
     fn load_image(
@@ -2091,6 +2379,52 @@ fn scene_decode_work_plan(
     )
 }
 
+fn exact_atlas_axis_matches(
+    tile_size: f32,
+    count: u32,
+    margin: f32,
+    spacing: f32,
+    extent: u32,
+) -> bool {
+    let tile_size = f64::from(tile_size);
+    let count = f64::from(count);
+    let spacing = f64::from(spacing);
+    let tiles = tile_size * count;
+    let gaps = spacing * (count - 1.0);
+    let terms = [
+        tiles,
+        tile_size.mul_add(count, -tiles),
+        f64::from(margin) * 2.0,
+        gaps,
+        spacing.mul_add(count - 1.0, -gaps),
+        -f64::from(extent),
+    ];
+    let mut expansion = [0.0; 6];
+    let mut length = 0;
+    for term in terms {
+        let mut accumulator = term;
+        let mut next_length = 0;
+        for index in 0..length {
+            let component = expansion[index];
+            let sum = accumulator + component;
+            let component_in_sum = sum - accumulator;
+            let residual =
+                (accumulator - (sum - component_in_sum)) + (component - component_in_sum);
+            if residual != 0.0 {
+                expansion[next_length] = residual;
+                next_length += 1;
+            }
+            accumulator = sum;
+        }
+        if accumulator != 0.0 {
+            expansion[next_length] = accumulator;
+            next_length += 1;
+        }
+        length = next_length;
+    }
+    length == 0
+}
+
 fn prefab_expansion_work_plan(
     limits: nara_scene::PrefabExpansionLimits,
 ) -> Result<usize, ProjectContentError> {
@@ -2215,6 +2549,7 @@ fn image_retained_plan_bytes(
 fn snapshot_retained_overhead(
     prefabs: &BTreeMap<AssetPath, Arc<PrefabDocument>>,
     images: &[ProjectImageContent],
+    tilesets: &[ProjectTileSetContent],
 ) -> Result<usize, ProjectContentError> {
     let mut total = checked_plan_sum(
         ProjectContentBudgetKind::RetainedBytes,
@@ -2238,12 +2573,34 @@ fn snapshot_retained_overhead(
                 images.len(),
                 size_of::<ProjectImageContent>(),
             )?,
+            checked_plan_product(
+                ProjectContentBudgetKind::RetainedBytes,
+                tilesets.len(),
+                size_of::<ProjectTileSetContent>(),
+            )?,
         ],
     )?;
     for path in prefabs.keys() {
         checked_add_to(
             &mut total,
             string_retained_bytes(path.as_str())?,
+            ProjectContentBudgetKind::RetainedBytes,
+        )?;
+    }
+    for tileset in tilesets {
+        checked_add_to(
+            &mut total,
+            string_retained_bytes(tileset.path.as_str())?,
+            ProjectContentBudgetKind::RetainedBytes,
+        )?;
+        checked_add_to(
+            &mut total,
+            string_retained_bytes(tileset.image_path.as_str())?,
+            ProjectContentBudgetKind::RetainedBytes,
+        )?;
+        checked_add_to(
+            &mut total,
+            string_retained_bytes(&tileset.source.image.to_string())?,
             ProjectContentBudgetKind::RetainedBytes,
         )?;
     }

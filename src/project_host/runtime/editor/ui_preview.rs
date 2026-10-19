@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use nara_asset::{AssetId, Handle};
+use nara_asset::Handle;
 use nara_core::Mat3;
 use nara_ecs::Entity;
 use nara_render::{
@@ -23,8 +23,6 @@ use thiserror::Error;
 use crate::product::AcceptedPrimaryUiSurfaceProfile;
 
 use super::authoring_images::EditorAuthoringImageCatalogReceipt;
-
-const EDITOR_UI_TARGET_ID: u64 = 3;
 
 /// One exact authoring-only UI image candidate owned by the Editor Host.
 ///
@@ -133,7 +131,7 @@ impl EditorUiPreviewSession {
             compiler,
             planner: UiPresentationPlanner::default(),
             render_generation,
-            target: Handle::new(AssetId::from_raw(EDITOR_UI_TARGET_ID)),
+            target: RenderImage2d::allocate_handle()?,
             next_frame_index: 0,
             next_compile_generation: 0,
             key: None,
@@ -340,6 +338,8 @@ impl EditorUiPreviewSession {
 
 #[derive(Debug, Error)]
 pub(super) enum UiPreviewError {
+    #[error(transparent)]
+    TargetIdentity(#[from] nara_asset::AssetError),
     #[error(transparent)]
     Compile(#[from] UiAuthoringCanvasCompileError),
     #[error(transparent)]

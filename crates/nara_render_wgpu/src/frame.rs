@@ -709,7 +709,6 @@ mod tests {
     #[cfg(feature = "ui-submitter")]
     #[test]
     fn target_matching_normalizes_windows_but_keeps_images_exact() {
-        use nara_asset::{AssetId, Handle};
         use nara_render::RenderImage2d;
 
         assert!(render_targets_match(
@@ -718,8 +717,8 @@ mod tests {
             Some(WindowId::PRIMARY),
         ));
         assert!(!render_targets_match(
-            RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(1))),
-            RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(2))),
+            RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
+            RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
             Some(WindowId::PRIMARY),
         ));
     }

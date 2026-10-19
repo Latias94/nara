@@ -6,9 +6,9 @@ use nara_app::{
     RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
 };
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetId, AssetPath, AssetStates,
-    AssetVersion, Assets, Handle, ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest,
-    ImportProfile, ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
+    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetPath, AssetStates, AssetVersion,
+    Assets, Handle, ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
+    ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
 };
 use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Resource, World, schedule::IntoScheduleConfigs};
@@ -585,7 +585,10 @@ fn queueing_records_missing_prepared_texture_snapshot() {
         .world_mut()
         .expect("app should allow world mutation")
         .spawn((
-            Sprite::from_texture(Handle::new(AssetId::from_raw(7)), Vec2::new(10.0, 10.0)),
+            Sprite::from_texture(
+                nara_asset::allocate_anonymous_handle().unwrap(),
+                Vec2::new(10.0, 10.0),
+            ),
             Transform2d::default(),
         ))
         .id();
@@ -603,7 +606,7 @@ fn queueing_records_missing_prepared_texture_snapshot() {
 
 #[test]
 fn queueing_uses_prepared_image_resource_keys_and_uvs() {
-    let image = Handle::new(AssetId::from_raw(7));
+    let image = nara_asset::allocate_anonymous_handle().unwrap();
     let mut app = sprite_app();
     insert_loaded_image(&mut app, image);
     app.world_mut()
@@ -665,7 +668,7 @@ fn custom_material_captures_second_texture_and_preserves_stock_order() {
         input: Material2dInput::SPRITE_FRAGMENT_V1,
         alpha_mode: AlphaMode2d::Opaque,
     }];
-    let texture = Handle::new(AssetId::from_raw(33));
+    let texture = nara_asset::allocate_anonymous_handle().unwrap();
     let definitions = Material2dDefinitions::new(&DEFINITIONS).unwrap();
     let material = definitions
         .instantiate("test.palette", [1.0, 0.5, 0.0, 0.0], texture)
@@ -676,7 +679,7 @@ fn custom_material_captures_second_texture_and_preserves_stock_order() {
     let camera = world
         .spawn((
             Camera2d {
-                target: RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(9))),
+                target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
                 viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
                 viewport_height: 100.0,
                 ..Default::default()
@@ -743,14 +746,18 @@ fn missing_custom_material_texture_skips_only_that_item() {
     }];
     let definitions = Material2dDefinitions::new(&DEFINITIONS).unwrap();
     let material = definitions
-        .instantiate("test.palette", [0.0; 4], Handle::new(AssetId::from_raw(33)))
+        .instantiate(
+            "test.palette",
+            [0.0; 4],
+            nara_asset::allocate_anonymous_handle().unwrap(),
+        )
         .unwrap();
     let mut app = sprite_app();
     let world = app.world_mut().unwrap();
     let camera = world
         .spawn((
             Camera2d {
-                target: RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(9))),
+                target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
                 viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
                 viewport_height: 100.0,
                 ..Default::default()
@@ -962,8 +969,8 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
 
 #[test]
 fn transparent_material_changes_preserve_painter_order_and_split_adjacent_batches() {
-    let texture_a = prepared_image_snapshot(1);
-    let texture_b = prepared_image_snapshot(2);
+    let texture_a = prepared_image_snapshot();
+    let texture_b = prepared_image_snapshot();
     let mut items = vec![
         QueuedSpriteItem {
             material: material_key(),
@@ -1014,7 +1021,7 @@ fn transparent_material_changes_preserve_painter_order_and_split_adjacent_batche
 
 #[test]
 fn same_image_with_different_samplers_splits_batches() {
-    let image = Handle::new(AssetId::from_raw(7));
+    let image = nara_asset::allocate_anonymous_handle().unwrap();
     let mut app = sprite_app();
     insert_loaded_image(&mut app, image);
     app.world_mut()
@@ -1088,7 +1095,7 @@ fn target_or_domain_kind_changes_split_batches() {
             ..queued_item(1)
         },
         QueuedSpriteItem {
-            target: RenderTarget::Image(Handle::new(AssetId::from_raw(8))),
+            target: RenderTarget::Image(nara_asset::allocate_anonymous_handle().unwrap()),
             kind: SpriteBatchKind::Sprite,
             ..queued_item(2)
         },
@@ -1147,7 +1154,7 @@ fn generated_instances_fit_camera_viewport_aspect_and_position() {
 
 #[test]
 fn app_pipeline_extracts_tilemaps_into_batches() {
-    let target = RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(9)));
+    let target = RenderTarget::Image(RenderImage2d::allocate_handle().unwrap());
     let mut app = sprite_app();
     app.world_mut()
         .expect("app should allow world mutation")
@@ -1189,8 +1196,8 @@ fn app_pipeline_extracts_tilemaps_into_batches() {
 
 #[test]
 fn tilemap_extraction_applies_tileset_image_and_atlas_uvs() {
-    let tileset = Handle::new(AssetId::from_raw(21));
-    let image = Handle::new(AssetId::from_raw(22));
+    let tileset = nara_asset::allocate_anonymous_handle().unwrap();
+    let image = nara_asset::allocate_anonymous_handle().unwrap();
     let mut tilesets = Assets::<TileSet>::default();
     tilesets.insert(
         tileset,
@@ -1232,8 +1239,8 @@ fn tilemap_extraction_applies_tileset_image_and_atlas_uvs() {
 
 #[test]
 fn tilemap_extraction_skips_out_of_range_atlas_tiles() {
-    let tileset = Handle::new(AssetId::from_raw(21));
-    let image = Handle::new(AssetId::from_raw(22));
+    let tileset = nara_asset::allocate_anonymous_handle().unwrap();
+    let image = nara_asset::allocate_anonymous_handle().unwrap();
     let mut tilesets = Assets::<TileSet>::default();
     tilesets.insert(
         tileset,
@@ -1376,8 +1383,8 @@ fn test_image() -> ImageAsset {
     .unwrap()
 }
 
-fn prepared_image_snapshot(asset_id: u64) -> PreparedImageSnapshot {
-    let handle = Handle::new(AssetId::from_raw(asset_id));
+fn prepared_image_snapshot() -> PreparedImageSnapshot {
+    let handle = nara_asset::allocate_anonymous_handle().unwrap();
     let mut images = Assets::<ImageAsset>::default();
     assert!(images.insert(handle, test_image()).is_none());
     let image = images.get(handle).unwrap();

@@ -41,6 +41,10 @@ const BOOT_OUTCOME_REQUIREMENTS: &[PluginId] = &[GAMEPLAY_COMMAND_PLUGIN_ID];
 const BOOT_OUTCOME_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(BOOT_OUTCOME_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(BOOT_OUTCOME_REQUIREMENTS);
+const TILESET_PUBLICATION_PLUGIN_ID: PluginId =
+    PluginId::new("nara.test.tileset-publication-outcome");
+const TILESET_PUBLICATION_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(TILESET_PUBLICATION_PLUGIN_ID, PluginCategory::Runtime);
 const EXIT_AFTER_TICK_PLUGIN_ID: PluginId = PluginId::new("nara.test.exit-after-tick");
 const EXIT_AFTER_TICK_REQUIREMENTS: &[PluginId] = &[BOOT_OUTCOME_PLUGIN_ID];
 const EXIT_AFTER_TICK_DECLARATION: PluginDeclaration =
@@ -65,6 +69,17 @@ struct BootOutcome {
     scene_entities: Vec<String>,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq, Resource)]
+struct TileSetPublicationOutcome {
+    tileset_count: usize,
+    image_count: usize,
+    resolved_tilemap_count: usize,
+    #[cfg(feature = "presentation-2d")]
+    rendered_tile_cells: u32,
+    #[cfg(feature = "presentation-2d")]
+    prepared_pixels: Vec<u8>,
+}
+
 #[derive(Debug, Default)]
 struct BootOutcomePlugin;
 
@@ -80,6 +95,28 @@ impl Plugin for BootOutcomePlugin {
                 .in_set(FixedUpdateSet::Finalize)
                 .after(GameplayCommandSet::Capture),
         )?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+struct TileSetPublicationPlugin;
+
+impl Plugin for TileSetPublicationPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &TILESET_PUBLICATION_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.insert_resource(TileSetPublicationOutcome::default())?
+            .add_systems(
+                CoreStage::FixedUpdate,
+                capture_tileset_publication
+                    .in_set(FixedUpdateSet::Finalize)
+                    .after(GameplayCommandSet::Capture),
+            )?;
+        #[cfg(feature = "presentation-2d")]
+        app.add_systems(CoreStage::Last, capture_rendered_tiles)?;
         Ok(())
     }
 }
@@ -166,6 +203,39 @@ fn capture_boot_outcome(
     outcome.scene_entities.sort();
 }
 
+fn capture_tileset_publication(
+    tilesets: Res<nara::asset::Assets<nara::tilemap::TileSet>>,
+    images: Res<nara::asset::Assets<nara::image::ImageAsset>>,
+    tilemaps: Query<&nara::tilemap::Tilemap>,
+    mut outcome: ResMut<TileSetPublicationOutcome>,
+) {
+    outcome.tileset_count = tilesets.iter().count();
+    outcome.image_count = images.iter().count();
+    outcome.resolved_tilemap_count = tilemaps
+        .iter()
+        .filter_map(|tilemap| tilemap.tileset)
+        .filter_map(|handle| tilesets.get(handle))
+        .filter_map(|tileset| tileset.material.image)
+        .filter(|handle| images.get(*handle).is_some())
+        .count();
+}
+
+#[cfg(feature = "presentation-2d")]
+fn capture_rendered_tiles(
+    batches: Res<nara::sprite_render::__private::SpriteBatches>,
+    stats: Res<nara::sprite_render::SpriteRenderStats>,
+    mut outcome: ResMut<TileSetPublicationOutcome>,
+) {
+    outcome.rendered_tile_cells = stats.extracted_tile_cells;
+    outcome.prepared_pixels = batches
+        .as_slice()
+        .iter()
+        .filter(|batch| !batch.instances.is_empty())
+        .filter_map(|batch| batch.image.as_ref())
+        .next()
+        .map_or_else(Vec::new, |image| image.resource().pixels().to_vec());
+}
+
 fn request_exit_after_tick(mut exit: ResMut<AppExitRequests>) {
     exit.request_exit();
 }
@@ -203,11 +273,20 @@ fn boot_recipe() -> ProductRecipe {
         .expect("the boot recipe is statically valid")
 }
 
-fn execute_to_terminal(run: &mut HeadlessRun<BootOutcome>) -> HeadlessRunReport<BootOutcome> {
+fn tileset_probe_recipe() -> ProductRecipe {
+    ProductRecipe::new()
+        .add_plugin::<TileSetPublicationPlugin>()
+        .expect("the TileSet publication probe recipe is statically valid")
+}
+
+fn execute_to_terminal<O>(run: &mut HeadlessRun<O>) -> HeadlessRunReport<O>
+where
+    O: Resource + Clone,
+{
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let report = run.execute_bounded();
-        if report.outcome() != &HeadlessRunOutcome::CleanupIncomplete {
+        if !matches!(report.outcome(), HeadlessRunOutcome::CleanupIncomplete) {
             return report;
         }
         assert!(Instant::now() < deadline, "product cleanup did not finish");
@@ -295,6 +374,198 @@ fn headless_run_materializes_a_stable_image_reference_after_source_rename() {
             .iter()
             .any(|member| member.path().as_str() == "assets/textures/renamed.png")
     );
+}
+
+#[test]
+fn headless_run_publishes_file_backed_tilesets_after_image_dependencies() {
+    use nara::{
+        asset::AssetRef,
+        reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue},
+        scene::{SceneComponentRecord, SceneDocument, SceneEntityRecord},
+        tilemap::{TileAtlasLayout, TileSetSource},
+    };
+
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    #[cfg(feature = "presentation-2d")]
+    {
+        let manifest_path = project.path().join("nara.toml");
+        let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+        std::fs::write(
+            manifest_path,
+            manifest.replace("[\"runtime-2d\"]", "[\"runtime-2d\", \"presentation-2d\"]"),
+        )
+        .unwrap();
+    }
+    let tileset_id = "d3d3f9a6-f7a9-4db0-ae3c-e1d4264d6f12";
+    let tilemap = SceneEntityRecord::new(scene_id("terrain"))
+        .with_component(
+            ComponentTypeId::new("nara.tilemap.Tilemap"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([
+                    (
+                        "tile_size",
+                        ComponentValue::map([
+                            ("x", ComponentValue::f64(1.0).unwrap()),
+                            ("y", ComponentValue::f64(1.0).unwrap()),
+                        ]),
+                    ),
+                    (
+                        "tileset",
+                        ComponentValue::map([
+                            ("kind", ComponentValue::String("path".to_owned())),
+                            (
+                                "value",
+                                ComponentValue::String("tilesets/terrain.tileset.ron".to_owned()),
+                            ),
+                        ]),
+                    ),
+                    (
+                        "cells",
+                        ComponentValue::List(vec![ComponentValue::map([
+                            (
+                                "coord",
+                                ComponentValue::map([
+                                    ("x", ComponentValue::I64(0)),
+                                    ("y", ComponentValue::I64(0)),
+                                ]),
+                            ),
+                            (
+                                "cell",
+                                ComponentValue::map([
+                                    ("tile", ComponentValue::U64(0)),
+                                    (
+                                        "color",
+                                        ComponentValue::map(["r", "g", "b", "a"].map(|channel| {
+                                            (channel, ComponentValue::f64(1.0).unwrap())
+                                        })),
+                                    ),
+                                ]),
+                            ),
+                        ])]),
+                    ),
+                ]),
+            ),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.transform.Transform2d"),
+            project_content_fixture::identity_transform_record(),
+        );
+    let mut other_tilemap = tilemap.clone();
+    other_tilemap.id = scene_id("other-terrain");
+    let ComponentValue::Map(fields) = &mut other_tilemap
+        .components
+        .get_mut(&ComponentTypeId::new("nara.tilemap.Tilemap"))
+        .unwrap()
+        .value
+    else {
+        panic!("Tilemap fixture must have a map payload");
+    };
+    fields.insert(
+        "tileset".to_owned(),
+        ComponentValue::map([
+            ("kind", ComponentValue::String("path".to_owned())),
+            (
+                "value",
+                ComponentValue::String("tilesets/z-terrain.tileset.ron".to_owned()),
+            ),
+        ]),
+    );
+    let mut scene = SceneDocument::from_ordered_roots([tilemap, other_tilemap]);
+    #[cfg(feature = "presentation-2d")]
+    {
+        let camera = SceneEntityRecord::new(scene_id("map-camera"))
+            .with_component(
+                ComponentTypeId::new("nara.transform.Transform2d"),
+                project_content_fixture::identity_transform_record(),
+            )
+            .with_component(
+                ComponentTypeId::new("nara.render.Camera2d"),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::map([
+                        ("viewport_height", ComponentValue::f64(16.0).unwrap()),
+                        (
+                            "viewport",
+                            ComponentValue::map([
+                                ("physical_x", ComponentValue::U64(0)),
+                                ("physical_y", ComponentValue::U64(0)),
+                                ("physical_width", ComponentValue::U64(16)),
+                                ("physical_height", ComponentValue::U64(16)),
+                            ]),
+                        ),
+                    ]),
+                ),
+            );
+        scene = SceneDocument::from_ordered_roots(scene.entities.into_iter().chain([camera]));
+    }
+    project.write_scene_source(&scene);
+    project.write_tileset_source(
+        "tilesets/terrain.tileset.ron",
+        &TileSetSource::new(
+            AssetRef::path("textures/player.png").unwrap(),
+            TileAtlasLayout::grid(nara::core::Vec2::new(1.0, 1.0), 1, 1),
+        ),
+        &project_content_fixture::tileset_meta(tileset_id, "tilesets/terrain.tileset.ron"),
+    );
+    project.write_tileset_source(
+        "tilesets/z-terrain.tileset.ron",
+        &TileSetSource::new(
+            AssetRef::StableId(player_image_meta().identity().stable_id()),
+            TileAtlasLayout::grid(nara::core::Vec2::ONE, 1, 1),
+        ),
+        &project_content_fixture::tileset_meta(
+            "f3d3f9a6-f7a9-4db0-ae3c-e1d4264d6f13",
+            "tilesets/z-terrain.tileset.ron",
+        ),
+    );
+
+    let mut run: HeadlessRun<TileSetPublicationOutcome> = HeadlessRun::from_recipe(
+        project.root_capability(),
+        tileset_probe_recipe(),
+        NonZeroU32::new(1).unwrap(),
+        Vec::new(),
+    );
+    let report = execute_to_terminal(&mut run);
+
+    assert_eq!(
+        report.outcome(),
+        &HeadlessRunOutcome::Completed(TileSetPublicationOutcome {
+            tileset_count: 2,
+            image_count: 1,
+            resolved_tilemap_count: 2,
+            #[cfg(feature = "presentation-2d")]
+            rendered_tile_cells: 2,
+            #[cfg(feature = "presentation-2d")]
+            prepared_pixels: vec![24, 120, 220, 255],
+        })
+    );
+    drop(run);
+
+    #[cfg(feature = "tooling")]
+    {
+        use nara::project_host::{
+            EditorProjectCloseProgress, EditorProjectSession, TrustedCompiledEditorProjectIntent,
+        };
+
+        let mut editor = EditorProjectSession::open_trusted_compiled(
+            project.root_capability(),
+            TrustedCompiledEditorProjectIntent::new(),
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !matches!(
+            editor.advance_close(),
+            EditorProjectCloseProgress::Complete(_)
+        ) {
+            assert!(
+                Instant::now() < deadline,
+                "Editor TileSet runtime must retire"
+            );
+            std::thread::yield_now();
+        }
+    }
 }
 
 #[test]
@@ -517,7 +788,7 @@ fn source_label_cannot_downgrade_a_trusted_product_command_rejection() {
             )
         })
         .collect::<Vec<_>>();
-    let mut run = HeadlessRun::from_recipe(
+    let mut run: HeadlessRun<BootOutcome> = HeadlessRun::from_recipe(
         project.root_capability(),
         boot_recipe(),
         NonZeroU32::new(1).unwrap(),

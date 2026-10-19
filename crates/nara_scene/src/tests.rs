@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::*;
 use nara_asset::{
-    AssetId, AssetPath, AssetRecord, AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle,
+    AssetPath, AssetRecord, AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle,
     ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit};
@@ -2395,6 +2395,7 @@ fn identity_claim_failure_preserves_world_assets_ticks_and_allocator() {
         .get_resource_change_ticks::<AssetServer>()
         .expect("asset server must be installed");
 
+    let before_asset_server = world.resource::<AssetServer>().clone();
     let report = spawn_scene(&mut world, &registry, &document);
 
     assert!(report.diagnostics.has_errors());
@@ -2414,7 +2415,7 @@ fn identity_claim_failure_preserves_world_assets_ticks_and_allocator() {
         asset_server.path(existing.id()),
         Some("textures/existing.png")
     );
-    assert_eq!(asset_server.path(AssetId::from_raw(2)), None);
+    assert_eq!(asset_server, &before_asset_server);
 
     let empty = spawn_scene(
         &mut world,
@@ -3378,6 +3379,7 @@ fn unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation() 
     world.insert_resource(existing_asset_server);
     let before_entities = world.iter_entities().count();
 
+    let before_asset_server = world.resource::<AssetServer>().clone();
     let report = spawn_scene_with_asset_database(&mut world, &registry, &document, &database);
     assert!(report.diagnostics.has_errors());
     assert!(report.instance.is_none());
@@ -3388,7 +3390,7 @@ fn unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation() 
         asset_server.path(existing_handle.id()),
         Some("textures/existing.png")
     );
-    assert_eq!(asset_server.path(AssetId::from_raw(2)), None);
+    assert_eq!(asset_server, &before_asset_server);
     assert!(report.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.invalid-component-payload"
             && diagnostic_has_text_field(diagnostic, "entity-id", "player")
@@ -3463,6 +3465,7 @@ fn component_apply_failure_restores_original_asset_server() {
     world.insert_resource(existing_asset_server);
     let before_entities = world.iter_entities().count();
 
+    let before_asset_server = world.resource::<AssetServer>().clone();
     let report = spawn_scene(&mut world, &registry, &document);
 
     assert!(report.diagnostics.has_errors());
@@ -3474,7 +3477,7 @@ fn component_apply_failure_restores_original_asset_server() {
         asset_server.path(existing_handle.id()),
         Some("textures/existing.png")
     );
-    assert_eq!(asset_server.path(AssetId::from_raw(2)), None);
+    assert_eq!(asset_server, &before_asset_server);
 }
 
 #[test]
@@ -3500,6 +3503,7 @@ fn later_component_apply_failure_does_not_publish_prior_asset_resolution() {
         .get_resource_change_ticks::<AssetServer>()
         .expect("asset server must be installed");
 
+    let before_asset_server = world.resource::<AssetServer>().clone();
     let report = spawn_scene(&mut world, &registry, &document);
 
     assert!(report.diagnostics.has_errors());
@@ -3516,7 +3520,7 @@ fn later_component_apply_failure_does_not_publish_prior_asset_resolution() {
         asset_server.path(existing.id()),
         Some("textures/existing.png")
     );
-    assert_eq!(asset_server.path(AssetId::from_raw(2)), None);
+    assert_eq!(asset_server, &before_asset_server);
 }
 
 #[test]

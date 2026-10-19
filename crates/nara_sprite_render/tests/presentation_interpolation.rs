@@ -2,7 +2,6 @@ use nara_app::{
     __RuntimeDriverPort, App, CoreStage, FixedTime, FixedUpdateSet, RuntimeControl,
     RuntimeControlRequestResult, RuntimeInstance,
 };
-use nara_asset::{AssetId, Handle};
 use nara_core::{Color, Mat3, Vec2};
 use nara_ecs::{Component, Entity, Query, Resource, With, World, schedule::IntoScheduleConfigs};
 use nara_hierarchy::{
@@ -47,7 +46,7 @@ fn fixed_motion_uses_half_tick_presentation_without_mutating_simulation() {
     let camera = world
         .spawn((
             Camera2d {
-                target: RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(1))),
+                target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
                 viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
                 viewport_height: 100.0,
                 ..Default::default()
@@ -136,7 +135,7 @@ fn presentation_app(interpolate: bool) -> App {
 
 fn camera() -> Camera2d {
     Camera2d {
-        target: RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(1))),
+        target: RenderTarget::Image(RenderImage2d::allocate_handle().unwrap()),
         viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
         viewport_height: 100.0,
         ..Default::default()

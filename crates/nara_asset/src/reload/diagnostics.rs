@@ -136,6 +136,8 @@ pub(super) fn asset_error_identifier(error: &AssetError) -> &'static str {
         AssetError::StableIdAlreadyBound { .. } => "stable-id-already-bound",
         AssetError::AssetIdAlreadyBoundToPath { .. } => "asset-id-already-bound-to-path",
         AssetError::AssetIdAlreadyBoundToStableId { .. } => "asset-id-already-bound-to-stable-id",
+        AssetError::UnknownAssetId(_) => "unknown-asset-id",
+        AssetError::AssetTypeMismatch { .. } => "asset-type-mismatch",
     }
 }
 

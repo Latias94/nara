@@ -51,7 +51,7 @@ pub use state::{
     AssetEvents, AssetState, AssetStateError, AssetStateRevision, AssetStates, AssetVersion,
     LoadState,
 };
-pub use storage::{Asset, AssetSlotRevision, Assets, Handle};
+pub use storage::{Asset, AssetSlotRevision, Assets, Handle, allocate_anonymous_handle};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum AssetRefExportPolicy {
@@ -120,14 +120,17 @@ impl From<AssetDatabaseError> for AssetRefError {
 }
 
 impl AssetRef {
-    pub fn resolve<T>(&self, asset_server: &mut AssetServer) -> Result<Handle<T>, AssetRefError> {
+    pub fn resolve<T: 'static>(
+        &self,
+        asset_server: &mut AssetServer,
+    ) -> Result<Handle<T>, AssetRefError> {
         match self {
             Self::Path(path) => asset_server.reserve::<T>(path.as_str()).map_err(Into::into),
             Self::StableId(id) => Err(AssetRefError::MissingProjectDatabase(*id)),
         }
     }
 
-    pub fn resolve_with_database<T>(
+    pub fn resolve_with_database<T: 'static>(
         &self,
         asset_server: &mut AssetServer,
         database: &ProjectAssetDatabase,
@@ -136,7 +139,7 @@ impl AssetRef {
         asset_server.reserve_record(record).map_err(Into::into)
     }
 
-    pub fn resolve_with_database_as<T>(
+    pub fn resolve_with_database_as<T: 'static>(
         &self,
         asset_server: &mut AssetServer,
         database: &ProjectAssetDatabase,
@@ -162,18 +165,24 @@ impl AssetRef {
         Ok(record)
     }
 
-    pub fn from_handle<T>(
+    pub fn from_handle<T: 'static>(
         asset_server: &AssetServer,
         handle: Handle<T>,
     ) -> Result<Self, AssetRefError> {
         Self::from_handle_with_policy(asset_server, handle, AssetRefExportPolicy::Path)
     }
 
-    pub fn from_handle_with_policy<T>(
+    pub fn from_handle_with_policy<T: 'static>(
         asset_server: &AssetServer,
         handle: Handle<T>,
         policy: AssetRefExportPolicy,
     ) -> Result<Self, AssetRefError> {
+        if let Err(error) = asset_server.validate_type_claim::<T>(handle.id()) {
+            return match error {
+                AssetError::UnknownAssetId(_) => Err(AssetRefError::UnknownHandle(handle.id())),
+                error => Err(AssetRefError::Asset(error)),
+            };
+        }
         if policy == AssetRefExportPolicy::StableIdWhenKnown
             && let Some(stable_id) = asset_server.stable_id(handle.id())
         {
@@ -220,6 +229,120 @@ mod tests {
 
         assert_eq!(first, second);
         assert_eq!(server.path(first.id()), Some("player.png"));
+    }
+
+    #[test]
+    fn typed_claims_are_idempotent_and_reject_incompatible_types() {
+        let mut server = AssetServer::new();
+        let first = server.reserve::<String>("player.png").unwrap();
+        let repeat = server.reserve::<String>("player.png").unwrap();
+
+        assert_eq!(first, repeat);
+        assert!(matches!(
+            server.reserve::<u32>("player.png"),
+            Err(AssetError::AssetTypeMismatch { .. })
+        ));
+        assert_eq!(server.path(first.id()), Some("player.png"));
+    }
+
+    #[test]
+    fn unknown_ids_cannot_be_claimed_as_typed_handles() {
+        let mut server = AssetServer::new();
+
+        assert_eq!(
+            server.claim::<String>(AssetId::from_raw(u64::MAX)),
+            Err(AssetError::UnknownAssetId(AssetId::from_raw(u64::MAX)))
+        );
+    }
+
+    #[test]
+    fn rejected_typed_record_claims_restore_staged_bindings() {
+        let mut server = AssetServer::new();
+        let first = asset_record("textures/player.png");
+        let handle = server.reserve::<String>(first.path().as_str()).unwrap();
+        let baseline = server.clone();
+        assert!(matches!(
+            server.reserve_record::<u32>(&first),
+            Err(AssetError::AssetTypeMismatch { .. })
+        ));
+        assert_eq!(server, baseline);
+        assert_eq!(server.stable_id(handle.id()), None);
+    }
+
+    #[test]
+    fn untyped_identity_claims_participate_in_catalog_snapshots() {
+        let mut server = AssetServer::new();
+        let id = server
+            .reserve_record_id(&asset_record("image.png"))
+            .unwrap();
+        let baseline = server.clone();
+
+        let handle = server.claim::<String>(id).unwrap();
+
+        assert_ne!(server, baseline);
+        assert_eq!(server.claim::<String>(id).unwrap(), handle);
+        assert_eq!(server.get_handle::<String>(id), Some(handle));
+        assert!(server.get_handle::<u32>(id).is_none());
+        assert!(baseline.get_handle::<String>(id).is_none());
+    }
+
+    #[test]
+    fn anonymous_identities_are_unique_and_have_explicit_catalog_membership() {
+        let detached = allocate_anonymous_handle::<String>().unwrap();
+        let mut server = AssetServer::new();
+        let owned = server.reserve_anonymous::<String>().unwrap();
+
+        assert_ne!(detached.id(), owned.id());
+        assert_eq!(server.claim::<String>(owned.id()).unwrap(), owned);
+        assert_eq!(
+            server.claim::<String>(detached.id()),
+            Err(AssetError::UnknownAssetId(detached.id()))
+        );
+        assert!(matches!(
+            server.claim::<u32>(owned.id()),
+            Err(AssetError::AssetTypeMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn independent_asset_servers_allocate_distinct_runtime_ids() {
+        let mut first_server = AssetServer::new();
+        let mut second_server = AssetServer::new();
+        let first = first_server.reserve::<String>("first.png").unwrap();
+        let second = second_server.reserve::<String>("second.png").unwrap();
+        let mut second_assets = Assets::default();
+        second_assets.insert(second, String::from("second"));
+
+        assert_ne!(first.id(), second.id());
+        assert!(second_assets.get(first).is_none());
+        assert_eq!(
+            AssetRef::from_handle(&second_server, first),
+            Err(AssetRefError::UnknownHandle(first.id()))
+        );
+    }
+
+    #[test]
+    fn cloned_asset_servers_allocate_distinct_new_runtime_ids() {
+        let mut original = AssetServer::new();
+        let existing = original.reserve::<String>("existing.png").unwrap();
+        let mut clone = original.clone();
+
+        let original_new = original.reserve::<String>("original.png").unwrap();
+        let clone_new = clone.reserve::<String>("clone.png").unwrap();
+
+        assert_eq!(original.path(existing.id()), Some("existing.png"));
+        assert_ne!(original_new.id(), clone_new.id());
+    }
+
+    #[test]
+    fn asset_server_equality_ignores_discarded_allocator_ids() {
+        let mut original = AssetServer::new();
+        original.reserve::<String>("existing.png").unwrap();
+        let clone = original.clone();
+
+        AssetServer::new().reserve_anonymous::<String>().unwrap();
+
+        assert_eq!(original, clone);
     }
 
     #[test]

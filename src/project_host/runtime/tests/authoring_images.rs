@@ -118,13 +118,24 @@ fn generic_editor_retires_an_image_when_its_metadata_becomes_invalid() {
         settings,
         &source_bytes,
     );
-    project.write_ui_authoring_documents(Some(image_path), None);
+    project.write_ui_authoring_documents(Some(image_path), Some(image_path));
 
     let mut editor = open_generic_editor_with_ready_index(&project);
     drive_image_import_host_until_idle(&mut editor);
     assert_eq!(
         editor.editor_authoring_image_catalog_facts(),
         (2, vec![(image_path.to_owned(), settings)])
+    );
+    editor.set_editor_preview_extent(nara_render::Extent2d::new(320, 240));
+    editor.drive_editor_frame(Duration::ZERO);
+    let before = editor.take_editor_preview_candidate().unwrap();
+    let before_stamp = before.content_stamp();
+    let (_, _, _, _, before_batches, _) = before.into_parts();
+    assert!(
+        before_batches
+            .as_slice()
+            .iter()
+            .any(|batch| batch.image.is_some())
     );
 
     fs::write(
@@ -135,6 +146,16 @@ fn generic_editor_retires_an_image_when_its_metadata_becomes_invalid() {
     assert!(editor.request_project_source_index_refresh());
     drive_image_import_host_until_idle(&mut editor);
 
+    editor.drive_editor_frame(Duration::ZERO);
+    let after = editor.take_editor_preview_candidate().unwrap();
+    let after_stamp = after.content_stamp();
+    let (_, _, _, _, after_batches, _) = after.into_parts();
+    let close = drive_editor_close_to_completion(&mut editor);
+    assert!(matches!(
+        close,
+        super::super::editor::EditorProjectCloseProgress::Complete(_)
+    ));
+
     assert_eq!(
         editor.editor_authoring_image_catalog_facts(),
         (3, Vec::new())
@@ -144,6 +165,254 @@ fn generic_editor_retires_an_image_when_its_metadata_becomes_invalid() {
             .editor_image_last_good(&AssetPath::new(image_path).unwrap())
             .is_none(),
         "invalid metadata must retire the image from the authoring publication"
+    );
+    assert_ne!(
+        before_stamp, after_stamp,
+        "identity retirement must invalidate Scene content reuse"
+    );
+    assert!(
+        after_batches
+            .as_slice()
+            .iter()
+            .all(|batch| batch.image.is_none()),
+        "invalid metadata must revoke Image pixels from new Scene preview packets"
+    );
+}
+
+#[test]
+fn generic_editor_failed_image_revocation_settles_catalog_and_blocks_metadata_writes() {
+    let project = TestProject::new("generic-image-revocation-failure");
+    project.configure_authoring_ui("Image Revocation Failure");
+    let revoked_path = "textures/revoked.png";
+    let valid_path = "textures/valid.png";
+    let pixels = include_bytes!("../../../../tests/fixtures/images/valid-rgba-1x1.png");
+    for (path, stable_id) in [
+        (revoked_path, "0d39d538-c070-42fb-a829-fca0630d1a0d"),
+        (valid_path, "10280c94-d8ce-450b-b35d-5acdfb697502"),
+    ] {
+        project.write_canonical_image(path, stable_id, ImageImportSettings::default(), pixels);
+    }
+    project.write_ui_authoring_documents(Some(revoked_path), Some(valid_path));
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    drive_image_import_host_until_idle(&mut editor);
+    editor.set_editor_preview_extent(nara_render::Extent2d::new(320, 240));
+    editor.drive_editor_frame(Duration::ZERO);
+    editor.test_exhaust_image_publication_revision();
+    fs::write(
+        project.root.join(format!("assets/{revoked_path}.meta")),
+        b"invalid metadata",
+    )
+    .unwrap();
+    editor.request_project_source_index_refresh();
+    drive_image_import_host_until_idle(&mut editor);
+    editor.drive_editor_frame(Duration::ZERO);
+    let (_, choices) = editor.editor_authoring_image_catalog_facts();
+    let removed = editor
+        .editor_image_last_good(&AssetPath::new(revoked_path).unwrap())
+        .is_none();
+    let preview_retired = editor.take_editor_preview_candidate().is_none();
+    let warning = report_has_code(
+        editor.current_frame().diagnostics(),
+        "project.editor.authoring-image-revocation-failed",
+    );
+    let metadata_path = project.root.join(format!("assets/{valid_path}.meta"));
+    let before = fs::read(&metadata_path).unwrap();
+    let request = editor.request_editor_image_import(
+        editor.current_frame().revision(),
+        &format!("assets/{valid_path}"),
+        ImageImportSettings::new(ImageColorSpace::Linear),
+    );
+    let after = fs::read(&metadata_path).unwrap();
+    let close = drive_editor_close_to_completion(&mut editor);
+    assert!(matches!(
+        close,
+        super::super::editor::EditorProjectCloseProgress::Complete(_)
+    ));
+    assert!(removed);
+    assert_eq!(
+        choices,
+        vec![(valid_path.to_owned(), ImageImportSettings::default())]
+    );
+    assert!(preview_retired);
+    assert!(warning);
+    assert!(
+        matches!(
+            request,
+            super::super::editor::EditorImageImportRequestResult::Rejected(
+                super::super::editor::EditorImageImportFailure::Runtime(_)
+            )
+        ),
+        "{request:?}"
+    );
+    assert_eq!(before, after);
+}
+
+#[test]
+fn generic_editor_explicit_image_import_is_admitted_during_background_hydration() {
+    for same_source in [false, true] {
+        let project = TestProject::new("generic-image-hydration-user-priority");
+        project.configure_authoring_ui("Image Hydration User Priority");
+        let pixels = include_bytes!("../../../../tests/fixtures/images/valid-rgba-1x1.png");
+        for (path, stable_id) in [
+            (
+                "textures/a-running.png",
+                "10280c94-d8ce-450b-b35d-5acdfb697502",
+            ),
+            (
+                "textures/m-explicit.png",
+                "b44c013f-8ed6-470d-a389-c1ef498e5561",
+            ),
+            (
+                "textures/z-queued.png",
+                "c0d02b07-05f3-4776-972c-c92e8e57668f",
+            ),
+        ] {
+            project.write_canonical_image(path, stable_id, ImageImportSettings::default(), pixels);
+        }
+        project.write_ui_authoring_documents(
+            Some("textures/a-running.png"),
+            Some("textures/z-queued.png"),
+        );
+        let mut host = super::super::editor::EditorProjectOpenHost::new();
+        let mut attempt = host.begin(project.writable_capability(), None);
+        let mut editor = loop {
+            match host.advance(attempt) {
+                super::super::editor::EditorProjectOpenProgress::Pending(next) => attempt = next,
+                super::super::editor::EditorProjectOpenProgress::Opened(session) => break session,
+                super::super::editor::EditorProjectOpenProgress::Rejected(failure) => {
+                    panic!("the Image fixture must open: {:?}", failure.diagnostics())
+                }
+            }
+        };
+        let held = editor.test_hold_next_image_import();
+        for _ in 0..128 {
+            editor.drive_editor_frame(Duration::ZERO);
+        }
+        let hydration_started = held.wait_until_started();
+        let target = if same_source {
+            "textures/a-running.png"
+        } else {
+            "textures/z-queued.png"
+        };
+        let result = editor.request_editor_image_import(
+            editor.current_frame().revision(),
+            &format!("assets/{target}"),
+            ImageImportSettings::new(ImageColorSpace::Linear),
+        );
+        let _ = held.release();
+        let terminal = if matches!(
+            result,
+            super::super::editor::EditorImageImportRequestResult::Started(_)
+        ) {
+            Some(drive_image_import_to_terminal(&mut editor))
+        } else {
+            None
+        };
+        drive_image_import_host_until_idle(&mut editor);
+        let accepted = editor
+            .editor_image_last_good(&AssetPath::new(target).unwrap())
+            .cloned();
+        let queued_restored = editor
+            .editor_image_last_good(&AssetPath::new("textures/z-queued.png").unwrap())
+            .is_some();
+        let close = drive_editor_close_to_completion(&mut editor);
+        assert!(matches!(
+            close,
+            super::super::editor::EditorProjectCloseProgress::Complete(_)
+        ));
+        assert!(
+            hydration_started,
+            "the regression must hold active hydration"
+        );
+        assert!(
+            matches!(
+                result,
+                super::super::editor::EditorImageImportRequestResult::Started(_)
+            ),
+            "explicit import must be admitted while hydration is active: {result:?}"
+        );
+        assert!(
+            matches!(
+                terminal,
+                Some(super::super::editor::EditorImageImportState::Succeeded { .. })
+            ),
+            "{terminal:?}"
+        );
+        assert_eq!(
+            accepted.unwrap().settings_hash(),
+            ImageImportSettings::new(ImageColorSpace::Linear).settings_hash()
+        );
+        assert!(queued_restored, "unrelated queued hydration must resume");
+    }
+}
+
+#[test]
+fn generic_editor_catalog_revocation_cancels_a_late_image_import_even_after_metadata_is_restored() {
+    let project = TestProject::new("generic-image-revoked-late-import");
+    project.configure_authoring_ui("Revoked Late Image Import");
+    let path = "textures/revoked.png";
+    project.write_canonical_image(
+        path,
+        "0d39d538-c070-42fb-a829-fca0630d1a0d",
+        ImageImportSettings::default(),
+        include_bytes!("../../../../tests/fixtures/images/valid-rgba-1x1.png"),
+    );
+    project.write_ui_authoring_documents(Some(path), Some(path));
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    drive_image_import_host_until_idle(&mut editor);
+    let held = editor.test_hold_next_image_import();
+    let request = editor.request_editor_image_import(
+        editor.current_frame().revision(),
+        &format!("assets/{path}"),
+        ImageImportSettings::new(ImageColorSpace::Linear),
+    );
+    assert!(matches!(
+        request,
+        super::super::editor::EditorImageImportRequestResult::Started(_)
+    ));
+    assert!(held.wait_until_started());
+    let metadata_path = project.root.join(format!("assets/{path}.meta"));
+    let admitted_metadata = fs::read(&metadata_path).unwrap();
+    fs::write(&metadata_path, b"invalid metadata").unwrap();
+    editor.request_project_source_index_refresh();
+    for _ in 0..256 {
+        editor.drive_editor_frame(Duration::ZERO);
+        if editor
+            .editor_image_last_good(&AssetPath::new(path).unwrap())
+            .is_none()
+        {
+            break;
+        }
+    }
+    let revoked_before_release = editor
+        .editor_image_last_good(&AssetPath::new(path).unwrap())
+        .is_none();
+    fs::write(&metadata_path, admitted_metadata).unwrap();
+    let _ = held.release();
+    drive_image_import_host_until_idle(&mut editor);
+    let still_revoked = editor
+        .editor_image_last_good(&AssetPath::new(path).unwrap())
+        .is_none();
+    let terminal = editor.editor_image_import_state();
+    let close = drive_editor_close_to_completion(&mut editor);
+    assert!(matches!(
+        close,
+        super::super::editor::EditorProjectCloseProgress::Complete(_)
+    ));
+    assert!(
+        revoked_before_release,
+        "the refreshed catalog must observe identity revocation"
+    );
+    assert!(
+        still_revoked,
+        "a late result must not regain authority after metadata restoration"
+    );
+    assert!(
+        matches!(
+            terminal,
+            super::super::editor::EditorImageImportState::Failed { .. }
+        ),
+        "{terminal:?}"
     );
 }
 

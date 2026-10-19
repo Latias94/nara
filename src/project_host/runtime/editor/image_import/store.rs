@@ -132,6 +132,16 @@ impl EditorImageLastGoodStore {
             .collect()
     }
 
+    pub(super) fn ineligible_handles(
+        &self,
+        mut retain: impl FnMut(&AssetPath, &EditorImageLastGood) -> bool,
+    ) -> Vec<Handle<ImageAsset>> {
+        self.images
+            .iter()
+            .filter_map(|(path, image)| (!retain(path, image)).then_some(image.handle()))
+            .collect()
+    }
+
     pub(super) fn retain_catalog_eligible(
         &mut self,
         mut retain: impl FnMut(&AssetPath, &EditorImageLastGood) -> bool,

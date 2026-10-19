@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn setup_scene(mut commands: Commands) {
-    let target = Handle::<RenderImage2d>::new(AssetId::from_raw(1));
+    let target = RenderImage2d::allocate_handle().unwrap();
     let camera = commands
         .spawn((
             Name::new("camera"),

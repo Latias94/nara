@@ -289,7 +289,6 @@ mod native {
     use dear_imgui_rs::{Condition, Context, FontSource, Ui};
     use dear_imgui_wgpu::{ExternalTextureId, WgpuFrameStage};
     use dear_imgui_winit::{HiDpiMode, WinitPlatform};
-    use nara_asset::{AssetId, Handle};
     use nara_ecs::Entity;
     use nara_render::{
         __private::{
@@ -490,7 +489,7 @@ mod native {
             .unwrap();
             let generation = EditorRenderGeneration::try_acquire().unwrap();
             let target = editor_viewport_image_target(
-                Handle::<RenderImage2d>::new(AssetId::from_raw(791)),
+                RenderImage2d::allocate_handle().unwrap(),
                 Extent2d::new(64, 64).unwrap(),
             )
             .unwrap();

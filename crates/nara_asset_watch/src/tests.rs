@@ -360,7 +360,7 @@ fn concurrent_producer_rejection_is_non_blocking_and_requires_rescan() {
 struct WatchCapturedReloadRequests(Vec<AssetReloadRequest>);
 
 fn install_reload_capture(app: &mut App) {
-    let consumer = register_image_reload_consumer(app).unwrap();
+    let consumer = register_image_reload_consumer::<String>(app).unwrap();
     app.init_resource::<WatchCapturedReloadRequests>().unwrap();
     app.add_systems(
         CoreStage::TaskUpdate,

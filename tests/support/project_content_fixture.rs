@@ -27,6 +27,7 @@ use nara::{
 };
 
 pub type ImageAssetMeta = AssetMeta<ImageImportSettings>;
+pub type TileSetAssetMeta = AssetMeta<()>;
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static BUILT_IN_AUTHORING_SCHEMA_BUNDLE: OnceLock<Box<[u8]>> = OnceLock::new();
@@ -249,6 +250,22 @@ requested = ["runtime-2d"]
         .unwrap();
     }
 
+    pub fn write_tileset_source(
+        &self,
+        path: &str,
+        source: &nara::tilemap::TileSetSource,
+        meta: &TileSetAssetMeta,
+    ) {
+        let source_path = self.root.join("assets").join(path);
+        fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        fs::write(&source_path, source.encode_ron_bytes().unwrap()).unwrap();
+        fs::write(
+            self.root.join("assets").join(format!("{path}.meta")),
+            meta.to_json_string().unwrap(),
+        )
+        .unwrap();
+    }
+
     pub fn write_asset(&self, path: &str, bytes: &[u8], meta: &ImageAssetMeta) {
         let source = self.root.join("assets").join(path);
         fs::create_dir_all(source.parent().unwrap()).unwrap();
@@ -304,6 +321,17 @@ pub fn image_meta(stable_id: &str, path: &str) -> ImageAssetMeta {
     )
 }
 
+pub fn tileset_meta(stable_id: &str, path: &str) -> TileSetAssetMeta {
+    AssetMeta::new(
+        AssetMetaIdentity::new(
+            StableAssetId::parse_str(stable_id).unwrap(),
+            AssetPath::new(path).unwrap(),
+            AssetSourceKind::Other("tileset".to_string()),
+        ),
+        (),
+    )
+}
+
 pub fn valid_png_bytes() -> &'static [u8] {
     include_bytes!("../fixtures/images/valid-rgba-1x1.png")
 }
@@ -337,7 +365,7 @@ pub fn sprite_value(image: &AssetRef) -> ComponentValue {
     ])
 }
 
-fn identity_transform_record() -> SceneComponentRecord {
+pub fn identity_transform_record() -> SceneComponentRecord {
     SceneComponentRecord::new(
         ComponentSchemaVersion::ONE,
         ComponentValue::map([

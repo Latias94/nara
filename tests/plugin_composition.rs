@@ -419,6 +419,33 @@ impl Plugin for AfterOrderingPlugin {
 #[derive(Default)]
 struct SchemaProviderPlugin;
 
+struct UndeclaredSchemaProviderPlugin;
+
+impl Plugin for UndeclaredSchemaProviderPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        const DECLARATION: PluginDeclaration =
+            PluginDeclaration::new(TEST_SCHEMA_PLUGIN_ID, PluginCategory::Runtime)
+                .requires_plugins(&[nara::reflect::COMPONENT_REGISTRY_PLUGIN_ID]);
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut nara::app::App) -> Result<(), PluginError> {
+        let provider = ComponentSchemaProviderDefinition::new(
+            TEST_SCHEMA_OWNER_ID,
+            TEST_SCHEMA_PROVIDER_ID,
+            TEST_SCHEMA_PROVIDER_BINDING_ID,
+            empty_schema_catalog_source,
+            register_empty_schema_provider,
+        );
+        nara::reflect::register_schema_provider_for_plugin(
+            app,
+            TEST_SCHEMA_PLUGIN_ID,
+            TEST_SCHEMA_PROVIDER_ID.as_str(),
+            &provider,
+        )
+    }
+}
+
 impl Plugin for SchemaProviderPlugin {
     fn declaration() -> &'static PluginDeclaration {
         &TEST_SCHEMA_PLUGIN_DECLARATION
@@ -1243,11 +1270,9 @@ fn code_first_schema_provider_builds_and_freezes_once_without_a_host() {
     COUNTED_PROVIDER_VALIDATIONS.store(0, Ordering::SeqCst);
     COUNTED_PROVIDER_REGISTRATIONS.store(0, Ordering::SeqCst);
     let mut app = nara::app::App::new();
-    app.add_plugins((
-        nara::reflect::ComponentRegistryPlugin,
-        CountedSchemaProviderPlugin,
-    ))
-    .unwrap();
+    app.add_plugins(nara::reflect::ComponentRegistryPlugin)
+        .unwrap();
+    app.add_plugins(CountedSchemaProviderPlugin).unwrap();
     assert_eq!(COUNTED_PROVIDER_VALIDATIONS.load(Ordering::SeqCst), 1);
     assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
 
@@ -1256,6 +1281,38 @@ fn code_first_schema_provider_builds_and_freezes_once_without_a_host() {
     assert!(registry.is_frozen());
     assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
     nara::reflect::validate_component_registry_authority(app.world()).unwrap();
+}
+
+#[test]
+fn direct_schema_closure_rejects_a_declared_provider_without_a_receipt() {
+    let mut app = nara::app::App::new();
+    app.add_plugins(nara::reflect::ComponentRegistryPlugin)
+        .unwrap();
+    app.add_plugins(SchemaProviderPlugin).unwrap();
+
+    let error = app
+        .seal()
+        .err()
+        .expect("missing provider receipt must reject sealing");
+
+    assert!(error.to_string().contains(TEST_SCHEMA_PROVIDER_ID.as_str()));
+}
+
+#[test]
+fn direct_schema_closure_rejects_an_undeclared_provider_receipt() {
+    let mut app = nara::app::App::new();
+    app.add_plugins((
+        nara::reflect::ComponentRegistryPlugin,
+        UndeclaredSchemaProviderPlugin,
+    ))
+    .unwrap();
+
+    let error = app
+        .seal()
+        .err()
+        .expect("undeclared provider receipt must reject sealing");
+
+    assert!(error.to_string().contains(TEST_SCHEMA_PROVIDER_ID.as_str()));
 }
 
 #[test]

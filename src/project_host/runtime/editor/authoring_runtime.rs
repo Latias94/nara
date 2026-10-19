@@ -22,6 +22,7 @@ use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskShutdownReport, TaskSpawnRequest,
     TaskTerminal,
 };
+use nara_tilemap::TileSet;
 #[cfg(feature = "presentation-2d")]
 use nara_tooling::{EditorDocumentId, WorldIdentitySnapshot};
 
@@ -30,7 +31,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 
 use crate::project_host::{ProjectContentSnapshot, authoring::AuthoringProjectSessionSnapshot};
 
-use super::super::{publish_snapshot_images, single_error};
+use super::super::{publish_snapshot_assets, single_error};
 #[cfg(feature = "runtime-ui")]
 use super::authoring_images::{
     EditorAuthoringImageCatalogCandidate, EditorAuthoringImageCatalogError,
@@ -164,6 +165,7 @@ pub(super) enum EditorAuthoringRuntimeCloseProgress {
 /// reuse this owner instead of creating another `App`, task pool, or image store.
 pub(super) struct EditorAuthoringRuntime {
     runtime: RuntimeInstance,
+    image_revocation_failure: Option<EditorImageRuntimeFailure>,
     #[cfg(feature = "presentation-2d")]
     preview: EditorPreviewSession,
     #[cfg(feature = "presentation-2d")]
@@ -191,7 +193,7 @@ impl EditorAuthoringRuntime {
         let mut app = build_authoring_app()?;
         #[cfg(feature = "presentation-2d")]
         let preview = EditorPreviewSession::install_trusted(&mut app, project.clone(), registry)?;
-        publish_snapshot_images(
+        publish_snapshot_assets(
             app.world_mut()
                 .map_err(|_| runtime_error("project.editor.preview-world-unavailable"))?,
             &project,
@@ -201,6 +203,7 @@ impl EditorAuthoringRuntime {
             .map_err(|_| runtime_error("project.editor.preview-runtime-start-failed"))?;
         Ok(Self {
             runtime,
+            image_revocation_failure: None,
             #[cfg(feature = "presentation-2d")]
             preview,
             #[cfg(feature = "presentation-2d")]
@@ -229,6 +232,7 @@ impl EditorAuthoringRuntime {
             .map_err(|_| runtime_error("project.editor.preview-runtime-start-failed"))?;
         Ok(Self {
             runtime,
+            image_revocation_failure: None,
             #[cfg(feature = "presentation-2d")]
             preview,
             #[cfg(feature = "presentation-2d")]
@@ -273,6 +277,9 @@ impl EditorAuthoringRuntime {
         &mut self,
         source: Option<EditorPreviewSource>,
     ) -> Option<DiagnosticReport> {
+        if self.image_revocation_failure.is_some() {
+            return None;
+        }
         self.preview
             .drive(&mut self.runtime, source, self.image_publication_revision)
     }
@@ -297,6 +304,9 @@ impl EditorAuthoringRuntime {
         project_relative_path: RelativePath,
         settings: ImageImportSettings,
     ) -> Result<EditorImageRuntimeTask, EditorImageRuntimeFailure> {
+        if let Some(failure) = self.image_revocation_failure {
+            return Err(failure);
+        }
         let request = EditorImageImportAdmission {
             attempt_generation,
             record,
@@ -341,6 +351,9 @@ impl EditorAuthoringRuntime {
         &mut self,
         imported: ImageImportedAsset,
     ) -> Result<AssetVersion, EditorImageRuntimeFailure> {
+        if let Some(failure) = self.image_revocation_failure {
+            return Err(failure);
+        }
         #[cfg(feature = "presentation-2d")]
         let successor = self
             .image_publication_revision
@@ -358,14 +371,56 @@ impl EditorAuthoringRuntime {
         Ok(version)
     }
 
+    pub(super) fn revoke_images(
+        &mut self,
+        handles: Vec<Handle<ImageAsset>>,
+    ) -> Result<(), EditorImageRuntimeFailure> {
+        if handles.is_empty() {
+            return Ok(());
+        }
+        let result = (|| {
+            if let Some(failure) = self.image_revocation_failure {
+                return Err(failure);
+            }
+            #[cfg(feature = "presentation-2d")]
+            let successor = self
+                .image_publication_revision
+                .checked_add(1)
+                .ok_or(EditorImageRuntimeFailure::Publication)?;
+            self.runtime
+                .with_driver_scope(|scope| scope.__apply_port::<EditorImageRevocationPort>(handles))
+                .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?
+                .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)??;
+            #[cfg(feature = "presentation-2d")]
+            {
+                self.image_publication_revision = successor;
+            }
+            Ok(())
+        })();
+        if let Err(failure) = result {
+            self.image_revocation_failure = Some(failure);
+        }
+        #[cfg(feature = "presentation-2d")]
+        self.preview.retire_candidate();
+        result
+    }
+
     #[must_use]
     pub(super) fn image_import_asset(
         &self,
         handle: Handle<ImageAsset>,
         expected_version: AssetVersion,
     ) -> Option<&ImageAsset> {
+        if self.image_revocation_failure.is_some() {
+            return None;
+        }
         let world = self.runtime.world();
-        if world.get_resource::<AssetStates>()?.version(handle.id()) != Some(expected_version) {
+        if world
+            .get_resource::<AssetStates>()?
+            .state(handle.id())?
+            .usable_version()
+            != Some(expected_version)
+        {
             return None;
         }
         world.get_resource::<Assets<ImageAsset>>()?.get(handle)
@@ -375,6 +430,9 @@ impl EditorAuthoringRuntime {
     pub(super) fn capture_authoring_image_catalog_candidate(
         &self,
     ) -> Result<EditorAuthoringImageCatalogCandidate, EditorAuthoringImageCatalogError> {
+        if self.image_revocation_failure.is_some() {
+            return Err(EditorAuthoringImageCatalogError::RuntimeUnavailable);
+        }
         let world = self.runtime.world();
         let server = world
             .get_resource::<AssetServer>()
@@ -428,6 +486,12 @@ impl EditorAuthoringRuntime {
         } else {
             EditorAuthoringRuntimeCloseProgress::Incomplete(report)
         }
+    }
+
+    #[cfg(test)]
+    #[cfg(feature = "presentation-2d")]
+    pub(super) fn test_exhaust_image_publication_revision(&mut self) {
+        self.image_publication_revision = u64::MAX;
     }
 
     #[cfg(test)]
@@ -498,8 +562,11 @@ fn build_authoring_app() -> Result<App, DiagnosticReport> {
     ))
     .and_then(|app| app.add_plugins(nara_image::ImagePlugin::default()))
     .map_err(|_| runtime_error("project.editor.preview-plugin-install-failed"))?;
+    app.init_resource::<Assets<TileSet>>()
+        .map_err(|_| runtime_error("project.editor.preview-state-install-failed"))?;
     app.insert_resource(EditorImageAdmissionPort)
         .and_then(|app| app.insert_resource(EditorImagePublicationPort))
+        .and_then(|app| app.insert_resource(EditorImageRevocationPort))
         .and_then(|app| {
             app.__register_driver_port::<EditorImageAdmissionPort>(
                 EditorImageAdmissionPort::apply_driver_input_in_world,
@@ -508,6 +575,11 @@ fn build_authoring_app() -> Result<App, DiagnosticReport> {
         .and_then(|app| {
             app.__register_driver_port::<EditorImagePublicationPort>(
                 EditorImagePublicationPort::apply_driver_input_in_world,
+            )
+        })
+        .and_then(|app| {
+            app.__register_driver_port::<EditorImageRevocationPort>(
+                EditorImageRevocationPort::apply_driver_input_in_world,
             )
         })
         .map_err(|_| runtime_error("project.editor.preview-state-install-failed"))?;
@@ -707,6 +779,56 @@ impl EditorImagePublicationPort {
     }
 }
 
+#[derive(Resource)]
+struct EditorImageRevocationPort;
+
+impl __RuntimeDriverPort for EditorImageRevocationPort {
+    type Input = Vec<Handle<ImageAsset>>;
+    type Output = Result<(), EditorImageRuntimeFailure>;
+
+    fn apply_driver_input(&mut self, _input: Self::Input) -> Self::Output {
+        Err(EditorImageRuntimeFailure::RuntimeUnavailable)
+    }
+}
+
+impl EditorImageRevocationPort {
+    fn apply_driver_input_in_world(
+        world: &mut World,
+        handles: Vec<Handle<ImageAsset>>,
+    ) -> Result<
+        Result<(), EditorImageRuntimeFailure>,
+        (RuntimeWorldAccessError, Vec<Handle<ImageAsset>>),
+    > {
+        let server = world.resource::<AssetServer>();
+        let states = world.resource::<AssetStates>();
+        for handle in &handles {
+            if server.get_handle::<ImageAsset>(handle.id()) != Some(*handle) {
+                return Ok(Err(EditorImageRuntimeFailure::AssetIdentity));
+            }
+            if states.next_version(handle.id()).is_err() {
+                return Ok(Err(EditorImageRuntimeFailure::Publication));
+            }
+        }
+        world.resource_scope(|world, mut images: Mut<'_, Assets<ImageAsset>>| {
+            world.resource_scope(|world, mut states: Mut<'_, AssetStates>| {
+                let mut events = world.resource_mut::<AssetEvents>();
+                for handle in &handles {
+                    images
+                        .remove_with_state(*handle, &mut states, &mut events)
+                        .expect("exclusive Image revocation preflighted every next version");
+                }
+            });
+        });
+        #[cfg(feature = "presentation-2d")]
+        if let Some(mut prepared) = world.get_resource_mut::<nara_render::PreparedRenderResources<nara_image::PreparedImageResource>>() {
+            for handle in handles {
+                prepared.remove(nara_image::image_resource_key(handle));
+            }
+        }
+        Ok(Ok(()))
+    }
+}
+
 fn publish_authoring_image_records(
     world: &mut World,
     snapshot: &AuthoringProjectSessionSnapshot,
@@ -766,6 +888,7 @@ mod preview_content_tests {
         (
             EditorAuthoringRuntime {
                 runtime: RuntimeInstance::start(app).unwrap(),
+                image_revocation_failure: None,
                 preview,
                 image_publication_revision: 0,
                 next_image_import_gate: None,
@@ -887,6 +1010,60 @@ mod preview_content_tests {
         assert_eq!(before.document(), after.document());
         assert_eq!(before.revision(), after.revision());
         assert_ne!(before.content_stamp(), after.content_stamp());
+    }
+
+    #[test]
+    fn revoked_image_rejects_admitted_results_and_can_be_imported_again_under_the_same_handle() {
+        let (mut runtime, record, handle) = authoring_runtime();
+        let initial = imported_image(&runtime, &record, handle);
+        let initial_version = runtime.commit_image_import(initial).unwrap();
+        let old_candidate = imported_image(&runtime, &record, handle);
+        runtime.revoke_images(vec![handle]).unwrap();
+        let after_revoke = runtime
+            .image_import_asset(handle, initial_version)
+            .is_none();
+        let old_rejected = runtime.commit_image_import(old_candidate).is_err();
+        let replacement = imported_image(&runtime, &record, handle);
+        let replacement_version = runtime.commit_image_import(replacement).unwrap();
+        let restored = runtime
+            .image_import_asset(handle, replacement_version)
+            .is_some();
+        retire(&mut runtime);
+        assert!(after_revoke);
+        assert!(old_rejected);
+        assert!(restored);
+        assert!(replacement_version > initial_version);
+    }
+
+    #[test]
+    fn failed_image_revocation_retires_preview_and_rejects_further_publication() {
+        let (mut runtime, record, handle) = authoring_runtime();
+        let initial = imported_image(&runtime, &record, handle);
+        let version = runtime.commit_image_import(initial).unwrap();
+        let admitted = imported_image(&runtime, &record, handle);
+        runtime.set_preview_extent(Extent2d::new(320, 240));
+        let source = SceneAuthoringSession::new(SceneDocument::default());
+        let _ = preview(&mut runtime, &source);
+        let retained_drive = runtime.drive_preview(Some(EditorPreviewSource {
+            document: EditorDocumentId::from_raw(1),
+            revision: source.revision(),
+            projection: None,
+        }));
+        runtime.test_exhaust_image_publication_revision();
+        let revoked = runtime.revoke_images(vec![handle]);
+        let retained_candidate = runtime.take_preview_candidate().is_some();
+        let subsequent_report = runtime.drive_preview(None);
+        let new_candidate = runtime.take_preview_candidate().is_some();
+        let available = runtime.image_import_asset(handle, version).is_some();
+        let publication = runtime.commit_image_import(admitted);
+        retire(&mut runtime);
+        assert!(retained_drive.is_none());
+        assert_eq!(revoked, Err(EditorImageRuntimeFailure::Publication));
+        assert!(!retained_candidate);
+        assert!(subsequent_report.is_none());
+        assert!(!new_candidate);
+        assert!(!available);
+        assert_eq!(publication, Err(EditorImageRuntimeFailure::Publication));
     }
 
     #[test]

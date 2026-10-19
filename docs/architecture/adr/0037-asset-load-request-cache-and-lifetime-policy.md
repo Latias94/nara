@@ -45,6 +45,9 @@ flowchart LR
 The first lifetime policy is:
 
 - `Handle<T>` is runtime identity. It is stable across reloads but not persistent scene data.
+- Runtime handles use process-unique asset identities. A cloned `AssetServer` is a private
+  catalogue snapshot for transactional staging, not a shared allocator; independent snapshots
+  cannot issue the same new runtime identity for different sources.
 - `AssetRef` is persistent semantic identity. Authoring hosts resolve it through the project asset
   database; packaged runtimes resolve it through a validated mounted content catalog. Resolution
   does not itself imply residency.
@@ -54,13 +57,26 @@ The first lifetime policy is:
 - A source reload request represents an already known source/product whose authoring inputs or
   importer recipe changed. It is not the public runtime load request.
 - `AssetSourceChange` values are coalesced into generation-stamped `AssetReloadRequest` values.
+- Coalescing preserves metadata dirtiness independently from the latest explicit source existence.
+  A metadata-only event does not resurrect a removed source; a later source recreation can replace
+  removal without losing an earlier metadata change.
 - Each reload request carries expected asset version and load generation. Domain apply systems must
   reject stale results.
+- Image reload registration supplies its Rust type check and first claim to source routing. An incompatible
+  principal claim produces a bounded diagnostic before generation, state or event mutation.
+  Routing secures the claim before publishing Loading; requests still carry identity only.
+  The Image spawn phase retrieves and retains its typed handle through removal, success and failure;
+  apply paths do not rebuild handles from request IDs.
 - A failed first load stores no asset value and sets `LoadState::Failed`.
 - A failed reload preserves the last good typed asset value when one exists, records
   `LoadState::Failed`, and emits a failure event.
 - In a source-backed authoring database, removing a source clears typed runtime values and
   prepared render resources derived from that source generation.
+- Image removal may retain one pixel-free recovery receipt per known identity, only after
+  successfully revoking a current usable Image. A later source-only recreation must match the
+  catalog, type, state and slot continuity before re-admitting current metadata. It does not grant
+  first-load authority or reuse deleted pixels. Metadata-backed recovery requires Image's `serde`
+  feature; without it, the existing metadata-support rejection remains explicit.
 - Removing authoring source is distinct from unmounting a packaged generation. A runtime may keep
   using a verified mounted artifact even when no authoring tree is present.
 - Source-change translation or scheduling failures produce structured diagnostics; they must not be

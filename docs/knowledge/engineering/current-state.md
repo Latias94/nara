@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "8997855501e4689e38e8c89e67efac785a4f1ccf600c909460f64f94f8dcb774"
+source_fingerprint: "3231a3eb2036d791a8a07053a322fcd21223230b0274b39d4486875162bd918a"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "8997855501e4689e38e8c89e67efac785a4f1ccf600c909460f64f94f8d
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `8997855501e4689e38e8c89e67efac785a4f1ccf600c909460f64f94f8dcb774`
-- Immutable records: 731
+- Source fingerprint: `3231a3eb2036d791a8a07053a322fcd21223230b0274b39d4486875162bd918a`
+- Immutable records: 734
 - Active lane heads: 0
 
 # Active Registrations
@@ -47,6 +47,9 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Image lifecycle contract repairs](verification/2026-10/2026-10-19T021717Z-image-lifecycle-contract-repairs-95901fe367a149bc90ec922ad0384a73.md) - R0 event coalescing, removal recovery, foreground admission and shared authoring revocation.
+- **Subagent Finding**: [TileSet dependency and Editor loading research](subagents/2026-10/2026-10-19T012524Z-tileset-dependency-and-editor-loading-research-768c093b92ed44b581556093dc20d059.md) - Source-confirmed Image lifecycle gaps and a reviewed sequence for coherent TileSet publication.
+- **Verification Evidence**: [Component plugin and asset contract refactor](verification/2026-10/2026-10-18T164837Z-component-plugin-and-asset-contract-refactor-b4c2497eff5d4bdb90cebe1de995ceb3.md) - Checked runtime identities and typed claims, schema closure, exact TileSet admission, and consumer migration.
 - **Verification Evidence**: [F11 hierarchy candidate cost refactor](verification/2026-10/2026-10-18T095114Z-f11-hierarchy-candidate-cost-refactor-8570db0da1ef433dbab5368a9d0f59e6.md) - Sparse candidate overlay and private validated baseline reduce measured hierarchy transaction cost while preserving raw-dirty and lifecycle contracts.
 - **Verification Evidence**: [Foundation contract refactor scoped completion](verification/2026-10/2026-10-18T064513Z-foundation-contract-refactor-scoped-completion-299571832cbc4aa28cc9d5d3743bd527.md) - Final closure, durable references, real multi-owner reconciliation and measured scale evidence complete the required foundation slice.
 - **Work Progress**: [Foundation U3 effective values and reference closure](progress/2026-10/2026-10-18T053959Z-u3-effective-closure.md) - Effective default materialization, scene/prefab/export closure, asset collection limits, and Inspector projection landed after U2.
@@ -56,9 +59,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Decision**: [Agent workflow and design cleanup](decisions/2026-10/2026-10-17T152243Z-agent-workflow-and-design-cleanup-c85f611fef834769b7488de6e5ffcc15.md) - Keep engineering continuity while removing registration gates and retiring stale design entrances.
 - **Verification Evidence**: [Dear ImGui 0.21 published backend acceptance](verification/2026-10/2026-10-17T135132Z-dear-imgui-0-21-published-backend-acceptance-5cf11eaec8ea42a986d4953c4a4a00b8.md) - Published registry cohort, owned renderer mapping, native IME and Windows DX12 product qualification with bounded text-intent cadence.
 - **Memory Event**: [Verification: Green Editor run8d5467b0 passes132/132 with bounded text-intent followup; fourte](logs/2026-10/2026-10-17T135008Z-verification-green-editor-run8d5467b0-passes132-132-with-bounded-text-intent-followup-fourte-01d5279ca83145e497911729d884cfef.md) - Green Editor run8d5467b0 passes132/132 with bounded text-intent followup; fourteen native cases remain outside ordinary suite. Independent i
-- **Memory Event**: [Verification: Red run755cd0d8 proves real on-demand IME defect: programmatic_text_focus_repain](logs/2026-10/2026-10-17T134739Z-verification-red-run755cd0d8-proves-real-on-demand-ime-defect-programmatic-text-focus-repain-30e2165bd7c841b582bd1ad12cdcdaf9.md) - Red run755cd0d8 proves real on-demand IME defect: programmatic_text_focus_repaints_until_ime_intent_catches_up_then_becomes_idle fails IO.wa
-- **Memory Event**: [Progress: IME fixture08ba267d passes after ordinary prepare_frame and complete focus/IO li](logs/2026-10/2026-10-17T134542Z-progress-ime-fixture08ba267d-passes-after-ordinary-prepare-frame-and-complete-focus-io-li-59c93b32eace43bd8a9eb90b13b3dcb7.md) - IME fixture08ba267d passes after ordinary prepare_frame and complete focus/IO lifecycle; GPU rejected-frame fixture now completes update_pla
-- **Memory Event**: [Verification: Independent module-consumer cohort 455d45a5 passes18/18 using published0.21 lock](logs/2026-10/2026-10-17T134101Z-verification-independent-module-consumer-cohort-455d45a5-passes18-18-using-published0-21-lock-29b4d17cf24a4c088c25eea27cde2d20.md) - Independent module-consumer cohort 455d45a5 passes18/18 using published0.21 locks. First Windows DX12 native run aeca2708 executes7:5 existi
 
 # Integration Notes
 

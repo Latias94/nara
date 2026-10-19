@@ -202,14 +202,14 @@ impl<'a> ComponentDecodeContext<'a> {
         self.asset_server_touched
     }
 
-    pub fn resolve_asset_ref<T>(
+    pub fn resolve_asset_ref<T: 'static>(
         &mut self,
         asset_ref: &AssetRef,
     ) -> Option<Result<Handle<T>, AssetRefError>> {
         self.resolve_asset_ref_as(asset_ref, None)
     }
 
-    pub fn resolve_asset_ref_with_kind<T>(
+    pub fn resolve_asset_ref_with_kind<T: 'static>(
         &mut self,
         asset_ref: &AssetRef,
         expected_source_kind: &AssetSourceKind,
@@ -230,7 +230,7 @@ impl<'a> ComponentDecodeContext<'a> {
         )
     }
 
-    fn resolve_asset_ref_as<T>(
+    fn resolve_asset_ref_as<T: 'static>(
         &mut self,
         asset_ref: &AssetRef,
         expected_source_kind: Option<&AssetSourceKind>,

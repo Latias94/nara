@@ -41,7 +41,7 @@ pub use crate::project_content::{
     ProjectContentBudgetError, ProjectContentBudgetHost, ProjectContentBudgetKind,
     ProjectContentBudgetSnapshot, ProjectContentError, ProjectContentErrorKind,
     ProjectContentLimits, ProjectContentLoader, ProjectContentRevision, ProjectContentSnapshot,
-    ProjectImageContent, ProjectPrefabContent, StartupContentClosureReceipt,
+    ProjectImageContent, ProjectPrefabContent, ProjectTileSetContent, StartupContentClosureReceipt,
     StartupContentMemberKind, StartupContentMemberReceipt,
 };
 pub use composition::{

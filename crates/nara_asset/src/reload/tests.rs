@@ -49,7 +49,7 @@ fn install_asset_plugin(app: &mut App) {
 struct CapturedReloadRequests(Vec<AssetReloadRequest>);
 
 fn install_test_reload_consumer(app: &mut App) {
-    let consumer = register_image_reload_consumer(app).unwrap();
+    let consumer = register_image_reload_consumer::<String>(app).unwrap();
     app.init_resource::<CapturedReloadRequests>().unwrap();
     app.add_systems(
         CoreStage::TaskUpdate,

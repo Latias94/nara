@@ -119,7 +119,7 @@ impl ComponentApplyContext {
         }
     }
 
-    pub fn resolve_asset_ref<T>(
+    pub fn resolve_asset_ref<T: 'static>(
         &mut self,
         asset_ref: &AssetRef,
     ) -> Result<Handle<T>, AssetRefError> {

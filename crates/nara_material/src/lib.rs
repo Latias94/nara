@@ -209,7 +209,6 @@ pub mod prelude {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_asset::AssetId;
 
     const DEFINITION: Material2dDefinition = Material2dDefinition {
         id: "test.palette",
@@ -230,7 +229,7 @@ mod tests {
     #[test]
     fn instances_select_registered_shader_parameters_texture_and_alpha() {
         let definitions = Material2dDefinitions::new(&DEFINITIONS).unwrap();
-        let texture = Handle::new(AssetId::from_raw(7));
+        let texture = nara_asset::allocate_anonymous_handle().unwrap();
         let instance = definitions
             .instantiate("test.palette", [0.5, 1.0, 2.0, 3.0], texture)
             .unwrap();

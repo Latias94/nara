@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use nara_app::{App, RuntimeInstance};
-use nara_asset::{AssetId, Handle};
 use nara_core::{Color, Vec2};
 use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
@@ -38,12 +37,9 @@ fn native_packet_executes_split_affine_views_with_one_ui_overlay() {
         nara_sprite_render::SpriteRenderPlugin,
     ))
     .unwrap();
-    let target = RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(200)));
-    let descriptor = editor_viewport_image_target(
-        Handle::new(AssetId::from_raw(200)),
-        Extent2d::new(64, 64).unwrap(),
-    )
-    .unwrap();
+    let image = RenderImage2d::allocate_handle().unwrap();
+    let target = RenderTarget::Image(image);
+    let descriptor = editor_viewport_image_target(image, Extent2d::new(64, 64).unwrap()).unwrap();
     let generation = EditorRenderGeneration::try_acquire().unwrap();
     #[cfg(feature = "ui-submitter")]
     let overlay = overlay_packet(target);

@@ -907,7 +907,7 @@ fn asset_server_drift_rejects_the_batch_without_overwriting_newer_state() {
         .resource_mut::<AssetServer>()
         .reserve::<TestAsset>("textures/live.png")
         .unwrap();
-    assert_eq!(staged.id(), live.id());
+    assert_ne!(staged.id(), live.id());
 
     let result = batch.commit(&mut world);
 
