@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "50836c1e689173c12e84e93055930184510f2201cea342242b0843c65d652d61"
+source_fingerprint: "6196e0b4b37ac25daade2d5bfd061558297a71e786ead79527dc8213d4106320"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "50836c1e689173c12e84e93055930184510f2201cea342242b0843c65d6
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `50836c1e689173c12e84e93055930184510f2201cea342242b0843c65d652d61`
-- Immutable records: 753
+- Source fingerprint: `6196e0b4b37ac25daade2d5bfd061558297a71e786ead79527dc8213d4106320`
+- Immutable records: 754
 - Active lane heads: 0
 
 # Active Registrations
@@ -47,6 +47,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Work Progress**: [Post-correction foundation audit and withdrawn reference](progress/2026-10/2026-10-19T113248Z-post-correction-foundation-audit-and-withdrawn-reference-4b9d308fc38e4a31bdbe594c037e9b11.md) - Open post-correction findings, bounded Prefab failure proof and exclusion of the withdrawn reference.
 - **Verification Evidence**: [Foundation correction U1-U15 integration and review](verification/2026-10/2026-10-19-foundation-correction-completion.md) - Final source, consumer, native and review evidence with explicit deferred and platform limits.
 - **Verification Evidence**: [Foundation U13 external ordinary native runner and admitted Exit](verification/2026-10/2026-10-19-foundation-u13-public-native-runner.md) - A separately compiled panel runs through the public native entry and joins normal application retirement after authoritative Session publication.
 - **Verification Evidence**: [Foundation U12 ordinary profile-default font configuration](verification/2026-10/2026-10-19-foundation-u12-profile-defaults.md) - One ProductRecipe configures compilation and presentation through direct composition, Check, Editor Play and actual exported native startup.
@@ -58,7 +59,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Foundation U15 concrete TileSet resource access](verification/2026-10/2026-10-19-foundation-u15-tileset-access.md) - Runtime, managed Editor and TaskUpdate share one concrete publication resource join.
 - **Verification Evidence**: [Foundation U14 aggregate input lifetimes and paused restoration](verification/2026-10/2026-10-19-foundation-u14-semantic-lifetimes.md) - One staging owner prevents normalized and synthetic presses from reviving after configuration exits.
 - **Work Progress**: [Foundation correction integration and authoring acceptance](progress/2026-10/2026-10-19-foundation-correction-integration.md) - U1-U9 focused progress, U10-U15 implementation, independent findings and remaining goal gates.
-- **Verification Evidence**: [Foundation U9 shared text content geometry](verification/2026-10/2026-10-19-foundation-u9-text-content-box.md) - Padded text measures and paints one content box while outer interaction geometry remains intact.
 
 # Integration Notes
 

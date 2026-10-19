@@ -1,5 +1,11 @@
 # Pele Interface And Theming Study
 
+**Status: withdrawn as Nara design input.** The user clarified on 2026-10-19 that the URL was
+sent in error and must not guide this engine. This retained research is historical only; its
+recommendations and plan disposition below are superseded by that correction. It created no
+Pele dependency or Pele-specific engine implementation. Current architecture navigation and
+the correction plan no longer use it as evidence.
+
 Date: 2026-10-19. This is comparative research for the
 [foundation correction plan](../plans/2026-10-19-1335-refactor-foundation-correction-plan.md),
 not an Accepted architecture decision or additional implementation scope.

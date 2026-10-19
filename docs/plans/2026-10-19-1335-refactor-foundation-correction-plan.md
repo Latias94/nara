@@ -471,11 +471,6 @@ reads and pure preparation off the UI thread while retaining attempt identity, s
 finite physical retirement and owner-thread publication. Extract private modules by responsibility
 as their owners change; line count alone is not an acceptance criterion.
 
-The [Pele interface and theming study](../audits/2026-10-19-pele-interface-and-theming-study.md)
-adds comparative evidence for semantic theme roles, metric-affecting invalidation and explicit
-adapter retirement. Lazy module loading does not establish off-thread rendering. This reference
-does not add a CSS engine, new widget framework or asynchronous owner interfaces to U1-U15.
-
 ### Decisions Reserved For Those Consumers
 
 The user will choose the first additional asset/domain workflow, the intended scene-travel/save behavior, and the tile identity/migration experience when those consumers enter scope.

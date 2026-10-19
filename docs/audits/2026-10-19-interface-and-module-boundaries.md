@@ -91,7 +91,3 @@ see [U10 evidence](../knowledge/engineering/verification/2026-10/2026-10-19-foun
 and [later public-consumer results](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-public-consumer-integration.md).
 This closes I04's concrete interface correction. I01-I03 remain unmeasured follow-ups under G9;
 the baseline line counts above are historical extraction guidance, not current file-size promises.
-
-The [Pele study](2026-10-19-pele-interface-and-theming-study.md) independently distinguishes
-asynchronous module loading from off-thread rendering and supports retaining synchronous owner
-commit boundaries. It introduces no new execution model or UI framework into this correction.

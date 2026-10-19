@@ -6,6 +6,10 @@ then-proposed acceptance. U1-U15's focused consumer gates, final locked workspac
 all-features/all-targets check, external-consumer lint and five post-fix critical native tests pass.
 Formal integrated review is complete with zero open findings; the U1-U15 correction scope is complete.
 
+The subsequent [foundation review](2026-10-19-foundation-next-stage-review.md) records new findings
+after that scope, including raw resolver input, Inspector action lifecycles and render error paths.
+Its findings are open; U1-U15 verification does not imply those separate workflows were proved.
+
 The [foundation correction plan](../plans/2026-10-19-1335-refactor-foundation-correction-plan.md)
 maps these B findings, the earlier A findings and module seams to implementation units or explicit
 entry triggers. The plan governs current work; the baseline findings and subsequent execution
@@ -60,9 +64,9 @@ record captures the completed ten-lens formal review and its source/platform lim
 The [follow-up interface review](2026-10-19-interface-and-module-boundaries.md) adds G9 to the correction plan: Nara's task pool is a blocking
 closure pool with cooperative cancellation, not a Future executor, and current owner-thread
 publication seams should remain synchronous. It also records module-boundary candidates before
-any async I/O or public trait expansion is introduced. The [Pele source study](2026-10-19-pele-interface-and-theming-study.md)
-adds comparative evidence for theme dependencies and local lifecycle ownership only; it introduces
-no dependency, CSS engine or executor and does not expand U1-U15 or close G1-G9 follow-ups.
+any async I/O or public trait expansion is introduced. Comparative engine evidence uses the local
+Bevy and Godot sources. The unrelated URL study was withdrawn by the user and supplies no current
+architecture direction.
 
 ## Original Research Scope And Evidence
 

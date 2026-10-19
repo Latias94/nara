@@ -59,8 +59,12 @@ explicit correctness/capability distinctions.
 
 The [interface and module review](../audits/2026-10-19-interface-and-module-boundaries.md)
 separates synchronous owner contracts from triggered asynchronous preparation and private module
-extraction. The [Pele study](../audits/2026-10-19-pele-interface-and-theming-study.md) adds a focused
-comparison of semantic theme tokens, layout invalidation and adapter lifecycle ownership.
+extraction.
+
+The [post-correction foundation review](../audits/2026-10-19-foundation-next-stage-review.md)
+records new raw-Prefab, Inspector and render error-path findings, and the next action-result,
+component-validation, code-generation and document-ownership design triggers. It keeps current
+defects separate from deliberate capability limits and the completed U1-U15 corrections.
 
 The [UI foundation design](ui-foundation-design.md),
 [UI boundary study](ui-product-boundaries-editor-dogfood-and-porting-strategy.md), and
