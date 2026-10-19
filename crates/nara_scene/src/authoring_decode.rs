@@ -62,6 +62,30 @@ pub enum AuthoringDocumentReadiness {
     Degraded,
 }
 
+/// Read-only identity of one immutable authoring schema and Adapter admission.
+///
+/// Clones compare equal while they retain the same admission in this process. Independent
+/// admissions compare unequal even when their catalog contents match. This is neither a
+/// serialized catalog fingerprint nor authority to mutate a document.
+#[derive(Clone)]
+pub struct AuthoringSchemaBasis(Arc<AuthoringClassificationBasis>);
+
+impl fmt::Debug for AuthoringSchemaBasis {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AuthoringSchemaBasis")
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for AuthoringSchemaBasis {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for AuthoringSchemaBasis {}
+
 /// ADR 0090 readiness of one persistent component record or component-targeting operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AuthoringRecordReadiness {
@@ -1046,6 +1070,10 @@ pub(crate) struct AuthoringDocumentState {
 }
 
 impl AuthoringDocumentState {
+    pub(crate) fn schema_basis(&self) -> AuthoringSchemaBasis {
+        AuthoringSchemaBasis(Arc::clone(&self.basis))
+    }
+
     pub(crate) fn catalog_components(&self) -> impl Iterator<Item = (&ComponentSchema, bool)> {
         self.basis
             .schemas

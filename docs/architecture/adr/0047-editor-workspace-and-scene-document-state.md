@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-08-15
+**Last Revised**: 2026-10-19
 **Amended**: 2026-08-15 to make selection single-owner and separate monotonic revision from
 receipt-backed content state
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
@@ -61,6 +61,14 @@ Rules:
 - Document mutations, Undo, and Redo target a non-optional document identity and exact base
   `SceneAuthoringRevision`. Active-document state is presentation/navigation context, never a
   mutation fallback.
+- Stable field/widget identity is distinct from that mutation basis. Under ADR 0118, frontend
+  drafts retain exact revision/schema/source facts independently; unrelated document changes
+  require deliberate conflict recovery rather than destroying input or silently rebasing it.
+  The owner exposes read-only binding facts; path equality alone cannot certify a replaced source.
+  `SceneAuthoringRevision::source_id()` identifies the source incarnation; opaque
+  `AuthoringSchemaBasis` identifies the retained immutable data-only schema/Adapter admission.
+  Both survive ordinary edits and Save. Reopen changes the source incarnation even when it
+  preserves the schema admission. Neither projection grants mutation or persistence authority.
 - Authoring revision remains monotonic for conflict detection. Dirty state compares the current
   opaque content-state identity with the receipt-backed saved content-state identity, with
   source-upgrade-required as an additional dirty condition.

@@ -11,11 +11,11 @@ use nara_fs::{
 };
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
-    AuthoringDocumentReadiness, AuthoringFieldEdit, AuthoringRecordFact, PrefabAuthoringSession,
-    PrefabDocument, PublishedAuthoringPrefabDocument, PublishedAuthoringSceneDocument,
-    SceneAuthoringContentState, SceneAuthoringHistoryStatus, SceneAuthoringRevision,
-    SceneAuthoringSession, SceneDocument, SceneEntityId, ScenePatchDocument, ScenePatchReport,
-    UnavailableRecordManifest,
+    AuthoringDocumentReadiness, AuthoringFieldEdit, AuthoringRecordFact, AuthoringSchemaBasis,
+    PrefabAuthoringSession, PrefabDocument, PublishedAuthoringPrefabDocument,
+    PublishedAuthoringSceneDocument, SceneAuthoringContentState, SceneAuthoringHistoryStatus,
+    SceneAuthoringRevision, SceneAuthoringSession, SceneDocument, SceneEntityId,
+    ScenePatchDocument, ScenePatchReport, UnavailableRecordManifest,
 };
 
 use crate::composition::{
@@ -312,6 +312,13 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => slot.authoring_readiness(),
             Self::Prefab(slot) => slot.authoring_readiness(),
+        }
+    }
+
+    fn authoring_schema_basis(&self) -> Option<AuthoringSchemaBasis> {
+        match self {
+            Self::Scene(slot) => slot.session.authoring_schema_basis(),
+            Self::Prefab(slot) => slot.session.authoring_schema_basis(),
         }
     }
 
@@ -902,6 +909,7 @@ impl EditorWorkspace {
                     saved_revision: slot.saved_revision(),
                     history: slot.history_status(),
                     authoring_readiness: slot.authoring_readiness(),
+                    authoring_schema_basis: slot.authoring_schema_basis(),
                     source_binding: slot.source_binding().cloned(),
                     external_reload: slot.external_reload(),
                     active: Some(*document) == self.active_document,
@@ -2550,6 +2558,8 @@ pub struct EditorDocumentTabModel {
     pub saved_revision: SceneAuthoringRevision,
     pub history: SceneAuthoringHistoryStatus,
     pub authoring_readiness: Option<AuthoringDocumentReadiness>,
+    /// Immutable schema and Adapter admission; document/source incarnation is `revision.source_id()`.
+    pub authoring_schema_basis: Option<AuthoringSchemaBasis>,
     pub source_binding: Option<EditorDocumentSourceBinding>,
     pub external_reload: EditorExternalReloadState,
     pub active: bool,
@@ -2925,12 +2935,14 @@ mod tests {
     use nara_diagnostic::DiagnosticValueRef;
     use nara_reflect::{
         AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldId, ComponentRegistry,
-        ComponentSchemaVersion, ComponentTypeId, ComponentValue, PersistentComponentSchemaOwnerId,
+        ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
+        ComponentValue, PersistentComponentSchemaOwnerId,
     };
     use nara_scene::{
-        AuthoringDocumentSource, PrefabDocument, SCENE_COMPONENTS_SCHEMA_OWNER_ID,
-        SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentRecord, SceneDocumentCandidate,
-        SceneEntityRecord, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+        AuthoringDocumentSource, PrefabDocument, PrefabDocumentCandidate,
+        SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentRecord,
+        SceneDocumentCandidate, SceneEntityRecord, ScenePatchOperation, ScenePlacement,
+        ScenePlacementOwner,
     };
 
     use crate::{
@@ -3490,6 +3502,181 @@ mod tests {
             workspace.scene(document).unwrap().saved_revision(),
             captured_revision
         );
+    }
+
+    #[test]
+    fn authoring_basis_survives_edit_and_save_while_reopen_changes_source_incarnation() {
+        let bundle = authoring_basis_bundle("Basis");
+        let (mut workspace, mut authority) = EditorWorkspace::new_hosted();
+        let document = workspace
+            .open_authoring_scene_document(
+                "basis",
+                EditorDocumentSourceBinding::new("scenes/basis.scene.json"),
+                published_basis_scene(&bundle),
+            )
+            .unwrap()
+            .opened_document
+            .unwrap();
+        let initial = workspace
+            .authoring_model()
+            .document(document)
+            .unwrap()
+            .clone();
+        assert!(initial.authoring_schema_basis.is_some());
+        assert!(
+            workspace
+                .apply_authoring_command(EditorWorkspaceCommand::ApplyScenePatch {
+                    document,
+                    base_revision: initial.revision,
+                    patch: add_entity_patch("added"),
+                })
+                .applied
+        );
+        let edited = workspace
+            .authoring_model()
+            .document(document)
+            .unwrap()
+            .clone();
+        assert_ne!(edited.revision, initial.revision);
+        assert_eq!(edited.revision.source_id(), initial.revision.source_id());
+        assert_eq!(
+            edited.authoring_schema_basis,
+            initial.authoring_schema_basis
+        );
+
+        let checkpoint = authority.capture(&workspace, document).unwrap();
+        let digest = EditorDocumentDigest::new(7, [0x5a; 32]);
+        assert!(
+            authority
+                .commit(
+                    &mut workspace,
+                    EditorPersistenceCommit { checkpoint, digest }
+                )
+                .applied
+        );
+        let saved = workspace
+            .authoring_model()
+            .document(document)
+            .unwrap()
+            .clone();
+        assert_eq!(saved.revision, edited.revision);
+        assert_eq!(saved.authoring_schema_basis, initial.authoring_schema_basis);
+        assert!(!saved.dirty);
+
+        let session = workspace.scene(document).unwrap().session();
+        let candidate = SceneDocumentCandidate::decode_json_bytes(
+            session.document().to_json_string().unwrap().as_bytes(),
+        )
+        .unwrap();
+        let reopened = session.try_reopen_authoring_candidate(candidate).unwrap();
+        authority
+            .publish_reopened_session(&mut workspace, document, saved.revision, reopened, digest)
+            .unwrap();
+        let current = workspace
+            .authoring_model()
+            .document(document)
+            .unwrap()
+            .clone();
+        assert_eq!(current.source_binding, initial.source_binding);
+        assert_eq!(
+            current.authoring_schema_basis,
+            initial.authoring_schema_basis
+        );
+        assert_ne!(current.revision.source_id(), initial.revision.source_id());
+    }
+
+    #[test]
+    fn equal_source_paths_do_not_alias_independent_schema_admissions() {
+        let original = authoring_basis_bundle("Basis");
+        let changed = authoring_basis_bundle("Renamed Basis");
+        assert_ne!(original.fingerprint(), changed.fingerprint());
+        let mut workspace = EditorWorkspace::new();
+        let documents = [&original, &original, &changed].map(|bundle| {
+            workspace
+                .open_authoring_scene_document(
+                    "basis",
+                    EditorDocumentSourceBinding::new("scenes/basis.scene.json"),
+                    published_basis_scene(bundle),
+                )
+                .unwrap()
+                .opened_document
+                .unwrap()
+        });
+        let model = workspace.authoring_model();
+        let first = model.document(documents[0]).unwrap();
+        for document in &documents[1..] {
+            let other = model.document(*document).unwrap();
+            assert_eq!(other.source_binding, first.source_binding);
+            assert_ne!(other.authoring_schema_basis, first.authoring_schema_basis);
+            assert_ne!(other.revision.source_id(), first.revision.source_id());
+        }
+        let native = open_scene(&mut workspace, "native", SceneDocument::default());
+        assert!(
+            workspace
+                .authoring_model()
+                .document(native)
+                .unwrap()
+                .authoring_schema_basis
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn prefab_projection_preserves_schema_basis_when_reopened_source_changes() {
+        let bundle = authoring_basis_bundle("Basis");
+        let source = EditorDocumentSourceBinding::new("prefabs/basis.prefab.json");
+        let published = PrefabDocumentCandidate::decode_json_bytes(
+            PrefabDocument::default()
+                .to_json_string()
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap()
+        .admit_authoring(
+            AuthoringDocumentSource::new(AssetRef::path(source.locator()).unwrap()),
+            &bundle,
+            &[],
+        )
+        .unwrap()
+        .publish();
+        let (mut workspace, mut authority) = EditorWorkspace::new_hosted();
+        let document = workspace
+            .open_authoring_prefab_document("basis", source.clone(), published)
+            .unwrap()
+            .opened_document
+            .unwrap();
+        let initial = workspace
+            .authoring_model()
+            .document(document)
+            .unwrap()
+            .clone();
+        assert!(initial.authoring_schema_basis.is_some());
+        let session = workspace.prefab(document).unwrap().session();
+        let candidate = PrefabDocumentCandidate::decode_json_bytes(
+            session.document().to_json_string().unwrap().as_bytes(),
+        )
+        .unwrap();
+        let reopened = session.try_reopen_authoring_candidate(candidate).unwrap();
+        authority
+            .publish_reopened_prefab_session(
+                &mut workspace,
+                document,
+                initial.revision,
+                source,
+                reopened,
+                EditorDocumentDigest::new(7, [0x5a; 32]),
+            )
+            .unwrap();
+        let current = workspace
+            .authoring_model()
+            .document(document)
+            .unwrap()
+            .clone();
+        assert_eq!(
+            current.authoring_schema_basis,
+            initial.authoring_schema_basis
+        );
+        assert_ne!(current.revision.source_id(), initial.revision.source_id());
     }
 
     #[test]
@@ -4588,6 +4775,39 @@ mod tests {
         let mut registry = ComponentRegistry::new();
         registry.freeze().unwrap();
         registry
+    }
+
+    fn authoring_basis_bundle(alias: &str) -> AuthoringSchemaBundle {
+        AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+            PersistentComponentSchemaOwnerId::try_new("test.basis").unwrap(),
+            ComponentSchemaCatalog {
+                components: vec![ComponentSchema::new(
+                    ComponentTypeId::new("test.basis.Component"),
+                    alias,
+                    ComponentSchemaVersion::ONE,
+                )],
+                ..ComponentSchemaCatalog::default()
+            },
+            None,
+        )])
+        .unwrap()
+    }
+
+    fn published_basis_scene(bundle: &AuthoringSchemaBundle) -> PublishedAuthoringSceneDocument {
+        SceneDocumentCandidate::decode_json_bytes(
+            SceneDocument::default()
+                .to_json_string()
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap()
+        .admit_authoring(
+            AuthoringDocumentSource::new(AssetRef::path("scenes/basis.scene.json").unwrap()),
+            bundle,
+            &[],
+        )
+        .unwrap()
+        .publish()
     }
 
     fn composition_registry() -> ComponentRegistry {

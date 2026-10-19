@@ -156,6 +156,8 @@ pub struct SceneAuthoringHistoryUsage {
 }
 
 impl SceneAuthoringRevision {
+    /// Owner-assigned source incarnation, retained across edits and Save checkpoints.
+    /// Replacing or reopening the source starts a different incarnation.
     #[must_use]
     pub const fn source_id(self) -> SceneAuthoringSourceId {
         self.source_id
@@ -621,6 +623,13 @@ pub struct PrefabAuthoringSession {
 }
 
 impl PrefabAuthoringSession {
+    /// Projects the immutable admission retained by a data-only authoring session.
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn authoring_schema_basis(&self) -> Option<crate::AuthoringSchemaBasis> {
+        self.authority.published().map(|state| state.schema_basis())
+    }
+
     /// Projects the exact retained catalog independently from the records already present.
     #[cfg(feature = "serde")]
     pub fn authoring_catalog_components(
@@ -1091,6 +1100,13 @@ impl PrefabAuthoringSession {
 }
 
 impl SceneAuthoringSession {
+    /// Projects the immutable admission retained by a data-only authoring session.
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn authoring_schema_basis(&self) -> Option<crate::AuthoringSchemaBasis> {
+        self.authority.published().map(|state| state.schema_basis())
+    }
+
     /// Projects the exact retained catalog independently from the records already present.
     #[cfg(feature = "serde")]
     pub fn authoring_catalog_components(
