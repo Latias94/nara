@@ -2,6 +2,10 @@
 
 Status: source review and recommendations; no architecture decision or implementation change.
 
+Implementation sequencing and acceptance are tracked in the
+[foundation correction plan](../plans/2026-10-19-1335-refactor-foundation-correction-plan.md).
+The findings below remain source-review evidence until linked implementation verification lands.
+
 ## Scope And Verdict
 
 Reviewed Nara `835c5e4dd8d278766be0ea2f99709836db5a3b28`, Bevy

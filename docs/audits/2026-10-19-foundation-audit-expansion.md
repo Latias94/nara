@@ -2,6 +2,10 @@
 
 Status: twelve research lanes and independent challenge complete; recommendations not implemented.
 
+The [foundation correction plan](../plans/2026-10-19-1335-refactor-foundation-correction-plan.md)
+maps these B findings, the earlier A findings and module seams to implementation units or explicit
+entry triggers. It does not change the evidence or completion claims of this audit.
+
 ## Scope And Evidence
 
 This extends the [Bevy/Godot architecture comparison](2026-10-19-nara-bevy-godot-architecture-review.md)

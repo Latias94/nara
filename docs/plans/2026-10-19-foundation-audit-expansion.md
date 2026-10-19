@@ -66,3 +66,7 @@ review challenged the high-impact findings without requiring a withdrawal. The
 including three P1 recommendations, reviewed non-findings, future triggers and refactor order.
 The standalone HTML remains outside the repository. Only dependency metadata and document/HTML
 checks ran; no new runtime tests, benchmarks or platform qualification are claimed.
+
+The [foundation correction plan](2026-10-19-1335-refactor-foundation-correction-plan.md) organizes subsequent implementation.
+It preserves this completed research record and maps every A/B/M finding to a correction unit or
+an explicit follow-up trigger; writing that plan does not implement its recommendations.

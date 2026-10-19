@@ -35,6 +35,7 @@ their completion conditions do not automatically apply to later tasks.
 | Image import and authoring publication | [ADR 0115](adr/0115-editor-image-import-metadata-and-authoring-publication.md) |
 | Supervised external Play and saved-source admission | [ADR 0116](adr/0116-standalone-supervised-editor-play.md) |
 | Historical plan and verification lineage | [Engineering memory](../knowledge/engineering/index.md) and [UI plan history](../plans/ui-program-roadmap.md) |
+| Foundation audit corrections and follow-up triggers | [Foundation correction plan](../plans/2026-10-19-1335-refactor-foundation-correction-plan.md) maps A01-A09, B01-B14 and M01-M04 to ordered units and consumer/measurement gates |
 
 ## Background Designs
 
