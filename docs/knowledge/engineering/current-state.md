@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "516ce1137ad3d28e4a022dcafb154dc65e484f5d7d11a7182d0ddacb796a96bf"
+source_fingerprint: "a5192e836db3d0ba5a3f5da119c16106895c81f9766a660cd77a5fdf2ca76576"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "516ce1137ad3d28e4a022dcafb154dc65e484f5d7d11a7182d0ddacb796
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `516ce1137ad3d28e4a022dcafb154dc65e484f5d7d11a7182d0ddacb796a96bf`
-- Immutable records: 768
+- Source fingerprint: `a5192e836db3d0ba5a3f5da119c16106895c81f9766a660cd77a5fdf2ca76576`
+- Immutable records: 771
 - Active lane heads: 0
 
 # Active Registrations
@@ -27,6 +27,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
 - [Editor Image Import and Reimport v1 complete](registry/2026-08/2026-08-21T025159Z-editor-image-import-reimport-v1-codex-root-6a48e230cc9c4e2eb1faf8121a85d9ea.md): `completed` (editor-image-import-reimport-v1-codex-root; producer `codex-root`)
 - [Editor Project Browser and Source Index v1 complete; no successor active](registry/2026-08/2026-08-19T213600Z-editor-project-browser-source-index-v1-codex-root-6c28391e9cd8451f92b821dba9d0c9e3.md): `completed` (editor-project-browser-source-index-v1-codex-root; producer `codex-root`)
+- [Editor responsiveness characterized and task cancellation corrected](registry/2026-10/2026-10-19T182958Z-editor-responsiveness-codex-root-7730caec67d84a4e9a7f0bd4e433fa49.md): `completed` (editor-responsiveness-codex-root; producer `codex-root`)
 - [Editor Scene Composition and Scene View v1 complete; no successor active](registry/2026-08/2026-08-16T122618Z-editor-scene-composition-view-v1-codex-root-cf2e6d93a351485c8381f6834cdd4e70.md): `completed` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Authoring and Canvas v1 complete; no successor active](registry/2026-08/2026-08-17T233146Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fcbd471b11774b599cd190ead6827654.md): `completed` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Structural Composition v1 complete; no successor active](registry/2026-08/2026-08-18T072656Z-editor-ui-prefab-structural-composition-v1-codex-root-5edbf5a02be34aa8bdf7f88e45981dab.md): `completed` (editor-ui-prefab-structural-composition-v1-codex-root; producer `codex-root`)
@@ -51,6 +52,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Editor responsiveness measurements and standalone task cancellation](verification/2026-10/2026-10-19T182252Z-editor-responsiveness-measurements-and-standalone-task-cancellation-0e2521d0010a4d94940d83fa865f3d0c.md) - Decision-local optimized Open Save Reopen timings, source-grounded rebuild seams, and failed-then-passing standalone pending cancellation.
 - **Verification Evidence**: [N05 safe plugin failure facts and invocation context](verification/2026-10/2026-10-19T170951Z-n05-safe-plugin-failure-facts-and-invocation-context-d01f7391b84348a8827a0daa760dd1a4.md) - Checked App plugin facts, actual invocation identity and retained primary/shutdown diagnostics through public product and Editor failure paths.
 - **Verification Evidence**: [Authoring S3 component constraints diagnostics and inventory](verification/2026-10/2026-10-19T162634Z-authoring-s3-component-constraints-diagnostics-and-inventory-64aacf18a3af432584d306af27d32eb3.md) - Shared interval contracts, safe domain facts, explicit UI evolution and independently compiled component authoring evidence.
 - **Verification Evidence**: [Authoring S2 exact results and retained field editing](verification/2026-10/2026-10-19T153834Z-authoring-s2-exact-results-and-retained-field-editing-2b09e865afc64b7990e2adc737fa2aa7.md) - Exact frontend dispatch correlation, retained Inspector drafts and public panel/native qualification within S2.
@@ -62,7 +64,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Foundation U13 external ordinary native runner and admitted Exit](verification/2026-10/2026-10-19-foundation-u13-public-native-runner.md) - A separately compiled panel runs through the public native entry and joins normal application retirement after authoritative Session publication.
 - **Verification Evidence**: [Foundation U12 ordinary profile-default font configuration](verification/2026-10/2026-10-19-foundation-u12-profile-defaults.md) - One ProductRecipe configures compilation and presentation through direct composition, Check, Editor Play and actual exported native startup.
 - **Work Progress**: [Foundation consumer acceptance and final integration checkpoint](progress/2026-10/2026-10-19-foundation-correction-consumer-checkpoint.md) - Public consumers and saved-data migrations pass while actual Export and external native runner proof remain active.
-- **Verification Evidence**: [Foundation U10 closed Vec2 shapes and owner migration](verification/2026-10/2026-10-19-foundation-u10-closed-vec2.md) - Finite F32 vector records retain their wire encoding with explicit saved-owner lineage and external editing evidence.
 
 # Integration Notes
 

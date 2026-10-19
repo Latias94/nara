@@ -561,11 +561,51 @@ make the surface appear modern. An asynchronous preparation operation needs expl
 cancel and physical-retirement semantics; it may use existing blocking workers or a Future executor
 only after its consumer requires that choice. No generic operation service is needed now.
 
+### Selected G1/G2/G9 Investigation
+
+The [Editor responsiveness and task-retirement investigation](../benchmarks/2026-10-20-editor-responsiveness.md)
+now selects a bounded part of these triggers. It records ordinary data-only Open's synchronous
+phases, Save checkpoint capture and persistence drive, and Reopen preparation/publication through
+existing public interfaces. Three optimized measurement processes pass, each retaining sixteen
+samples per population/phase and 480 numeric rows. The protocol separates request admission from
+frame drive, excludes fixture setup/output, and physically closes each session before the next
+sample. At 4,096 empty entities and 483,534 baseline source bytes, the three Save-drive P50 values
+are 14.973 / 14.926 / 15.117 ms; per-process P95 values are 16.357 / 15.559 / 15.792 ms.
+Reopen-drive P95 spans 10.104-10.394 ms and startup-closure preparation 10.312-12.028 ms, while
+Save-request P95 spans 0.262-0.293 ms and idle drive 0.307-0.330 ms. These are separate process
+results, not pooled samples or a subtraction of independent percentiles.
+
+This evidence prioritizes a targeted Save preparation design, followed by Reopen and startup-
+closure preparation. An 8 ms single-call owner-work threshold selects private investigation; it
+is not a product guarantee or native SLA. No asynchronous implementation lands in this follow-up.
+With sixteen samples, nearest-rank P95 equals max and does not estimate a stable tail. These
+shallow empty-entity probes do not qualify Browser Open, saved-source receipts, no-op Cargo,
+native redraw interruption, representative game components, cold storage or a supported scene
+ceiling. Their raw samples and run identities remain in the linked investigation.
+
+A task-owner regression fails on the starting source: a blocked first pending capture's destructor
+delays another pending handle's logical cancellation during standalone pool abandonment. The
+owner-local correction at `3b70e48` publishes cancellation for the bounded pending set before
+transferring captures to their existing physical-retirement owner. The final Tasks/Image library
+cohort passes all 120 tests, and independent review has no remaining findings. This does not
+change handle Drop into cancellation, add a disposal queue, or promise constant-time Drop.
+Rejected/coalesced capture disposal during submission and the last owner's disposal of an untaken
+completed result can still execute user destructors on the caller thread; their potential owner
+latency remains an open G9 concern.
+
+The suspected unbounded supervised-process output drain was disproved: both platform adapters
+already limit each poll to 64 records and retain reader/queue completion separately. No output
+queue or polling refactor follows from that suspicion. Plugin hooks, component codecs, World
+commit and panel painting retain synchronous contracts. An asynchronous preparation implementation
+still needs a measured consumer, stale-result rejection, owner-thread publication and explicit
+physical retirement; D6 as a whole remains open.
+
 ## Implementation Sequence And Ownership
 
 S1 / E1-E2, S2 / E3-E4 and S3 / E6-E5 are complete within their linked verification scope.
-D6 remains triggered future work, not an active Goal. Preserve the existing history and complete
-real consumers.
+D6 remains consumer-triggered work, with only the bounded G1/G2/G9 investigation above selected.
+It is not an active Goal or a blanket asynchronous interface migration. Preserve the existing
+history and complete real consumers.
 
 ### Architecture Adjustment After The Reference Comparison
 

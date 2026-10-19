@@ -82,6 +82,20 @@ The design links its focused owner/product evidence separately from S3 and nativ
 Triggered asynchronous preparation, inline tools and multiple-document designs remain future work.
 This does not reopen the completed correction plan.
 
+The [Editor responsiveness and task-retirement investigation](../benchmarks/2026-10-20-editor-responsiveness.md)
+selects a bounded G1/G2/G9 follow-up: ordinary public Open/Save/Reopen phase measurements and
+standalone pending-task cancellation before capture disposal. The starting-source regression fails;
+the correction at `3b70e48` passes the final 120-test Tasks/Image library cohort and independent
+review. Three optimized measurement processes pass; at 4,096 empty entities, Save-drive P95 spans
+15.559-16.357 ms across processes. The evidence prioritizes targeted Save preparation design, then
+Reopen/startup-closure preparation, using 8 ms only as a private single-call investigation trigger.
+Sixteen samples per phase make P95 equal max; this is not a stable tail estimate or native SLA.
+Browser Open, source receipts, no-op Cargo and native redraw remain unmeasured. Platform review
+disproves an unbounded output-drain suspicion because each poll already consumes at most 64
+records. Caller-thread disposal of rejected captures or untaken completed results can still run
+user destructors and remains an open G9 latency concern. This does not complete D6, implement
+asynchronous preparation, change owner-thread traits to async, or extend S3/N05/native evidence.
+
 The [UI foundation design](ui-foundation-design.md),
 [UI boundary study](ui-product-boundaries-editor-dogfood-and-porting-strategy.md), and
 [render pressure matrix](render-capability-pressure-matrix.md) provide design context when a task
