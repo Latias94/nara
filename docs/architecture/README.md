@@ -70,9 +70,9 @@ The [authoring interface ergonomics design](authoring-interface-ergonomics-desig
 one complete field-edit entry, exact dispatch-result routing, a single component inventory and
 finite shared constraints. It compares alternative interfaces and defines caller-level acceptance;
 its implementation section groups corrections into complete editing and component-evolution
-workflows, with qualification at each changed boundary. It is not an Accepted contract or
-implemented convenience API, and it does not reopen the completed correction plan. Its S1
-existing-owner corrections are complete within the linked verification scope; S2/S3 remain proposed.
+workflows, with qualification at each changed boundary. S1 owner corrections and S2 field editing/
+exact results are implemented within the linked verification scope; ADRs 0047/0118 own the adopted
+contracts. S3 and the other designs remain proposed. It does not reopen the completed correction plan.
 
 The [UI foundation design](ui-foundation-design.md),
 [UI boundary study](ui-product-boundaries-editor-dogfood-and-porting-strategy.md), and

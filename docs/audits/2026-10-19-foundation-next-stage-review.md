@@ -16,7 +16,11 @@ The [S1 verification record](../knowledge/engineering/verification/2026-10/2026-
 contains owner, public-control, GPU and selected Windows native results and their limits.
 The original findings and review-time evidence below remain historical. N02 additionally required
 removing data-only Set-only gates and implementing exact inverse presence; correcting the button
-alone did not complete the workflow. N03-N07 and triggered G follow-ups remain open.
+alone did not complete the workflow. S2 subsequently corrects N03 with exact result correlation,
+retained field drafts and the default public field helper; its
+[verification record](../knowledge/engineering/verification/2026-10/2026-10-19T153834Z-authoring-s2-exact-results-and-retained-field-editing-2b09e865afc64b7990e2adc737fa2aa7.md)
+separates ordinary/public/native evidence from remaining capability limits. N04-N07 and triggered
+G follow-ups remain open.
 
 Six independent research lanes covered execution/tasks, components/plugins, content/persistence,
 Editor workflows, iteration/delivery and render/platform ownership. A seventh lane challenged the

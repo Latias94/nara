@@ -1,6 +1,6 @@
 # Authoring Interface Ergonomics
 
-**Status:** Proposed design; no new interface below is implemented or Accepted.
+**Status:** S1 and S2 implemented within their verification scope; D3-D6 / S3 remain proposed.
 **Date:** 2026-10-19.
 **Source baseline:** `f988852`.
 **Inputs:** [post-correction audit](../audits/2026-10-19-foundation-next-stage-review.md),
@@ -12,9 +12,11 @@ are directional design examples, not compiling examples of today's API. Pele is 
 
 S1 / E1-E2 is implemented through `bfbd2b8`, with the
 [verification record](../knowledge/engineering/verification/2026-10/2026-10-19T143606Z-authoring-s1-safety-and-field-override-recovery-0aca8f3bff914ffeaf0254f40a5cb118.md)
-covering the existing Prefab/render failure and field-override corrections. D1-D4's new convenience
-interfaces, correlated dispatch and shared interval metadata remain proposed. This status does
-not reopen U1-U15 or imply that S2/S3 is implemented.
+covering the existing Prefab/render failure and field-override corrections. S2 / E3-E4 implements
+D1's default field helper and D2's exact dispatch path under the refinements in Accepted ADRs
+0047/0118; see the [S2 verification record](../knowledge/engineering/verification/2026-10/2026-10-19T153834Z-authoring-s2-exact-results-and-retained-field-editing-2b09e865afc64b7990e2adc737fa2aa7.md).
+D3-D6, component inventory and shared interval metadata remain proposals. This status does not
+reopen U1-U15 or imply S3 completion.
 
 ## Start With The Developer's Work
 
@@ -121,7 +123,7 @@ It does not claim to describe their latest releases. The broader
 
 The following are source facts; the Nara choices are design judgments drawn from them.
 
-| Developer task | Reference-engine design | Nara today and proposed response | Deliberate difference / cost |
+| Developer task | Reference-engine design | Nara at the design baseline and selected response | Deliberate difference / cost |
 | --- | --- | --- | --- |
 | Install behavior | Bevy `App.add_plugins` invokes the Plugin composition path; Plugin separates `build`, `ready`, `finish` and `cleanup` [B1] | Keep the existing fallible Plugin lifecycle and one `ProductRecipe` contribution across Hosts/tools. D3 shortens package authoring without a second installation service. | Do not merge persistent component identity into Plugin or infer dependencies from callbacks. Nara's admission and close guarantees still need their own proof. |
 | Make a Rust type editable/persistent | Bevy derive metadata plus `register_type` installs reflection type data; `ReflectComponent` supplies reflected ECS operations [B2]. Godot `PropertyInfo` carries type, name, hint and usage [G1]. | Current `PersistentComponent` derives schema/codec, but the package author still lists types in catalog and native registration. D3 generates both from one inventory and reuses the current schema list for successors. | Runtime type registration is not a substitute for Nara's explicit owner IDs, predecessor catalogs and migrations. Keep those semantic decisions visible. |
@@ -159,8 +161,9 @@ Line locations refer to the pinned local snapshots. `repo-ref/` stays read-only 
 
 Current Nara caller contracts are in the [component guide](../guides/persistent-components.md),
 [recipe guide](../guides/rust-product-recipes.md) and [panel guide](../guides/editor-panels.md).
-The current [panel context](../../editor/src/frontend/imgui/workspace.rs):22-55 still exposes
-`emit`; D1-D4 remain proposals, not claims about today's interface.
+The current [panel context](../../editor/src/frontend/imgui/workspace.rs) exposes `submit`, exact
+`action_finished` results and the D1 `edit_field` helper. The [panel guide](../guides/editor-panels.md)
+describes that implemented surface; D3-D6 remain proposals.
 
 #### What This Comparison Changes
 
@@ -177,12 +180,12 @@ first mechanically, a real inline-tool consumer should drive the second, and one
 addresses a concrete multi-field operation without automatic rebasing.
 
 This evidence does not establish that Nara's interfaces are as mature as either reference engine.
-Native conflict recovery, IME, external component evolution and full workflow qualification below
-are the proof required before publishing the proposed convenience surface.
+S2's linked evidence covers field conflict recovery, native IME and the external panel surface.
+External component evolution and its full workflow qualification remain S3 work.
 
 ## D1. Ordinary Field Editing
 
-The proposed common usage is intentionally short:
+The implemented common usage is intentionally short:
 
 ```rust,ignore
 impl ImguiEditorPanel for HealthPanel {
@@ -306,7 +309,7 @@ undo stack. Native text editing can retain its toolkit-local undo during input.
 The advanced public sketch remains small:
 
 ```rust,ignore
-// Proposed additions; names may change with implementation review.
+// Implemented on ImguiEditorPanelContext and ImguiEditorPanel respectively.
 fn submit(&mut self, action: EditorAction)
     -> Result<PanelSubmissionId, PanelSubmitError>;
 
@@ -546,9 +549,9 @@ only after its consumer requires that choice. No generic operation service is ne
 
 ## Implementation Sequence And Ownership
 
-S1 / E1-E2 is complete within the linked verification scope. The remaining units are proposed
-work, not an active Goal. Reconcile affected ADRs when adopting their durable contracts. Preserve
-the existing history and complete real consumers.
+S1 / E1-E2 and S2 / E3-E4 are complete within their linked verification scope. The remaining units
+are proposed work, not an active Goal. Reconcile affected ADRs when adopting their durable
+contracts. Preserve the existing history and complete real consumers.
 
 ### Architecture Adjustment After The Reference Comparison
 
@@ -559,17 +562,16 @@ closed; its G1-G9 entry conditions remain separate from the work below.
 
 | Boundary | Recommended adjustment | Adoption point |
 | --- | --- | --- |
-| Field identity and mutation authority | Stable UI/draft binding is independent of document revision; exact revision/catalog/source basis still governs commit. Retained controller state remains private to its frontend instance. | Reconcile ADRs 0047/0118 with D1 before E3/E4 changes this boundary. |
-| Intent and acknowledgement | Keep existing semantic actions and owner reports. Carry their exact origin through dispatch/filtering, then settle one original live recipient after application drive. | Record the D2 refinement in ADR 0118 before replacing the public frontend submission seam. |
+| Field identity and mutation authority | Stable UI/draft binding is independent of document revision; exact revision/catalog/source basis still governs commit. Retained controller state remains private to its frontend instance. | Adopted in ADRs 0047/0118 for S2. |
+| Intent and acknowledgement | Keep existing semantic actions and owner reports. Carry their exact origin through dispatch/filtering, then settle one original live recipient after application drive. | Adopted in ADR 0118 for S2. |
 | Data rules and error facts | One schema-driven validator owns supported numeric rules; native preflight and Editor feedback consume it. Presentation hints and arbitrary native invariants remain distinct. Safe error facts cross adapters without parsing strings. | Reconcile ADRs 0045/0081 and affected saved-owner lineage before E6 writes new metadata. |
 | Component installation | Keep explicit package/recipe and atomic provider admission. One inventory generates mechanical callbacks and current schemas, while history stays explicit. | E5 is an ergonomic implementation over current ownership; do not add a registration authority or amend architecture merely to introduce a macro. |
 | Waiting and retirement | Preserve a seam for owned preparation, attempt/result identity and owner-thread publication; decide cancel and physical-retirement behavior for the actual operation. | D6 and G1/G9 remain triggered work, not blanket async trait changes or prerequisites for current repairs. |
 
-These are recommended refinements, not amendments to Accepted ADRs in this document-only change.
-No new public trait, shared controller framework, universal operation service or crate layer is
-required to express them. API names and the macro spelling remain provisional until the complete
-consumer demonstrates the interface; stable identity, strict authority and failure retention are
-the invariants being designed.
+ADRs 0047/0118 now adopt the S2 identity/result refinements; the other adoption points remain
+proposed. No shared controller framework, universal operation service or crate layer is required.
+D3's macro spelling remains provisional until its complete consumer demonstrates the interface;
+stable identity, strict authority and failure retention remain the governing invariants.
 
 ### Deliver Workflows, Qualify Each Changed Boundary
 
@@ -581,7 +583,7 @@ all implementation units have landed.
 | --- | --- | --- |
 | S0: establish the consumer and affected contracts | Use the existing independently compiled component/panel fixture to specify the D1-D4 calls and adoption points. Reuse a concrete field such as Cooldown; no new example game is required. | One type inventory, one product contribution and one ordinary field-edit entry; no manually routed reports or private engine hooks. This is a caller design check, not a requirement to implement E5/E6 before safety repairs. |
 | S1: repair existing failure and authored-state semantics | E1 and E2 as independent owner-local changes, with their focused portion of E7 | Raw invalid Prefab rejects without panic; failed target reservation preserves the old publication; terminal bad shader is not recreated per frame; Reset/Remove preserves raw authored semantics through affected history/persistence paths. |
-| S2: complete one reliable editing loop | E3 followed by E4, with external/native evidence from E7 | Exact action result reaches the original live controller or panel; invalid/conflicting input survives; unrelated edits and native IME retain stable widget identity. Two fields from one basis have explicit conflict behavior; a cohesive multi-field operation uses one existing atomic patch. |
+| S2: complete one reliable editing loop (implemented) | E3 followed by E4, with external/native evidence from E7 | Exact action result reaches the original live controller or panel; invalid/conflicting input survives; unrelated edits and native IME retain stable widget identity. Two fields from one basis have explicit conflict behavior; a cohesive multi-field operation uses one existing atomic patch. See S2 verification above for executed consumers and platform limits. |
 | S3: complete component declaration through evolution | Settle E6 validation/error semantics, then E5's inventory convenience, with E7 component workflow evidence | One external component can be installed, created, edited, rejected with an actionable error, saved/reopened and explicitly migrated. Adding a component after a successor catalog still changes only the current inventory, leaving historical membership intact. |
 | Follow-up selection | D6 and existing G1-G9 only when their named consumer or measurement enters | Pick a concrete pending operation, frame workload, inline field tool or multi-document workflow, then design and verify that owner's next complete contract. These are not hidden exit conditions for S1-S3. |
 
@@ -665,4 +667,4 @@ Open/Save and edit-to-result precede executor or scaling changes.
 The default conflict policy here preserves drafts and requires explicit review/reapply. Product
 choices for checkpoint restoration, automatic source freshness and cross-document atomicity remain
 deferred to their actual workflows. They do not block the concrete corrections and ordinary field
-editing interface proposed above.
+editing interface implemented in S2.
