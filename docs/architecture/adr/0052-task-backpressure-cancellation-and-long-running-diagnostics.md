@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-10-20
 **Refines**: ADR 0008, ADR 0042, ADR 0048
 **Refined By**: ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
@@ -52,6 +52,9 @@ flowchart TD
 
 ### Execution, cancellation, and statistics
 
+- Tasks are owned `FnOnce(TaskCancellationToken) -> T` closures. Pool names, including
+  `AsyncCompute`, select worker queues rather than a Future execution model. No task closure
+  borrows the World or an owner-thread context across execution.
 - Every task closure is individually unwind-isolated. Panic becomes the safe classification
   `TaskFailure::Panicked`; panic payload text is not retained in a handle, diagnostic, or dedupe
   key, and the worker continues serving work.
@@ -61,8 +64,17 @@ flowchart TD
   closures are trusted in-process code and must not place secrets in panic payloads.
 - Completed, cancelled, and failed are mutually exclusive first-terminal states. Cancel-after-
   complete cannot erase a value; a detached or late closure cannot overwrite an earlier terminal.
+- `TaskHandle::cancel` returns whether that call won the first-terminal transition. Dropping a
+  handle only discards the caller's interest; it does not cancel queued or running work. This
+  preserves Image's independent retirement of stale publication handles under ADR 0080.
 - Cancellation is cooperative for running work. The handle may already be cancelled while the
   closure exits, but physical `running` count and age remain until the worker actually releases it.
+  `TaskHandle::is_finished` describes terminal publication, including after the result is consumed;
+  it does not prove that captured values, the closure, or a worker have physically retired.
+- Admission never executes a rejected closure as an inline fallback. It can still run capture
+  destructors while discarding rejected, replaced, or already-terminal pending work on the
+  submitting thread. Dropping the last owner of an untaken completed result can similarly run its
+  destructor on the dropping thread. These paths do not promise nonblocking submission or disposal.
 - Stats expose admitted, rejected, coalesced, queued, running, started, completed, failed,
   cancelled, taken, oldest queued/running age, shutdowns, and shutdown timeouts. A detached-worker
   count is not exposed because dropping an unfinished `JoinHandle` is not a valid shutdown result.
@@ -103,12 +115,20 @@ flowchart TD
 - `TaskPools::shutdown_blocking` is the explicitly named standalone convenience driver over the same
   close state machine. It may return an incomplete report at the configured deadline, and a later
   call on the same pools continues the same owner.
-- Drop never waits without bound. It closes admission, requests cancellation, joins only finished
-  workers, and moves unfinished handles plus pending-job destruction into a process-owned retained
-  quarantine so owner loss does not silently detach work. A small bounded set of internal drop
-  lanes prevents one blocking user destructor from monopolizing the owner coordinator. An owner's
-  receipt completes only after its pending queue, in-flight destructors, and worker handles are all
-  complete. Lane saturation remains retained work rather than false `Stopped` evidence.
+- Drop closes admission and publishes cancellation for pending and running handles before moving
+  unfinished handles plus pending-job destruction into a process-owned retained quarantine. A
+  blocked capture destructor cannot delay another abandoned pending handle's logical cancellation.
+  This visits the bounded pending queue in O(n) time. Pending capture disposal runs on internal
+  drop lanes, and only finished workers are joined on the dropping thread. Running-control
+  snapshots remain alive until all cancellation is published and pending captures have their
+  retained disposal owner; a concurrently completed result's last snapshot therefore cannot delay
+  those steps. Releasing a completed result's last owner can still run its user destructor on the
+  dropping thread. Arbitrary result-destructor latency remains a G9 follow-up, and Drop does not
+  promise constant time or bounded latency for user destructors. A small bounded set of internal
+  drop lanes prevents one blocking pending destructor from monopolizing the owner coordinator.
+  Physical disposal remains serial within each owner. An owner's receipt completes only after its
+  pending queue, in-flight destructors, and worker handles are all complete. Lane saturation remains
+  retained work rather than false `Stopped` evidence.
 - `TaskPlugin` closes only pools it created. Externally inserted pools remain caller-owned; a
   completed plugin-owned close publishes the typed report in the world for inspection.
 

@@ -58,6 +58,28 @@ impl Drop for SlowPendingDropThread {
     }
 }
 
+struct BlockingPendingDrop {
+    started: mpsc::Sender<()>,
+    release: mpsc::Receiver<()>,
+    retired: mpsc::Sender<()>,
+}
+
+impl Drop for BlockingPendingDrop {
+    fn drop(&mut self) {
+        let _ = self.started.send(());
+        let _ = self.release.recv_timeout(Duration::from_secs(10));
+        let _ = self.retired.send(());
+    }
+}
+
+struct PendingDropReleaseGuard(mpsc::Sender<()>);
+
+impl Drop for PendingDropReleaseGuard {
+    fn drop(&mut self) {
+        let _ = self.0.send(());
+    }
+}
+
 fn start_runtime(app: App, close_timeout: Duration) -> RuntimeInstance {
     let sealed = app.seal().unwrap();
     let candidate = RuntimeAdmissionReservation::try_acquire()
@@ -267,6 +289,89 @@ fn dropping_pending_task_owners_transfers_slow_destructors_without_blocking() {
         started.elapsed() < Duration::from_millis(200),
         "dropping a task owner synchronously ran pending destructors"
     );
+}
+
+#[test]
+fn pool_drop_cancels_all_pending_handles_before_blocked_capture_retirement() {
+    let pools = inline_pools(2);
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let (retired_tx, retired_rx) = mpsc::channel();
+    let release = PendingDropReleaseGuard(release_tx);
+    let capture = BlockingPendingDrop {
+        started: started_tx,
+        release: release_rx,
+        retired: retired_tx,
+    };
+    let calls = Arc::new(AtomicUsize::new(0));
+    let first_calls = Arc::clone(&calls);
+    let mut first = accepted(pools.spawn(TaskPoolKind::Io, request(1), move |_| {
+        first_calls.fetch_add(1, Ordering::SeqCst);
+        drop(capture);
+    }));
+    let second_calls = Arc::clone(&calls);
+    let mut second = accepted(pools.spawn(TaskPoolKind::Io, request(2), move |_| {
+        second_calls.fetch_add(1, Ordering::SeqCst);
+    }));
+    let first_token = first.cancellation_token();
+    let second_token = second.cancellation_token();
+
+    drop(pools);
+    started_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("the reaper did not begin retiring the first capture");
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !second.is_finished() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        second.is_finished(),
+        "a blocked capture delayed another pending handle's logical cancellation"
+    );
+    assert!(first_token.is_cancelled());
+    assert!(second_token.is_cancelled());
+    for handle in [&mut first, &mut second] {
+        assert!(matches!(
+            handle.try_take(),
+            Some(TaskTerminal::Cancelled(TaskCancellation {
+                reason: TaskCancellationReason::PoolShutdown,
+                before_start: true,
+            }))
+        ));
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(matches!(
+        retired_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+
+    drop(release);
+    retired_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("the released capture did not retire");
+}
+
+#[test]
+fn dropping_a_task_handle_keeps_the_queued_closure_admitted() {
+    let pools = inline_pools(1);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let task_calls = Arc::clone(&calls);
+    let handle = accepted(pools.spawn(TaskPoolKind::Io, request(1), move |_| {
+        task_calls.fetch_add(1, Ordering::SeqCst);
+    }));
+    let cancellation = handle.cancellation_token();
+
+    drop(handle);
+
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(!cancellation.is_cancelled());
+    assert_eq!(pools.run_pending_for_tests().executed, 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(!cancellation.is_cancelled());
+    let stats = pools.stats().for_kind(TaskPoolKind::Io);
+    assert_eq!(stats.completed, 1);
+    assert_eq!(stats.cancelled, 0);
 }
 
 #[test]

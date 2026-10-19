@@ -57,6 +57,7 @@ pub(crate) fn default_worker_allocation(available_parallelism: usize) -> [usize;
 pub enum TaskPoolKind {
     Io,
     Compute,
+    /// A worker queue for background compute closures, not a Future executor.
     AsyncCompute,
 }
 
@@ -658,6 +659,10 @@ impl<T> TaskTerminal<T> {
     }
 }
 
+/// A cooperative cancellation signal shared with an owned task closure.
+///
+/// Cancellation does not interrupt a running closure. Work that can stop early must check this
+/// signal at suitable boundaries and release its owned inputs before returning.
 #[derive(Clone, Default)]
 pub struct TaskCancellationToken {
     cancelled: Arc<AtomicBool>,
@@ -888,6 +893,16 @@ struct TaskControl {
     state: Arc<dyn ErasedTaskState>,
 }
 
+/// Observes one task's first terminal result independently of its physical retirement.
+///
+/// Dropping a handle does not cancel the task. Queued or running work keeps its owned inputs until
+/// the executor retires it, even when no caller remains interested in its result. Use
+/// [`Self::cancel`] to request cancellation explicitly.
+///
+/// A cancelled handle can be finished while its closure or captured values are still being
+/// retired. Pool shutdown and the managed runtime close protocol track that physical work.
+/// Dropping the last owner of an untaken completed result runs that result's destructor on the
+/// dropping thread; the destructor may block.
 pub struct TaskHandle<T> {
     descriptor: TaskDescriptor,
     state: Arc<TaskState<T>>,
@@ -929,15 +944,26 @@ impl<T> TaskHandle<T> {
         self.state.token.clone()
     }
 
+    /// Publishes cancellation if no terminal result has already won.
+    ///
+    /// Returns `true` only when this call wins the first-terminal transition. `false` means the
+    /// task was already completed, failed, or cancelled. Pending work that loses execution
+    /// authority will not start; running work receives a cooperative signal and may continue
+    /// until it checks the token or returns. Neither result proves physical retirement.
     pub fn cancel(&self) -> bool {
         self.state.cancel(TaskCancellationReason::Requested)
     }
 
+    /// Returns whether a completed, failed, or cancelled terminal has been published.
+    ///
+    /// This remains `true` after [`Self::try_take`] consumes the result. It does not mean the
+    /// closure, its captured values, or its worker have physically retired.
     #[must_use]
     pub fn is_finished(&self) -> bool {
         self.state.is_terminal()
     }
 
+    /// Takes the terminal result once, returning `None` before publication or after consumption.
     pub fn try_take(&mut self) -> Option<TaskTerminal<T>> {
         self.state.try_take()
     }
@@ -1181,6 +1207,22 @@ struct TaskPoolInstanceToken {
     completion_publication: Mutex<TaskCompletionPublication>,
 }
 
+/// Bounded worker queues that execute owned, potentially blocking closures.
+///
+/// Tasks return owned data for their domain to integrate on its owner thread. This API does not
+/// accept or poll Futures; [`TaskPoolKind::AsyncCompute`] selects another closure worker queue.
+///
+/// Standalone pools retain their close owner. [`Self::shutdown_blocking`] drives finite,
+/// retryable physical retirement. Dropping an unfinished standalone owner closes admission and
+/// publishes cancellation for pending and running handles before transferring unfinished work
+/// to process-owned retention. This cancellation visits the bounded pending queue and is O(n);
+/// pending captures are disposed on internal drop lanes without waiting for uncooperative work.
+/// Physical capture disposal and worker joins can remain incomplete after Drop returns. Releasing
+/// the last owner of an untaken completed result can still run its destructor on the dropping
+/// thread, so Drop does not promise bounded latency for arbitrary user destructors.
+///
+/// Plugin-created pools transfer close ownership to the managed runtime. Removing or replacing
+/// their World-facing facade does not retire that owner's workers or close obligations.
 #[derive(Resource)]
 pub struct TaskPools {
     config: TaskPoolConfig,
@@ -1393,6 +1435,12 @@ impl TaskPools {
         }
     }
 
+    /// Submits an owned closure to a bounded worker queue and returns its admission outcome.
+    ///
+    /// Production workers execute admitted closures; [`Self::inline_for_tests`] provides an
+    /// explicit test driver. There is no fallback execution on the submitting thread.
+    /// Rejection, coalescing, and stale-entry cleanup can drop captured values on the submitting
+    /// thread, so a blocking capture destructor can delay this call.
     pub fn spawn<T, F>(
         &self,
         kind: TaskPoolKind,
@@ -1483,6 +1531,11 @@ impl TaskPools {
         }
     }
 
+    /// Drives a standalone owner's finite drain, cancellation, and worker-join protocol.
+    ///
+    /// An incomplete report retains the same physical work for a later call. A complete report
+    /// proves retirement; terminal task handles alone do not. Plugin-managed pools return
+    /// [`TaskShutdownError::CloseOwnerTransferred`] because their runtime owns this protocol.
     pub fn shutdown_blocking(&self) -> Result<TaskShutdownReport, TaskShutdownError> {
         let mut close_owner = self
             .close_owner
@@ -2346,14 +2399,23 @@ impl TaskPoolCloseOwner {
             self.shared.changed.notify_all();
             (pending, running)
         };
-        for running in running {
+        // A completed task's snapshot may be its result's final owner. Retain every snapshot
+        // until cancellation is published and pending captures have their disposal owner.
+        for running in &running {
             running.state.cancel(TaskCancellationReason::PoolShutdown);
+        }
+        for pending in &pending {
+            pending
+                .control
+                .state
+                .cancel(TaskCancellationReason::PoolShutdown);
         }
         self.join_finished_workers();
         retain_abandoned_task_owner(AbandonedTaskPoolOwner {
             pending,
             workers: std::mem::take(&mut self.workers),
         });
+        drop(running);
     }
 }
 
@@ -2644,12 +2706,7 @@ struct AbandonedTaskPoolOwner {
 
 impl AbandonedTaskPoolOwner {
     fn take_pending_for_reap(&mut self) -> Option<PendingJob> {
-        self.pending.pop_front().inspect(|pending| {
-            pending
-                .control
-                .state
-                .cancel(TaskCancellationReason::PoolShutdown);
-        })
+        self.pending.pop_front()
     }
 
     fn poll_finished_workers(&mut self) {
