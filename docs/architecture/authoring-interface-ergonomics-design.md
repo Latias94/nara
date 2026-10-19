@@ -107,15 +107,72 @@ closing a workflow that the existing models cannot express.
 
 ### Lessons From The Pinned Reference Engines
 
-The [comparison](../audits/2026-10-19-nara-bevy-godot-architecture-review.md) and
-[current audit](../audits/2026-10-19-foundation-next-stage-review.md) contain the pinned Bevy/Godot
-source evidence. They are architectural comparisons, not an instruction to copy their public API.
+This comparison uses the local Bevy snapshot `85503941e488152711a4695bbe248e9ed9f453fc`
+and Godot snapshot `81ab961f91066a63bcbf3ec340962bb1a1ada558`, rechecked on 2026-10-19.
+It does not claim to describe their latest releases. The broader
+[architecture comparison](../audits/2026-10-19-nara-bevy-godot-architecture-review.md) and
+[current audit](../audits/2026-10-19-foundation-next-stage-review.md) retain their original scope.
 
-| Reference lesson | Application here | Limit |
-| --- | --- | --- |
-| Bevy separates component data, plugin composition and reflection facilities | Keep data, installation and persistent schema legible; generate paired registration bookkeeping | Runtime reflection alone does not supply Nara's stable saved-data lineage |
-| Godot has targeted Editor extensions, property metadata and explicit revert behavior | Offer a narrow field editor and action result; distinguish authored overrides from effective defaults | Property presentation hints are not automatically persisted validation rules |
-| Godot checks resource creation; Bevy retains pipeline preparation states | Failure should terminate or defer inside the existing resource owner | Neither precedent requires a new public render/job framework |
+The following are source facts; the Nara choices are design judgments drawn from them.
+
+| Developer task | Reference-engine design | Nara today and proposed response | Deliberate difference / cost |
+| --- | --- | --- | --- |
+| Install behavior | Bevy `App.add_plugins` invokes the Plugin composition path; Plugin separates `build`, `ready`, `finish` and `cleanup` [B1] | Keep the existing fallible Plugin lifecycle and one `ProductRecipe` contribution across Hosts/tools. D3 shortens package authoring without a second installation service. | Do not merge persistent component identity into Plugin or infer dependencies from callbacks. Nara's admission and close guarantees still need their own proof. |
+| Make a Rust type editable/persistent | Bevy derive metadata plus `register_type` installs reflection type data; `ReflectComponent` supplies reflected ECS operations [B2]. Godot `PropertyInfo` carries type, name, hint and usage [G1]. | Current `PersistentComponent` derives schema/codec, but the package author still lists types in catalog and native registration. D3 generates both from one inventory and reuses the current schema list for successors. | Runtime type registration is not a substitute for Nara's explicit owner IDs, predecessor catalogs and migrations. Keep those semantic decisions visible. |
+| Edit a normal property | Godot `EditorProperty.emit_changed` reaches the Inspector change path; `_edit_set` integrates with the Editor Undo/Redo manager [G2]. | Nara currently exposes actions but lacks a complete per-attempt result-aware field entry. D1 owns drafts, conversion, exact submission and feedback behind `edit_field`; D2 supplies the underlying dispatch result. | Godot's inspected path edits live Object properties. Nara edits a revisioned saved-document model, so `emit_changed` is not evidence for opaque candidates or revision conflict handling. Those are Nara-specific requirements. |
+| Extend the Inspector or add a tool | Godot `EditorInspectorPlugin` offers `can_handle`, `parse_property` and `add_property_editor`; `EditorPlugin` has targeted edit/visibility/state/clear hooks [G3]. | Current Nara source-built panels already have per-instance state and action submission. Prove D1 in a public external panel; add a narrower inline field/menu hook only when a real tool needs it. | A full panel is more work than Godot's inline property hook for a small customization. Record that capability gap; do not claim panel support makes the extension experience equally mature. No dynamic ABI is proposed. |
+| Reset a property | Godot exposes `property_can_revert` and `property_get_revert`; Inspector revert emits the chosen revert value [G4]. | Fix N02 and keep authored override presence distinct from effective/defaulted value. D1 Reset removes an override through the existing document owner and Undo/Redo. | Borrow the explicit revert affordance, not Godot's storage operation: writing a value and removing a Nara override have different future-default semantics. |
+| Declare a numeric range | Godot range hints configure Inspector spin bounds, step and greater/lesser allowances [G1]. | D4 adds typed finite validation intervals shared by catalog admission, authoring and native preflight; presentation hints remain distinct. | A Godot control hint does not by itself establish a persisted validator for every ingestion path. Nara's rule changes affect saved-schema lineage and require component succession. |
+| Apply several related edits | Godot exposes do/undo property operations, commit and history selection; its Inspector has a multi-property action path [G5]. | Retain one owner/history. D2 can correlate several ordered actions; a true Apply All uses one existing atomic patch. | Two Nara writes from the same revision can still accept the first and reject the second. Correlation alone does not match the convenience of a cohesive multi-property control; its consumer must build one patch. |
+| Wait for I/O or initialization | Bevy `AssetLoader.load` returns a Future; Plugin `ready` synchronously reports asynchronous setup readiness [B3]. Godot ResourceLoader exposes threaded request/status/get [G6]. | Keep Plugin composition, codecs and paint synchronous. Design an owned preparation attempt, pending result, cancellation/staleness and owner-thread publication for a concrete slow workflow. | Do not infer that all loads should use a Future or that a request/status interface guarantees nonblocking final retrieval. Physical retirement remains an additional explicit Nara obligation. |
+| Recover from resource preparation failure | Bevy retains `CachedPipelineState::Err` and retries dependency-not-ready failures separately from permanent shader failures [B4]. The current audit traces Godot allocation checks. | E1 closes expected allocation errors and remembers terminal static shader rejection inside existing owners. Ordinary callers receive a result instead of reconstructing GPU recovery. | Copy the failure classification, not a full render graph or another public pipeline cache interface. |
+
+#### Primary Source Map
+
+Line locations refer to the pinned local snapshots. `repo-ref/` stays read-only and untracked.
+
+- **B1:** [Bevy Plugin](../../repo-ref/bevy/crates/bevy_app/src/plugin.rs):57-78;
+  [App composition](../../repo-ref/bevy/crates/bevy_app/src/app.rs):642.
+- **B2:** [App reflection registration](../../repo-ref/bevy/crates/bevy_app/src/app.rs):654-669;
+  [ReflectComponent](../../repo-ref/bevy/crates/bevy_ecs/src/reflect/component.rs):76-125.
+- **B3:** [AssetLoader](../../repo-ref/bevy/crates/bevy_asset/src/loader.rs):32-46;
+  [Plugin readiness](../../repo-ref/bevy/crates/bevy_app/src/plugin.rs):61-71.
+- **B4:** [Pipeline failure states and retry classification](../../repo-ref/bevy/crates/bevy_render/src/render_resource/pipeline_cache.rs):48-56,
+  901-936.
+- **G1:** [PropertyInfo](../../repo-ref/godot/core/object/property_info.h):128-159;
+  [numeric property controls](../../repo-ref/godot/editor/inspector/editor_properties.cpp):1619-1635.
+- **G2:** [Editor property change and Inspector mutation](../../repo-ref/godot/editor/inspector/editor_inspector.cpp):322-327,
+  5730-5885.
+- **G3:** [Inspector extension hooks](../../repo-ref/godot/editor/inspector/editor_inspector.h):350-387;
+  [Editor plugin lifecycle](../../repo-ref/godot/editor/plugins/editor_plugin.h):205-220.
+- **G4:** [Object revert contract](../../repo-ref/godot/core/object/object.cpp):652-686;
+  [Inspector revert](../../repo-ref/godot/editor/inspector/editor_inspector.cpp):1299, 1656.
+- **G5:** [Editor Undo/Redo manager](../../repo-ref/godot/editor/editor_undo_redo_manager.h):84-127;
+  [Inspector multi-property action](../../repo-ref/godot/editor/inspector/editor_inspector.cpp):5888-5915.
+- **G6:** [Threaded ResourceLoader](../../repo-ref/godot/core/io/resource_loader.h):249-251.
+
+Current Nara caller contracts are in the [component guide](../guides/persistent-components.md),
+[recipe guide](../guides/rust-product-recipes.md) and [panel guide](../guides/editor-panels.md).
+The current [panel context](../../editor/src/frontend/imgui/workspace.rs):22-55 still exposes
+`emit`; D1-D4 remain proposals, not claims about today's interface.
+
+#### What This Comparison Changes
+
+The strongest lesson is to reduce what each caller must reconstruct, rather than match method
+names. Bevy motivates derived type registration with an explicit advanced escape hatch; Godot
+shows how a narrow property control can participate in a complete editing/history workflow.
+For Nara this supports the selected C-over-D2 interface instead of a public ticket/controller
+framework, while retaining its separate saved-data authority.
+
+Three usability costs remain visible: package/provider declaration is more verbose than one
+runtime `register_type`; inline property extension is less direct than Godot's inspected hook;
+strict revision admission makes independent same-document writes conflict. D3 addresses the
+first mechanically, a real inline-tool consumer should drive the second, and one atomic patch
+addresses a concrete multi-field operation without automatic rebasing.
+
+This evidence does not establish that Nara's interfaces are as mature as either reference engine.
+Native conflict recovery, IME, external component evolution and full workflow qualification below
+are the proof required before publishing the proposed convenience surface.
 
 ## D1. Ordinary Field Editing
 
