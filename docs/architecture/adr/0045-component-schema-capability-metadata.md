@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-19
+**Last Revised**: 2026-10-20
 **Implemented Slice**: RGF-U1 canonical-v1 vocabulary on 2026-07-12
 **Refines**: ADR 0004, ADR 0011, ADR 0015, ADR 0021, ADR 0027, ADR 0028, ADR 0029
 **Refined By**: ADR 0051: Persistent File Envelope, Migration, and Golden Fixtures;
@@ -93,6 +93,27 @@ axis names are current value locators. This replaces the derive helper's former 
 description without changing x/y wire encoding. Existing component owners must retain their
 predecessor catalog, advance affected component versions and their owner catalog, and register an
 explicit migration. Unchanged wire bytes do not authorize silently tightening a saved schema.
+
+### Finite Numeric Intervals
+
+Scalar shapes may declare one optional typed numeric interval alongside their numeric domain.
+Signed, unsigned and finite floating bounds are distinct; endpoint inclusion is explicit, and no
+integer-to-float coercion is allowed. The same shared validator governs catalogs, defaults,
+creation templates, data-only authoring and native preflight/encoding. Presentation hints remain
+separate from persisted constraints, and arbitrary cross-field/native invariants stay codec-owned.
+
+Schema admission rejects mismatched kinds, out-of-domain bounds and empty intervals, including
+intervals containing no representable value in the admitted integer/F32/F64 domain. F32 values
+are materialized to F32 and exactly widened before comparison against the declared bounds;
+validation never clamps, rounds or rewrites stored values. Thus a positive F64 that becomes F32
+zero cannot satisfy a positive F32 interval. Signed zero has one canonical fingerprint meaning.
+
+Absent interval metadata preserves the existing catalog encoding and fingerprint. Present metadata
+participates in identity; readers unable to interpret it reject under the closed shape format.
+Adding, changing or removing intervals changes field semantics and requires a component successor
+and explicit owner lineage/migration, even if wire bytes stay identical. No subsumption prover
+waives same-version schema equality. Derive supports scalar numeric literal bounds; handwritten
+recursive scalar leaves reuse the same descriptor and validator.
 
 ### Effective Values
 

@@ -2309,6 +2309,7 @@ dependencies = [
  "nara_app",
  "nara_asset",
  "nara_core",
+ "nara_diagnostic",
  "nara_ecs",
  "nara_identity",
  "nara_reflect_derive",

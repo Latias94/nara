@@ -491,10 +491,13 @@ impl<'schema> PresentReferenceTraversal<'schema> {
                 ComponentValueShape::Scalar {
                     kind,
                     numeric_domain,
+                    numeric_interval,
                 },
                 value,
             ) if value.kind() == *kind
-                && numeric_domain.is_none_or(|domain| domain.accepts_value(value)) => {}
+                && numeric_domain.is_none_or(|domain| domain.accepts_value(value))
+                && numeric_interval
+                    .is_none_or(|interval| interval.accepts_value(value, *numeric_domain)) => {}
             (ComponentValueShape::EntityRef, ComponentValue::EntityReference(_)) => {
                 self.record(field, path, ComponentValueKind::EntityRef)?;
             }

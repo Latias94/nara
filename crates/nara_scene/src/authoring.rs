@@ -1695,6 +1695,7 @@ impl SceneAuthoringSession {
                                 "Persistent scene components are ineligible for retirement",
                             ),
                             &error,
+                            None,
                         )
                     }
                     SceneInstanceRetirementTransactionError::Hierarchy => diagnostic_error(

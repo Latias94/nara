@@ -8,11 +8,14 @@ mod authoring;
 #[cfg(feature = "serde")]
 mod authoring_bundle;
 mod codec;
+mod domain_error;
 mod effective;
 mod entity_reference;
 #[cfg(feature = "serde")]
 mod format;
+mod inventory;
 mod migration;
+mod numeric_interval;
 mod path;
 mod persistent_apply;
 mod plugin;
@@ -35,6 +38,7 @@ pub use authoring_bundle::{
     AuthoringSchemaBundleOwner,
 };
 pub use codec::{ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext};
+pub use domain_error::ComponentDomainError;
 pub use effective::{
     ComponentValueMaterializationLimits, effective_component_value, effective_component_value_owned,
 };
@@ -50,6 +54,7 @@ pub use format::{
 pub use migration::{ComponentMigrationError, MigratedComponentValue};
 pub use nara_identity::EntityReference;
 pub use nara_reflect_derive::PersistentComponent;
+pub use numeric_interval::{ComponentNumericBound, ComponentNumericInterval};
 pub use path::{ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment};
 pub use persistent_apply::{
     ComponentApplyBatch, ComponentApplyContext, PersistentApplyRejection, PersistentLifecycleEvent,
@@ -85,11 +90,15 @@ pub use value::{ComponentFloat, ComponentValue, ComponentValueCost, ComponentVal
 
 #[doc(hidden)]
 pub mod __macro_support {
+    pub use crate::inventory::validate_inventory;
     pub use crate::{
         ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-        ComponentFieldSchema, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
-        ComponentValue, ComponentValueShape, PersistentComponentProvider,
-        authoring::{PersistentFieldCodec, decode_persistent_field, encode_persistent_field},
+        ComponentFieldSchema, ComponentNumericBound, ComponentSchema, ComponentSchemaVersion,
+        ComponentTypeId, ComponentValue, ComponentValueShape, PersistentComponentProvider,
+        authoring::{
+            PersistentFieldCodec, PersistentNumericField, decode_persistent_field,
+            encode_persistent_field,
+        },
     };
 }
 
@@ -141,11 +150,12 @@ pub mod __private {
 pub mod prelude {
     pub use crate::{
         ComponentApplyContext, ComponentCapability, ComponentCatalogGenerationError,
-        ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
+        ComponentCodecError, ComponentDecodeContext, ComponentDomainError, ComponentEncodeContext,
         ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentFieldPath,
         ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema, ComponentFloat,
-        ComponentMigrationError, ComponentNumericDomain, ComponentRegistry, ComponentRegistryError,
-        ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentShapeError,
+        ComponentMigrationError, ComponentNumericBound, ComponentNumericDomain,
+        ComponentNumericInterval, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+        ComponentSchemaCatalog, ComponentSchemaVersion, ComponentShapeError,
         ComponentShapeErrorKind, ComponentShapeMember, ComponentTypeId, ComponentValue,
         ComponentValueError, ComponentValueKind, ComponentValueShape, DeclaredAssetReference,
         DeclaredAssetReferenceError, EntityReference, EntityReferenceTraversalLimits,

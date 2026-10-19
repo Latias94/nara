@@ -1,0 +1,5 @@
+error: range bounds must be numeric literals or negative numeric literals
+ --> tests/ui/range_expression.rs:8:65
+  |
+8 |     #[nara(id = "value", alias = "Value", range(min_inclusive = 1 + 2))]
+  |                                                                 ^^^^^

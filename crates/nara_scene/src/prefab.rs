@@ -1160,6 +1160,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
                             "component-id", component_id.as_str(),
                         ),
                         &error,
+                        Some(schema),
                     ));
                     return None;
                 }

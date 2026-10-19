@@ -4,9 +4,10 @@ use nara_asset::AssetRef;
 use nara_ecs::World;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
-    ComponentFieldPath, ComponentFieldSchema, ComponentRegistry, ComponentSchema,
-    ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind, EntityReference, PersistentComponentSchemaOwnerId,
+    ComponentFieldPath, ComponentFieldSchema, ComponentNumericBound, ComponentNumericInterval,
+    ComponentRegistry, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape, EntityReference,
+    PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
     AuthoringDocumentReadiness, AuthoringDocumentSource, AuthoringFieldEdit,
@@ -19,6 +20,87 @@ use nara_scene::{
 };
 
 const OWNER: &str = "nara.scene.hierarchy.components";
+
+#[test]
+fn data_only_interval_rejection_retains_engine_code_and_root_without_nested_map_keys() {
+    let canary = "qvM7k2p8Nx4J";
+    let component = component_id("demo.WeightedCooldown");
+    let owner = persistent_owner("demo.cooldown");
+    let schema = ComponentSchema::new(
+        component.clone(),
+        "Weighted cooldown",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_fields([ComponentFieldSchema::required(
+        ComponentFieldId::new("weights"),
+        "Weights",
+        ComponentFieldPath::from_fields(["weights"]),
+        ComponentValueShape::map(
+            ComponentValueShape::scalar(ComponentValueKind::U64).with_numeric_interval(
+                ComponentNumericInterval::U64 {
+                    min: None,
+                    max: Some(ComponentNumericBound::Included(10)),
+                },
+            ),
+        ),
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
+    let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+        owner.clone(),
+        ComponentSchemaCatalog {
+            components: vec![schema],
+            ..ComponentSchemaCatalog::default()
+        },
+        None,
+    )])
+    .unwrap();
+    let adapter = nara_scene::__private::AuthoringAdapterReceipt::from_schema_owner(
+        &bundle.owners()[0],
+        &Default::default(),
+    )
+    .unwrap();
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("root"))
+        .with_component(
+            component,
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([(
+                    "weights",
+                    ComponentValue::map([(canary, ComponentValue::U64(11))]),
+                )]),
+            )
+            .with_owner(owner),
+        )]);
+    let rejection =
+        SceneDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
+            .unwrap()
+            .admit_authoring(source("scenes/cooldown.scene.json"), &bundle, &[adapter])
+            .unwrap_err();
+    let diagnostic = rejection
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code().as_str() == "nara.reflect.numeric-range")
+        .unwrap();
+    assert!(
+        diagnostic
+            .fields()
+            .iter()
+            .any(|field| field.key().as_str() == "component-field-id"
+                && field.value() == nara_diagnostic::DiagnosticValueRef::Identifier("weights"))
+    );
+    assert!(
+        diagnostic
+            .fields()
+            .iter()
+            .any(|field| field.key().as_str() == "scene-context-code"
+                && field.value()
+                    == nara_diagnostic::DiagnosticValueRef::Identifier(
+                        "scene.authoring-component-value-invalid"
+                    ))
+    );
+    assert!(!format!("{:?}", rejection.diagnostics()).contains(canary));
+}
 
 #[test]
 fn generic_insertion_preserves_unknown_placement_and_rejects_prepend_atomically() {

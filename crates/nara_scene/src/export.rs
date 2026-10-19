@@ -333,6 +333,7 @@ pub fn export_scene_with_options(
                                     schema.id.as_str(),
                                 ),
                                 &error,
+                                Some(schema),
                             ));
                             continue;
                         }
@@ -440,6 +441,7 @@ pub fn export_scene_with_options(
                             schema.id.as_str(),
                         ),
                         &error,
+                        Some(schema),
                     ));
                 }
             }

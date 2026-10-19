@@ -7,7 +7,7 @@ use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Entity, World};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentEncodeContext, ComponentMigrationError,
-    ComponentRegistry, ComponentTypeId, PersistentApplyRejection,
+    ComponentRegistry, ComponentSchema, ComponentTypeId, PersistentApplyRejection,
 };
 use nara_scene::{
     SceneAuthoringRevision, SceneAuthoringSession, SceneComponentRecord, SceneEntityId,
@@ -705,6 +705,7 @@ fn export_component_change(
                             component,
                         ),
                         &error,
+                        Some(schema),
                     ),
                 ),
                 operation: None,
@@ -810,27 +811,52 @@ fn component_error(
     )
 }
 
-fn with_codec_error(entry: Diagnostic, error: &ComponentCodecError) -> Diagnostic {
+fn with_codec_error(
+    entry: Diagnostic,
+    error: &ComponentCodecError,
+    schema: Option<&ComponentSchema>,
+) -> Diagnostic {
     match error {
-        ComponentCodecError::MissingField { field } => diagnostic::with_public_identifier(
+        ComponentCodecError::Domain(error) => {
+            let mut domain = Diagnostic::new(error.code(), entry.severity(), error.summary());
+            for field in entry.fields() {
+                domain = domain
+                    .try_with_field(field.clone())
+                    .expect("tooling codec context retains its bounded fields");
+            }
+            domain = diagnostic::with_public_identifier(
+                domain,
+                "tooling_context_code",
+                entry.code().as_str(),
+            );
+            domain = diagnostic::with_public_identifier(domain, "codec_reason", "domain");
+            if let Some(field) = error.field().filter(|field| {
+                schema.is_some_and(|schema| schema.fields().iter().any(|known| &known.id == *field))
+            }) {
+                domain = diagnostic::with_public_identifier(
+                    domain,
+                    "component_field_id",
+                    field.as_str(),
+                );
+            }
+            domain
+        }
+        ComponentCodecError::MissingField { .. } => diagnostic::with_sensitive(
             diagnostic::with_public_identifier(entry, "codec_reason", "missing_field"),
             "field",
-            field,
         ),
-        ComponentCodecError::InvalidField { field, .. } => diagnostic::with_secret(
-            diagnostic::with_public_identifier(
+        ComponentCodecError::InvalidField { .. } => diagnostic::with_secret(
+            diagnostic::with_sensitive(
                 diagnostic::with_public_identifier(entry, "codec_reason", "invalid_field"),
                 "field",
-                field,
             ),
             "expected",
         ),
-        ComponentCodecError::InvalidAssetRef { field, .. } => diagnostic::with_secret(
+        ComponentCodecError::InvalidAssetRef { .. } => diagnostic::with_secret(
             diagnostic::with_sensitive(
-                diagnostic::with_public_identifier(
+                diagnostic::with_sensitive(
                     diagnostic::with_public_identifier(entry, "codec_reason", "invalid_asset_ref"),
                     "field",
-                    field,
                 ),
                 "asset_ref",
             ),
@@ -989,6 +1015,7 @@ fn with_migration_error(entry: Diagnostic, error: &ComponentMigrationError) -> D
                 u64::from(to_version.0),
             ),
             error,
+            None,
         ),
     }
 }
@@ -1020,4 +1047,58 @@ fn apply_changes_diagnostic(
         entry = diagnostic::with_public_u64(entry, "source_revision", source_revision.generation());
     }
     entry
+}
+
+#[cfg(test)]
+mod codec_diagnostic_tests {
+    use super::*;
+    use nara_diagnostic::{DiagnosticCode, DiagnosticValueRef, SafeSummary};
+    use nara_reflect::{ComponentDomainError, ComponentFieldId};
+
+    #[test]
+    fn apply_changes_codec_diagnostics_hide_unproven_fields_and_keep_domain_identity() {
+        let canary = "qvM7k2p8Nx4J";
+        for error in [
+            ComponentCodecError::missing_field(canary),
+            ComponentCodecError::invalid_field(canary, canary),
+            ComponentCodecError::invalid_asset_ref(canary, canary, canary),
+        ] {
+            let entry = with_codec_error(
+                diagnostic::error("tooling.test.codec-error", "Component encoding failed"),
+                &error,
+                None,
+            );
+            assert!(
+                entry
+                    .fields()
+                    .iter()
+                    .any(|field| field.key().as_str() == "field"
+                        && field.value() == DiagnosticValueRef::Redacted)
+            );
+            assert!(!format!("{entry:?}").contains(canary));
+        }
+        for code in ["demo.cooldown.negative", "demo.cooldown.disabled"] {
+            let error = ComponentCodecError::domain(
+                ComponentDomainError::new(
+                    DiagnosticCode::new(code).unwrap(),
+                    SafeSummary::new("Cooldown cannot be used").unwrap(),
+                )
+                .with_field(ComponentFieldId::new(canary)),
+            );
+            let entry = with_codec_error(
+                diagnostic::error("tooling.test.codec-error", "Component encoding failed"),
+                &error,
+                None,
+            );
+            assert_eq!(entry.code().as_str(), code);
+            assert_eq!(entry.summary().as_str(), "Cooldown cannot be used");
+            assert!(
+                !entry
+                    .fields()
+                    .iter()
+                    .any(|field| field.key().as_str() == "component_field_id")
+            );
+            assert!(!format!("{entry:?}").contains(canary));
+        }
+    }
 }

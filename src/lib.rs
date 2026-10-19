@@ -50,6 +50,8 @@ pub use nara_project as project;
 pub use nara_reflect as reflect;
 #[cfg(feature = "runtime-core")]
 pub use nara_reflect::PersistentComponent;
+#[cfg(feature = "runtime-core")]
+pub use nara_reflect::persistent_components;
 #[cfg(any(
     feature = "runtime-2d",
     feature = "presentation-2d",

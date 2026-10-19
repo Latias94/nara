@@ -39,10 +39,8 @@ owner-local candidate:
 ```rust
 use nara::app::PluginSchemaProviderId;
 use nara::reflect::{
-    ComponentRegistry, ComponentRegistryError, ComponentSchemaCatalog,
     ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
-    ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
-    PersistentComponentProvider,
+    ComponentSchemaProviderDefinition,
 };
 
 const PLAYER_SCHEMA_PROVIDER_ID: PluginSchemaProviderId =
@@ -52,23 +50,11 @@ const PLAYER_SCHEMA_PROVIDER: ComponentSchemaProviderDefinition =
         ComponentSchemaOwnerId::new("example.player.components"),
         PLAYER_SCHEMA_PROVIDER_ID,
         ComponentSchemaProviderBindingId::new("example.player.components.native", 1),
-        player_schema_catalog,
-        register_player_components,
+        player_types::initial_catalog,
+        player_types::register,
     );
 
-fn player_schema_catalog(
-) -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
-    Ok(ComponentSchemaCatalog {
-        components: vec![Player::persistent_component_schema()],
-        ..ComponentSchemaCatalog::default()
-    })
-}
-
-fn register_player_components(
-    registry: &mut ComponentRegistry,
-) -> Result<(), ComponentRegistryError> {
-    registry.register_persistent_component::<Player>().map(|_| ())
-}
+nara::persistent_components! { pub mod player_types = [Player]; }
 ```
 
 Expose this definition through the component-owning crate's `SchemaContribution`. The plugin
@@ -90,6 +76,54 @@ their behalf. Standalone `ComponentRegistry` users can still register and freeze
 Only a frozen registry may turn codec output into an applicable component. A building registry
 returns no runtime preflight result, so plugin preparation cannot publish a value before the final
 schema, native binding, and stable identity are fixed.
+
+The inventory generates `schemas`, `initial_catalog` and `register` callbacks from one explicit
+list of type identifiers. Import or alias qualified component types into the invocation module
+before listing them. It performs no discovery or installation. `initial_catalog` is a generation-one
+convenience only. When evolving a package, retain the old catalog snapshot, construct the current
+catalog with `ComponentSchemaCatalog::successor_of`, fill its components from `player_types::schemas()?`,
+and keep explicit migration registration around `player_types::register`. Adding a new current
+type changes the inventory; it must not change historical catalog membership. Owner/provider IDs,
+binding versions and migration meaning remain package decisions.
+
+The [independent component consumer](../../tests/fixtures/module-consumer/tests/component_inventory.rs)
+demonstrates a successor catalog, a new current component, explicit migration and the ordinary
+Editor Create/Edit/Save/Reopen workflow using one product contribution.
+
+## Declare Numeric Constraints
+
+Declare finite scalar bounds once; Editor feedback, data-only validation and native preflight use
+the same schema rule:
+
+```rust
+#[derive(Component, PersistentComponent)]
+#[nara(id = "example.Cooldown", version = 1, alias = "Cooldown",
+    component_capabilities(scene, inspect, edit), field_capabilities(scene, inspect, edit),
+    authoring_initial)]
+pub struct Cooldown {
+    #[nara(id = "seconds", alias = "Seconds", initial = 0.5_f32,
+        range(min_inclusive = 0.0_f32, max_inclusive = 30.0_f32))]
+    pub seconds: f32,
+}
+```
+
+Each endpoint is optional and may be inclusive or exclusive. Bounds are numeric literals checked
+against the field's Rust type, including aliases; expressions, nonnumeric fields and container
+range attributes are rejected. Handwritten recursive scalar shapes can use `ComponentNumericInterval`.
+F32 validation compares the materialized F32 value without rewriting saved bytes. Empty intervals
+and nonfinite/out-of-domain bounds reject at catalog admission. These are validation constraints,
+not slider hints. Cross-field/domain rules still belong to the native codec.
+
+Adding, changing or removing a constraint requires a component version successor and explicit
+catalog lineage/migration. Preserve valid historical values or reject them for repair; never
+silently clamp authored data. A successful data-only edit still does not prove every native invariant.
+
+For native domain failures, return `ComponentDomainError::new(checked_code, checked_summary)` and
+optionally `.with_field(ComponentFieldId::new("seconds"))`. Checked `DiagnosticCode` and
+`SafeSummary` are static public facts. The Scene bridge retains them and publishes the field only
+when an explicitly admitted schema proves membership. Keep payloads, nested map keys, paths and
+locators in private detail, never in codes or summaries. Without a schema the safe code remains,
+but the field claim is omitted. Existing free-form codec errors retain their redacted fallback.
 
 ## Manual Codecs and Apply Preparation
 

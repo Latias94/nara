@@ -1,0 +1,24 @@
+error[E0277]: the trait bound `bool: nara_reflect::__macro_support::PersistentNumericField` is not satisfied
+ --> tests/ui/range_non_numeric.rs:9:12
+  |
+9 |     value: bool,
+  |            ^^^^ the trait `nara_reflect::__macro_support::PersistentNumericField` is not implemented for `bool`
+  |
+  = help: the following other types implement trait `nara_reflect::__macro_support::PersistentNumericField`:
+            f32
+            f64
+            i16
+            i32
+            i64
+            i8
+            u16
+            u32
+          and $N others
+
+error[E0308]: mismatched types
+ --> tests/ui/range_non_numeric.rs:8:65
+  |
+8 |     #[nara(id = "value", alias = "Value", range(min_inclusive = 0))]
+  |                                                                 ^ expected `bool`, found integer
+9 |     value: bool,
+  |            ---- expected due to this

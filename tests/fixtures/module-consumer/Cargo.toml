@@ -20,6 +20,7 @@ bevy_ecs = "0.20"
 nara_app = { path = "../../../crates/nara_app" }
 nara_asset = { path = "../../../crates/nara_asset", default-features = false, features = ["serde"] }
 nara_ecs = { path = "../../../crates/nara_ecs" }
+nara_engine = { package = "nara", path = "../../..", default-features = false, features = ["tooling", "project-workflow"] }
 nara_core = { path = "../../../crates/nara_core" }
 nara_fs = { path = "../../../crates/nara_fs" }
 nara_hierarchy = { path = "../../../crates/nara_hierarchy" }

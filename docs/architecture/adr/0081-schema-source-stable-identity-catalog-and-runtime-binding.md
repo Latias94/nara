@@ -1,7 +1,7 @@
 # ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding
 
 **Status**: Accepted
-**Last Revised**: 2026-10-19
+**Last Revised**: 2026-10-20
 **Date**: 2026-07-12
 **Implemented Slices**: RGF-U1 canonical catalog and native binding boundary on 2026-07-12; RGF-U2
 native Rust derive authoring and public headless consumer on 2026-07-13; RGF-U12 World-independent
@@ -26,6 +26,27 @@ Lossless authoring with known-but-unbound or unknown schema is now governed by A
 [ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md) admits optional complete creation-only schema templates.
 Catalog identity includes present template metadata, while same-version durable decode semantics exclude it.
 Field missing-value defaults, strict native binding and owned schema lineage retain their existing roles.
+
+## S3 Component Authoring Refinement
+
+Finite scalar intervals follow ADR 0045 and participate in saved schema identity. Tightening or
+relaxing a range requires an explicit component successor; migrations decide how historical values
+are handled rather than silently clamping them. The UI owner preserves its generation-two catalog
+and advances UiText to version three with its complete native F32 `(0, 256]` size constraint.
+
+A component-domain failure may retain a checked static diagnostic code and summary, plus an
+optional stable root field ID. The Scene bridge publishes that field only when an explicitly
+supplied admitted schema contains it; no schema means no field claim. Dynamic codec messages,
+value paths, map keys, locators and payloads remain private fallback detail. Data-only interval
+failures use engine-defined identity and the known root field, without executing native codecs.
+The diagnostic owner remains independent of reflection; checked code/summary primitives may be
+consumed by reflection without adding reverse dependencies or a second diagnostics bus.
+
+A source-built component inventory may generate the existing pure generation-one catalog/schema
+callbacks and native registration callback. It does not install a package, freeze a registry,
+discover types or infer historical catalogs/migrations. Successors reuse the current schema list
+while retaining explicit predecessor snapshots, owner/provider identity and binding versions.
+The existing atomic provider admission still compares declared and native schemas.
 
 ## Context
 

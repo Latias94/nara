@@ -9,6 +9,7 @@ use std::{
 };
 
 use bevy_reflect::{GetTypeRegistration, TypeRegistry};
+use nara_diagnostic::{DiagnosticCode, SafeSummary};
 use nara_ecs::{
     __private::{
         PersistentComponentMetadataError, register_persistent_component,
@@ -19,7 +20,8 @@ use nara_ecs::{
 };
 
 use crate::{
-    ComponentFieldPath, ComponentFieldPathSegment, ComponentValue, PersistentComponentProvider,
+    ComponentDomainError, ComponentFieldPath, ComponentFieldPathSegment, ComponentValue,
+    PersistentComponentProvider,
     codec::{
         ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
         FnComponentCodec,
@@ -2477,11 +2479,12 @@ fn validate_component_field_default(
             source,
         }
     })?;
-    if field.accepts_value(default_value) {
-        return Ok(());
-    }
+    let error = match field.shape.validate_value(default_value) {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
     if default_value.kind() == field.value_kind() {
-        if let Some(numeric_domain) = field.numeric_domain() {
+        if let ComponentShapeErrorKind::NumericDomain(numeric_domain) = error.kind {
             return Err(
                 ComponentRegistryError::ComponentFieldDefaultOutsideNumericDomain {
                     component_id: component_id.clone(),
@@ -2495,10 +2498,7 @@ fn validate_component_field_default(
         return Err(ComponentRegistryError::InvalidComponentFieldDefaultShape {
             component_id: component_id.clone(),
             path: field.path.clone(),
-            source: field
-                .shape
-                .validate_value(default_value)
-                .expect_err("rejected default has a shape error"),
+            source: error,
         });
     }
     Err(ComponentRegistryError::InvalidComponentFieldDefault {
@@ -2568,6 +2568,19 @@ fn validate_component_value_coverage_with_presence(
         match value.get_path(&field.path) {
             Ok(value) => {
                 if let Err(error) = field.shape.validate_value(value) {
+                    if error.kind == ComponentShapeErrorKind::NumericInterval {
+                        return Err(ComponentCodecError::domain(
+                            ComponentDomainError::new(
+                                DiagnosticCode::new("nara.reflect.numeric-range")
+                                    .expect("numeric interval diagnostic code is valid"),
+                                SafeSummary::new(
+                                    "Component value is outside its declared numeric interval",
+                                )
+                                .expect("numeric interval summary is safe static text"),
+                            )
+                            .with_field(field.id.clone()),
+                        ));
+                    }
                     let path = ComponentFieldPath::new(
                         field
                             .path

@@ -31,6 +31,47 @@ pub trait PersistentFieldCodec: private::Sealed + Sized + 'static {
     fn encode(&self) -> Result<ComponentValue, ComponentCodecError>;
 }
 
+/// Numeric primitives supported by the derive's scalar range literals.
+#[doc(hidden)]
+pub trait PersistentNumericField: PersistentFieldCodec + Copy {
+    fn numeric_interval(
+        min: Option<crate::ComponentNumericBound<Self>>,
+        max: Option<crate::ComponentNumericBound<Self>>,
+    ) -> Result<crate::ComponentNumericInterval, crate::ComponentValueError>;
+}
+
+fn map_bound<T, U>(
+    bound: Option<crate::ComponentNumericBound<T>>,
+    convert: impl FnOnce(T) -> Result<U, crate::ComponentValueError>,
+) -> Result<Option<crate::ComponentNumericBound<U>>, crate::ComponentValueError> {
+    use crate::ComponentNumericBound::{Excluded, Included};
+    match bound {
+        Some(Included(value)) => convert(value).map(Included).map(Some),
+        Some(Excluded(value)) => convert(value).map(Excluded).map(Some),
+        None => Ok(None),
+    }
+}
+
+macro_rules! numeric_interval_codec {
+    ($variant:ident, $convert:expr; $($ty:ty),+ $(,)?) => {$(
+        impl PersistentNumericField for $ty {
+            fn numeric_interval(
+                min: Option<crate::ComponentNumericBound<Self>>,
+                max: Option<crate::ComponentNumericBound<Self>>,
+            ) -> Result<crate::ComponentNumericInterval, crate::ComponentValueError> {
+                Ok(crate::ComponentNumericInterval::$variant {
+                    min: map_bound(min, $convert)?,
+                    max: map_bound(max, $convert)?,
+                })
+            }
+        }
+    )+};
+}
+
+numeric_interval_codec!(I64, |value| Ok(i64::from(value)); i8, i16, i32, i64);
+numeric_interval_codec!(U64, |value| Ok(u64::from(value)); u8, u16, u32, u64);
+numeric_interval_codec!(F64, |value| crate::ComponentFloat::new(f64::from(value)); f32, f64);
+
 #[doc(hidden)]
 pub fn decode_persistent_field<T>(
     value: &ComponentValue,

@@ -23,7 +23,7 @@ use crate::{
     SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SceneFileLimits, ScenePatchDocument,
     ScenePatchOperation, ScenePatchReport,
     diagnostics::{
-        error as diagnostic_error, warning as diagnostic_warning, with_asset_ref,
+        error as diagnostic_error, warning as diagnostic_warning, with_asset_ref, with_codec_error,
         with_public_locator,
     },
     validation::{
@@ -1671,29 +1671,49 @@ fn classify_complete_record(
             .schema
             .as_ref()
             .expect("available authoring record retains its current schema");
+        let owner = classified
+            .resolved_owner
+            .as_ref()
+            .expect("available authoring record retains its admitted schema owner");
         let effective = effective_component_value(
             schema,
             &record.value,
             context.limits.component_materialization_limits(),
         )
-        .map_err(|_| {
-            rejection(with_public_locator(
-                diagnostic_error(
-                    "scene.authoring-component-value-invalid",
-                    "Persistent authoring record exceeds its effective-value policy",
+        .map_err(|error| {
+            rejection(with_codec_error(
+                with_public_locator(
+                    with_public_locator(
+                        diagnostic_error(
+                            "scene.authoring-component-value-invalid",
+                            "Persistent authoring record exceeds its effective-value policy",
+                        ),
+                        "schema-owner",
+                        owner.as_str(),
+                    ),
+                    "component-id",
+                    component.as_str(),
                 ),
-                "component-id",
-                component.as_str(),
+                &error,
+                Some(schema),
             ))
         })?;
-        nara_reflect::validate_component_value(schema, &effective).map_err(|_| {
-            rejection(with_public_locator(
-                diagnostic_error(
-                    "scene.authoring-component-value-invalid",
-                    "Persistent authoring record does not satisfy its declared schema",
+        nara_reflect::validate_component_value(schema, &effective).map_err(|error| {
+            rejection(with_codec_error(
+                with_public_locator(
+                    with_public_locator(
+                        diagnostic_error(
+                            "scene.authoring-component-value-invalid",
+                            "Persistent authoring record does not satisfy its declared schema",
+                        ),
+                        "schema-owner",
+                        owner.as_str(),
+                    ),
+                    "component-id",
+                    component.as_str(),
                 ),
-                "component-id",
-                component.as_str(),
+                &error,
+                Some(schema),
             ))
         })?;
         if matches!(&location, AuthoringRecordLocation::EntityComponent { .. }) {
@@ -2572,7 +2592,9 @@ fn authoring_field_change_is_preservation_safe(
         && !field.has_capability(ComponentCapability::EntityRef)
         && supports_data_shape(field.shape())
         && match value {
-            Some(value) => field.accepts_value(value),
+            // The complete candidate is validated by classification before publication. Keep
+            // value failures there so the shared validator retains its safe code and root field.
+            Some(_) => true,
             None => {
                 (!field.required || field.default_value.is_some())
                     && matches!(

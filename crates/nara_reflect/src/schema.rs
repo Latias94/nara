@@ -8,7 +8,9 @@ use std::{
 
 use nara_identity::EntityReference;
 
-use crate::{ComponentFieldPath, ComponentFieldPathSegment, ComponentValue};
+use crate::{
+    ComponentFieldPath, ComponentFieldPathSegment, ComponentNumericInterval, ComponentValue,
+};
 
 const MAX_ALIAS_BYTES: usize = 128;
 
@@ -506,6 +508,11 @@ pub enum ComponentValueShape {
             serde(default, skip_serializing_if = "Option::is_none")
         )]
         numeric_domain: Option<ComponentNumericDomain>,
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
+        numeric_interval: Option<ComponentNumericInterval>,
     },
     EntityRef,
     AssetRef,
@@ -548,6 +555,12 @@ pub enum ComponentShapeErrorKind {
         kind: ComponentValueKind,
         domain: ComponentNumericDomain,
     },
+    InvalidNumericIntervalKind {
+        expected: ComponentValueKind,
+        actual: ComponentValueKind,
+    },
+    NumericIntervalBoundOutsideDomain,
+    EmptyNumericInterval,
     InvalidRecordMember,
     DuplicateRecordMember(String),
     InvalidOptional,
@@ -559,6 +572,7 @@ pub enum ComponentShapeErrorKind {
         actual: ComponentValueKind,
     },
     NumericDomain(ComponentNumericDomain),
+    NumericInterval,
     MissingMember(String),
     UndeclaredMember(String),
 }
@@ -630,6 +644,7 @@ impl ComponentValueShape {
         Self::Scalar {
             kind,
             numeric_domain: None,
+            numeric_interval: None,
         }
     }
 
@@ -695,6 +710,42 @@ impl ComponentValueShape {
                         *shape = Self::Scalar {
                             kind: shape.value_kind(),
                             numeric_domain: domain,
+                            numeric_interval: None,
+                        };
+                    }
+                    return self;
+                }
+            }
+        }
+        self
+    }
+
+    /// Adds a validation interval to a scalar, optionally wrapped in Optional.
+    ///
+    /// Applying an interval to another shape produces an invalid schema candidate rather than
+    /// silently ignoring the constraint or propagating it into container children.
+    #[must_use]
+    pub fn with_numeric_interval(
+        mut self,
+        interval: impl Into<Option<ComponentNumericInterval>>,
+    ) -> Self {
+        let interval = interval.into();
+        let mut current = &mut self;
+        for _depth in 0..=MAX_SHAPE_DEPTH {
+            match current {
+                Self::Optional { value } => current = value,
+                Self::Scalar {
+                    numeric_interval, ..
+                } => {
+                    *numeric_interval = interval;
+                    return self;
+                }
+                shape => {
+                    if interval.is_some() && shape.validate().is_ok() {
+                        *shape = Self::Scalar {
+                            kind: shape.value_kind(),
+                            numeric_domain: None,
+                            numeric_interval: interval,
                         };
                     }
                     return self;
@@ -726,6 +777,21 @@ impl ComponentValueShape {
         for _depth in 0..=MAX_SHAPE_DEPTH {
             match current {
                 Self::Scalar { numeric_domain, .. } => return *numeric_domain,
+                Self::Optional { value } => current = value,
+                _ => return None,
+            }
+        }
+        None
+    }
+
+    #[must_use]
+    pub fn numeric_interval(&self) -> Option<ComponentNumericInterval> {
+        let mut current = self;
+        for _depth in 0..=MAX_SHAPE_DEPTH {
+            match current {
+                Self::Scalar {
+                    numeric_interval, ..
+                } => return *numeric_interval,
                 Self::Optional { value } => current = value,
                 _ => return None,
             }
@@ -769,6 +835,7 @@ impl ComponentValueShape {
             Self::Scalar {
                 kind,
                 numeric_domain,
+                numeric_interval,
             } => {
                 if let Some(domain) = numeric_domain
                     && domain.value_kind() != *kind
@@ -792,6 +859,11 @@ impl ComponentValueShape {
                         path,
                         ComponentShapeErrorKind::InvalidScalarKind(*kind),
                     ));
+                }
+                if let Some(interval) = numeric_interval {
+                    interval
+                        .validate(*kind, *numeric_domain)
+                        .map_err(|kind| shape_error(path, kind))?;
                 }
             }
             Self::Opaque { kind }
@@ -873,6 +945,7 @@ impl ComponentValueShape {
                 Self::Scalar {
                     kind,
                     numeric_domain,
+                    numeric_interval,
                 },
                 value,
             ) if value.kind() == *kind => {
@@ -883,6 +956,11 @@ impl ComponentValueShape {
                         path,
                         ComponentShapeErrorKind::NumericDomain(*domain),
                     ));
+                }
+                if let Some(interval) = numeric_interval
+                    && !interval.accepts_value(value, *numeric_domain)
+                {
+                    return Err(shape_error(path, ComponentShapeErrorKind::NumericInterval));
                 }
                 Ok(())
             }
@@ -1132,6 +1210,15 @@ impl ComponentFieldSchema {
     }
 
     #[must_use]
+    pub fn with_numeric_interval(
+        mut self,
+        interval: impl Into<Option<ComponentNumericInterval>>,
+    ) -> Self {
+        self.shape = self.shape.with_numeric_interval(interval);
+        self
+    }
+
+    #[must_use]
     pub fn with_capability(mut self, capability: ComponentCapability) -> Self {
         self.capabilities.insert(capability);
         self
@@ -1172,11 +1259,16 @@ impl ComponentFieldSchema {
     }
 
     #[must_use]
+    pub fn numeric_interval(&self) -> Option<ComponentNumericInterval> {
+        self.shape.numeric_interval()
+    }
+
+    #[must_use]
     pub const fn shape(&self) -> &ComponentValueShape {
         &self.shape
     }
 
-    /// Checks the declared wire kind and finite numeric domain.
+    /// Checks the declared wire kind, finite numeric domain and validation interval.
     ///
     /// Optional fields retain their explicit-null semantics. Native codecs may impose further
     /// component-specific invariants that are not represented by this schema.
@@ -1479,11 +1571,17 @@ fn feed_shape(hasher: &mut blake3::Hasher, shape: &ComponentValueShape) {
         ComponentValueShape::Scalar {
             kind,
             numeric_domain,
+            numeric_interval,
         } => {
             feed_bytes(hasher, &[0, component_value_kind_tag(*kind)]);
             match numeric_domain {
                 Some(domain) => feed_bytes(hasher, &[1, domain.fingerprint_tag()]),
                 None => feed_bytes(hasher, &[0]),
+            }
+            // No absence tag: existing unconstrained shapes retain their exact fingerprints.
+            if let Some(interval) = numeric_interval {
+                feed_bytes(hasher, b"numeric-interval");
+                interval.feed_fingerprint(hasher);
             }
         }
         ComponentValueShape::EntityRef => feed_bytes(hasher, &[1]),

@@ -1,0 +1,5 @@
+error: a range may declare each endpoint only once
+ --> tests/ui/range_duplicate_endpoint.rs:8:68
+  |
+8 |     #[nara(id = "value", alias = "Value", range(min_inclusive = 0, min_exclusive = 1))]
+  |                                                                    ^^^^^^^^^^^^^

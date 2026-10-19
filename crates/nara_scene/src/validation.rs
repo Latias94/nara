@@ -469,7 +469,12 @@ fn preflight_scene_with_context_options(
                 Err(error) => {
                     push_with_operation_index(
                         &mut diagnostics,
-                        component_payload_diagnostic(entity.id.as_str(), component_id, &error),
+                        component_payload_diagnostic(
+                            entity.id.as_str(),
+                            component_id,
+                            &error,
+                            registry,
+                        ),
                         operation_index,
                     );
                     continue;
@@ -487,7 +492,12 @@ fn preflight_scene_with_context_options(
                 if let Err(error) = validation {
                     push_with_operation_index(
                         &mut diagnostics,
-                        component_payload_diagnostic(entity.id.as_str(), component_id, &error),
+                        component_payload_diagnostic(
+                            entity.id.as_str(),
+                            component_id,
+                            &error,
+                            registry,
+                        ),
                         operation_index,
                     );
                 }
@@ -511,6 +521,7 @@ fn preflight_scene_with_context_options(
                             &ComponentCodecError::Message(
                                 "Schema-declared asset reference traversal failed".to_owned(),
                             ),
+                            registry,
                         ),
                         operation_index,
                     );
@@ -532,6 +543,7 @@ fn preflight_scene_with_context_options(
                             reference.asset_ref().to_string(),
                             "Asset reference is not declared in the project asset database",
                         ),
+                        registry,
                     ),
                     operation_index,
                 );
@@ -575,8 +587,12 @@ fn preflight_scene_with_context_options(
                     prepared,
                 }),
                 Some(Err(error)) => {
-                    let diagnostic =
-                        component_payload_diagnostic(entity.id.as_str(), component_id, &error);
+                    let diagnostic = component_payload_diagnostic(
+                        entity.id.as_str(),
+                        component_id,
+                        &error,
+                        registry,
+                    );
                     push_with_operation_index(&mut diagnostics, diagnostic, operation_index);
                 }
                 None => push_with_operation_index(
@@ -616,8 +632,9 @@ fn component_payload_diagnostic(
     entity_id: &str,
     component_id: &ComponentTypeId,
     error: &ComponentCodecError,
+    registry: &ComponentRegistry,
 ) -> Diagnostic {
-    with_codec_error(
+    let diagnostic = with_codec_error(
         with_public_locator(
             with_public_locator(
                 diagnostic_error(
@@ -631,7 +648,13 @@ fn component_payload_diagnostic(
             component_id.as_str(),
         ),
         error,
-    )
+        registry.schema(component_id),
+    );
+    if let Some(owner) = registry.component_schema_owner(component_id) {
+        with_public_locator(diagnostic, "schema-owner", owner.as_str())
+    } else {
+        diagnostic
+    }
 }
 
 pub(crate) fn first_unavailable_hierarchy_projection_entity<'document>(

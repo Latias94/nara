@@ -82,6 +82,7 @@ struct FieldArgs {
     aliases: Vec<LitStr>,
     capabilities: Option<Vec<Capability>>,
     initial: Option<Expr>,
+    range: Option<NumericRange>,
 }
 
 struct PersistentField {
@@ -91,6 +92,13 @@ struct PersistentField {
     aliases: Vec<LitStr>,
     capabilities: Vec<Capability>,
     initial: Option<Expr>,
+    range: Option<NumericRange>,
+}
+
+#[derive(Default)]
+struct NumericRange {
+    min: Option<(bool, Expr)>,
+    max: Option<(bool, Expr)>,
 }
 
 fn expand_persistent_component(input: DeriveInput) -> Result<TokenStream2> {
@@ -401,6 +409,9 @@ fn parse_field(
                     meta.path.span(),
                     "initial",
                 )
+            } else if meta.path.is_ident("range") {
+                let range = parse_numeric_range(meta)?;
+                set_once(&mut args.range, range, attribute.span(), "range")
             } else {
                 Err(meta.error("unsupported persistent field attribute"))
             }
@@ -424,7 +435,45 @@ fn parse_field(
         aliases: args.aliases,
         capabilities,
         initial: args.initial,
+        range: args.range,
     })
+}
+
+fn parse_numeric_range(meta: syn::meta::ParseNestedMeta<'_>) -> Result<NumericRange> {
+    let mut range = NumericRange::default();
+    meta.parse_nested_meta(|bound| {
+        let (side, inclusive) = if bound.path.is_ident("min_inclusive") {
+            (&mut range.min, true)
+        } else if bound.path.is_ident("min_exclusive") {
+            (&mut range.min, false)
+        } else if bound.path.is_ident("max_inclusive") {
+            (&mut range.max, true)
+        } else if bound.path.is_ident("max_exclusive") {
+            (&mut range.max, false)
+        } else {
+            return Err(bound
+                .error("expected min_inclusive, min_exclusive, max_inclusive or max_exclusive"));
+        };
+        if side.is_some() {
+            return Err(bound.error("a range may declare each endpoint only once"));
+        }
+        let value: Expr = bound.value()?.parse()?;
+        if !matches!(
+            initial_scalar_literal(&value),
+            Ok(Lit::Int(_) | Lit::Float(_))
+        ) {
+            return Err(Error::new_spanned(
+                value,
+                "range bounds must be numeric literals or negative numeric literals",
+            ));
+        }
+        *side = Some((inclusive, value));
+        Ok(())
+    })?;
+    if range.min.is_none() && range.max.is_none() {
+        return Err(meta.error("range requires at least one bound"));
+    }
+    Ok(range)
 }
 
 fn initial_scalar_literal(initial: &Expr) -> Result<&Lit> {
@@ -521,6 +570,31 @@ fn field_schema(field: &PersistentField, support: &TokenStream2) -> TokenStream2
         .capabilities
         .iter()
         .map(|capability| capability.tokens(support));
+    let interval = field.range.as_ref().map(|range| {
+        let bound_tokens = |bound: &Option<(bool, Expr)>| match bound {
+            None => quote!(::core::option::Option::None),
+            Some((inclusive, value)) => {
+                let variant = if *inclusive { format_ident!("Included") } else { format_ident!("Excluded") };
+                let checked = if matches!(initial_scalar_literal(value), Ok(literal) if is_float_literal(literal)) {
+                    quote! { const {
+                        let bound: #ty = #value;
+                        assert!(bound.is_finite(), "range bounds must be finite for their field type");
+                        bound
+                    } }
+                } else { quote!(#value) };
+                quote!(::core::option::Option::Some(#support::ComponentNumericBound::#variant({
+                    let bound: #ty = #checked;
+                    bound
+                })))
+            }
+        };
+        let min = bound_tokens(&range.min);
+        let max = bound_tokens(&range.max);
+        quote! { .with_numeric_interval(
+            <#ty as #support::PersistentNumericField>::numeric_interval(#min, #max)
+                .expect("PersistentComponent range literals are finite")
+        ) }
+    });
     quote! {
         #support::ComponentFieldSchema::required(
             #support::ComponentFieldId::new(#id),
@@ -530,6 +604,7 @@ fn field_schema(field: &PersistentField, support: &TokenStream2) -> TokenStream2
         )
         #additional_aliases
         .with_capabilities([#(#capability_tokens),*])
+        #interval
     }
 }
 

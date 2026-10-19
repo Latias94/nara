@@ -6,7 +6,10 @@ use nara_asset::{
     ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit};
-use nara_diagnostic::{Diagnostic, DiagnosticFieldClass, DiagnosticReport, DiagnosticValueRef};
+use nara_diagnostic::{
+    Diagnostic, DiagnosticCode, DiagnosticFieldClass, DiagnosticReport, DiagnosticValueRef,
+    SafeSummary,
+};
 use nara_ecs::{
     Commands, Component, Entity, Mut, Resource, World,
     lifecycle::{Add, Despawn, HookContext, Remove},
@@ -25,10 +28,11 @@ use nara_identity::{
 };
 use nara_reflect::bevy_reflect;
 use nara_reflect::{
-    ComponentCapability, ComponentCodecError, ComponentDecodeContext, ComponentFieldId,
-    ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema,
-    ComponentRegistry, ComponentRegistryError, ComponentSchema, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueKind, PreparedComponentCandidate, Reflect,
+    ComponentCapability, ComponentCodecError, ComponentDecodeContext, ComponentDomainError,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment,
+    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    PreparedComponentCandidate, Reflect,
 };
 #[derive(Clone, Debug, PartialEq, Component, Reflect)]
 struct TestPosition {
@@ -222,6 +226,7 @@ fn scene_diagnostics_redact_legacy_codec_text_and_sensitive_locators() {
             "password",
         ),
         &ComponentCodecError::Message(canary.to_string()),
+        None,
     );
 
     assert!(diagnostic_has_redacted_field(&diagnostic, "component-id"));
@@ -237,6 +242,102 @@ fn scene_diagnostics_redact_legacy_codec_text_and_sensitive_locators() {
         DiagnosticFieldClass::Secret,
     ));
     assert!(!format!("{diagnostic:?}").contains(canary));
+}
+
+#[test]
+fn native_scene_validation_keeps_distinct_component_domain_codes_and_root_fields() {
+    let canary = "qvM7k2p8Nx4J";
+    let component = ComponentTypeId::new("nara.test.DomainFailure");
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_persistent_component_with_codec::<TestPosition, _, _>(
+            test_component_schema(
+                component.clone(),
+                "Domain failure",
+                ComponentSchemaVersion::ONE,
+                [
+                    test_component_field(
+                        "x",
+                        "X",
+                        ComponentFieldPath::from_fields(["x"]),
+                        ComponentValueKind::I64,
+                        true,
+                    ),
+                    ComponentFieldSchema::required(
+                        ComponentFieldId::new("payload"),
+                        "Payload",
+                        ComponentFieldPath::from_fields(["payload"]),
+                        nara_reflect::ComponentValueShape::map(ComponentValueKind::String.into()),
+                    )
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+                ],
+            ),
+            |value| {
+                let code = if value.field_i64("x")? == -1 {
+                    "demo.cooldown.negative"
+                } else {
+                    "demo.cooldown.disabled"
+                };
+                Err(ComponentDomainError::new(
+                    DiagnosticCode::new(code).unwrap(),
+                    SafeSummary::new("Cooldown cannot be used").unwrap(),
+                )
+                .with_field(ComponentFieldId::new("x"))
+                .into())
+            },
+            |value| {
+                Ok(ComponentValue::map([
+                    ("x", ComponentValue::I64(i64::from(value.x))),
+                    (
+                        "payload",
+                        ComponentValue::map([] as [(&str, ComponentValue); 0]),
+                    ),
+                ]))
+            },
+        )
+        .unwrap();
+    registry.freeze().unwrap();
+    for (x, expected_code) in [
+        (-1, "demo.cooldown.negative"),
+        (-2, "demo.cooldown.disabled"),
+    ] {
+        let document = SceneDocument::new(
+            vec![scene_id("root")],
+            vec![SceneEntityRecord::new(scene_id("root")).with_component(
+                component.clone(),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::map([
+                        ("x", ComponentValue::I64(x)),
+                        (
+                            "payload",
+                            ComponentValue::map([(
+                                canary,
+                                ComponentValue::String(canary.to_owned()),
+                            )]),
+                        ),
+                    ]),
+                ),
+            )],
+        );
+        let report = document.validate(&registry);
+        let diagnostic = report
+            .iter()
+            .find(|diagnostic| diagnostic.code().as_str() == expected_code)
+            .unwrap();
+        assert_eq!(diagnostic.summary().as_str(), "Cooldown cannot be used");
+        assert!(diagnostic_has_text_field(
+            diagnostic,
+            "component-field-id",
+            "x"
+        ));
+        assert!(diagnostic_has_text_field(
+            diagnostic,
+            "component-id",
+            component.as_str()
+        ));
+        assert!(!format!("{report:?}").contains(canary));
+    }
 }
 
 #[test]

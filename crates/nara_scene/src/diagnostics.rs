@@ -8,8 +8,8 @@ use nara_identity::{
 };
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentEntityReferenceRewriteError,
-    ComponentFieldPath, ComponentFieldPathError, ComponentMigrationError, ComponentValueKind,
-    PersistentApplyRejection,
+    ComponentFieldPath, ComponentFieldPathError, ComponentMigrationError, ComponentSchema,
+    ComponentValueKind, PersistentApplyRejection,
 };
 
 pub(crate) fn error(code: &'static str, summary: &'static str) -> Diagnostic {
@@ -284,8 +284,27 @@ pub(crate) fn with_asset_ref(
     }
 }
 
-pub(crate) fn with_codec_error(diagnostic: Diagnostic, error: &ComponentCodecError) -> Diagnostic {
+pub(crate) fn with_codec_error(
+    diagnostic: Diagnostic,
+    error: &ComponentCodecError,
+    schema: Option<&ComponentSchema>,
+) -> Diagnostic {
     match error {
+        ComponentCodecError::Domain(error) => {
+            let mut domain = Diagnostic::new(error.code(), diagnostic.severity(), error.summary());
+            for field in diagnostic.fields() {
+                domain = with_field(domain, field.clone());
+            }
+            domain =
+                with_public_identifier(domain, "scene-context-code", diagnostic.code().as_str());
+            domain = with_public_identifier(domain, "codec-error-kind", "domain");
+            if let Some(field) = error.field().filter(|field| {
+                schema.is_some_and(|schema| schema.fields().iter().any(|known| &known.id == *field))
+            }) {
+                domain = with_public_locator(domain, "component-field-id", field.as_str());
+            }
+            domain
+        }
         ComponentCodecError::MissingField { .. } => with_sensitive(
             with_public_identifier(diagnostic, "codec-error-kind", "missing-field"),
             "field-path",
@@ -453,6 +472,7 @@ pub(crate) fn with_migration_error(
                 u64::from(to_version.0),
             ),
             error,
+            None,
         ),
     }
 }
@@ -685,9 +705,9 @@ mod tests {
     use nara_diagnostic::{DiagnosticFieldClass, DiagnosticValueRef};
     use nara_identity::{EntityReference, SceneEntityId};
     use nara_reflect::{
-        ComponentFieldId, ComponentFieldSchema, ComponentNumericDomain, ComponentSchema,
-        ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueShape,
-        EntityReferenceTraversalLimits, rewrite_declared_entity_references,
+        ComponentDomainError, ComponentFieldId, ComponentFieldSchema, ComponentNumericDomain,
+        ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+        ComponentValueShape, EntityReferenceTraversalLimits, rewrite_declared_entity_references,
         validate_component_value,
     };
 
@@ -810,6 +830,7 @@ mod tests {
             let diagnostic = with_codec_error(
                 error("scene.test-codec-error", "Scene test codec failed"),
                 &failure,
+                Some(&schema),
             );
 
             assert_redacted(&diagnostic, "field-path");
@@ -840,6 +861,83 @@ mod tests {
         assert_redacted(&diagnostic, "error-field-path");
         assert_redacted(&diagnostic, "missing-field");
         assert_identifier(&diagnostic, "path-error-kind", "missing-field");
+        assert_canary_absent(&diagnostic, canary);
+    }
+
+    #[test]
+    fn domain_diagnostics_preserve_identity_and_publish_only_schema_admitted_root_fields() {
+        let canary = "qvM7k2p8Nx4J";
+        let schema = ComponentSchema::new(
+            ComponentTypeId::new("nara.test.DiagnosticDomain"),
+            "Diagnostic domain",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("duration"),
+            "Duration",
+            ComponentFieldPath::from_fields(["duration"]),
+            ComponentValueKind::I64,
+        )]);
+        for code in ["demo.cooldown.negative", "demo.cooldown.disabled"] {
+            let failure = ComponentCodecError::domain(
+                ComponentDomainError::new(
+                    diagnostic_code(code),
+                    safe_summary("Cooldown cannot be used"),
+                )
+                .with_field(ComponentFieldId::new("duration")),
+            );
+            let original = || {
+                with_public_locator(
+                    error(
+                        "scene.invalid-component-payload",
+                        "Component payload is invalid",
+                    ),
+                    "component-id",
+                    "demo.Cooldown",
+                )
+            };
+            let diagnostic = with_codec_error(original(), &failure, Some(&schema));
+            assert_eq!(diagnostic.code().as_str(), code);
+            assert_eq!(diagnostic.summary().as_str(), "Cooldown cannot be used");
+            assert_identifier(&diagnostic, "component-field-id", "duration");
+            assert_identifier(&diagnostic, "component-id", "demo.Cooldown");
+            assert_identifier(
+                &diagnostic,
+                "scene-context-code",
+                "scene.invalid-component-payload",
+            );
+            let unproven = with_codec_error(original(), &failure, None);
+            assert_eq!(unproven.code().as_str(), code);
+            assert_eq!(unproven.summary(), diagnostic.summary());
+            assert!(
+                !unproven
+                    .fields()
+                    .iter()
+                    .any(|field| field.key().as_str() == "component-field-id")
+            );
+        }
+
+        let foreign = ComponentCodecError::domain(
+            ComponentDomainError::new(
+                diagnostic_code("demo.cooldown.foreign-field"),
+                safe_summary("Cooldown failed a domain check"),
+            )
+            .with_field(ComponentFieldId::new(canary)),
+        );
+        let diagnostic = with_codec_error(
+            error(
+                "scene.invalid-component-payload",
+                "Component payload is invalid",
+            ),
+            &foreign,
+            Some(&schema),
+        );
+        assert!(
+            !diagnostic
+                .fields()
+                .iter()
+                .any(|field| field.key().as_str() == "component-field-id")
+        );
         assert_canary_absent(&diagnostic, canary);
     }
 }

@@ -12,12 +12,14 @@ use nara_asset::{
 use nara_ecs::{Entity, World};
 
 use crate::{
-    ComponentTypeId, ComponentValue, ComponentValueError, ComponentValueMaterializationLimits,
+    ComponentDomainError, ComponentTypeId, ComponentValue, ComponentValueError,
+    ComponentValueMaterializationLimits,
     persistent_apply::{PersistentApplyRejection, PreparedComponentCandidate},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComponentCodecError {
+    Domain(ComponentDomainError),
     MissingField {
         field: String,
     },
@@ -54,6 +56,11 @@ pub enum ComponentCodecError {
 
 impl ComponentCodecError {
     #[must_use]
+    pub fn domain(error: ComponentDomainError) -> Self {
+        Self::Domain(error)
+    }
+
+    #[must_use]
     pub fn missing_field(field: impl Into<String>) -> Self {
         Self::MissingField {
             field: field.into(),
@@ -85,6 +92,7 @@ impl ComponentCodecError {
 impl Display for ComponentCodecError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Domain(error) => Display::fmt(error, formatter),
             Self::MissingField { field } => write!(formatter, "missing component field '{field}'"),
             Self::InvalidField { field, expected } => {
                 write!(
@@ -137,6 +145,12 @@ impl Display for ComponentCodecError {
 }
 
 impl Error for ComponentCodecError {}
+
+impl From<ComponentDomainError> for ComponentCodecError {
+    fn from(error: ComponentDomainError) -> Self {
+        Self::Domain(error)
+    }
+}
 
 impl From<ComponentValueError> for ComponentCodecError {
     fn from(error: ComponentValueError) -> Self {

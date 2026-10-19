@@ -427,6 +427,7 @@ impl SceneSpawner {
                     "Prepared scene components could not be committed",
                 ),
                 &error,
+                None,
             ));
             return SceneSpawnReport {
                 instance: None,
@@ -549,6 +550,7 @@ impl SceneSpawner {
                                 component_id.as_str(),
                             ),
                             &error,
+                            registry.schema(&component_id),
                         ));
                         rollback_spawn_transaction(world, &spawned_entities);
                         return SceneSpawnReport {
@@ -577,6 +579,7 @@ impl SceneSpawner {
                     "Prepared scene components could not be committed",
                 ),
                 &error,
+                None,
             ));
             rollback_spawn_transaction(world, &spawned_entities);
             return SceneSpawnReport {
@@ -595,6 +598,7 @@ impl SceneSpawner {
                     "Prepared scene components could not be committed",
                 ),
                 &error,
+                None,
             ));
             rollback_spawn_transaction(world, &spawned_entities);
             return SceneSpawnReport {
@@ -787,6 +791,7 @@ impl SceneSpawner {
                         "Prepared scene components could not be committed",
                     ),
                     &error,
+                    None,
                 ));
                 rollback_spawn_transaction(world, &spawned_entities);
                 return SceneSpawnReport {
@@ -1370,6 +1375,7 @@ fn persistent_apply_rejection(
             "Persistent scene components are ineligible for target-World apply",
         ),
         error,
+        None,
     ));
     SceneSpawnReport {
         instance: None,
