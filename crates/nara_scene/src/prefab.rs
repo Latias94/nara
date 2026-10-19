@@ -25,7 +25,9 @@ use crate::{
     patch::{
         scene_entities_source_value_cost, scene_entity_component_value_cost, scene_patch_value_cost,
     },
-    validation::{preflight_scene_with_context, reference_traversal_limits},
+    validation::{
+        preflight_scene_with_context, reference_traversal_limits, validate_scene_structure,
+    },
 };
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -782,9 +784,15 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             return Vec::new();
         }
 
+        let mut source_document = prefab.instantiate();
+        let structure = validate_scene_structure(&source_document);
+        if structure.has_errors() {
+            self.diagnostics.extend(structure);
+            return Vec::new();
+        }
+
         self.stack.push(source.clone());
 
-        let mut source_document = prefab.instantiate();
         if !overrides.is_empty() {
             let patch_report = match self.database {
                 Some(database) => overrides
