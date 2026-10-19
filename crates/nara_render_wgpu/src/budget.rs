@@ -108,7 +108,6 @@ impl InstanceReservation {
                 .charges
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            // Every committed reservation is already included in the bounded reserved total.
             charges.committed += self.bytes;
         }
         self.committed = true;

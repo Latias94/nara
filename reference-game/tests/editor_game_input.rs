@@ -344,7 +344,11 @@ fn gpu_recovery_pauses_runtime_without_resolving_dirty_exit() {
         .dispatch_editor_actions(EditorActionBatch::new(
             recovered.revision(),
             [EditorAction::WorkspaceIntent(
-                recovered.workspace_intent().decision_prompt().unwrap().resolve(EditorCloseDecision::Cancel),
+                recovered
+                    .workspace_intent()
+                    .decision_prompt()
+                    .unwrap()
+                    .resolve(EditorCloseDecision::Cancel),
             )],
         ))
         .unwrap();

@@ -39,7 +39,6 @@ pub(super) enum ValueDraft {
     },
 }
 
-/// A new child is deliberately incomplete, even when zero/false/empty would decode.
 impl ValueDraft {
     pub fn new(shape: &ComponentValueShape) -> Self {
         Self::from_value(shape, None)

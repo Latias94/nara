@@ -355,6 +355,7 @@ fn generic_editor_hydrates_only_referenced_images_and_retains_a_complete_canvas_
 }
 
 #[test]
+#[cfg(feature = "presentation-2d")]
 fn generic_editor_retires_an_image_when_its_metadata_becomes_invalid() {
     let project = TestProject::new("generic-image-retirement");
     project.configure_authoring_ui("Generic Image Retirement");
@@ -432,6 +433,7 @@ fn generic_editor_retires_an_image_when_its_metadata_becomes_invalid() {
 }
 
 #[test]
+#[cfg(feature = "presentation-2d")]
 fn generic_editor_failed_image_revocation_settles_catalog_and_blocks_metadata_writes() {
     let project = TestProject::new("generic-image-revocation-failure");
     project.configure_authoring_ui("Image Revocation Failure");

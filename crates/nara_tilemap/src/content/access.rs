@@ -1,6 +1,6 @@
 use nara_asset::{
-    AssetEvents, AssetRecord, AssetServer, AssetSlotRevision, AssetSourceKind, AssetStateRevision,
-    AssetStates, Assets, Handle, ProjectAssetDatabase, SourceHash,
+    AssetEvents, AssetRecord, AssetServer, AssetSlotRevision, AssetStateRevision, AssetStates,
+    Assets, Handle, ProjectAssetDatabase, SourceHash,
 };
 use nara_ecs::{Res, ResMut, system::SystemParam};
 use nara_image::ImageAsset;
@@ -139,7 +139,7 @@ impl TileSetContent<'_> {
 }
 
 fn validate_source_kind(record: &AssetRecord) -> Result<(), TileSetAssetError> {
-    if record.source_kind() == &AssetSourceKind::Other(String::from("tileset")) {
+    if record.source_kind() == &crate::tileset_asset_source_kind() {
         Ok(())
     } else {
         Err(TileSetAssetError::InvalidSourceKind)

@@ -567,7 +567,8 @@ impl ImguiAuthoringPanels {
         text_owner: &mut Option<ImguiTextOwner>,
     ) {
         let _id = ui.push_id(field.id.as_str());
-        let editable = editable && value_draft::supported(&field.shape);
+        let supported = value_draft::supported(&field.shape);
+        let editable = editable && supported;
         ui.text(format!(
             "{}{}",
             field.path,
@@ -577,7 +578,7 @@ impl ImguiAuthoringPanels {
             field.shape,
             nara::reflect::ComponentValueShape::Scalar { .. }
                 | nara::reflect::ComponentValueShape::AssetRef
-        ) && value_draft::supported(&field.shape)
+        ) && supported
         {
             let draft = self.structured_drafts.entry(target.clone()).or_default();
             match recursive_controls::show_root(
