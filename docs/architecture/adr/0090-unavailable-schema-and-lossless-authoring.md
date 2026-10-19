@@ -3,6 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-13
 **Accepted**: 2026-08-18
+**Last Revised**: 2026-10-19 (bounded field-override removal and exact inverse presence)
 **Owner**: `nara_reflect`, `nara_scene`, `nara_tooling`, and persistent document owners
 **Admission Trigger**: Scene/prefab fixtures with a missing provider, known schema without its
 required native or Adapter-specific runtime binding, missing migration, and future component schema
@@ -72,6 +73,15 @@ Generic field writes accept editable closed shapes through the same bounded tran
 port. Entity-reference-containing field writes remain denied until the complete target and
 remap closure is admitted. Reading declared references and native Prefab remapping use the
 shared recursive visitor; their availability does not authorize reference-closure mutation.
+
+The same port admits removing an authored map-member field when it is editable and either
+optional or backed by a declared missing-field default. Reset removes the override rather than
+storing that default. An already omitted field cannot be removed again. Root-value and terminal
+list-index removal remain unavailable in this finite slice: shifting a list is not an override
+omission with an inverse field Set. Setting an absent map member records inverse removal;
+removing a present member records inverse Set, including an explicit Null. Forward and inverse
+obey the same transaction budgets, complete candidate validation and unavailable-manifest
+preservation before one history publication. No native codec or project callback is introduced.
 
 ## Decision
 

@@ -265,6 +265,14 @@ and finite float literals (including negative numeric literals), not `Vec2`, ent
 callbacks, or aggregate expressions. Missing fields in a stored component still fail decoding;
 creation metadata does not supply decode defaults.
 
+The Inspector shows `Reset to default` for a field with a declared missing-field default and
+`Remove field` for an optional field without one. Both remove an explicitly stored map-member
+override; they do not store a copy of the default. Already omitted fields and required fields
+without defaults cannot be removed. Root-value and terminal list-index removal are unavailable.
+Explicit `Null` is a stored value and differs from omission. Undo restores the exact authored
+value, including Null, and Save/Reopen preserves the omitted key. The same Scene/Prefab document
+owner validates data-only field edits and their inverses without loading project code.
+
 ## Runtime-Only Components
 
 ```rust

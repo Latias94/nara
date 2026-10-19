@@ -1097,6 +1097,7 @@ impl EditorWorkspace {
                 if !matches!(
                     &command,
                     SceneInspectorCommand::SetField { .. }
+                        | SceneInspectorCommand::RemoveField { .. }
                         | SceneInspectorCommand::SetAssetRefField { .. }
                 ) {
                     return authoring_command_error_report(active_document, document);

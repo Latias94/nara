@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use dear_imgui_rs::{Key, TreeNodeFlags, Ui};
 use nara::{
     asset::AssetRef,
-    reflect::{ComponentCapability, ComponentValue, ComponentValueKind},
+    reflect::{ComponentCapability, ComponentFieldPathSegment, ComponentValue, ComponentValueKind},
     scene::{SceneAuthoringRevision, SceneEntityId, ScenePlacement, ScenePlacementOwner},
     tooling::{
         EditorAction, EditorDocumentId, EditorDocumentKind, EditorDocumentMutation,
@@ -648,11 +648,32 @@ impl ImguiAuthoringPanels {
                 }
             }
         }
-        if enabled_button(
+        let remove_label = if field.default_value.is_some() {
+            "Reset to default"
+        } else {
+            "Remove field"
+        };
+        let remove = enabled_button(
             ui,
-            editable && field.value.is_some() && !field.required,
-            "Remove field",
-        ) {
+            editable
+                && field.state == SceneInspectorFieldState::Present
+                && matches!(
+                    field.path.segments().last(),
+                    Some(ComponentFieldPathSegment::Field(_))
+                )
+                && (!field.required || field.default_value.is_some()),
+            remove_label,
+        );
+        #[cfg(test)]
+        super::interaction_tests::record_control(
+            ui,
+            format!(
+                "field-action:{}:{}:{remove_label}",
+                target.component().as_str(),
+                target.field().as_str()
+            ),
+        );
+        if remove {
             actions.push(field_action(
                 &target,
                 SceneInspectorCommand::RemoveField {

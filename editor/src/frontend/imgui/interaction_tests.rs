@@ -30,6 +30,7 @@ use nara::{
 use super::ImguiEditorFrontend;
 use crate::{EditorApplication, EditorLaunchOptions};
 
+mod field_overrides;
 mod recursive_shapes;
 
 pub(super) const CUSTOM_COMPONENT: &str = "studio.interaction.Health";
@@ -51,6 +52,12 @@ pub(crate) struct InteractionProject {
 }
 
 impl InteractionProject {
+    pub(crate) fn new_field_overrides() -> Self {
+        let project = Self::new();
+        field_overrides::configure(&project);
+        project
+    }
+
     pub(crate) fn new_recursive() -> Self {
         let project = Self::new();
         recursive_shapes::configure(&project);
@@ -173,6 +180,7 @@ struct Interaction {
     application: EditorApplication,
     frontend: ImguiEditorFrontend,
     context: Context,
+    actions: Vec<EditorAction>,
 }
 
 impl Interaction {
@@ -224,6 +232,7 @@ impl Interaction {
             application,
             frontend: ImguiEditorFrontend::new(),
             context,
+            actions: Vec::new(),
         };
         for _ in 0..4 {
             interaction.render();
@@ -241,12 +250,14 @@ impl Interaction {
         let batch = self.frontend.show(ui, &mut self.application).unwrap();
         let _ = self.context.render_legacy();
         if let Some(batch) = batch {
+            self.actions.extend(batch.clone().into_actions());
             self.frontend
                 .submit_and_drive(&mut self.application, batch, Duration::ZERO);
         }
     }
 
     fn click(&mut self, label: &str) {
+        self.actions.clear();
         let point = CONTROLS.with(|controls| {
             let controls = controls.borrow();
             let rect = controls.get(label).unwrap_or_else(|| {

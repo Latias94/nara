@@ -106,7 +106,7 @@ impl SceneInspectorState {
         })
     }
 
-    /// Applies the only Inspector mutation admitted for a generically published authoring
+    /// Applies a field mutation admitted for a generically published authoring
     /// document. The session reclassifies the candidate and proves preservation before commit.
     pub fn apply_authoring_command(
         &self,
@@ -115,7 +115,9 @@ impl SceneInspectorState {
     ) -> SceneInspectorCommandReport {
         if !matches!(
             &command,
-            SceneInspectorCommand::SetField { .. } | SceneInspectorCommand::SetAssetRefField { .. }
+            SceneInspectorCommand::SetField { .. }
+                | SceneInspectorCommand::RemoveField { .. }
+                | SceneInspectorCommand::SetAssetRefField { .. }
         ) {
             return inspector_authoring_command_error_report();
         }
@@ -148,6 +150,12 @@ impl SceneInspectorState {
                 ..
             }
             | SceneInspectorCommand::SetAssetRefField {
+                entity,
+                component,
+                component_version,
+                ..
+            }
+            | SceneInspectorCommand::RemoveField {
                 entity,
                 component,
                 component_version,
@@ -1145,7 +1153,7 @@ fn inspector_authoring_command_error_report() -> SceneInspectorCommandReport {
     let mut diagnostics = DiagnosticReport::default();
     diagnostics.push(diagnostic::error(
         "tooling.inspector-authoring-command-unsupported",
-        "generically published authoring documents only accept preservation-safe field writes",
+        "generically published authoring documents only accept preservation-safe field edits",
     ));
     SceneInspectorCommandReport {
         applied: false,
@@ -1205,6 +1213,15 @@ mod tests {
         )])
         .unwrap();
         let sprite = ComponentTypeId::new("nara.sprite.Sprite");
+        let sprite_schema = resolved
+            .current()
+            .catalog()
+            .components()
+            .iter()
+            .find(|schema| schema.id() == &sprite)
+            .unwrap();
+        let sprite_version = sprite_schema.version();
+        let sprite_value = sprite_schema.authoring_initial_value().unwrap().clone();
         let adapter = nara_scene::__private::AuthoringAdapterReceipt::from_trusted_provider(
             resolved.contribution_receipt(),
             "nara.sprite.first-party-authoring-adapter",
@@ -1217,17 +1234,7 @@ mod tests {
         let original = SceneDocument::from_ordered_roots([SceneEntityRecord::new(entity.clone())
             .with_component(
                 sprite.clone(),
-                SceneComponentRecord::new(
-                    ComponentSchemaVersion::ONE,
-                    ComponentValue::map([
-                        (
-                            "material",
-                            ComponentValue::map([("image", ComponentValue::Null)]),
-                        ),
-                        ("layer", ComponentValue::I64(0)),
-                    ]),
-                )
-                .with_owner(owner),
+                SceneComponentRecord::new(sprite_version, sprite_value).with_owner(owner),
             )
             .with_component(
                 ComponentTypeId::new("project.Unavailable"),
@@ -1264,11 +1271,57 @@ mod tests {
         assert_eq!(image.value_kind, ComponentValueKind::AssetRef);
         assert_eq!(image.value, Some(ComponentValue::Null));
 
+        let reset = SceneInspectorCommand::RemoveField {
+            entity: entity.clone(),
+            component: sprite.clone(),
+            component_version: sprite_version,
+            field: ComponentFieldId::new("material.image"),
+        };
+        let removed = inspector.apply_authoring_command(&mut session, reset.clone());
+        assert!(removed.applied, "{:#?}", removed.diagnostics);
+        assert!(
+            session.document().entities[0].components[&sprite]
+                .value
+                .get("material")
+                .unwrap()
+                .get("image")
+                .is_none()
+        );
+        let model = inspector.authoring_model_with_selection(&session, Some(&entity));
+        let reset_image = model
+            .selected_entity_view
+            .unwrap()
+            .components
+            .into_iter()
+            .find(|component| component.component == sprite)
+            .unwrap()
+            .fields
+            .into_iter()
+            .find(|field| field.id == ComponentFieldId::new("material.image"))
+            .unwrap();
+        assert_eq!(reset_image.state, SceneInspectorFieldState::Defaulted);
+        assert_eq!(reset_image.value, Some(ComponentValue::Null));
+        assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+        let accepted = session.document().clone();
+        let revision = session.revision();
+        let history = session.history_status();
+        let repeated = inspector.apply_authoring_command(&mut session, reset);
+        assert!(!repeated.applied);
+        assert_eq!(session.document(), &accepted);
+        assert_eq!(session.revision(), revision);
+        assert_eq!(session.history_status(), history);
+        assert!(session.undo_authoring().applied);
+        assert_eq!(session.document(), &original);
+        assert!(session.redo_authoring().applied);
+        assert_eq!(session.document(), &accepted);
+        assert!(session.undo_authoring().applied);
+        assert_eq!(session.document(), &original);
+
         let image_ref = AssetRef::path("textures/player.png").unwrap();
         let command = SceneInspectorCommand::SetAssetRefField {
             entity: entity.clone(),
             component: sprite.clone(),
-            component_version: ComponentSchemaVersion::ONE,
+            component_version: sprite_version,
             field: ComponentFieldId::new("material.image"),
             asset_ref: image_ref.clone(),
         };
@@ -1292,7 +1345,7 @@ mod tests {
             SceneInspectorCommand::SetAssetRefField {
                 entity,
                 component: sprite,
-                component_version: ComponentSchemaVersion::ONE,
+                component_version: sprite_version,
                 field: ComponentFieldId::new("layer"),
                 asset_ref: image_ref,
             },
