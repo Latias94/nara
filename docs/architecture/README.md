@@ -50,6 +50,11 @@ The [Bevy/Godot architecture comparison](../audits/2026-10-19-nara-bevy-godot-ar
 records current execution/Scene interface hazards and the workflow triggers for asset, Editor,
 schema and residency refactors. It is source-review evidence, not a new architecture contract.
 
+The [expanded foundation audit](../audits/2026-10-19-foundation-audit-expansion.md) adds twelve
+focused research lanes across tasks, components, reflection, extensions, runtime, Editor, input,
+UI/text, filesystem, assets, rendering and module integration, with independent challenge and
+explicit correctness/capability distinctions.
+
 The [UI foundation design](ui-foundation-design.md),
 [UI boundary study](ui-product-boundaries-editor-dogfood-and-porting-strategy.md), and
 [render pressure matrix](render-capability-pressure-matrix.md) provide design context when a task
