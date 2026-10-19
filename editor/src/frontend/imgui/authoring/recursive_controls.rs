@@ -6,55 +6,37 @@ use nara::{
 
 use super::{
     super::{ImguiTextOwner, observe_text_owner},
-    value_draft::{RootDraft, ValueDraft},
+    value_draft::{ChildDraft, RootDraft, ValueDraft},
 };
 
-pub(super) fn show_root(
+pub(in crate::frontend::imgui) fn show_root(
     ui: &Ui,
     target: &EditorFieldTarget,
     shape: &ComponentValueShape,
     source: Option<&ComponentValue>,
     draft: &mut RootDraft,
     editable: bool,
+    can_submit: bool,
     text_owner: &mut Option<ImguiTextOwner>,
-) -> Option<Result<ComponentValue, ()>> {
+) -> bool {
     if draft.node.is_none() {
         ui.text_wrapped(super::value_label(source));
         if button(ui, target, "root", "Edit value", editable) {
             draft.node = Some(ValueDraft::from_value(shape, source));
-            draft.error = None;
         }
-        return None;
+        return false;
     }
     ui.with_disabled_if(!editable, || {
         if let Some(node) = &mut draft.node {
             show_node(ui, target, "root", shape, node, text_owner);
         }
     });
-    if button(ui, target, "root", "Apply value", editable) {
-        let value = draft
-            .node
-            .as_ref()
-            .expect("an open root has a draft")
-            .value(shape);
-        match value {
-            Ok(value) => {
-                draft.node = None;
-                draft.error = None;
-                return Some(Ok(value));
-            }
-            Err(error) => {
-                draft.error = Some(error);
-                return Some(Err(()));
-            }
-        }
-    }
+    let apply = button(ui, target, "root", "Apply value", editable && can_submit);
     ui.same_line();
-    if button(ui, target, "root", "Cancel value", true) {
+    if button(ui, target, "root", "Cancel value", editable) {
         draft.node = None;
-        draft.error = None;
     }
-    None
+    apply
 }
 
 fn show_node(
@@ -65,7 +47,6 @@ fn show_node(
     draft: &mut ValueDraft,
     text_owner: &mut Option<ImguiTextOwner>,
 ) {
-    let _id = ui.push_id(path);
     match (draft, shape) {
         (ValueDraft::Null, _) => ui.text("Null"),
         (ValueDraft::Bool(value), _) => {
@@ -112,6 +93,7 @@ fn show_node(
                 *confirmed = true;
             }
             for ((name, draft), member) in values.iter_mut().zip(members) {
+                let _member_id = ui.push_id(name.as_str());
                 ui.text(name.as_str());
                 ui.indent();
                 show_node(
@@ -150,6 +132,7 @@ fn show_node(
                 *pending = Some(Box::new(ValueDraft::new(shape)));
             }
             if let Some(child) = value {
+                let _child_id = ui.push_id("some");
                 ui.indent();
                 show_node(
                     ui,
@@ -162,6 +145,7 @@ fn show_node(
                 ui.unindent();
             }
             if let Some(child) = pending {
+                let _child_id = ui.push_id("new-some");
                 ui.text("New Some value (unconfirmed)");
                 ui.indent();
                 show_node(ui, target, &format!("{path}.new"), shape, child, text_owner);
@@ -190,9 +174,10 @@ fn show_node(
         ) => {
             let mut remove = None;
             for (index, child) in items.iter_mut().enumerate() {
+                let _row_id = ui.push_id(&child.id.to_string());
                 let path = format!("{path}[{index}]");
                 ui.text(format!("Item {index}"));
-                show_node(ui, target, &path, item, child, text_owner);
+                show_node(ui, target, &path, item, &mut child.node, text_owner);
                 if button(ui, target, &path, "Remove item", true) {
                     remove = Some(index);
                 }
@@ -204,12 +189,20 @@ fn show_node(
                 *confirmed = true;
             }
             if button(ui, target, path, "Add...", pending.is_none()) {
-                *pending = Some(Box::new(ValueDraft::new(item)));
+                *pending = Some(Box::new(ChildDraft::new(ValueDraft::new(item))));
             }
             if let Some(child) = pending {
+                let _row_id = ui.push_id(&child.id.to_string());
                 ui.text("New list item (unconfirmed)");
-                show_node(ui, target, &format!("{path}.new"), item, child, text_owner);
-                let admission = child.value(item);
+                show_node(
+                    ui,
+                    target,
+                    &format!("{path}.new"),
+                    item,
+                    &mut child.node,
+                    text_owner,
+                );
+                let admission = child.node.value(item);
                 if let Err(error) = &admission {
                     ui.text_disabled(error);
                 }
@@ -233,9 +226,10 @@ fn show_node(
         ) => {
             let mut remove = None;
             for (key, child) in entries.iter_mut() {
+                let _row_id = ui.push_id(&child.id.to_string());
                 let path = format!("{path}[{key:?}]");
                 ui.text(key);
-                show_node(ui, target, &path, shape, child, text_owner);
+                show_node(ui, target, &path, shape, &mut child.node, text_owner);
                 if button(ui, target, &path, "Remove entry", true) {
                     remove = Some(key.clone());
                 }
@@ -247,9 +241,14 @@ fn show_node(
                 *confirmed = true;
             }
             if button(ui, target, path, "Insert...", pending.is_none()) {
-                *pending = Some((String::new(), false, Box::new(ValueDraft::new(shape))));
+                *pending = Some((
+                    String::new(),
+                    false,
+                    Box::new(ChildDraft::new(ValueDraft::new(shape))),
+                ));
             }
             if let Some((key, key_entered, child)) = pending {
+                let _row_id = ui.push_id(&child.id.to_string());
                 ui.text("New map entry (unconfirmed)");
                 if ui.input_text("Key", key).build() {
                     *key_entered = true;
@@ -259,8 +258,15 @@ fn show_node(
                 if !*key_entered && button(ui, target, path, "Use empty key", true) {
                     *key_entered = true;
                 }
-                show_node(ui, target, &format!("{path}.new"), shape, child, text_owner);
-                let admission = child.value(shape);
+                show_node(
+                    ui,
+                    target,
+                    &format!("{path}.new"),
+                    shape,
+                    &mut child.node,
+                    text_owner,
+                );
+                let admission = child.node.value(shape);
                 if let Err(error) = &admission {
                     ui.text_disabled(error);
                 }
@@ -290,7 +296,6 @@ fn show_node(
 }
 
 fn button(ui: &Ui, target: &EditorFieldTarget, path: &str, label: &str, enabled: bool) -> bool {
-    let _id = ui.push_id(path);
     let clicked = ui.with_disabled_if(!enabled, || ui.button(label));
     record(ui, target, path, label);
     clicked

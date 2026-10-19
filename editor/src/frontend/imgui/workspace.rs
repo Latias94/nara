@@ -11,7 +11,9 @@ use crate::workspace::{
     EditorPanelInstanceId, EditorPanelModel, EditorPanelTarget, EditorPanelWorkspace,
 };
 
+use super::submission::{self, PanelOrigin, PendingPanelSubmission, Recipient};
 use super::{ImguiFrontendOutput, ImguiPanelInput};
+use super::{PanelActionDispatch, PanelSubmissionId, PanelSubmitError};
 
 /// Frontend state for one open instance of a trusted source-built panel contribution.
 ///
@@ -21,6 +23,9 @@ use super::{ImguiFrontendOutput, ImguiPanelInput};
 /// Only read-only projections and admitted application actions cross this interface.
 pub trait ImguiEditorPanel {
     fn show(&mut self, ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>);
+
+    /// Receives the exact dispatch result once, after application drive, while this instance lives.
+    fn action_finished(&mut self, _id: PanelSubmissionId, _result: PanelActionDispatch) {}
 }
 
 pub(super) type ImguiPanelFactory = Box<dyn Fn() -> Box<dyn ImguiEditorPanel>>;
@@ -40,6 +45,8 @@ pub struct ImguiEditorPanelContext<'scope, 'frame> {
     pub(super) widgets: &'scope mut ImguiPanelWidgets,
     pub(super) input: &'scope ImguiPanelInput<'frame>,
     pub(super) actions: &'scope mut Vec<EditorAction>,
+    pub(super) submissions: &'scope mut Vec<PendingPanelSubmission>,
+    pub(super) next_submission: &'scope mut u64,
     pub(super) output: &'scope mut ImguiFrontendOutput,
 }
 
@@ -49,13 +56,46 @@ impl ImguiEditorPanelContext<'_, '_> {
         self.model
     }
 
-    pub fn emit(&mut self, action: EditorAction) {
+    /// Queues an action for the current frontend candidate.
+    ///
+    /// `Ok` admits the queue entry; the existing application owner decides whether it applies.
+    /// Several actions keep their order and are not an atomic transaction. The exact result is
+    /// delivered once through this instance's `action_finished` while its original scope is live.
+    /// Immediate errors do not enqueue an action or produce a callback.
+    pub fn submit(&mut self, action: EditorAction) -> Result<PanelSubmissionId, PanelSubmitError> {
+        self.submit_to(action, Recipient::Contribution)
+    }
+
+    pub(super) fn submit_authoring(
+        &mut self,
+        action: EditorAction,
+    ) -> Result<PanelSubmissionId, PanelSubmitError> {
+        self.submit_to(action, Recipient::Authoring)
+    }
+
+    fn submit_to(
+        &mut self,
+        action: EditorAction,
+        recipient: Recipient,
+    ) -> Result<PanelSubmissionId, PanelSubmitError> {
+        let id = submission::enqueue(
+            self.next_submission,
+            self.submissions,
+            PanelOrigin {
+                instance: self.model.instance().id(),
+                incarnation: std::sync::Arc::clone(&self.widgets.incarnation),
+            },
+            self.actions.len(),
+            recipient,
+        )?;
         self.actions.push(action);
+        Ok(id)
     }
 }
 
 #[derive(Default)]
 pub(super) struct ImguiPanelWidgets {
+    pub incarnation: std::sync::Arc<submission::PanelIncarnation>,
     pub panel: Option<Box<dyn ImguiEditorPanel>>,
     pub kind: String,
     pub document: Option<EditorDocumentId>,
@@ -185,8 +225,26 @@ impl ImguiPanelPresentation {
         }
     }
 
-    pub fn observe_report(&mut self, report: &EditorActionBatchReport) {
+    pub fn observe_report_for(
+        &mut self,
+        report: &EditorActionBatchReport,
+        origins: &[PanelOrigin],
+    ) {
+        let live = origins
+            .iter()
+            .filter_map(|origin| {
+                self.widgets
+                    .get(&origin.instance)
+                    .filter(|widgets| {
+                        std::sync::Arc::ptr_eq(&widgets.incarnation, &origin.incarnation)
+                    })
+                    .map(|_| origin.instance)
+            })
+            .collect::<BTreeSet<_>>();
         for pending in self.pending_gestures.drain(..) {
+            if !live.contains(&pending.instance) {
+                continue;
+            }
             if let Some(EditorActionOutcome::Gesture(EditorGestureOutcome::Began(view))) =
                 report.outcomes().get(pending.action_index)
             {
@@ -197,26 +255,54 @@ impl ImguiPanelPresentation {
                 .as_ref()
                 .is_none_or(|(owner, _, _)| *owner != pending.instance)
             {
-                self.widgets.remove(&pending.instance);
+                if let Some(widgets) = self.widgets.get_mut(&pending.instance) {
+                    widgets.ui_authoring = Default::default();
+                }
             }
         }
-        for widgets in self.widgets.values_mut() {
+        for (id, widgets) in &mut self.widgets {
+            if !live.contains(id) {
+                continue;
+            }
             widgets.ui_authoring.observe_report(report);
             widgets.project.observe_action_report(report);
         }
     }
 
-    pub fn observe_rejection(&mut self, rejection: EditorActionRejection) {
+    pub fn observe_rejection_for(
+        &mut self,
+        rejection: EditorActionRejection,
+        origins: &[PanelOrigin],
+    ) {
+        let live = origins
+            .iter()
+            .filter_map(|origin| {
+                self.widgets
+                    .get(&origin.instance)
+                    .filter(|widgets| {
+                        std::sync::Arc::ptr_eq(&widgets.incarnation, &origin.incarnation)
+                    })
+                    .map(|_| origin.instance)
+            })
+            .collect::<BTreeSet<_>>();
         for pending in self.pending_gestures.drain(..) {
+            if !live.contains(&pending.instance) {
+                continue;
+            }
             if self
                 .gesture_owner
                 .as_ref()
                 .is_none_or(|(owner, _, _)| *owner != pending.instance)
             {
-                self.widgets.remove(&pending.instance);
+                if let Some(widgets) = self.widgets.get_mut(&pending.instance) {
+                    widgets.ui_authoring = Default::default();
+                }
             }
         }
-        for widgets in self.widgets.values_mut() {
+        for (id, widgets) in &mut self.widgets {
+            if !live.contains(id) {
+                continue;
+            }
             widgets.ui_authoring.observe_rejection(rejection);
             widgets.project.observe_action_rejection(rejection);
         }

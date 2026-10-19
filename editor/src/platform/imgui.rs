@@ -1009,22 +1009,27 @@ impl NativeImgui {
             self.input.flush(application)?;
         }
         let mut local_changed = false;
-        let dispatch = output.actions.map(|actions| {
-            let dispatch = application.dispatch_editor_actions(actions);
-            self.frontend.observe_dispatch(&dispatch);
-            if dispatch.invalidates_game_input() {
-                self.input
-                    .invalidate_after_control(application.active_game_start_request());
-                self.game_candidate = None;
-            }
-            dispatch
-        });
+        let dispatch = self
+            .frontend
+            .seal_output(&mut output)
+            .and_then(|submission| {
+                let dispatch = self.frontend.dispatch_submission(application, submission)?;
+                if dispatch.invalidates_game_input() {
+                    self.input
+                        .invalidate_after_control(application.active_game_start_request());
+                    self.game_candidate = None;
+                }
+                Some(dispatch)
+            });
         for action in output.browser_actions {
             local_changed |= application.apply_project_browser_local_action(action);
         }
         if let Some(action) = output.shell_action {
             let update = application.submit_shell_action(action);
             if update.exit_ready() {
+                if let Some(dispatch) = &dispatch {
+                    self.frontend.finish_dispatch(application, dispatch);
+                }
                 return Ok(true);
             }
             local_changed |= update.actions_observed();
@@ -1032,6 +1037,9 @@ impl NativeImgui {
         if let Some(action) = output.project_action {
             let update = application.submit_project_action(action);
             if update.exit_ready() {
+                if let Some(dispatch) = &dispatch {
+                    self.frontend.finish_dispatch(application, dispatch);
+                }
                 return Ok(true);
             }
             local_changed |= update.actions_observed();
@@ -1067,6 +1075,9 @@ impl NativeImgui {
                 actions_observed || local_changed,
                 drive_runtime,
             );
+            if let Some(dispatch) = &dispatch {
+                self.frontend.finish_dispatch(application, dispatch);
+            }
             if update.actions_observed() {
                 self.window.request_redraw();
             }

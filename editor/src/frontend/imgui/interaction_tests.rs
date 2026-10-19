@@ -30,6 +30,7 @@ use nara::{
 use super::ImguiEditorFrontend;
 use crate::{EditorApplication, EditorLaunchOptions};
 
+mod field_drafts;
 mod field_overrides;
 mod recursive_shapes;
 
@@ -52,6 +53,11 @@ pub(crate) struct InteractionProject {
 }
 
 impl InteractionProject {
+    pub(crate) fn new_field_drafts() -> Self {
+        let project = Self::new();
+        field_drafts::configure(&project);
+        project
+    }
     pub(crate) fn new_field_overrides() -> Self {
         let project = Self::new();
         field_overrides::configure(&project);
@@ -250,7 +256,7 @@ impl Interaction {
         let batch = self.frontend.show(ui, &mut self.application).unwrap();
         let _ = self.context.render_legacy();
         if let Some(batch) = batch {
-            self.actions.extend(batch.clone().into_actions());
+            self.actions.extend(batch.batch.clone().into_actions());
             self.frontend
                 .submit_and_drive(&mut self.application, batch, Duration::ZERO);
         }
@@ -563,8 +569,7 @@ fn dirty_close_displays_the_prompted_document_after_advance_and_stale_replay() {
     assert!(!second_text.contains(&first_title), "{second_text}");
     assert!(!second_text.contains(&first_source), "{second_text}");
 
-    interaction.frontend.submit_and_drive(
-        &mut interaction.application,
+    interaction.application.submit_and_drive(
         EditorActionBatch::new(
             second.revision(),
             [EditorAction::WorkspaceIntent(
@@ -602,8 +607,7 @@ fn dirty_close_does_not_offer_a_decision_after_save_has_started() {
     interaction.click("+ Root");
     let frame = interaction.frame();
     let document = frame.workspace().active_scene.as_ref().unwrap().document;
-    interaction.frontend.submit_and_drive(
-        &mut interaction.application,
+    interaction.application.submit_and_drive(
         EditorActionBatch::new(
             frame.revision(),
             [EditorAction::WorkspaceIntent(
@@ -651,8 +655,7 @@ fn dirty_close_does_not_offer_a_decision_after_save_has_started() {
     super::show_dirty_close_dialog(ui, &saving, &mut actions);
     let _ = interaction.context.render_legacy();
     let offers_cancel = CONTROLS.with(|controls| controls.borrow().contains_key("close:Cancel"));
-    interaction.frontend.submit_and_drive(
-        &mut interaction.application,
+    interaction.application.submit_and_drive(
         EditorActionBatch::new(
             frame.revision(),
             [EditorAction::WorkspaceIntent(

@@ -1,44 +1,32 @@
-use std::collections::HashMap;
-
-use dear_imgui_rs::{Key, TreeNodeFlags, Ui};
+use dear_imgui_rs::{TreeNodeFlags, Ui};
 use nara::{
-    asset::AssetRef,
-    reflect::{ComponentCapability, ComponentFieldPathSegment, ComponentValue, ComponentValueKind},
-    scene::{SceneAuthoringRevision, SceneEntityId, ScenePlacement, ScenePlacementOwner},
+    reflect::{ComponentCapability, ComponentValue, ComponentValueKind},
+    scene::{SceneEntityId, ScenePlacement, ScenePlacementOwner},
     tooling::{
         EditorAction, EditorDocumentId, EditorDocumentKind, EditorDocumentMutation,
-        EditorFieldFeedbackReason, EditorFieldTarget, EditorFieldValidationFailure,
         EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
         EditorPersistenceOperation, EditorPersistenceRequestKind, EditorPersistenceResult,
         EditorPlayState, EditorReopenTarget, EditorRuntimeAvailability, EditorSceneModel,
         EditorWorkspaceIntent, EditorWorkspaceIntentAction, PrefabCompositionCommand,
         PrefabCompositionEntityDraft, SceneCompositionCommand, SceneCompositionEntityKind,
-        SceneInspectorCommand, SceneInspectorComponentView, SceneInspectorEntityRow,
-        SceneInspectorFieldState, SceneInspectorFieldView,
+        SceneInspectorComponentView, SceneInspectorEntityRow, SceneInspectorFieldView,
     },
 };
 
-use super::{ImguiTextOwner, observe_text_owner};
+use super::{
+    ImguiTextOwner,
+    field_editor::{FieldEditors, PreparedFieldEdit},
+};
 
-mod recursive_controls;
-mod value_draft;
+pub(super) mod recursive_controls;
+pub(super) mod value_draft;
 
 #[derive(Default)]
 pub(super) struct ImguiAuthoringPanels {
-    scope: Option<(
-        EditorDocumentId,
-        SceneAuthoringRevision,
-        Option<SceneEntityId>,
-    )>,
-    drafts: HashMap<EditorFieldTarget, FieldDraft>,
-    structured_drafts: HashMap<EditorFieldTarget, value_draft::RootDraft>,
+    scope: Option<EditorDocumentId>,
+    pub(super) fields: FieldEditors,
     pending_removal: Option<SceneEntityId>,
     read_only: bool,
-}
-
-struct FieldDraft {
-    text: String,
-    error: Option<String>,
 }
 
 impl ImguiAuthoringPanels {
@@ -48,23 +36,16 @@ impl ImguiAuthoringPanels {
 
     pub(super) fn retire(&mut self) {
         self.scope = None;
-        self.drafts.clear();
-        self.structured_drafts.clear();
+        self.fields.clear();
         self.pending_removal = None;
     }
 
     fn synchronize(&mut self, scene: Option<&EditorSceneModel>) {
-        let scope = scene.map(|scene| {
-            (
-                scene.document,
-                scene.revision,
-                scene.editor.inspector.selected_entity.clone(),
-            )
-        });
-        if self.scope != scope {
+        let scope = scene.map(|scene| scene.document);
+        if self.scope.is_some() && scope.is_some() && self.scope != scope {
             self.retire();
-            self.scope = scope;
         }
+        self.scope = scope;
     }
 
     pub(super) fn show_document_controls(
@@ -361,6 +342,7 @@ impl ImguiAuthoringPanels {
                         to: ScenePlacement::last(ScenePlacementOwner::Root),
                     },
                 ));
+                ui.close_current_popup();
             }
             for (index, candidate) in inspector.entities.iter().enumerate() {
                 let eligible = editing
@@ -377,6 +359,7 @@ impl ImguiAuthoringPanels {
                             }),
                         },
                     ));
+                    ui.close_current_popup();
                 }
             }
         }
@@ -421,6 +404,7 @@ impl ImguiAuthoringPanels {
         frame: &EditorFrameModel,
         actions: &mut Vec<EditorAction>,
         text_owner: &mut Option<ImguiTextOwner>,
+        prepared: &mut Vec<PreparedFieldEdit>,
     ) {
         self.synchronize(frame.workspace().active_scene.as_ref());
         let Some(scene) = frame.workspace().active_scene.as_ref() else {
@@ -432,9 +416,8 @@ impl ImguiAuthoringPanels {
             return;
         };
         let scope_id = format!(
-            "document:{}:{:?}:entity:{}",
+            "document:{}:entity:{}",
             scene.document.raw(),
-            scene.revision,
             entity.id.as_str()
         );
         let _scope = ui.push_id(scope_id.as_str());
@@ -473,6 +456,7 @@ impl ImguiAuthoringPanels {
                             component: capability.component.clone(),
                         },
                     ));
+                    ui.close_current_popup();
                 }
                 if let Some(reason) = capability.add_unavailable_reason {
                     ui.text_disabled(reason);
@@ -483,7 +467,7 @@ impl ImguiAuthoringPanels {
         }
         for component in &entity.components {
             self.show_component(
-                ui, frame, scene, &entity.id, component, editing, actions, text_owner,
+                ui, frame, scene, &entity.id, component, editing, actions, text_owner, prepared,
             );
         }
         if entity.components.is_empty() {
@@ -502,14 +486,16 @@ impl ImguiAuthoringPanels {
         editing: bool,
         actions: &mut Vec<EditorAction>,
         text_owner: &mut Option<ImguiTextOwner>,
+        prepared: &mut Vec<PreparedFieldEdit>,
     ) {
-        let component_id = format!(
-            "{}:{:?}",
-            component.component.as_str(),
-            component.schema_version
+        let _id = ui.push_id(component.component.as_str());
+        let open = ui.collapsing_header(component.component.as_str(), TreeNodeFlags::DEFAULT_OPEN);
+        #[cfg(test)]
+        super::interaction_tests::record_control(
+            ui,
+            format!("component:{}", component.component.as_str()),
         );
-        let _id = ui.push_id(component_id.as_str());
-        if !ui.collapsing_header(component.component.as_str(), TreeNodeFlags::DEFAULT_OPEN) {
+        if !open {
             return;
         }
         if let Some(reason) = component.access.read_only_reason() {
@@ -537,243 +523,17 @@ impl ImguiAuthoringPanels {
             ));
         }
         for field in &component.fields {
-            let target = EditorFieldTarget::new(
-                scene.document,
-                scene.revision,
-                entity.clone(),
-                component.component.clone(),
-                component.schema_version,
-                field.id.clone(),
-            );
             let editable = editing
                 && component.access.is_editable()
                 && field.capabilities.contains(&ComponentCapability::Edit);
-            self.show_field(ui, frame, target, field, editable, actions, text_owner);
+            if let Some(edit) = self.fields.show(
+                ui, frame, scene, entity, component, field, editable, text_owner,
+            ) {
+                prepared.push(edit);
+            }
         }
         if component.fields.is_empty() {
             ui.text_disabled("No inspectable fields");
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn show_field(
-        &mut self,
-        ui: &Ui,
-        frame: &EditorFrameModel,
-        target: EditorFieldTarget,
-        field: &SceneInspectorFieldView,
-        editable: bool,
-        actions: &mut Vec<EditorAction>,
-        text_owner: &mut Option<ImguiTextOwner>,
-    ) {
-        let _id = ui.push_id(field.id.as_str());
-        let supported = value_draft::supported(&field.shape);
-        let editable = editable && supported;
-        ui.text(format!(
-            "{}{}",
-            field.path,
-            if field.required { " *" } else { "" }
-        ));
-        if !matches!(
-            field.shape,
-            nara::reflect::ComponentValueShape::Scalar { .. }
-                | nara::reflect::ComponentValueShape::AssetRef
-        ) && supported
-        {
-            let draft = self.structured_drafts.entry(target.clone()).or_default();
-            match recursive_controls::show_root(
-                ui,
-                &target,
-                &field.shape,
-                field.value.as_ref().or(field.default_value.as_ref()),
-                draft,
-                editable,
-                text_owner,
-            ) {
-                Some(Ok(value)) => actions.push(field_action(
-                    &target,
-                    SceneInspectorCommand::SetField {
-                        entity: target.entity().clone(),
-                        component: target.component().clone(),
-                        component_version: target.component_version(),
-                        field: target.field().clone(),
-                        value,
-                    },
-                )),
-                Some(Err(())) => actions.push(EditorAction::ReportFieldValidation(
-                    EditorFieldValidationFailure::new(target.clone(), field.value_kind),
-                )),
-                None => {}
-            }
-        } else {
-            match field.value_kind {
-                ComponentValueKind::Bool => {
-                    let mut value = field
-                        .value
-                        .as_ref()
-                        .or(field.default_value.as_ref())
-                        .and_then(ComponentValue::as_bool)
-                        .unwrap_or(false);
-                    let changed =
-                        ui.with_disabled_if(!editable, || ui.checkbox("##value", &mut value));
-                    if changed {
-                        self.drafts.remove(&target);
-                        actions.push(field_action(
-                            &target,
-                            SceneInspectorCommand::SetField {
-                                entity: target.entity().clone(),
-                                component: target.component().clone(),
-                                component_version: target.component_version(),
-                                field: target.field().clone(),
-                                value: ComponentValue::Bool(value),
-                            },
-                        ));
-                    }
-                }
-                ComponentValueKind::I64
-                | ComponentValueKind::U64
-                | ComponentValueKind::F64
-                | ComponentValueKind::String
-                | ComponentValueKind::AssetRef => {
-                    self.show_text_field(ui, &target, field, editable, actions, text_owner);
-                }
-                ComponentValueKind::Null
-                | ComponentValueKind::List
-                | ComponentValueKind::Map
-                | ComponentValueKind::EntityRef => {
-                    ui.text_wrapped(value_label(
-                        field.value.as_ref().or(field.default_value.as_ref()),
-                    ));
-                    ui.text_disabled("This field kind is read-only in the generic Inspector");
-                }
-            }
-        }
-        let remove_label = if field.default_value.is_some() {
-            "Reset to default"
-        } else {
-            "Remove field"
-        };
-        let remove = enabled_button(
-            ui,
-            editable
-                && field.state == SceneInspectorFieldState::Present
-                && matches!(
-                    field.path.segments().last(),
-                    Some(ComponentFieldPathSegment::Field(_))
-                )
-                && (!field.required || field.default_value.is_some()),
-            remove_label,
-        );
-        #[cfg(test)]
-        super::interaction_tests::record_control(
-            ui,
-            format!(
-                "field-action:{}:{}:{remove_label}",
-                target.component().as_str(),
-                target.field().as_str()
-            ),
-        );
-        if remove {
-            actions.push(field_action(
-                &target,
-                SceneInspectorCommand::RemoveField {
-                    entity: target.entity().clone(),
-                    component: target.component().clone(),
-                    component_version: target.component_version(),
-                    field: target.field().clone(),
-                },
-            ));
-        }
-        if let SceneInspectorFieldState::InvalidPath(reason) = &field.state {
-            ui.text_wrapped(reason);
-        }
-        if let Some(error) = self
-            .drafts
-            .get(&target)
-            .and_then(|draft| draft.error.as_deref())
-            .or_else(|| {
-                self.structured_drafts
-                    .get(&target)
-                    .and_then(|draft| draft.error.as_deref())
-            })
-        {
-            ui.text_colored([1.0, 0.4, 0.3, 1.0], error);
-        } else if let Some(feedback) = frame.field_feedback()
-            && feedback.target().same_field(&target)
-        {
-            ui.text_colored(
-                [1.0, 0.4, 0.3, 1.0],
-                field_feedback_label(feedback.reason()),
-            );
-        }
-        ui.separator();
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn show_text_field(
-        &mut self,
-        ui: &Ui,
-        target: &EditorFieldTarget,
-        field: &SceneInspectorFieldView,
-        editable: bool,
-        actions: &mut Vec<EditorAction>,
-        text_owner: &mut Option<ImguiTextOwner>,
-    ) {
-        let mut text = self
-            .drafts
-            .get(target)
-            .map_or_else(|| field_source_text(field), |draft| draft.text.clone());
-        let before = text.clone();
-        let enter = ui.with_disabled_if(!editable, || {
-            ui.input_text("##value", &mut text)
-                .enter_returns_true(true)
-                .build()
-        });
-        #[cfg(test)]
-        super::interaction_tests::record_control(
-            ui,
-            format!(
-                "field:{}:{}",
-                target.component().as_str(),
-                target.field().as_str()
-            ),
-        );
-        observe_text_owner(ui, text_owner);
-        let cancel = ui.is_item_active() && ui.is_key_pressed(Key::Escape);
-        if cancel {
-            self.drafts.remove(target);
-            return;
-        }
-        if text != before {
-            self.drafts.insert(
-                target.clone(),
-                FieldDraft {
-                    text: text.clone(),
-                    error: None,
-                },
-            );
-        }
-        ui.same_line();
-        let apply = enabled_button(ui, editable, "Apply");
-        if (enter || apply) && editable {
-            match parse_field_command(target, field.value_kind, &text) {
-                Ok(command) => {
-                    self.drafts.remove(target);
-                    actions.push(field_action(target, command));
-                }
-                Err(error) => {
-                    self.drafts.insert(
-                        target.clone(),
-                        FieldDraft {
-                            text,
-                            error: Some(error),
-                        },
-                    );
-                    actions.push(EditorAction::ReportFieldValidation(
-                        EditorFieldValidationFailure::new(target.clone(), field.value_kind),
-                    ));
-                }
-            }
         }
     }
 }
@@ -799,7 +559,7 @@ fn enabled_button(ui: &Ui, enabled: bool, label: &str) -> bool {
     clicked
 }
 
-fn editing_enabled(frame: &EditorFrameModel) -> bool {
+pub(super) fn editing_enabled(frame: &EditorFrameModel) -> bool {
     (matches!(
         frame.runtime_availability(),
         EditorRuntimeAvailability::ExternalSupervised
@@ -873,69 +633,7 @@ fn compose_action(scene: &EditorSceneModel, command: SceneCompositionCommand) ->
     }
 }
 
-fn field_action(target: &EditorFieldTarget, command: SceneInspectorCommand) -> EditorAction {
-    EditorAction::Mutate(EditorDocumentMutation::ApplyInspectorCommand {
-        document: target.document(),
-        base_revision: target.base_revision(),
-        command,
-    })
-}
-
-fn parse_field_command(
-    target: &EditorFieldTarget,
-    kind: ComponentValueKind,
-    text: &str,
-) -> Result<SceneInspectorCommand, String> {
-    if kind == ComponentValueKind::AssetRef {
-        let asset_ref = if let Some(id) = text.strip_prefix("stable_id:") {
-            AssetRef::stable_id(id).map_err(|error| error.to_string())
-        } else {
-            AssetRef::path(text).map_err(|error| error.to_string())
-        }?;
-        return Ok(SceneInspectorCommand::SetAssetRefField {
-            entity: target.entity().clone(),
-            component: target.component().clone(),
-            component_version: target.component_version(),
-            field: target.field().clone(),
-            asset_ref,
-        });
-    }
-    let value = match kind {
-        ComponentValueKind::Bool => text
-            .parse()
-            .map(ComponentValue::Bool)
-            .map_err(|_| "Expected true or false")?,
-        ComponentValueKind::I64 => text
-            .parse()
-            .map(ComponentValue::I64)
-            .map_err(|_| "Expected a signed integer")?,
-        ComponentValueKind::U64 => text
-            .parse()
-            .map(ComponentValue::U64)
-            .map_err(|_| "Expected an unsigned integer")?,
-        ComponentValueKind::F64 => {
-            ComponentValue::f64(text.parse().map_err(|_| "Expected a finite number")?)
-                .map_err(|_| "Expected a finite number")?
-        }
-        ComponentValueKind::String => ComponentValue::String(text.to_owned()),
-        ComponentValueKind::Null
-        | ComponentValueKind::List
-        | ComponentValueKind::Map
-        | ComponentValueKind::EntityRef
-        | ComponentValueKind::AssetRef => {
-            return Err("This field kind is read-only in the generic Inspector".to_owned());
-        }
-    };
-    Ok(SceneInspectorCommand::SetField {
-        entity: target.entity().clone(),
-        component: target.component().clone(),
-        component_version: target.component_version(),
-        field: target.field().clone(),
-        value,
-    })
-}
-
-fn field_source_text(field: &SceneInspectorFieldView) -> String {
+pub(super) fn field_source_text(field: &SceneInspectorFieldView) -> String {
     let value = field.value.as_ref().or(field.default_value.as_ref());
     if field.value_kind == ComponentValueKind::AssetRef {
         if let Some(ComponentValue::Map(fields)) = value {
@@ -963,7 +661,7 @@ fn field_source_text(field: &SceneInspectorFieldView) -> String {
     }
 }
 
-fn value_label(value: Option<&ComponentValue>) -> String {
+pub(super) fn value_label(value: Option<&ComponentValue>) -> String {
     match value {
         None => "<missing>".to_owned(),
         Some(ComponentValue::Null) => "null".to_owned(),
@@ -982,18 +680,6 @@ fn value_label(value: Option<&ComponentValue>) -> String {
                 format!("{}:{}", entity.namespace.as_str(), entity.entity)
             }
         },
-    }
-}
-
-fn field_feedback_label(reason: EditorFieldFeedbackReason) -> &'static str {
-    match reason {
-        EditorFieldFeedbackReason::InvalidValue(_) => {
-            "Invalid value for this field; correct it and apply again"
-        }
-        EditorFieldFeedbackReason::StaleAction => "The field changed before this edit was applied",
-        EditorFieldFeedbackReason::MutationRejected => {
-            "The field edit was rejected; see Diagnostics"
-        }
     }
 }
 
@@ -1038,7 +724,7 @@ fn tree_position<'a>(
 mod tests {
     use super::*;
     use nara::{
-        reflect::{ComponentFieldId, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId},
+        reflect::{ComponentRegistry, ComponentTypeId},
         scene::{SceneAuthoringSession, SceneDocument, SceneEntityRecord},
         tooling::{EditorExternalReloadState, SceneEditorState},
     };
@@ -1058,140 +744,6 @@ mod tests {
             selection: Default::default(),
             editor: SceneEditorState::new().model(&session, &ComponentRegistry::default(), None),
         }
-    }
-
-    fn target(scene: &EditorSceneModel) -> EditorFieldTarget {
-        EditorFieldTarget::new(
-            scene.document,
-            scene.revision,
-            SceneEntityId::new("owner").unwrap(),
-            ComponentTypeId::new("custom.stats"),
-            ComponentSchemaVersion::ONE,
-            ComponentFieldId::new("value"),
-        )
-    }
-
-    #[test]
-    fn scalar_edits_preserve_integer_precision_and_reject_non_finite_numbers() {
-        let scene = scene(EditorDocumentKind::Scene);
-        let target = target(&scene);
-        for (kind, text, expected) in [
-            (
-                ComponentValueKind::I64,
-                "-9223372036854775808",
-                ComponentValue::I64(i64::MIN),
-            ),
-            (
-                ComponentValueKind::U64,
-                "18446744073709551615",
-                ComponentValue::U64(u64::MAX),
-            ),
-            (
-                ComponentValueKind::String,
-                "中文 / clipboard",
-                ComponentValue::String("中文 / clipboard".to_owned()),
-            ),
-        ] {
-            let command = parse_field_command(&target, kind, text).unwrap();
-            let SceneInspectorCommand::SetField { value, .. } = command else {
-                panic!("scalar edit did not preserve its typed field command");
-            };
-            assert_eq!(value, expected);
-        }
-        for text in ["NaN", "inf", "-inf", "1e999"] {
-            assert!(parse_field_command(&target, ComponentValueKind::F64, text).is_err());
-        }
-        assert!(parse_field_command(&target, ComponentValueKind::U64, "-1").is_err());
-        assert!(
-            parse_field_command(&target, ComponentValueKind::I64, "9223372036854775808").is_err()
-        );
-    }
-
-    #[test]
-    fn asset_edits_use_the_asset_reference_command_and_generic_entity_fields_stay_read_only() {
-        let scene = scene(EditorDocumentKind::Scene);
-        let target = target(&scene);
-        for text in [
-            "textures/player.png",
-            "stable_id:550e8400-e29b-41d4-a716-446655440000",
-        ] {
-            let command = parse_field_command(&target, ComponentValueKind::AssetRef, text).unwrap();
-            let expected = if let Some(id) = text.strip_prefix("stable_id:") {
-                AssetRef::stable_id(id).unwrap()
-            } else {
-                AssetRef::path(text).unwrap()
-            };
-            assert!(matches!(command, SceneInspectorCommand::SetAssetRefField {
-                asset_ref, ..
-            } if asset_ref == expected));
-        }
-        assert!(
-            parse_field_command(&target, ComponentValueKind::AssetRef, "stable_id:invalid")
-                .is_err()
-        );
-        assert!(
-            parse_field_command(&target, ComponentValueKind::EntityRef, "scene-local:owner")
-                .is_err()
-        );
-        let reference =
-            ComponentValue::EntityReference(nara::identity::EntityReference::SceneLocal {
-                entity: SceneEntityId::new("owner").unwrap(),
-            });
-        assert_eq!(value_label(Some(&reference)), "scene-local:owner");
-    }
-
-    #[test]
-    fn revision_selection_and_panel_retirement_discard_only_local_drafts() {
-        let mut scene = scene(EditorDocumentKind::Scene);
-        let mut panel = ImguiAuthoringPanels::default();
-        panel.synchronize(Some(&scene));
-        let key = target(&scene);
-        panel.drafts.insert(
-            key.clone(),
-            FieldDraft {
-                text: "unapplied".to_owned(),
-                error: None,
-            },
-        );
-        panel
-            .structured_drafts
-            .insert(key.clone(), value_draft::RootDraft::default());
-        panel.synchronize(Some(&scene));
-        assert_eq!(panel.drafts[&key].text, "unapplied");
-        assert!(panel.structured_drafts.contains_key(&key));
-
-        scene.editor.inspector.selected_entity = Some(SceneEntityId::new("owner").unwrap());
-        panel.synchronize(Some(&scene));
-        assert!(panel.drafts.is_empty());
-        assert!(panel.structured_drafts.is_empty());
-        panel.drafts.insert(
-            key.clone(),
-            FieldDraft {
-                text: "stale".to_owned(),
-                error: None,
-            },
-        );
-        scene.revision = SceneAuthoringSession::new(SceneDocument::default()).revision();
-        panel.synchronize(Some(&scene));
-        assert!(panel.drafts.is_empty());
-
-        panel.drafts.insert(
-            key,
-            FieldDraft {
-                text: "closed".to_owned(),
-                error: None,
-            },
-        );
-        panel.pending_removal = Some(SceneEntityId::new("owner").unwrap());
-        panel
-            .structured_drafts
-            .insert(target(&scene), value_draft::RootDraft::default());
-        panel.retire();
-        assert!(panel.scope.is_none());
-        assert!(panel.drafts.is_empty());
-        assert!(panel.structured_drafts.is_empty());
-        assert!(panel.pending_removal.is_none());
-        assert!(!scene.dirty);
     }
 
     #[test]

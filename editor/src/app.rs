@@ -171,9 +171,35 @@ pub(crate) struct EditorApplicationDispatch {
     requests_step: bool,
     requires_runtime_drive: bool,
     feedback: Option<Result<EditorActionBatchReport, EditorActionRejection>>,
+    original_slots: Vec<Option<usize>>,
+    closing_filter: bool,
 }
 
 impl EditorApplicationDispatch {
+    pub(crate) fn remap_original_slots(&mut self, slots: &[Option<usize>]) {
+        self.original_slots = slots
+            .iter()
+            .map(|slot| slot.and_then(|slot| self.original_slots.get(slot).copied().flatten()))
+            .collect();
+    }
+    pub(crate) fn original_outcome(&self, slot: usize) -> Option<&EditorActionOutcome> {
+        let compact = self.original_slots.get(slot).copied().flatten()?;
+        self.feedback
+            .as_ref()?
+            .as_ref()
+            .ok()?
+            .outcomes()
+            .get(compact)
+    }
+
+    pub(crate) fn original_slots(&self) -> &[Option<usize>] {
+        &self.original_slots
+    }
+
+    pub(crate) const fn closing_filter(&self) -> bool {
+        self.closing_filter
+    }
+
     pub(crate) const fn actions_observed(&self) -> bool {
         self.actions_observed
     }
@@ -696,6 +722,10 @@ impl EditorApplication {
         &mut self,
         batch: EditorActionBatch,
     ) -> EditorApplicationDispatch {
+        let revision = batch.frame_revision();
+        let actions = batch.into_actions();
+        let action_count = actions.len();
+        let batch = EditorActionBatch::new(revision, actions);
         let retirement_pending = self.session_retirement.is_some();
         match &mut self.state {
             EditorProductState::AuthoringReady(project)
@@ -732,7 +762,10 @@ impl EditorApplication {
             | EditorProductState::OpeningReplacement(OpeningReplacementState::Refreshing {
                 ..
             })
-            | EditorProductState::Recovery(_) => EditorApplicationDispatch::default(),
+            | EditorProductState::Recovery(_) => EditorApplicationDispatch {
+                original_slots: vec![None; action_count],
+                ..Default::default()
+            },
         }
     }
 
@@ -1654,6 +1687,7 @@ fn dispatch_project_actions(
     let frame_revision = batch.frame_revision();
     let actions = batch.into_actions();
     let mut dispatch = EditorApplicationDispatch::default();
+    dispatch.original_slots = (0..actions.len()).map(Some).collect();
     for action in &actions {
         match action {
             EditorAction::Play(EditorPlayAction::Stop)
@@ -1703,18 +1737,22 @@ fn dispatch_close_resolution_actions(
     batch: EditorActionBatch,
 ) -> (EditorApplicationDispatch, bool) {
     let frame_revision = batch.frame_revision();
-    let actions = batch
-        .into_actions()
-        .into_iter()
-        .filter(|action| {
-            matches!(
-                action,
-                EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Resolve { .. })
-                    | EditorAction::Play(EditorPlayAction::RetryClose)
-                    | EditorAction::Play(EditorPlayAction::RetryRetirement)
-            )
-        })
-        .collect::<Vec<_>>();
+    let original_actions = batch.into_actions().into_iter();
+    let mut original_slots = Vec::new();
+    let mut actions = Vec::new();
+    for action in original_actions {
+        if matches!(
+            action,
+            EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Resolve { .. })
+                | EditorAction::Play(EditorPlayAction::RetryClose)
+                | EditorAction::Play(EditorPlayAction::RetryRetirement)
+        ) {
+            original_slots.push(Some(actions.len()));
+            actions.push(action);
+        } else {
+            original_slots.push(None);
+        }
+    }
     let save_actions = actions
         .iter()
         .map(|action| {
@@ -1727,11 +1765,13 @@ fn dispatch_close_resolution_actions(
             )
         })
         .collect::<Vec<_>>();
-    let dispatch = if actions.is_empty() {
+    let mut dispatch = if actions.is_empty() {
         EditorApplicationDispatch::default()
     } else {
         dispatch_project_actions(project, EditorActionBatch::new(frame_revision, actions))
     };
+    dispatch.original_slots = original_slots;
+    dispatch.closing_filter = true;
     let attempted_save = dispatch
         .feedback()
         .and_then(Result::ok)
@@ -2024,12 +2064,13 @@ mod tests {
             .try_claim_legacy_renderer()
             .unwrap()
             .build();
-        let rendered_revision = frontend
+        let rendered = frontend
             .show(context.frame(), &mut application)
             .expect("the ordinary Dear ImGui frontend must render")
-            .map(|batch| batch.frame_revision());
+            .is_some();
         let _ = context.render_legacy();
-        let first_revision = rendered_revision.expect("the authoring workspace was rendered");
+        assert!(rendered, "the authoring workspace was rendered");
+        let first_revision = application.current_frame().unwrap().revision();
         let frame = application.current_frame().unwrap();
         let scene = frame.workspace().active_scene.as_ref().unwrap();
         let first = application.dispatch_editor_actions(EditorActionBatch::new(
@@ -2068,8 +2109,6 @@ mod tests {
         let second_feedback_revision = second
             .feedback()
             .map(|feedback| feedback.map(|report| report.frame_revision()));
-        frontend.observe_dispatch(&first);
-        frontend.observe_dispatch(&second);
 
         // Complete physical session retirement before asserting so a regression failure cannot
         // make the native session's unwind guard obscure the originating-feedback assertion.

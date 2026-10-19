@@ -328,3 +328,69 @@ fn recursive_widgets_draft_optional_record_and_scalar_containers_in_scene_and_pr
         interaction.click("Dismiss persistence result");
     }
 }
+
+#[test]
+fn unfinished_recursive_child_survives_collapse_and_unrelated_revision_conflict() {
+    use nara::tooling::{EditorDocumentMutation, SceneInspectorCommand};
+
+    let project = InteractionProject::new_recursive();
+    let mut interaction = Interaction::new(&project);
+    interaction.click("+ Root");
+    interaction.click("Add Component");
+    interaction.click(CUSTOM_COMPONENT);
+    click(&mut interaction, "list", "root", "Edit value");
+    click(&mut interaction, "list", "root", "Add...");
+    replace(&mut interaction, "list", "root.new", "256");
+    interaction.click(&format!("component:{CUSTOM_COMPONENT}"));
+    let frame = interaction.frame();
+    let scene = frame.workspace().active_scene.as_ref().unwrap();
+    interaction.application.submit_and_drive(
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Mutate(
+                EditorDocumentMutation::ApplyInspectorCommand {
+                    document: scene.document,
+                    base_revision: scene.revision,
+                    command: SceneInspectorCommand::SetField {
+                        entity: scene.selection.top_entity().unwrap().clone(),
+                        component: ComponentTypeId::new(CUSTOM_COMPONENT),
+                        component_version: ComponentSchemaVersion::ONE,
+                        field: ComponentFieldId::new("optional"),
+                        value: ComponentValue::f64(7.0).unwrap(),
+                    },
+                },
+            )],
+        ),
+        Duration::ZERO,
+    );
+    interaction.render();
+    let retained = interaction
+        .frontend
+        .retained_field_draft(CUSTOM_COMPONENT, "list")
+        .unwrap();
+    assert!(retained.0.contains("256"));
+    assert!(retained.1);
+    interaction.click(&format!("component:{CUSTOM_COMPONENT}"));
+    interaction.click(&format!(
+        "field-action:{CUSTOM_COMPONENT}:list:Reapply draft"
+    ));
+    assert_eq!(
+        selected(&interaction, "list"),
+        ComponentValue::List(vec![ComponentValue::U64(3)])
+    );
+    assert!(
+        interaction
+            .frontend
+            .retained_field_draft(CUSTOM_COMPONENT, "list")
+            .unwrap()
+            .0
+            .contains("256")
+    );
+    replace(&mut interaction, "list", "root.new", "8");
+    click(&mut interaction, "list", "root", "Add value");
+    click(&mut interaction, "list", "root", "Apply value");
+    assert_eq!(
+        selected(&interaction, "list"),
+        ComponentValue::List(vec![ComponentValue::U64(3), ComponentValue::U64(8)])
+    );
+}

@@ -180,7 +180,7 @@ impl CanvasAdmission {
         let authoring = self.authoring();
         self.frontend
             .finish_canvas_presentation(&mut output, Some(&authoring), confirmed);
-        if let Some(batch) = output.actions {
+        if let Some(batch) = self.frontend.seal_output(&mut output) {
             self.frontend
                 .submit_and_drive(&mut self.application, batch, Duration::ZERO);
         }
@@ -338,13 +338,11 @@ fn a_failed_canvas_frame_rolls_back_the_drag_without_dispatching_unpresented_act
         .frontend
         .reject_canvas_frame(released, Some(&frame))
         .unwrap();
-    let revision = batch.frame_revision();
-    let actions = batch.into_actions();
+    let actions = batch.batch.clone().into_actions();
     assert!(matches!(
         actions.as_slice(),
         [EditorAction::Gesture(EditorGestureAction::Cancel { .. })]
     ));
-    let batch = EditorActionBatch::new(revision, actions);
     interaction
         .frontend
         .submit_and_drive(&mut interaction.application, batch, Duration::ZERO);

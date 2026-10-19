@@ -71,8 +71,7 @@ fn starter_opens_one_coherent_frame_and_empty_repaint_preserves_document_state()
     let dirty = before_scene.dirty;
     let selection = before_scene.selection.clone();
 
-    let batch = render_once(&mut application);
-    let update = application.submit_and_drive(batch, Duration::ZERO);
+    let update = render_once(&mut application);
     let after = current_frame(&application);
     let after_scene = after
         .workspace()
@@ -746,7 +745,7 @@ fn retry_and_replacement_close_are_failure_atomic() {
 
     assert!(application.request_project_replacement(replacement.root(), None));
     drive_replacement_to_close_decision(&mut application);
-    assert!(render_once(&mut application).into_actions().is_empty());
+    assert!(!render_once(&mut application).actions_observed());
     let awaiting_cancel = current_frame(&application);
     let cancel = EditorActionBatch::new(
         awaiting_cancel.revision(),
@@ -906,7 +905,7 @@ fn workspace_open_project_action_enters_the_retained_replacement_flow() {
         EditorApplicationState::OpeningReplacement
     );
     assert!(Arc::ptr_eq(&before, &current_frame(&application)));
-    assert!(render_once(&mut application).into_actions().is_empty());
+    assert!(!render_once(&mut application).actions_observed());
     let preparing_frame = current_frame(&application);
     let preparing_scene = preparing_frame.workspace().active_scene.as_ref().unwrap();
     let ignored = application.submit_and_drive(
@@ -1101,7 +1100,7 @@ fn replacement_same_root_alias_save_publishes_a_fresh_candidate() {
         current_frame(&application).workspace_intent().phase(),
         Some(EditorWorkspaceIntentPhase::Prepared)
     );
-    assert!(render_once(&mut application).into_actions().is_empty());
+    assert!(!render_once(&mut application).actions_observed());
     drive_replacement_to_terminal(&mut application);
 
     assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
@@ -1140,13 +1139,11 @@ fn ordinary_play_reports_typed_supervised_play_contract_missing() {
     assert!(frame.workspace().active_scene.is_some());
 }
 
-fn render_once(application: &mut EditorApplication) -> EditorActionBatch {
-    imgui::draw(
-        &mut imgui::context(),
-        &mut ImguiEditorFrontend::new(),
-        application,
-    )
-    .expect("the fixed Editor panel returns one workspace result")
+fn render_once(application: &mut EditorApplication) -> nara_editor::EditorApplicationUpdate {
+    let mut frontend = ImguiEditorFrontend::new();
+    let submission = imgui::draw(&mut imgui::context(), &mut frontend, application)
+        .expect("the fixed Editor panel returns one workspace result");
+    frontend.submit_and_drive(application, submission, Duration::ZERO)
 }
 
 fn current_frame(application: &EditorApplication) -> Arc<nara::tooling::EditorFrameModel> {

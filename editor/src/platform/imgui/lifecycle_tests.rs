@@ -343,7 +343,6 @@ impl NativeLifecycleProof {
                 .ok_or_else(|| imgui_error("the lifecycle action lost its workspace"))?;
             let dispatch = application
                 .dispatch_editor_actions(EditorActionBatch::new(frame.revision(), [action]));
-            native.frontend.observe_dispatch(&dispatch);
             if dispatch.invalidates_game_input() {
                 native
                     .input

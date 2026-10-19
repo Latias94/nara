@@ -1,17 +1,20 @@
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use nara::{
     asset::AssetRef,
     reflect::{ComponentValue, ComponentValueKind, ComponentValueShape},
 };
 
-#[derive(Default)]
-pub(super) struct RootDraft {
+#[derive(Default, Clone, Debug, PartialEq)]
+pub(in crate::frontend::imgui) struct RootDraft {
     pub node: Option<ValueDraft>,
-    pub error: Option<String>,
 }
 
-pub(super) enum ValueDraft {
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::frontend::imgui) enum ValueDraft {
     Null,
     Bool(Option<bool>),
     Text {
@@ -28,18 +31,86 @@ pub(super) enum ValueDraft {
         chosen: bool,
     },
     List {
-        items: Vec<ValueDraft>,
-        pending: Option<Box<ValueDraft>>,
+        items: Vec<ChildDraft>,
+        pending: Option<Box<ChildDraft>>,
         confirmed: bool,
     },
     Map {
-        entries: BTreeMap<String, ValueDraft>,
-        pending: Option<(String, bool, Box<ValueDraft>)>,
+        entries: BTreeMap<String, ChildDraft>,
+        pending: Option<(String, bool, Box<ChildDraft>)>,
         confirmed: bool,
     },
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::frontend::imgui) struct ChildDraft {
+    pub id: u64,
+    pub node: ValueDraft,
+}
+
+impl ChildDraft {
+    pub fn new(node: ValueDraft) -> Self {
+        static NEXT_ROW: AtomicU64 = AtomicU64::new(1);
+        Self {
+            id: NEXT_ROW.fetch_add(1, Ordering::Relaxed),
+            node,
+        }
+    }
+}
+
 impl ValueDraft {
+    /// A lossless recovery view includes invalid text and unfinished child drafts.
+    pub fn copy_text(&self) -> String {
+        match self {
+            Self::Text { text, .. } => text.clone(),
+            Self::Null => "null".to_owned(),
+            Self::Bool(value) => {
+                value.map_or_else(|| "<unconfirmed>".to_owned(), |value| value.to_string())
+            }
+            Self::Record { members, .. } => members
+                .iter()
+                .map(|(name, value)| format!("{name}: {}", value.copy_text()))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Self::Optional { value, pending, .. } => {
+                let mut text = value
+                    .as_ref()
+                    .map_or_else(|| "null".to_owned(), |value| value.copy_text());
+                if let Some(pending) = pending {
+                    text.push_str(&format!("\nUnconfirmed Some: {}", pending.copy_text()));
+                }
+                text
+            }
+            Self::List { items, pending, .. } => {
+                let mut text = items
+                    .iter()
+                    .map(|child| child.node.copy_text())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if let Some(pending) = pending {
+                    text.push_str(&format!("\nUnconfirmed item: {}", pending.node.copy_text()));
+                }
+                text
+            }
+            Self::Map {
+                entries, pending, ..
+            } => {
+                let mut text = entries
+                    .iter()
+                    .map(|(key, value)| format!("{key}: {}", value.node.copy_text()))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if let Some((key, _, pending)) = pending {
+                    text.push_str(&format!(
+                        "\nUnconfirmed entry {key}: {}",
+                        pending.node.copy_text()
+                    ));
+                }
+                text
+            }
+        }
+    }
+
     pub fn new(shape: &ComponentValueShape) -> Self {
         Self::from_value(shape, None)
     }
@@ -84,7 +155,7 @@ impl ValueDraft {
                 items: match source {
                     Some(ComponentValue::List(values)) => values
                         .iter()
-                        .map(|value| Self::from_value(item, Some(value)))
+                        .map(|value| ChildDraft::new(Self::from_value(item, Some(value))))
                         .collect(),
                     _ => Vec::new(),
                 },
@@ -95,7 +166,12 @@ impl ValueDraft {
                 entries: match source {
                     Some(ComponentValue::Map(values)) => values
                         .iter()
-                        .map(|(key, value)| (key.clone(), Self::from_value(shape, Some(value))))
+                        .map(|(key, value)| {
+                            (
+                                key.clone(),
+                                ChildDraft::new(Self::from_value(shape, Some(value))),
+                            )
+                        })
                         .collect(),
                     _ => BTreeMap::new(),
                 },
@@ -176,7 +252,7 @@ impl ValueDraft {
                 ComponentValue::List(
                     items
                         .iter()
-                        .map(|draft| draft.value(item))
+                        .map(|draft| draft.node.value(item))
                         .collect::<Result<_, _>>()?,
                 )
             }
@@ -197,7 +273,9 @@ impl ValueDraft {
                 ComponentValue::Map(
                     entries
                         .iter()
-                        .map(|(key, draft)| draft.value(shape).map(|value| (key.clone(), value)))
+                        .map(|(key, draft)| {
+                            draft.node.value(shape).map(|value| (key.clone(), value))
+                        })
                         .collect::<Result<_, _>>()?,
                 )
             }
@@ -210,7 +288,7 @@ impl ValueDraft {
     }
 }
 
-pub(super) fn supported(shape: &ComponentValueShape) -> bool {
+pub(in crate::frontend::imgui) fn supported(shape: &ComponentValueShape) -> bool {
     match shape {
         ComponentValueShape::Scalar { .. } | ComponentValueShape::AssetRef => true,
         ComponentValueShape::Optional { value } => supported(value),
@@ -253,7 +331,10 @@ fn scalar_text(shape: &ComponentValueShape, value: &ComponentValue) -> String {
     }
 }
 
-fn parse_scalar(shape: &ComponentValueShape, text: &str) -> Result<ComponentValue, String> {
+pub(in crate::frontend::imgui) fn parse_scalar(
+    shape: &ComponentValueShape,
+    text: &str,
+) -> Result<ComponentValue, String> {
     if matches!(shape, ComponentValueShape::AssetRef) {
         let reference = if let Some(id) = text.strip_prefix("stable_id:") {
             AssetRef::stable_id(id).map_err(|error| error.to_string())

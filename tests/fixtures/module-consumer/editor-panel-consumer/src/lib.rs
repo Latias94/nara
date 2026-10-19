@@ -2,7 +2,7 @@
 
 use nara_editor::{
     EditorLaunchOptions, EditorNativeComposition, EditorRunError, ImguiEditorPanel,
-    ImguiEditorPanelContext,
+    ImguiEditorPanelContext, PanelActionDispatch, PanelSubmissionId,
     workspace::{
         EditorPanelDescriptor, EditorPanelModel, EditorPanelMultiplicity, EditorPanelPlacement,
         EditorPanelRegistrationError,
@@ -37,6 +37,8 @@ pub fn run(options: EditorLaunchOptions) -> Result<(), Box<EditorRunError>> {
 #[derive(Default)]
 struct SelectionSummary {
     note: String,
+    pending: Option<PanelSubmissionId>,
+    dispatch_status: String,
 }
 
 impl ImguiEditorPanel for SelectionSummary {
@@ -47,11 +49,25 @@ impl ImguiEditorPanel for SelectionSummary {
             selected_count(context.model())
         ));
         let action = clear_selection(context.model());
-        let _disabled = ui.begin_disabled_with_cond(action.is_none());
+        ui.text(&self.dispatch_status);
+        let _disabled = ui.begin_disabled_with_cond(action.is_none() || self.pending.is_some());
         if ui.button("Clear selection")
             && let Some(action) = action
         {
-            context.emit(action);
+            match context.submit(action) {
+                Ok(id) => {
+                    self.pending = Some(id);
+                    self.dispatch_status = "Selection change queued".to_owned();
+                }
+                Err(error) => self.dispatch_status = error.to_string(),
+            }
+        }
+    }
+
+    fn action_finished(&mut self, id: PanelSubmissionId, result: PanelActionDispatch) {
+        if self.pending == Some(id) {
+            self.pending = None;
+            self.dispatch_status = format!("Selection dispatch: {result:?}");
         }
     }
 }

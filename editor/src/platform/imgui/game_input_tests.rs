@@ -553,7 +553,6 @@ impl GameInputWorkflow<'_> {
                 frame.revision(),
                 [EditorAction::Play(action)],
             ));
-        self.native.frontend.observe_dispatch(&dispatch);
         if dispatch.invalidates_game_input() {
             self.native
                 .input

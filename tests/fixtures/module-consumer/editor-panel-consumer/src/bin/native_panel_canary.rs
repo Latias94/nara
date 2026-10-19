@@ -4,6 +4,7 @@ use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
 use nara_editor::{
     EditorLaunchOptions, EditorNativeComposition, ImguiEditorPanel, ImguiEditorPanelContext,
+    PanelActionDispatch, PanelSubmissionId,
     workspace::{EditorPanelDescriptor, EditorPanelMultiplicity, EditorPanelPlacement},
 };
 use nara_tooling::{
@@ -19,6 +20,7 @@ struct Evidence {
     factories: usize,
     painted: usize,
     selection_acknowledged: bool,
+    selection_dispatched: bool,
     exit_requested: bool,
     dropped: usize,
 }
@@ -28,6 +30,7 @@ struct NativePanelCanary {
     draft: String,
     selected: Option<String>,
     document_before: Option<EditorDocumentTabModel>,
+    selection_submission: Option<PanelSubmissionId>,
 }
 
 impl ImguiEditorPanel for NativePanelCanary {
@@ -48,6 +51,7 @@ impl ImguiEditorPanel for NativePanelCanary {
         ui.text("External native runner canary");
 
         if let Some(before) = &self.document_before {
+            assert!(self.evidence.borrow().selection_dispatched);
             assert_eq!(
                 document, before,
                 "panel navigation must preserve source revision, dirty state and history"
@@ -68,9 +72,11 @@ impl ImguiEditorPanel for NativePanelCanary {
                 self.evidence.borrow_mut().selection_acknowledged = true;
                 self.evidence.borrow_mut().exit_requested = true;
                 eprintln!("native panel acknowledged selection; requesting normal workspace exit");
-                context.emit(EditorAction::WorkspaceIntent(
-                    EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::Exit),
-                ));
+                context
+                    .submit(EditorAction::WorkspaceIntent(
+                        EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::Exit),
+                    ))
+                    .expect("the ordinary panel submission budget must admit Exit");
             }
         } else {
             assert!(!document.dirty, "the source fixture must start clean");
@@ -92,12 +98,29 @@ impl ImguiEditorPanel for NativePanelCanary {
             self.document_before = Some(document.clone());
             let document = document.document;
             eprintln!("native panel emitted a real selection from the public Scene projection");
-            context.emit(EditorAction::Navigate(
-                EditorNavigationAction::SelectEntity {
-                    document,
-                    entity: Some(entity),
-                },
+            self.selection_submission = Some(
+                context
+                    .submit(EditorAction::Navigate(
+                        EditorNavigationAction::SelectEntity {
+                            document,
+                            entity: Some(entity),
+                        },
+                    ))
+                    .expect("the ordinary panel submission budget must admit selection"),
+            );
+        }
+    }
+
+    fn action_finished(&mut self, id: PanelSubmissionId, result: PanelActionDispatch) {
+        if self.selection_submission == Some(id) {
+            assert!(matches!(
+                result,
+                PanelActionDispatch::Dispatched(nara_tooling::EditorActionOutcome::Workspace(report))
+                    if report.applied
             ));
+            assert!(!self.evidence.borrow().selection_dispatched);
+            self.evidence.borrow_mut().selection_dispatched = true;
+            self.selection_submission = None;
         }
     }
 }
@@ -133,6 +156,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 draft: String::new(),
                 selected: None,
                 document_before: None,
+                selection_submission: None,
             }
         },
     )?;
@@ -149,7 +173,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         evidence.painted >= 2,
         "selection must be acknowledged by a subsequent native frame"
     );
-    assert!(evidence.selection_acknowledged && evidence.exit_requested);
+    assert!(
+        evidence.selection_dispatched && evidence.selection_acknowledged && evidence.exit_requested
+    );
     assert_eq!(
         evidence.dropped, 1,
         "normal runner return must retire the panel object"

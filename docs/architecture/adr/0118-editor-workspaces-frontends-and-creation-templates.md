@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
+**Last Revised**: 2026-10-19 (correlated authoring submissions and retained field drafts)
 **Owner**: Private Editor product, tooling, reflection and Scene/Prefab document owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -49,6 +50,43 @@ admission failure cannot leave a partial contribution installed. Frontend state 
 panel instance. Close, hide, target/resolved-document change, project replacement and layout reset
 retire its drafts; moving/docking the panel preserves them. GPU reconstruction moves the retained
 frontend, including its factories and instance state, instead of reinstalling contributions.
+
+### Complete field edits through exact owner results
+
+A normal field editor accepts the resolved panel document, authored entity and stable component/
+field identity. Its frontend owns transient input and feedback; the document owner still validates
+and publishes the existing semantic action. Private widget/draft identity excludes the monotonic
+document revision. Submission basis retains the exact revision and admitted schema/source meaning.
+Ordinary Save does not replace that meaning; source/session replacement must not alias it merely
+because a locator is equal. Read-only owner projections supply these facts.
+
+Invalid text and unfinished structured input remain drafts. A dirty draft retains its basis when
+unrelated edits advance the revision, and requires explicit current-value review/reapply before a
+new submission. Schema/source incompatibility cannot reinterpret old input. Collapse or temporary
+unselection is not panel retirement or proof that an unprojected field was deleted. Draft storage
+is finite; capacity rejects new input before admission rather than silently evicting unsaved input.
+The actual panel lifecycle above still retires its state. No second document or undo authority is
+created, and shared schema validation does not imply arbitrary native readiness.
+
+A source-built panel can submit several existing actions and receive an opaque local ID for each
+accepted enqueue. Immediate failure queues no action. Dispatch completion is delivered at most
+once to the originating live panel incarnation, after painting borrows release, application drive
+and actual project/target/layout reconciliation. The callback receives no UI, World or dispatch
+context. Helper-owned requests have one private controller recipient, not an additional custom
+callback. A committed action is not rolled back when its observer retires.
+
+The frontend carries exact original action slots through closing filters and whole-batch rejection.
+Its public prepared submission is move-only, bound to that frontend and project/candidate cycle,
+and consumed only by the matching frontend. A newer candidate invalidates an unconsumed one;
+late/foreign consumption cannot mutate or settle another candidate. Dropping it runs no user code;
+the next frontend cycle settles outstanding observation or final retirement releases it. Native
+presentation seals the candidate after final Canvas/pick provenance. Direct non-frontend batch
+consumers retain their ordinary report path and cannot settle frontend observations.
+
+This completion means dispatch, not eventual Save/Play completion. Several actions remain ordered;
+same-basis document writes can conflict and are never silently rebased. A cohesive multi-field
+operation uses one existing atomic patch. No generic bus, polling-ticket framework, asynchronous
+panel trait or public controller state machine is introduced.
 
 The native Host retains one event loop, device-creation authority and accountable close/recovery lifecycle.
 It may delegate secondary window/surface ownership to the selected platform/renderer adapter with explicit shutdown ordering.

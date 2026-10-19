@@ -393,7 +393,6 @@ impl SupervisedPlayTestHost {
                         dispatch.feedback()
                     ));
                 }
-                native.frontend.observe_dispatch(&dispatch);
                 let update = self.application.drive_editor_frame(
                     Duration::ZERO,
                     dispatch.actions_observed(),

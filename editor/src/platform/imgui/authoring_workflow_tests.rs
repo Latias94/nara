@@ -31,6 +31,7 @@ use crate::{
 
 const CUSTOM_COMPONENT: &str = "studio.interaction.Health";
 
+mod field_drafts;
 mod field_overrides;
 mod recursive_shapes;
 

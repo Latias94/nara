@@ -1,8 +1,7 @@
 use std::path::PathBuf;
 
 use dear_imgui_rs::{ConfigFlags, Context};
-use nara::tooling::EditorActionBatch;
-use nara_editor::{EditorApplication, ImguiEditorFrontend};
+use nara_editor::{EditorApplication, ImguiEditorFrontend, ImguiEditorSubmission};
 
 pub fn context() -> Context {
     let mut context = Context::create();
@@ -24,7 +23,7 @@ pub fn draw(
     context: &mut Context,
     frontend: &mut ImguiEditorFrontend,
     application: &mut EditorApplication,
-) -> Option<EditorActionBatch> {
+) -> Option<ImguiEditorSubmission> {
     let batch = frontend
         .show(context.frame(), application)
         .expect("the ordinary Dear ImGui frontend must render");

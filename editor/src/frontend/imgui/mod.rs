@@ -7,6 +7,7 @@ use nara::tooling::{
 mod authoring;
 #[cfg(test)]
 mod canvas_admission_tests;
+mod field_editor;
 mod game;
 #[cfg(test)]
 mod interaction_tests;
@@ -14,6 +15,9 @@ mod interaction_tests;
 pub(crate) use interaction_tests::InteractionProject;
 mod layout;
 mod project;
+mod submission;
+#[cfg(test)]
+mod submission_tests;
 mod ui_authoring;
 #[cfg(test)]
 mod ui_interaction_tests;
@@ -25,6 +29,10 @@ pub(crate) use ui_interaction_tests::{
 };
 mod view;
 mod workspace;
+pub use submission::{
+    ImguiEditorSubmission, PanelActionDispatch, PanelActionNotDispatched, PanelSubmissionId,
+    PanelSubmitError,
+};
 pub use workspace::{ImguiEditorPanel, ImguiEditorPanelContext};
 
 #[derive(Clone, Copy)]
@@ -36,6 +44,7 @@ pub(crate) struct ImguiViewImage {
 #[derive(Default)]
 pub(crate) struct ImguiFrontendOutput {
     pub(crate) actions: Option<EditorActionBatch>,
+    candidate_serial: Option<u64>,
     pub(crate) project_action: Option<crate::EditorProjectAction>,
     pub(crate) shell_action: Option<crate::app::EditorProjectShellAction>,
     pub(crate) browser_actions: Vec<nara::tooling::EditorProjectBrowserLocalAction>,
@@ -159,6 +168,10 @@ struct ImguiPanelInput<'frame> {
 /// to EditorApplication and its existing owners, including across native-window replacement.
 #[derive(Default)]
 pub struct ImguiEditorFrontend {
+    identity: std::sync::Arc<()>,
+    next_candidate: u64,
+    next_submission: u64,
+    pending: Option<std::sync::Arc<submission::PendingCandidate>>,
     presentation: workspace::ImguiPanelPresentation,
     project: project::ImguiProjectPanels,
     toolbar: authoring::ImguiAuthoringPanels,
@@ -174,12 +187,15 @@ impl ImguiEditorFrontend {
         &mut self,
         mut output: ImguiFrontendOutput,
         authoring: Option<&nara::project_host::EditorUiAuthoringFrame>,
-    ) -> Option<EditorActionBatch> {
+    ) -> Option<ImguiEditorSubmission> {
         let revision = output.actions.take()?.frame_revision();
+        if let Some(pending) = self.pending.as_mut().and_then(std::sync::Arc::get_mut) {
+            pending.failure = Some(PanelActionNotDispatched::PresentationFailed);
+        }
         // A failed render may only roll back its Canvas gesture, not admit other UI actions.
         output.actions = Some(EditorActionBatch::new(revision, []));
         self.finish_canvas_presentation(&mut output, authoring, false);
-        output.actions
+        self.seal_output(&mut output)
     }
 
     pub(crate) fn finish_canvas_presentation(
@@ -236,6 +252,15 @@ impl ImguiEditorFrontend {
         let mut actions = batch.into_actions();
         let first = actions.len();
         actions.append(&mut output.canvas_actions);
+        if let Some(pending) = self.pending.as_mut().and_then(std::sync::Arc::get_mut) {
+            let origin = submission::PanelOrigin {
+                instance,
+                incarnation: std::sync::Arc::clone(&widgets.incarnation),
+            };
+            pending
+                .action_origins
+                .extend((first..actions.len()).map(|slot| (slot, origin.clone())));
+        }
         self.presentation
             .observe_panel_actions(instance, &target, first, &actions);
         output.actions = Some(EditorActionBatch::new(revision, actions));
@@ -260,7 +285,7 @@ impl ImguiEditorFrontend {
         &mut self,
         ui: &Ui,
         application: &mut crate::EditorApplication,
-    ) -> Result<Option<EditorActionBatch>, String> {
+    ) -> Result<Option<ImguiEditorSubmission>, String> {
         let mut output = self.show_with_views(
             ui,
             application,
@@ -275,35 +300,224 @@ impl ImguiEditorFrontend {
             application.current_ui_authoring_frame().as_deref(),
             false,
         );
-        for action in output.browser_actions {
+        for action in output.browser_actions.drain(..) {
             let _ = application.apply_project_browser_local_action(action);
         }
-        if let Some(action) = output.shell_action {
+        if let Some(action) = output.shell_action.take() {
             application.submit_shell_action(action);
         }
-        if let Some(action) = output.project_action {
+        if let Some(action) = output.project_action.take() {
             application.submit_project_action(action);
         }
-        Ok(output.actions)
+        Ok(self.seal_output(&mut output))
     }
 
-    /// Observes the exact accepted or rejected batch before advancing the existing application.
+    /// Dispatches this frontend's current candidate, drives the application, then routes each
+    /// result to its original live panel or field controller. Foreign and superseded candidates
+    /// cannot mutate the application or settle this frontend's current observations.
     pub fn submit_and_drive(
         &mut self,
         application: &mut crate::EditorApplication,
-        batch: EditorActionBatch,
+        submission: ImguiEditorSubmission,
         real_delta: std::time::Duration,
     ) -> crate::EditorApplicationUpdate {
-        let dispatch = application.dispatch_editor_actions(batch);
-        self.observe_dispatch(&dispatch);
-        application.drive_editor_frame(real_delta, dispatch.actions_observed(), true)
+        let Some(dispatch) = self.dispatch_submission(application, submission) else {
+            return crate::EditorApplicationUpdate::idle();
+        };
+        let update = application.drive_editor_frame(real_delta, dispatch.actions_observed(), true);
+        self.finish_dispatch(application, &dispatch);
+        update
     }
 
-    pub(crate) fn observe_dispatch(&mut self, dispatch: &crate::app::EditorApplicationDispatch) {
-        if let Some(feedback) = dispatch.feedback() {
-            match feedback {
-                Ok(report) => self.presentation.observe_report(report),
-                Err(rejection) => self.presentation.observe_rejection(rejection),
+    pub(crate) fn seal_output(
+        &mut self,
+        output: &mut ImguiFrontendOutput,
+    ) -> Option<ImguiEditorSubmission> {
+        let serial = output.candidate_serial.take()?;
+        let pending = self
+            .pending
+            .as_ref()
+            .filter(|pending| pending.serial == serial)?;
+        Some(ImguiEditorSubmission {
+            frontend: std::sync::Arc::clone(&self.identity),
+            ledger: std::sync::Arc::clone(pending),
+            batch: output.actions.take()?,
+        })
+    }
+
+    pub(crate) fn dispatch_submission(
+        &mut self,
+        application: &mut crate::EditorApplication,
+        submission: ImguiEditorSubmission,
+    ) -> Option<crate::app::EditorApplicationDispatch> {
+        if !std::sync::Arc::ptr_eq(&self.identity, &submission.frontend)
+            || !self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| std::sync::Arc::ptr_eq(pending, &submission.ledger))
+        {
+            return None;
+        }
+        self.reconcile_application(application);
+        if submission.ledger.generation != application.workspace_generation() {
+            self.settle_pending(None, Some(PanelActionNotDispatched::ProjectChanged));
+            return None;
+        }
+        let revision = submission.batch.frame_revision();
+        let pending = self.pending.as_ref()?;
+        let retired = pending
+            .action_origins
+            .iter()
+            .filter_map(|(slot, origin)| {
+                (!self
+                    .presentation
+                    .widgets
+                    .get(&origin.instance)
+                    .is_some_and(|widgets| {
+                        std::sync::Arc::ptr_eq(&origin.incarnation, &widgets.incarnation)
+                    }))
+                .then_some(*slot)
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut actions = Vec::new();
+        let slots = submission
+            .batch
+            .into_actions()
+            .into_iter()
+            .enumerate()
+            .map(|(slot, action)| {
+                if retired.contains(&slot) {
+                    None
+                } else {
+                    let compact = actions.len();
+                    actions.push(action);
+                    Some(compact)
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut dispatch =
+            application.dispatch_editor_actions(EditorActionBatch::new(revision, actions));
+        dispatch.remap_original_slots(&slots);
+        Some(dispatch)
+    }
+
+    pub(crate) fn finish_dispatch(
+        &mut self,
+        application: &crate::EditorApplication,
+        dispatch: &crate::app::EditorApplicationDispatch,
+    ) {
+        self.reconcile_application(application);
+        self.settle_pending(Some(dispatch), None);
+    }
+
+    fn reconcile_application(&mut self, application: &crate::EditorApplication) {
+        let generation = application.workspace_generation();
+        let lifecycle = application.panel_workspace().layout().lifecycle();
+        if self
+            .layout_lifecycle
+            .as_ref()
+            .is_none_or(|previous| !std::sync::Arc::ptr_eq(previous, lifecycle))
+        {
+            self.presentation.reset_widgets();
+            self.layout_lifecycle = Some(std::sync::Arc::clone(lifecycle));
+        }
+        if self.workspace_generation != generation {
+            self.presentation.reset_widgets();
+            self.project.reset_workspace();
+            self.toolbar.retire();
+            self.workspace_generation = generation;
+        }
+        if let Some(frame) = application.current_frame() {
+            self.presentation
+                .reconcile_instances(&frame, application.panel_workspace());
+        } else {
+            self.presentation.reset_widgets();
+        }
+    }
+
+    fn settle_pending(
+        &mut self,
+        dispatch: Option<&crate::app::EditorApplicationDispatch>,
+        reason: Option<PanelActionNotDispatched>,
+    ) {
+        let Some(pending) = self.pending.take() else {
+            return;
+        };
+        let reason = reason.or(pending.failure);
+        let live = |origin: &submission::PanelOrigin, widgets: &workspace::ImguiPanelWidgets| {
+            std::sync::Arc::ptr_eq(&origin.incarnation, &widgets.incarnation)
+        };
+        // Built-in consumers retain their original batch indices, including filtered holes.
+        if let Some(dispatch) = dispatch.filter(|_| reason.is_none()) {
+            if let Some(Ok(report)) = dispatch.feedback() {
+                let outcomes = dispatch
+                    .original_slots()
+                    .iter()
+                    .enumerate()
+                    .map(|(slot, _)| {
+                        dispatch.original_outcome(slot).cloned().unwrap_or(
+                            nara::tooling::EditorActionOutcome::Rejected(
+                                nara::tooling::EditorActionRejection::NoPublishedFrame,
+                            ),
+                        )
+                    });
+                let original =
+                    nara::tooling::EditorActionBatchReport::new(report.frame_revision(), outcomes);
+                self.presentation
+                    .observe_report_for(&original, &pending.panels);
+            } else if !dispatch.original_slots().is_empty() {
+                self.presentation.observe_rejection_for(
+                    dispatch
+                        .feedback()
+                        .and_then(Result::err)
+                        .unwrap_or(nara::tooling::EditorActionRejection::NoPublishedFrame),
+                    &pending.panels,
+                );
+            }
+        } else if !pending.action_origins.is_empty() {
+            self.presentation.observe_rejection_for(
+                nara::tooling::EditorActionRejection::NoPublishedFrame,
+                &pending.panels,
+            );
+        }
+        for submission in &pending.submissions {
+            let Some(widgets) = self
+                .presentation
+                .widgets
+                .get_mut(&submission.origin.instance)
+                .filter(|widgets| live(&submission.origin, widgets))
+            else {
+                continue;
+            };
+            let result = if let Some(reason) = reason {
+                PanelActionDispatch::NotDispatched(reason)
+            } else if let Some(outcome) =
+                dispatch.and_then(|dispatch| dispatch.original_outcome(submission.slot))
+            {
+                PanelActionDispatch::Dispatched(outcome.clone())
+            } else {
+                let dispatch =
+                    dispatch.expect("dispatch settlement has a dispatch or explicit reason");
+                let reason = if dispatch.original_slots().get(submission.slot) == Some(&None)
+                    && dispatch.closing_filter()
+                {
+                    PanelActionNotDispatched::Closing
+                } else if let Some(Err(rejection)) = dispatch.feedback() {
+                    PanelActionNotDispatched::BatchRejected(rejection)
+                } else {
+                    PanelActionNotDispatched::NoPublishedFrame
+                };
+                PanelActionDispatch::NotDispatched(reason)
+            };
+            match submission.recipient {
+                submission::Recipient::Contribution => {
+                    if let Some(panel) = widgets.panel.as_mut() {
+                        panel.action_finished(submission.id, result);
+                    }
+                }
+                submission::Recipient::Authoring => {
+                    widgets.authoring.action_finished(submission.id, &result)
+                }
             }
         }
     }
@@ -344,24 +558,14 @@ impl ImguiEditorFrontend {
         canvas_presented: bool,
         detachment: &str,
     ) -> Result<ImguiFrontendOutput, String> {
+        self.reconcile_application(application);
+        self.settle_pending(None, Some(PanelActionNotDispatched::Superseded));
         let generation = application.workspace_generation();
-        let layout_lifecycle = application.panel_workspace().layout().lifecycle();
-        if self
-            .layout_lifecycle
-            .as_ref()
-            .is_none_or(|previous| !std::sync::Arc::ptr_eq(previous, layout_lifecycle))
-        {
-            self.presentation.reset_widgets();
-            self.layout_lifecycle = Some(std::sync::Arc::clone(layout_lifecycle));
-        }
-        if self.workspace_generation != generation {
-            self.presentation.reset_widgets();
-            self.project.reset_workspace();
-            self.toolbar.retire();
-            self.workspace_generation = generation;
-        }
         let mut output = ImguiFrontendOutput::default();
         let mut actions = Vec::new();
+        let mut submissions = Vec::new();
+        let mut panels = Vec::new();
+        let mut action_origins = Vec::new();
         let reset_windows = std::mem::take(&mut self.reset_windows);
         let condition = if reset_windows {
             Condition::Always
@@ -572,17 +776,23 @@ impl ImguiEditorFrontend {
                     };
                 }
                 let mut panel = widgets.panel.take().unwrap_or_else(factory);
+                widgets.authoring.fields.begin_paint(&frame);
                 let first_action = actions.len();
                 let scope = document
                     .and_then(|document| {
-                        frame.workspace().document(document).map(|tab| {
+                        frame.workspace().document(document).map(|_| {
                             format!(
-                                "workspace:{generation:?}:document:{document:?}:revision:{:?}",
-                                tab.revision
+                                "workspace:{generation:?}:document:{document:?}:incarnation:{}",
+                                widgets.incarnation.serial
                             )
                         })
                     })
-                    .unwrap_or_else(|| format!("workspace:{generation:?}"));
+                    .unwrap_or_else(|| {
+                        format!(
+                            "workspace:{generation:?}:incarnation:{}",
+                            widgets.incarnation.serial
+                        )
+                    });
                 let _scope = ui.push_id(scope.as_str());
                 panel.show(
                     ui,
@@ -591,10 +801,19 @@ impl ImguiEditorFrontend {
                         widgets,
                         input: &input,
                         actions: &mut actions,
+                        submissions: &mut submissions,
+                        next_submission: &mut self.next_submission,
                         output: &mut output,
                     },
                 );
                 widgets.panel = Some(panel);
+                let origin = submission::PanelOrigin {
+                    instance: instance.id(),
+                    incarnation: std::sync::Arc::clone(&widgets.incarnation),
+                };
+                action_origins
+                    .extend((first_action..actions.len()).map(|slot| (slot, origin.clone())));
+                panels.push(origin);
                 if !widgets.project_inspector {
                     self.presentation.painted.insert(instance.id());
                 }
@@ -640,6 +859,20 @@ impl ImguiEditorFrontend {
         }
         show_dirty_close_dialog(ui, &frame, &mut actions);
         output.actions = Some(EditorActionBatch::new(frame.revision(), actions));
+        let serial = self.next_candidate;
+        self.next_candidate = self
+            .next_candidate
+            .checked_add(1)
+            .expect("frontend candidate identity exhausted");
+        output.candidate_serial = Some(serial);
+        self.pending = Some(std::sync::Arc::new(submission::PendingCandidate {
+            serial,
+            generation,
+            submissions,
+            panels,
+            action_origins,
+            failure: None,
+        }));
         Ok(output)
     }
 }
@@ -814,12 +1047,7 @@ fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
             &mut context.output.text_owner,
         );
     } else {
-        context.widgets.authoring.show_inspector(
-            ui,
-            context.input.frame,
-            context.actions,
-            &mut context.output.text_owner,
-        );
+        context.show_scene_inspector(ui);
     }
 }
 
