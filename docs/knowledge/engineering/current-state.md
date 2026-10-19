@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "23a7d2fb04cd4a1749d9085130b4f5462e22eedc6fe5b6d65bc40f563eb5094b"
+source_fingerprint: "50836c1e689173c12e84e93055930184510f2201cea342242b0843c65d652d61"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "23a7d2fb04cd4a1749d9085130b4f5462e22eedc6fe5b6d65bc40f563eb
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `23a7d2fb04cd4a1749d9085130b4f5462e22eedc6fe5b6d65bc40f563eb5094b`
-- Immutable records: 735
+- Source fingerprint: `50836c1e689173c12e84e93055930184510f2201cea342242b0843c65d652d61`
+- Immutable records: 753
 - Active lane heads: 0
 
 # Active Registrations
@@ -47,18 +47,18 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
-- **Verification Evidence**: [TileSet exact publication and dependency recovery](verification/2026-10/2026-10-19-tileset-publication-and-recovery.md) - Strict atlas membership, exact Image retention, desired dependency recovery, GPU coexistence and reviewed module seams.
-- **Verification Evidence**: [Image lifecycle contract repairs](verification/2026-10/2026-10-19T021717Z-image-lifecycle-contract-repairs-95901fe367a149bc90ec922ad0384a73.md) - R0 event coalescing, removal recovery, foreground admission and shared authoring revocation.
-- **Subagent Finding**: [TileSet dependency and Editor loading research](subagents/2026-10/2026-10-19T012524Z-tileset-dependency-and-editor-loading-research-768c093b92ed44b581556093dc20d059.md) - Source-confirmed Image lifecycle gaps and a reviewed sequence for coherent TileSet publication.
-- **Verification Evidence**: [Component plugin and asset contract refactor](verification/2026-10/2026-10-18T164837Z-component-plugin-and-asset-contract-refactor-b4c2497eff5d4bdb90cebe1de995ceb3.md) - Checked runtime identities and typed claims, schema closure, exact TileSet admission, and consumer migration.
-- **Verification Evidence**: [F11 hierarchy candidate cost refactor](verification/2026-10/2026-10-18T095114Z-f11-hierarchy-candidate-cost-refactor-8570db0da1ef433dbab5368a9d0f59e6.md) - Sparse candidate overlay and private validated baseline reduce measured hierarchy transaction cost while preserving raw-dirty and lifecycle contracts.
-- **Verification Evidence**: [Foundation contract refactor scoped completion](verification/2026-10/2026-10-18T064513Z-foundation-contract-refactor-scoped-completion-299571832cbc4aa28cc9d5d3743bd527.md) - Final closure, durable references, real multi-owner reconciliation and measured scale evidence complete the required foundation slice.
-- **Work Progress**: [Foundation U3 effective values and reference closure](progress/2026-10/2026-10-18T053959Z-u3-effective-closure.md) - Effective default materialization, scene/prefab/export closure, asset collection limits, and Inspector projection landed after U2.
-- **Work Progress**: [Foundation identity residency, input endpoint and font ownership repairs](progress/2026-10/2026-10-18T040444Z-foundation-identity-input-font-repairs.md) - U5, U11 and U14 code and consumer proof, remaining recursive-schema work, serial test evidence and limits.
-- **Work Progress**: [Foundation U1 transaction boundary and U6 owner-thread repair](progress/2026-10/2026-10-18T033610Z-foundation-u1-u6-transaction-and-thread-ownership.md) - Reproduced and repaired intermediate native validation and executable-owner mobility; serial owning-package and consumer evidence.
-- **Work Progress**: [Foundation fearless refactor goal and reviewed plan](progress/2026-10/2026-10-18T031900Z-foundation-refactor-goal-and-plan.md) - Reviewed dependency-ordered foundation plan, external HTML delivery, active goal and first implementation boundary.
-- **Decision**: [Agent workflow and design cleanup](decisions/2026-10/2026-10-17T152243Z-agent-workflow-and-design-cleanup-c85f611fef834769b7488de6e5ffcc15.md) - Keep engineering continuity while removing registration gates and retiring stale design entrances.
-- **Verification Evidence**: [Dear ImGui 0.21 published backend acceptance](verification/2026-10/2026-10-17T135132Z-dear-imgui-0-21-published-backend-acceptance-5cf11eaec8ea42a986d4953c4a4a00b8.md) - Published registry cohort, owned renderer mapping, native IME and Windows DX12 product qualification with bounded text-intent cadence.
+- **Verification Evidence**: [Foundation correction U1-U15 integration and review](verification/2026-10/2026-10-19-foundation-correction-completion.md) - Final source, consumer, native and review evidence with explicit deferred and platform limits.
+- **Verification Evidence**: [Foundation U13 external ordinary native runner and admitted Exit](verification/2026-10/2026-10-19-foundation-u13-public-native-runner.md) - A separately compiled panel runs through the public native entry and joins normal application retirement after authoritative Session publication.
+- **Verification Evidence**: [Foundation U12 ordinary profile-default font configuration](verification/2026-10/2026-10-19-foundation-u12-profile-defaults.md) - One ProductRecipe configures compilation and presentation through direct composition, Check, Editor Play and actual exported native startup.
+- **Work Progress**: [Foundation consumer acceptance and final integration checkpoint](progress/2026-10/2026-10-19-foundation-correction-consumer-checkpoint.md) - Public consumers and saved-data migrations pass while actual Export and external native runner proof remain active.
+- **Verification Evidence**: [Foundation U10 closed Vec2 shapes and owner migration](verification/2026-10/2026-10-19-foundation-u10-closed-vec2.md) - Finite F32 vector records retain their wire encoding with explicit saved-owner lineage and external editing evidence.
+- **Verification Evidence**: [Foundation public consumer and saved-data integration](verification/2026-10/2026-10-19-foundation-public-consumer-integration.md) - Independent Scene and Editor consumers, candidate doctests and Reference Game workflows pass after fixture corrections.
+- **Verification Evidence**: [Foundation U13 stateful native panel composition](verification/2026-10/2026-10-19-foundation-u13-stateful-panels.md) - Paired source-built panel factories own independent drafts through native startup and GPU reconstruction.
+- **Verification Evidence**: [Foundation U11 explicit recursive Inspector drafts](verification/2026-10/2026-10-19-foundation-u11-recursive-inspector.md) - Shape-driven native controls commit complete root fields through existing document authority.
+- **Verification Evidence**: [Foundation U15 concrete TileSet resource access](verification/2026-10/2026-10-19-foundation-u15-tileset-access.md) - Runtime, managed Editor and TaskUpdate share one concrete publication resource join.
+- **Verification Evidence**: [Foundation U14 aggregate input lifetimes and paused restoration](verification/2026-10/2026-10-19-foundation-u14-semantic-lifetimes.md) - One staging owner prevents normalized and synthetic presses from reviving after configuration exits.
+- **Work Progress**: [Foundation correction integration and authoring acceptance](progress/2026-10/2026-10-19-foundation-correction-integration.md) - U1-U9 focused progress, U10-U15 implementation, independent findings and remaining goal gates.
+- **Verification Evidence**: [Foundation U9 shared text content geometry](verification/2026-10/2026-10-19-foundation-u9-text-content-box.md) - Padded text measures and paints one content box while outer interaction geometry remains intact.
 
 # Integration Notes
 

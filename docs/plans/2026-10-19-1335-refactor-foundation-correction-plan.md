@@ -18,6 +18,15 @@ execution: code
 - **Execution:** Deliver independently reviewable units in dependency order. The implementation owner integrates code, migrations, focused tests, documentation and precise commits; push, PR and release publication require separate authorization.
 - **Stop conditions:** Pause the affected unit for a newly discovered product choice, an incompatible Accepted contract that has not been reconciled, or evidence invalidating its premise. Independent units may continue. A missing native platform records a qualification limit rather than a passing result.
 
+## Execution Evidence
+
+U1-U15 are implemented and committed through engine integration `bdd0e63` and external-consumer
+lint cleanup `0ca41f3`. The [final integration record](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-correction-completion.md)
+links every unit's owning evidence, final locked workspace check, public/saved-data consumers,
+actual native/Export trajectories, lint and formatting results. Formal integrated review is
+complete with zero open findings; U1-U15 are complete. Cross-platform release qualification retains
+the recorded platform limits. G1-G9 remain follow-ups with the entry triggers below.
+
 ---
 
 ## Product Contract
@@ -141,7 +150,7 @@ flowchart TB
 | Close prompt | Host issues intent/document/prompt identity | Resolve consumes exactly that prompt | Advance, cancel, failed Save or new intent invalidates the previous token |
 | Expanded Scene | Scene owner validates document/provenance coverage and association together | Prepared Scene commit installs admitted provenance | Failed replacement leaves the previous instance live |
 | Image reload | Image owner identifies the latest desired generation | Eligible ordered results reach final source/generation guards | Superseded logical handles retire independently; TaskPools retains physical work |
-| GPU resources | Live device capabilities and cumulative scope reservations admit candidates | Existing packet/submission owners retain exact resources | Failure, candidate drop and submission completion release the corresponding reservations |
+| GPU resources | Live device capabilities and cumulative scope reservations admit candidates | Existing packet/submission owners retain exact resources; committed demand accumulates for the scope | Unsubmitted candidate drop refunds demand; a new frame/transaction resets committed scope demand; submission completion retires physical holders independently |
 | Inspector | Frontend builds a complete data-only root-field draft | Document owner validates revision, shape and domain atomically | Rejected or stale drafts do not change the document or unavailable records |
 
 ```mermaid
@@ -345,6 +354,10 @@ Do not treat that possible future need as a blocker to U6 or U7.
 **Requirements:** R10, R17; B02. **Dependencies:** none.
 **Files:** `crates/nara_reflect/src/authoring.rs`, `crates/nara_reflect/tests/math_reflection.rs`, `crates/nara_reflect/tests/derive_nested.rs`, `crates/nara_scene/tests/data_authoring.rs`, `tests/fixtures/module-consumer/` and affected checked-in schema fixtures.
 **Approach:** Apply KTD6 with a closed x/y numeric shape under the stable root field. Inventory consuming schema owners and reconcile the Accepted opaque-math rule before changing the helper. Each affected owner supplies the appropriate version, predecessor and migration; document the external-owner upgrade path instead of silently rewriting all schemas.
+The [interface review](../audits/2026-10-19-interface-and-module-boundaries.md) also found that the
+public `ComponentCodec` trait has no external installation route. Make this implementation detail
+private and remove its facade/prelude exports while preserving documented closure codec registration,
+contexts and errors; exercise the existing independent manual-codec consumer.
 **Patterns:** Existing recursive closed shapes, numeric domains and owner-controlled predecessor migrations.
 **Test scenarios:**
 
@@ -447,11 +460,28 @@ When a trigger is selected, deepen the relevant item into its own implementation
 | G6 | A08 | Two regions need independent residency, or dynamic game entities need save/restore | Plan acquisition/release and save contracts separately. Prove shared Image budget charges retire by actual holders; distinguish persistent authored identity, runtime instance/incarnation and dynamic save identity. Do not serialize World, raw Entity or generated Prefab locators as a save format. |
 | G7 | A09 | Two real persistent components reuse the same domain field/newtype or closed enum | Design a constrained reusable field adapter with stable IDs, wire shape, unknown-choice behavior and owner lineage. Existing manual custom-scalar support remains valid. U10's math shape does not close this separate extension API gap. |
 | G8 | M03 | Before tile layout editing, durable per-tile metadata or tile widgets | Decide logical tile identity/remapping and coordinate-based authoring with bounded inverse history. Keep atlas-local TileIndex until the consumer requires migration. Keep gameplay occupancy and mutable encounters out of render cells. |
+| G9 | Task/API and module-boundary review | Before introducing true Future-based I/O, a latency-sensitive task consumer, or broad editor/component API expansion | Keep `nara_tasks`' current blocking-closure/cooperative-cancellation contract explicit; do not add `async fn` to owner-thread traits or hold World/close context across await. Measure owner responsiveness and evaluate existing pools first. Select an isolated Future executor or blocking adapter only when the consumer requires it, with owned-result generation/commit boundaries, wait/waker semantics and explicit drop-vs-detach policy. Split oversized private modules by existing responsibility seams before widening APIs: task runtime, app runtime, tooling workspace, reflection registry, scene patch, and large contract-test files. Prove that module moves preserve public exports, close, generation and persistence contracts. |
+
+G9's [source review and extraction map](../audits/2026-10-19-interface-and-module-boundaries.md)
+separates current semantics from future execution models. First document blocking closure jobs,
+cooperative cancellation, result terminality versus physical completion, and handle Drop behavior.
+Measure native project-open phases and Save/Reopen on a representative dependency closure and
+storage profile. If a phase blocks cancellation or exceeds its interaction budget, move transportable
+reads and pure preparation off the UI thread while retaining attempt identity, stale-result rejection,
+finite physical retirement and owner-thread publication. Extract private modules by responsibility
+as their owners change; line count alone is not an acceptance criterion.
+
+The [Pele interface and theming study](../audits/2026-10-19-pele-interface-and-theming-study.md)
+adds comparative evidence for semantic theme roles, metric-affecting invalidation and explicit
+adapter retirement. Lazy module loading does not establish off-thread rendering. This reference
+does not add a CSS engine, new widget framework or asynchronous owner interfaces to U1-U15.
 
 ### Decisions Reserved For Those Consumers
 
 The user will choose the first additional asset/domain workflow, the intended scene-travel/save behavior, and the tile identity/migration experience when those consumers enter scope.
 Native wheel/modifier vocabulary, broader material APIs and a unified module declaration remain separate triggered work.
+The async execution model (Future executor versus explicit blocking adapter), task drop/detach semantics and
+the order of private module extraction remain G9 decisions; current corrections do not preselect them.
 These choices do not block current corrections and must not be preselected by speculative infrastructure.
 
 ---
@@ -519,6 +549,6 @@ Remove the replaced ambiguous API and abandoned experimental code; retain no com
 Commit only intended changes with a precise Conventional Commit.
 
 The active correction scope is complete when U1-U15 meet their verification contracts and each A/B/M item still resolves to its implementation evidence or trigger entry.
-Untriggered G1-G8 items remain explicit follow-ups and are not reported as repaired.
+Untriggered G1-G9 items remain explicit follow-ups and are not reported as repaired.
 If a platform is unavailable, distinguish implementation completion from missing native qualification and carry the latter visibly to handoff.
 The final review checks architecture/API ownership and correctness without expanding into deferred tile tools or a new general engine framework.

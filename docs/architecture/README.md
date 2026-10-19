@@ -32,6 +32,7 @@ their completion conditions do not automatically apply to later tasks.
 | Project creation, compiled schema, editing, Check and Export | [Product recipe guide](../guides/rust-product-recipes.md) |
 | Persistent schema, codecs and custom scalar authoring | [Component guide](../guides/persistent-components.md) |
 | Workspace/frontend boundaries, creation templates, panels and native views | [ADR 0118](adr/0118-editor-workspaces-frontends-and-creation-templates.md); [native qualification procedure](../verification/native-editor-qualification.md) |
+| Source-built stateful native panel composition | [Editor panel guide](../guides/editor-panels.md) |
 | Image import and authoring publication | [ADR 0115](adr/0115-editor-image-import-metadata-and-authoring-publication.md) |
 | Supervised external Play and saved-source admission | [ADR 0116](adr/0116-standalone-supervised-editor-play.md) |
 | Historical plan and verification lineage | [Engineering memory](../knowledge/engineering/index.md) and [UI plan history](../plans/ui-program-roadmap.md) |
@@ -55,6 +56,11 @@ The [expanded foundation audit](../audits/2026-10-19-foundation-audit-expansion.
 focused research lanes across tasks, components, reflection, extensions, runtime, Editor, input,
 UI/text, filesystem, assets, rendering and module integration, with independent challenge and
 explicit correctness/capability distinctions.
+
+The [interface and module review](../audits/2026-10-19-interface-and-module-boundaries.md)
+separates synchronous owner contracts from triggered asynchronous preparation and private module
+extraction. The [Pele study](../audits/2026-10-19-pele-interface-and-theming-study.md) adds a focused
+comparison of semantic theme tokens, layout invalidation and adapter lifecycle ownership.
 
 The [UI foundation design](ui-foundation-design.md),
 [UI boundary study](ui-product-boundaries-editor-dogfood-and-porting-strategy.md), and

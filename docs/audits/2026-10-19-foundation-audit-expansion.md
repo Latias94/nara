@@ -1,12 +1,70 @@
 # Expanded Foundation Audit
 
-Status: twelve research lanes and independent challenge complete; recommendations not implemented.
+Status: original twelve-lane research and independent challenge complete; subsequent correction
+evidence is summarized below. The original B01-B14 bodies retain their reviewed baseline and
+then-proposed acceptance. U1-U15's focused consumer gates, final locked workspace
+all-features/all-targets check, external-consumer lint and five post-fix critical native tests pass.
+Formal integrated review is complete with zero open findings; the U1-U15 correction scope is complete.
 
 The [foundation correction plan](../plans/2026-10-19-1335-refactor-foundation-correction-plan.md)
 maps these B findings, the earlier A findings and module seams to implementation units or explicit
-entry triggers. It does not change the evidence or completion claims of this audit.
+entry triggers. The plan governs current work; the baseline findings and subsequent execution
+results are separate records.
 
-## Scope And Evidence
+## Current Finding Disposition
+
+The [final integration record](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-correction-completion.md)
+extends these focused results with the final batch gates. Counts belong to overlapping selected
+cohorts, not one aggregate test total. Earlier immutable evidence shards retain the pending items
+that existed when captured; later results extend them.
+
+| Finding | Current disposition | Implementation evidence or entry trigger |
+| --- | --- | --- |
+| B01 | U1 corrected in `2713396`: owner-issued prompt identity rejects replay against a successor document | [Prompt replay, native widget and persistence consumers](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-u1-close-prompt.md) |
+| B02 | U10 committed in `b0648b6`: closed Vec2 shapes and explicit owner/component migration; focused reflection 68, external consumers 12 and Reference Game 38 passed. The built `authoring_bundle` executable subsequently passed `--check`; this was not a new Cargo test run | [U10 owner/saved-data evidence](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-u10-closed-vec2.md), [later public-consumer results](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-public-consumer-integration.md); final batch gates and review pass as recorded in the integration evidence above |
+| B03 | U11 corrected in `7bec88f`: explicit Optional/record/scalar-container drafts. Editor ordinary cohort 147 passed, including second-item removal identity; actual native Inspector Save/Reopen passed in `8a069d68` | [Recursive Inspector evidence](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-u11-recursive-inspector.md) |
+| B04 | U12 corrected in `ff64897`: ordinary root/Check/Editor Play/renamed-root consumers passed. Actual compiled Check, Release Export with two exact product observations and packaged Headless/Desktop first presentation passed in `39fba8cf` (929.384 s, including cold builds) | [U12 profile-default evidence](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-u12-profile-defaults.md); focused acceptance is complete, with final plan-wide gates separate |
+| B05 | G1 follow-up; no general nonblocking capture-disposal guarantee is claimed | Before a latency-sensitive task submitter, characterize blocking Drop and finite rejected-work/retirement ownership |
+| B06 | G1 follow-up; current product impact remains unmeasured | Measure queue admission workload and P95/P99/allocations/lock time before changing queue algorithms |
+| B07 | G3 follow-up; background pools are not a scoped frame-job system | A real CPU frame-budget miss first evaluates existing Bevy schedule/query parallelism and one worker budget |
+| B08 | U14 corrected in `dbe2900`: aggregate semantic actions and non-reverting observed lifetimes. Input/Gameplay 97 and Reference Game 38 passed, including context restoration, fresh press and multi-tick movement | [Domain evidence](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-u14-semantic-lifetimes.md), [later gameplay consumer results](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-public-consumer-integration.md) |
+| B09 | U8 corrected in `eff95c2`: Linux FIFO deadline cohort 64 passed; Windows locked crate cohort 64 passed with three platform tests skipped | [Filesystem evidence](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-u8-unix-leaf-admission.md). Linux used original sources through a temporary standalone manifest, not root locked-workspace qualification |
+| B10 | U9 corrected in `1ff253a`: kernel/render 123 passed and the neutral layout gallery passed at scales 1.0 and 1.25 | [Shared text content-box evidence](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-u9-text-content-box.md) |
+| B11 | G2 follow-up; last-good bounded rejection is retained | Long-lived glyph churn or a measured authoring/frame/cache-pressure problem selects working-set recovery and immutable-old-packet proof |
+| B12 | U2 corrected in `8b3e26b`: Image library 75 passed; logical supersession remains separate from physical task retirement | [Image/device evidence](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-u2-u3-recovery-and-device-admission.md) |
+| B13 | U3 corrected in `ebbe005`: live requested-device admission, WGPU 115 passed and Windows/DX12 extent/reconstruction evidence | [Device evidence](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-u2-u3-recovery-and-device-admission.md); actual allocation OOM was not injected |
+| B14 | U4 corrected in `0b078a0` and `964d25c`: WGPU 122 passed; mixed Sprite/UI and two-target native scope cases passed separately. Physical completion does not refund committed demand within the same scope | [Cumulative reservation and completion evidence](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-u4-instance-budget.md) |
+
+Earlier A/M joins also have focused results: U5 associated Scene candidates (`8cd3eb6`) passed
+Scene 194, root 138, public boundary selection 4, candidate doctests 2 and the later external/Reference
+Game consumers; U6/U7 (`5419b10`) passed the 242-test domain cohort and public/renamed-root selection;
+U15 (`31b18d1`) passed concrete resource-join and root 224-test integration, including hidden-Scene
+retarget/revocation. See [U5](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-u5-scene-candidate.md),
+[U6/U7](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-u6-u7-managed-schedules.md),
+[U15](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-u15-tileset-access.md) and
+[public consumer integration](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-public-consumer-integration.md).
+A06/U13 now closes its focused external acceptance in `e676117`: the separately compiled
+contribution's ordinary public native runner passed `2ff99d9d` in 1.240 s, joining the earlier
+retained-panel reconstruction and embedded interaction evidence. That trajectory exposed an
+Application ownership gap after Session-accepted Exit. The owning correction adopts existing
+ExitProcess retirement after authoritative Session publication; all 15 application contracts
+passed in `eb01fe90`, including dirty Cancel/acknowledge/new Exit/Discard. The
+[latest U13 native-runner evidence](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-u13-public-native-runner.md)
+records both failed attempts, the real fix and the passing normal cleanup; it extends the earlier
+[state/reconstruction snapshot](../knowledge/engineering/verification/2026-10/2026-10-19-foundation-u13-stateful-panels.md).
+Independent correctness, reliability and adversarial follow-up found no remaining issue in that
+fix. The final batch additionally passes five actual native critical trajectories, including
+recursive Inspector persistence and panel-state reconstruction. The linked final integration
+record captures the completed ten-lens formal review and its source/platform limits.
+
+The [follow-up interface review](2026-10-19-interface-and-module-boundaries.md) adds G9 to the correction plan: Nara's task pool is a blocking
+closure pool with cooperative cancellation, not a Future executor, and current owner-thread
+publication seams should remain synchronous. It also records module-boundary candidates before
+any async I/O or public trait expansion is introduced. The [Pele source study](2026-10-19-pele-interface-and-theming-study.md)
+adds comparative evidence for theme dependencies and local lifecycle ownership only; it introduces
+no dependency, CSS engine or executor and does not expand U1-U15 or close G1-G9 follow-ups.
+
+## Original Research Scope And Evidence
 
 This extends the [Bevy/Godot architecture comparison](2026-10-19-nara-bevy-godot-architecture-review.md)
 and its A01-A09 findings. The [research lane map](../plans/2026-10-19-foundation-audit-expansion.md)
@@ -16,8 +74,10 @@ and owns the report. At most three child agents run concurrently because of the 
 Source baseline: Nara `d88a96f`, whose runtime code remains `835c5e4`; Bevy
 `85503941e488152711a4695bbe248e9ed9f453fc`; Godot
 `81ab961f91066a63bcbf3ec340962bb1a1ada558`. Reference-engine paths below include `repo-ref/`.
-Existing untracked files were preserved. No runtime behavior or Accepted ADR is changed by this
-review. Proposed acceptance cases are future verification, not tests run in this audit.
+Existing untracked files were preserved. No runtime behavior or Accepted ADR changed during that
+original research stage. Its proposed acceptance cases were not tests executed at that stage.
+Subsequent implementation changed source and owning ADRs; the current disposition above links
+the actual execution evidence without reclassifying the baseline as a reproduced test run.
 
 ## Verdict And Coverage
 
@@ -25,7 +85,8 @@ Retain the current ECS, component/plugin split, frozen definitions and managed o
 results are fourteen distinct items: three P1 safety/recovery recommendations and eleven P2
 correctness, extension or triggered-capability items. This is not fourteen newly reproduced bugs.
 P2 performance claims below identify source-level work or missing capability without asserting a
-measured frame regression. Earlier A01-A09 remain open recommendations in the linked comparison.
+measured frame regression. Earlier A01-A09 describe the comparison baseline; their current
+implementation or follow-up disposition belongs to the correction plan and evidence above.
 
 | Lane | Subject | New result |
 | --- | --- | --- |
@@ -487,6 +548,19 @@ Sprite/UI passes and two Editor targets.
 view data (`repo-ref/bevy/crates/bevy_sprite_render/src/render/mod.rs:584`, `591`, `663`, `704`).
 This supports aggregate ownership, not a claim that Bevy enforces the same 64 MiB hard limit.
 
+**Implementation follow-up:** U4 carries one private `InstanceBudget` owner through the Runtime
+frame or Editor Host render transaction. Each prepared submitter draw owns an RAII reservation;
+failed preparation drops it, successful queue submission commits it, and the next scope replaces
+the owner while old physical holders keep their completed scope charge. `backend.rs`,
+`editor_execution.rs`, `lib.rs`, `quad.rs` and the private `budget.rs` implementation preserve
+the existing target presentation boundaries. The owner-level backend suite covers two 40 MiB
+admissions, scope replacement, overflow, drop/commit and recovery. Real mixed Sprite/UI readback
+and two-target native Editor submission tests also pass using a private reduced ceiling. The
+production ceiling stays 64 MiB; there is no public test-only batch interface. The final regression
+joining scope reset with older physical completion tokens passed in the complete WGPU all-features
+cohort (122 passed, three native cases ignored). The new two-target native case passed separately;
+the plan-wide workspace gate remains pending.
+
 ## Reviewed Without New Independent Findings
 
 - **J02 component transactions:** persistent candidates bind to a frozen registry; lifecycle-free
@@ -563,10 +637,11 @@ real public consumer, its failure/recovery path and removal of the obsolete work
 features do not justify speculative generic executors, native rollback, package kernels or cache
 frameworks.
 
-## Verification And Artifacts
+## Original Research Verification And Artifacts
 
-- Static source review and independent challenge only; no new nextest suite, timing benchmark,
-  Linux FIFO execution, native GPU readback or platform qualification was run.
+- At the original research stage: static source review and independent challenge only; no new
+  nextest suite, timing benchmark, Linux FIFO execution, native GPU readback or platform
+  qualification was run. Later executed results are recorded separately above.
 - One serial `cargo metadata --locked --format-version 1 --all-features` confirmed the actual
   Bevy ECS feature cohort. Cargo downloaded a dependency into its cache; project runtime files
   and the lockfile were not changed.
