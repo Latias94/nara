@@ -170,9 +170,17 @@ pub enum FixedUpdateSet {
 pub enum ScheduleCompatibilityError {
     #[error("public schedule {schedule:?} requires automatic deferred insertion")]
     AutomaticDeferredInsertionDisabled { schedule: CoreStage },
-    #[error("public schedule {schedule:?} failed to build: {message}")]
+}
+
+/// An installed schedule failed graph admission before any Startup systems could execute.
+///
+/// Every installed graph is admitted, including custom schedules without public ordering anchors.
+/// Anchor-specific deferred-command policy remains a separate [`ScheduleCompatibilityError`].
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum ScheduleGraphError {
+    #[error("schedule {schedule:?} failed to build: {message}")]
     BuildFailed {
-        schedule: CoreStage,
+        schedule: InternedScheduleLabel,
         message: String,
     },
 }
@@ -1293,9 +1301,10 @@ impl App {
 
     /// Replaces the build settings for a registered or newly initialized schedule.
     ///
-    /// Built-in schedules remain subject to Nara's seal-time compatibility validation. This is the
-    /// controlled configuration path for build policy; raw mutable access is reserved for custom
-    /// schedules so callers cannot replace a built-in executor, graph, or build-pass inventory.
+    /// Every installed graph is built fallibly at sealing. Public-anchor schedules also remain
+    /// subject to Nara's deferred-command compatibility policy. This is the controlled configuration
+    /// path for build policy; raw mutable access is reserved for custom schedules so callers cannot
+    /// replace a built-in executor, graph, or build-pass inventory.
     pub fn set_schedule_build_settings(
         &mut self,
         schedule: impl ScheduleLabel,
@@ -1449,7 +1458,7 @@ impl App {
         Ok(self)
     }
 
-    /// Freezes configuration for advanced Host composition without executing startup.
+    /// Freezes configuration and admits every installed schedule graph without executing startup.
     ///
     /// Ordinary execution consumes configuration directly through [`RuntimeInstance::start`].
     #[doc(hidden)]
@@ -1513,7 +1522,10 @@ impl App {
         }
 
         if self.owner.plugin_lifecycle == PluginLifecycleState::Finishing {
-            if let Err(error) = self.validate_public_schedule_compatibility() {
+            if let Err(error) = self
+                .validate_public_schedule_compatibility()
+                .and_then(|()| self.initialize_installed_schedules())
+            {
                 self.owner.shutdown_plugins_internal();
                 return Err(error);
             }
@@ -1563,10 +1575,17 @@ impl App {
             }
             public_schedule.set_build_settings(build_settings);
             public_schedule.set_apply_final_deferred(true);
-            if let Err(error) = public_schedule.initialize(&mut state.world) {
-                return Err(ScheduleCompatibilityError::BuildFailed {
-                    schedule,
-                    message: error.to_string(public_schedule.graph(), &state.world),
+        }
+        Ok(())
+    }
+
+    fn initialize_installed_schedules(&mut self) -> Result<(), PluginError> {
+        let state = &mut *self.owner;
+        for (_, schedule) in state.schedules.iter_mut() {
+            if let Err(error) = schedule.initialize(&mut state.world) {
+                return Err(ScheduleGraphError::BuildFailed {
+                    schedule: schedule.label(),
+                    message: error.to_string(schedule.graph(), &state.world),
                 }
                 .into());
             }

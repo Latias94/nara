@@ -260,10 +260,13 @@ mod tests {
 
     use super::*;
     use nara_app::{
-        CoreStage, PluginError, RuntimeFaultKind, RuntimeFaultReporter, ScheduleCompatibilityError,
+        CoreStage, PluginError, RuntimeFaultKind, RuntimeFaultReporter, ScheduleGraphError,
     };
     use nara_core::{ByteLimit, ItemLimit};
-    use nara_ecs::{Res, ResMut, Resource, World, schedule::IntoScheduleConfigs};
+    use nara_ecs::{
+        Res, ResMut, Resource, World,
+        schedule::{IntoScheduleConfigs, ScheduleLabel},
+    };
     use nara_identity::{
         EntityLookup, PersistentRuntimeId, PersistentRuntimeNamespaceId,
         PersistentRuntimeReference, RuntimeEntityIncarnation, SceneEntityId, SceneInstanceId,
@@ -1531,10 +1534,10 @@ mod tests {
 
         assert!(matches!(
             error,
-            PluginError::ScheduleCompatibility(ScheduleCompatibilityError::BuildFailed {
-                schedule: CoreStage::FixedUpdate,
+            PluginError::ScheduleGraph(ScheduleGraphError::BuildFailed {
+                schedule,
                 ..
-            })
+            }) if schedule == CoreStage::FixedUpdate.intern()
         ));
     }
 

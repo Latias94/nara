@@ -1528,6 +1528,7 @@ fn plugin_hook_failure_report(error: &PluginError) -> DiagnosticReport {
         | PluginError::DuplicateDriverPort { .. }
         | PluginError::RawBuiltInScheduleMutationForbidden
         | PluginError::ScheduleCompatibility(_)
+        | PluginError::ScheduleGraph(_)
         | PluginError::ShutdownObligationOutsideBuild
         | PluginError::LifecycleShutdown
         | PluginError::LifecyclePoisoned
@@ -1543,6 +1544,7 @@ fn plugin_error_reason(error: &PluginError) -> &'static str {
         PluginError::DuplicateDriverPort { .. } => "duplicate-driver-port",
         PluginError::RawBuiltInScheduleMutationForbidden => "raw-schedule-mutation-forbidden",
         PluginError::ScheduleCompatibility(_) => "schedule-compatibility",
+        PluginError::ScheduleGraph(_) => "schedule-graph",
         PluginError::SetupFailed { .. } => "setup-failed",
         PluginError::ComponentRegistrationFailed { .. } => "component-registration-failed",
         PluginError::HookPanicked { .. } => "hook-panicked",

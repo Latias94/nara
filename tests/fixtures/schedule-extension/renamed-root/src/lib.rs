@@ -11,12 +11,12 @@ mod tests {
     use engine::{
         app::{
             App, CoreStage, FixedTime, FixedUpdateSet, RuntimeFaultKind, RuntimeFaultReporter,
-            RuntimeInstance,
+            RuntimeInstance, RuntimeScheduleError, RealTime,
         },
         ecs::{
             Commands, Component, Query, Res, ResMut, Resource, ScheduleLabel, SystemSet,
             error::{BevyError, ErrorContext, FallbackErrorHandler},
-            schedule::IntoScheduleConfigs,
+            schedule::{IntoScheduleConfigs, ScheduleLabel as ScheduleLabelTrait},
         },
         gameplay::{
             GameplayCommandBatch, GameplayCommandDraft, GameplayCommandIngressSource,
@@ -32,6 +32,47 @@ mod tests {
         BeforeConsume,
         ConsumeMember,
         CaptureMember,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
+    enum CustomSchedule {
+        Explicit,
+        Unrequested,
+        Missing,
+    }
+
+    #[derive(Debug, Default, Resource)]
+    struct CustomTrace(Vec<&'static str>);
+
+    #[test]
+    fn managed_owner_executes_custom_schedule_through_the_renamed_root() {
+        let mut app = App::new();
+        app.init_resource::<CustomTrace>().unwrap();
+        app.add_systems(CoreStage::Update, |mut trace: ResMut<CustomTrace>| trace.0.push("update"))
+            .unwrap();
+        app.add_systems(CustomSchedule::Explicit, |mut trace: ResMut<CustomTrace>| trace.0.push("custom"))
+            .unwrap();
+        app.add_systems(CustomSchedule::Unrequested, |mut trace: ResMut<CustomTrace>| trace.0.push("unrequested"))
+            .unwrap();
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let real = *runtime.world().resource::<RealTime>();
+        let tick = runtime.world().resource::<FixedTime>().tick();
+
+        runtime.run_schedule(CustomSchedule::Explicit).unwrap();
+
+        assert_eq!(runtime.world().resource::<CustomTrace>().0, ["update", "custom"]);
+        assert_eq!(*runtime.world().resource::<RealTime>(), real);
+        assert_eq!(runtime.world().resource::<FixedTime>().tick(), tick);
+        assert_eq!(runtime.run_schedule(CustomSchedule::Missing), Err(RuntimeScheduleError::Missing {
+            schedule: CustomSchedule::Missing.intern(),
+        }));
+        assert_eq!(runtime.run_schedule(CoreStage::Update), Err(RuntimeScheduleError::BuiltIn {
+            schedule: CoreStage::Update.intern(),
+        }));
+        runtime.drive(std::time::Duration::ZERO).unwrap();
+        assert_eq!(runtime.world().resource::<CustomTrace>().0, ["update", "custom", "update"]);
+        runtime.finish().unwrap();
     }
 
     #[derive(Debug, Default, Resource)]

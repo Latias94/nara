@@ -98,13 +98,15 @@ ordering and verifies that every referenced set anchor is installed in the inten
 that the schedule-label participation point exists. An absent set or a set in another schedule does
 not silently create an ordering edge. Renaming, splitting,
 merging, or changing the semantic completion point of a public anchor is a compatibility change.
-Before `App::seal` succeeds, the App must build and validate every schedule containing a public
-anchor, including the required set graph and deferred-command insertion policy. A plugin may
-configure an App before sealing, but a graph/settings change that invalidates an anchor contract
-rejects sealing; after sealing, public APIs expose no schedule-configuration mutation. Custom
-schedules remain owner-defined and are not constrained by this validation unless their owner
-publishes its own semantic anchors. This policy does not add another scheduler wrapper, a global
-stage DSL, or public access to every first-party system.
+Before `App::seal` succeeds, the App must initialize every installed schedule graph through Bevy's
+fallible build path, after all plugin finish hooks and before any Startup system executes. Invalid
+Startup, frame or custom graphs return a typed graph error with their actual schedule label. The
+existing failed-construction owner retains its shutdown obligations and incomplete retirement.
+Public semantic anchors additionally require their declared set graph and deferred-command policy.
+After sealing, public APIs expose no schedule-configuration mutation. Custom schedules remain
+owner-defined and may choose different deferred policies unless their owner publishes semantic
+anchors; their graph validity is still admitted before Startup. This policy does not add another
+scheduler wrapper, a global stage DSL, or public access to every first-party system.
 
 Raw mutable `Schedule` access is available only for custom schedules. Engine-owned startup and
 frame schedules use `App::add_systems`, `App::configure_sets`, and explicit controlled policy
@@ -208,9 +210,12 @@ visibility.
 - `nara_app` is the owner of engine startup and frame semantics.
 - `nara_app` can use `bevy_ecs::Schedule` internally or through `nara_ecs`.
 - Built-in startup/frame schedules and arbitrary custom schedules share one type-directed authoring
-  Interface. `run_schedule` is the explicit custom driver, seals before executing a registered
-  custom schedule, and rejects built-in schedule labels; built-in schedules remain exclusively
-  driven by the App lifecycle.
+  interface. `RuntimeInstance::run_schedule` executes an installed custom schedule explicitly through
+  the already admitted owner. It requires Running state without pending controls, rejects built-in
+  or missing labels, and preserves frame/tick clocks and automatic order. The same managed authority
+  and sticky-fault checks apply; the exclusive owner borrow prevents safe reentrant execution.
+  Built-in schedules remain exclusively driven by the Runtime lifecycle, and raw App execution is
+  not restored.
 - `get_schedule_mut` is a custom-schedule escape hatch. Built-in schedules expose immutable
   inspection plus controlled App configuration, not raw executor/graph/build-pass mutation.
 - Third-party domains order against documented semantic anchors. Concrete first-party systems,

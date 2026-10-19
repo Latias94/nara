@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Formatter};
 use nara_ecs::{Resource, World};
 use thiserror::Error;
 
-use crate::{App, RuntimeCloseParticipantId, ScheduleCompatibilityError};
+use crate::{App, RuntimeCloseParticipantId, ScheduleCompatibilityError, ScheduleGraphError};
 
 mod definition;
 mod fingerprint;
@@ -339,6 +339,8 @@ pub enum PluginError {
     RawBuiltInScheduleMutationForbidden,
     #[error("schedule compatibility validation failed: {0}")]
     ScheduleCompatibility(#[from] ScheduleCompatibilityError),
+    #[error("schedule graph admission failed: {0}")]
+    ScheduleGraph(#[from] ScheduleGraphError),
     #[error("plugin {plugin} failed to initialize: {message}")]
     SetupFailed { plugin: PluginId, message: String },
     #[error("plugin {plugin} failed to register component {component}: {message}")]

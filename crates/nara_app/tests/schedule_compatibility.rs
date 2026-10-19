@@ -2,9 +2,13 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use nara_app::{
     App, CoreStage, FixedTime, PluginError, RuntimeInstance, ScheduleCompatibilityError,
-    StartupStage,
+    ScheduleGraphError, StartupStage,
 };
-use nara_ecs::{Resource, SystemSet, schedule::IntoScheduleConfigs, system::Commands};
+use nara_ecs::{
+    Resource, SystemSet,
+    schedule::{IntoScheduleConfigs, ScheduleLabel},
+    system::Commands,
+};
 
 #[derive(Resource)]
 struct FinalDeferredApplied;
@@ -80,10 +84,10 @@ fn seal_rejects_invalid_public_anchor_graph_without_panicking() {
     let error = sealed.unwrap().unwrap_err();
     assert!(matches!(
         error,
-        PluginError::ScheduleCompatibility(ScheduleCompatibilityError::BuildFailed {
-            schedule: CoreStage::FixedUpdate,
+        PluginError::ScheduleGraph(ScheduleGraphError::BuildFailed {
+            schedule,
             ..
-        })
+        }) if schedule == CoreStage::FixedUpdate.intern()
     ));
 }
 
@@ -111,10 +115,10 @@ fn seal_rejects_invalid_cleanup_anchor_graph_without_panicking() {
     let error = sealed.unwrap().unwrap_err();
     assert!(matches!(
         error,
-        PluginError::ScheduleCompatibility(ScheduleCompatibilityError::BuildFailed {
-            schedule: CoreStage::Cleanup,
+        PluginError::ScheduleGraph(ScheduleGraphError::BuildFailed {
+            schedule,
             ..
-        })
+        }) if schedule == CoreStage::Cleanup.intern()
     ));
 }
 

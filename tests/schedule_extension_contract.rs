@@ -77,3 +77,49 @@ fn renamed_root_fixture_observes_the_public_anchor_contract() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[cfg(feature = "runtime-core")]
+#[test]
+fn public_root_consumer_can_execute_an_installed_custom_schedule() {
+    use nara::{
+        app::{App, CoreStage, FixedTime, RealTime, RuntimeInstance},
+        ecs::{ResMut, Resource, ScheduleLabel},
+    };
+    use std::time::Duration;
+
+    #[derive(Clone, Debug, PartialEq, Eq, Hash, ScheduleLabel)]
+    struct DomainSchedule;
+    #[derive(Clone, Debug, PartialEq, Eq, Hash, ScheduleLabel)]
+    struct OtherSchedule;
+    #[derive(Default, Resource)]
+    struct Runs(Vec<&'static str>);
+
+    let mut app = App::new();
+    app.init_resource::<Runs>().unwrap();
+    app.add_systems(CoreStage::Update, |mut runs: ResMut<Runs>| {
+        runs.0.push("update")
+    })
+    .unwrap();
+    app.add_systems(DomainSchedule, |mut runs: ResMut<Runs>| {
+        runs.0.push("custom")
+    })
+    .unwrap();
+    app.add_systems(OtherSchedule, |mut runs: ResMut<Runs>| runs.0.push("other"))
+        .unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+    let frame = runtime.world().resource::<RealTime>().frame;
+    let tick = runtime.world().resource::<FixedTime>().tick();
+
+    runtime.run_schedule(DomainSchedule).unwrap();
+
+    assert_eq!(runtime.world().resource::<Runs>().0, ["update", "custom"]);
+    assert_eq!(runtime.world().resource::<RealTime>().frame, frame);
+    assert_eq!(runtime.world().resource::<FixedTime>().tick(), tick);
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(
+        runtime.world().resource::<Runs>().0,
+        ["update", "custom", "update"]
+    );
+    runtime.finish().unwrap();
+}

@@ -20,7 +20,7 @@ use nara_ecs::{
     component::Mutable,
     lifecycle::HookContext,
     observer::Observer,
-    schedule::{IntoScheduleConfigs, Schedule, Schedules},
+    schedule::{InternedScheduleLabel, IntoScheduleConfigs, Schedule, ScheduleLabel, Schedules},
     world::DeferredWorld,
 };
 use thiserror::Error;
@@ -2148,6 +2148,34 @@ impl RuntimeDriveError {
     }
 }
 
+/// Rejection or managed fault from one explicit custom-schedule execution.
+#[derive(Debug, Error, Clone, PartialEq)]
+pub enum RuntimeScheduleError {
+    #[error("custom schedule execution is unavailable while runtime state is {state:?}")]
+    Unavailable { state: RuntimeState },
+    #[error("custom schedule execution is unavailable while a runtime control is pending")]
+    ControlPending,
+    #[error("built-in schedule {schedule:?} is driven exclusively by the runtime lifecycle")]
+    BuiltIn { schedule: InternedScheduleLabel },
+    #[error("custom schedule {schedule:?} is not installed")]
+    Missing { schedule: InternedScheduleLabel },
+    #[error("custom schedule execution faulted")]
+    Faulted { fault: RuntimeFault },
+}
+
+impl RuntimeScheduleError {
+    #[must_use]
+    pub const fn fault(&self) -> Option<&RuntimeFault> {
+        match self {
+            Self::Faulted { fault } => Some(fault),
+            Self::Unavailable { .. }
+            | Self::ControlPending
+            | Self::BuiltIn { .. }
+            | Self::Missing { .. } => None,
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum RuntimeStartError {
     #[error("runtime capacity reservation failed: {0}")]
@@ -2415,6 +2443,58 @@ impl RuntimeInstance {
     #[must_use]
     pub fn world(&self) -> &World {
         &self.owner.world
+    }
+
+    /// Executes one installed custom schedule between managed drives.
+    ///
+    /// The runtime must be Running with no pending control. Built-in startup, frame and cleanup
+    /// schedules remain exclusive to the automatic lifecycle. Execution uses the same authority,
+    /// deferred-command and sticky-fault boundaries as an automatic schedule, without advancing
+    /// frame/tick clocks, clearing change trackers or adding this schedule to automatic frame order.
+    /// A custom schedule retains its configured deferred-command policy.
+    ///
+    /// This exclusive owner borrow prevents reentrant execution. Systems cannot obtain the owner
+    /// through their World, and this entry exposes neither a mutable World nor a driver callback.
+    ///
+    /// # Errors
+    ///
+    /// Returns a rejection before systems execute for an unavailable state, pending control,
+    /// built-in label or absent custom schedule. A managed execution fault is retained by the
+    /// runtime and returned as [`RuntimeScheduleError::Faulted`]; ordinary Stop/Close remains
+    /// available through [`Self::request_control`] and [`Self::drive`].
+    pub fn run_schedule(
+        &mut self,
+        schedule: impl ScheduleLabel,
+    ) -> Result<(), RuntimeScheduleError> {
+        let state = self.state();
+        if state != RuntimeState::Running {
+            return Err(RuntimeScheduleError::Unavailable { state });
+        }
+        if self.pending_control.is_some() {
+            return Err(RuntimeScheduleError::ControlPending);
+        }
+        let schedule = schedule.intern();
+        if crate::is_built_in_schedule(schedule) {
+            return Err(RuntimeScheduleError::BuiltIn { schedule });
+        }
+        if !self.owner.schedules.contains(schedule) {
+            return Err(RuntimeScheduleError::Missing { schedule });
+        }
+
+        let fault_route = self.owner.fault_route_token();
+        let result = with_runtime_system_fault_capture(fault_route, || {
+            self.owner.run_managed_schedule(schedule)
+        });
+        let fault = match result {
+            Ok(Ok(())) => self.owner.reporter().fault(),
+            Ok(Err(error)) => Some(RuntimeFault::app(error)),
+            Err(fault) => Some(fault),
+        };
+        if let Some(fault) = fault {
+            let RuntimeDriveError::Faulted { fault } = self.enter_fault(fault);
+            return Err(RuntimeScheduleError::Faulted { fault });
+        }
+        Ok(())
     }
 
     #[cfg(test)]
