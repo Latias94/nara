@@ -46,6 +46,10 @@ The [post-publication architecture review](../audits/2026-10-19-post-publication
 records the TileSet/Image corrections and the remaining concrete module-interface refactor order.
 Its implementation and verification limits remain separate from future tile authoring tools.
 
+The [Bevy/Godot architecture comparison](../audits/2026-10-19-nara-bevy-godot-architecture-review.md)
+records current execution/Scene interface hazards and the workflow triggers for asset, Editor,
+schema and residency refactors. It is source-review evidence, not a new architecture contract.
+
 The [UI foundation design](ui-foundation-design.md),
 [UI boundary study](ui-product-boundaries-editor-dogfood-and-porting-strategy.md), and
 [render pressure matrix](render-capability-pressure-matrix.md) provide design context when a task
