@@ -1157,6 +1157,8 @@ pub(crate) struct AuthoringDocumentState {
     kind: AuthoringDocumentKind,
     readiness: AuthoringDocumentReadiness,
     record_facts: Vec<AuthoringRecordFact>,
+    available_direct_records:
+        BTreeMap<SceneEntityId, BTreeMap<ComponentTypeId, ComponentSchemaVersion>>,
     unavailable_manifest: UnavailableRecordManifest,
     diagnostics: DiagnosticReport,
     basis: Arc<AuthoringClassificationBasis>,
@@ -1203,24 +1205,13 @@ impl AuthoringDocumentState {
         &self,
         entity: &SceneEntityId,
         component: &ComponentTypeId,
-        version: ComponentSchemaVersion,
     ) -> Option<&ComponentSchema> {
-        let available = self.record_facts.iter().any(|fact| {
-            fact.readiness == AuthoringRecordReadiness::Available
-                && &fact.component == component
-                && matches!(
-                    &fact.location,
-                    AuthoringRecordLocation::EntityComponent { entity: owner } if owner == entity
-                )
-        });
-        if !available {
-            return None;
-        }
+        let version = self.available_direct_records.get(entity)?.get(component)?;
         self.basis
             .schemas
             .get(component)
             .map(|entry| &entry.schema)
-            .filter(|schema| schema.version() == version)
+            .filter(|schema| schema.version() == *version)
     }
 
     pub(crate) const fn unavailable_manifest(&self) -> &UnavailableRecordManifest {
@@ -1550,11 +1541,25 @@ fn classify_scene_document(
     } else {
         AuthoringDocumentReadiness::Degraded
     };
+    // The state and its document are published together. Index only exact direct Available
+    // facts so schema projection needs neither a document scan nor a second fact scan.
+    let mut available_direct_records = BTreeMap::<_, BTreeMap<_, _>>::new();
+    for fact in &record_facts {
+        if fact.readiness == AuthoringRecordReadiness::Available
+            && let AuthoringRecordLocation::EntityComponent { entity } = &fact.location
+        {
+            available_direct_records
+                .entry(entity.clone())
+                .or_default()
+                .insert(fact.component.clone(), fact.version);
+        }
+    }
     Ok(AuthoringDocumentState {
         source,
         kind,
         readiness,
         record_facts,
+        available_direct_records,
         unavailable_manifest,
         diagnostics,
         basis,

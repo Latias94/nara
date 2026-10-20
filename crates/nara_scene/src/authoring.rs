@@ -659,16 +659,9 @@ impl PrefabAuthoringSession {
         entity: &crate::SceneEntityId,
         component: &nara_reflect::ComponentTypeId,
     ) -> Option<&nara_reflect::ComponentSchema> {
-        let record = self
-            .document
-            .entities
-            .iter()
-            .find(|record| &record.id == entity)?
-            .components
-            .get(component)?;
         self.authority
             .published()?
-            .available_component_schema(entity, component, record.version)
+            .available_component_schema(entity, component)
     }
     #[must_use]
     pub fn new(document: PrefabDocument) -> Self {
@@ -1262,16 +1255,9 @@ impl SceneAuthoringSession {
         entity: &crate::SceneEntityId,
         component: &nara_reflect::ComponentTypeId,
     ) -> Option<&nara_reflect::ComponentSchema> {
-        let record = self
-            .document
-            .entities
-            .iter()
-            .find(|record| &record.id == entity)?
-            .components
-            .get(component)?;
         self.authority
             .published()?
-            .available_component_schema(entity, component, record.version)
+            .available_component_schema(entity, component)
     }
 
     #[must_use]
