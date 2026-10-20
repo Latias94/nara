@@ -167,6 +167,10 @@ reuse, removal or a narrower implementation. In particular, investigate the repo
 `fetch_update` to `try_update` rename. Coexisting package names alone do not prove duplicate
 execution or justify replacing a scheduler.
 
+The [preliminary dependency and deprecation study](../research/2026-10-21-task-dependency-and-deprecation-preliminary.md)
+records the supported rename and enabled Bevy feature graph. It does not establish actual duplicate
+worker pools or select a replacement; measure those costs after the complete consumer is qualified.
+
 ## Sources
 
 - [Strategy](../../STRATEGY.md)
