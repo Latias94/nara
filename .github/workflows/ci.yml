@@ -200,3 +200,7 @@ jobs:
             cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-scene-module-consumer -p nara-material-module-consumer --test-threads=1
             cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-editor-panel-module-consumer --test-threads=1
           fi
+      - name: Check Collect Game sample all features
+        run: cargo check --manifest-path samples/collect-game/Cargo.toml --locked --workspace --all-features --all-targets
+      - name: Test Collect Game sample headless
+        run: cargo nextest run --manifest-path samples/collect-game/Cargo.toml --workspace --locked --test-threads=1

@@ -200,11 +200,16 @@ let report = headless.execute_bounded();
 ```
 
 With the corresponding features enabled, use `DesktopRun::from_recipe(project_root, recipe()?)`
-for the first-party desktop Host, or pass the recipe through
-`EditorProjectIntent::new().with_recipe(recipe()?)` when opening an editor project session.
+for the first-party desktop Host. Ordinary generic Editor opening reads the declared authoring
+bundle and does not accept or load the game's native recipe. An engine integration that explicitly
+needs trusted in-process execution uses
+`TrustedCompiledEditorProjectIntent::new().with_recipe(recipe()?)` with the trusted compiled
+Editor entry. This is an advanced placement boundary, not the ordinary generic authoring path.
 
 `PluginDefinition`, raw slot edits, parallel provider lists, runtime candidates, and retirement
-ledgers remain advanced embedding APIs. Do not put file I/O, dynamic package lookup, runner
+ledgers remain first-party plumbing. Ordinary external runtime embedding uses
+`RuntimeInstance::start`; see [Managed Runtime Runners](managed-runtime-runner.md).
+Do not put file I/O, dynamic package lookup, runner
 selection, or process authority into a recipe.
 
 ## One Custom Runtime UI Font
