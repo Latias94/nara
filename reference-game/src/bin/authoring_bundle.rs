@@ -63,13 +63,15 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> Result<&'static str, Bu
 }
 
 fn run_in_project(project_root: &Path, command: Command) -> Result<&'static str, BundleToolError> {
-    let rights = match command {
-        Command::Check => CapabilityRights::ReadOnly,
-        Command::Write => CapabilityRights::ReadWrite,
+    let (rights, trust) = match command {
+        Command::Check => (CapabilityRights::ReadOnly, portable_trust()),
+        // Explicit --write authorizes this Host-selected local workspace. Unix replacement
+        // remains name-bound; using it here does not claim strict untrusted publication.
+        Command::Write => (CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
     };
     let root = DirectoryCapability::from_host_handle(
         host_directory(project_root, rights).map_err(BundleToolError::OpenProjectRoot)?,
-        HostCapabilityOptions::new(rights, portable_trust()),
+        HostCapabilityOptions::new(rights, trust),
     )
     .map_err(BundleToolError::AuthorizeProjectRoot)?;
     let (bundle_path, expected) = canonical_bundle_bytes(&root)?;
@@ -421,18 +423,23 @@ mod tests {
             "schema_bundle = \"schema/authoring.bundle.json\"",
             "schema_bundle = \"alternate/authoring.bundle.json\"",
         );
-        fs::write(root.join("nara.toml"), manifest).unwrap();
-        fs::write(
-            root.join("schema/authoring.bundle.json"),
-            include_bytes!("../../schema/authoring.bundle.json"),
-        )
-        .unwrap();
+        fs::write(root.join("nara.toml"), &manifest).unwrap();
+        let undeclared_bundle = b"the undeclared bundle must remain untouched\n";
+        fs::write(root.join("schema/authoring.bundle.json"), undeclared_bundle).unwrap();
         fs::write(root.join("alternate/authoring.bundle.json"), b"{}\n").unwrap();
 
         assert!(matches!(
             run_in_project(&root, Command::Check),
             Err(BundleToolError::Stale)
         ));
+        assert_eq!(
+            fs::read(root.join("nara.toml")).unwrap(),
+            manifest.as_bytes()
+        );
+        assert_eq!(
+            fs::read(root.join("alternate/authoring.bundle.json")).unwrap(),
+            b"{}\n"
+        );
         let write = run_in_project(&root, Command::Write);
         assert!(write.is_ok(), "write failed: {write:?}");
         assert!(run_in_project(&root, Command::Check).is_ok());
@@ -440,6 +447,19 @@ mod tests {
             fs::read(root.join("alternate/authoring.bundle.json")).unwrap(),
             include_bytes!("../../schema/authoring.bundle.json")
         );
+        assert_eq!(
+            fs::read(root.join("nara.toml")).unwrap(),
+            manifest.as_bytes()
+        );
+        assert_eq!(
+            fs::read(root.join("schema/authoring.bundle.json")).unwrap(),
+            undeclared_bundle
+        );
+        assert_eq!(
+            run_in_project(&root, Command::Write).unwrap(),
+            "the declared authoring schema bundle is already current"
+        );
+        assert_eq!(fs::read_dir(root.join("alternate")).unwrap().count(), 1);
 
         fs::remove_dir_all(root).unwrap();
     }

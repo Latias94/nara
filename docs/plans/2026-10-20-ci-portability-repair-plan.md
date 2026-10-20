@@ -10,6 +10,11 @@ handle-bound directory enumeration, stale reference-game retirement/lease expect
 standalone module-consumer formatting. The `8afbe42` run repeats the formatting failure.
 The first local portable wasm check fails in `getrandom 0.3.4` before engine library checking.
 
+After `fce2e70`, hosted run `39409199063` passes the portable wasm job and Linux module consumer.
+Linux reference-game advances through the original enumeration failure and exposes the next
+failure: its schema-bundle CLI requests strict untrusted replacement for an explicit local
+`--write`, although Linux correctly reports name-bound publication.
+
 ## Ordered Corrections
 
 - Implement Linux enumeration behind the existing capability owner using `rustix::fs::Dir` and
@@ -17,6 +22,9 @@ The first local portable wasm check fails in `getrandom 0.3.4` before engine lib
   no-follow child admission, rejected-entry isolation and explicit unsupported tiers elsewhere.
 - Validate content versus independently retained startup-closure leases and their actual release;
   observe terminal Stop instead of counting drive calls. Keep the existing gameplay assertions.
+- Make the schema-bundle CLI's explicit local `--write` select trusted local workspace authority;
+  retain strict Check reads and the existing atomic preflight, identity, digest and cleanup path.
+  Do not upgrade Linux publication guarantees or silently suppress its failure.
 - Format independent workspaces and refresh only required lockfile dependency edges.
 - Reconcile the stale exact fixture dependency policy with its existing dev-only component
   integration consumer. Keep the library's direct-domain dependencies and explicit facade features.
