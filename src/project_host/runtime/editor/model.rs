@@ -4,9 +4,7 @@ use nara_tooling::{
     EditorFrameModel, EditorProjectBrowserView, EditorProjectView, EditorReopenTarget,
 };
 
-use super::{
-    EditorPersistenceOperation, EditorProjectSession, PendingPersistence, PublishedEditorFrame,
-};
+use super::{EditorProjectSession, PublishedEditorFrame};
 
 impl EditorProjectSession {
     #[must_use]
@@ -44,16 +42,7 @@ impl EditorProjectSession {
             self.resume_content_refresh_after_runtime_retirement();
             self.advance_project_content_refresh();
         }
-        if let Some(operation) = self.pending_persistence.take() {
-            self.persistence_result = Some(match operation {
-                PendingPersistence::Save(save) => self.complete_save(save),
-                PendingPersistence::Reopen {
-                    document,
-                    base_revision,
-                } => self.complete_reopen(document, base_revision),
-            });
-            self.persistence_operation = EditorPersistenceOperation::Idle;
-        }
+        self.advance_persistence();
         self.advance_workspace_persistence();
         self.advance_workspace_retirement();
         if drive_runtime && self.trusted_compiled().is_some() {

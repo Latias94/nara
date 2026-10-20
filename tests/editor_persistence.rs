@@ -219,9 +219,8 @@ fn save_advances_only_the_captured_revision_then_close_releases_the_lane() {
         &outcomes[2],
         EditorActionOutcome::Workspace(report) if report.applied
     ));
-    let first = editor
-        .drive_editor_frame(std::time::Duration::ZERO)
-        .persistence();
+    let saved_frame = editor_driver::drive_persistence_until_result(&mut editor);
+    let first = saved_frame.persistence();
     assert!(matches!(
         first.result(),
         Some(EditorPersistenceResult::Saved { revision, .. }) if revision == captured_revision
@@ -229,6 +228,9 @@ fn save_advances_only_the_captured_revision_then_close_releases_the_lane() {
     let scene = current_scene_model(&editor, document);
     assert_eq!(scene.saved_revision, captured_revision);
     assert!(scene.dirty);
+    let persisted = fs::read_to_string(project.scene_path()).unwrap();
+    assert!(persisted.contains("\"captured\""));
+    assert!(!persisted.contains("\"later\""));
 
     let undo_revision = editor
         .current_frame()
@@ -304,8 +306,7 @@ fn save_advances_only_the_captured_revision_then_close_releases_the_lane() {
         ]
     );
     assert!(matches!(
-        editor
-            .drive_editor_frame(std::time::Duration::ZERO)
+        editor_driver::drive_persistence_until_result(&mut editor)
             .persistence()
             .result(),
         Some(EditorPersistenceResult::Saved { .. })
@@ -393,8 +394,7 @@ fn external_write_rejects_save_and_preserves_dirty_document() {
         EditorPersistenceRequestResult::Accepted
     );
     assert_eq!(
-        editor
-            .drive_editor_frame(std::time::Duration::ZERO)
+        editor_driver::drive_persistence_until_result(&mut editor)
             .persistence()
             .result(),
         Some(EditorPersistenceResult::Rejected {
@@ -420,8 +420,7 @@ fn external_write_rejects_save_and_preserves_dirty_document() {
         EditorPersistenceRequestResult::Accepted
     );
     assert!(matches!(
-        editor
-            .drive_editor_frame(Duration::ZERO)
+        editor_driver::drive_persistence_until_result(&mut editor)
             .persistence()
             .result(),
         Some(EditorPersistenceResult::Rejected {
@@ -826,7 +825,7 @@ fn dirty_close_save_conflict_keeps_document_and_runtime_open() {
         editor_driver::resolve_workspace_intent(&mut editor, EditorCloseDecision::Save),
         EditorWorkspaceIntentRequestResult::Accepted
     );
-    editor.drive_editor_frame(std::time::Duration::ZERO);
+    editor_driver::drive_persistence_until_result(&mut editor);
 
     assert_eq!(
         editor.current_frame().play().state(),
@@ -950,7 +949,7 @@ fn dirty_close_save_publishes_bytes_before_retiring_play() {
     );
     assert_eq!(fs::read(project.scene_path()).unwrap(), original_bytes);
 
-    editor.drive_editor_frame(std::time::Duration::ZERO);
+    editor_driver::drive_persistence_until_result(&mut editor);
     assert!(matches!(
         editor.current_frame().persistence().result(),
         Some(EditorPersistenceResult::Saved { document: saved, .. }) if saved == document

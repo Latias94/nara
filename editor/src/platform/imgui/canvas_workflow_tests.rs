@@ -546,7 +546,7 @@ impl CanvasWorkflow<'_> {
 
     fn settle_persistence(&mut self) -> Result<(), String> {
         let deadline = Instant::now() + Duration::from_secs(10);
-        for _ in 0..120 {
+        while Instant::now() < deadline {
             self.paint(|_| {})?;
             if self.application.current_frame().is_some_and(|frame| {
                 frame.persistence().operation() == EditorPersistenceOperation::Idle

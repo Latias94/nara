@@ -23,10 +23,11 @@ use nara::{
     scene::UnavailableRecordManifest,
     tooling::{
         EditorAction, EditorActionBatch, EditorActionBatchReport, EditorActionOutcome,
-        EditorActionRejection, EditorFrameModel, EditorPersistenceResult, EditorPlayAction,
-        EditorProjectBrowserLocalAction, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
-        EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection,
-        EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult,
+        EditorActionRejection, EditorFrameModel, EditorPersistenceOperation,
+        EditorPersistenceResult, EditorPlayAction, EditorProjectBrowserLocalAction,
+        EditorWorkspaceIntent, EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase,
+        EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
+        EditorWorkspaceIntentResult,
     },
 };
 use thiserror::Error;
@@ -791,18 +792,16 @@ impl EditorApplication {
         }) = &mut self.state
         {
             let external_observed = drive_supervised_play_owner(retained, now);
-            retained
-                .session
-                .drive_editor_frame_with_runtime(real_delta, drive_runtime);
-            return self.finish_replacement_handoff(actions_observed || external_observed);
+            let persistence_observed = drive_project_frame(retained, real_delta, drive_runtime);
+            return self.finish_replacement_handoff(
+                actions_observed || external_observed || persistence_observed,
+            );
         }
         match &mut self.state {
             EditorProductState::AuthoringReady(project)
             | EditorProductState::AuthoringDegraded(project) => {
                 let external_observed = drive_supervised_play_owner(project, now);
-                project
-                    .session
-                    .drive_editor_frame_with_runtime(real_delta, drive_runtime);
+                let persistence_observed = drive_project_frame(project, real_delta, drive_runtime);
                 let intent = project.session.current_frame().workspace_intent();
                 if self.session_retirement.is_none()
                     && (intent.intent() == Some(EditorWorkspaceIntent::Exit)
@@ -817,10 +816,14 @@ impl EditorApplication {
                     self.session_close_retry_at = None;
                 }
                 if self.session_retirement.is_some() {
-                    self.finish_session_retirement(actions_observed || external_observed)
+                    self.finish_session_retirement(
+                        actions_observed || external_observed || persistence_observed,
+                    )
                 } else {
                     EditorApplicationUpdate {
-                        actions_observed: actions_observed || external_observed,
+                        actions_observed: actions_observed
+                            || external_observed
+                            || persistence_observed,
                         exit_ready: false,
                     }
                 }
@@ -1230,6 +1233,23 @@ impl EditorApplication {
                     exit_ready: false,
                 }
             }
+            _ if frame.workspace_intent().intent().is_none()
+                && frame.persistence().operation() == EditorPersistenceOperation::Idle =>
+            {
+                // A Save may have kept the initial Exit request Busy. Retain the user's
+                // retirement intent and admit it only after that operation has settled.
+                let update = match &mut self.state {
+                    EditorProductState::AuthoringReady(project)
+                    | EditorProductState::AuthoringDegraded(project) => {
+                        request_exit_on_project(project)
+                    }
+                    _ => EditorApplicationUpdate::idle(),
+                };
+                EditorApplicationUpdate {
+                    actions_observed: actions_observed || update.actions_observed(),
+                    exit_ready: false,
+                }
+            }
             _ => EditorApplicationUpdate {
                 actions_observed,
                 exit_ready: false,
@@ -1319,29 +1339,50 @@ impl EditorApplication {
     ) -> (EditorProductState, bool) {
         match replacement {
             OpeningReplacementState::Preparing {
-                retained,
+                mut retained,
                 mut opening,
-            } => match self.advance_opening_step(&mut opening) {
-                OpenStepResult::Pending => (
-                    EditorProductState::OpeningReplacement(OpeningReplacementState::Preparing {
-                        retained,
-                        opening,
-                    }),
-                    true,
-                ),
-                OpenStepResult::Rejected(_) => (EditorProductState::from_published(retained), true),
-                OpenStepResult::Opened(candidate) => (
-                    EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
-                        entry_generation: opening.entry_generation,
-                        attempt_generation: opening.attempt_generation,
-                        retained,
-                        candidate,
-                        close_started: false,
-                        save_attempted: false,
-                    }),
-                    true,
-                ),
-            },
+            } => {
+                // The candidate must not capture source bytes that an already admitted Save
+                // is still replacing, especially when both requests name the same project.
+                if matches!(&opening.step, OpeningProjectStep::ProjectRoot)
+                    && retained.session.persistence_view().operation()
+                        != EditorPersistenceOperation::Idle
+                {
+                    let observed = drive_project_frame(&mut retained, Duration::ZERO, false);
+                    if retained.session.current_frame().persistence().operation()
+                        != EditorPersistenceOperation::Idle
+                    {
+                        return (
+                            EditorProductState::OpeningReplacement(
+                                OpeningReplacementState::Preparing { retained, opening },
+                            ),
+                            observed,
+                        );
+                    }
+                }
+                match self.advance_opening_step(&mut opening) {
+                    OpenStepResult::Pending => (
+                        EditorProductState::OpeningReplacement(
+                            OpeningReplacementState::Preparing { retained, opening },
+                        ),
+                        true,
+                    ),
+                    OpenStepResult::Rejected(_) => {
+                        (EditorProductState::from_published(retained), true)
+                    }
+                    OpenStepResult::Opened(candidate) => (
+                        EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
+                            entry_generation: opening.entry_generation,
+                            attempt_generation: opening.attempt_generation,
+                            retained,
+                            candidate,
+                            close_started: false,
+                            save_attempted: false,
+                        }),
+                        true,
+                    ),
+                }
+            }
             OpeningReplacementState::Refreshing {
                 retained,
                 mut opening,
@@ -1392,13 +1433,22 @@ impl EditorApplication {
                     );
                 }
                 let update = request_exit_on_project(&mut retained);
+                let frame = retained.session.current_frame();
+                let close_started = frame.workspace_intent().intent()
+                    == Some(EditorWorkspaceIntent::Exit)
+                    || matches!(
+                        frame.workspace_intent().result(),
+                        Some(EditorWorkspaceIntentResult::Applied {
+                            intent: EditorWorkspaceIntent::Exit,
+                        })
+                    );
                 (
                     EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
                         entry_generation,
                         attempt_generation,
                         retained,
                         candidate,
-                        close_started: true,
+                        close_started,
                         save_attempted,
                     }),
                     update.actions_observed(),
@@ -1854,6 +1904,19 @@ fn cancel_pending_exit(project: &mut PublishedEditorProject) -> bool {
     )
 }
 
+fn drive_project_frame(
+    project: &mut PublishedEditorProject,
+    real_delta: Duration,
+    drive_runtime: bool,
+) -> bool {
+    let before = project.session.current_frame().persistence();
+    let after = project
+        .session
+        .drive_editor_frame_with_runtime(real_delta, drive_runtime)
+        .persistence();
+    before != after
+}
+
 fn request_exit_on_project(project: &mut PublishedEditorProject) -> EditorApplicationUpdate {
     let frame = project.session.current_frame();
     let mut actions = Vec::with_capacity(2);
@@ -1872,11 +1935,9 @@ fn request_exit_on_project(project: &mut PublishedEditorProject) -> EditorApplic
     } else {
         dispatch_project_actions(project, EditorActionBatch::new(frame.revision(), actions))
     };
-    project
-        .session
-        .drive_editor_frame_with_runtime(Duration::ZERO, true);
+    let persistence_observed = drive_project_frame(project, Duration::ZERO, true);
     EditorApplicationUpdate {
-        actions_observed: dispatch.actions_observed(),
+        actions_observed: dispatch.actions_observed() || persistence_observed,
         exit_ready: false,
     }
 }
@@ -1987,6 +2048,10 @@ fn open_directory(path: &Path) -> io::Result<File> {
 fn open_directory(path: &Path) -> io::Result<File> {
     File::open(path)
 }
+
+#[cfg(all(test, any(windows, all(target_os = "linux", target_arch = "x86_64"))))]
+#[path = "app/persistence_tests.rs"]
+mod persistence_tests;
 
 #[cfg(test)]
 mod tests {

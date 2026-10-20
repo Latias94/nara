@@ -626,11 +626,13 @@ fn ordinary_scene_and_prefab_create_custom_components_without_project_execution(
 }
 
 fn settle_persistence(app: &mut EditorApplication) {
-    for _ in 0..128 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
         if frame(app).persistence().operation() == nara::tooling::EditorPersistenceOperation::Idle {
             return;
         }
         dispatch(app, None);
+        std::thread::sleep(Duration::from_millis(1));
     }
     close(app);
     panic!("persistence did not settle within its bounded drive");

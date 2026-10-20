@@ -4,7 +4,7 @@ use nara::{
     project_host::TrustedCompiledEditorProjectIntent,
     render::RenderWindowPacket,
     render_wgpu::__private::WgpuEditorExecutionError,
-    tooling::EditorPlayState,
+    tooling::{EditorPersistenceOperation, EditorPlayState},
     window::{PresentMode, WindowId as NaraWindowId, WindowResolution},
 };
 use thiserror::Error;
@@ -25,6 +25,7 @@ const EDITOR_TITLE: &str = "Nara Editor";
 const EDITOR_GPU_UNAVAILABLE_TITLE: &str = "Nara Editor - GPU unavailable";
 const PLAY_LIFECYCLE_POLL_DELAY: Duration = Duration::from_millis(16);
 const IMAGE_IMPORT_POLL_DELAY: Duration = Duration::from_millis(16);
+const PERSISTENCE_POLL_DELAY: Duration = Duration::from_millis(16);
 
 #[derive(Debug, Error)]
 pub enum EditorRunError {
@@ -101,6 +102,13 @@ fn image_import_poll_deadline(now: Instant, pending: bool) -> Option<Instant> {
     pending.then_some(now + IMAGE_IMPORT_POLL_DELAY)
 }
 
+fn persistence_poll_deadline(
+    now: Instant,
+    operation: EditorPersistenceOperation,
+) -> Option<Instant> {
+    (operation != EditorPersistenceOperation::Idle).then_some(now + PERSISTENCE_POLL_DELAY)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EditorGpuRecovery {
     Ready,
@@ -172,11 +180,11 @@ fn platform_gpu_error(error: WgpuEditorExecutionError) -> EditorRunError {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use nara::tooling::EditorPlayState;
+    use nara::tooling::{EditorPersistenceOperation, EditorPlayState};
 
     use super::{
         EditorGpuRecovery, earliest_deadline, image_import_poll_deadline,
-        play_lifecycle_poll_deadline,
+        persistence_poll_deadline, play_lifecycle_poll_deadline,
     };
 
     #[test]
@@ -214,6 +222,31 @@ mod tests {
             Some(now + Duration::from_millis(16))
         );
         assert_eq!(image_import_poll_deadline(now, false), None);
+    }
+
+    #[test]
+    fn pending_persistence_uses_maintenance_until_idle() {
+        let now = Instant::now();
+        let document = nara::tooling::EditorDocumentId::from_raw(1);
+        let revision =
+            nara::scene::SceneAuthoringSession::new(nara::scene::SceneDocument::default())
+                .revision();
+        for operation in [
+            EditorPersistenceOperation::Saving {
+                document,
+                captured_revision: revision,
+            },
+            EditorPersistenceOperation::Opening { document },
+        ] {
+            assert_eq!(
+                persistence_poll_deadline(now, operation),
+                Some(now + Duration::from_millis(16))
+            );
+        }
+        assert_eq!(
+            persistence_poll_deadline(now, EditorPersistenceOperation::Idle),
+            None
+        );
     }
 
     #[test]

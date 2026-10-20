@@ -36,8 +36,8 @@ use crate::{EditorApplication, EditorNativeComposition, supervised_play::Supervi
 
 use super::{
     EditorGpuRecovery, EditorRunError, earliest_deadline, editor_window_packet,
-    explicit_gpu_retry_requested, image_import_poll_deadline, platform_gpu_error,
-    play_lifecycle_poll_deadline,
+    explicit_gpu_retry_requested, image_import_poll_deadline, persistence_poll_deadline,
+    platform_gpu_error, play_lifecycle_poll_deadline,
 };
 
 #[cfg(all(test, target_os = "windows"))]
@@ -1774,6 +1774,10 @@ fn imgui_next_deadline(
         }
         let state = frame.play().state();
         deadline = earliest_deadline(deadline, play_lifecycle_poll_deadline(now, state));
+        deadline = earliest_deadline(
+            deadline,
+            persistence_poll_deadline(now, frame.persistence().operation()),
+        );
     }
     deadline = earliest_deadline(deadline, application.session_close_retry_deadline());
     deadline

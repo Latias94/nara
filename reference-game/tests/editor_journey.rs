@@ -1,5 +1,8 @@
 #![cfg(feature = "editor")]
 
+#[path = "support/editor_persistence_driver.rs"]
+mod editor_persistence_driver;
+
 use std::{
     fs::{self, File},
     path::{Path, PathBuf},
@@ -178,7 +181,7 @@ fn unsaved_editor_source_survives_retry_then_save_close_and_reopen() {
         ),
         EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
     ));
-    let saved_frame = editor.drive_editor_frame(Duration::ZERO);
+    let saved_frame = editor_persistence_driver::drive_until_result(&mut editor);
     assert!(matches!(
         saved_frame.persistence().result(),
         Some(EditorPersistenceResult::Saved {

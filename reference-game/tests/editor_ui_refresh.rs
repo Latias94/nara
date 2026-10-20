@@ -1,5 +1,7 @@
 #![cfg(feature = "editor")]
 
+#[path = "support/editor_persistence_driver.rs"]
+mod editor_persistence_driver;
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 #[path = "support/reference_project_copy.rs"]
@@ -506,7 +508,7 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
         ),
         EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
     ));
-    let saved = editor.drive_editor_frame(Duration::ZERO);
+    let saved = editor_persistence_driver::drive_until_result(&mut editor);
     let saved_digest = match saved.persistence().result() {
         Some(EditorPersistenceResult::Saved {
             document,

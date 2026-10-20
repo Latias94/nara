@@ -750,7 +750,7 @@ fn play_does_not_rebase_to_a_later_document_revision_from_the_same_frame() {
 }
 
 #[test]
-fn save_completion_becomes_visible_only_in_the_next_editor_frame() {
+fn save_completion_becomes_visible_only_after_an_editor_frame_publishes_it() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
     let mut editor = EditorProjectSession::open_trusted_compiled(
@@ -808,7 +808,7 @@ fn save_completion_becomes_visible_only_in_the_next_editor_frame() {
             .dirty
     );
 
-    let saved = editor.drive_editor_frame(Duration::ZERO);
+    let saved = editor_driver::drive_persistence_until_result(&mut editor);
     assert!(!saved.workspace().scene(document).unwrap().dirty);
 }
 

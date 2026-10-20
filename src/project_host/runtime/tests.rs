@@ -5,6 +5,9 @@
 ))]
 mod authoring_images;
 
+#[cfg(feature = "tooling")]
+mod owned_save;
+
 use std::{
     error::Error,
     fmt,
@@ -1037,7 +1040,7 @@ logical_height = 540
         save_report.outcomes()[0],
         EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
     ));
-    let saved_frame = editor.drive_editor_frame(Duration::ZERO);
+    let saved_frame = drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
         editor.persistence_view().result(),
         Some(EditorPersistenceResult::Saved { document, .. }) if document == prefab_document
@@ -2378,6 +2381,24 @@ fn idle_generic_editor_project_close_yields_progress_before_polling_workers() {
 }
 
 #[cfg(feature = "tooling")]
+fn drive_persistence_to_terminal(
+    editor: &mut super::editor::EditorProjectSession,
+) -> Arc<nara_tooling::EditorFrameModel> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let frame = editor.drive_editor_frame(Duration::ZERO);
+        if frame.persistence().result().is_some() {
+            return frame;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Editor persistence retained an unfinished operation"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[cfg(feature = "tooling")]
 fn drive_editor_close_to_completion(
     editor: &mut super::editor::EditorProjectSession,
 ) -> super::editor::EditorProjectCloseProgress {
@@ -2500,7 +2521,7 @@ fn scene_save_cleanup_blocks_session_close_until_retry() {
         }),
         nara_tooling::EditorPersistenceRequestResult::Accepted
     );
-    editor.drive_editor_frame(Duration::ZERO);
+    drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
         editor.persistence_view().result(),
         Some(EditorPersistenceResult::Failed {
@@ -3177,7 +3198,7 @@ fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successo
         }),
         nara_tooling::EditorPersistenceRequestResult::Accepted
     );
-    let saved = editor.drive_editor_frame(Duration::ZERO);
+    let saved = drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
         editor.persistence_view().result(),
         Some(EditorPersistenceResult::Saved { document: saved_document, .. })
@@ -3844,7 +3865,7 @@ fn close_prompt_replay_rejects_after_cancel_new_intent_and_failed_save() {
         editor.resolve_workspace_intent(current, EditorCloseDecision::Save),
         EditorWorkspaceIntentRequestResult::Accepted
     );
-    editor.drive_editor_frame(Duration::ZERO);
+    drive_persistence_to_terminal(&mut editor);
     let retry = editor.workspace_intent_view();
     assert_eq!(
         retry.phase(),
@@ -3861,13 +3882,60 @@ fn close_prompt_replay_rejects_after_cancel_new_intent_and_failed_save() {
         fs::read(project.root.join("scenes/startup.scene.json")).unwrap(),
         disk_before
     );
+    let retry_prompt = retry.decision_prompt().unwrap();
+    let control = editor.hold_next_save(super::editor::SaveTestPhase::BeforePublication);
     assert_eq!(
-        editor.resolve_workspace_intent(
-            retry.decision_prompt().unwrap(),
-            EditorCloseDecision::Cancel
-        ),
+        editor.resolve_workspace_intent(retry_prompt, EditorCloseDecision::Save),
         EditorWorkspaceIntentRequestResult::Accepted
     );
+    assert!(editor.persistence_view().result().is_none());
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(control.wait_until_started());
+    for _ in 0..3 {
+        let frame = editor.drive_editor_frame(Duration::ZERO);
+        assert!(frame.persistence().result().is_none());
+        assert_eq!(
+            frame.workspace_intent().phase(),
+            Some(EditorWorkspaceIntentPhase::Saving)
+        );
+        assert!(frame.workspace_intent().decision_prompt().is_none());
+    }
+    assert_eq!(
+        editor.resolve_workspace_intent(current, EditorCloseDecision::Discard),
+        EditorWorkspaceIntentRequestResult::Rejected(EditorWorkspaceIntentRejection::Busy)
+    );
+    assert_eq!(
+        editor.resolve_workspace_intent(retry_prompt, EditorCloseDecision::Cancel),
+        EditorWorkspaceIntentRequestResult::Rejected(EditorWorkspaceIntentRejection::Busy)
+    );
+    assert_eq!(
+        fs::read(project.root.join("scenes/startup.scene.json")).unwrap(),
+        disk_before
+    );
+    control.release();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while editor.workspace_intent_view().phase() == Some(EditorWorkspaceIntentPhase::Saving) {
+        editor.drive_editor_frame(Duration::ZERO);
+        assert!(
+            Instant::now() < deadline,
+            "the retried exit Save did not complete"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        editor.workspace_intent_view().phase(),
+        Some(EditorWorkspaceIntentPhase::Prepared)
+    );
+    assert!(!editor.workspace().document_is_dirty(document).unwrap());
+    assert!(
+        fs::read_to_string(project.root.join("scenes/startup.scene.json"))
+            .unwrap()
+            .contains("retained-dirty")
+    );
+    assert!(matches!(
+        drive_editor_close_to_completion(&mut editor),
+        super::editor::EditorProjectCloseProgress::Complete(_)
+    ));
 }
 
 #[cfg(feature = "tooling")]
@@ -3947,7 +4015,7 @@ fn dirty_scene_retarget_uses_cancel_discard_and_save_before_publication() {
         ),
         nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
     );
-    editor.drive_editor_frame(Duration::ZERO);
+    drive_persistence_to_terminal(&mut editor);
     let third = editor.workspace().active_document().unwrap();
     assert_ne!(third, second);
     assert!(editor.workspace().scene(third).is_some());
@@ -4200,7 +4268,7 @@ fn authoring_prefab_source_survives_failed_publication_close_and_reopen() {
         save.outcomes()[0],
         EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
     ));
-    let _ = editor.drive_editor_frame(Duration::ZERO);
+    drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
         editor.persistence_view().result(),
         Some(EditorPersistenceResult::Saved { document, .. }) if document == prefab_document
@@ -5330,7 +5398,7 @@ fn failed_and_uncertain_saves_do_not_advance_workspace_persistence_state() {
         }),
         nara_tooling::EditorPersistenceRequestResult::Accepted
     );
-    editor.drive_editor_frame(Duration::ZERO);
+    drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
         editor.persistence_view().result(),
         Some(EditorPersistenceResult::Failed {
@@ -5355,7 +5423,7 @@ fn failed_and_uncertain_saves_do_not_advance_workspace_persistence_state() {
         }),
         nara_tooling::EditorPersistenceRequestResult::Accepted
     );
-    editor.drive_editor_frame(Duration::ZERO);
+    drive_persistence_to_terminal(&mut editor);
     let uncertain_result = editor.persistence_view().result();
     assert!(
         matches!(

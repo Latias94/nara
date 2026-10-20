@@ -173,6 +173,11 @@ impl EditorProjectSession {
     }
 
     pub(super) fn advance_project_content_refresh(&mut self) {
+        // A replacement runtime would retire the file-custody participant before the
+        // current session can recover its Host and acknowledge the admitted Save.
+        if self.pending_persistence.is_some() {
+            return;
+        }
         let Some(request) = self.pending_content_refresh.take() else {
             return;
         };

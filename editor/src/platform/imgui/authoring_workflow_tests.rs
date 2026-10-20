@@ -331,7 +331,7 @@ impl AuthoringWorkflow<'_> {
 
     fn settle_persistence(&mut self) -> Result<(), String> {
         let deadline = Instant::now() + Duration::from_secs(10);
-        for _ in 0..120 {
+        while Instant::now() < deadline {
             self.paint(|_| {})?;
             if self.frame()?.persistence().operation() == EditorPersistenceOperation::Idle {
                 return Ok(());

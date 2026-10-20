@@ -92,6 +92,7 @@ fn measure_editor_owner_thread_work() {
                 .scene(document)
                 .unwrap()
                 .revision;
+            let completion_started = Instant::now();
             let started = Instant::now();
             let accepted = editor_driver::request_persistence(
                 &mut editor,
@@ -102,8 +103,20 @@ fn measure_editor_owner_thread_work() {
             let request = started.elapsed();
             assert_eq!(accepted, EditorPersistenceRequestResult::Accepted);
             let started = Instant::now();
-            let frame = editor.drive_editor_frame(Duration::ZERO);
-            let drive = started.elapsed();
+            let mut frame = editor.drive_editor_frame(Duration::ZERO);
+            let first_drive = started.elapsed();
+            let mut max_drive = first_drive;
+            while frame.persistence().result().is_none() {
+                assert!(
+                    completion_started.elapsed() < ASYNC_DRIVER_TIMEOUT,
+                    "Save did not complete within the measurement deadline"
+                );
+                thread::sleep(ASYNC_POLL_INTERVAL);
+                let started = Instant::now();
+                frame = editor.drive_editor_frame(Duration::ZERO);
+                max_drive = max_drive.max(started.elapsed());
+            }
+            let completion = completion_started.elapsed();
             let saved_digest = match frame.persistence().result() {
                 Some(EditorPersistenceResult::Saved {
                     document: saved,
@@ -126,8 +139,28 @@ fn measure_editor_owner_thread_work() {
                 )
             );
             if measured {
-                emit(population, source.len(), sample, "save-request", request);
-                emit(population, source.len(), sample, "save-drive", drive);
+                emit(population, source.len(), sample, "save-v2-request", request);
+                emit(
+                    population,
+                    source.len(),
+                    sample,
+                    "save-v2-first-drive",
+                    first_drive,
+                );
+                emit(
+                    population,
+                    source.len(),
+                    sample,
+                    "save-v2-max-drive",
+                    max_drive,
+                );
+                emit(
+                    population,
+                    source.len(),
+                    sample,
+                    "save-v2-completion",
+                    completion,
+                );
             }
             assert_eq!(
                 editor_driver::request_persistence(
@@ -219,7 +252,7 @@ fn emit(population: usize, source_bytes: usize, sample: usize, phase: &str, dura
     println!(
         "{}",
         serde_json::json!({
-            "measurement": "editor-owner-thread-v1",
+            "measurement": "editor-owner-thread-v2",
             "population": population,
             "baseline_source_bytes": source_bytes,
             "sample": sample,

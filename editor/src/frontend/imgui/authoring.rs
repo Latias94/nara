@@ -5,11 +5,12 @@ use nara::{
     tooling::{
         EditorAction, EditorDocumentId, EditorDocumentKind, EditorDocumentMutation,
         EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
-        EditorPersistenceOperation, EditorPersistenceRequestKind, EditorPersistenceResult,
-        EditorPlayState, EditorReopenTarget, EditorRuntimeAvailability, EditorSceneModel,
-        EditorWorkspaceIntent, EditorWorkspaceIntentAction, PrefabCompositionCommand,
-        PrefabCompositionEntityDraft, SceneCompositionCommand, SceneCompositionEntityKind,
-        SceneInspectorComponentView, SceneInspectorEntityRow, SceneInspectorFieldView,
+        EditorPersistenceOperation, EditorPersistenceRejection, EditorPersistenceRequestKind,
+        EditorPersistenceResult, EditorPlayState, EditorReopenTarget, EditorRuntimeAvailability,
+        EditorSceneModel, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
+        PrefabCompositionCommand, PrefabCompositionEntityDraft, SceneCompositionCommand,
+        SceneCompositionEntityKind, SceneInspectorComponentView, SceneInspectorEntityRow,
+        SceneInspectorFieldView,
     },
 };
 
@@ -173,6 +174,12 @@ impl ImguiAuthoringPanels {
             match result {
                 EditorPersistenceResult::Saved { .. } => ui.text("Saved"),
                 EditorPersistenceResult::Opened { .. } => ui.text("Reopened"),
+                EditorPersistenceResult::Rejected {
+                    reason: EditorPersistenceRejection::RequiresReconcile,
+                    ..
+                } => ui.text_wrapped(
+                    "Saving could not be confirmed. Reopen this document to reconcile its source.",
+                ),
                 EditorPersistenceResult::Rejected { reason, .. } => {
                     ui.text_wrapped(format!("Persistence rejected: {reason:?}"));
                 }
@@ -567,7 +574,10 @@ pub(super) fn editing_enabled(frame: &EditorFrameModel) -> bool {
         frame.play().state(),
         EditorPlayState::Empty | EditorPlayState::Paused | EditorPlayState::Faulted
     )) && frame.workspace_intent().intent().is_none()
-        && frame.persistence().operation() == EditorPersistenceOperation::Idle
+        && matches!(
+            frame.persistence().operation(),
+            EditorPersistenceOperation::Idle | EditorPersistenceOperation::Saving { .. }
+        )
 }
 
 pub(super) fn persistence_allows(
@@ -577,6 +587,11 @@ pub(super) fn persistence_allows(
 ) -> bool {
     match result {
         None => true,
+        Some(EditorPersistenceResult::Rejected {
+            document: target,
+            reason: EditorPersistenceRejection::RequiresReconcile,
+            ..
+        }) => request == EditorPersistenceRequestKind::Reopen && target == Some(document),
         Some(EditorPersistenceResult::Rejected {
             request: failed,
             document: target,
@@ -794,25 +809,95 @@ mod tests {
     #[test]
     fn an_uncertain_save_allows_only_reopening_its_exact_document() {
         let scene = scene(EditorDocumentKind::Scene);
-        let result = Some(EditorPersistenceResult::PersistenceUncertain {
-            document: scene.document,
-            revision: scene.revision,
-            digest: nara::tooling::EditorDocumentDigest::new(0, [0; 32]),
-        });
+        for result in [
+            Some(EditorPersistenceResult::PersistenceUncertain {
+                document: scene.document,
+                revision: scene.revision,
+                digest: nara::tooling::EditorDocumentDigest::new(0, [0; 32]),
+            }),
+            Some(EditorPersistenceResult::Rejected {
+                request: EditorPersistenceRequestKind::Save,
+                document: Some(scene.document),
+                reason: EditorPersistenceRejection::RequiresReconcile,
+            }),
+        ] {
+            assert!(!persistence_allows(
+                result,
+                EditorPersistenceRequestKind::Save,
+                scene.document
+            ));
+            assert!(persistence_allows(
+                result,
+                EditorPersistenceRequestKind::Reopen,
+                scene.document
+            ));
+            assert!(!persistence_allows(
+                result,
+                EditorPersistenceRequestKind::Reopen,
+                EditorDocumentId::from_raw(8)
+            ));
+        }
         assert!(!persistence_allows(
-            result,
-            EditorPersistenceRequestKind::Save,
-            scene.document
-        ));
-        assert!(persistence_allows(
-            result,
+            Some(EditorPersistenceResult::Rejected {
+                request: EditorPersistenceRequestKind::Save,
+                document: None,
+                reason: EditorPersistenceRejection::RequiresReconcile,
+            }),
             EditorPersistenceRequestKind::Reopen,
-            scene.document
+            scene.document,
         ));
-        assert!(!persistence_allows(
-            result,
-            EditorPersistenceRequestKind::Reopen,
-            EditorDocumentId::from_raw(8)
-        ));
+    }
+
+    #[test]
+    fn an_ordinary_save_keeps_the_authoring_frame_editable_but_reopen_does_not() {
+        use nara::tooling::{
+            EditorAuthoringReadiness, EditorFrameClock, EditorPersistenceView, EditorPlayView,
+            EditorProjectContentView, EditorProjectReadinessView, EditorProjectView,
+            EditorWorkspace, EditorWorkspaceIntentView,
+        };
+        let mut workspace = EditorWorkspace::new();
+        let report = workspace
+            .open_scene_session(
+                "Editable",
+                SceneAuthoringSession::new(SceneDocument::from_ordered_roots([
+                    SceneEntityRecord::new(SceneEntityId::new("owner").unwrap()),
+                ])),
+            )
+            .unwrap();
+        let document = report.opened_document.unwrap();
+        let revision = workspace.scene(document).unwrap().revision();
+        for (operation, editable) in [
+            (EditorPersistenceOperation::Idle, true),
+            (
+                EditorPersistenceOperation::Saving {
+                    document,
+                    captured_revision: revision,
+                },
+                true,
+            ),
+            (EditorPersistenceOperation::Opening { document }, false),
+        ] {
+            let frame = EditorFrameClock::new().publish(
+                workspace.model(&ComponentRegistry::default(), None),
+                EditorProjectView::new(
+                    EditorProjectReadinessView::new(
+                        EditorAuthoringReadiness::Complete,
+                        EditorRuntimeAvailability::TrustedInProcess,
+                    ),
+                    Default::default(),
+                    EditorPlayView::new(EditorPlayState::Empty, None, None, None, false, None),
+                    EditorPersistenceView::new(operation, None),
+                    EditorProjectContentView::NotInstalled,
+                    EditorWorkspaceIntentView::new(None, None, None, None, None),
+                ),
+                Default::default(),
+                EditorReopenTarget::OpenDocument {
+                    document,
+                    base_revision: revision,
+                },
+                None,
+            );
+            assert_eq!(editing_enabled(&frame), editable, "{operation:?}");
+        }
     }
 }

@@ -1,12 +1,17 @@
 #![allow(dead_code)]
 
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
 use nara::{
     project_host::EditorProjectSession,
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::SceneEntityId,
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorActionRejection,
-        EditorApplyChangesRejection, EditorCloseDecision, EditorDocumentMutation,
+        EditorApplyChangesRejection, EditorCloseDecision, EditorDocumentMutation, EditorFrameModel,
         EditorNavigationAction, EditorPersistenceAction, EditorPersistenceCommand,
         EditorPersistenceRequestResult, EditorPlayAction, EditorPlayCommand,
         EditorPlayRequestResult, EditorRuntimeEditRejection, EditorRuntimeEditRequest,
@@ -14,6 +19,21 @@ use nara::{
         EditorWorkspaceIntentAction, EditorWorkspaceIntentRequestResult, SceneApplyChangesRequest,
     },
 };
+
+pub fn drive_persistence_until_result(editor: &mut EditorProjectSession) -> Arc<EditorFrameModel> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let frame = editor.drive_editor_frame(Duration::ZERO);
+        if frame.persistence().result().is_some() {
+            return frame;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Editor persistence did not complete"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
 
 pub fn dispatch(
     editor: &mut EditorProjectSession,

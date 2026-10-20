@@ -52,6 +52,8 @@ pub use open::{
     EditorProjectOpenFailureSource, EditorProjectOpenHost, EditorProjectOpenPhase,
     EditorProjectOpenProgress,
 };
+#[cfg(test)]
+pub(crate) use persistence::SaveTestPhase;
 #[cfg(feature = "presentation-2d")]
 pub use presentation::{
     EditorAcceptedPreview, EditorPresentationError, EditorPresentationImage, EditorPresentedToken,
@@ -443,7 +445,11 @@ impl fmt::Display for EditorProjectOpenError {
 impl std::error::Error for EditorProjectOpenError {}
 
 enum PendingPersistence {
-    Save(PendingSave),
+    Save {
+        candidate: PendingSave,
+        authoring: Option<nara_scene::AuthoringDocumentReadmission>,
+    },
+    Saving(persistence::BackgroundSave),
     Reopen {
         document: EditorDocumentId,
         base_revision: Option<nara_scene::SceneAuthoringRevision>,
@@ -738,6 +744,8 @@ pub struct EditorProjectSession {
     reject_next_prefab_source_binding: bool,
     persistence_operation: EditorPersistenceOperation,
     pending_persistence: Option<PendingPersistence>,
+    #[cfg(test)]
+    next_save_gate: Option<persistence::SaveTestGate>,
     persistence_result: Option<EditorPersistenceResult>,
     last_persistence_receipt: Option<EditorPersistenceReceipt>,
     diagnostics: DiagnosticReport,
@@ -825,12 +833,21 @@ impl Drop for EditorProjectSession {
 }
 
 impl EditorProjectSession {
-    /// Cancels session-local work and advances one bounded task and file cleanup attempt.
+    /// Advances an admitted Save before cancelling session-local work and polling cleanup.
     ///
     /// The caller must retain this session and retry after `Incomplete`. Dropping an incomplete
     /// session transfers retained runtime ownership to process quarantine.
+    /// Filesystem calls already borrowed by Save must return before their Host can be recovered;
+    /// this poll does not claim to preempt an OS call or roll back published bytes.
     #[doc(hidden)]
     pub fn advance_close(&mut self) -> EditorProjectCloseProgress {
+        self.advance_persistence();
+        if self.pending_persistence.is_some() {
+            return EditorProjectCloseProgress::Incomplete {
+                task_shutdown: TaskShutdownReport::default(),
+                file_cleanup_pending: true,
+            };
+        }
         self.image_import.cancel_pending();
         let mut files_closed = self.image_import.retry_publication_cleanup();
         if let Some(lane) = self.scene_lane.as_mut() {
@@ -1287,6 +1304,8 @@ impl EditorProjectSession {
             reject_next_prefab_source_binding: false,
             persistence_operation: EditorPersistenceOperation::Idle,
             pending_persistence: None,
+            #[cfg(test)]
+            next_save_gate: None,
             persistence_result: None,
             last_persistence_receipt: None,
             diagnostics,
@@ -1507,6 +1526,8 @@ impl EditorProjectSession {
             reject_next_prefab_source_binding: false,
             persistence_operation: EditorPersistenceOperation::Idle,
             pending_persistence: None,
+            #[cfg(test)]
+            next_save_gate: None,
             persistence_result: None,
             last_persistence_receipt: None,
             diagnostics,
@@ -2081,7 +2102,14 @@ impl EditorProjectSession {
         let authoring = self.authoring_project().is_some();
         let mut projection_rejected = false;
         let mut projection_omitted = false;
-        let scene_document = self.scene_lane.as_ref().map(|lane| lane.document);
+        let scene_document = self
+            .scene_lane
+            .as_ref()
+            .map(|lane| lane.document)
+            .or_else(|| match self.pending_persistence.as_ref() {
+                Some(PendingPersistence::Saving(save)) => save.scene_document(),
+                _ => None,
+            });
         let source_identity = scene_document.and_then(|document| {
             self.workspace
                 .scene(document)

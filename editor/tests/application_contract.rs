@@ -788,6 +788,7 @@ fn retry_and_replacement_close_are_failure_atomic() {
         )],
     );
     let _ = application.submit_and_drive(save, Duration::ZERO);
+    settle_persistence(&mut application);
     assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
     assert_eq!(
         active_scene_state(&current_frame(&application)),
@@ -1087,6 +1088,7 @@ fn replacement_same_root_alias_save_publishes_a_fresh_candidate() {
         )],
     );
     let _ = application.submit_and_drive(save, Duration::ZERO);
+    settle_persistence(&mut application);
     let saved_frame = current_frame(&application);
     let _ = application.submit_and_drive(
         EditorActionBatch::new(saved_frame.revision(), []),
@@ -1150,6 +1152,18 @@ fn current_frame(application: &EditorApplication) -> Arc<nara::tooling::EditorFr
     application
         .current_frame()
         .expect("the trusted compiled application owns one Editor frame")
+}
+
+fn settle_persistence(application: &mut EditorApplication) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while current_frame(application).persistence().operation()
+        != nara::tooling::EditorPersistenceOperation::Idle
+    {
+        assert!(Instant::now() < deadline, "persistence did not settle");
+        let frame = current_frame(application);
+        application.submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 fn open_ordinary(project_root: &Path) -> EditorApplication {

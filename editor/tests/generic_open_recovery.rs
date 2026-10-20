@@ -513,6 +513,18 @@ fn dispatch(
         Duration::ZERO,
     );
     assert!(update.actions_observed());
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while current_frame(application).persistence().operation()
+        != nara::tooling::EditorPersistenceOperation::Idle
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "persistence did not settle"
+        );
+        let frame = current_frame(application);
+        application.submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
     current_frame(application)
 }
 
