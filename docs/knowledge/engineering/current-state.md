@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "7ec19eabf902d73d87678c933b0d5be30d374cf846f30ba32561a712d15b6cca"
+source_fingerprint: "30b88fd5af5a7fd589b4bf90af9fbf22996f9f66ffc9969dda4b3203a183a8c2"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "7ec19eabf902d73d87678c933b0d5be30d374cf846f30ba32561a712d15
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `7ec19eabf902d73d87678c933b0d5be30d374cf846f30ba32561a712d15b6cca`
-- Immutable records: 799
+- Source fingerprint: `30b88fd5af5a7fd589b4bf90af9fbf22996f9f66ffc9969dda4b3203a183a8c2`
+- Immutable records: 802
 - Active lane heads: 0
 
 # Active Registrations
@@ -22,6 +22,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Authoring S1 corrections complete; S2 remains proposed](registry/2026-10/2026-10-19T144026Z-authoring-workflow-s1-codex-root-2fbf60933b96475b84d9483c6acb0d3e.md): `completed` (authoring-workflow-s1-codex-root; producer `codex-root`)
 - [Authoring S2 field editing workflow complete](registry/2026-10/2026-10-19T154515Z-authoring-workflow-s2-codex-root-3cac208816154dd2b1c31ddf0272824b.md): `complete` (authoring-workflow-s2-codex-root; producer `codex-root`)
 - [Authoring S3 shared component constraints and inventory complete](registry/2026-10/2026-10-19T164247Z-authoring-workflow-s3-codex-root-abf223401a3146968d15996a72e6f905.md): `completed` (authoring-workflow-s3-codex-root; producer `codex-root`)
+- [Browser preparation locality complete](registry/2026-10/2026-10-20T100432Z-browser-preparation-locality-codex-root-4fb8ab8a34ad4890a47c08b4c0b977e9.md): `completed` (browser-preparation-locality-codex-root; producer `codex-root`)
 - [Dear ImGui 0.21 upgrade complete](registry/2026-10/2026-10-17T135355Z-dear-imgui-021-upgrade-codex-root-c8d8fd35d7b34ca2845220d1113df8e7.md): `completed` (dear-imgui-021-upgrade-codex-root; producer `codex-root`)
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
@@ -62,6 +63,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Browser preparation locality qualification](verification/2026-10/2026-10-20T095710Z-browser-preparation-locality-qualification-554a0c2edbfb455f84d4b32304446a2e.md) - Finite source-index workers and request-specific document Open with exact predecessor authority, physical retirement, public/native consumers and owner-occupancy measurements.
 - **Verification Evidence**: [Scalar preparation locality qualification](verification/2026-10/2026-10-20T090217Z-scalar-preparation-locality-qualification-7da17674f8c7464ea1612dc119686c45.md) - Field-only classification and conservative publication-shape reuse with exact validation, public timing and separate requested-allocation evidence.
 - **Verification Evidence**: [Production cost baselines and indexed authoring schema qualification](verification/2026-10/2026-10-20T081224Z-production-cost-baselines-and-indexed-authoring-schema-qualification-494a94898cf340b695e7332bbca06fc5.md) - Optimized public interaction, offscreen runtime and Rust iteration observations with exact schema lookup correction.
 - **Verification Evidence**: [Fixed world canvas and native UI qualification](verification/2026-10/2026-10-20T070752Z-fixed-world-canvas-and-native-ui-qualification-e7c7f1ee29e4459688d51f1ca20282d8.md) - Pixel readback, presented world input, native button resize and independent exported desktop qualification.
@@ -73,7 +75,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Owned Editor Reopen preparation and publication qualification](verification/2026-10/2026-10-20T022302Z-owned-editor-reopen-preparation-and-publication-qualification-557ea95db99b4b8a87829870db1d6b13.md) - Bounded read preparation, owner native codec affinity, exact stale admission, task terminal policy and responsiveness evidence.
 - **Verification Evidence**: [Owned Editor Save custody native observation and measurements](verification/2026-10/2026-10-20T013307Z-owned-editor-save-custody-native-observation-and-measurements-9828019f2f934061a1773899ce356ffb.md) - Cross-frame Save ownership, retained filesystem cleanup, migrated consumers and decision-local owner-drive evidence.
 - **Verification Evidence**: [Editor responsiveness measurements and standalone task cancellation](verification/2026-10/2026-10-19T182252Z-editor-responsiveness-measurements-and-standalone-task-cancellation-0e2521d0010a4d94940d83fa865f3d0c.md) - Decision-local optimized Open Save Reopen timings, source-grounded rebuild seams, and failed-then-passing standalone pending cancellation.
-- **Verification Evidence**: [N05 safe plugin failure facts and invocation context](verification/2026-10/2026-10-19T170951Z-n05-safe-plugin-failure-facts-and-invocation-context-d01f7391b84348a8827a0daa760dd1a4.md) - Checked App plugin facts, actual invocation identity and retained primary/shutdown diagnostics through public product and Editor failure paths.
 
 # Integration Notes
 

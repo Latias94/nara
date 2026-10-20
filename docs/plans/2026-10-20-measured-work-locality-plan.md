@@ -1,7 +1,7 @@
 # Measured Work Locality Follow-Up
 
-Status: L1 attribution and its bounded owner-local correction are complete. L2-L4 remain
-proposed; select one unit at a time. Remaining scalar latency is an explicitly open follow-up.
+Status: L1 attribution and its bounded owner-local correction and L2 Browser preparation are complete;
+L3/L4 are under source research before implementation. Remaining scalar latency is explicitly open.
 
 ## Evidence And Intent
 
@@ -44,6 +44,11 @@ implementing that alternative. No generic Future-based owner trait follows from 
 
 ### L2: Prepare Browser Filesystem Work With Finite Custody
 
+Disposition: [implemented and qualified](2026-10-20-browser-preparation-locality-plan.md) at
+`7f78c59`. The [report](../benchmarks/2026-10-20-browser-preparation.md) separates reduced owner
+occupancy from total scan/Open completion, and binds the explicit pending/result interface,
+exact predecessor authority and physical task/Host retirement. Original selected brief follows.
+
 Enumeration is the measured long owner call; terminal publication is smaller in this fixture.
 Move the existing source-index attempt, capabilities and budgets into a finite owned worker
 using current task pools. Preserve last-good snapshots and typed progress; coalesce Refresh,
@@ -69,6 +74,8 @@ intent, project close and stale completion through the ordinary public consumer.
 
 ### L3: Bound Large-Map Work To Views And Changes
 
+Researched brief: [Tile visibility locality](2026-10-20-tile-visibility-locality-plan.md).
+
 First split the real managed drive into Tile extraction, per-view queueing and sort/batch work;
 the baseline includes UI and is not per-function CPU attribution. Retain the fixed camera,
 one Tilemap entity, static and one-cell mutation cases. Keep 65,536 cells a stress population,
@@ -89,6 +96,8 @@ can avoid those cache obligations if it resolves the measured cost.
 Measure queued/uploaded bytes and changing/static cost separately with actual pixel readback.
 
 ### L4: Attribute The Rust And Play Iteration Path
+
+Researched brief: [Rust/Play attribution](2026-10-20-rust-play-attribution-plan.md).
 
 Use the retained independent-game collector and Cargo's existing build diagnostics to identify
 build units and dependency critical paths. Add bounded compiler/linker observations only when

@@ -28,6 +28,12 @@ The [locality follow-up](../plans/2026-10-20-measured-work-locality-plan.md) kee
 scalar, Browser, Tile and compiler work behind explicit attribution and complete
 consumer acceptance. These observations do not select a universal async interface or job kernel.
 
+The [Browser preparation slice](../plans/2026-10-20-browser-preparation-locality-plan.md) uses
+existing task custody for finite scans and explicit request-specific Open preparation. ADRs
+0047/0118 own pre-retirement revalidation and truthful pending/result observation; its
+[report](../benchmarks/2026-10-20-browser-preparation.md) separates correctness, native scope and
+maximum owner occupancy from total completion.
+
 Use [engineering memory](../knowledge/engineering/index.md) to resume work or recover its reasoning,
 verification and handoff context. Registration is continuity evidence, not a lock or an approval
 gate. Read records relevant to the task rather than treating the whole bundle as required context.

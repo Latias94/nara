@@ -4,6 +4,12 @@ This index separates architecture decisions from their recorded implementation c
 Decision and implementation states retain the scope of their linked evidence; updating this index
 does not requalify product behavior or change an ADR's acceptance.
 
+The [Browser preparation qualification](../../benchmarks/2026-10-20-browser-preparation.md) at
+`7f78c59` implements finite source-index workers and explicit request-specific document Open
+under ADRs 0047/0118. Exact predecessor/index admission, dirty-close decisions and physical
+Host/task retirement remain with their current owners. Public, focused native and timing
+evidence separates reduced owner occupancy from unchanged total filesystem work.
+
 The [scalar preparation locality investigation](../../benchmarks/2026-10-20-scalar-preparation.md)
 implements private publication-shape proof with full fallback and field-only classification reuse
 at `601b467`. Exact JSON/RON byte limits, schema/default/reference validation, unavailable
