@@ -58,6 +58,69 @@ locator. Add only that fixed key with existing size/NUL limits; do not read or l
 inherit arbitrary credentials or weaken Sealed/injection exclusions. This is a confirmed projection
 gap; the earlier generic Start result alone does not establish it as the only failure cause.
 
+With full failure collection, the same run executes all 2,641 Linux root tests: 2,618 pass and
+23 fail, with 12 platform-scoped skips. Nineteen failures are Editor consumers: seventeen expose
+the native Host's OS-derived strict write policy, while two generic composition fixtures still
+assume Browser Open completes synchronously. The remaining four failures are two stale manifest
+boundary fixtures, one unstable compiler-help snapshot and a font-license byte mismatch.
+
+The user selects cooperative local writes for explicitly selected native workspaces. Issue
+`ReadWrite + TrustedLocal` at the existing native root-capability entry, independently from
+data-only Open and explicit Rust execution. Preserve conflict checks, atomic name publication,
+receipt acknowledgement and honest platform guarantees. Lower caller-issued strict capabilities
+must still refuse unsupported writes; do not gate the nineteen consumer tests away on Linux.
+ADR 0118 owns this product policy.
+
+Update dependency fixtures to the actual direct-domain and dev-only workflow-facade boundary,
+including negative cases for default/extra features, wrong paths and facade placement. Replace
+only the unstable Resource compiler-help snapshot with a compile-time negative trait assertion;
+retain all other authority/privacy compile-fail cases. Generic composition fixtures must await
+and acknowledge the exact new Open request with bounded elapsed time, preserving all domain
+assertions. Preserve the pinned upstream Fira Sans license's original CRLF bytes through Git
+attributes; do not change the expected provenance hash to match transformed text. Fira Mono's
+existing canonical LF fixture remains LF on every checkout.
+
+The completed Windows root job runs 2,659 tests: 2,650 pass and nine fail, with 42 skips.
+Two stale boundary fixtures and six asynchronous Open assumptions overlap the repairs above.
+The ninth failure is an actual GPU oracle mismatch: in a 5-by-3 physical window with scale 1.25,
+the canvas content spans physical y=0.25..2.75, but pixel (0, 2) is black rather than the expected
+green. Investigate composite viewport/scissor and raster sampling against the shared content
+mapping; preserve exact visible-pixel and input agreement rather than relaxing the oracle.
+
+`0d71c4d` rasterizes the integer pixel-center coverage already selected by the scissor, while
+the original fractional rectangle remains the source-sampling uniform. All five canvas GPU tests
+pass with both automatic adapter selection and forced fallback on Windows. The undersized-window
+oracle, nearest sampling, bars and native UI assertions remain unchanged; hosted GPU qualification
+is still pending. `ecb8410` applies the selected local-workspace policy; `a9b110f` repairs exact
+asynchronous Open observation. The remaining local Browser test now confirms hard-linked local
+assets remain inspect-only; both recovery/Browser consumers pass, while the independent lower
+strict multi-link rejection still passes.
+
+The cold Windows job spends about 71 minutes in checks, feature-matrix builds and the default
+suite before its existing all-feature suite and Dear adapter gate. Its 75-minute job budget
+cannot cover that complete sequence. Set the root job envelope to 180 minutes, retaining serial
+Cargo, individual test deadlines, complete suites and failure semantics. This admits the existing
+workload; it is not a performance target or evidence that the next run will finish in that budget.
+
+## Feedback Cost Follow-up
+
+The user challenges this duration and explicitly selects `repo-ref/bevy` as a CI design reference.
+The 180-minute envelope is a temporary qualification guard, not the desired feedback loop. At
+Bevy revision `85503941e488152711a4695bbe248e9ed9f453fc`, separate test, lint, compile-test and wasm
+jobs, CI debug settings and trusted cache writers provide comparison evidence. Preserve Nara's
+actual platform and feature obligations rather than copying Bevy's feature selection.
+
+For Windows run `39418300517`, checks take 4m34s, the feature matrix 15m26s, nextest preparation
+about 15m50s and default test execution 35m16s. Eight selected compiler/consumer tests consume 1,614.084 seconds
+(76.29% of that test cohort). Nested Cargo and compile-contract construction dominate. Attribute
+cache and feature-profile reuse first; move compile-only positive fixtures out of mixed trybuild
+suites where their only effect is to force full dependency code generation. Keep executable
+positive behavior and every negative assertion. Review a small job/cache correction and actual
+before/after hosted evidence before claiming an improved feedback time. No new compiler-analysis
+framework, broad test exclusion or unmeasured speed claim is authorized by this comparison.
+The [source comparison and measured attribution](../research/2026-10-20-ci-feedback-and-bevy-comparison.md)
+records exact Bevy evidence, distinct feature obligations and the ordered small corrections.
+
 ## Ordered Corrections
 
 - Implement Linux enumeration behind the existing capability owner using `rustix::fs::Dir` and
@@ -81,6 +144,10 @@ gap; the earlier generic Start result alone does not establish it as the only fa
 - Preserve the selected X11 desktop session's XAUTHORITY input and make terminal external-start
   failures print existing bounded public diagnostics immediately. Qualify the actual Linux
   Play/Restart/Stop/Exit journey without expanding ambient environment inheritance.
+- Apply the selected native local-workspace policy at its owning entry and qualify Save, Reopen,
+  replacement and lifecycle consumers. Preserve lower strict-capability rejection and execution
+  admission. Repair the independently observed manifest, async fixture, negative assertion and
+  canonical font-byte contracts without excluding their consumers.
 - Format independent workspaces and refresh only required lockfile dependency edges.
 - Reconcile the stale exact fixture dependency policy with its existing dev-only component
   integration consumer. Keep the library's direct-domain dependencies and explicit facade features.

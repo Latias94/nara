@@ -41,6 +41,11 @@ retained-cache authority. The separate [CI portability repair](../plans/2026-10-
 adds Linux handle enumeration and compile-only portable wasm checks; browser execution remains
 outside that matrix.
 
+The [CI feedback comparison](../research/2026-10-20-ci-feedback-and-bevy-comparison.md) attributes
+hosted compiler/consumer costs and compares the pinned Bevy job/cache structure. A first correction
+separates positive API probes from negative compile suites while retaining both feature combinations;
+cache, profile and job-layout follow-ups need their own measured qualification.
+
 The [Rust/Play attribution](../benchmarks/2026-10-20-rust-play.md) at `2c26c92` measures public
 Play through accepted first presentation and retains separate Restart/headless controls. A
 bounded Windows path-input correction proves same-parameter CLI artifact reuse without changing

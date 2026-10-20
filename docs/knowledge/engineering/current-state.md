@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "e361f46250f58c9a45d7ac006014387e47f8179b285d495ccabccbaf76882551"
+source_fingerprint: "1a128b28e55fee79a5c32169122639461dbf0350f6437546b02ad9c821055c8e"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "e361f46250f58c9a45d7ac006014387e47f8179b285d495ccabccbaf768
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `e361f46250f58c9a45d7ac006014387e47f8179b285d495ccabccbaf76882551`
-- Immutable records: 805
+- Source fingerprint: `1a128b28e55fee79a5c32169122639461dbf0350f6437546b02ad9c821055c8e`
+- Immutable records: 806
 - Active lane heads: 1
 
 # Active Registrations
@@ -64,6 +64,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Hosted CI contract corrections and signed Linux process groups](verification/2026-10/2026-10-20T115517Z-hosted-ci-contract-corrections-and-signed-linux-process-groups-b976e5720228491691361ab578614f12.md) - Observed hosted failures, signed process groups, native local-workspace policy and deterministic contract fixtures; full successor CI pending.
 - **Verification Evidence**: [Rust Play attribution and Windows Cargo input qualification](verification/2026-10/2026-10-20T112401Z-rust-play-attribution-and-windows-cargo-input-qualification-2abb1db859f04d848d88a1706ad167be.md) - Public Play/Restart, private native Cargo attribution, exact CLI cache interoperability and compiler failure recovery at the corrected Windows path boundary.
 - **Verification Evidence**: [CI portability and Tile locality qualification in progress](verification/2026-10/2026-10-20T102441Z-ci-portability-and-tile-locality-qualification-in-progress-b85485ff744b4ccf8d02562d94d50ce6.md) - Confirmed hosted failures, Linux capability enumeration, portable wasm compilation and measured per-view queue correction; final hosted and timing evidence pending.
 - **Verification Evidence**: [Browser preparation locality qualification](verification/2026-10/2026-10-20T095710Z-browser-preparation-locality-qualification-554a0c2edbfb455f84d4b32304446a2e.md) - Finite source-index workers and request-specific document Open with exact predecessor authority, physical retirement, public/native consumers and owner-occupancy measurements.
@@ -75,7 +76,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Editor Image metadata publication cleanup custody qualification](verification/2026-10/2026-10-20T035244Z-editor-image-metadata-publication-cleanup-custody-qualification-c097c716d6f3480692d800285ec53544.md) - Register metadata publication before writes and retain cleanup through terminal failure, close, unwind and abandonment.
 - **Verification Evidence**: [Owned startup closure publication and responsiveness qualification](verification/2026-10/2026-10-20T032446Z-owned-startup-closure-publication-and-responsiveness-qualification-f187b61104d4443187cea8b9bc392460.md) - Bounded background startup preparation preserves linear Open ownership, owner session publication, cancellation and retained project replacement.
 - **Verification Evidence**: [Editor Host lifetime cleanup custody qualification](verification/2026-10/2026-10-20T030524Z-editor-host-lifetime-cleanup-custody-qualification-12c6b025d6c74ed1bf6900c8b0413877.md) - Scene and Prefab cleanup survives terminal Save, Reopen, content runtime replacement, close and session abandonment.
-- **Verification Evidence**: [Owned Editor Reopen preparation and publication qualification](verification/2026-10/2026-10-20T022302Z-owned-editor-reopen-preparation-and-publication-qualification-557ea95db99b4b8a87829870db1d6b13.md) - Bounded read preparation, owner native codec affinity, exact stale admission, task terminal policy and responsiveness evidence.
 
 # Integration Notes
 
