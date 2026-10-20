@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "457be34a9867375b5a040403fc33afdf5463e7ffcd72b81c982780e70f877290"
+source_fingerprint: "64f96d232ebfaa7e3e204f3a4a5eaa335b0d2cf05a6444e9f5236a107db1245e"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "457be34a9867375b5a040403fc33afdf5463e7ffcd72b81c982780e70f8
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `457be34a9867375b5a040403fc33afdf5463e7ffcd72b81c982780e70f877290`
-- Immutable records: 782
+- Source fingerprint: `64f96d232ebfaa7e3e204f3a4a5eaa335b0d2cf05a6444e9f5236a107db1245e`
+- Immutable records: 784
 - Active lane heads: 0
 
 # Active Registrations
@@ -26,6 +26,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
 - [Editor Host lifetime custody qualified](registry/2026-10/2026-10-20T030840Z-editor-host-custody-codex-root-f670666828544942a1f93038a83782f3.md): `completed` (editor-host-custody-codex-root; producer `codex-root`)
+- [Editor Image metadata cleanup custody qualified](registry/2026-10/2026-10-20T040023Z-editor-image-custody-codex-root-cb65f43d088f4508997444afed6704fe.md): `completed` (editor-image-custody-codex-root; producer `codex-root`)
 - [Editor Image Import and Reimport v1 complete](registry/2026-08/2026-08-21T025159Z-editor-image-import-reimport-v1-codex-root-6a48e230cc9c4e2eb1faf8121a85d9ea.md): `completed` (editor-image-import-reimport-v1-codex-root; producer `codex-root`)
 - [Owned Editor Reopen qualified with cleanup lifetime follow-up](registry/2026-10/2026-10-20T023343Z-editor-owned-reopen-codex-root-670715f95c9d41c39c6e04cf0c0c925b.md): `completed` (editor-owned-reopen-codex-root; producer `codex-root`)
 - [Owned background Editor Save qualified](registry/2026-10/2026-10-20T020203Z-editor-owned-save-codex-root-e752cdb15dd3493b96a52f17a336ca31.md): `completed` (editor-owned-save-codex-root; producer `codex-root`)
@@ -56,6 +57,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Editor Image metadata publication cleanup custody qualification](verification/2026-10/2026-10-20T035244Z-editor-image-metadata-publication-cleanup-custody-qualification-c097c716d6f3480692d800285ec53544.md) - Register metadata publication before writes and retain cleanup through terminal failure, close, unwind and abandonment.
 - **Verification Evidence**: [Owned startup closure publication and responsiveness qualification](verification/2026-10/2026-10-20T032446Z-owned-startup-closure-publication-and-responsiveness-qualification-f187b61104d4443187cea8b9bc392460.md) - Bounded background startup preparation preserves linear Open ownership, owner session publication, cancellation and retained project replacement.
 - **Verification Evidence**: [Editor Host lifetime cleanup custody qualification](verification/2026-10/2026-10-20T030524Z-editor-host-lifetime-cleanup-custody-qualification-12c6b025d6c74ed1bf6900c8b0413877.md) - Scene and Prefab cleanup survives terminal Save, Reopen, content runtime replacement, close and session abandonment.
 - **Verification Evidence**: [Owned Editor Reopen preparation and publication qualification](verification/2026-10/2026-10-20T022302Z-owned-editor-reopen-preparation-and-publication-qualification-557ea95db99b4b8a87829870db1d6b13.md) - Bounded read preparation, owner native codec affinity, exact stale admission, task terminal policy and responsiveness evidence.
@@ -67,7 +69,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Authoring S1 safety and field override recovery](verification/2026-10/2026-10-19T143606Z-authoring-s1-safety-and-field-override-recovery-0aca8f3bff914ffeaf0254f40a5cb118.md) - Owner-local Prefab/render rejection fixes and complete data-only Reset/Remove history with explicit test and platform limits.
 - **Work Progress**: [Authoring architecture refinements and workflow delivery order](progress/2026-10/2026-10-19T132019Z-authoring-architecture-refinements-and-workflow-delivery-order-9db915d26cb2407291ac76b756a2126c.md) - Keep existing owners, refine exact edit/result and value contracts, and qualify complete workflows within each stage.
 - **Work Progress**: [Ergonomic authoring interface design and independent challenge](progress/2026-10/2026-10-19T120824Z-ergonomic-authoring-interface-design-and-independent-challenge-510d6c4813604051a07a6f1e7009019b.md) - Proposed caller-first field editing, correlated dispatch, component inventory and bounded validation; design-only outcome.
-- **Work Progress**: [Post-correction foundation audit and withdrawn reference](progress/2026-10/2026-10-19T113248Z-post-correction-foundation-audit-and-withdrawn-reference-4b9d308fc38e4a31bdbe594c037e9b11.md) - Open post-correction findings, bounded Prefab failure proof and exclusion of the withdrawn reference.
 
 # Integration Notes
 

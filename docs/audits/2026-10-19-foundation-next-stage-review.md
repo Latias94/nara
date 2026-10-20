@@ -35,16 +35,20 @@ separate N05 App follow-up are implemented and qualified within the evidence lin
 [authoring design](../architecture/authoring-interface-ergonomics-design.md). S3 closes the selected
 finite-constraint and component-domain diagnostic work; arbitrary cross-field/native invariants
 remain an explicit validation boundary. N06 and N07 remain capability triggers, not confirmed bugs.
+The selected concrete corrections for N01-N05, N08/N09 and I01-I04 now have qualified evidence
+through S1-S3, the N05 App follow-up, U10, `3b70e48`, owned Save/Reopen/startup preparation and
+the Scene/Prefab/Image custody repairs. This closes those bounded corrections, not arbitrary
+native validation, future capabilities or every possible engine defect.
 
 The selected I/G follow-ups now have distinct dispositions:
 
 | Follow-up | Current disposition | Next dependency |
 | --- | --- | --- |
 | I01 / G1 standalone cancellation | Corrected at `3b70e48`: pending handles become logically cancelled before retained capture disposal. Task API semantics are explicit. The [v1 investigation](../benchmarks/2026-10-20-editor-responsiveness.md) owns the regression and limits. | Measure rejected/coalesced capture disposal and queue pressure before promising bounded caller latency or changing the queue. Logical cancellation still does not prove physical retirement. |
-| I03 / G2/G9 Save and Reopen | [Owned Save](../benchmarks/2026-10-20-owned-editor-save.md) and [Owned Reopen](../benchmarks/2026-10-20-owned-editor-reopen.md) are implemented and qualified within their linked scopes. Native codecs, migrations and document publication retain owner-thread admission. | Full Host lifetime custody is the adjacent correctness follow-up below; slow storage, complex codecs and total CPU remain separate measurements. |
+| I03 / G2/G9 Save and Reopen | [Owned Save](../benchmarks/2026-10-20-owned-editor-save.md) and [Owned Reopen](../benchmarks/2026-10-20-owned-editor-reopen.md) are implemented and qualified within their linked scopes. Native codecs, migrations and document publication retain owner-thread admission. | The adjacent full Host lifetime custody correction is also qualified below; slow storage, complex codecs and total CPU remain separate measurements. |
 | Post-terminal failed-Save cleanup | Full Scene/Prefab Host lifetime custody is implemented and qualified at `fe3ad96`. The [custody plan](../plans/2026-10-20-editor-host-lifetime-custody-plan.md) and [verification record](../knowledge/engineering/verification/2026-10/2026-10-20T030524Z-editor-host-lifetime-cleanup-custody-qualification-12c6b025d6c74ed1bf6900c8b0413877.md) own acceptance and limits. | No further Host framework is required by this repair. |
 | I02 / Project Open startup closure | The v1 workload triggered investigation: at 4,096 empty entities, startup-closure P50 was 9.920 / 10.048 / 9.911 ms and P95 11.194 / 10.312 / 12.028 ms across three processes. Owned startup preparation is implemented and qualified at `eb1ee98`; three optimized v4 processes pass in the [startup report](../benchmarks/2026-10-20-owned-editor-startup-closure.md). | Owner/Editor/native, independent module/reference and workspace qualification pass. Session/runtime construction and publication stay on the owner. The 8 ms trigger is not a product SLA. |
-| Subsequent sweep / Image metadata publication cleanup | Confirmed correctness gap: terminal publication failure can retain cleanup only in `EditorImageImportHost`, outside the Scene/Prefab lifetime registration. Session Drop can lose that authority, including after explicit close has stopped the runtime while Image cleanup remains pending. | Next correctness repair after startup qualification: [Image publication custody](../plans/2026-10-20-editor-image-publication-custody-plan.md). Retain the original publication owner through close, runtime replacement and abandonment, and prove actual cleanup retirement. Not implemented or qualified by the startup slice. |
+| Subsequent sweep / Image metadata publication cleanup | The confirmed lost-cleanup-authority defect is corrected and qualified at `bae0440`: the concrete `FilePublicationHost` registers with finite runtime custody before mutation, and the session latch exists before the Host is borrowed. The [Image verification record](../knowledge/engineering/verification/2026-10/2026-10-20T035244Z-editor-image-metadata-publication-cleanup-custody-qualification-c097c716d6f3480692d800285ec53544.md) records owner/Editor/native and workspace results. | [Image custody acceptance](../plans/2026-10-20-editor-image-publication-custody-plan.md) retains its own scope. No new feature or timing claim follows. |
 | Other G1/G2/G3 latency concerns | Browser Open, source-receipt/compiled-Prefab refresh, caller capture disposal, GPU completion holds and aggregate Runtime workers have no qualifying measurement here. | Measure their actual consumer before choosing queue indexing, callback deduplication, another executor or another job system. |
 | N06/N07 and G4-G8 | Code freshness/state restore, multiple same-kind documents, dependency roles, live rename, residency/save, reusable domain fields and Tile authoring are workflow-dependent capability work. | Let a concrete game or tool establish the required contract; these are not hidden closure conditions for the completed corrections. |
 
@@ -84,22 +88,41 @@ check (70 seconds), formatting and diff checks pass. Three v4 processes retain 8
 cross-platform release support.
 
 The original N/I corrections retain their linked repair evidence. A subsequent same-class sweep
-confirmed an additional Image metadata publication cleanup defect, so the current finding set is
-not closed. In [Image transaction ownership](../../src/project_host/runtime/editor/image_import/transaction.rs),
-`publication_cleanup` is retained only by `EditorImageImportHost` (reviewed lines 232 and 603-606).
-It is not registered in the Scene/Prefab Host custody owner. Explicit close retries it, but can
-leave the authoring runtime Stopped while that retry still fails; dropping the session then loses
-the remaining `FilePublicationHost` cleanup authority. This is a separate owning path from the
-qualified Scene/Prefab repair, not evidence that its tested registrations failed.
+identified a separate Image metadata cleanup defect: at that reviewed baseline,
+`EditorImageImportHost.publication_cleanup` was the sole authority after terminal failure
+(transaction lines 232 and 603-606). Explicit close could stop the runtime while cleanup remained
+pending, then session Drop lost the remaining retry authority. That historical finding is now
+corrected by the [Image custody slice](../plans/2026-10-20-editor-image-publication-custody-plan.md).
 
-The [planned Image custody repair](../plans/2026-10-20-editor-image-publication-custody-plan.md)
-now takes priority over further latency work. Schema CLI publication failures report an explicit
-manual-cleanup obligation and are not classified as this lost Editor lifetime-ownership bug.
-Startup measurements and its four passing selected native trajectories remain valid within their
-scope; they do not exercise the newly identified Image failure. Browser admission and receipt/
-content-refresh costs still need real consumer measurements after this correctness repair.
-Cross-platform release proof and the named future capabilities retain separate requirements;
-none of these results establishes that every engine workflow is correct.
+The concrete metadata `FilePublicationHost` registers with finite HostCustody before writing,
+and the transaction establishes its session latch before borrowing that Host. Failed cleanup
+therefore survives terminal results, close, Drop and unwind independently of the Image projection.
+Runtime close remains incomplete until cleanup retires. Success retires mutable publication
+authority and retains only the exact read source and binding; pending completion still opens
+metadata afresh and validates identity/digest. Source conflict and last-good policies are unchanged.
+
+Three new compound tests pass: missing/existing metadata failure followed by direct Drop; completed
+task shutdown with file close still incomplete followed by Drop; and catch/unwind after actual
+publication through the real Host mutex. They assert nonempty temporary files, unchanged PNG/
+metadata/Scene bytes, exact directory entries and one retained runtime until independent atomic
+fault release removes the temporary file and returns quarantine to baseline. The panic case proves
+retry through a poisoned Host mutex. Independent integration review found no current reachable
+blocking defect. The [Image qualification record](../knowledge/engineering/verification/2026-10/2026-10-20T035244Z-editor-image-metadata-publication-cleanup-custody-qualification-c097c716d6f3480692d800285ec53544.md)
+records 116 root tests passing with 81 excluded, 186 Editor tests with 19 native tests excluded,
+and two selected actual Windows/DX12 native tests passing. Final source is `bae0440`; the locked
+all-features/all-targets workspace check passes in 56.28 seconds, with formatting and diff checks
+passing. No additional runtime-ui-off qualification ran in this Image slice.
+These are separate overlapping cohorts, not a combined total or broader release certification.
+
+Image import runs only in ordinary Authoring; trusted compiled content-runtime replacement has
+no actual consumer intersection with this workflow. Finite custody transfers registered variants
+by construction, without claiming a native test of an unreachable intersection. Schema CLI failures
+retain their explicit manual-cleanup contract. Earlier lower-filesystem unwind remains best effort;
+this slice covers cleanup transferred into the publication Host, not every possible OS failure.
+All v1-v4 measurements stay frozen, with no latency-improvement claim. The remaining registered
+G9 costs, including Browser admission, receipt/content refresh, capture disposal, GPU holds and
+aggregate workers, need concrete consumer measurements; they are not additional confirmed defects
+closed by this slice. Future capabilities and cross-platform release proof retain separate scope.
 
 ## Assessment
 

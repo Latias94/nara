@@ -1,6 +1,6 @@
 # Editor Image Metadata Publication Cleanup Custody
 
-Status: In progress after owned startup implementation `eb1ee98`.
+Status: Completed at `bae0440`, after owned startup implementation `eb1ee98`.
 
 ## Confirmed Gap
 
@@ -51,3 +51,22 @@ Mode: execute_direct. Baseline implementation `eb1ee98`. Shared branch
 
 Review is read-only after implementation; each lane reports ownership and actual verification.
 Reuse target with CARGO_BUILD_JOBS=1; preserve concurrent files and vendor/. No push or PR.
+
+## Outcome
+
+The concrete FilePublicationHost is registered before mutation, with a transaction handle retained
+before borrowing it. Terminal failure, task shutdown, session Drop and unwind through the real Host
+mutex preserve cleanup authority in runtime custody. Successful publication retires the writer and
+keeps only the existing fresh-read source and binding for late identity/digest checks. The helper
+is a private transaction child, not a generic executor or importer abstraction.
+
+Focused engine/public 116, Editor/application 186 and actual Windows/DX12 native 2 tests pass;
+workspace all-features/all-targets, formatting and diff checks pass. Two read-only integration
+reviews report no remaining confirmed blocking defect in this change. Image mutation currently
+uses Authoring execution, while content-runtime replacement uses trusted compiled execution;
+there is no real consumer intersection to claim. The finite registration transfer covers the
+concrete variant; existing Scene/Prefab replacement evidence retains its original scope.
+
+The [qualification](../knowledge/engineering/verification/2026-10/2026-10-20T035244Z-editor-image-metadata-publication-cleanup-custody-qualification-c097c716d6f3480692d800285ec53544.md)
+records commands, run identities, independent review and limits. This closes the confirmed Image
+cleanup finding; unmeasured consumer costs and future capability work remain separate.

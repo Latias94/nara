@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-20
+**Last Revised**: 2026-10-20 (metadata publication retirement custody)
 **Owner**: `nara_asset`, `nara_image`, the project Host, UI-neutral tooling, and private Editor
 authoring adapters
 **Refines**: [ADR 0033](0033-asset-import-and-render-resource-preparation-seam.md),
@@ -102,6 +103,18 @@ consumers and `crates/nara_asset/tests/meta_format.rs` contract tests.
 Import and Reimport share one active user-action lane. A second request while that lane is active is
 rejected rather than queued. Editing a draft setting does not mutate source or metadata; only the
 explicit action begins a transaction.
+
+The private runtime custody owner registers the concrete metadata publication Host before its
+first write. The import transaction retains a handle before borrowing it, so a terminal failure
+or unwind after publication cannot discard identity-bound temporary cleanup. Runtime close stays
+incomplete until that registered cleanup retires, including after the Editor caller is abandoned.
+New publication is rejected after close admission shuts. This registration uses the existing
+finite file-retirement owner; it does not retain the entire image catalog or add a job framework.
+
+Once publication has no cleanup obligation, the transaction retires its mutable Host. Pending
+image decoding retains only the exact parent/name read capability and accepted metadata binding.
+Completion opens that source afresh and verifies its identity and digest before admitting pixels.
+Retiring write authority therefore does not weaken late source/metadata replacement detection.
 
 Before metadata publication, the Host binds the request to the current project session and attempt,
 selected logical source, source-index generation, metadata-catalog generation, exact capability,

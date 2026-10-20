@@ -638,6 +638,12 @@ Its v4 timing and cancellation evidence remain separate from native display late
 v1/v2/v3 data. Unmeasured source/receipt paths and future capabilities retain their separate
 admission criteria.
 
+The subsequent [Image cleanup custody correction](../plans/2026-10-20-editor-image-publication-custody-plan.md)
+at `bae0440` registers metadata write authority before mutation and retains failed cleanup through
+terminal failure, close, Drop and post-publication unwind. Pending decode keeps only fresh-read
+authority and the accepted metadata binding. Focused engine/public 116, Editor/application 186 and
+actual Windows/DX12 native 2 tests pass; this correctness repair adds no latency or release claim.
+
 ## Implementation Sequence And Ownership
 
 S1 / E1-E2, S2 / E3-E4 and S3 / E6-E5 are complete within their linked verification scope.

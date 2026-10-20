@@ -149,20 +149,40 @@ and diff checks pass. Three v4 processes retain 864 rows each and 162 independen
 summary groups. These overlapping cohorts do not establish cross-platform release qualification.
 
 The original N/I corrections retain their linked repair evidence. A subsequent same-class sweep
-confirmed a separate Image metadata publication cleanup defect. The
-[Image transaction owner](../../src/project_host/runtime/editor/image_import/transaction.rs)
-retains failed `publication_cleanup` only inside `EditorImageImportHost` (reviewed lines 232 and
-603-606), without registration in the Scene/Prefab lifetime custody owner. Explicit close can
-stop the authoring runtime while this cleanup remains pending; subsequent session Drop loses
-the remaining `FilePublicationHost` retry authority. The current confirmed finding set therefore
-has an open correctness repair, rather than only unmeasured or future-capability items.
+identified a separate Image metadata publication cleanup defect: at the reviewed baseline,
+`EditorImageImportHost.publication_cleanup` held its failed publication authority alone (transaction
+lines 232 and 603-606). Explicit close could stop the runtime while that cleanup remained pending;
+session Drop then lost retry authority. The
+[Image custody slice](../plans/2026-10-20-editor-image-publication-custody-plan.md) corrects that owner.
 
-The [Image publication custody plan](../plans/2026-10-20-editor-image-publication-custody-plan.md)
-is the next priority after startup qualification. Retain the exact original publication owner
-through runtime replacement, close and abandonment, with physical cleanup retirement proof.
-The startup slice has not repaired or qualified this owner. Schema CLI failures explicitly report
-manual cleanup and are not the same lifetime-ownership defect. Browser admission, receipt/content
-refresh and task/GPU/aggregate-worker latency still need measurement after this correctness work.
+The concrete metadata `FilePublicationHost` registers with finite runtime custody before writing;
+the transaction retains its latch before borrowing the Host. Failed cleanup survives terminal
+failure, close, Drop and unwind. Runtime close cannot complete while the registration has cleanup.
+Successful publication retires mutable authority and leaves only the exact read source and binding,
+with fresh completion-time identity/digest checks unchanged. This is one concrete private custody
+variant, not a new async framework or lifetime registration of the whole Image catalog.
+
+The [Image qualification record](../knowledge/engineering/verification/2026-10/2026-10-20T035244Z-editor-image-metadata-publication-cleanup-custody-qualification-c097c716d6f3480692d800285ec53544.md)
+records 116 root tests passing with 81 excluded, 186 Editor tests with 19 native tests excluded,
+and two selected actual Windows/DX12 native tests passing. Three new compound tests cover missing/
+existing metadata direct Drop, completed task shutdown with file close incomplete, and panic after
+actual publication through the real Host mutex. Actual temporary files, unchanged PNG/metadata/
+Scene bytes and quarantine retention survive until atomic fault release; removal and return to
+baseline prove cleanup retirement, including poisoned-mutex recovery. Independent integration
+review passes. Final source is `bae0440`; the locked all-features/all-targets workspace check passes
+in 56.28 seconds, together with formatting and diff checks. There is no additional runtime-ui-off
+qualification in this Image slice. Counts overlap and add no release claim.
+
+Image import belongs to ordinary Authoring, while content-runtime replacement belongs to trusted
+compiled execution; no native intersection or new consumer is claimed. Schema CLI failures retain
+explicit manual cleanup. Earlier lower-filesystem unwind remains best effort, and OS calls remain
+non-preemptible. All v1-v4 data stays frozen. Browser admission, receipt/content refresh and task/
+GPU/aggregate-worker latency still need concrete consumer measurements; these are remaining G9
+investigations, not additional confirmed correctness defects in this repair.
+The selected concrete corrections in N01-N05, N08/N09 and I01-I04 now have qualified S1-S3,
+N05 App, U10, task-cancellation, owned Save/Reopen/startup and custody evidence. Historical
+finding tables keep their reviewed source baseline; N06/N07 and untriggered G capabilities
+retain their own consumer conditions rather than appearing as unresolved correctness bugs.
 Multiple documents, automatic code freshness, domain-field adapters and
 Tile tools remain capability decisions, not evidence that synchronous owner traits are unsound.
 Split private modules by their existing responsibility when those owners change; historical line

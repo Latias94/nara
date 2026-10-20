@@ -103,8 +103,9 @@ follow-ups implement the measured phase corrections. The
 [Host lifetime custody qualification](../plans/2026-10-20-editor-host-lifetime-custody-plan.md)
 separately closes post-terminal Scene/Prefab failed-cleanup ownership. The subsequent
 [Image metadata custody repair](../plans/2026-10-20-editor-image-publication-custody-plan.md)
-addresses the separately confirmed Image publication path. These bounded changes preserve owner
-publication, native callback affinity and existing task retirement; they do not make synchronous
+at `bae0440` closes the separately confirmed Image publication path: focused engine/public 116,
+Editor/application 186 and actual Windows/DX12 native 2 tests pass. These bounded changes preserve
+owner publication, native callback affinity and existing task retirement; they do not make synchronous
 Plugin, codec or panel traits asynchronous. Each report owns its actual scope and limits.
 
 The [UI foundation design](ui-foundation-design.md),
