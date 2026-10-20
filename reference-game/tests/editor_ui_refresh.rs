@@ -566,7 +566,7 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
         ),
         EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
     ));
-    let reopened = editor.drive_editor_frame(Duration::ZERO);
+    let reopened = editor_persistence_driver::drive_until_result(&mut editor);
     assert!(matches!(
         reopened.persistence().result(),
         Some(EditorPersistenceResult::Opened { document, digest, .. })

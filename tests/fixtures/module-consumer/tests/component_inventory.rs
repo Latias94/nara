@@ -390,6 +390,12 @@ fn public_data_only_editor_creates_edits_rejects_saves_reopens_and_passes_compil
         ),
         EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
     ));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while editor.current_frame().persistence().result().is_none() {
+        assert!(Instant::now() < deadline, "Editor Reopen did not complete");
+        editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
     assert!(matches!(
         editor.current_frame().persistence().result(),
         Some(EditorPersistenceResult::Opened { .. })

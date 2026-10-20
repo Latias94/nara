@@ -463,9 +463,7 @@ fn explicit_reopen_reconciles_a_dirty_document_from_persisted_bytes() {
         ),
         EditorPersistenceRequestResult::Accepted
     );
-    let reopened = editor
-        .drive_editor_frame(std::time::Duration::ZERO)
-        .persistence();
+    let reopened = editor_driver::drive_persistence_until_result(&mut editor).persistence();
     assert!(matches!(
         reopened.result(),
         Some(EditorPersistenceResult::Opened {
@@ -523,8 +521,7 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
         EditorPersistenceRequestResult::Accepted
     );
     assert_eq!(
-        editor
-            .drive_editor_frame(std::time::Duration::ZERO)
+        editor_driver::drive_persistence_until_result(&mut editor)
             .persistence()
             .result(),
         Some(EditorPersistenceResult::Failed {
@@ -564,8 +561,7 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
         EditorPersistenceRequestResult::Accepted
     );
     assert_eq!(
-        editor
-            .drive_editor_frame(std::time::Duration::ZERO)
+        editor_driver::drive_persistence_until_result(&mut editor)
             .persistence()
             .result(),
         Some(EditorPersistenceResult::Failed {
@@ -595,8 +591,7 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
         EditorPersistenceRequestResult::Accepted
     );
     assert_eq!(
-        editor
-            .drive_editor_frame(std::time::Duration::ZERO)
+        editor_driver::drive_persistence_until_result(&mut editor)
             .persistence()
             .result(),
         Some(EditorPersistenceResult::Rejected {
@@ -626,8 +621,7 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
         EditorPersistenceRequestResult::Accepted
     );
     assert!(matches!(
-        editor
-            .drive_editor_frame(std::time::Duration::ZERO)
+        editor_driver::drive_persistence_until_result(&mut editor)
             .persistence()
             .result(),
         Some(EditorPersistenceResult::Failed {
@@ -659,8 +653,7 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
         EditorPersistenceRequestResult::Accepted
     );
     assert!(matches!(
-        editor
-            .drive_editor_frame(std::time::Duration::ZERO)
+        editor_driver::drive_persistence_until_result(&mut editor)
             .persistence()
             .result(),
         Some(EditorPersistenceResult::Opened {

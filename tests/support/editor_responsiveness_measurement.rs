@@ -176,6 +176,7 @@ fn measure_editor_owner_thread_work() {
                 document,
                 add_entity_patch("unsaved-edit")
             ));
+            let completion_started = Instant::now();
             let started = Instant::now();
             let accepted = editor_driver::request_persistence(
                 &mut editor,
@@ -186,8 +187,20 @@ fn measure_editor_owner_thread_work() {
             let request = started.elapsed();
             assert_eq!(accepted, EditorPersistenceRequestResult::Accepted);
             let started = Instant::now();
-            let frame = editor.drive_editor_frame(Duration::ZERO);
-            let drive = started.elapsed();
+            let mut frame = editor.drive_editor_frame(Duration::ZERO);
+            let first_drive = started.elapsed();
+            let mut max_drive = first_drive;
+            while frame.persistence().result().is_none() {
+                assert!(
+                    completion_started.elapsed() < ASYNC_DRIVER_TIMEOUT,
+                    "Reopen did not complete within the measurement deadline"
+                );
+                thread::sleep(ASYNC_POLL_INTERVAL);
+                let started = Instant::now();
+                frame = editor.drive_editor_frame(Duration::ZERO);
+                max_drive = max_drive.max(started.elapsed());
+            }
+            let completion = completion_started.elapsed();
             let model = frame.workspace().scene(document).unwrap();
             assert!(matches!(
                 frame.persistence().result(),
@@ -226,8 +239,34 @@ fn measure_editor_owner_thread_work() {
                 population + 1
             );
             if measured {
-                emit(population, source.len(), sample, "reopen-request", request);
-                emit(population, source.len(), sample, "reopen-drive", drive);
+                emit(
+                    population,
+                    source.len(),
+                    sample,
+                    "reopen-v3-request",
+                    request,
+                );
+                emit(
+                    population,
+                    source.len(),
+                    sample,
+                    "reopen-v3-first-drive",
+                    first_drive,
+                );
+                emit(
+                    population,
+                    source.len(),
+                    sample,
+                    "reopen-v3-max-drive",
+                    max_drive,
+                );
+                emit(
+                    population,
+                    source.len(),
+                    sample,
+                    "reopen-v3-completion",
+                    completion,
+                );
             }
             // Each Open sample starts from identical bytes. Restore outside the measured span.
             drop(frame);
@@ -252,7 +291,7 @@ fn emit(population: usize, source_bytes: usize, sample: usize, phase: &str, dura
     println!(
         "{}",
         serde_json::json!({
-            "measurement": "editor-owner-thread-v2",
+            "measurement": "editor-owner-thread-v3",
             "population": population,
             "baseline_source_bytes": source_bytes,
             "sample": sample,

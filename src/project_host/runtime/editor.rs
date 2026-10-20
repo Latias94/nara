@@ -53,7 +53,7 @@ pub use open::{
     EditorProjectOpenProgress,
 };
 #[cfg(test)]
-pub(crate) use persistence::SaveTestPhase;
+pub(crate) use persistence::{ReopenTestPhase, SaveTestPhase};
 #[cfg(feature = "presentation-2d")]
 pub use presentation::{
     EditorAcceptedPreview, EditorPresentationError, EditorPresentationImage, EditorPresentedToken,
@@ -450,10 +450,8 @@ enum PendingPersistence {
         authoring: Option<nara_scene::AuthoringDocumentReadmission>,
     },
     Saving(persistence::BackgroundSave),
-    Reopen {
-        document: EditorDocumentId,
-        base_revision: Option<nara_scene::SceneAuthoringRevision>,
-    },
+    Reopen(persistence::PendingReopen),
+    Reopening(persistence::BackgroundReopen),
 }
 
 enum PendingSave {
@@ -746,6 +744,8 @@ pub struct EditorProjectSession {
     pending_persistence: Option<PendingPersistence>,
     #[cfg(test)]
     next_save_gate: Option<persistence::SaveTestGate>,
+    #[cfg(test)]
+    next_reopen_gate: Option<persistence::ReopenTestGate>,
     persistence_result: Option<EditorPersistenceResult>,
     last_persistence_receipt: Option<EditorPersistenceReceipt>,
     diagnostics: DiagnosticReport,
@@ -833,11 +833,11 @@ impl Drop for EditorProjectSession {
 }
 
 impl EditorProjectSession {
-    /// Advances an admitted Save before cancelling session-local work and polling cleanup.
+    /// Advances admitted persistence before cancelling session-local work and polling cleanup.
     ///
     /// The caller must retain this session and retry after `Incomplete`. Dropping an incomplete
     /// session transfers retained runtime ownership to process quarantine.
-    /// Filesystem calls already borrowed by Save must return before their Host can be recovered;
+    /// Filesystem calls borrowed by persistence must return before completion can be observed;
     /// this poll does not claim to preempt an OS call or roll back published bytes.
     #[doc(hidden)]
     pub fn advance_close(&mut self) -> EditorProjectCloseProgress {
@@ -1306,6 +1306,8 @@ impl EditorProjectSession {
             pending_persistence: None,
             #[cfg(test)]
             next_save_gate: None,
+            #[cfg(test)]
+            next_reopen_gate: None,
             persistence_result: None,
             last_persistence_receipt: None,
             diagnostics,
@@ -1528,6 +1530,8 @@ impl EditorProjectSession {
             pending_persistence: None,
             #[cfg(test)]
             next_save_gate: None,
+            #[cfg(test)]
+            next_reopen_gate: None,
             persistence_result: None,
             last_persistence_receipt: None,
             diagnostics,

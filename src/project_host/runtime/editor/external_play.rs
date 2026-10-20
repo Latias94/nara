@@ -490,6 +490,16 @@ impl EditorProjectSession {
         &mut self,
         command: EditorPlayCommand,
     ) -> EditorPlayRequestResult {
+        if self.reopen_pending()
+            && matches!(
+                command,
+                EditorPlayCommand::Play
+                    | EditorPlayCommand::Restart
+                    | EditorPlayCommand::RunLastGood
+            )
+        {
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
+        }
         let operation = super::play::play_operation(command);
         let current = self.external_play_view().unwrap_or_else(|| {
             EditorExternalPlayView::new(

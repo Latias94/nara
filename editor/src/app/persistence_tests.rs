@@ -55,6 +55,101 @@ fn pending_save_retries_close_project_and_exit_after_its_receipt() {
 }
 
 #[test]
+fn pending_reopen_retries_close_project_and_exit_after_owner_publication() {
+    for retirement in [
+        EditorSessionRetirement::CloseProject,
+        EditorSessionRetirement::ExitProcess,
+    ] {
+        let fixture = PersistenceFixture::new();
+        let original = fs::read(fixture.root.join("worlds/entry.scene.json")).unwrap();
+        let mut application = fixture.open();
+        queue_reopen(&mut application);
+        let mut exited = match retirement {
+            EditorSessionRetirement::CloseProject => application
+                .submit_project_action(EditorProjectAction::CloseProject)
+                .exit_ready(),
+            EditorSessionRetirement::ExitProcess => application.request_exit().exit_ready(),
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while application.current_frame().is_some() && Instant::now() < deadline {
+            exited |= application
+                .drive_editor_frame(Duration::ZERO, false, false)
+                .exit_ready();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(application.state(), EditorApplicationState::ProjectManager);
+        assert_eq!(exited, retirement == EditorSessionRetirement::ExitProcess);
+        assert_eq!(
+            fs::read(fixture.root.join("worlds/entry.scene.json")).unwrap(),
+            original
+        );
+    }
+}
+
+#[test]
+fn pending_reopen_replacement_waits_for_the_original_source_publication() {
+    let fixture = PersistenceFixture::new();
+    let mut application = fixture.open();
+    queue_reopen(&mut application);
+    assert!(application.request_project_replacement(&fixture.root, Some("desktop".to_owned())));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while application.state() == EditorApplicationState::OpeningReplacement
+        && Instant::now() < deadline
+    {
+        application.advance_project_open();
+        application.drive_editor_frame(Duration::ZERO, false, false);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        application.state(),
+        EditorApplicationState::AuthoringDegraded
+    );
+    let frame = application.current_frame().unwrap();
+    let scene = frame.workspace().active_scene.as_ref().unwrap();
+    assert!(!scene.dirty);
+    assert!(
+        !scene
+            .editor
+            .inspector
+            .entities
+            .iter()
+            .any(|entity| entity.id == SceneEntityId::new("discarded-by-reopen").unwrap())
+    );
+    close(&mut application);
+}
+
+#[test]
+fn reopen_completion_is_observed_without_repainting_unchanged_polls() {
+    let fixture = PersistenceFixture::new();
+    let mut application = fixture.open();
+    queue_reopen(&mut application);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut saw_completion = false;
+    while Instant::now() < deadline {
+        let before = application.current_frame().unwrap().persistence();
+        let update = application.drive_editor_frame(Duration::ZERO, false, false);
+        let after = application.current_frame().unwrap().persistence();
+        assert_eq!(update.actions_observed(), before != after);
+        if after.operation() == EditorPersistenceOperation::Idle {
+            assert!(matches!(
+                after.result(),
+                Some(EditorPersistenceResult::Opened { .. })
+            ));
+            saw_completion = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(saw_completion);
+    assert!(
+        !application
+            .drive_editor_frame(Duration::ZERO, false, false)
+            .actions_observed()
+    );
+    close(&mut application);
+}
+
+#[test]
 fn pending_save_replacement_retries_close_and_refreshes_the_prepared_source() {
     let fixture = PersistenceFixture::new();
     let mut application = fixture.open();
@@ -163,6 +258,56 @@ fn queue_save(application: &mut EditorApplication) {
             EditorPersistenceRequestResult::Accepted
         )]
     ));
+}
+
+fn queue_reopen(application: &mut EditorApplication) {
+    let frame = application.current_frame().unwrap();
+    let scene = frame.workspace().active_scene.as_ref().unwrap();
+    application.submit_and_drive(
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Mutate(
+                EditorDocumentMutation::ApplyScenePatch {
+                    document: scene.document,
+                    base_revision: scene.revision,
+                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                        entity: SceneEntityRecord::new(
+                            SceneEntityId::new("discarded-by-reopen").unwrap(),
+                        ),
+                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    }]),
+                },
+            )],
+        ),
+        Duration::ZERO,
+    );
+    let frame = application.current_frame().unwrap();
+    let scene = frame.workspace().active_scene.as_ref().unwrap();
+    assert!(scene.dirty);
+    let dispatch = application.dispatch_editor_actions(EditorActionBatch::new(
+        frame.revision(),
+        [EditorAction::Persistence(EditorPersistenceAction::Reopen {
+            target: frame.reopen_target(),
+        })],
+    ));
+    assert!(matches!(
+        dispatch.feedback().unwrap().unwrap().outcomes(),
+        [EditorActionOutcome::Persistence(
+            EditorPersistenceRequestResult::Accepted
+        )]
+    ));
+    let project = application.state.workspace().unwrap();
+    assert_eq!(
+        project.session.persistence_view().operation(),
+        EditorPersistenceOperation::Opening {
+            document: scene.document
+        }
+    );
+    assert_eq!(
+        frame.persistence().operation(),
+        EditorPersistenceOperation::Idle,
+        "admission must precede publication of the Opening frame"
+    );
 }
 
 fn close(application: &mut EditorApplication) {

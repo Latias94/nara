@@ -621,8 +621,8 @@ fn dirty_close_does_not_offer_a_decision_after_save_has_started() {
     interaction.render();
     assert!(CONTROLS.with(|controls| controls.borrow().contains_key("close:Cancel")));
     let frame = interaction.frame();
-    // Freeze the public in-progress projection: this fixture completes its actual file save in
-    // one drive, so racing that completion would not reliably exercise this widget state.
+    // Freeze the public in-progress projection so worker scheduling cannot race the
+    // widget-policy observation.
     let saving = nara::tooling::EditorFrameClock::new().publish(
         frame.workspace().clone(),
         nara::tooling::EditorProjectView::new(

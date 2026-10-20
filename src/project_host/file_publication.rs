@@ -118,6 +118,18 @@ pub(in crate::project_host) struct FilePublicationHost {
     block_cleanup: bool,
 }
 
+/// Read-only access to the exact parent capability and target name retained by a publication Host.
+pub(in crate::project_host) struct FilePublicationReadSource {
+    parent: DirectoryCapability,
+    target: RelativeComponent,
+}
+
+impl FilePublicationReadSource {
+    pub(in crate::project_host) fn open(&self) -> Result<FileCapability, FsError> {
+        self.parent.open_child_file(&self.target)
+    }
+}
+
 impl FilePublicationHost {
     pub(in crate::project_host) fn from_existing(
         parent: DirectoryCapability,
@@ -265,6 +277,13 @@ impl FilePublicationHost {
 
     pub(in crate::project_host) fn open_target(&self) -> Result<FileCapability, FsError> {
         self.parent.open_child_file(&self.target)
+    }
+
+    pub(in crate::project_host) fn read_source(&self) -> FilePublicationReadSource {
+        FilePublicationReadSource {
+            parent: self.parent.share(),
+            target: self.target.clone(),
+        }
     }
 
     pub(in crate::project_host) fn mark_uncertain(&mut self) {

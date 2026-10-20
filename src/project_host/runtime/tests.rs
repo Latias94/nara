@@ -6,6 +6,8 @@
 mod authoring_images;
 
 #[cfg(feature = "tooling")]
+mod owned_reopen;
+#[cfg(feature = "tooling")]
 mod owned_save;
 
 use std::{
@@ -764,7 +766,7 @@ fn editor_no_play_workflow_keeps_one_plan_owned_schema_snapshot() {
         }),
         nara_tooling::EditorPersistenceRequestResult::Accepted
     );
-    editor.drive_editor_frame(Duration::ZERO);
+    drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
         editor.persistence_view().result(),
         Some(EditorPersistenceResult::Opened { .. })
@@ -1121,7 +1123,7 @@ logical_height = 540
         reconcile.outcomes()[1],
         EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
     ));
-    let reconciled_frame = editor.drive_editor_frame(Duration::ZERO);
+    let reconciled_frame = drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
         reconciled_frame.project_content(),
         EditorProjectContentView::RefreshPending { .. }
@@ -1186,7 +1188,7 @@ logical_height = 540
         reopen_report.outcomes()[0],
         EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
     ));
-    let reopened_frame = editor.drive_editor_frame(Duration::ZERO);
+    let reopened_frame = drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
         editor.persistence_view().result(),
         Some(EditorPersistenceResult::Opened { document, .. }) if document == prefab_document

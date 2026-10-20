@@ -1,6 +1,7 @@
 use super::*;
 
 mod background;
+mod reopen;
 mod retirement;
 pub(super) use background::BackgroundSave;
 use background::SaveLane;
@@ -8,6 +9,11 @@ use background::SaveLane;
 pub(super) use background::SaveTestGate;
 #[cfg(test)]
 pub(crate) use background::{SaveTestControl, SaveTestPhase};
+#[cfg(test)]
+pub(super) use reopen::ReopenTestGate;
+#[cfg(test)]
+pub(crate) use reopen::ReopenTestPhase;
+pub(super) use reopen::{BackgroundReopen, PendingReopen};
 pub(super) use retirement::{SaveCustody, SaveCustodyPlugin};
 
 use nara_asset::{AssetPath, AssetRef};
@@ -63,10 +69,23 @@ impl EditorProjectSession {
                 };
                 self.acknowledge_save(kind, document, refresh, outcome)
             }
-            PendingPersistence::Reopen {
-                document,
-                base_revision,
-            } => self.complete_reopen(document, base_revision),
+            PendingPersistence::Reopen(pending) => {
+                self.pending_persistence =
+                    Some(PendingPersistence::Reopening(BackgroundReopen::start(
+                        pending,
+                        self.authoring_runtime.persistence_tasks(),
+                        #[cfg(test)]
+                        self.next_reopen_gate.take(),
+                    )));
+                return;
+            }
+            PendingPersistence::Reopening(mut worker) => {
+                let Some(completion) = worker.poll() else {
+                    self.pending_persistence = Some(PendingPersistence::Reopening(worker));
+                    return;
+                };
+                self.publish_reopen_completion(worker.admission(), completion)
+            }
         };
         self.persistence_result = Some(result);
         self.persistence_operation = EditorPersistenceOperation::Idle;
@@ -305,7 +324,16 @@ impl EditorProjectSession {
         let diagnostics = published.diagnostics().clone();
         let basis =
             nara_scene::PrefabAuthoringSession::from_published_authoring_document(published);
-        let reopened = match host.reopen_authoring(&basis) {
+        let prepared = match host.prepare_reopen(basis.authoring_readmission()) {
+            Ok(request) => request.prepare(),
+            Err(_) => {
+                return editor_workspace_command_rejected(
+                    self.workspace.active_document(),
+                    "project.editor.prefab-preservation-mismatch",
+                );
+            }
+        };
+        let reopened = match prepared.admit(None) {
             PrefabReopenOutcome::Opened(opened) => opened,
             PrefabReopenOutcome::Rejected(_) => {
                 return editor_workspace_command_rejected(
@@ -570,10 +598,7 @@ impl EditorProjectSession {
             );
         }
 
-        let runtime_blocks_reopen = self.trusted_compiled().is_some_and(|lane| {
-            !matches!(&lane.runtime_owner, EditorRuntimeOwnerState::Empty)
-                || lane.runtime_host.has_cleanup_owner()
-        });
+        let runtime_blocks_reopen = self.scene_runtime_blocks_reopen();
         if matches!(command, EditorPersistenceCommand::Reopen { .. })
             && self.workspace.document_kind(requested_document) != Some(EditorDocumentKind::Prefab)
             && runtime_blocks_reopen
@@ -655,23 +680,18 @@ impl EditorProjectSession {
                 };
             }
             EditorPersistenceCommand::Reopen { .. } => {
-                let base_revision =
-                    self.workspace
-                        .document_kind(requested_document)
-                        .and_then(|kind| match kind {
-                            EditorDocumentKind::Scene => self
-                                .workspace
-                                .scene(requested_document)
-                                .map(|slot| slot.revision()),
-                            EditorDocumentKind::Prefab => self
-                                .workspace
-                                .prefab(requested_document)
-                                .map(|slot| slot.revision()),
+                let pending = match self.capture_reopen(requested_document) {
+                    Ok(pending) => pending,
+                    Err(reason) => {
+                        self.persistence_result = Some(EditorPersistenceResult::Rejected {
+                            request: EditorPersistenceRequestKind::Reopen,
+                            document: Some(requested_document),
+                            reason,
                         });
-                self.pending_persistence = Some(PendingPersistence::Reopen {
-                    document: requested_document,
-                    base_revision,
-                });
+                        return EditorPersistenceRequestResult::Rejected(reason);
+                    }
+                };
+                self.pending_persistence = Some(PendingPersistence::Reopen(pending));
                 self.persistence_operation = EditorPersistenceOperation::Opening {
                     document: requested_document,
                 };
@@ -809,62 +829,12 @@ impl EditorProjectSession {
         }
     }
 
-    pub(super) fn complete_reopen(
+    fn publish_scene_reopen(
         &mut self,
         document: EditorDocumentId,
-        base_revision: Option<nara_scene::SceneAuthoringRevision>,
+        base_revision: nara_scene::SceneAuthoringRevision,
+        reopened: SceneReopenOutcome,
     ) -> EditorPersistenceResult {
-        if self.workspace.document_kind(document) == Some(EditorDocumentKind::Prefab) {
-            return self.complete_prefab_reopen(document, base_revision);
-        }
-        self.complete_scene_reopen(document, base_revision)
-    }
-
-    fn complete_scene_reopen(
-        &mut self,
-        document: EditorDocumentId,
-        base_revision: Option<nara_scene::SceneAuthoringRevision>,
-    ) -> EditorPersistenceResult {
-        let Some(base_revision) = base_revision else {
-            return EditorPersistenceResult::Rejected {
-                request: EditorPersistenceRequestKind::Reopen,
-                document: Some(document),
-                reason: EditorPersistenceRejection::MissingDocument,
-            };
-        };
-        let Some(lane) = self.scene_lane.as_ref() else {
-            return EditorPersistenceResult::Rejected {
-                request: EditorPersistenceRequestKind::Reopen,
-                document: Some(document),
-                reason: EditorPersistenceRejection::MissingDocument,
-            };
-        };
-        if lane.document != document {
-            return EditorPersistenceResult::Rejected {
-                request: EditorPersistenceRequestKind::Reopen,
-                document: Some(document),
-                reason: EditorPersistenceRejection::SourceBindingMismatch,
-            };
-        }
-        let Some(slot) = self.workspace.scene(document) else {
-            return EditorPersistenceResult::Rejected {
-                request: EditorPersistenceRequestKind::Reopen,
-                document: Some(document),
-                reason: EditorPersistenceRejection::MissingDocument,
-            };
-        };
-        let reopened = if slot.authoring_readiness().is_some() {
-            lane.host.reopen_authoring(slot.session())
-        } else {
-            match &self.execution {
-                EditorExecutionLane::TrustedCompiled(runtime) => lane
-                    .host
-                    .reopen_native(runtime.plan.schema_validation().registry()),
-                EditorExecutionLane::Authoring(_) => {
-                    SceneReopenOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch)
-                }
-            }
-        };
         match reopened {
             SceneReopenOutcome::Opened(opened) => {
                 let OpenedSceneReopen {
@@ -916,55 +886,14 @@ impl EditorProjectSession {
         }
     }
 
-    fn complete_prefab_reopen(
+    fn publish_prefab_reopen(
         &mut self,
         document: EditorDocumentId,
-        base_revision: Option<nara_scene::SceneAuthoringRevision>,
+        base_revision: nara_scene::SceneAuthoringRevision,
+        source_binding: EditorDocumentSourceBinding,
+        refresh_runtime_content: bool,
+        reopened: PrefabReopenOutcome,
     ) -> EditorPersistenceResult {
-        let Some(lane) = self.prefab_lane.as_ref() else {
-            return EditorPersistenceResult::Failed {
-                request: EditorPersistenceRequestKind::Reopen,
-                document: Some(document),
-                stage: EditorPersistenceFailureStage::OpenTarget,
-            };
-        };
-        if lane.document != document {
-            return EditorPersistenceResult::Rejected {
-                request: EditorPersistenceRequestKind::Reopen,
-                document: Some(document),
-                reason: EditorPersistenceRejection::SourceBindingMismatch,
-            };
-        }
-        let host = &lane.host;
-        let Some(base_revision) = base_revision else {
-            return EditorPersistenceResult::Rejected {
-                request: EditorPersistenceRequestKind::Reopen,
-                document: Some(document),
-                reason: EditorPersistenceRejection::MissingDocument,
-            };
-        };
-        let source_binding = match self.workspace.prefab(document) {
-            Some(slot) => slot.source_binding().clone(),
-            None => {
-                return EditorPersistenceResult::Rejected {
-                    request: EditorPersistenceRequestKind::Reopen,
-                    document: Some(document),
-                    reason: EditorPersistenceRejection::MissingDocument,
-                };
-            }
-        };
-        let refresh_runtime_content = host.publishes_runtime_content();
-        let reopened = match self.workspace.prefab(document) {
-            Some(slot) if slot.authoring_readiness().is_some() => {
-                host.reopen_authoring(slot.session())
-            }
-            _ => match self.trusted_compiled() {
-                Some(lane) => host.reopen_native(lane.plan.schema_validation().registry()),
-                None => {
-                    PrefabReopenOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch)
-                }
-            },
-        };
         match reopened {
             PrefabReopenOutcome::Opened(opened) => {
                 let OpenedPrefabReopen {

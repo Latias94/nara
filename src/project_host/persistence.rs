@@ -18,6 +18,11 @@ use nara_tooling::{
     EditorPersistenceFailureStage, EditorPersistenceRejection,
 };
 
+mod reopen;
+pub(super) use reopen::{
+    PrefabReopenRequest, PreparedPrefabReopen, PreparedSceneReopen, SceneReopenRequest,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DocumentEncoding {
     Json,
@@ -95,16 +100,6 @@ pub(super) enum SceneReopenOutcome {
 
 pub(super) enum PrefabReopenOutcome {
     Opened(Box<OpenedPrefabReopen>),
-    Rejected(EditorPersistenceRejection),
-    Failed(EditorPersistenceFailureStage),
-}
-
-enum FileReopenOutcome {
-    Opened {
-        bytes: Vec<u8>,
-        identity: FileIdentity,
-        content_digest: ContentDigest,
-    },
     Rejected(EditorPersistenceRejection),
     Failed(EditorPersistenceFailureStage),
 }
@@ -343,23 +338,6 @@ impl PersistenceFileState {
         PersistenceSaveOutcome::Saved { commit, evidence }
     }
 
-    fn reopen(&self) -> FileReopenOutcome {
-        let file = match self.publication.open_target() {
-            Ok(file) => file,
-            Err(error) => return open_target_reopen_failure(error),
-        };
-        let bytes = match file.read_to_end_bounded(file_byte_limit(self.limits)) {
-            Ok(bytes) => bytes,
-            Err(_) => return FileReopenOutcome::Failed(EditorPersistenceFailureStage::ReadTarget),
-        };
-        let content_digest = ContentDigest::of_bytes(&bytes);
-        FileReopenOutcome::Opened {
-            bytes,
-            identity: file.identity(),
-            content_digest,
-        }
-    }
-
     fn commit_reopen(&mut self, identity: FileIdentity, digest: ContentDigest) {
         self.publication.commit_reconciled(identity, digest);
     }
@@ -507,75 +485,6 @@ impl ScenePersistenceHost {
         self.file.save_preflighted(checkpoint, &bytes)
     }
 
-    pub(super) fn reopen_native(&self, registry: &ComponentRegistry) -> SceneReopenOutcome {
-        if self.lane != PersistenceDocumentLane::Native {
-            return SceneReopenOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch);
-        }
-        let reopened = self.file.reopen();
-        let FileReopenOutcome::Opened {
-            bytes,
-            identity,
-            content_digest,
-        } = reopened
-        else {
-            return match reopened {
-                FileReopenOutcome::Rejected(reason) => SceneReopenOutcome::Rejected(reason),
-                FileReopenOutcome::Failed(stage) => SceneReopenOutcome::Failed(stage),
-                FileReopenOutcome::Opened { .. } => unreachable!(),
-            };
-        };
-        let session =
-            match decode_scene_session(self.file.encoding, &bytes, self.file.limits, registry) {
-                Ok(session) => session,
-                Err(stage) => return SceneReopenOutcome::Failed(stage),
-            };
-        SceneReopenOutcome::Opened(Box::new(OpenedSceneReopen {
-            session,
-            digest: editor_digest(content_digest),
-            identity,
-            content_digest,
-        }))
-    }
-
-    pub(super) fn reopen_authoring(&self, current: &SceneAuthoringSession) -> SceneReopenOutcome {
-        if self.lane != PersistenceDocumentLane::Authoring
-            || current.authoring_readiness().is_none()
-        {
-            return SceneReopenOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch);
-        }
-        let reopened = self.file.reopen();
-        let FileReopenOutcome::Opened {
-            bytes,
-            identity,
-            content_digest,
-        } = reopened
-        else {
-            return match reopened {
-                FileReopenOutcome::Rejected(reason) => SceneReopenOutcome::Rejected(reason),
-                FileReopenOutcome::Failed(stage) => SceneReopenOutcome::Failed(stage),
-                FileReopenOutcome::Opened { .. } => unreachable!(),
-            };
-        };
-        let session = match decode_authoring_scene_session(
-            self.file.encoding,
-            &bytes,
-            self.file.limits,
-            current,
-        ) {
-            Ok(session) => session,
-            Err(stage) => return SceneReopenOutcome::Failed(stage),
-        };
-        if !scene_authoring_basis_is_preserved(&session, current) {
-            return SceneReopenOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch);
-        }
-        SceneReopenOutcome::Opened(Box::new(OpenedSceneReopen {
-            session,
-            digest: editor_digest(content_digest),
-            identity,
-            content_digest,
-        }))
-    }
-
     pub(super) fn commit_reopen(&mut self, identity: FileIdentity, digest: ContentDigest) {
         self.file.commit_reopen(identity, digest);
     }
@@ -696,75 +605,6 @@ impl PrefabPersistenceHost {
         self.file.save_preflighted(checkpoint, &bytes)
     }
 
-    pub(super) fn reopen_native(&self, registry: &ComponentRegistry) -> PrefabReopenOutcome {
-        if self.lane != PersistenceDocumentLane::Native {
-            return PrefabReopenOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch);
-        }
-        let reopened = self.file.reopen();
-        let FileReopenOutcome::Opened {
-            bytes,
-            identity,
-            content_digest,
-        } = reopened
-        else {
-            return match reopened {
-                FileReopenOutcome::Rejected(reason) => PrefabReopenOutcome::Rejected(reason),
-                FileReopenOutcome::Failed(stage) => PrefabReopenOutcome::Failed(stage),
-                FileReopenOutcome::Opened { .. } => unreachable!(),
-            };
-        };
-        let session =
-            match decode_prefab_session(self.file.encoding, &bytes, self.file.limits, registry) {
-                Ok(session) => session,
-                Err(stage) => return PrefabReopenOutcome::Failed(stage),
-            };
-        PrefabReopenOutcome::Opened(Box::new(OpenedPrefabReopen {
-            session,
-            digest: editor_digest(content_digest),
-            identity,
-            content_digest,
-        }))
-    }
-
-    pub(super) fn reopen_authoring(&self, current: &PrefabAuthoringSession) -> PrefabReopenOutcome {
-        if self.lane != PersistenceDocumentLane::Authoring
-            || current.authoring_readiness().is_none()
-        {
-            return PrefabReopenOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch);
-        }
-        let reopened = self.file.reopen();
-        let FileReopenOutcome::Opened {
-            bytes,
-            identity,
-            content_digest,
-        } = reopened
-        else {
-            return match reopened {
-                FileReopenOutcome::Rejected(reason) => PrefabReopenOutcome::Rejected(reason),
-                FileReopenOutcome::Failed(stage) => PrefabReopenOutcome::Failed(stage),
-                FileReopenOutcome::Opened { .. } => unreachable!(),
-            };
-        };
-        let session = match decode_authoring_prefab_session(
-            self.file.encoding,
-            &bytes,
-            self.file.limits,
-            current,
-        ) {
-            Ok(session) => session,
-            Err(stage) => return PrefabReopenOutcome::Failed(stage),
-        };
-        if !prefab_authoring_basis_is_preserved(&session, current) {
-            return PrefabReopenOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch);
-        }
-        PrefabReopenOutcome::Opened(Box::new(OpenedPrefabReopen {
-            session,
-            digest: editor_digest(content_digest),
-            identity,
-            content_digest,
-        }))
-    }
-
     pub(super) const fn publishes_runtime_content(&self) -> bool {
         matches!(self.lane, PersistenceDocumentLane::Native)
     }
@@ -829,26 +669,6 @@ fn decode_scene_session(
         .map_err(|_| EditorPersistenceFailureStage::Validate)
 }
 
-fn decode_authoring_scene_session(
-    encoding: DocumentEncoding,
-    bytes: &[u8],
-    limits: SceneFileLimits,
-    current: &SceneAuthoringSession,
-) -> Result<SceneAuthoringSession, EditorPersistenceFailureStage> {
-    let candidate = match encoding {
-        DocumentEncoding::Json => {
-            SceneDocumentCandidate::decode_json_bytes_with_limits(bytes, limits)
-        }
-        DocumentEncoding::Ron => {
-            SceneDocumentCandidate::decode_ron_bytes_with_limits(bytes, limits)
-        }
-    }
-    .map_err(|_| EditorPersistenceFailureStage::Decode)?;
-    current
-        .try_reopen_authoring_candidate(candidate)
-        .map_err(|_| EditorPersistenceFailureStage::Validate)
-}
-
 enum AuthoringSaveValidationError {
     Decode(EditorPersistenceFailureStage),
     PreservationMismatch,
@@ -876,14 +696,6 @@ fn validate_authoring_scene_save(
         return Err(AuthoringSaveValidationError::PreservationMismatch);
     }
     Ok(())
-}
-
-fn scene_authoring_basis_is_preserved(
-    reopened: &SceneAuthoringSession,
-    current: &SceneAuthoringSession,
-) -> bool {
-    reopened.authoring_readiness() == current.authoring_readiness()
-        && reopened.unavailable_record_manifest() == current.unavailable_record_manifest()
 }
 
 fn encode_prefab(
@@ -917,26 +729,6 @@ fn decode_prefab_session(
         .map_err(|_| EditorPersistenceFailureStage::Validate)
 }
 
-fn decode_authoring_prefab_session(
-    encoding: DocumentEncoding,
-    bytes: &[u8],
-    limits: SceneFileLimits,
-    current: &PrefabAuthoringSession,
-) -> Result<PrefabAuthoringSession, EditorPersistenceFailureStage> {
-    let candidate = match encoding {
-        DocumentEncoding::Json => {
-            PrefabDocumentCandidate::decode_json_bytes_with_limits(bytes, limits)
-        }
-        DocumentEncoding::Ron => {
-            PrefabDocumentCandidate::decode_ron_bytes_with_limits(bytes, limits)
-        }
-    }
-    .map_err(|_| EditorPersistenceFailureStage::Decode)?;
-    current
-        .try_reopen_authoring_candidate(candidate)
-        .map_err(|_| EditorPersistenceFailureStage::Validate)
-}
-
 fn validate_authoring_prefab_save(
     encoding: DocumentEncoding,
     bytes: &[u8],
@@ -959,14 +751,6 @@ fn validate_authoring_prefab_save(
         return Err(AuthoringSaveValidationError::PreservationMismatch);
     }
     Ok(())
-}
-
-fn prefab_authoring_basis_is_preserved(
-    reopened: &PrefabAuthoringSession,
-    current: &PrefabAuthoringSession,
-) -> bool {
-    reopened.authoring_readiness() == current.authoring_readiness()
-        && reopened.unavailable_record_manifest() == current.unavailable_record_manifest()
 }
 
 fn editor_persistence_receipt(
@@ -1023,18 +807,6 @@ const fn editor_publication_failure(
     }
 }
 
-fn open_target_reopen_failure(error: FsError) -> FileReopenOutcome {
-    match error {
-        FsError::Io { ref source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
-            FileReopenOutcome::Rejected(EditorPersistenceRejection::TargetDeleted)
-        }
-        FsError::Unsupported { .. } | FsError::Unproven { .. } => {
-            FileReopenOutcome::Rejected(EditorPersistenceRejection::UnsupportedGuarantee)
-        }
-        _ => FileReopenOutcome::Failed(EditorPersistenceFailureStage::OpenTarget),
-    }
-}
-
 fn editor_digest(digest: ContentDigest) -> EditorDocumentDigest {
     EditorDocumentDigest::new(digest.length(), *digest.as_bytes())
 }
@@ -1051,6 +823,7 @@ mod tests {
         fs::{self, File},
         path::{Path, PathBuf},
         sync::atomic::{AtomicU64, Ordering},
+        sync::{Arc, Mutex},
     };
 
     #[cfg(windows)]
@@ -1069,6 +842,225 @@ mod tests {
     use nara_tooling::{EditorDocumentSourceBinding, EditorWorkspace, EditorWorkspaceCommand};
 
     static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
+
+    #[derive(nara_ecs::Component)]
+    struct ReopenThreadProbe(i64);
+
+    #[test]
+    fn native_reopen_prepares_on_a_worker_but_runs_codecs_and_migrations_only_on_owner_admission() {
+        use nara_reflect::{
+            ComponentCapability, ComponentFieldPath, ComponentFieldSchema, ComponentSchema,
+            ComponentSchemaVersion, ComponentTypeId, ComponentValueKind,
+        };
+        let root = TestRoot::new();
+        let directory = root.capability();
+        let callbacks = Arc::new(Mutex::new(Vec::new()));
+        let mut registry = ComponentRegistry::new();
+        let component = ComponentTypeId::new("nara.test.ReopenThreadProbe");
+        let decode_calls = Arc::clone(&callbacks);
+        let encode_calls = Arc::clone(&callbacks);
+        registry
+            .register_persistent_component_with_codec::<ReopenThreadProbe, _, _>(
+                ComponentSchema::new(
+                    component.clone(),
+                    "Reopen thread probe",
+                    ComponentSchemaVersion(2),
+                )
+                .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                .with_fields([ComponentFieldSchema::required(
+                    ComponentFieldId::new("value"),
+                    "Value",
+                    ComponentFieldPath::from_fields(["value"]),
+                    ComponentValueKind::I64,
+                )
+                .with_capabilities(ComponentCapability::SCENE_AUTHORING)]),
+                move |value| {
+                    decode_calls
+                        .lock()
+                        .unwrap()
+                        .push(("decode", std::thread::current().id()));
+                    Ok(ReopenThreadProbe(value.field_i64("value")?))
+                },
+                move |value| {
+                    encode_calls
+                        .lock()
+                        .unwrap()
+                        .push(("encode", std::thread::current().id()));
+                    Ok(ComponentValue::map([(
+                        "value",
+                        ComponentValue::I64(value.0),
+                    )]))
+                },
+            )
+            .unwrap();
+        let migrate_calls = Arc::clone(&callbacks);
+        registry
+            .register_component_migration(
+                &component,
+                ComponentSchemaVersion::ONE,
+                ComponentSchemaVersion(2),
+                move |value| {
+                    migrate_calls
+                        .lock()
+                        .unwrap()
+                        .push(("migration", std::thread::current().id()));
+                    Ok(value)
+                },
+            )
+            .unwrap();
+        registry.freeze().unwrap();
+        let scene_host = ScenePersistenceHost::open(&directory, "startup.scene.json", &registry)
+            .unwrap()
+            .host;
+        let prefab_host = PrefabPersistenceHost::open(
+            &directory,
+            EditorDocumentSourceBinding::new("reference-ui.prefab.json"),
+            &registry,
+        )
+        .unwrap()
+        .host;
+        let scene_identity = scene_host.file.observed_identity();
+        let scene_digest = scene_host.file.observed_digest();
+        let entity = SceneEntityRecord::new(SceneEntityId::new("native-probe").unwrap())
+            .with_component(
+                component.clone(),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::map([("value", ComponentValue::I64(7))]),
+                ),
+            );
+        fs::write(
+            root.scene_path(),
+            SceneDocument::from_ordered_roots([entity.clone()])
+                .to_json_string()
+                .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            root.path.join("reference-ui.prefab.json"),
+            PrefabDocument::from_ordered_roots([entity])
+                .to_json_string()
+                .unwrap(),
+        )
+        .unwrap();
+        let scene_request = scene_host.prepare_reopen(None).unwrap();
+        let prefab_request = prefab_host.prepare_reopen(None).unwrap();
+        let (scene, prefab) =
+            std::thread::spawn(move || (scene_request.prepare(), prefab_request.prepare()))
+                .join()
+                .unwrap();
+        assert!(
+            callbacks.lock().unwrap().is_empty(),
+            "worker preparation cannot execute native behavior"
+        );
+        assert_eq!(scene_host.file.observed_identity(), scene_identity);
+        assert_eq!(scene_host.file.observed_digest(), scene_digest);
+        let SceneReopenOutcome::Opened(scene) = scene.admit(Some(&registry)) else {
+            panic!("owner must admit the valid Scene")
+        };
+        let PrefabReopenOutcome::Opened(prefab) = prefab.admit(Some(&registry)) else {
+            panic!("owner must admit the valid Prefab")
+        };
+        assert_eq!(
+            scene.session.document().entities[0].components[&component].version,
+            ComponentSchemaVersion(2)
+        );
+        assert_eq!(
+            prefab.session.document().entities[0].components[&component].version,
+            ComponentSchemaVersion(2)
+        );
+        let callbacks = callbacks.lock().unwrap();
+        assert!(callbacks.iter().any(|(kind, _)| *kind == "migration"));
+        assert!(callbacks.iter().any(|(kind, _)| *kind == "decode"));
+        assert!(
+            callbacks
+                .iter()
+                .all(|(_, thread)| *thread == std::thread::current().id())
+        );
+    }
+
+    #[test]
+    fn authoring_scene_and_prefab_reopen_prepare_independently_without_mutating_the_original_hosts()
+    {
+        let root = TestRoot::new();
+        let directory = root.capability();
+        let scene_bytes = fs::read(root.scene_path()).unwrap();
+        let prefab_bytes = fs::read(root.path.join("reference-ui.prefab.json")).unwrap();
+        let bundle = AuthoringSchemaBundle::new([]).unwrap();
+        let scene = SceneDocumentCandidate::decode_json_bytes(&scene_bytes)
+            .unwrap()
+            .admit_authoring(
+                AuthoringDocumentSource::new(
+                    nara_asset::AssetRef::path("scenes/startup.scene.json").unwrap(),
+                ),
+                &bundle,
+                &[],
+            )
+            .unwrap()
+            .publish();
+        let prefab = PrefabDocumentCandidate::decode_json_bytes(&prefab_bytes)
+            .unwrap()
+            .admit_authoring(
+                AuthoringDocumentSource::new(
+                    nara_asset::AssetRef::path("prefabs/reference-ui.prefab.json").unwrap(),
+                ),
+                &bundle,
+                &[],
+            )
+            .unwrap()
+            .publish();
+        let scene_basis =
+            SceneAuthoringSession::from_published_authoring_document(scene).authoring_readmission();
+        let prefab_basis = PrefabAuthoringSession::from_published_authoring_document(prefab)
+            .authoring_readmission();
+        let scene_file = directory
+            .open_file(&RelativePath::new("startup.scene.json").unwrap())
+            .unwrap();
+        let prefab_file = directory
+            .open_file(&RelativePath::new("reference-ui.prefab.json").unwrap())
+            .unwrap();
+        let (mut scene_host, _) = ScenePersistenceHost::bind_authoring_source(
+            &directory,
+            "startup.scene.json",
+            scene_file.identity(),
+            ContentDigest::of_bytes(&scene_bytes),
+        )
+        .unwrap();
+        let (mut prefab_host, _) = PrefabPersistenceHost::bind_authoring_source(
+            &directory,
+            EditorDocumentSourceBinding::new("reference-ui.prefab.json"),
+            prefab_file.identity(),
+            ContentDigest::of_bytes(&prefab_bytes),
+        )
+        .unwrap();
+        scene_host.mark_uncertain();
+        prefab_host.mark_uncertain();
+        let scene_request = scene_host.prepare_reopen(scene_basis).unwrap();
+        let prefab_request = prefab_host.prepare_reopen(prefab_basis).unwrap();
+        let (scene, prefab) =
+            std::thread::spawn(move || (scene_request.prepare(), prefab_request.prepare()))
+                .join()
+                .unwrap();
+        assert!(scene_host.file.uncertain());
+        assert!(prefab_host.file.uncertain());
+        let SceneReopenOutcome::Opened(scene) = scene.admit(None) else {
+            panic!("pure Scene classification must prepare")
+        };
+        let PrefabReopenOutcome::Opened(prefab) = prefab.admit(None) else {
+            panic!("pure Prefab classification must prepare")
+        };
+        assert!(scene_host.file.uncertain());
+        assert!(prefab_host.file.uncertain());
+        scene_host.commit_reopen(scene.identity, scene.content_digest);
+        prefab_host.commit_reopen(prefab.identity, prefab.content_digest);
+        assert!(!scene_host.file.uncertain());
+        assert!(!prefab_host.file.uncertain());
+        assert_eq!(fs::read(root.scene_path()).unwrap(), scene_bytes);
+        assert_eq!(
+            fs::read(root.path.join("reference-ui.prefab.json")).unwrap(),
+            prefab_bytes
+        );
+    }
 
     #[cfg(windows)]
     #[test]
@@ -1235,7 +1227,12 @@ mod tests {
         ));
         assert_eq!(fs::read(root.scene_path()).unwrap(), first_bytes);
 
-        let SceneReopenOutcome::Opened(opened) = host.reopen_native(&registry) else {
+        let SceneReopenOutcome::Opened(opened) = host
+            .prepare_reopen(None)
+            .unwrap()
+            .prepare()
+            .admit(Some(&registry))
+        else {
             panic!("the published candidate must reopen");
         };
         let OpenedSceneReopen {
@@ -1351,7 +1348,12 @@ mod tests {
         assert_eq!(evidence.document(), document);
         assert!(authority.commit(&mut workspace, commit).applied);
 
-        let PrefabReopenOutcome::Opened(reopened) = host.reopen_native(&registry) else {
+        let PrefabReopenOutcome::Opened(reopened) = host
+            .prepare_reopen(None)
+            .unwrap()
+            .prepare()
+            .admit(Some(&registry))
+        else {
             panic!("the saved Prefab source should reopen through its own lane");
         };
         assert_eq!(reopened.session.document(), &expected);
@@ -1480,12 +1482,21 @@ mod tests {
         };
         assert!(authority.commit(&mut workspace, commit).applied);
         assert!(matches!(
-            host.reopen_native(&ComponentRegistry::new()),
-            SceneReopenOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch)
+            host.prepare_reopen(None),
+            Err(EditorPersistenceRejection::PreservationMismatch)
         ));
 
-        let SceneReopenOutcome::Opened(reopened) =
-            host.reopen_authoring(workspace.scene(document).unwrap().session())
+        let SceneReopenOutcome::Opened(reopened) = host
+            .prepare_reopen(
+                workspace
+                    .scene(document)
+                    .unwrap()
+                    .session()
+                    .authoring_readmission(),
+            )
+            .unwrap()
+            .prepare()
+            .admit(None)
         else {
             panic!("the saved degraded Scene should reopen through its exact authoring basis");
         };
@@ -1515,7 +1526,16 @@ mod tests {
         fs::write(root.scene_path(), manifest_drift.to_json_string().unwrap()).unwrap();
 
         assert!(matches!(
-            host.reopen_authoring(workspace.scene(document).unwrap().session()),
+            host.prepare_reopen(
+                workspace
+                    .scene(document)
+                    .unwrap()
+                    .session()
+                    .authoring_readmission()
+            )
+            .unwrap()
+            .prepare()
+            .admit(None),
             SceneReopenOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch)
         ));
         assert_eq!(host.file.observed_identity(), observed_identity);

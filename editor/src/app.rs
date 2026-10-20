@@ -1236,7 +1236,7 @@ impl EditorApplication {
             _ if frame.workspace_intent().intent().is_none()
                 && frame.persistence().operation() == EditorPersistenceOperation::Idle =>
             {
-                // A Save may have kept the initial Exit request Busy. Retain the user's
+                // Persistence may have kept the initial Exit request Busy. Retain the user's
                 // retirement intent and admit it only after that operation has settled.
                 let update = match &mut self.state {
                     EditorProductState::AuthoringReady(project)
@@ -1342,8 +1342,8 @@ impl EditorApplication {
                 mut retained,
                 mut opening,
             } => {
-                // The candidate must not capture source bytes that an already admitted Save
-                // is still replacing, especially when both requests name the same project.
+                // Finish admitted persistence before preparing a replacement, so its source
+                // and the retained workspace cannot straddle two publication attempts.
                 if matches!(&opening.step, OpeningProjectStep::ProjectRoot)
                     && retained.session.persistence_view().operation()
                         != EditorPersistenceOperation::Idle
