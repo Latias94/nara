@@ -124,12 +124,24 @@ impl WindowResolution {
     }
 }
 
+/// Native mode requested when the desktop adapter creates a window.
+///
+/// This startup setting does not promise that later component changes reconfigure
+/// an existing native window.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum WindowMode {
+    /// A normal window with the configured physical client extent.
     #[default]
     Windowed,
+    /// A borderless window covering the primary monitor without changing its video mode.
+    /// If the adapter cannot identify a primary monitor, the operating system chooses one.
     BorderlessFullscreen,
+    /// Exclusive fullscreen on the primary monitor at the configured physical extent.
+    ///
+    /// The desktop adapter chooses the matching video mode with the highest refresh
+    /// rate, then the highest bit depth. Missing primary monitors or matching video
+    /// modes fail startup; this request does not silently become borderless or windowed.
     Fullscreen,
 }
 

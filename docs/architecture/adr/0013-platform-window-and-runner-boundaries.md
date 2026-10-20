@@ -2,11 +2,11 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-10-20 (explicit startup window-mode lowering)
 **Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041:
 Input Routing, Actions, Text Input, UI Focus, and Accessibility
-**Proposed Refinement Under Evaluation**: ADR 0082 and ADR 0084 may place managed product/runtime
-ownership around this boundary; OQ-038 owns the reusable Platform Adapter and Runtime Driver shape.
+**Managed Execution**: Accepted ADR 0084 and its ADR 0117 refinement own the implemented managed
+runtime lifecycle. OQ-038 retains the future reusable Platform Adapter and Runtime Driver shape.
 
 ## Context
 
@@ -38,6 +38,12 @@ Rules:
 - Headless runner is first-class.
 - Window events are normalized into nara event/data types before game systems consume them.
 - Fixed timestep belongs to app/runtime scheduling, not winit-specific code.
+- Startup WindowMode is an actual adapter request. Windowed uses the configured physical client
+  extent. BorderlessFullscreen covers the primary monitor without changing its video mode; if no
+  primary monitor is identified, the OS chooses the monitor. Fullscreen requests an exclusive
+  primary-monitor mode with the exact configured physical extent, preferring highest refresh then
+  bit depth. Missing monitor/matching mode rejects before native creation; no silent downgrade is
+  allowed. This does not promise live reconfiguration of an existing window from component writes.
 - The accepted contract is a top-level driver authority and lifecycle boundary, not a public
   `Runner` trait. Its reusable Rust shape waits for OQ-038 evidence from a second production Adapter.
 

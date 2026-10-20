@@ -2,6 +2,7 @@
 
 #[cfg(feature = "accessibility")]
 mod accessibility;
+mod window_mode;
 
 #[cfg(feature = "accessibility")]
 pub use accessibility::{
@@ -341,7 +342,11 @@ impl<'runtime> WinitApp<'runtime> {
                 window.resolution.physical_width,
                 window.resolution.physical_height,
             ))
-            .with_resizable(window.resizable);
+            .with_resizable(window.resizable)
+            .with_fullscreen(window_mode::initial_fullscreen(
+                &window,
+                event_loop.primary_monitor(),
+            )?);
         #[cfg(feature = "platform-accessibility")]
         let attributes = if self.accessibility_activation.is_enabled() {
             attributes.with_visible(false)
