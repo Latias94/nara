@@ -38,15 +38,15 @@ pub use authoring::{
 #[cfg(feature = "serde")]
 pub use authoring_decode::{
     AuthoringAdapterEvidence, AuthoringAdapterIdentity, AuthoringDocumentKind,
-    AuthoringDocumentPublicationError, AuthoringDocumentReadiness, AuthoringDocumentSource,
-    AuthoringFieldEdit, AuthoringFieldEditError, AuthoringFieldWrite, AuthoringPatchRecordSlot,
-    AuthoringPatchTargetKind, AuthoringRecordFact, AuthoringRecordLocation,
-    AuthoringRecordOwnerClaim, AuthoringRecordReadiness, AuthoringSchemaBasis,
-    AuthoringSessionReopenError, MAX_AUTHORING_FIELD_WRITES, PrefabAuthoringDocumentCandidate,
-    PublishedAuthoringPrefabDocument, PublishedAuthoringSceneDocument,
-    SceneAuthoringDocumentCandidate, UnavailableEntityReference, UnavailablePatchTarget,
-    UnavailableRecord, UnavailableRecordManifest, UnavailableRecordManifestEntry,
-    UnavailableValuePathSegment,
+    AuthoringDocumentPublicationError, AuthoringDocumentReadiness, AuthoringDocumentReadmission,
+    AuthoringDocumentSource, AuthoringFieldEdit, AuthoringFieldEditError, AuthoringFieldWrite,
+    AuthoringPatchRecordSlot, AuthoringPatchTargetKind, AuthoringRecordFact,
+    AuthoringRecordLocation, AuthoringRecordOwnerClaim, AuthoringRecordReadiness,
+    AuthoringSchemaBasis, AuthoringSessionReopenError, MAX_AUTHORING_FIELD_WRITES,
+    PrefabAuthoringDocumentCandidate, PublishedAuthoringPrefabDocument,
+    PublishedAuthoringSceneDocument, SceneAuthoringDocumentCandidate, UnavailableEntityReference,
+    UnavailablePatchTarget, UnavailableRecord, UnavailableRecordManifest,
+    UnavailableRecordManifestEntry, UnavailableValuePathSegment,
 };
 pub use candidate::ExpandedSceneCandidate;
 pub use document::{SceneComponentRecord, SceneDocument, SceneEntityRecord};

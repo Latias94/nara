@@ -70,6 +70,96 @@ pub enum AuthoringDocumentReadiness {
 #[derive(Clone)]
 pub struct AuthoringSchemaBasis(Arc<AuthoringClassificationBasis>);
 
+/// Owned admission for preparing another document against one session's exact authoring basis.
+///
+/// This value retains schema classification, source identity, history limits and the unavailable
+/// record preservation expectation. It owns no working document, history entries, live instance
+/// or permission to replace a Workspace document. A Host must still admit a prepared result to
+/// its original document and revision before publishing it.
+#[derive(Debug)]
+pub struct AuthoringDocumentReadmission {
+    source: AuthoringDocumentSource,
+    kind: AuthoringDocumentKind,
+    basis: Arc<AuthoringClassificationBasis>,
+    history_limits: crate::SceneAuthoringHistoryLimits,
+    expected_readiness: AuthoringDocumentReadiness,
+    expected_unavailable_manifest: UnavailableRecordManifest,
+}
+
+impl AuthoringDocumentReadmission {
+    /// Prepares a new Scene lineage using the captured source and classification basis.
+    pub fn reopen_scene_candidate(
+        &self,
+        candidate: SceneDocumentCandidate,
+    ) -> Result<crate::SceneAuthoringSession, AuthoringSessionReopenError> {
+        if self.kind != AuthoringDocumentKind::Scene {
+            return Err(
+                authoring_reopen_kind_rejection(AuthoringDocumentKind::Scene, self.kind).into(),
+            );
+        }
+        let (document, limits) = candidate.into_authoring_parts();
+        let state = classify_scene_document(
+            &document,
+            self.source.clone(),
+            AuthoringDocumentKind::Scene,
+            Arc::clone(&self.basis),
+            limits,
+        )?;
+        Ok(
+            crate::SceneAuthoringSession::from_published_authoring_document_with_history_limits(
+                PublishedAuthoringSceneDocument { document, state },
+                self.history_limits,
+            ),
+        )
+    }
+
+    /// Prepares a new Prefab lineage using the captured source and classification basis.
+    pub fn reopen_prefab_candidate(
+        &self,
+        candidate: PrefabDocumentCandidate,
+    ) -> Result<crate::PrefabAuthoringSession, AuthoringSessionReopenError> {
+        if self.kind != AuthoringDocumentKind::Prefab {
+            return Err(
+                authoring_reopen_kind_rejection(AuthoringDocumentKind::Prefab, self.kind).into(),
+            );
+        }
+        let (document, limits) = candidate.into_authoring_parts();
+        let state = classify_scene_document(
+            &document.instantiate(),
+            self.source.clone(),
+            AuthoringDocumentKind::Prefab,
+            Arc::clone(&self.basis),
+            limits,
+        )?;
+        Ok(
+            crate::PrefabAuthoringSession::from_published_authoring_document_with_history_limits(
+                PublishedAuthoringPrefabDocument { document, state },
+                self.history_limits,
+            ),
+        )
+    }
+
+    /// Checks that re-admission preserved readiness and every unavailable Scene record.
+    #[must_use]
+    pub fn preserves_scene(&self, session: &crate::SceneAuthoringSession) -> bool {
+        self.kind == AuthoringDocumentKind::Scene
+            && session.authoring_schema_basis()
+                == Some(AuthoringSchemaBasis(Arc::clone(&self.basis)))
+            && session.authoring_readiness() == Some(self.expected_readiness)
+            && session.unavailable_record_manifest() == Some(&self.expected_unavailable_manifest)
+    }
+
+    /// Checks that re-admission preserved readiness and every unavailable Prefab record.
+    #[must_use]
+    pub fn preserves_prefab(&self, session: &crate::PrefabAuthoringSession) -> bool {
+        self.kind == AuthoringDocumentKind::Prefab
+            && session.authoring_schema_basis()
+                == Some(AuthoringSchemaBasis(Arc::clone(&self.basis)))
+            && session.authoring_readiness() == Some(self.expected_readiness)
+            && session.unavailable_record_manifest() == Some(&self.expected_unavailable_manifest)
+    }
+}
+
 impl fmt::Debug for AuthoringSchemaBasis {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
@@ -1137,46 +1227,18 @@ impl AuthoringDocumentState {
         &self.diagnostics
     }
 
-    pub(crate) fn reopen_scene_candidate(
+    pub(crate) fn readmission(
         &self,
-        candidate: SceneDocumentCandidate,
-    ) -> Result<PublishedAuthoringSceneDocument, AuthoringDocumentPublicationError> {
-        if self.kind != AuthoringDocumentKind::Scene {
-            return Err(authoring_reopen_kind_rejection(
-                AuthoringDocumentKind::Scene,
-                self.kind,
-            ));
+        history_limits: crate::SceneAuthoringHistoryLimits,
+    ) -> AuthoringDocumentReadmission {
+        AuthoringDocumentReadmission {
+            source: self.source.clone(),
+            kind: self.kind,
+            basis: Arc::clone(&self.basis),
+            history_limits,
+            expected_readiness: self.readiness,
+            expected_unavailable_manifest: self.unavailable_manifest.clone(),
         }
-        let (document, limits) = candidate.into_authoring_parts();
-        let state = classify_scene_document(
-            &document,
-            self.source.clone(),
-            AuthoringDocumentKind::Scene,
-            Arc::clone(&self.basis),
-            limits,
-        )?;
-        Ok(PublishedAuthoringSceneDocument { document, state })
-    }
-
-    pub(crate) fn reopen_prefab_candidate(
-        &self,
-        candidate: PrefabDocumentCandidate,
-    ) -> Result<PublishedAuthoringPrefabDocument, AuthoringDocumentPublicationError> {
-        if self.kind != AuthoringDocumentKind::Prefab {
-            return Err(authoring_reopen_kind_rejection(
-                AuthoringDocumentKind::Prefab,
-                self.kind,
-            ));
-        }
-        let (document, limits) = candidate.into_authoring_parts();
-        let state = classify_scene_document(
-            &document.instantiate(),
-            self.source.clone(),
-            AuthoringDocumentKind::Prefab,
-            Arc::clone(&self.basis),
-            limits,
-        )?;
-        Ok(PublishedAuthoringPrefabDocument { document, state })
     }
 }
 
@@ -2629,5 +2691,161 @@ fn field_edit_rejection(
         applied: false,
         inverse: None,
         diagnostics,
+    }
+}
+
+#[cfg(test)]
+mod readmission_tests {
+    use super::*;
+    use crate::{PrefabAuthoringSession, SceneAuthoringHistoryLimits, SceneAuthoringSession};
+
+    fn unavailable_entity() -> SceneEntityRecord {
+        SceneEntityRecord::new(SceneEntityId::new("root").unwrap()).with_component(
+            ComponentTypeId::new("project.Unavailable"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("preserve this record".to_owned()),
+            ),
+        )
+    }
+
+    #[test]
+    fn native_sessions_cannot_capture_authoring_readmission() {
+        assert!(
+            SceneAuthoringSession::new(SceneDocument::default())
+                .authoring_readmission()
+                .is_none()
+        );
+        assert!(
+            PrefabAuthoringSession::new(PrefabDocument::default())
+                .authoring_readmission()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn owned_scene_readmission_survives_its_session_and_preserves_only_the_exact_manifest() {
+        let document = SceneDocument::from_ordered_roots([unavailable_entity()]);
+        let bytes = document.to_json_string().unwrap().into_bytes();
+        let bundle = AuthoringSchemaBundle::new([]).unwrap();
+        let published = SceneDocumentCandidate::decode_json_bytes(&bytes)
+            .unwrap()
+            .admit_authoring(
+                AuthoringDocumentSource::new(AssetRef::path("scenes/root.scene.json").unwrap()),
+                &bundle,
+                &[],
+            )
+            .unwrap()
+            .publish();
+        let limits = SceneAuthoringHistoryLimits::new(8, 16, 32, 1024, 16, 32, 1024).unwrap();
+        let session = SceneAuthoringSession::from_published_authoring_document_with_history_limits(
+            published, limits,
+        );
+        let source_id = session.revision().source_id();
+        let admission = session.authoring_readmission().unwrap();
+        drop(session);
+
+        let reopened = std::thread::spawn(move || {
+            let reopened = admission
+                .reopen_scene_candidate(SceneDocumentCandidate::decode_json_bytes(&bytes).unwrap())
+                .unwrap();
+            assert!(admission.preserves_scene(&reopened));
+            let drift = admission
+                .reopen_scene_candidate(
+                    SceneDocumentCandidate::decode_json_bytes(
+                        SceneDocument::default()
+                            .to_json_string()
+                            .unwrap()
+                            .as_bytes(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            assert!(!admission.preserves_scene(&drift));
+            assert!(
+                admission
+                    .reopen_prefab_candidate(
+                        PrefabDocumentCandidate::decode_json_bytes(
+                            PrefabDocument::default()
+                                .to_json_string()
+                                .unwrap()
+                                .as_bytes()
+                        )
+                        .unwrap()
+                    )
+                    .is_err()
+            );
+            reopened
+        })
+        .join()
+        .unwrap();
+        assert_eq!(reopened.document(), &document);
+        assert_eq!(reopened.history_limits(), limits);
+        assert_ne!(reopened.revision().source_id(), source_id);
+        assert_eq!(reopened.history_status().undo_depth, 0);
+    }
+
+    #[test]
+    fn owned_prefab_readmission_survives_its_session_and_preserves_only_the_exact_manifest() {
+        let document = PrefabDocument::from_ordered_roots([unavailable_entity()]);
+        let bytes = document.to_json_string().unwrap().into_bytes();
+        let bundle = AuthoringSchemaBundle::new([]).unwrap();
+        let published = PrefabDocumentCandidate::decode_json_bytes(&bytes)
+            .unwrap()
+            .admit_authoring(
+                AuthoringDocumentSource::new(AssetRef::path("prefabs/root.prefab.json").unwrap()),
+                &bundle,
+                &[],
+            )
+            .unwrap()
+            .publish();
+        let limits = SceneAuthoringHistoryLimits::new(8, 16, 32, 1024, 16, 32, 1024).unwrap();
+        let session = PrefabAuthoringSession::from_published_authoring_document_with_history_limits(
+            published, limits,
+        );
+        let source_id = session.revision().source_id();
+        let admission = session.authoring_readmission().unwrap();
+        drop(session);
+
+        let reopened = std::thread::spawn(move || {
+            let reopened = admission
+                .reopen_prefab_candidate(
+                    PrefabDocumentCandidate::decode_json_bytes(&bytes).unwrap(),
+                )
+                .unwrap();
+            assert!(admission.preserves_prefab(&reopened));
+            let drift = admission
+                .reopen_prefab_candidate(
+                    PrefabDocumentCandidate::decode_json_bytes(
+                        PrefabDocument::default()
+                            .to_json_string()
+                            .unwrap()
+                            .as_bytes(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            assert!(!admission.preserves_prefab(&drift));
+            assert!(
+                admission
+                    .reopen_scene_candidate(
+                        SceneDocumentCandidate::decode_json_bytes(
+                            SceneDocument::default()
+                                .to_json_string()
+                                .unwrap()
+                                .as_bytes()
+                        )
+                        .unwrap()
+                    )
+                    .is_err()
+            );
+            reopened
+        })
+        .join()
+        .unwrap();
+        assert_eq!(reopened.document(), &document);
+        assert_eq!(reopened.history_limits(), limits);
+        assert_ne!(reopened.revision().source_id(), source_id);
+        assert_eq!(reopened.history_status().undo_depth, 0);
     }
 }

@@ -708,7 +708,7 @@ impl PrefabAuthoringSession {
     }
 
     #[cfg(feature = "serde")]
-    fn from_published_authoring_document_with_history_limits(
+    pub(crate) fn from_published_authoring_document_with_history_limits(
         published: crate::PublishedAuthoringPrefabDocument,
         history_limits: SceneAuthoringHistoryLimits,
     ) -> Self {
@@ -721,6 +721,18 @@ impl PrefabAuthoringSession {
         }
     }
 
+    /// Captures owned Prefab re-admission without copying its document, history or live state.
+    ///
+    /// Native sessions have no authoring classification basis and return `None`. The returned
+    /// value can prepare a candidate independently; it grants no Workspace publication authority.
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn authoring_readmission(&self) -> Option<crate::AuthoringDocumentReadmission> {
+        self.authority
+            .published()
+            .map(|state| state.readmission(self.history.limits()))
+    }
+
     /// Reopens a decoded Prefab with the exact authoring authority owned by this session.
     ///
     /// Sessions created through native publication have no authoring classification basis and
@@ -731,15 +743,9 @@ impl PrefabAuthoringSession {
         &self,
         candidate: crate::PrefabDocumentCandidate,
     ) -> Result<Self, crate::AuthoringSessionReopenError> {
-        let state = self
-            .authority
-            .published()
-            .ok_or(crate::AuthoringSessionReopenError::ClassificationBasisUnavailable)?;
-        let published = state.reopen_prefab_candidate(candidate)?;
-        Ok(Self::from_published_authoring_document_with_history_limits(
-            published,
-            self.history.limits(),
-        ))
+        self.authoring_readmission()
+            .ok_or(crate::AuthoringSessionReopenError::ClassificationBasisUnavailable)?
+            .reopen_prefab_candidate(candidate)
     }
 
     #[cfg(feature = "serde")]
@@ -1167,7 +1173,7 @@ impl SceneAuthoringSession {
     }
 
     #[cfg(feature = "serde")]
-    fn from_published_authoring_document_with_history_limits(
+    pub(crate) fn from_published_authoring_document_with_history_limits(
         published: crate::PublishedAuthoringSceneDocument,
         history_limits: SceneAuthoringHistoryLimits,
     ) -> Self {
@@ -1182,6 +1188,18 @@ impl SceneAuthoringSession {
         }
     }
 
+    /// Captures owned Scene re-admission without copying its document, history or live state.
+    ///
+    /// Native sessions have no authoring classification basis and return `None`. The returned
+    /// value can prepare a candidate independently; it grants no Workspace publication authority.
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn authoring_readmission(&self) -> Option<crate::AuthoringDocumentReadmission> {
+        self.authority
+            .published()
+            .map(|state| state.readmission(self.history.limits()))
+    }
+
     /// Reopens a decoded Scene with the exact authoring authority owned by this session.
     ///
     /// Sessions created through native publication have no authoring classification basis and
@@ -1192,15 +1210,9 @@ impl SceneAuthoringSession {
         &self,
         candidate: crate::SceneDocumentCandidate,
     ) -> Result<Self, crate::AuthoringSessionReopenError> {
-        let state = self
-            .authority
-            .published()
-            .ok_or(crate::AuthoringSessionReopenError::ClassificationBasisUnavailable)?;
-        let published = state.reopen_scene_candidate(candidate)?;
-        Ok(Self::from_published_authoring_document_with_history_limits(
-            published,
-            self.history.limits(),
-        ))
+        self.authoring_readmission()
+            .ok_or(crate::AuthoringSessionReopenError::ClassificationBasisUnavailable)?
+            .reopen_scene_candidate(candidate)
     }
 
     #[cfg(feature = "serde")]

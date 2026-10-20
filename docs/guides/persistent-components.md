@@ -307,6 +307,14 @@ Explicit `Null` is a stored value and differs from omission. Undo restores the e
 value, including Null, and Save/Reopen preserves the omitted key. The same Scene/Prefab document
 owner validates data-only field edits and their inverses without loading project code.
 
+Hosts that prepare persistence away from the document owner can capture
+`session.authoring_readmission()` alongside their intended document snapshot. The owned
+`AuthoringDocumentReadmission` retains the exact immutable schema/source basis and unavailable
+record expectation without retaining the working session or its history. Re-admit encoded bytes
+through the matching Scene/Prefab candidate method and check `preserves_scene` / `preserves_prefab`
+before publication. This validates preservation; it grants no permission to replace a Workspace
+document or mark it saved. Those operations still require the original owner and persistence receipt.
+
 ## Runtime-Only Components
 
 ```rust
