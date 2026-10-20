@@ -375,7 +375,9 @@ fn removing_documented_registry_prerequisite_fails_at_the_import() {
         .env("CARGO_TERM_COLOR", "never")
         .env(
             "CARGO_TARGET_DIR",
-            repository.join("target/module-consumer-boundary-cargo"),
+            std::env::var_os("CARGO_TARGET_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| repository.join("target")),
         )
         .output()
         .expect("failed to execute the missing-prerequisite compile probe");

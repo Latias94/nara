@@ -821,7 +821,9 @@ fn compiler_diagnostic_messages(stdout: &[u8]) -> String {
 }
 
 fn public_prelude_target_dir(repository: &Path) -> PathBuf {
-    repository.join("target").join("public-prelude-fixtures")
+    std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repository.join("target"))
 }
 
 fn assert_present(tree: &str, package: &str) {
