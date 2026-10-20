@@ -96,6 +96,17 @@ records. Caller-thread disposal of rejected captures or untaken completed result
 user destructors and remains an open G9 latency concern. This does not complete D6, implement
 asynchronous preparation, change owner-thread traits to async, or extend S3/N05/native evidence.
 
+The subsequent [owned Save](../benchmarks/2026-10-20-owned-editor-save.md),
+[owned Reopen](../benchmarks/2026-10-20-owned-editor-reopen.md) and
+[owned startup-closure preparation](../benchmarks/2026-10-20-owned-editor-startup-closure.md)
+follow-ups implement the measured phase corrections. The
+[Host lifetime custody qualification](../plans/2026-10-20-editor-host-lifetime-custody-plan.md)
+separately closes post-terminal Scene/Prefab failed-cleanup ownership. The subsequent
+[Image metadata custody repair](../plans/2026-10-20-editor-image-publication-custody-plan.md)
+addresses the separately confirmed Image publication path. These bounded changes preserve owner
+publication, native callback affinity and existing task retirement; they do not make synchronous
+Plugin, codec or panel traits asynchronous. Each report owns its actual scope and limits.
+
 The [UI foundation design](ui-foundation-design.md),
 [UI boundary study](ui-product-boundaries-editor-dogfood-and-porting-strategy.md), and
 [render pressure matrix](render-capability-pressure-matrix.md) provide design context when a task

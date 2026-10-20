@@ -100,12 +100,13 @@ extraction guidance, not current file-size promises.
   records the failing starting-source regression and passing correction. Rejected/coalesced capture
   disposal can still execute user destructors on the caller; measure that workload and queue
   pressure before promising bounded submission latency. No Future consumer or async trait is implied.
-- **I02:** Project Open startup-closure preparation is now a measured trigger. At 4,096 empty
+- **I02:** Project Open startup-closure preparation was a measured trigger. At 4,096 empty
   entities, its owner-call P50 was 9.920 / 10.048 / 9.911 ms and P95 11.194 / 10.312 / 12.028 ms
-  across the v1 processes. Owned bounded startup-closure preparation is the next selected slice
-  after Host custody qualification; keep session/runtime construction and final publication on
-  the owner thread. The 8 ms investigation trigger is not a native SLA. Browser document Open
-  and source-receipt refresh remain separately unmeasured.
+  across the v1 processes. The subsequent [owned startup slice](../plans/2026-10-20-owned-editor-startup-closure-plan.md)
+  is implemented, with three passing optimized v4 processes in its
+  [measurement report](../benchmarks/2026-10-20-owned-editor-startup-closure.md). Session/runtime
+  construction and publication stay on the owner thread. The 8 ms investigation trigger is not
+  a native SLA. Browser document Open and source-receipt refresh remain separately unmeasured.
 - **I03:** [Owned Save](../benchmarks/2026-10-20-owned-editor-save.md) and
   [Owned Reopen](../benchmarks/2026-10-20-owned-editor-reopen.md) are implemented and qualified
   within their linked scope. Workers own transportable preparation; original file authority,
@@ -127,9 +128,42 @@ records 125 selected root/public tests, 189 Editor/application tests and three s
 Windows/DX12 native workflows passing, together with the locked all-features/all-targets workspace
 check. Counts overlap and do not establish full release or other-platform support.
 
-The selected N/I reconciliation found no remaining unclosed confirmed correctness defect after
-that custody follow-up. Task/GPU/aggregate-worker latency still needs
-consumer measurement. Multiple documents, automatic code freshness, domain-field adapters and
+Startup-closure preparation now retains bounded file reads, decode, dependency traversal and
+pure schema classification in a linear owned task attempt. Its reusable small Open task owner
+limits physical captures to five; cancellation does not free those permits before physical
+retirement. Only a completed result of the live attempt may advance. Adapter admission, native
+Plugin/registry construction and session/Workspace publication remain owner work. Quiet repeated
+StartupClosure polls do not request redraw, while Cancel/Exit revoke publication interest.
+
+At 4,096 empty entities, v4 maximum startup owner-advance P95 is 0.066 / 0.081 / 0.077 ms across
+the three processes. Observed startup completion remains roughly 11 ms, full Open 20-22 ms and
+session publication roughly a 6 ms owner call. The report distinguishes these spans and measures
+prepared-receipt disposal separately from untaken task-payload destruction. No faster-storage,
+lower-total-CPU, native input-latency or generic destructor guarantee follows; v1/v2/v3 stay frozen.
+The [startup qualification record](../knowledge/engineering/verification/2026-10/2026-10-20T032446Z-owned-startup-closure-publication-and-responsiveness-qualification-f187b61104d4443187cea8b9bc392460.md)
+records final source `eb1ee98`: 131 selected engine/public, 195 Editor/application/panel and four
+selected actual Windows/DX12 native tests pass. Independent Scene and panel consumers pass 3 and
+2 tests; all 4 reference consumers pass, including full Play/Restart/Stop/Exit in 386 seconds.
+The runtime-ui-off test, locked all-features/all-targets workspace check (70 seconds), formatting
+and diff checks pass. Three v4 processes retain 864 rows each and 162 independently reviewed
+summary groups. These overlapping cohorts do not establish cross-platform release qualification.
+
+The original N/I corrections retain their linked repair evidence. A subsequent same-class sweep
+confirmed a separate Image metadata publication cleanup defect. The
+[Image transaction owner](../../src/project_host/runtime/editor/image_import/transaction.rs)
+retains failed `publication_cleanup` only inside `EditorImageImportHost` (reviewed lines 232 and
+603-606), without registration in the Scene/Prefab lifetime custody owner. Explicit close can
+stop the authoring runtime while this cleanup remains pending; subsequent session Drop loses
+the remaining `FilePublicationHost` retry authority. The current confirmed finding set therefore
+has an open correctness repair, rather than only unmeasured or future-capability items.
+
+The [Image publication custody plan](../plans/2026-10-20-editor-image-publication-custody-plan.md)
+is the next priority after startup qualification. Retain the exact original publication owner
+through runtime replacement, close and abandonment, with physical cleanup retirement proof.
+The startup slice has not repaired or qualified this owner. Schema CLI failures explicitly report
+manual cleanup and are not the same lifetime-ownership defect. Browser admission, receipt/content
+refresh and task/GPU/aggregate-worker latency still need measurement after this correctness work.
+Multiple documents, automatic code freshness, domain-field adapters and
 Tile tools remain capability decisions, not evidence that synchronous owner traits are unsound.
 Split private modules by their existing responsibility when those owners change; historical line
 counts alone do not justify new crates or a test framework.

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "3b13384a51001aaf746ecc88d3198e8a78d93597ce265803bae110ded06ec552"
+source_fingerprint: "457be34a9867375b5a040403fc33afdf5463e7ffcd72b81c982780e70f877290"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "3b13384a51001aaf746ecc88d3198e8a78d93597ce265803bae110ded06
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `3b13384a51001aaf746ecc88d3198e8a78d93597ce265803bae110ded06ec552`
-- Immutable records: 779
+- Source fingerprint: `457be34a9867375b5a040403fc33afdf5463e7ffcd72b81c982780e70f877290`
+- Immutable records: 782
 - Active lane heads: 0
 
 # Active Registrations
@@ -29,6 +29,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor Image Import and Reimport v1 complete](registry/2026-08/2026-08-21T025159Z-editor-image-import-reimport-v1-codex-root-6a48e230cc9c4e2eb1faf8121a85d9ea.md): `completed` (editor-image-import-reimport-v1-codex-root; producer `codex-root`)
 - [Owned Editor Reopen qualified with cleanup lifetime follow-up](registry/2026-10/2026-10-20T023343Z-editor-owned-reopen-codex-root-670715f95c9d41c39c6e04cf0c0c925b.md): `completed` (editor-owned-reopen-codex-root; producer `codex-root`)
 - [Owned background Editor Save qualified](registry/2026-10/2026-10-20T020203Z-editor-owned-save-codex-root-e752cdb15dd3493b96a52f17a336ca31.md): `completed` (editor-owned-save-codex-root; producer `codex-root`)
+- [Owned startup closure preparation qualified with Image custody follow-up](registry/2026-10/2026-10-20T034711Z-editor-owned-startup-codex-root-be888bb248c84615a90d96a5197f1af1.md): `completed` (editor-owned-startup-codex-root; producer `codex-root`)
 - [Editor Project Browser and Source Index v1 complete; no successor active](registry/2026-08/2026-08-19T213600Z-editor-project-browser-source-index-v1-codex-root-6c28391e9cd8451f92b821dba9d0c9e3.md): `completed` (editor-project-browser-source-index-v1-codex-root; producer `codex-root`)
 - [Editor responsiveness characterized and task cancellation corrected](registry/2026-10/2026-10-19T182958Z-editor-responsiveness-codex-root-7730caec67d84a4e9a7f0bd4e433fa49.md): `completed` (editor-responsiveness-codex-root; producer `codex-root`)
 - [Editor Scene Composition and Scene View v1 complete; no successor active](registry/2026-08/2026-08-16T122618Z-editor-scene-composition-view-v1-codex-root-cf2e6d93a351485c8381f6834cdd4e70.md): `completed` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
@@ -55,6 +56,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Owned startup closure publication and responsiveness qualification](verification/2026-10/2026-10-20T032446Z-owned-startup-closure-publication-and-responsiveness-qualification-f187b61104d4443187cea8b9bc392460.md) - Bounded background startup preparation preserves linear Open ownership, owner session publication, cancellation and retained project replacement.
 - **Verification Evidence**: [Editor Host lifetime cleanup custody qualification](verification/2026-10/2026-10-20T030524Z-editor-host-lifetime-cleanup-custody-qualification-12c6b025d6c74ed1bf6900c8b0413877.md) - Scene and Prefab cleanup survives terminal Save, Reopen, content runtime replacement, close and session abandonment.
 - **Verification Evidence**: [Owned Editor Reopen preparation and publication qualification](verification/2026-10/2026-10-20T022302Z-owned-editor-reopen-preparation-and-publication-qualification-557ea95db99b4b8a87829870db1d6b13.md) - Bounded read preparation, owner native codec affinity, exact stale admission, task terminal policy and responsiveness evidence.
 - **Verification Evidence**: [Owned Editor Save custody native observation and measurements](verification/2026-10/2026-10-20T013307Z-owned-editor-save-custody-native-observation-and-measurements-9828019f2f934061a1773899ce356ffb.md) - Cross-frame Save ownership, retained filesystem cleanup, migrated consumers and decision-local owner-drive evidence.
@@ -66,7 +68,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Authoring architecture refinements and workflow delivery order](progress/2026-10/2026-10-19T132019Z-authoring-architecture-refinements-and-workflow-delivery-order-9db915d26cb2407291ac76b756a2126c.md) - Keep existing owners, refine exact edit/result and value contracts, and qualify complete workflows within each stage.
 - **Work Progress**: [Ergonomic authoring interface design and independent challenge](progress/2026-10/2026-10-19T120824Z-ergonomic-authoring-interface-design-and-independent-challenge-510d6c4813604051a07a6f1e7009019b.md) - Proposed caller-first field editing, correlated dispatch, component inventory and bounded validation; design-only outcome.
 - **Work Progress**: [Post-correction foundation audit and withdrawn reference](progress/2026-10/2026-10-19T113248Z-post-correction-foundation-audit-and-withdrawn-reference-4b9d308fc38e4a31bdbe594c037e9b11.md) - Open post-correction findings, bounded Prefab failure proof and exclusion of the withdrawn reference.
-- **Verification Evidence**: [Foundation correction U1-U15 integration and review](verification/2026-10/2026-10-19-foundation-correction-completion.md) - Final source, consumer, native and review evidence with explicit deferred and platform limits.
 
 # Integration Notes
 

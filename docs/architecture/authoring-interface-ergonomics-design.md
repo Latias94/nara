@@ -632,8 +632,11 @@ not cover a prior failed Save cleanup owner.
 The subsequent [Host lifetime custody correction](../plans/2026-10-20-editor-host-lifetime-custody-plan.md)
 gives each concrete Scene/Prefab Host a private retirement registration across idle, Save/Reopen,
 runtime replacement and session abandonment. This closes the ownership gap independently of the
-v3 read-preparation timing evidence. Startup-closure preparation remains the next measured trigger;
-unmeasured source/receipt paths and future capabilities retain their separate admission criteria.
+v3 read-preparation timing evidence. The [owned startup-closure follow-up](../benchmarks/2026-10-20-owned-editor-startup-closure.md)
+then moves measured startup admission to bounded workers while retaining owner session publication.
+Its v4 timing and cancellation evidence remain separate from native display latency and the frozen
+v1/v2/v3 data. Unmeasured source/receipt paths and future capabilities retain their separate
+admission criteria.
 
 ## Implementation Sequence And Ownership
 

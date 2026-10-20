@@ -42,8 +42,9 @@ The selected I/G follow-ups now have distinct dispositions:
 | --- | --- | --- |
 | I01 / G1 standalone cancellation | Corrected at `3b70e48`: pending handles become logically cancelled before retained capture disposal. Task API semantics are explicit. The [v1 investigation](../benchmarks/2026-10-20-editor-responsiveness.md) owns the regression and limits. | Measure rejected/coalesced capture disposal and queue pressure before promising bounded caller latency or changing the queue. Logical cancellation still does not prove physical retirement. |
 | I03 / G2/G9 Save and Reopen | [Owned Save](../benchmarks/2026-10-20-owned-editor-save.md) and [Owned Reopen](../benchmarks/2026-10-20-owned-editor-reopen.md) are implemented and qualified within their linked scopes. Native codecs, migrations and document publication retain owner-thread admission. | Full Host lifetime custody is the adjacent correctness follow-up below; slow storage, complex codecs and total CPU remain separate measurements. |
-| Post-terminal failed-Save cleanup | Full Scene/Prefab Host lifetime custody is implemented and qualified at `fe3ad96`. The [custody plan](../plans/2026-10-20-editor-host-lifetime-custody-plan.md) and [verification record](../knowledge/engineering/verification/2026-10/2026-10-20T030524Z-editor-host-lifetime-cleanup-custody-qualification-12c6b025d6c74ed1bf6900c8b0413877.md) own acceptance and limits. | The next selected slice is Project Open startup-closure preparation; no further Host framework is required by this repair. |
-| I02 / Project Open startup closure | The v1 workload triggered investigation: at 4,096 empty entities, startup-closure P50 was 9.920 / 10.048 / 9.911 ms and P95 11.194 / 10.312 / 12.028 ms across three processes. | Next selected slice after custody qualification: owned bounded startup-closure preparation, with session/runtime construction and final publication on the owner thread. The 8 ms trigger is not a product SLA. |
+| Post-terminal failed-Save cleanup | Full Scene/Prefab Host lifetime custody is implemented and qualified at `fe3ad96`. The [custody plan](../plans/2026-10-20-editor-host-lifetime-custody-plan.md) and [verification record](../knowledge/engineering/verification/2026-10/2026-10-20T030524Z-editor-host-lifetime-cleanup-custody-qualification-12c6b025d6c74ed1bf6900c8b0413877.md) own acceptance and limits. | No further Host framework is required by this repair. |
+| I02 / Project Open startup closure | The v1 workload triggered investigation: at 4,096 empty entities, startup-closure P50 was 9.920 / 10.048 / 9.911 ms and P95 11.194 / 10.312 / 12.028 ms across three processes. Owned startup preparation is implemented and qualified at `eb1ee98`; three optimized v4 processes pass in the [startup report](../benchmarks/2026-10-20-owned-editor-startup-closure.md). | Owner/Editor/native, independent module/reference and workspace qualification pass. Session/runtime construction and publication stay on the owner. The 8 ms trigger is not a product SLA. |
+| Subsequent sweep / Image metadata publication cleanup | Confirmed correctness gap: terminal publication failure can retain cleanup only in `EditorImageImportHost`, outside the Scene/Prefab lifetime registration. Session Drop can lose that authority, including after explicit close has stopped the runtime while Image cleanup remains pending. | Next correctness repair after startup qualification: [Image publication custody](../plans/2026-10-20-editor-image-publication-custody-plan.md). Retain the original publication owner through close, runtime replacement and abandonment, and prove actual cleanup retirement. Not implemented or qualified by the startup slice. |
 | Other G1/G2/G3 latency concerns | Browser Open, source-receipt/compiled-Prefab refresh, caller capture disposal, GPU completion holds and aggregate Runtime workers have no qualifying measurement here. | Measure their actual consumer before choosing queue indexing, callback deduplication, another executor or another job system. |
 | N06/N07 and G4-G8 | Code freshness/state restore, multiple same-kind documents, dependency roles, live rename, residency/save, reusable domain fields and Tile authoring are workflow-dependent capability work. | Let a concrete game or tool establish the required contract; these are not hidden closure conditions for the completed corrections. |
 
@@ -58,10 +59,47 @@ check. Counts overlap; this is not cross-platform release certification. The lin
 compound failed-cleanup, runtime-replacement and held-read admission evidence. Existing v1/v2/v3
 measurements remain frozen; no new latency result follows.
 
-Reconciliation found no remaining unclosed confirmed correctness defect in the selected N/I
-corrections after that custody follow-up. This bounded result does not establish
-that every engine workflow is correct. Cross-platform release proof, unmeasured workloads and
-the named future capabilities retain their own acceptance and consumer requirements.
+The subsequent [startup-closure slice](../plans/2026-10-20-owned-editor-startup-closure-plan.md)
+moves bounded source reads, decode, dependency traversal and pure schema classification into an
+owned linear attempt. The Open Host reuses small task pools and five physical capture permits;
+logical cancellation cannot admit unlimited unretired work. Adapter admission, native registry/
+Plugin construction, session/runtime creation and Workspace publication remain on the owner.
+Only the live attempt can admit its completed result. Cancel/Exit revoke publication without
+claiming to preempt OS reads; unchanged StartupClosure polls do not request presentation.
+
+All three optimized v4 processes pass. At 4,096 empty entities, maximum startup owner-advance P95
+is 0.066 / 0.081 / 0.077 ms. Startup completion is still observed at roughly 11 ms, full Open at
+20-22 ms and session publication remains roughly a 6 ms owner call. These are different spans,
+not faster storage or lower total CPU. Prepared-receipt disposal is measured after reaching
+SessionPublication without creating a session; it is not untaken task-payload destruction or a
+generic caller-destructor guarantee. The report retains all process rows and frozen v1/v2/v3 data.
+
+The [startup qualification record](../knowledge/engineering/verification/2026-10/2026-10-20T032446Z-owned-startup-closure-publication-and-responsiveness-qualification-f187b61104d4443187cea8b9bc392460.md)
+records final qualification at `eb1ee98`: 131 selected engine/public tests, 195 Editor/application/
+panel tests and four selected actual Windows/DX12 native workflows pass. Independent Scene and
+panel consumers pass 3 and 2 tests; all 4 reference consumers pass, including the 386-second full
+Play/Restart/Stop/Exit workflow. The runtime-ui-off test, locked all-features/all-targets workspace
+check (70 seconds), formatting and diff checks pass. Three v4 processes retain 864 rows each and
+162 summary groups, independently reviewed. Counts overlap and do not establish a native SLA or
+cross-platform release support.
+
+The original N/I corrections retain their linked repair evidence. A subsequent same-class sweep
+confirmed an additional Image metadata publication cleanup defect, so the current finding set is
+not closed. In [Image transaction ownership](../../src/project_host/runtime/editor/image_import/transaction.rs),
+`publication_cleanup` is retained only by `EditorImageImportHost` (reviewed lines 232 and 603-606).
+It is not registered in the Scene/Prefab Host custody owner. Explicit close retries it, but can
+leave the authoring runtime Stopped while that retry still fails; dropping the session then loses
+the remaining `FilePublicationHost` cleanup authority. This is a separate owning path from the
+qualified Scene/Prefab repair, not evidence that its tested registrations failed.
+
+The [planned Image custody repair](../plans/2026-10-20-editor-image-publication-custody-plan.md)
+now takes priority over further latency work. Schema CLI publication failures report an explicit
+manual-cleanup obligation and are not classified as this lost Editor lifetime-ownership bug.
+Startup measurements and its four passing selected native trajectories remain valid within their
+scope; they do not exercise the newly identified Image failure. Browser admission and receipt/
+content-refresh costs still need real consumer measurements after this correctness repair.
+Cross-platform release proof and the named future capabilities retain separate requirements;
+none of these results establishes that every engine workflow is correct.
 
 ## Assessment
 

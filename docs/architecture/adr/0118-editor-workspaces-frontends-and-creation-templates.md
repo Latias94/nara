@@ -106,6 +106,16 @@ retry cleanup, but cannot reopen file or Play admission on that closing or stopp
 Scene/Prefab Host cleanup remains registered across idle operation periods and transfers explicitly
 when content refresh replaces the authoring runtime; frontend retirement does not release it.
 
+Project Open separates transportable startup-closure preparation from session publication. Its
+linear attempt owns the exact project/schema capabilities, budgets and prepared result. Background
+reads, decode, dependency traversal and pure schema classification may remain pending across
+several advances in the same phase. Only an actual completed result can advance to publication;
+native Adapter admission, Plugin/registry construction and Workspace/session creation remain on
+the owner thread. Cancelling an attempt revokes its publication interest without claiming that an
+OS read stopped. A bounded preparation owner retains running captures through the existing task
+retirement path. Unchanged pending polls need maintenance, not repeated presentation. Retained
+replacement projects and persistence-before-preparation/Save-before-refresh ordering stay intact.
+
 The native Host retains one event loop, device-creation authority and accountable close/recovery lifecycle.
 It may delegate secondary window/surface ownership to the selected platform/renderer adapter with explicit shutdown ordering.
 The adapter uses the engine-created GPU lineage rather than a second device/runtime.
