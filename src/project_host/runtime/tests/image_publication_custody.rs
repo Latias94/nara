@@ -1,7 +1,12 @@
+#[cfg(windows)]
 use super::*;
 
+#[cfg(windows)]
 use crate::project_host::file_publication::CleanupTestControl;
 
+// Each recovery case below requires exact temporary discard after the held failure releases.
+// Unix instead preserves a recoverable orphan, as verified by nara_fs filesystem_contract.
+#[cfg(windows)]
 #[test]
 fn terminal_failed_image_metadata_keeps_cleanup_custody_after_session_drop() {
     for existing_metadata in [false, true] {
@@ -9,16 +14,19 @@ fn terminal_failed_image_metadata_keeps_cleanup_custody_after_session_drop() {
     }
 }
 
+#[cfg(windows)]
 #[test]
 fn image_metadata_cleanup_keeps_runtime_retained_after_tasks_close_and_session_drop() {
     assert_abandoned_metadata_cleanup(true, true, false);
 }
 
+#[cfg(windows)]
 #[test]
 fn panic_after_image_metadata_publication_preserves_cleanup_through_session_drop() {
     assert_abandoned_metadata_cleanup(true, false, true);
 }
 
+#[cfg(windows)]
 fn assert_abandoned_metadata_cleanup(
     existing_metadata: bool,
     close_before_drop: bool,
@@ -149,6 +157,7 @@ fn assert_abandoned_metadata_cleanup(
     assert_eq!(fs::read(&scene).unwrap(), scene_bytes);
 }
 
+#[cfg(windows)]
 fn directory_entries(directory: &Path) -> Vec<PathBuf> {
     let mut entries = fs::read_dir(directory)
         .unwrap()
@@ -158,11 +167,13 @@ fn directory_entries(directory: &Path) -> Vec<PathBuf> {
     entries
 }
 
+#[cfg(windows)]
 struct CleanupGuard {
     control: CleanupTestControl,
     retained_before: usize,
 }
 
+#[cfg(windows)]
 impl CleanupGuard {
     fn new(control: CleanupTestControl) -> Self {
         Self {
@@ -196,6 +207,7 @@ impl CleanupGuard {
     }
 }
 
+#[cfg(windows)]
 impl Drop for CleanupGuard {
     fn drop(&mut self) {
         self.control.release();

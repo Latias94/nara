@@ -1,11 +1,17 @@
 use super::*;
 
 use nara_tooling::{
-    EditorDocumentId, EditorDocumentKind, EditorPersistenceFailureStage,
-    EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPersistenceRequestResult,
+    EditorDocumentId, EditorPersistenceRejection, EditorPersistenceRequestResult,
     EditorPlayCommand, EditorPlayRejection, EditorPlayRequestResult,
 };
+#[cfg(windows)]
+use nara_tooling::{
+    EditorDocumentKind, EditorPersistenceFailureStage, EditorPersistenceRequestKind,
+};
 
+// Recovery to an empty quarantine requires Windows exact-handle temporary discard. Unix
+// orphan preservation is verified by nara_fs; the non-unlink admission test below stays portable.
+#[cfg(windows)]
 #[test]
 fn terminal_failed_scene_and_prefab_saves_keep_cleanup_custody_after_session_drop() {
     for (kind, begin_close) in [
@@ -44,6 +50,7 @@ fn terminal_failed_scene_and_prefab_saves_keep_cleanup_custody_after_session_dro
     }
 }
 
+#[cfg(windows)]
 #[test]
 fn failed_and_stale_reopen_preserve_failed_save_cleanup_through_session_drop() {
     for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
@@ -112,6 +119,7 @@ fn failed_and_stale_reopen_preserve_failed_save_cleanup_through_session_drop() {
     }
 }
 
+#[cfg(windows)]
 #[test]
 fn document_replacement_rejects_until_failed_cleanup_retires_then_opens_the_new_lane() {
     for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
@@ -210,7 +218,7 @@ fn session_close_rejects_new_file_and_play_admission_before_and_after_physical_r
     assert!(!editor.workspace().scene(document).unwrap().is_dirty());
 }
 
-#[cfg(feature = "runtime-ui")]
+#[cfg(all(windows, feature = "runtime-ui"))]
 #[test]
 fn content_runtime_replacement_transfers_failed_cleanup_and_keeps_original_hosts_usable() {
     let project = TestProject::new("host-custody-content-runtime-replacement");
@@ -336,7 +344,7 @@ fn content_runtime_replacement_transfers_failed_cleanup_and_keeps_original_hosts
     assert_eq!(fs::read(&source_path).unwrap(), scene_bytes);
 }
 
-#[cfg(feature = "runtime-ui")]
+#[cfg(all(windows, feature = "runtime-ui"))]
 fn edit_native_name(
     editor: &mut editor::EditorProjectSession,
     document: EditorDocumentId,
@@ -439,6 +447,7 @@ fn seeded_project(label: &str) -> TestProject {
     project
 }
 
+#[cfg(windows)]
 fn open_kind(
     project: &TestProject,
     editor: &mut editor::EditorProjectSession,
@@ -461,6 +470,7 @@ fn open_kind(
     }
 }
 
+#[cfg(windows)]
 fn successor(
     kind: EditorDocumentKind,
 ) -> (
@@ -479,6 +489,7 @@ fn successor(
     }
 }
 
+#[cfg(windows)]
 fn arm_failed_cleanup(
     editor: &mut editor::EditorProjectSession,
     kind: EditorDocumentKind,
@@ -489,6 +500,7 @@ fn arm_failed_cleanup(
     }
 }
 
+#[cfg(windows)]
 fn fail_save(editor: &mut editor::EditorProjectSession, document: EditorDocumentId) {
     assert_eq!(
         editor.request_persistence(EditorPersistenceCommand::Save {
@@ -506,10 +518,12 @@ fn fail_save(editor: &mut editor::EditorProjectSession, document: EditorDocument
     );
 }
 
+#[cfg(windows)]
 fn directory_entries(path: &Path) -> usize {
     fs::read_dir(path.parent().unwrap()).unwrap().count()
 }
 
+#[cfg(windows)]
 fn assert_cleanup_is_retained(guard: &CleanupGuard) {
     assert_eq!(
         runtime_quarantine_status().current_thread_retained(),
@@ -523,11 +537,13 @@ fn assert_cleanup_is_retained(guard: &CleanupGuard) {
     }
 }
 
+#[cfg(windows)]
 struct CleanupGuard {
     control: crate::project_host::persistence::CleanupTestControl,
     retained_before: usize,
 }
 
+#[cfg(windows)]
 impl CleanupGuard {
     fn new(control: crate::project_host::persistence::CleanupTestControl) -> Self {
         Self {
@@ -562,6 +578,7 @@ impl CleanupGuard {
     }
 }
 
+#[cfg(windows)]
 impl Drop for CleanupGuard {
     fn drop(&mut self) {
         self.release();

@@ -15,6 +15,13 @@ Linux reference-game advances through the original enumeration failure and expos
 failure: its schema-bundle CLI requests strict untrusted replacement for an explicit local
 `--write`, although Linux correctly reports name-bound publication.
 
+The Linux root cohort also reaches seven failed-cleanup recovery tests whose terminal assertions
+require Windows exact-handle temporary discard. Unix deliberately preserves recoverable orphans;
+it cannot satisfy those assertions after the injected failure releases. Keep these seven cases
+Windows-only, with the portable close/admission case and Unix fail-closed orphan contract retained.
+The focused Windows cohort passes all eight tests (`318c24ec-4f50-4f3e-a475-1de0fcb2a1f9`); the
+Linux test target cross-check also passes. These local results do not substitute for hosted CI.
+
 ## Ordered Corrections
 
 - Implement Linux enumeration behind the existing capability owner using `rustix::fs::Dir` and
@@ -25,6 +32,8 @@ failure: its schema-bundle CLI requests strict untrusted replacement for an expl
 - Make the schema-bundle CLI's explicit local `--write` select trusted local workspace authority;
   retain strict Check reads and the existing atomic preflight, identity, digest and cleanup path.
   Do not upgrade Linux publication guarantees or silently suppress its failure.
+- Scope exact-discard recovery tests to their required Windows capability. Preserve portable
+  admission and Unix recoverable-orphan coverage rather than pretending cleanup completed.
 - Format independent workspaces and refresh only required lockfile dependency edges.
 - Reconcile the stale exact fixture dependency policy with its existing dev-only component
   integration consumer. Keep the library's direct-domain dependencies and explicit facade features.
