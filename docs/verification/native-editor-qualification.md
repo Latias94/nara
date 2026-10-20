@@ -105,3 +105,13 @@ cargo +1.95.0 nextest run -p nara-editor -p nara_render_wgpu --features nara_ren
 
 It verifies actual secondary presentation before primary acquisition, exact native registration,
 foreign device/queue rejection, report replay, binding replacement and stale image-content receipts.
+
+For the optional fixed world canvas, also run the same actual Game input/resize/Step workflow with
+the canvas profile:
+
+```powershell
+cargo +1.95.0 nextest run -p nara-editor --lib --locked --run-ignored only -E 'test(native_fixed_world_canvas_keeps_ui_input_resize_and_step_coherent)' --test-threads=1
+```
+
+Exact world pixels and bars are separately checked through the shared target encoder in
+`nara_render_wgpu::canvas::tests`; native presentation alone does not establish pixel readback.

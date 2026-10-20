@@ -30,7 +30,7 @@ fn fixed_motion_uses_half_tick_presentation_without_mutating_simulation() {
         nara_hierarchy::HierarchyPlugin,
         TransformPlugin,
         nara_render::RenderComponentsPlugin,
-        nara_render::RenderPlugin,
+        nara_render::RenderPlugin::default(),
         nara_image::ImagePreparePlugin,
         SpriteRenderPlugin,
     ))
@@ -116,7 +116,7 @@ fn presentation_app(interpolate: bool) -> App {
         nara_hierarchy::HierarchyPlugin,
         TransformPlugin,
         nara_render::RenderComponentsPlugin,
-        nara_render::RenderPlugin,
+        nara_render::RenderPlugin::default(),
         nara_image::ImagePreparePlugin,
         SpriteRenderPlugin,
     ))

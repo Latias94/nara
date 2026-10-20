@@ -148,7 +148,7 @@ fn custom_font_uses_ordinary_adapter_and_configured_presentation() {
             nara_input::InputPlugin,
             (
                 nara_render::RenderComponentsPlugin,
-                nara_render::RenderPlugin,
+                nara_render::RenderPlugin::default(),
                 nara_image::ImagePreparePlugin,
             ),
             crate::plugin(font.clone()),

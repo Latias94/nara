@@ -101,6 +101,47 @@ restores the initial player position, three visible targets and original backgro
 Gameplay changes runtime state and leaves authored source intact. Collected targets
 remain alive, so reset does not destroy and reconstruct persistent entities.
 
+## Select an optional pixel world
+
+For a fixed pixel world, add this optional setting to `nara.toml`:
+
+```toml
+[render.world_canvas]
+width = 320
+height = 180
+```
+
+The world raster stays at 320 by 180 while the native window keeps its real size. IntegerFit
+uses whole physical pixels with centered bars when it fits, and fractionally downscales the
+complete image in a smaller window. Runtime UI is drawn afterward at native resolution.
+The camera's `viewport_height` still controls world units; simulation positions remain fractional.
+For a profile that needs native world rendering, use `render.clear_world_canvas = true` in
+that profile's patch. A profile cannot both clear and replace the canvas.
+
+Direct App consumers can use `RenderPlugin { world_canvas: Some(WorldCanvas::new(320, 180).unwrap()) }`;
+repeatable product groups configure their Render slot with
+`nara::render::plugin(Some(WorldCanvas::new(320, 180).unwrap()))`. Project consumers use the
+manifest so Check, managed Play and exported executables share one setting.
+
+Use `nara::render::WorldPointer` as a system parameter for world picking:
+
+```rust,ignore
+fn pick_world(pointer: nara::render::WorldPointer, camera: nara::ecs::Query<nara::ecs::Entity,
+    nara::ecs::With<nara::render::Camera2d>>) {
+    for camera in &camera {
+        // Supply a logical window position from the admitted gameplay input route.
+        let position = nara::core::Vec2::new(160.0, 90.0);
+        if let Some(world) = pointer.window_to_world(camera, position) {
+            // Use the world position for this camera.
+        }
+    }
+}
+```
+
+The conversion uses the last successfully presented camera. Bars and maximum edges return None;
+resize, canvas changes and backend retirement require a matching new presentation. Respect the
+input route's UI disposition before applying gameplay actions.
+
 ## Edit in the ordinary Editor
 
 ```powershell

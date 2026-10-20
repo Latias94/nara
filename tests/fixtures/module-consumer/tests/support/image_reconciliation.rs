@@ -96,7 +96,7 @@ impl ImageFixture {
             HierarchyPlugin,
             TransformPlugin,
             RenderComponentsPlugin,
-            RenderPlugin,
+            RenderPlugin::default(),
             ImagePreparePlugin,
         ))
         .unwrap();

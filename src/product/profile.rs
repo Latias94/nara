@@ -26,6 +26,12 @@ pub(crate) struct ProjectProfilePlugins {
     capabilities: ProductCapabilitySet,
     task_config: nara_tasks::TaskPoolConfig,
     primary_window: Option<nara_window::Window>,
+    #[cfg(any(
+        feature = "presentation-2d",
+        feature = "presentation-ui",
+        feature = "render-wgpu"
+    ))]
+    render_definition: PluginDefinition,
     #[cfg(feature = "runtime-ui")]
     primary_ui_surface: Option<super::ui_surface::AcceptedPrimaryUiSurfaceProfile>,
     placement: ProjectProfilePlacement,
@@ -62,6 +68,15 @@ impl ProjectProfilePlugins {
             capabilities,
             task_config: settings.tasks.pool_config,
             primary_window: settings.window.to_window(),
+            #[cfg(any(
+                feature = "presentation-2d",
+                feature = "presentation-ui",
+                feature = "render-wgpu"
+            ))]
+            render_definition: nara_render::plugin(settings.render.world_canvas.map(|canvas| {
+                nara_render::WorldCanvas::new(canvas.width, canvas.height)
+                    .expect("resolved project world canvas extents are positive")
+            })),
             #[cfg(feature = "runtime-ui")]
             primary_ui_surface: settings
                 .ui
@@ -137,7 +152,11 @@ impl PluginGroup for ProjectProfilePlugins {
             .capabilities
             .contains(nara_project::ProductCapability::Presentation2d)
         {
-            builder.add_group(super::Presentation2dPlugins)
+            builder.add_edited_group(
+                super::Presentation2dPlugins
+                    .edit()
+                    .configure_slot(super::SLOT_RENDER, self.render_definition.clone()),
+            )
         } else {
             builder
         };
@@ -147,7 +166,11 @@ impl PluginGroup for ProjectProfilePlugins {
             .capabilities
             .contains(nara_project::ProductCapability::PresentationUi)
         {
-            builder.add_group(super::PresentationUiPlugins)
+            builder.add_edited_group(
+                super::PresentationUiPlugins
+                    .edit()
+                    .configure_slot(super::SLOT_RENDER, self.render_definition.clone()),
+            )
         } else {
             builder
         };
@@ -172,7 +195,11 @@ impl PluginGroup for ProjectProfilePlugins {
                 .capabilities
                 .contains(nara_project::ProductCapability::RenderWgpu)
         {
-            builder.add_group(super::WgpuBackendPlugins)
+            builder.add_edited_group(
+                super::WgpuBackendPlugins
+                    .edit()
+                    .configure_slot(super::SLOT_RENDER, self.render_definition.clone()),
+            )
         } else {
             builder
         };

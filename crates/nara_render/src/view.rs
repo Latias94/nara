@@ -1,11 +1,13 @@
 use nara_core::{Color, Mat3, Vec2};
 use nara_ecs::{Component, Entity, Resource};
 
-use crate::{RenderTarget, ViewportRect};
+use crate::{RenderTarget, ViewportRect, WorldCanvas};
 
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Camera2d {
     pub target: RenderTarget,
+    /// Raster rectangle in world-canvas pixels when configured, otherwise destination pixels.
+    /// None uses the complete world canvas or destination extent.
     pub viewport: Option<ViewportRect>,
     /// Explicit target clear. Otherwise the first view clears with `ClearColor` and later views load.
     pub clear_color: Option<Color>,
@@ -129,17 +131,32 @@ pub fn viewport_clip_to_physical(viewport: ViewportRect, clip: Vec2) -> Vec2 {
 #[derive(Debug, Default, Clone, PartialEq, Resource)]
 pub struct ExtractedViews {
     views: Vec<ExtractedView>,
+    world_canvas: Option<WorldCanvas>,
 }
 
 impl ExtractedViews {
     pub fn clear(&mut self) {
         self.views.clear();
+        self.world_canvas = None;
     }
+    /// Appends a manually supplied view. The caller owns consistency with the explicit frame
+    /// builder configuration; ordinary extraction publishes its configuration atomically instead.
     pub fn push(&mut self, view: ExtractedView) {
         self.views.push(view);
     }
-    pub(crate) fn replace(&mut self, candidate: &mut Vec<ExtractedView>) {
+    pub(crate) fn replace(
+        &mut self,
+        candidate: &mut Vec<ExtractedView>,
+        world_canvas: Option<WorldCanvas>,
+    ) {
         std::mem::swap(&mut self.views, candidate);
+        self.world_canvas = world_canvas;
+    }
+    /// Exact canvas configuration used to derive this extracted camera projection.
+    /// First-party capture must use this value rather than a subsequently changed resource.
+    #[must_use]
+    pub const fn world_canvas(&self) -> Option<WorldCanvas> {
+        self.world_canvas
     }
     #[must_use]
     pub fn as_slice(&self) -> &[ExtractedView] {

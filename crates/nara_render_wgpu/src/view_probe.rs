@@ -31,7 +31,7 @@ fn captured_split_frame() -> crate::frame::WgpuCapturedFrame {
         nara_hierarchy::HierarchyPlugin,
         nara_transform::TransformPlugin,
         nara_render::RenderComponentsPlugin,
-        nara_render::RenderPlugin,
+        nara_render::RenderPlugin::default(),
         nara_image::ImagePreparePlugin,
         nara_sprite_render::SpriteRenderPlugin,
     ))

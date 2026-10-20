@@ -43,7 +43,7 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
     app.add_plugins((
         RuntimeUiPlugins,
         nara::render::RenderComponentsPlugin,
-        RenderPlugin,
+        RenderPlugin::default(),
         ImagePlugin::default(),
         ImagePreparePlugin,
     ))?;

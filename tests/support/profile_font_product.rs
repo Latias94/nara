@@ -14,6 +14,8 @@ pub const PROFILE_FONT_PROOF: &str =
     "profile_font: shaped_selected_face=true rasterized_selected_face=true";
 pub const PROFILE_FONT_NATIVE_PROOF: &str =
     "profile_font_native: presented_selected_face=true submitted_glyphs=true";
+pub const WORLD_CANVAS_NATIVE_PROOF: &str =
+    "world_canvas_native: fixed_world=true native_ui=true presented_picking=true";
 
 #[derive(Default, Resource, Clone, Debug, PartialEq, Eq)]
 pub struct ProfileFontOutcome {
@@ -225,6 +227,48 @@ fn capture_presented_font(world: &mut World) {
             .wgpu()
             .is_some_and(|gpu| gpu.submitted_glyph_quad_count() > 0 && gpu.glyph_page_count() > 0)
     );
+    if let Some(canvas) = world.get_resource::<nara::render::WorldCanvas>().copied() {
+        use nara::{core::Vec2, ecs::system::SystemState, render::WorldPointer};
+        let view = world.resource::<nara::render::ExtractedViews>().as_slice()[0];
+        assert_eq!(view.viewport.extent(), canvas.extent());
+        let window = {
+            let mut query = world.query::<&nara::window::Window>();
+            query.iter(world).next().unwrap().clone()
+        };
+        assert_ne!(
+            window.resolution.physical_width,
+            canvas.extent().width,
+            "the ordinary project must keep the actual window extent"
+        );
+        let physical_ui = presented
+            .frame()
+            .environment()
+            .content_transform()
+            .physical_surface_size();
+        assert_eq!(physical_ui.width(), window.resolution.physical_width as f32);
+        assert_eq!(
+            physical_ui.height(),
+            window.resolution.physical_height as f32
+        );
+        let window_center = Vec2::new(
+            window.resolution.physical_width as f32,
+            window.resolution.physical_height as f32,
+        ) / (2.0 * window.resolution.scale_factor as f32);
+        let expected = view
+            .viewport_to_world(Vec2::new(
+                canvas.extent().width as f32 * 0.5,
+                canvas.extent().height as f32 * 0.5,
+            ))
+            .unwrap();
+        let mut state = SystemState::<WorldPointer>::new(world);
+        let actual = state
+            .get(world)
+            .unwrap()
+            .window_to_world(view.camera_entity, window_center)
+            .expect("world input must use the actual successful presentation");
+        assert!((actual - expected).length() < 0.001);
+        println!("{WORLD_CANVAS_NATIVE_PROOF}");
+    }
     world
         .resource_mut::<ProfileFontOutcome>()
         .presented_selected_face = true;

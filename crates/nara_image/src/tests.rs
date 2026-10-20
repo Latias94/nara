@@ -5171,7 +5171,7 @@ fn app_with_loaded_image(importer: ImageImporter) -> (App, Handle<ImageAsset>) {
         nara_hierarchy::HierarchyPlugin,
         nara_transform::TransformPlugin,
         nara_render::RenderComponentsPlugin,
-        nara_render::RenderPlugin,
+        nara_render::RenderPlugin::default(),
     ))
     .unwrap();
     app.add_plugin(ImagePreparePlugin).unwrap();
@@ -5271,7 +5271,7 @@ fn app_with_image_plugin_configuration(
         nara_hierarchy::HierarchyPlugin,
         nara_transform::TransformPlugin,
         nara_render::RenderComponentsPlugin,
-        nara_render::RenderPlugin,
+        nara_render::RenderPlugin::default(),
         ImagePreparePlugin,
     ))
     .unwrap();

@@ -51,6 +51,121 @@ static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[path = "support/product_default_configuration.rs"]
 mod product_default_configuration;
 
+#[test]
+fn headless_world_canvas_setting_does_not_request_or_install_presentation() {
+    let manifest = TestManifest::new(
+        "schema_version = 1\n[project]\nname = 'Headless canvas'\n[runtime]\npreset = 'local-headless'\n[render.world_canvas]\nwidth = 320\nheight = 180\n",
+    );
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    assert_eq!(candidate.settings().render.world_canvas.unwrap().width, 320);
+    assert_eq!(
+        candidate.normalized_capabilities(),
+        ProductCapabilitySet::singleton(ProductCapability::RuntimeCore)
+    );
+    let plan = resolve_product_recipe(&candidate, ProductRecipe::new()).unwrap();
+    assert!(plan.plugin_plan().entries().iter().all(|entry| {
+        entry.plugin_id().as_str() != "nara.render"
+            && entry.plugin_id().as_str() != "nara.render-wgpu"
+    }));
+}
+
+#[cfg(any(
+    feature = "presentation-2d",
+    feature = "presentation-ui",
+    feature = "render-wgpu"
+))]
+fn assert_project_world_canvas_composition(capabilities: &[&str]) {
+    let requested = capabilities
+        .iter()
+        .map(|name| format!("\"{name}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let manifest = TestManifest::new(&format!(
+        "schema_version = 1\n[project]\nname = 'Canvas composition'\n[window]\nwidth = 1280\nheight = 720\n[capabilities]\nrequested = [{requested}]\n[render.world_canvas]\nwidth = 320\nheight = 180\n[profiles.native.render]\nclear_world_canvas = true\n",
+    ));
+    let fixed_candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let native_candidate = ingest_project_manifest(&manifest.capability(), Some("native")).unwrap();
+    assert_eq!(
+        fixed_candidate.settings().window,
+        native_candidate.settings().window
+    );
+    assert_eq!(
+        fixed_candidate.settings().ui,
+        native_candidate.settings().ui
+    );
+    let fixed = resolve_product_recipe(&fixed_candidate, ProductRecipe::new()).unwrap();
+    let native = resolve_product_recipe(&native_candidate, ProductRecipe::new()).unwrap();
+    assert_ne!(
+        fixed.plugin_plan().fingerprint(),
+        native.plugin_plan().fingerprint()
+    );
+    assert_eq!(
+        fixed.schema_validation().composition_fingerprint(),
+        native.schema_validation().composition_fingerprint()
+    );
+    for (plan, expected) in [
+        (&fixed, nara::render::WorldCanvas::new(320, 180)),
+        (&native, None),
+    ] {
+        let entries = plan
+            .plugin_plan()
+            .entries()
+            .iter()
+            .filter(|entry| entry.plugin_id() == nara::render::RENDER_PLUGIN_ID)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            entries.len(),
+            1,
+            "all Render slots must coalesce to one owner"
+        );
+        assert_eq!(
+            entries[0].definition_key(),
+            nara::render::plugin(expected).key()
+        );
+        let app = plan.plugin_plan().instantiate().unwrap();
+        assert_eq!(
+            app.world()
+                .get_resource::<nara::render::WorldCanvas>()
+                .map(|canvas| canvas.extent()),
+            expected.map(|canvas| canvas.extent())
+        );
+    }
+}
+
+#[cfg(feature = "presentation-2d")]
+#[test]
+fn project_world_canvas_configures_sprite_presentation() {
+    assert_project_world_canvas_composition(&["runtime-2d", "presentation-2d"]);
+}
+
+#[cfg(feature = "presentation-ui")]
+#[test]
+fn project_world_canvas_configures_ui_only_presentation_without_resizing_ui() {
+    assert_project_world_canvas_composition(&["runtime-ui", "presentation-ui"]);
+}
+
+#[cfg(feature = "render-wgpu")]
+#[test]
+fn project_world_canvas_configures_backend_only_presentation() {
+    assert_project_world_canvas_composition(&["render-wgpu"]);
+}
+
+#[cfg(all(
+    feature = "presentation-2d",
+    feature = "presentation-ui",
+    feature = "render-wgpu"
+))]
+#[test]
+fn project_world_canvas_coalesces_sprite_ui_and_backend_render_slots() {
+    assert_project_world_canvas_composition(&[
+        "runtime-2d",
+        "presentation-2d",
+        "runtime-ui",
+        "presentation-ui",
+        "render-wgpu",
+    ]);
+}
+
 const RUNTIME_2D_REQUIREMENT: PluginProductCapability = PluginProductCapability::new("runtime-2d");
 const RUNTIME_CORE_REQUIREMENT: PluginProductCapability =
     PluginProductCapability::new("runtime-core");

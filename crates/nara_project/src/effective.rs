@@ -8,6 +8,7 @@ use crate::capability::{ProductCapabilitySet, RuntimePreset};
 use crate::manifest::ProjectManifest;
 use crate::path::ProjectPath;
 use crate::profile::ProjectProfileError;
+use crate::render::EffectiveRenderSettings;
 use crate::sections::{
     ProjectPathsManifest, ProjectProfileKind, ProjectStartupManifest, ProjectUiManifest,
     ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest,
@@ -26,6 +27,7 @@ pub struct EffectiveProjectSettings {
     pub startup: EffectiveStartupSettings,
     pub runtime: EffectiveRuntimeSettings,
     pub tasks: EffectiveTaskSettings,
+    pub render: EffectiveRenderSettings,
     pub ui: EffectiveUiSettings,
     pub window: EffectiveWindowSettings,
     pub input: EffectiveInputSettings,
@@ -56,6 +58,7 @@ impl EffectiveProjectSettings {
             startup: EffectiveStartupSettings::from_manifest(manifest.startup.clone())?,
             runtime: manifest.runtime.lower()?,
             tasks: manifest.tasks.lower()?,
+            render: manifest.render.into(),
             ui: EffectiveUiSettings::from_manifest(manifest.ui.clone()),
             window: manifest.window.clone().lower(),
             input: manifest.input.clone().lower()?,

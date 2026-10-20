@@ -192,7 +192,7 @@ fn sprite_and_tilesets_publish_exact_generations_and_revoke_without_releasing_he
         HierarchyPlugin,
         TransformPlugin,
         RenderComponentsPlugin,
-        RenderPlugin,
+        RenderPlugin::default(),
         ImagePreparePlugin,
     ))
     .unwrap();

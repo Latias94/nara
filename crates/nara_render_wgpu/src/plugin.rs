@@ -121,7 +121,7 @@ mod tests {
             nara_hierarchy::HierarchyPlugin,
             nara_transform::TransformPlugin,
             nara_render::RenderComponentsPlugin,
-            nara_render::RenderPlugin,
+            nara_render::RenderPlugin::default(),
             crate::WgpuRenderPlugin,
         ))
         .unwrap();
@@ -139,7 +139,7 @@ mod tests {
             nara_hierarchy::HierarchyPlugin,
             nara_transform::TransformPlugin,
             nara_render::RenderComponentsPlugin,
-            nara_render::RenderPlugin,
+            nara_render::RenderPlugin::default(),
             crate::WgpuRenderPlugin,
         ))
         .unwrap();

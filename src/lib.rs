@@ -236,7 +236,7 @@ pub mod prelude {
         feature = "presentation-ui",
         feature = "render-wgpu"
     ))]
-    pub use nara_render::{ClearColor, RenderPlugin};
+    pub use nara_render::{ClearColor, RenderPlugin, WorldCanvas, WorldPointer};
     #[cfg(feature = "runtime-2d")]
     pub use nara_sprite::{Sprite, SpriteAnchor, SpriteMaterial, SpritePlugin, TextureRegion};
     #[cfg(feature = "runtime-2d")]

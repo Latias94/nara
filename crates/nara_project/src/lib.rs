@@ -20,6 +20,7 @@ mod effective;
 mod manifest;
 mod path;
 mod profile;
+mod render;
 mod sections;
 mod validation;
 
@@ -41,6 +42,10 @@ pub use profile::{
     ProjectStartupPatch, ProjectTaskPoolPatch, ProjectTaskShutdownPatch, ProjectTasksPatch,
     ProjectUiPatch, ProjectWindowPatch,
 };
+pub use render::{
+    EffectiveRenderSettings, EffectiveWorldCanvas, ProjectRenderManifest, ProjectRenderPatch,
+    ProjectWorldCanvasManifest,
+};
 pub use sections::{
     ProjectAuthoringManifest, ProjectCapabilitiesManifest, ProjectDiagnosticsManifest,
     ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest, ProjectPathsManifest,
@@ -54,21 +59,22 @@ pub mod prelude {
         CURRENT_PROJECT_SCHEMA_VERSION, DEFAULT_MANIFEST_BYTE_LIMIT,
         DESKTOP_SUPERVISED_PLAY_V1_CONTRACT, EffectiveDiagnosticsSettings, EffectiveInputSettings,
         EffectivePrimaryUiSurface, EffectiveProjectExecutionSettings, EffectiveProjectInfo,
-        EffectiveProjectPaths, EffectiveProjectSettings, EffectiveRuntimeSettings,
-        EffectiveStartupSettings, EffectiveTaskSettings, EffectiveUiSafeArea, EffectiveUiSettings,
-        EffectiveWindowSettings, MAX_PROJECT_EXECUTION_CONTRACT_BYTES,
-        MAX_PROJECT_FIXED_DEBT_STEPS, MAX_PROJECT_FIXED_STEPS_PER_FRAME,
-        MAX_PROJECT_UI_LOGICAL_EXTENT, ProductCapability, ProductCapabilitySet,
-        ProjectAuthoringManifest, ProjectCapabilitiesManifest, ProjectCapabilitiesPatch,
-        ProjectDiagnosticsManifest, ProjectExecutionContract, ProjectExecutionPatch,
-        ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest, ProjectManifest,
-        ProjectManifestLoad, ProjectManifestMutationError, ProjectManifestWriteError, ProjectPath,
-        ProjectPathError, ProjectPathsManifest, ProjectPresentMode, ProjectProfileError,
-        ProjectProfileKind, ProjectProfileOverlay, ProjectRuntimeManifest, ProjectStartupManifest,
+        EffectiveProjectPaths, EffectiveProjectSettings, EffectiveRenderSettings,
+        EffectiveRuntimeSettings, EffectiveStartupSettings, EffectiveTaskSettings,
+        EffectiveUiSafeArea, EffectiveUiSettings, EffectiveWindowSettings, EffectiveWorldCanvas,
+        MAX_PROJECT_EXECUTION_CONTRACT_BYTES, MAX_PROJECT_FIXED_DEBT_STEPS,
+        MAX_PROJECT_FIXED_STEPS_PER_FRAME, MAX_PROJECT_UI_LOGICAL_EXTENT, ProductCapability,
+        ProductCapabilitySet, ProjectAuthoringManifest, ProjectCapabilitiesManifest,
+        ProjectCapabilitiesPatch, ProjectDiagnosticsManifest, ProjectExecutionContract,
+        ProjectExecutionPatch, ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest,
+        ProjectManifest, ProjectManifestLoad, ProjectManifestMutationError,
+        ProjectManifestWriteError, ProjectPath, ProjectPathError, ProjectPathsManifest,
+        ProjectPresentMode, ProjectProfileError, ProjectProfileKind, ProjectProfileOverlay,
+        ProjectRenderManifest, ProjectRenderPatch, ProjectRuntimeManifest, ProjectStartupManifest,
         ProjectTaskPoolManifest, ProjectTaskPoolPatch, ProjectTaskShutdownManifest,
         ProjectTaskShutdownPatch, ProjectTasksManifest, ProjectTasksPatch, ProjectUiManifest,
         ProjectUiPatch, ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest, ProjectWindowManifest,
-        ProjectWindowMode, RuntimePreset,
+        ProjectWindowMode, ProjectWorldCanvasManifest, RuntimePreset,
     };
 }
 

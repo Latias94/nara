@@ -11,9 +11,13 @@ use nara_input::{
 };
 use nara_project::{ProductCapability, ProductCapabilitySet};
 use nara_reflect::SchemaCompositionFingerprint;
+use nara_render::__private::{
+    PresentedWorldFrame, WorldPresentationGuard, WorldPresentationRevoker,
+    prepare_world_presentation,
+};
 use nara_render::{
     Extent2d, ExtractedViews, RenderFrame, RenderFramePacket, RenderFramePacketError,
-    RenderFrameTarget, RenderWindowPacket, build_render_frame_packet,
+    RenderFrameTarget, RenderWindowPacket, build_render_frame_packet_with_world_canvas,
 };
 use nara_scene::SceneAuthoringRevision;
 #[cfg(feature = "presentation-2d")]
@@ -381,6 +385,7 @@ impl EditorGameInputBatch {
 pub(super) struct PendingEditorGameViewCandidate {
     identity: EditorGameViewRuntimeCandidateIdentity,
     packet: RenderFramePacket,
+    world_presentation_revoker: Option<WorldPresentationRevoker>,
     #[cfg(feature = "presentation-2d")]
     sprite_batches: Option<SpriteBatches>,
     #[cfg(feature = "presentation-ui")]
@@ -400,6 +405,7 @@ impl PendingEditorGameViewCandidate {
                 runtime: self.identity,
             },
             packet: self.packet,
+            world_presentation_revoker: self.world_presentation_revoker,
             #[cfg(feature = "presentation-2d")]
             sprite_batches: self.sprite_batches,
             #[cfg(feature = "presentation-ui")]
@@ -413,6 +419,7 @@ impl PendingEditorGameViewCandidate {
 pub struct EditorGameViewCandidate {
     identity: EditorGameViewCandidateIdentity,
     packet: RenderFramePacket,
+    world_presentation_revoker: Option<WorldPresentationRevoker>,
     #[cfg(feature = "presentation-2d")]
     sprite_batches: Option<SpriteBatches>,
     #[cfg(feature = "presentation-ui")]
@@ -420,6 +427,11 @@ pub struct EditorGameViewCandidate {
 }
 
 impl EditorGameViewCandidate {
+    /// Invalidation-only device/target lifetime join for the private native presenter.
+    #[must_use]
+    pub fn world_presentation_revoker(&self) -> Option<WorldPresentationRevoker> {
+        self.world_presentation_revoker.clone()
+    }
     #[must_use]
     pub const fn identity(&self) -> EditorGameViewCandidateIdentity {
         self.identity
@@ -740,6 +752,8 @@ struct EditorGameViewBridge {
     next_sequence: u64,
     slot: EditorGameViewBridgeSlot,
     failure: Option<EditorGameViewBridgeFailure>,
+    pending_world_presentation: Option<(PresentedWorldFrame, WorldPresentationGuard)>,
+    world_presentation_guard: Option<WorldPresentationGuard>,
 }
 
 impl EditorGameViewBridge {
@@ -750,6 +764,8 @@ impl EditorGameViewBridge {
             next_sequence: 1,
             slot: EditorGameViewBridgeSlot::Empty,
             failure: None,
+            pending_world_presentation: None,
+            world_presentation_guard: None,
         }
     }
 
@@ -781,9 +797,14 @@ impl EditorGameViewBridge {
             frame_index: captured.packet.frame_index(),
             sequence,
         };
+        self.pending_world_presentation = prepare_world_presentation(&captured.packet);
         self.slot = EditorGameViewBridgeSlot::Buffered(PendingEditorGameViewCandidate {
             identity,
             packet: captured.packet,
+            world_presentation_revoker: self
+                .pending_world_presentation
+                .as_ref()
+                .map(|(_, guard)| guard.revoker()),
             #[cfg(feature = "presentation-2d")]
             sprite_batches: captured.sprite_batches,
             #[cfg(feature = "presentation-ui")]
@@ -826,6 +847,14 @@ impl EditorGameViewBridge {
 
     fn set_capture_enabled(&mut self, enabled: bool) {
         self.capture_enabled = enabled;
+        if !enabled {
+            self.invalidate_world_presentation();
+        }
+    }
+
+    fn invalidate_world_presentation(&mut self) {
+        self.pending_world_presentation = None;
+        self.world_presentation_guard = None;
     }
 
     fn reconfigure(
@@ -836,7 +865,25 @@ impl EditorGameViewBridge {
             return Err(EditorGameViewBridgeFailure::CandidateBusy);
         }
         self.config = config;
+        self.invalidate_world_presentation();
         Ok(())
+    }
+
+    fn complete_world_presentation(
+        &mut self,
+        world: &mut World,
+        disposition: EditorGameViewCompletionDisposition,
+    ) {
+        let pending = self.pending_world_presentation.take();
+        if disposition != EditorGameViewCompletionDisposition::Presented || !self.capture_enabled {
+            self.world_presentation_guard = None;
+            return;
+        }
+        if let Some((presented, guard)) = pending {
+            guard.mark_presented();
+            world.insert_resource(presented);
+            self.world_presentation_guard = Some(guard);
+        }
     }
 }
 
@@ -844,6 +891,7 @@ enum EditorGameViewBridgeInput {
     TakeCandidate,
     RetirementBlocked,
     SetCaptureEnabled(bool),
+    InvalidateWorldPresentation,
     Reconfigure(EditorGameViewCaptureConfig),
     Complete(EditorGameViewCompletion),
 }
@@ -875,7 +923,8 @@ impl __RuntimeDriverPort for EditorGameViewBridge {
                 )
             }
             EditorGameViewBridgeInput::RetirementBlocked => !matches!(state, RuntimeState::Stopped),
-            EditorGameViewBridgeInput::SetCaptureEnabled(_) => {
+            EditorGameViewBridgeInput::SetCaptureEnabled(_)
+            | EditorGameViewBridgeInput::InvalidateWorldPresentation => {
                 !matches!(state, RuntimeState::Stopped)
             }
             EditorGameViewBridgeInput::Reconfigure(_) => {
@@ -900,6 +949,10 @@ impl __RuntimeDriverPort for EditorGameViewBridge {
             }
             EditorGameViewBridgeInput::SetCaptureEnabled(enabled) => {
                 self.set_capture_enabled(enabled);
+                EditorGameViewBridgeOutput::Updated(Ok(()))
+            }
+            EditorGameViewBridgeInput::InvalidateWorldPresentation => {
+                self.invalidate_world_presentation();
                 EditorGameViewBridgeOutput::Updated(Ok(()))
             }
             EditorGameViewBridgeInput::Reconfigure(config) => {
@@ -930,6 +983,7 @@ impl EditorGameViewBridge {
                         if !bridge.accepts_completion(runtime_identity) {
                             return EditorGameViewBridgeOutput::Completed(Err(completion));
                         }
+                        let world_disposition = completion.disposition;
 
                         #[cfg(feature = "presentation-ui")]
                         {
@@ -961,6 +1015,7 @@ impl EditorGameViewBridge {
                         #[cfg(not(feature = "presentation-ui"))]
                         let _ = completion;
 
+                        bridge.complete_world_presentation(world, world_disposition);
                         bridge.finish_completion(runtime_identity);
                         EditorGameViewBridgeOutput::Completed(Ok(()))
                     }
@@ -1037,12 +1092,13 @@ fn capture_candidate(
         .ok_or(EditorGameViewBridgeFailure::MissingPrimaryWindow)?;
     let packet = {
         let mut query = world.query::<&Window>();
-        build_render_frame_packet(
+        build_render_frame_packet_with_world_canvas(
             runtime_generation,
             frame_index,
             Some(primary_window_id),
             query.iter(world),
             world.resource::<ExtractedViews>(),
+            world.resource::<ExtractedViews>().world_canvas(),
         )
         .map_err(EditorGameViewBridgeFailure::Packet)?
     };
@@ -1193,6 +1249,9 @@ pub(super) fn complete_candidate(
             Err((_, EditorGameViewBridgeInput::SetCaptureEnabled(_))) => {
                 unreachable!("the owned completion path cannot change capture state")
             }
+            Err((_, EditorGameViewBridgeInput::InvalidateWorldPresentation)) => {
+                unreachable!("the owned completion path cannot invalidate a presentation")
+            }
             Err((_, EditorGameViewBridgeInput::Reconfigure(_))) => {
                 unreachable!("the owned completion path cannot reconfigure Game View")
             }
@@ -1221,6 +1280,25 @@ pub(super) fn apply_input_batch(
     let Some(first) = events.first().copied() else {
         return Ok(());
     };
+    if events
+        .iter()
+        .any(|event| matches!(event.event(), EditorGameInputEvent::SurfaceRetired))
+    {
+        // The Session has admitted this exact route and drained its candidate. Retiring native
+        // input also revokes the displayed camera, even when the bridge is already idle.
+        let output = runtime
+            .with_driver_scope(|scope| {
+                scope.__apply_port::<EditorGameViewBridge>(
+                    EditorGameViewBridgeInput::InvalidateWorldPresentation,
+                )
+            })
+            .map_err(|_| EditorGameViewBridgeFailure::RuntimeUnavailable)?
+            .map_err(|_| EditorGameViewBridgeFailure::RuntimeUnavailable)?;
+        match output {
+            EditorGameViewBridgeOutput::Updated(result) => result?,
+            _ => unreachable!("the world presentation retirement port returns an update outcome"),
+        }
+    }
     let window = nara_input::InputWindowId::new(first.identity.start().logical_window().id.get());
     let result = runtime.with_driver_scope(|scope| {
         for (event_index, envelope) in events.into_iter().enumerate() {
@@ -1275,5 +1353,145 @@ pub(super) fn apply_input_batch(
             source,
         }),
         Err(source) => Err(EditorGameViewBridgeFailure::InputScopeRejected { source }),
+    }
+}
+
+#[cfg(test)]
+mod world_presentation_tests {
+    use super::*;
+    use nara_core::{Color, Mat3, Vec2};
+    use nara_ecs::{Entity, system::SystemState};
+    use nara_render::{
+        ExtractedView, RenderTarget, ViewLoadOp, ViewMapping2d, ViewportRect, WorldCanvas,
+        WorldPointer,
+    };
+
+    fn generation() -> RuntimeGeneration {
+        let runtime = nara_app::RuntimeInstance::start(App::new()).unwrap();
+        let generation = runtime.generation();
+        let mut retirement = runtime.begin_retirement();
+        while retirement.retirement_state() != nara_app::RuntimeCandidateRetirementState::Retired {
+            retirement.drive_retirement();
+        }
+        generation
+    }
+
+    fn pick(world: &mut World, camera: Entity) -> Option<Vec2> {
+        let mut state = SystemState::<WorldPointer>::new(world);
+        state
+            .get(world)
+            .unwrap()
+            .window_to_world(camera, Vec2::new(640.0, 360.0))
+    }
+
+    fn capture(
+        world: &mut World,
+        packet: RenderFramePacket,
+    ) -> EditorGameViewRuntimeCandidateIdentity {
+        let generation = packet.source_generation().runtime_generation().unwrap();
+        let mut bridge = world.resource_mut::<EditorGameViewBridge>();
+        bridge
+            .publish(CapturedEditorGameViewCandidate {
+                runtime_generation: generation,
+                packet,
+                #[cfg(feature = "presentation-2d")]
+                sprite_batches: None,
+                #[cfg(feature = "presentation-ui")]
+                ui_frame: None,
+            })
+            .unwrap();
+        let EditorGameViewBridgeOutput::Candidate(candidate) = bridge.take_candidate() else {
+            panic!("the bridge must issue the freshly captured candidate");
+        };
+        candidate.identity
+    }
+
+    fn complete(world: &mut World, identity: EditorGameViewRuntimeCandidateIdentity) {
+        world.resource_scope(|world, mut bridge: Mut<'_, EditorGameViewBridge>| {
+            assert!(bridge.accepts_completion(identity));
+            bridge
+                .complete_world_presentation(world, EditorGameViewCompletionDisposition::Presented);
+            bridge.finish_completion(identity);
+        });
+    }
+
+    fn invalidate(world: &mut World) {
+        assert!(matches!(
+            EditorGameViewBridge::apply_driver_input_in_world(
+                world,
+                EditorGameViewBridgeInput::InvalidateWorldPresentation,
+            ),
+            Ok(EditorGameViewBridgeOutput::Updated(Ok(())))
+        ));
+    }
+
+    #[test]
+    fn retired_idle_surface_revokes_world_picking_and_only_fresh_presentation_recovers() {
+        let generation = generation();
+        let window = Window::new("Game", nara_window::WindowResolution::new(1280, 720));
+        let canvas = WorldCanvas::new(320, 180).unwrap();
+        let mut world = World::new();
+        let camera = world.spawn_empty().id();
+        world.spawn(window.clone());
+        world.insert_resource(generation);
+        world.insert_resource(canvas);
+        world.insert_resource(EditorGameViewBridge::new(EditorGameViewCaptureConfig {
+            logical_window: RenderWindowPacket {
+                id: window.id,
+                resolution: window.resolution,
+                present_mode: window.present_mode,
+            },
+            resizable: true,
+            sprites: false,
+            ui: false,
+        }));
+        let viewport = ViewportRect::new(0, 0, 320, 180).unwrap();
+        let mut views = ExtractedViews::default();
+        views.push(ExtractedView {
+            camera_entity: camera,
+            target: RenderTarget::Window(window.id),
+            viewport,
+            mapping: ViewMapping2d::orthographic(Mat3::IDENTITY, 180.0, viewport).unwrap(),
+            order: 0,
+            load: ViewLoadOp::Clear(Color::BLACK),
+        });
+        let packet = |frame| {
+            build_render_frame_packet_with_world_canvas(
+                generation,
+                frame,
+                Some(window.id),
+                [&window],
+                &views,
+                Some(canvas),
+            )
+            .unwrap()
+            .unwrap()
+        };
+
+        let first = capture(&mut world, packet(1));
+        assert!(
+            pick(&mut world, camera).is_none(),
+            "capture does not confer display authority"
+        );
+        complete(&mut world, first);
+        assert_eq!(pick(&mut world, camera), Some(Vec2::ZERO));
+        assert!(world.resource::<EditorGameViewBridge>().is_idle());
+
+        invalidate(&mut world);
+        assert!(pick(&mut world, camera).is_none());
+        assert!(world.resource::<EditorGameViewBridge>().can_capture());
+
+        let retired = capture(&mut world, packet(2));
+        invalidate(&mut world);
+        complete(&mut world, retired);
+        assert!(
+            pick(&mut world, camera).is_none(),
+            "a discarded pending guard cannot revive"
+        );
+
+        let fresh = capture(&mut world, packet(3));
+        assert!(pick(&mut world, camera).is_none());
+        complete(&mut world, fresh);
+        assert_eq!(pick(&mut world, camera), Some(Vec2::ZERO));
     }
 }

@@ -3,7 +3,7 @@ use nara_window::{Window, WindowId};
 
 use crate::{
     Extent2d, ExtractedView, ExtractedViews, RenderFrameTarget, RenderImagePacket, RenderTarget,
-    RenderWindowPacket, ViewLoadOp,
+    RenderWindowPacket, ViewLoadOp, WorldCanvas, WorldCanvasFrame,
 };
 
 /// Maximum serial views in one exclusive target transaction.
@@ -43,13 +43,15 @@ impl From<RuntimeGeneration> for RenderFrameSourceGeneration {
     }
 }
 
-/// Owned, bounded, ordered views for one exclusive physical target transaction.
+/// Owned, bounded, ordered world views for one exclusive destination transaction.
+/// A fixed world canvas adds one owner-local image-to-window edge without changing target identity.
 #[derive(Debug, PartialEq)]
 pub struct RenderFramePacket {
     pub(crate) source_generation: RenderFrameSourceGeneration,
     frame_index: u64,
     pub(crate) target: RenderFrameTarget,
     views: Vec<ExtractedView>,
+    world_canvas: Option<WorldCanvasFrame>,
 }
 
 impl RenderFramePacket {
@@ -68,6 +70,10 @@ impl RenderFramePacket {
     #[must_use]
     pub fn views(&self) -> &[ExtractedView] {
         &self.views
+    }
+    #[must_use]
+    pub const fn world_canvas(&self) -> Option<WorldCanvasFrame> {
+        self.world_canvas
     }
 }
 
@@ -101,6 +107,10 @@ pub enum RenderFramePacketError {
     TargetWindowMismatch { window_id: WindowId },
     #[error("a render viewport lies outside its physical target")]
     ViewportOutsideTarget,
+    #[error("a fixed world canvas requires a window target")]
+    WorldCanvasRequiresWindowTarget,
+    #[error("the fixed world canvas cannot map into the captured window geometry")]
+    InvalidWorldCanvasMapping,
 }
 
 /// Captures the admitted desktop topology before any surface acquisition.
@@ -112,6 +122,26 @@ pub fn build_render_frame_packet<'a>(
     windows: impl IntoIterator<Item = &'a Window>,
     views: &ExtractedViews,
 ) -> Result<Option<RenderFramePacket>, RenderFramePacketError> {
+    build_render_frame_packet_with_world_canvas(
+        generation,
+        frame_index,
+        primary_window_id,
+        windows,
+        views,
+        None,
+    )
+}
+
+/// Captures one window transaction with optional fixed world raster geometry. Runtime UI continues
+/// to use the actual window target extent; only world viewports are validated against the canvas.
+pub fn build_render_frame_packet_with_world_canvas<'a>(
+    generation: RuntimeGeneration,
+    frame_index: u64,
+    primary_window_id: Option<WindowId>,
+    windows: impl IntoIterator<Item = &'a Window>,
+    views: &ExtractedViews,
+    world_canvas: Option<WorldCanvas>,
+) -> Result<Option<RenderFramePacket>, RenderFramePacketError> {
     build_render_frame_packet_for_source(
         RenderFrameSourceGeneration::runtime(generation),
         frame_index,
@@ -119,6 +149,7 @@ pub fn build_render_frame_packet<'a>(
         windows,
         views,
         None,
+        world_canvas,
     )
 }
 
@@ -129,6 +160,7 @@ pub(crate) fn build_render_frame_packet_for_source<'a>(
     windows: impl IntoIterator<Item = &'a Window>,
     views: &ExtractedViews,
     image_target: Option<RenderImagePacket>,
+    world_canvas: Option<WorldCanvas>,
 ) -> Result<Option<RenderFramePacket>, RenderFramePacketError> {
     let Some(first) = views.as_slice().first() else {
         return Ok(None);
@@ -185,6 +217,11 @@ pub(crate) fn build_render_frame_packet_for_source<'a>(
             if window.id != window_id {
                 return Err(RenderFramePacketError::TargetWindowMismatch { window_id });
             }
+            // Minimized/suspended native windows have no raster target. Explicit camera
+            // viewports remain valid authored data, but cannot make this surface renderable.
+            if window.resolution.is_zero_sized() {
+                return Ok(None);
+            }
             RenderFrameTarget::Window(RenderWindowPacket {
                 id: window.id,
                 resolution: window.resolution,
@@ -192,7 +229,17 @@ pub(crate) fn build_render_frame_packet_for_source<'a>(
             })
         }
     };
-    let extent = target.extent();
+    let world_canvas = match (world_canvas, target) {
+        (Some(canvas), RenderFrameTarget::Window(window)) => Some(
+            WorldCanvasFrame::new(canvas, window.resolution)
+                .ok_or(RenderFramePacketError::InvalidWorldCanvasMapping)?,
+        ),
+        (Some(_), RenderFrameTarget::Image(_)) => {
+            return Err(RenderFramePacketError::WorldCanvasRequiresWindowTarget);
+        }
+        (None, _) => None,
+    };
+    let extent = world_canvas.map_or_else(|| target.extent(), |canvas| canvas.extent());
     if views.as_slice().iter().any(|view| {
         let viewport = view.viewport;
         viewport.extent().is_empty()
@@ -208,6 +255,7 @@ pub(crate) fn build_render_frame_packet_for_source<'a>(
         frame_index,
         target,
         views: views.as_slice().to_vec(),
+        world_canvas,
     }))
 }
 

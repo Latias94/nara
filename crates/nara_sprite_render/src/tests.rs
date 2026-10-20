@@ -84,7 +84,7 @@ fn sprite_app() -> App {
         HierarchyPlugin,
         TransformPlugin,
         nara_render::RenderComponentsPlugin,
-        nara_render::RenderPlugin,
+        nara_render::RenderPlugin::default(),
         nara_image::ImagePreparePlugin,
         SpriteRenderPlugin,
     ))

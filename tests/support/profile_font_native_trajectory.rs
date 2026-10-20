@@ -6,14 +6,14 @@ use std::{
 };
 
 use super::profile_font_product::{
-    PROFILE_FONT_NATIVE_PROOF, PROFILE_FONT_PROOF, profile_font_recipe,
+    PROFILE_FONT_NATIVE_PROOF, PROFILE_FONT_PROOF, WORLD_CANVAS_NATIVE_PROOF, profile_font_recipe,
 };
 
 static NEXT_TRAJECTORY: AtomicU64 = AtomicU64::new(1);
 
 #[test]
 #[ignore = "builds and exports one independent UI product and executes its real native desktop first-presentation canary"]
-fn ordinary_font_recipe_survives_compiled_check_export_and_native_packaged_startup() {
+fn fixed_world_canvas_and_font_recipe_survive_check_export_and_native_restart() {
     let checkout = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sequence = NEXT_TRAJECTORY.fetch_add(1, Ordering::Relaxed);
     let parent = checkout.join("target").join(format!(
@@ -45,7 +45,7 @@ fn ordinary_font_recipe_survives_compiled_check_export_and_native_packaged_start
             "requested = [\"runtime-2d\", \"presentation-2d\", \"runtime-ui\", \"presentation-ui\", \"desktop-winit\", \"render-wgpu\"]");
     fs::write(
         manifest_path,
-        format!("{manifest}\n[ui.primary_surface]\nlogical_width = 320\nlogical_height = 180\n"),
+        format!("{manifest}\n[ui.primary_surface]\nlogical_width = 320\nlogical_height = 180\n\n[render.world_canvas]\nwidth = 320\nheight = 180\n"),
     )
     .unwrap();
 
@@ -122,9 +122,21 @@ fn ordinary_font_recipe_survives_compiled_check_export_and_native_packaged_start
     // These binaries resolve their sibling exported project, including its saved UI profile.
     // Their shared fixture asserts actual shaping and rasterization before reporting success.
     let packaged = parent.join("font-candidate");
-    for (target, arguments, success) in [
-        ("headless", Vec::<&str>::new(), "starter_headless: ok"),
+    for (label, target, arguments, success) in [
         (
+            "headless",
+            "headless",
+            Vec::<&str>::new(),
+            "starter_headless: ok",
+        ),
+        (
+            "desktop",
+            "desktop",
+            vec!["--verify-first-present"],
+            "starter_desktop: ok first_present_verified=true",
+        ),
+        (
+            "desktop restart",
             "desktop",
             vec!["--verify-first-present"],
             "starter_desktop: ok first_present_verified=true",
@@ -135,12 +147,16 @@ fn ordinary_font_recipe_survives_compiled_check_export_and_native_packaged_start
             .join(format!("{target}{}", std::env::consts::EXE_SUFFIX));
         let mut run = Command::new(executable);
         run.current_dir(&parent).args(arguments);
-        let output = successful(run.output().unwrap(), target);
+        let output = successful(run.output().unwrap(), label);
         assert!(
             output.contains(PROFILE_FONT_PROOF),
             "{target} did not prove its selected font: {output}"
         );
         if target == "desktop" {
+            assert!(
+                output.contains(WORLD_CANVAS_NATIVE_PROOF),
+                "{label} omitted the canvas/picking proof: {output}"
+            );
             assert!(
                 output.contains(PROFILE_FONT_NATIVE_PROOF),
                 "desktop omitted its owner-produced UI presentation: {output}"

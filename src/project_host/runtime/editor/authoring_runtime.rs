@@ -612,7 +612,7 @@ fn build_authoring_app() -> Result<App, DiagnosticReport> {
         .map_err(|_| runtime_error("project.editor.preview-state-install-failed"))?;
     #[cfg(feature = "presentation-2d")]
     app.add_plugins((
-        nara_render::RenderPlugin,
+        nara_render::RenderPlugin::default(),
         nara_image::ImagePreparePlugin,
         nara_sprite_render::SpriteRenderPlugin,
     ))

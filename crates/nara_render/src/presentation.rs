@@ -92,20 +92,20 @@ impl DisplayMapping2d {
         } else {
             fit
         };
-        let size = [
-            target.width as f32 * fit / pixels_per_point,
-            target.height as f32 * fit / pixels_per_point,
-        ];
-        let mut min = [
-            panel.min[0] + ((panel.max[0] - panel.min[0]) - size[0]) * 0.5,
-            panel.min[1] + ((panel.max[1] - panel.min[1]) - size[1]) * 0.5,
+        let physical_size = [target.width as f32 * fit, target.height as f32 * fit];
+        let mut physical_min = [
+            panel.min[0] * pixels_per_point + (available[0] - physical_size[0]) * 0.5,
+            panel.min[1] * pixels_per_point + (available[1] - physical_size[1]) * 0.5,
         ];
         if scale == DisplayScale::IntegerFit && fit >= 1.0 {
-            min = min.map(|point| (point * pixels_per_point).round() / pixels_per_point);
+            physical_min = physical_min.map(f32::round);
         }
         let content = DisplayRect {
-            min,
-            max: [min[0] + size[0], min[1] + size[1]],
+            min: physical_min.map(|point| point / pixels_per_point),
+            max: [
+                (physical_min[0] + physical_size[0]) / pixels_per_point,
+                (physical_min[1] + physical_size[1]) / pixels_per_point,
+            ],
         };
         content.is_valid().then_some(Self {
             target,

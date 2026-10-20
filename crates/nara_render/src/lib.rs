@@ -1,15 +1,20 @@
 //! Renderer-facing data and backend seam.
 
+extern crate nara_ecs as bevy_ecs;
+
+mod canvas;
 mod frame;
 mod prepare;
 mod presentation;
 mod target;
 mod view;
+mod world_pointer;
 
+pub use canvas::{WorldCanvas, WorldCanvasFrame};
 use frame::build_render_frame_packet_for_source;
 pub use frame::{
     MAX_VIEWS_PER_TARGET, RenderFramePacket, RenderFramePacketError, RenderFrameSourceGeneration,
-    build_render_frame_packet,
+    build_render_frame_packet, build_render_frame_packet_with_world_canvas,
 };
 pub use presentation::{DisplayMapping2d, DisplayRect, DisplaySampling, DisplayScale};
 pub use target::{
@@ -20,6 +25,7 @@ pub use view::{
     Camera2d, ExtractedView, ExtractedViews, ViewLoadOp, ViewMapping2d, viewport_clip_to_physical,
     viewport_physical_to_clip,
 };
+pub use world_pointer::WorldPointer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Resource)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -56,6 +62,10 @@ pub use prepare::{
 
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::world_pointer::{
+        PresentedWorldFrame, WorldPresentationGuard, WorldPresentationRevoker,
+        prepare_world_presentation,
+    };
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use nara_ecs::SystemSet;
@@ -98,6 +108,7 @@ pub mod __private {
             std::iter::empty(),
             views,
             Some(target),
+            None,
         )?;
         if packet
             .as_ref()
@@ -427,8 +438,33 @@ impl Plugin for RenderComponentsPlugin {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct RenderPlugin;
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RenderPlugin {
+    pub world_canvas: Option<WorldCanvas>,
+}
+
+/// Creates a repeatable Render plugin with an optional fixed world canvas.
+#[must_use]
+pub fn plugin(world_canvas: Option<WorldCanvas>) -> nara_app::PluginDefinition {
+    let mut bytes = b"nara.render.plugin-config.v1\0".to_vec();
+    match world_canvas {
+        None => bytes.push(0),
+        Some(canvas) => {
+            bytes.push(1);
+            bytes.extend_from_slice(&canvas.extent().width.to_le_bytes());
+            bytes.extend_from_slice(&canvas.extent().height.to_le_bytes());
+            let color = canvas.bar_color();
+            for value in [color.r, color.g, color.b, color.a] {
+                bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+            }
+        }
+    }
+    nara_app::PluginDefinition::infallible::<RenderPlugin, _>(
+        nara_app::PluginDefinitionId::new("nara.render.configured", 1),
+        bytes,
+        move || RenderPlugin { world_canvas },
+    )
+}
 
 pub const RENDER_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.render");
 const RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
@@ -452,12 +488,20 @@ impl Plugin for RenderPlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         nara_transform::__private::install_render_projection(app)?;
+        if let Some(canvas) = self.world_canvas {
+            app.insert_resource(canvas)?;
+        }
         app.init_resource::<ClearColor>()?;
         app.init_resource::<ExtractedViews>()?;
         app.init_resource::<ExtractedViewScratch>()?;
         app.init_resource::<RenderFrame>()?;
         app.init_resource::<FrameStats>()?;
         app.init_resource::<RenderBackendStatus>()?;
+        app.add_systems(
+            CoreStage::First,
+            world_pointer::invalidate_window_presentation
+                .after(nara_window::WindowSet::ApplyEvents),
+        )?;
         app.add_systems(
             CoreStage::Extract,
             extract_views
@@ -706,6 +750,7 @@ fn extract_views(
     presentation: Res<nara_transform::__private::RenderTransformProjection>,
     primary_window_id: Option<Res<PrimaryWindowId>>,
     windows: Query<&Window>,
+    canvas: Option<Res<WorldCanvas>>,
     cameras: Query<(
         Entity,
         &Camera2d,
@@ -739,10 +784,14 @@ fn extract_views(
                 entity: camera_entity,
             })
             .map_err(BevyError::error)?;
-        let Some(viewport) = camera
-            .viewport
-            .or_else(|| viewport_for_target(camera.target, primary_window_id, &windows))
-        else {
+        let Some(viewport) = camera.viewport.or_else(|| {
+            viewport_for_target(
+                camera.target,
+                primary_window_id,
+                &windows,
+                canvas.as_deref().copied(),
+            )
+        }) else {
             continue;
         };
 
@@ -778,7 +827,7 @@ fn extract_views(
             view.load = ViewLoadOp::Clear(clear_color.0);
         }
     }
-    extracted_views.replace(&mut scratch.0);
+    extracted_views.replace(&mut scratch.0, canvas.as_deref().copied());
     frame.begin_extract();
     Ok(())
 }
@@ -808,16 +857,22 @@ fn viewport_for_target(
     target: RenderTarget,
     primary_window_id: Option<WindowId>,
     windows: &Query<&Window>,
+    canvas: Option<WorldCanvas>,
 ) -> Option<ViewportRect> {
     let window_id = target.window_id(primary_window_id)?;
     windows
         .iter()
         .find(|window| window.id == window_id)
-        .and_then(|window| ViewportRect::from_window_resolution(window.resolution))
+        .filter(|window| !window.resolution.is_zero_sized())
+        .and_then(|window| match canvas {
+            Some(canvas) => ViewportRect::from_extent(canvas.extent()),
+            None => ViewportRect::from_window_resolution(window.resolution),
+        })
 }
 
 #[cfg(test)]
 mod tests {
+    mod world_canvas;
     use super::*;
     use std::time::Duration;
 
@@ -846,7 +901,7 @@ mod tests {
         if with_window {
             app.add_plugin(WindowPlugin::default()).unwrap();
         }
-        app.add_plugin(RenderPlugin).unwrap();
+        app.add_plugin(RenderPlugin::default()).unwrap();
         app
     }
 

@@ -14,6 +14,7 @@ use crate::effective::{
     EffectiveTaskSettings, EffectiveUiSettings, EffectiveWindowSettings, ProjectExecutionContract,
 };
 use crate::path::{ProjectPath, ProjectPathError};
+use crate::render::ProjectRenderPatch;
 use crate::sections::{
     ProjectCapabilitiesManifest, ProjectFixedCatchUpPolicy, ProjectPresentMode,
     ProjectTaskPoolManifest, ProjectTaskShutdownManifest, ProjectTasksManifest,
@@ -38,6 +39,8 @@ pub struct ProjectProfileOverlay {
     pub runtime: ProjectRuntimePatch,
     #[serde(default)]
     pub tasks: ProjectTasksPatch,
+    #[serde(default)]
+    pub render: ProjectRenderPatch,
     #[serde(default)]
     pub ui: ProjectUiPatch,
     #[serde(default)]
@@ -67,6 +70,8 @@ impl ProjectProfileOverlay {
             .validate_into(diagnostics, &format!("{prefix}.runtime"));
         self.tasks
             .validate_into(diagnostics, &format!("{prefix}.tasks"), base_tasks);
+        self.render
+            .validate_into(diagnostics, &format!("{prefix}.render"));
         self.ui.validate_into(diagnostics, &format!("{prefix}.ui"));
         self.window
             .validate_into(diagnostics, &format!("{prefix}.window"));
@@ -91,6 +96,7 @@ impl ProjectProfileOverlay {
             settings.runtime_preset = preset;
         }
         self.tasks.apply_to(&mut settings.tasks)?;
+        self.render.apply_to(&mut settings.render);
         self.ui.apply_to(&mut settings.ui);
         self.window.apply_to(&mut settings.window);
         self.input.apply_to(&mut settings.input)?;

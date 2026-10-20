@@ -145,6 +145,24 @@ ordered view list executes serially, including shared targets and explicit offsc
 This supersedes the single-view cardinality clauses in 0018/0094/0111/0112, retaining exclusive target
 ownership. Optional pixel-canvas policies do not quantize simulation. No public render graph or RHI is added.
 
+The first ordinary pixel-canvas consumer selects an optional fixed world raster extent. World
+views raster into that extent, then the completed canvas is nearest-sampled into the actual window
+using `DisplayScale::IntegerFit`; native runtime UI is drawn afterward at actual window resolution.
+Whole physical scaling is used when the canvas fits, with centered bars; undersized windows retain
+the existing fractional full-image downscale. WindowResolution, platform-logical input, camera
+world coordinates and fractional simulation remain independent of the internal raster extent.
+The project profile lowers this setting into the same Render configuration used by Rust consumers.
+
+Canvas raster, window/image composition, native UI and final submission are one closed transaction.
+The same private preparation and encoding serves runtime windows and the embedded Game View;
+canvas composition does not turn an image submission into a window presentation. World pointer
+conversion composes the successfully presented display mapping and exact extracted camera, checks
+the current destination/configuration, and excludes bars, nonfinite points and maximum edges.
+Resize, scale, suspension, retirement and device/runtime replacement revoke obsolete presentation
+authority. A fixed canvas allocation is retained across destination-only resize and retired by its
+backend owner on configuration/extent or device/runtime replacement. This is a finite first-party
+path, not a public image-target scheduler, render graph or raw backend escape.
+
 Material contributions are trusted Rust startup declarations with parameters, textures, alpha semantics,
 and supported renderer capabilities, proven by one palette example. Shader code changes require restart
 in this scope. Scripts/data select admitted definitions and values without Device/Queue authority.

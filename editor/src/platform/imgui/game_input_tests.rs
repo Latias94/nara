@@ -1,5 +1,9 @@
 #![cfg(target_os = "windows")]
 
+mod canvas;
+
+use canvas::{install_canvas_button, observe_canvas_button};
+
 use std::{path::Path, sync::Arc, time::Duration};
 
 use dear_imgui_rs::{ConfigFlags, Context, Key, MouseButton};
@@ -111,6 +115,8 @@ impl Plugin for InputResponsePlugin {
         app.add_systems(StartupStage::Scene, |mut commands: Commands| {
             commands.spawn((Transform2d::default(), Camera2d::default()));
         })?
+        .add_systems(StartupStage::Scene, install_canvas_button)?
+        .add_systems(CoreStage::Last, observe_canvas_button)?
         .add_systems(
             CoreStage::FixedUpdate,
             move_sprite.in_set(FixedUpdateSet::Simulate),
@@ -161,11 +167,31 @@ struct InputObservation {
 #[ignore = "requires a Windows desktop and actual WGPU sprite/UI presentation"]
 fn native_game_input_reopen_paused_refocus_resize_and_step_reach_presented_runtime() {
     let project = UiProject::new();
+    qualify_game_input(&project.0, false);
+}
+
+#[test]
+#[ignore = "requires a Windows desktop and actual fixed-world WGPU sprite/UI presentation"]
+fn native_fixed_world_canvas_keeps_ui_input_resize_and_step_coherent() {
+    let project = UiProject::new();
+    let path = project.0.join("nara.toml");
+    let manifest = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        path,
+        format!("{manifest}\n[render.world_canvas]\nwidth = 320\nheight = 180\n"),
+    )
+    .unwrap();
+    qualify_game_input(&project.0, true);
+}
+
+fn qualify_game_input(project: &Path, canvas_buttons: bool) {
+    canvas::reset_probe();
     let mut builder = EventLoop::builder();
     builder.with_any_thread(true);
     let event_loop = builder.build().unwrap();
     let mut host = GameInputTestHost {
-        project: &project.0,
+        project,
+        canvas_buttons,
         result: None,
     };
     event_loop.run_app(&mut host).unwrap();
@@ -290,13 +316,18 @@ fn native_game_input_reopen_paused_refocus_resize_and_step_reach_presented_runti
 
 struct GameInputTestHost<'a> {
     project: &'a Path,
+    canvas_buttons: bool,
     result: Option<Result<InputObservation, String>>,
 }
 
 impl ApplicationHandler for GameInputTestHost<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.result.is_none() {
-            self.result = Some(run_input_workflow(event_loop, self.project));
+            self.result = Some(run_input_workflow(
+                event_loop,
+                self.project,
+                self.canvas_buttons,
+            ));
         }
         event_loop.exit();
     }
@@ -307,6 +338,7 @@ impl ApplicationHandler for GameInputTestHost<'_> {
 fn run_input_workflow(
     event_loop: &ActiveEventLoop,
     project: &Path,
+    canvas_buttons: bool,
 ) -> Result<InputObservation, String> {
     let intent = game_view_intent()?;
     let window = hidden_window(event_loop, "Nara native Game input workflow")
@@ -356,6 +388,7 @@ fn run_input_workflow(
         pointer: [-1000.0, -1000.0],
         presents: 0,
         stage: "initial workspace",
+        canvas_buttons,
         interaction: String::new(),
     }
     .run();
@@ -390,6 +423,7 @@ struct GameInputWorkflow<'a> {
     pointer: [f32; 2],
     presents: u64,
     stage: &'static str,
+    canvas_buttons: bool,
     interaction: String,
 }
 
@@ -622,6 +656,11 @@ impl GameInputWorkflow<'_> {
         if !self.native.input.is_captured() {
             return Err("clicking the presented Game image did not capture input".into());
         }
+        let canvas_buttons = self.canvas_buttons;
+        if canvas_buttons {
+            self.stage = "Runtime UI button before Game resize";
+            self.click_runtime_canvas_button()?;
+        }
         self.key(ElementState::Pressed)?;
         self.settle()?;
         let moved = self.observe()?;
@@ -722,6 +761,15 @@ impl GameInputWorkflow<'_> {
         })?;
         self.settle()?;
         let resized = self.observe()?;
+        if canvas_buttons {
+            self.stage = "Runtime UI button after actual Game resize";
+            self.action(EditorPlayAction::Resume)?;
+            self.settle()?;
+            self.click("embedded:Game image")?;
+            self.click_runtime_canvas_button()?;
+            self.action(EditorPlayAction::Pause)?;
+            self.settle()?;
+        }
         self.stage = "recapture resized Paused Game and fixed Step";
         self.click("embedded:Game image")?;
         self.key(ElementState::Pressed)?;

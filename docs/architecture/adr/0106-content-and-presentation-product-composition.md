@@ -16,6 +16,8 @@
 
 **Composition Baseline**: [PCC-U4 Reviewed Product Composition Conformance Baseline](../../knowledge/engineering/verification/2026-08/2026-08-13T073115Z-pcc-u4-reviewed-product-composition-conformance-baseline-56264181873249c18d5477ce2170c8b1.md)
 
+**Refined By**: [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md) (shared project/Render world-canvas configuration)
+
 ## 2026-08-12 Product-Contribution Amendment
 
 The compiled Cargo ceiling, requested product and installed plugin closure remain three separate

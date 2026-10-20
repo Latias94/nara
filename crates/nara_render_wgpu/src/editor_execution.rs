@@ -758,6 +758,16 @@ impl WgpuEditorViewAdmission {
 struct WgpuEditorView {
     admission: WgpuEditorViewAdmission,
     target: Option<WgpuEditorViewportTarget>,
+    world_canvas: crate::canvas::WorldCanvasCache,
+    world_presentation: Option<nara_render::__private::WorldPresentationRevoker>,
+}
+
+impl Drop for WgpuEditorView {
+    fn drop(&mut self) {
+        if let Some(presentation) = self.world_presentation.take() {
+            presentation.invalidate();
+        }
+    }
 }
 
 /// Private GPU owner used by the first-party Editor Host.
@@ -935,6 +945,17 @@ impl WgpuEditorExecution {
             .is_ok()
         );
         let view = self.views.entry(reservation.stamp.view_id).or_default();
+        if view.admission.source_generation != Some(reservation.stamp.source_generation) {
+            if let Some(presentation) = view.world_presentation.take() {
+                presentation.invalidate();
+            }
+            self.backend
+                .retire_editor_world_presentation(reservation.stamp.view_id);
+        }
+        view.world_canvas.retain_namespace(
+            reservation.stamp.source_generation,
+            reservation.stamp.device_epoch,
+        );
         view.admission.activate(reservation.stamp);
         view.target = Some(WgpuEditorViewportTarget {
             stamp: reservation.stamp,
@@ -969,6 +990,43 @@ impl WgpuEditorExecution {
         packet: RenderFramePacket,
     ) -> Result<WgpuSubmittedImageReceipt, WgpuEditorExecutionError> {
         self.submit_image_payload(view_id, window, packet, WgpuFramePayload::default(), None)
+    }
+
+    /// Attaches invalidate-only Runtime camera state to an existing Editor view's GPU lifetime.
+    /// This grants no image submission, composite or presentation authority.
+    pub fn retain_game_world_presentation(
+        &mut self,
+        view_id: WgpuEditorViewId,
+        window: RenderWindowPacket,
+        revoker: nara_render::__private::WorldPresentationRevoker,
+    ) -> Result<(), WgpuEditorExecutionError> {
+        if self
+            .views
+            .get(&view_id)
+            .is_none_or(|view| view.target.is_none())
+        {
+            revoker.invalidate();
+            return Err(WgpuEditorExecutionError::ViewportTargetUnavailable);
+        }
+        if let Err(error) = self.backend.prepare_editor_window(&self.handles, window) {
+            revoker.invalidate();
+            return Err(error.into());
+        }
+        if let Err(error) = self
+            .backend
+            .retain_editor_world_presentation(view_id, revoker.clone())
+        {
+            revoker.invalidate();
+            return Err(error.into());
+        }
+        let view = self
+            .views
+            .get_mut(&view_id)
+            .expect("the registered view remains owned");
+        if let Some(previous) = view.world_presentation.replace(revoker) {
+            previous.invalidate();
+        }
+        Ok(())
     }
 
     #[cfg(feature = "sprite-submitter")]
@@ -1093,11 +1151,17 @@ impl WgpuEditorExecution {
         if let (Some(ui), Some(backend_generation)) = (ui.as_deref_mut(), ui_backend_generation) {
             ui.bind_backend(backend_generation)?;
         }
-        let mut draw = self.backend.prepare_target_draw(
+        let canvas_cache = &mut self
+            .views
+            .get_mut(&view_id)
+            .expect("a required target belongs to a registered view")
+            .world_canvas;
+        let mut draw = self.backend.prepare_target_draw_with_canvas_cache(
             EDITOR_IMAGE_FORMAT,
             &packet,
             &payload,
             host_frame_index,
+            canvas_cache,
         )?;
         let viewport_target = self
             .views
@@ -1223,7 +1287,11 @@ impl WgpuEditorExecution {
     pub fn retire_viewport_target(&mut self, view_id: WgpuEditorViewId) {
         if let Some(view) = self.views.get_mut(&view_id) {
             view.target = None;
+            if let Some(presentation) = view.world_presentation.take() {
+                presentation.invalidate();
+            }
         }
+        self.backend.retire_editor_world_presentation(view_id);
     }
 
     /// Flushes pending uploads and drains work at the explicit native Host shutdown boundary.
@@ -1236,6 +1304,7 @@ impl WgpuEditorExecution {
     /// Releases a final view lifetime. The Host never reuses its identity after this call.
     pub fn retire_view(&mut self, view_id: WgpuEditorViewId) {
         self.views.remove(&view_id);
+        self.backend.retire_editor_world_presentation(view_id);
     }
 
     fn validate_viewport_submission(

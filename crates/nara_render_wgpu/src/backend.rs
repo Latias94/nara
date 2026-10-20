@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     ffi::OsStr,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
@@ -87,15 +87,79 @@ impl Default for WgpuBackendInstanceId {
 }
 
 #[derive(Debug, Default)]
-struct DeviceLossSignal(AtomicBool);
+struct DeviceLossSignal {
+    lost: AtomicBool,
+    presentations: Mutex<DeviceWorldPresentations>,
+}
+
+#[derive(Debug, Default)]
+struct DeviceWorldPresentations {
+    runtime: Option<nara_render::__private::WorldPresentationRevoker>,
+    editor: BTreeMap<
+        crate::editor_execution::WgpuEditorViewId,
+        nara_render::__private::WorldPresentationRevoker,
+    >,
+}
 
 impl DeviceLossSignal {
     fn mark_lost(&self) {
-        self.0.store(true, Ordering::Release);
+        self.lost.store(true, Ordering::Release);
+        let presentations = self
+            .presentations
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(presentation) = &presentations.runtime {
+            presentation.invalidate();
+        }
+        for presentation in presentations.editor.values() {
+            presentation.invalidate();
+        }
     }
 
     fn is_lost(&self) -> bool {
-        self.0.load(Ordering::Acquire)
+        self.lost.load(Ordering::Acquire)
+    }
+
+    fn retain_presentation(&self, revoker: nara_render::__private::WorldPresentationRevoker) {
+        let mut presentations = self
+            .presentations
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if self.is_lost() {
+            revoker.invalidate();
+        } else {
+            if let Some(previous) = presentations.runtime.replace(revoker) {
+                previous.invalidate();
+            }
+        }
+    }
+
+    fn retain_editor_presentation(
+        &self,
+        view: crate::editor_execution::WgpuEditorViewId,
+        revoker: nara_render::__private::WorldPresentationRevoker,
+    ) {
+        let mut presentations = self
+            .presentations
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if self.is_lost() {
+            revoker.invalidate();
+        } else if let Some(previous) = presentations.editor.insert(view, revoker) {
+            previous.invalidate();
+        }
+    }
+
+    fn retire_editor_presentation(&self, view: crate::editor_execution::WgpuEditorViewId) {
+        if let Some(previous) = self
+            .presentations
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .editor
+            .remove(&view)
+        {
+            previous.invalidate();
+        }
     }
 }
 
@@ -422,6 +486,10 @@ pub struct WgpuRenderBackend {
     state: WgpuBackendState,
     // Rust drops fields in declaration order. Retire surfaces while their GPU owners are live.
     surfaces: BTreeMap<WindowId, WgpuSurfaceState>,
+    world_canvas: crate::canvas::WorldCanvasCache,
+    world_presentation_guard: Option<nara_render::__private::WorldPresentationGuard>,
+    presented_world: Option<nara_render::__private::PresentedWorldFrame>,
+    world_presentation_target: Option<(RenderWindowPacket, Option<nara_render::WorldCanvasFrame>)>,
     instance: Option<wgpu::Instance>,
     adapter: Option<wgpu::Adapter>,
     device: Option<wgpu::Device>,
@@ -679,6 +747,7 @@ impl WgpuRenderBackend {
             self.instance_budget = InstanceBudget::default();
         }
         self.presented_frame_this_transaction = None;
+        self.presented_world = None;
         #[cfg(feature = "ui-submitter")]
         self.clear_submitted_ui_facts();
     }
@@ -694,6 +763,13 @@ impl WgpuRenderBackend {
     ) -> Result<(), WgpuRenderError> {
         let window_ids = self.surfaces.keys().copied().collect::<Vec<_>>();
         let retirement_result = self.retire_targets(&window_ids, reason);
+        if let Some(signal) = &self.device_loss_signal {
+            signal.mark_lost();
+        }
+        self.world_canvas.clear();
+        self.world_presentation_guard = None;
+        self.presented_world = None;
+        self.world_presentation_target = None;
         self.device_loss_signal = None;
         self.queue = None;
         self.device = None;
@@ -883,6 +959,7 @@ impl WgpuRenderBackend {
             work_started_at,
         } = captured;
         let source_generation = packet.source_generation();
+        let world_presentation = nara_render::__private::prepare_world_presentation(&packet);
         stats.draw_calls = 0;
         stats.sprites = 0;
         self.begin_frame_transaction(packet.frame_index(), Some(app_frame_index));
@@ -923,6 +1000,13 @@ impl WgpuRenderBackend {
                     .to_owned(),
             });
         };
+        if self
+            .world_presentation_target
+            .is_some_and(|target| target != (window, packet.world_canvas()))
+        {
+            self.world_presentation_guard = None;
+            self.world_presentation_target = None;
+        }
         let Some(size) = surface_extent(
             window.resolution.physical_width,
             window.resolution.physical_height,
@@ -1040,6 +1124,16 @@ impl WgpuRenderBackend {
 
         if let Some(presented) = presented {
             self.presented_frame_this_transaction = Some(presented);
+            self.world_presentation_guard = None;
+            if let Some((snapshot, guard)) = world_presentation {
+                if let Some(signal) = &self.device_loss_signal {
+                    signal.retain_presentation(guard.revoker());
+                }
+                guard.mark_presented();
+                self.world_presentation_guard = Some(guard);
+                self.presented_world = Some(snapshot);
+                self.world_presentation_target = Some((window, packet.world_canvas()));
+            }
             #[cfg(feature = "ui-submitter")]
             if let Some(facts) = submitted_ui_facts {
                 self.publish_submitted_ui_facts(facts);
@@ -1302,6 +1396,10 @@ impl WgpuRenderBackend {
         window_id: WindowId,
         reason: SurfaceDropReason,
     ) -> Result<(), WgpuRenderError> {
+        self.world_canvas.clear();
+        self.world_presentation_guard = None;
+        self.presented_world = None;
+        self.world_presentation_target = None;
         if self
             .presented_frame_this_transaction
             .is_some_and(|receipt| receipt.window_id() == window_id)
@@ -1488,10 +1586,49 @@ impl WgpuRenderBackend {
         payload: &WgpuFramePayload,
         frame_index: u64,
     ) -> Result<PreparedTargetDraw, WgpuRenderError> {
+        let mut canvas_cache = std::mem::take(&mut self.world_canvas);
+        let result = self.prepare_target_draw_with_canvas_cache(
+            format,
+            packet,
+            payload,
+            frame_index,
+            &mut canvas_cache,
+        );
+        self.world_canvas = canvas_cache;
+        result
+    }
+
+    pub(super) fn prepare_target_draw_with_canvas_cache(
+        &mut self,
+        format: wgpu::TextureFormat,
+        packet: &nara_render::RenderFramePacket,
+        payload: &WgpuFramePayload,
+        frame_index: u64,
+        canvas_cache: &mut crate::canvas::WorldCanvasCache,
+    ) -> Result<PreparedTargetDraw, WgpuRenderError> {
         let mut prepared = PreparedTargetDraw::default();
+        let world_format = if let Some(canvas) = packet.world_canvas() {
+            prepared.canvas = Some(
+                canvas_cache.prepare(
+                    self.device
+                        .as_ref()
+                        .ok_or(WgpuRenderError::BackendNotReady)?,
+                    self.device_epoch,
+                    packet.source_generation(),
+                    format,
+                    canvas,
+                    packet.views().len(),
+                )?,
+            );
+            prepared.draw_calls = 1;
+            crate::canvas::WORLD_CANVAS_FORMAT
+        } else {
+            canvas_cache.clear();
+            format
+        };
         for (index, view) in packet.views().iter().enumerate() {
             let draw = self.prepare_submitter_draw(
-                format,
+                world_format,
                 view.target,
                 view.viewport,
                 Some(index),
@@ -1517,7 +1654,54 @@ impl WgpuRenderBackend {
         Ok(prepared)
     }
 
-    #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+    pub(super) fn take_presented_world(
+        &mut self,
+    ) -> Option<nara_render::__private::PresentedWorldFrame> {
+        self.presented_world.take()
+    }
+
+    pub(super) fn retain_editor_world_presentation(
+        &self,
+        view: crate::editor_execution::WgpuEditorViewId,
+        revoker: nara_render::__private::WorldPresentationRevoker,
+    ) -> Result<(), WgpuRenderError> {
+        self.device_loss_signal
+            .as_ref()
+            .ok_or(WgpuRenderError::BackendNotReady)?
+            .retain_editor_presentation(view, revoker);
+        Ok(())
+    }
+
+    pub(super) fn retire_editor_world_presentation(
+        &self,
+        view: crate::editor_execution::WgpuEditorViewId,
+    ) {
+        if let Some(signal) = &self.device_loss_signal {
+            signal.retire_editor_presentation(view);
+        }
+    }
+
+    pub(super) fn validate_world_presentation_current<'a>(
+        &mut self,
+        windows: impl IntoIterator<Item = &'a nara_window::Window>,
+        canvas: Option<nara_render::WorldCanvas>,
+    ) {
+        let Some((presented, captured_canvas)) = self.world_presentation_target else {
+            return;
+        };
+        let current = windows.into_iter().find(|window| window.id == presented.id);
+        let captured_canvas = captured_canvas.map(|frame| (frame.extent(), frame.bar_color()));
+        let current_canvas = canvas.map(|canvas| (canvas.extent(), canvas.bar_color()));
+        if current.is_none_or(|window| window.resolution != presented.resolution)
+            || captured_canvas != current_canvas
+        {
+            self.world_presentation_guard = None;
+            self.world_presentation_target = None;
+            self.presented_world = None;
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn with_probe_device(device: wgpu::Device, queue: wgpu::Queue) -> Self {
         Self {
             device: Some(device),
@@ -1619,13 +1803,10 @@ impl WgpuRenderBackend {
 
     fn logical_texture_bytes(&self) -> u64 {
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-        {
-            self.quad_textures.logical_texture_bytes()
-        }
+        let images = self.quad_textures.logical_texture_bytes();
         #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
-        {
-            0
-        }
+        let images: u64 = 0;
+        images.saturating_add(self.world_canvas.logical_bytes())
     }
 
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -2680,6 +2861,79 @@ mod tests {
             backend.fail_if_device_lost(),
             Err(WgpuRenderError::DeviceLost)
         ));
+    }
+
+    #[test]
+    fn device_loss_revokes_runtime_and_editor_world_before_render_or_registration() {
+        use nara_ecs::{World, system::SystemState};
+        use nara_render::{
+            __private::prepare_world_presentation, ViewLoadOp, ViewMapping2d, WorldPointer,
+        };
+
+        for (editor, lost_before_registration) in
+            [(false, false), (false, true), (true, false), (true, true)]
+        {
+            let mut world = World::new();
+            let window = Window {
+                resolution: nara_window::WindowResolution::new(64, 64),
+                ..Default::default()
+            };
+            world.spawn(window.clone());
+            let camera = world.spawn_empty().id();
+            let viewport = ViewportRect::new(0, 0, 64, 64).unwrap();
+            let mut views = ExtractedViews::default();
+            views.push(ExtractedView {
+                camera_entity: camera,
+                target: RenderTarget::Window(window.id),
+                viewport,
+                mapping: ViewMapping2d::orthographic(nara_core::Mat3::IDENTITY, 64.0, viewport)
+                    .unwrap(),
+                order: 0,
+                load: ViewLoadOp::Clear(Color::BLACK),
+            });
+            let generation = test_runtime_generation();
+            let packet =
+                build_render_frame_packet(generation, 1, Some(window.id), [&window], &views)
+                    .unwrap()
+                    .unwrap();
+            world.insert_resource(generation);
+            let (frame, guard) = prepare_world_presentation(&packet).unwrap();
+            let signal = DeviceLossSignal::default();
+            if lost_before_registration {
+                signal.mark_lost();
+            }
+            let view = crate::editor_execution::WgpuEditorViewId::new(1);
+            if editor {
+                signal.retain_editor_presentation(view, guard.revoker());
+            } else {
+                signal.retain_presentation(guard.revoker());
+            }
+            guard.mark_presented();
+            world.insert_resource(frame);
+            let mut parameter = SystemState::<WorldPointer>::new(&mut world);
+            let point = nara_core::Vec2::splat(32.0);
+            if !lost_before_registration {
+                assert!(
+                    parameter
+                        .get(&world)
+                        .unwrap()
+                        .window_to_world(camera, point)
+                        .is_some()
+                );
+                signal.mark_lost();
+            }
+            // No backend Render invocation or device polling is needed to revoke gameplay input.
+            assert!(signal.is_lost());
+            assert!(
+                parameter
+                    .get(&world)
+                    .unwrap()
+                    .window_to_world(camera, point)
+                    .is_none()
+            );
+            signal.retire_editor_presentation(view);
+            assert!(signal.presentations.lock().unwrap().editor.is_empty());
+        }
     }
 
     #[test]

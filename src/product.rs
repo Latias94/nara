@@ -891,7 +891,7 @@ impl PluginGroup for PresentationUiPlugins {
             )
             .add_slot(
                 PluginSlot::required(SLOT_RENDER, nara_render::RENDER_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_render::RenderPlugin>(),
+                nara_render::plugin(None),
             )
             .add_slot(
                 PluginSlot::required(SLOT_IMAGE_PREPARE, nara_image::IMAGE_PREPARE_PLUGIN_ID),
@@ -936,7 +936,7 @@ impl PluginGroup for Presentation2dPlugins {
             )
             .add_slot(
                 PluginSlot::required(SLOT_RENDER, nara_render::RENDER_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_render::RenderPlugin>(),
+                nara_render::plugin(None),
             )
             .add_slot(
                 PluginSlot::required(SLOT_IMAGE_PREPARE, nara_image::IMAGE_PREPARE_PLUGIN_ID),
@@ -987,7 +987,7 @@ impl PluginGroup for WgpuBackendPlugins {
             )
             .add_slot(
                 PluginSlot::required(SLOT_RENDER, nara_render::RENDER_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_render::RenderPlugin>(),
+                nara_render::plugin(None),
             )
             .add_slot(
                 PluginSlot::required(SLOT_WGPU_RENDER, nara_render_wgpu::WGPU_RENDER_PLUGIN_ID),

@@ -273,12 +273,14 @@ impl WgpuFrameCompletionStats {
 
 /// Backend-tracked logical GPU resource bytes for one device epoch.
 ///
-/// Texture bytes include image-cache and fallback texture payloads. With telemetry enabled before
-/// the first submission, instance-buffer bytes include all completion-correlated submitted quad
-/// payloads still in flight plus any payload currently being prepared. Surface images, driver
-/// allocation padding, pipelines, bind groups, samplers, and other unobservable driver residency
-/// are excluded. Evidence requires both `lost_retirements == 0` and `pending_retirements == 0` at
-/// its end boundary.
+/// Texture bytes include image-cache, fallback and glyph texture payloads plus the retained native
+/// Runtime world canvas. Editor view-owned canvases and image targets are excluded. With telemetry
+/// enabled before the first submission, instance-buffer bytes include completion-correlated quad
+/// payloads still in flight plus quad payloads currently being prepared. Composite mapping uniforms,
+/// material uniforms, surface images, driver allocation padding, pipelines, bind groups, samplers,
+/// and other unobservable driver residency are excluded. These are logical tracked payloads, not
+/// complete GPU residency. Evidence requires both `lost_retirements == 0` and
+/// `pending_retirements == 0` at its end boundary.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct WgpuGpuResourceStats {
     device_epoch: u64,

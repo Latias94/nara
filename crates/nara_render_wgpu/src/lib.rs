@@ -3,11 +3,11 @@
 #[cfg(all(feature = "ui-submitter", test))]
 use std::sync::Arc;
 
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 mod allocation;
 mod backend;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 mod budget;
+mod canvas;
 mod editor_execution;
 mod error;
 mod frame;
@@ -46,7 +46,9 @@ use nara_app::{
 };
 #[cfg(test)]
 use nara_ecs::Resource;
-use nara_ecs::{Query, Res, ResMut, schedule::IntoScheduleConfigs, system::NonSendMarker};
+use nara_ecs::{
+    Commands, Query, Res, ResMut, schedule::IntoScheduleConfigs, system::NonSendMarker,
+};
 #[cfg(test)]
 use nara_render::Color;
 #[cfg(test)]
@@ -55,7 +57,7 @@ use nara_render::Extent2d;
 use nara_render::RenderFrameState;
 use nara_render::{
     ExtractedViews, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
-    RenderFrameSkipReason, build_render_frame_packet,
+    RenderFrameSkipReason, build_render_frame_packet_with_world_canvas,
 };
 #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
 use nara_render::{RenderTarget, ViewportRect};
@@ -338,12 +340,13 @@ fn capture_wgpu_frame_packet(
         slot.reject_capture(WgpuFrameCaptureError::BatchTopologyMismatch);
         return;
     }
-    let captured = build_render_frame_packet(
+    let captured = build_render_frame_packet_with_world_canvas(
         generation,
         frame.index,
         primary_window_id,
         windows.iter(),
         &views,
+        views.world_canvas(),
     );
     slot.seal(
         #[cfg(feature = "ui-submitter")]
@@ -380,6 +383,7 @@ struct PreparedViewDraw {
 #[derive(Debug, Default)]
 struct PreparedTargetDraw {
     views: Vec<PreparedViewDraw>,
+    canvas: Option<canvas::PreparedWorldCanvas>,
     draw_calls: u32,
     sprites: u32,
     #[cfg(feature = "ui-submitter")]
@@ -442,7 +446,22 @@ fn encode_target_draw(
     target: &wgpu::TextureView,
     prepared: &PreparedTargetDraw,
 ) {
-    for view in &prepared.views {
+    if let Some(canvas) = &prepared.canvas {
+        let (world, ui) = prepared.views.split_at(canvas.world_view_count);
+        encode_view_draws(encoder, canvas.view(), world);
+        canvas.encode_composite(encoder, target);
+        encode_view_draws(encoder, target, ui);
+    } else {
+        encode_view_draws(encoder, target, &prepared.views);
+    }
+}
+
+fn encode_view_draws(
+    encoder: &mut wgpu::CommandEncoder,
+    target: &wgpu::TextureView,
+    views: &[PreparedViewDraw],
+) {
+    for view in views {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("nara_ordered_view_pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -483,6 +502,9 @@ fn encode_target_draw(
 }
 
 fn render_wgpu_surfaces(
+    mut commands: Commands,
+    windows: Query<&Window>,
+    world_canvas: Option<Res<nara_render::WorldCanvas>>,
     mut backend: ResMut<WgpuRenderBackend>,
     handles: Option<Res<BackendWindowHandles>>,
     mut packet_slot: ResMut<WgpuFramePacketSlot>,
@@ -492,6 +514,7 @@ fn render_wgpu_surfaces(
     faults: Option<Res<RuntimeFaultReporter>>,
     _main_thread: NonSendMarker,
 ) {
+    backend.validate_world_presentation_current(windows.iter(), world_canvas.as_deref().copied());
     backend.begin_frame_transaction(frame.index, None);
     #[cfg(feature = "ui-submitter")]
     let mut ui_submission_state = packet_slot.take_ui_submissions();
@@ -540,6 +563,9 @@ fn render_wgpu_surfaces(
             })
         }
     };
+    if let Some(presented) = backend.take_presented_world() {
+        commands.insert_resource(presented);
+    }
     #[cfg(feature = "ui-submitter")]
     let device_fault_generation = result.as_ref().err().and_then(|error| {
         (frame::classify_ui_backend_fault(error) == UiPresentationBackendFaultDomain::Device)
@@ -735,7 +761,7 @@ mod tests {
             nara_hierarchy::HierarchyPlugin,
             nara_transform::TransformPlugin,
             nara_render::RenderComponentsPlugin,
-            nara_render::RenderPlugin,
+            nara_render::RenderPlugin::default(),
         ))
         .unwrap();
         if with_window {

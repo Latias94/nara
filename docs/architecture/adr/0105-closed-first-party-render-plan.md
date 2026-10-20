@@ -11,7 +11,8 @@
 [ADR 0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md), and
 [ADR 0096](0096-evidence-gated-render-scaling-and-upload-policy.md)
 **Implementation Plan**: [Ordered UI Kernel and Engine Boundary Correction](../../plans/2026-08-04-002-refactor-ordered-ui-kernel-and-engine-boundary-correction-plan.md), NUI-U4 and NUI-U14
-**Refined By**: [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md)
+**Refined By**: [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md),
+[ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md) (ordered 2D views and fixed world canvas)
 
 ## Context
 

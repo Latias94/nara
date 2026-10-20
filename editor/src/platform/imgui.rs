@@ -1206,6 +1206,7 @@ impl NativeImgui {
         else {
             return Ok(None);
         };
+        let world_presentation_revoker = candidate.world_presentation_revoker();
         let (identity, packet, sprites, runtime_ui) =
             candidate.into_parts().into_submission_parts();
         #[cfg(all(test, target_os = "windows"))]
@@ -1238,6 +1239,22 @@ impl NativeImgui {
                 return Err(imgui_error(error));
             }
         };
+        if let Some(revoker) = world_presentation_revoker {
+            if let Err(error) = self
+                .gpu
+                .retain_game_world_presentation(view, window, revoker)
+            {
+                let completion = match runtime_ui {
+                    Some(ui) => EditorGameViewCompletion::with_ui_failed(
+                        identity,
+                        WgpuEditorExecution::reject_editor_ui_frame(ui, error.to_string()),
+                    ),
+                    None => EditorGameViewCompletion::without_ui_failed(identity),
+                };
+                self.return_game_completion(application, completion)?;
+                return Err(platform_gpu_error(error));
+            }
+        }
         let (image, ui) = match (sprites, runtime_ui) {
             (sprites, Some(ui)) => {
                 let submitted = match sprites {

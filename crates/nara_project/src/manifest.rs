@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::effective::EffectiveProjectSettings;
 use crate::path::ProjectPath;
 use crate::profile::{ProjectProfileError, ProjectProfileOverlay};
+use crate::render::ProjectRenderManifest;
 use crate::sections::{
     ProjectAuthoringManifest, ProjectCapabilitiesManifest, ProjectDiagnosticsManifest, ProjectInfo,
     ProjectInputManifest, ProjectPathsManifest, ProjectProfileKind, ProjectRuntimeManifest,
@@ -78,6 +79,8 @@ pub struct ProjectManifest {
     pub runtime: ProjectRuntimeManifest,
     #[serde(default)]
     pub tasks: ProjectTasksManifest,
+    #[serde(default)]
+    pub render: ProjectRenderManifest,
     #[serde(default)]
     pub ui: ProjectUiManifest,
     #[serde(default)]
@@ -232,6 +235,7 @@ impl ProjectManifest {
             .validate_into(&mut diagnostics, "capabilities");
         self.runtime.validate_into(&mut diagnostics, "runtime");
         self.tasks.validate_into(&mut diagnostics, "tasks");
+        self.render.validate_into(&mut diagnostics, "render");
         self.ui.validate_into(&mut diagnostics, "ui");
         self.window.validate_into(&mut diagnostics, "window");
         self.input.validate_into(&mut diagnostics, "input");
