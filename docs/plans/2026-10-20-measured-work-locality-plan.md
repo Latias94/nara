@@ -1,6 +1,7 @@
 # Measured Work Locality Follow-Up
 
-Status: Proposed successor, outside the completed measurement slice. Select one unit at a time.
+Status: L1 attribution and its bounded owner-local correction are complete. L2-L4 remain
+proposed; select one unit at a time. Remaining scalar latency is an explicitly open follow-up.
 
 ## Evidence And Intent
 
@@ -17,6 +18,12 @@ not a supported capacity or timing assertion. A real game still chooses its admi
 ## Ordered Units
 
 ### L1: Attribute Remaining Scalar Preparation
+
+Disposition: [implemented and qualified](2026-10-20-scalar-preparation-locality-plan.md) at
+`601b467`. The [report](../benchmarks/2026-10-20-scalar-preparation.md) records 4,096-record edit
+P50 38-42 ms versus 117-120 ms, separate allocation evidence, full-validator fallback and the
+remaining O(N)/whole-encoding work. This is above the 8 ms investigation trigger; further scalar
+optimization needs fresh attribution of this implementation. The original selected brief follows.
 
 First split one complete field edit and Undo into bounded observations of candidate copying,
 field preparation, format validation, classification/reference checks and owner publication/drop.

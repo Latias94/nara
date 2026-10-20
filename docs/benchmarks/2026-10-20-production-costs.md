@@ -8,6 +8,10 @@ This decision-local experiment follows the
 The starting product source is `33248b79b069e4d9023601e38e4c76515ea8e937`.
 Historical Save, Reopen, startup and reference-game protocols remain unchanged.
 
+The later [scalar preparation correction](2026-10-20-scalar-preparation.md) retains these
+historical observations and the exact public collector. It separately records attribution,
+post-correction timings, allocation coverage and remaining whole-document work.
+
 ## Questions And Boundaries
 
 | Workflow | Observation | Excluded interpretation |

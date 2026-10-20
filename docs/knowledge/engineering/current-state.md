@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "800c7a252bfca6bcddb0892e1a2268ae3a3d2df4804f49063d71ba4f77a10956"
+source_fingerprint: "7ec19eabf902d73d87678c933b0d5be30d374cf846f30ba32561a712d15b6cca"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "800c7a252bfca6bcddb0892e1a2268ae3a3d2df4804f49063d71ba4f77a
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `800c7a252bfca6bcddb0892e1a2268ae3a3d2df4804f49063d71ba4f77a10956`
-- Immutable records: 796
+- Source fingerprint: `7ec19eabf902d73d87678c933b0d5be30d374cf846f30ba32561a712d15b6cca`
+- Immutable records: 799
 - Active lane heads: 0
 
 # Active Registrations
@@ -56,11 +56,13 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Reference-game-driven foundation refactor: RGF-U19](registry/2026-07/2026-07-20T000516Z-reference-game-foundation-rgf-u19-codex-root-b395ac7f13cf4a0cbf6addc4ac712d20.md): `completed` (reference-game-foundation-rgf-u19-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U23](registry/2026-07/2026-07-21T131138Z-reference-game-foundation-rgf-u23-codex-root-ab7e4acc3ce143dc8b868eb820eb1181.md): `completed` (reference-game-foundation-rgf-u23-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U8](registry/2026-07/2026-07-19T233045Z-reference-game-foundation-rgf-u8-codex-root-4007e43148c84b20a0c28c73e379d302.md): `completed` (reference-game-foundation-rgf-u8-codex-root; producer `codex-root`)
+- [Scalar preparation locality completed](registry/2026-10/2026-10-20T090441Z-scalar-preparation-locality-codex-root-598f1d3571a64d4c9dd5897e55337e37.md): `completed` (scalar-preparation-locality-codex-root; producer `codex-root`)
 - [Standalone Generic Editor: SGE complete; no successor active](registry/2026-08/2026-08-19T111039Z-standalone-generic-editor-open-recovery-codex-root-931591fb6d2b4bcbad3151922814d8e6.md): `completed` (standalone-generic-editor-open-recovery-codex-root; producer `codex-root`)
 - [Standalone Supervised Play transferred to 2D foundation refactor](registry/2026-10/2026-10-15T091614Z-standalone-supervised-play-v1-codex-root-d7cca2f42c6d4e07b762475aced7eb44.md): `closed` (standalone-supervised-play-v1-codex-root; producer `codex-root`)
 
 # Recent Evidence
 
+- **Verification Evidence**: [Scalar preparation locality qualification](verification/2026-10/2026-10-20T090217Z-scalar-preparation-locality-qualification-7da17674f8c7464ea1612dc119686c45.md) - Field-only classification and conservative publication-shape reuse with exact validation, public timing and separate requested-allocation evidence.
 - **Verification Evidence**: [Production cost baselines and indexed authoring schema qualification](verification/2026-10/2026-10-20T081224Z-production-cost-baselines-and-indexed-authoring-schema-qualification-494a94898cf340b695e7332bbca06fc5.md) - Optimized public interaction, offscreen runtime and Rust iteration observations with exact schema lookup correction.
 - **Verification Evidence**: [Fixed world canvas and native UI qualification](verification/2026-10/2026-10-20T070752Z-fixed-world-canvas-and-native-ui-qualification-e7c7f1ee29e4459688d51f1ca20282d8.md) - Pixel readback, presented world input, native button resize and independent exported desktop qualification.
 - **Verification Evidence**: [Ordinary structural authoring and captured-source Reopen qualification](verification/2026-10/2026-10-20T051819Z-ordinary-structural-authoring-and-captured-source-reopen-qualification-f9b317e0ceda49a6b37f9000c61af8d7.md) - Source-local structural transactions, exact unavailable preservation, captured-source Reopen, ordinary public and actual Windows widget trajectories.
@@ -72,7 +74,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Owned Editor Save custody native observation and measurements](verification/2026-10/2026-10-20T013307Z-owned-editor-save-custody-native-observation-and-measurements-9828019f2f934061a1773899ce356ffb.md) - Cross-frame Save ownership, retained filesystem cleanup, migrated consumers and decision-local owner-drive evidence.
 - **Verification Evidence**: [Editor responsiveness measurements and standalone task cancellation](verification/2026-10/2026-10-19T182252Z-editor-responsiveness-measurements-and-standalone-task-cancellation-0e2521d0010a4d94940d83fa865f3d0c.md) - Decision-local optimized Open Save Reopen timings, source-grounded rebuild seams, and failed-then-passing standalone pending cancellation.
 - **Verification Evidence**: [N05 safe plugin failure facts and invocation context](verification/2026-10/2026-10-19T170951Z-n05-safe-plugin-failure-facts-and-invocation-context-d01f7391b84348a8827a0daa760dd1a4.md) - Checked App plugin facts, actual invocation identity and retained primary/shutdown diagnostics through public product and Editor failure paths.
-- **Verification Evidence**: [Authoring S3 component constraints diagnostics and inventory](verification/2026-10/2026-10-19T162634Z-authoring-s3-component-constraints-diagnostics-and-inventory-64aacf18a3af432584d306af27d32eb3.md) - Shared interval contracts, safe domain facts, explicit UI evolution and independently compiled component authoring evidence.
 
 # Integration Notes
 

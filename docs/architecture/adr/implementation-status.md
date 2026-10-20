@@ -4,6 +4,13 @@ This index separates architecture decisions from their recorded implementation c
 Decision and implementation states retain the scope of their linked evidence; updating this index
 does not requalify product behavior or change an ADR's acceptance.
 
+The [scalar preparation locality investigation](../../benchmarks/2026-10-20-scalar-preparation.md)
+implements private publication-shape proof with full fallback and field-only classification reuse
+at `601b467`. Exact JSON/RON byte limits, schema/default/reference validation, unavailable
+preservation and history publication remain with their existing owners. Differential and ordinary
+refusal tests support this implementation without changing ADRs 0026/0047/0049/0118 or introducing
+asynchronous editing. The report separates measured improvement from remaining whole-document work.
+
 **Published-backend qualification baseline:** 2026-10-17, Dear ImGui 0.21 implementation `6a89a77`.
 The [published-backend acceptance](../../knowledge/engineering/verification/2026-10/2026-10-17T135132Z-dear-imgui-0-21-published-backend-acceptance-5cf11eaec8ea42a986d4953c4a4a00b8.md)
 covers the selected Windows/DX12 trajectories, registered texture/window mapping and upstream IME

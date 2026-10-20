@@ -21,9 +21,11 @@ User instructions define the authorized task. Within that scope:
 
 The [production cost measurements](../benchmarks/2026-10-20-production-costs.md) distinguish
 ordinary editing, Browser transport, runtime work and Rust rebuild/restart. The private admitted
-schema index removes quadratic model lookup while preserving the document owner. The
-[proposed locality follow-up](../plans/2026-10-20-measured-work-locality-plan.md) keeps remaining
-format/candidate, Browser, Tile and compiler work behind explicit attribution and complete
+schema index removes quadratic model lookup while preserving the document owner. The subsequent
+[scalar preparation correction](../benchmarks/2026-10-20-scalar-preparation.md) reduces repeated
+format parsing and complete classification with conservative fallback and unchanged admission.
+The [locality follow-up](../plans/2026-10-20-measured-work-locality-plan.md) keeps remaining
+scalar, Browser, Tile and compiler work behind explicit attribution and complete
 consumer acceptance. These observations do not select a universal async interface or job kernel.
 
 Use [engineering memory](../knowledge/engineering/index.md) to resume work or recover its reasoning,

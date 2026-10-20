@@ -1,0 +1,111 @@
+{
+  "baseline_commit": "b9d25dc9688ac6d66edc47f31e3a5882c5e9a07a",
+  "nextest_id": "2e2a25ce-4c9d-41f6-87fd-1a164c3bb7e9",
+  "scope": "Temporary instrumented exploratory process, not final public timings; Scene4096; per-call nested durations are not additive independent percentiles",
+  "groups": [
+    {
+      "phase": "scalar-prepare",
+      "field": "clone_ns",
+      "count": 32,
+      "median_ns": 2902400.0,
+      "min_ns": 2540100,
+      "max_ns": 4805600
+    },
+    {
+      "phase": "scalar-prepare",
+      "field": "field_ns",
+      "count": 32,
+      "median_ns": 7900.0,
+      "min_ns": 5900,
+      "max_ns": 13300
+    },
+    {
+      "phase": "scalar-prepare",
+      "field": "format_ns",
+      "count": 32,
+      "median_ns": 79587100.0,
+      "min_ns": 77768400,
+      "max_ns": 83058800
+    },
+    {
+      "phase": "scalar-prepare",
+      "field": "canonical_ns",
+      "count": 32,
+      "median_ns": 49000.0,
+      "min_ns": 41400,
+      "max_ns": 71000
+    },
+    {
+      "phase": "scalar-prepare",
+      "field": "classify_ns",
+      "count": 32,
+      "median_ns": 30916000.0,
+      "min_ns": 29998300,
+      "max_ns": 32108200
+    },
+    {
+      "phase": "scalar-format",
+      "field": "canonical_ns",
+      "count": 32,
+      "median_ns": 6631400.0,
+      "min_ns": 5289000,
+      "max_ns": 8541900
+    },
+    {
+      "phase": "scalar-format",
+      "field": "json_ns",
+      "count": 32,
+      "median_ns": 22325600.0,
+      "min_ns": 21911100,
+      "max_ns": 24192700
+    },
+    {
+      "phase": "scalar-format",
+      "field": "ron_ns",
+      "count": 32,
+      "median_ns": 48810650.0,
+      "min_ns": 47814600,
+      "max_ns": 50022900
+    },
+    {
+      "phase": "scalar-json",
+      "field": "encode_ns",
+      "count": 32,
+      "median_ns": 12982900.0,
+      "min_ns": 12588900,
+      "max_ns": 13951600
+    },
+    {
+      "phase": "scalar-json",
+      "field": "parse_ns",
+      "count": 32,
+      "median_ns": 9220050.0,
+      "min_ns": 8966000,
+      "max_ns": 10566400
+    },
+    {
+      "phase": "scalar-ron",
+      "field": "encode_ns",
+      "count": 32,
+      "median_ns": 17336300.0,
+      "min_ns": 16589200,
+      "max_ns": 18261600
+    },
+    {
+      "phase": "scalar-ron",
+      "field": "parse_ns",
+      "count": 32,
+      "median_ns": 31331050.0,
+      "min_ns": 30603600,
+      "max_ns": 32202500
+    },
+    {
+      "phase": "scalar-forward-commit",
+      "field": "commit_ns",
+      "count": 16,
+      "median_ns": 3134350.0,
+      "min_ns": 2722800,
+      "max_ns": 4327600
+    }
+  ]
+}

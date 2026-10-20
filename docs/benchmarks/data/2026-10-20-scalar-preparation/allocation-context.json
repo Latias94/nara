@@ -1,0 +1,537 @@
+{
+  "before_commit": "b9d25dc9688ac6d66edc47f31e3a5882c5e9a07a",
+  "after_commit": "601b4671545f0d6835620e88c7e2e51c7b36895d",
+  "archive_sha256": "b897d5cd7539db6c83cae090244b01c0c8dc09a360d32413df97457bcca45d7b",
+  "probe_sha256": "8aafed905e5bed921dbd572f1f327bd4930a060344f7e1a70e59ef0614106af1",
+  "scope": "Separate release executables with identical probe; requested System allocation windows, not timings/RSS/complete heap",
+  "runs": [
+    {
+      "cohort": "before",
+      "nextest_id": "51bc327c-a3b3-4b59-804d-97449d5fccc5",
+      "file": "allocations-before.jsonl.gz",
+      "rows": 32,
+      "uncompressed_sha256": "19a958a9d7c76c330d7861c40fa807511a3033aaad9dbc0b6b3fad25cb25f2ef"
+    },
+    {
+      "cohort": "after",
+      "nextest_id": "b5e30a9e-2e2a-4477-82ee-047de26a1951",
+      "file": "allocations-after.jsonl.gz",
+      "rows": 32,
+      "uncompressed_sha256": "3533d914858bf039ecd1fae72f7eab377ad55488a9fcb30b2c7e171410b5b0d6"
+    }
+  ],
+  "groups": [
+    {
+      "cohort": "before",
+      "kind": "scene",
+      "phase": "edit-through-report",
+      "samples": 4,
+      "distinct_values": {
+        "allocation_calls": [
+          455853
+        ],
+        "reallocation_calls": [
+          16405
+        ],
+        "deallocation_calls": [
+          455848
+        ],
+        "allocated_requested_bytes": [
+          65772568
+        ],
+        "freed_requested_bytes": [
+          65755931
+        ],
+        "net_requested_bytes": [
+          16637
+        ],
+        "peak_above_start_requested_bytes": [
+          20769901
+        ],
+        "settled_live_delta_requested_bytes": [
+          0
+        ]
+      }
+    },
+    {
+      "cohort": "before",
+      "kind": "scene",
+      "phase": "undo-through-report",
+      "samples": 4,
+      "distinct_values": {
+        "allocation_calls": [
+          455853
+        ],
+        "reallocation_calls": [
+          16405
+        ],
+        "deallocation_calls": [
+          455848
+        ],
+        "allocated_requested_bytes": [
+          65772568
+        ],
+        "freed_requested_bytes": [
+          65755931
+        ],
+        "net_requested_bytes": [
+          16637
+        ],
+        "peak_above_start_requested_bytes": [
+          20769901
+        ],
+        "settled_live_delta_requested_bytes": [
+          0
+        ]
+      }
+    },
+    {
+      "cohort": "before",
+      "kind": "scene",
+      "phase": "document-clone-retained",
+      "samples": 4,
+      "distinct_values": {
+        "allocation_calls": [
+          28674
+        ],
+        "reallocation_calls": [
+          0
+        ],
+        "deallocation_calls": [
+          0
+        ],
+        "allocated_requested_bytes": [
+          8286208
+        ],
+        "freed_requested_bytes": [
+          0
+        ],
+        "net_requested_bytes": [
+          8286208
+        ],
+        "peak_above_start_requested_bytes": [
+          8286208
+        ],
+        "settled_live_delta_requested_bytes": [
+          8286208
+        ]
+      }
+    },
+    {
+      "cohort": "before",
+      "kind": "scene",
+      "phase": "document-clone-drop",
+      "samples": 4,
+      "distinct_values": {
+        "allocation_calls": [
+          0
+        ],
+        "reallocation_calls": [
+          0
+        ],
+        "deallocation_calls": [
+          28674
+        ],
+        "allocated_requested_bytes": [
+          0
+        ],
+        "freed_requested_bytes": [
+          8286208
+        ],
+        "net_requested_bytes": [
+          -8286208
+        ],
+        "peak_above_start_requested_bytes": [
+          0
+        ],
+        "settled_live_delta_requested_bytes": [
+          -8286208
+        ]
+      }
+    },
+    {
+      "cohort": "before",
+      "kind": "prefab",
+      "phase": "edit-through-report",
+      "samples": 4,
+      "distinct_values": {
+        "allocation_calls": [
+          513204
+        ],
+        "reallocation_calls": [
+          16405
+        ],
+        "deallocation_calls": [
+          513199
+        ],
+        "allocated_requested_bytes": [
+          83917851
+        ],
+        "freed_requested_bytes": [
+          83901214
+        ],
+        "net_requested_bytes": [
+          16637
+        ],
+        "peak_above_start_requested_bytes": [
+          29056110
+        ],
+        "settled_live_delta_requested_bytes": [
+          0
+        ]
+      }
+    },
+    {
+      "cohort": "before",
+      "kind": "prefab",
+      "phase": "undo-through-report",
+      "samples": 4,
+      "distinct_values": {
+        "allocation_calls": [
+          513204
+        ],
+        "reallocation_calls": [
+          16405
+        ],
+        "deallocation_calls": [
+          513199
+        ],
+        "allocated_requested_bytes": [
+          83917851
+        ],
+        "freed_requested_bytes": [
+          83901214
+        ],
+        "net_requested_bytes": [
+          16637
+        ],
+        "peak_above_start_requested_bytes": [
+          29056110
+        ],
+        "settled_live_delta_requested_bytes": [
+          0
+        ]
+      }
+    },
+    {
+      "cohort": "before",
+      "kind": "prefab",
+      "phase": "document-clone-retained",
+      "samples": 4,
+      "distinct_values": {
+        "allocation_calls": [
+          28674
+        ],
+        "reallocation_calls": [
+          0
+        ],
+        "deallocation_calls": [
+          0
+        ],
+        "allocated_requested_bytes": [
+          8286208
+        ],
+        "freed_requested_bytes": [
+          0
+        ],
+        "net_requested_bytes": [
+          8286208
+        ],
+        "peak_above_start_requested_bytes": [
+          8286208
+        ],
+        "settled_live_delta_requested_bytes": [
+          8286208
+        ]
+      }
+    },
+    {
+      "cohort": "before",
+      "kind": "prefab",
+      "phase": "document-clone-drop",
+      "samples": 4,
+      "distinct_values": {
+        "allocation_calls": [
+          0
+        ],
+        "reallocation_calls": [
+          0
+        ],
+        "deallocation_calls": [
+          28674
+        ],
+        "allocated_requested_bytes": [
+          0
+        ],
+        "freed_requested_bytes": [
+          8286208
+        ],
+        "net_requested_bytes": [
+          -8286208
+        ],
+        "peak_above_start_requested_bytes": [
+          0
+        ],
+        "settled_live_delta_requested_bytes": [
+          -8286208
+        ]
+      }
+    },
+    {
+      "cohort": "after",
+      "kind": "scene",
+      "phase": "edit-through-report",
+      "samples": 4,
+      "distinct_values": {
+        "allocation_calls": [
+          96424
+        ],
+        "reallocation_calls": [
+          4
+        ],
+        "deallocation_calls": [
+          96419
+        ],
+        "allocated_requested_bytes": [
+          22161541
+        ],
+        "freed_requested_bytes": [
+          22144904
+        ],
+        "net_requested_bytes": [
+          16637
+        ],
+        "peak_above_start_requested_bytes": [
+          17098066
+        ],
+        "settled_live_delta_requested_bytes": [
+          0
+        ]
+      }
+    },
+    {
+      "cohort": "after",
+      "kind": "scene",
+      "phase": "undo-through-report",
+      "samples": 4,
+      "distinct_values": {
+        "allocation_calls": [
+          96424
+        ],
+        "reallocation_calls": [
+          4
+        ],
+        "deallocation_calls": [
+          96419
+        ],
+        "allocated_requested_bytes": [
+          22161541
+        ],
+        "freed_requested_bytes": [
+          22144904
+        ],
+        "net_requested_bytes": [
+          16637
+        ],
+        "peak_above_start_requested_bytes": [
+          17098066
+        ],
+        "settled_live_delta_requested_bytes": [
+          0
+        ]
+      }
+    },
+    {
+      "cohort": "after",
+      "kind": "scene",
+      "phase": "document-clone-retained",
+      "samples": 4,
+      "distinct_values": {
+        "allocation_calls": [
+          28674
+        ],
+        "reallocation_calls": [
+          0
+        ],
+        "deallocation_calls": [
+          0
+        ],
+        "allocated_requested_bytes": [
+          8286208
+        ],
+        "freed_requested_bytes": [
+          0
+        ],
+        "net_requested_bytes": [
+          8286208
+        ],
+        "peak_above_start_requested_bytes": [
+          8286208
+        ],
+        "settled_live_delta_requested_bytes": [
+          8286208
+        ]
+      }
+    },
+    {
+      "cohort": "after",
+      "kind": "scene",
+      "phase": "document-clone-drop",
+      "samples": 4,
+      "distinct_values": {
+        "allocation_calls": [
+          0
+        ],
+        "reallocation_calls": [
+          0
+        ],
+        "deallocation_calls": [
+          28674
+        ],
+        "allocated_requested_bytes": [
+          0
+        ],
+        "freed_requested_bytes": [
+          8286208
+        ],
+        "net_requested_bytes": [
+          -8286208
+        ],
+        "peak_above_start_requested_bytes": [
+          0
+        ],
+        "settled_live_delta_requested_bytes": [
+          -8286208
+        ]
+      }
+    },
+    {
+      "cohort": "after",
+      "kind": "prefab",
+      "phase": "edit-through-report",
+      "samples": 4,
+      "distinct_values": {
+        "allocation_calls": [
+          96425
+        ],
+        "reallocation_calls": [
+          4
+        ],
+        "deallocation_calls": [
+          96420
+        ],
+        "allocated_requested_bytes": [
+          22685832
+        ],
+        "freed_requested_bytes": [
+          22669195
+        ],
+        "net_requested_bytes": [
+          16637
+        ],
+        "peak_above_start_requested_bytes": [
+          17098066
+        ],
+        "settled_live_delta_requested_bytes": [
+          0
+        ]
+      }
+    },
+    {
+      "cohort": "after",
+      "kind": "prefab",
+      "phase": "undo-through-report",
+      "samples": 4,
+      "distinct_values": {
+        "allocation_calls": [
+          96425
+        ],
+        "reallocation_calls": [
+          4
+        ],
+        "deallocation_calls": [
+          96420
+        ],
+        "allocated_requested_bytes": [
+          22685832
+        ],
+        "freed_requested_bytes": [
+          22669195
+        ],
+        "net_requested_bytes": [
+          16637
+        ],
+        "peak_above_start_requested_bytes": [
+          17098066
+        ],
+        "settled_live_delta_requested_bytes": [
+          0
+        ]
+      }
+    },
+    {
+      "cohort": "after",
+      "kind": "prefab",
+      "phase": "document-clone-retained",
+      "samples": 4,
+      "distinct_values": {
+        "allocation_calls": [
+          28674
+        ],
+        "reallocation_calls": [
+          0
+        ],
+        "deallocation_calls": [
+          0
+        ],
+        "allocated_requested_bytes": [
+          8286208
+        ],
+        "freed_requested_bytes": [
+          0
+        ],
+        "net_requested_bytes": [
+          8286208
+        ],
+        "peak_above_start_requested_bytes": [
+          8286208
+        ],
+        "settled_live_delta_requested_bytes": [
+          8286208
+        ]
+      }
+    },
+    {
+      "cohort": "after",
+      "kind": "prefab",
+      "phase": "document-clone-drop",
+      "samples": 4,
+      "distinct_values": {
+        "allocation_calls": [
+          0
+        ],
+        "reallocation_calls": [
+          0
+        ],
+        "deallocation_calls": [
+          28674
+        ],
+        "allocated_requested_bytes": [
+          0
+        ],
+        "freed_requested_bytes": [
+          8286208
+        ],
+        "net_requested_bytes": [
+          -8286208
+        ],
+        "peak_above_start_requested_bytes": [
+          0
+        ],
+        "settled_live_delta_requested_bytes": [
+          -8286208
+        ]
+      }
+    }
+  ]
+}
