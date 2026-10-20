@@ -194,11 +194,13 @@ impl Interaction {
         let mut application =
             EditorApplication::new(EditorLaunchOptions::new(&project.root).with_profile("desktop"));
         application.native_shell_ready();
-        for _ in 0..8 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
             if application.current_frame().is_some() {
                 break;
             }
             application.advance_project_open();
+            std::thread::sleep(Duration::from_millis(1));
         }
         assert!(
             application.current_frame().is_some(),
@@ -700,11 +702,13 @@ fn manager_recovery_retry_and_dirty_project_close_use_real_widgets() {
         EditorApplicationState::ProjectManager
     );
     interaction.click("shell:Open Project");
-    for _ in 0..8 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
         interaction.application.advance_project_open();
         if interaction.application.state() == EditorApplicationState::Recovery {
             break;
         }
+        std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(
         interaction.application.state(),
@@ -713,11 +717,13 @@ fn manager_recovery_retry_and_dirty_project_close_use_real_widgets() {
     interaction.render();
     fs::write(&bundle_path, bundle).unwrap();
     interaction.click("shell:Retry");
-    for _ in 0..8 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
         interaction.application.advance_project_open();
         if interaction.application.current_frame().is_some() {
             break;
         }
+        std::thread::sleep(Duration::from_millis(1));
     }
     for _ in 0..4 {
         interaction.render();

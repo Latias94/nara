@@ -164,9 +164,14 @@ fn external_supervised_stop_then_editor_exit_retires_the_owner() {
 fn open_generic_authoring_session() -> EditorProjectSession {
     let mut host = EditorProjectOpenHost::new();
     let mut attempt = host.begin(project_root_capability(), Some("desktop".to_owned()));
+    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         match host.advance(attempt) {
-            EditorProjectOpenProgress::Pending(next) => attempt = next,
+            EditorProjectOpenProgress::Pending(next) => {
+                attempt = next;
+                assert!(Instant::now() < deadline, "Reference Game generic Open timed out");
+                thread::sleep(Duration::from_millis(1));
+            }
             EditorProjectOpenProgress::Opened(session) => return session,
             EditorProjectOpenProgress::Rejected(failure) => {
                 panic!("Reference Game generic authoring open failed: {failure:#?}")
@@ -181,7 +186,8 @@ fn open_reference_game_application() -> EditorApplication {
         EditorApplication::new(EditorLaunchOptions::new(root).with_profile("desktop"));
     assert_eq!(application.state(), EditorApplicationState::ProjectManager);
     let _ = application.native_shell_ready();
-    for _ in 0..8 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
         match application.state() {
             EditorApplicationState::AuthoringReady | EditorApplicationState::AuthoringDegraded => {
                 return application;
@@ -196,6 +202,7 @@ fn open_reference_game_application() -> EditorApplication {
                 panic!("the native shell must arm the initial project-open request")
             }
         }
+        thread::sleep(Duration::from_millis(1));
     }
     panic!("Reference Game generic authoring open did not reach a published workspace")
 }

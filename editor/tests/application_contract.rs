@@ -1183,7 +1183,8 @@ fn assert_recovery(project_root: &Path) {
 }
 
 fn drive_open_to_terminal(application: &mut EditorApplication) {
-    for _ in 0..8 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
         match application.state() {
             EditorApplicationState::AuthoringReady
             | EditorApplicationState::AuthoringDegraded
@@ -1195,12 +1196,14 @@ fn drive_open_to_terminal(application: &mut EditorApplication) {
                 panic!("the native shell must arm the project-open request")
             }
         }
+        std::thread::sleep(Duration::from_millis(1));
     }
     panic!("the bounded project-open state machine did not reach a terminal state")
 }
 
 fn drive_replacement_to_close_decision(application: &mut EditorApplication) {
-    for _ in 0..8 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
         let _ = application.advance_project_open();
         if application.state() == EditorApplicationState::OpeningReplacement
             && current_frame(application).workspace_intent().phase()
@@ -1208,6 +1211,7 @@ fn drive_replacement_to_close_decision(application: &mut EditorApplication) {
         {
             return;
         }
+        std::thread::sleep(Duration::from_millis(1));
     }
     panic!("the replacement did not reach the retained session close decision")
 }

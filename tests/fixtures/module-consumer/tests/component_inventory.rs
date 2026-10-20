@@ -624,7 +624,8 @@ impl Project {
     fn open_editor(&self) -> EditorProjectSession {
         let mut host = EditorProjectOpenHost::new();
         let mut attempt = host.begin(self.capability(), None);
-        for _ in 0..8 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
             match host.advance(attempt) {
                 EditorProjectOpenProgress::Pending(next) => attempt = next,
                 EditorProjectOpenProgress::Opened(editor) => return editor,
@@ -632,8 +633,9 @@ impl Project {
                     panic!("public authoring open failed: {:?}", failure.diagnostics())
                 }
             }
+            std::thread::sleep(Duration::from_millis(1));
         }
-        panic!("public authoring open did not complete within its phase bound")
+        panic!("public authoring Open timed out")
     }
 }
 

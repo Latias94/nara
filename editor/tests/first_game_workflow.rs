@@ -1238,7 +1238,8 @@ fn open_application(root: &Path) -> EditorApplication {
         EditorApplication::new(EditorLaunchOptions::new(root).with_profile("desktop"));
     assert_eq!(application.state(), EditorApplicationState::ProjectManager);
     let _ = application.native_shell_ready();
-    for _ in 0..16 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
         match application.state() {
             EditorApplicationState::AuthoringReady | EditorApplicationState::AuthoringDegraded => {
                 return application;
@@ -1248,6 +1249,7 @@ fn open_application(root: &Path) -> EditorApplication {
             }
             state => panic!("the ordinary game project did not open: {state:?}"),
         }
+        thread::sleep(Duration::from_millis(1));
     }
     panic!("the ordinary game project did not publish its workspace");
 }

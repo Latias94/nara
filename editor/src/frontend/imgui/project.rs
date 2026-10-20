@@ -1106,9 +1106,17 @@ mod tests {
             crate::app::open_project_root(&project.0).unwrap(),
             Some("desktop".to_owned()),
         );
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
         let mut editor = loop {
             match host.advance(attempt) {
-                EditorProjectOpenProgress::Pending(next) => attempt = next,
+                EditorProjectOpenProgress::Pending(next) => {
+                    attempt = next;
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "supervised fixture Open timed out"
+                    );
+                    std::thread::sleep(Duration::from_millis(1));
+                }
                 EditorProjectOpenProgress::Opened(session) => break session,
                 EditorProjectOpenProgress::Rejected(failure) => {
                     panic!(
@@ -1262,11 +1270,13 @@ mod tests {
             crate::EditorLaunchOptions::new(root).with_profile("desktop"),
         );
         application.native_shell_ready();
-        for _ in 0..8 {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
             application.advance_project_open();
             if application.current_frame().is_some() {
                 break;
             }
+            std::thread::sleep(Duration::from_millis(1));
         }
         let frame = application.current_frame().unwrap();
         let availability = frame.runtime_availability();
@@ -1421,11 +1431,13 @@ mod tests {
             .join("../tests/fixtures/generic-editor/known-unbound");
         let mut application = crate::EditorApplication::new(crate::EditorLaunchOptions::new(root));
         application.native_shell_ready();
-        for _ in 0..8 {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
             application.advance_project_open();
             if application.current_frame().is_some() {
                 break;
             }
+            std::thread::sleep(Duration::from_millis(1));
         }
         let frame = application.current_frame().unwrap();
         let scene = frame.workspace().active_scene.as_ref().unwrap();

@@ -63,11 +63,13 @@ fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selecti
     let mut application =
         EditorApplication::new(EditorLaunchOptions::new(root).with_profile("desktop"));
     application.native_shell_ready();
-    for _ in 0..8 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         if application.current_frame().is_some() {
             break;
         }
         application.advance_project_open();
+        std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(
         application.state(),
@@ -353,11 +355,13 @@ fn an_external_field_tool_observes_acceptance_and_same_basis_conflict_separately
     let mut application =
         EditorApplication::new(EditorLaunchOptions::new(root).with_profile("desktop"));
     application.native_shell_ready();
-    for _ in 0..8 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         if application.current_frame().is_some() {
             break;
         }
         application.advance_project_open();
+        std::thread::sleep(Duration::from_millis(1));
     }
     let evidence = Rc::new(RefCell::new(DispatchEvidence::default()));
     let shared = Rc::clone(&evidence);

@@ -16,7 +16,8 @@ fn installed_generic_editor_opens_reference_game_without_runtime_publication() {
 
     assert_eq!(application.state(), EditorApplicationState::ProjectManager);
     let _ = application.native_shell_ready();
-    for _ in 0..8 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         match application.state() {
             EditorApplicationState::AuthoringReady
             | EditorApplicationState::AuthoringDegraded
@@ -28,6 +29,7 @@ fn installed_generic_editor_opens_reference_game_without_runtime_publication() {
                 panic!("the native shell must arm the initial project-open request")
             }
         }
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
 
     assert_eq!(

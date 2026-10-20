@@ -1973,11 +1973,13 @@ mod opening_tests {
         let mut application =
             EditorApplication::new(EditorLaunchOptions::new(root).with_profile("desktop"));
         application.native_shell_ready();
-        for _ in 0..8 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
             if application.current_frame().is_some() {
                 break;
             }
             application.advance_project_open();
+            std::thread::sleep(Duration::from_millis(1));
         }
         let frame = application
             .current_frame()

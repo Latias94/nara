@@ -85,7 +85,8 @@ fn open_application(project_root: &std::path::Path) -> EditorApplication {
         EditorApplication::new(EditorLaunchOptions::new(project_root).with_profile("desktop"));
     assert_eq!(application.state(), EditorApplicationState::ProjectManager);
     let _ = application.native_shell_ready();
-    for _ in 0..16 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
         match application.state() {
             EditorApplicationState::AuthoringReady | EditorApplicationState::AuthoringDegraded => {
                 return application;
@@ -100,6 +101,7 @@ fn open_application(project_root: &std::path::Path) -> EditorApplication {
                 panic!("the native shell must arm the generated starter open request")
             }
         }
+        thread::sleep(Duration::from_millis(1));
     }
     panic!("the generated starter did not publish an Editor workspace")
 }

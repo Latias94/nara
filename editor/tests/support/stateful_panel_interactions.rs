@@ -122,8 +122,10 @@ fn public_layout_reset_and_restore_retire_objects_before_reusing_instance_ids() 
     let mut application =
         EditorApplication::new(EditorLaunchOptions::new(fixture).with_profile("desktop"));
     application.native_shell_ready();
-    for _ in 0..8 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while application.current_frame().is_none() && Instant::now() < deadline {
         application.advance_project_open();
+        std::thread::sleep(Duration::from_millis(1));
     }
     let observed = Rc::new(RefCell::new(KindObservations::default()));
     let mut composition = EditorNativeComposition::new();
@@ -248,8 +250,10 @@ fn contributed_drafts_follow_instance_target_document_and_project_lifetimes() {
     let mut application =
         EditorApplication::new(EditorLaunchOptions::new(&fixture).with_profile("desktop"));
     application.native_shell_ready();
-    for _ in 0..8 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while application.current_frame().is_none() && Instant::now() < deadline {
         application.advance_project_open();
+        std::thread::sleep(Duration::from_millis(1));
     }
     let document = application
         .current_frame()

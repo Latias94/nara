@@ -496,12 +496,9 @@ impl AuthoringWorkflow<'_> {
         let project_code =
             fs::read(project.join("src/lib.rs")).map_err(|error| error.to_string())?;
         let deadline = Instant::now() + Duration::from_secs(10);
-        for _ in 0..120 {
+        while Instant::now() < deadline {
             self.paint(|_| {})?;
             if self.application.current_frame().is_some() {
-                break;
-            }
-            if Instant::now() >= deadline {
                 break;
             }
             std::thread::sleep(Duration::from_millis(1));

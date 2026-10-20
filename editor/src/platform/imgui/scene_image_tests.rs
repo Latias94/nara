@@ -288,6 +288,7 @@ impl SceneImageWorkflow<'_> {
                     self.native.frontend.reset_layout();
                 }
             }
+            std::thread::sleep(Duration::from_millis(1));
         }
         if !self.application.apply_project_browser_local_action(
             EditorProjectBrowserLocalAction::Select {

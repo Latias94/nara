@@ -11,6 +11,10 @@ use crate::project_host::authoring::{
 
 use super::{EditorProjectOpenError, EditorProjectSession, single_error};
 
+mod preparation;
+
+use preparation::{StartupPreparation, StartupPreparationHost, StartupPreparationProgress};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorProjectOpenPhase {
     ManifestAndProfile,
@@ -76,9 +80,15 @@ impl EditorProjectOpenFailure {
     }
 }
 
+/// Coordinates owner-thread admission with bounded background startup preparation.
+///
+/// Reuse this Host across attempts. `StartupClosure` may remain pending across many calls to
+/// [`Self::advance`]; poll from the Host's normal maintenance loop instead of busy-waiting.
+/// Manifest/schema admission and session publication still execute on the caller's owner thread.
 #[derive(Default)]
 pub struct EditorProjectOpenHost {
     admission: AuthoringProjectAdmissionHost,
+    preparation: StartupPreparationHost,
 }
 
 impl EditorProjectOpenHost {
@@ -143,11 +153,27 @@ impl EditorProjectOpenHost {
                 ))
             }
             EditorProjectOpenAttemptState::StartupClosure(prepared) => {
-                match prepared.admit_startup_closure() {
-                    Ok(candidate) => pending(EditorProjectOpenAttemptState::SessionPublication(
-                        candidate.publish(),
-                    )),
-                    Err(error) => EditorProjectOpenProgress::Rejected(source_failure(error)),
+                match self.preparation.start(prepared) {
+                    Some(preparation) => {
+                        pending(EditorProjectOpenAttemptState::StartupPreparing(preparation))
+                    }
+                    None => EditorProjectOpenProgress::Rejected(startup_worker_failure()),
+                }
+            }
+            EditorProjectOpenAttemptState::StartupPreparing(mut preparation) => {
+                match preparation.poll() {
+                    StartupPreparationProgress::Pending => {
+                        pending(EditorProjectOpenAttemptState::StartupPreparing(preparation))
+                    }
+                    StartupPreparationProgress::Completed(Ok(candidate)) => pending(
+                        EditorProjectOpenAttemptState::SessionPublication(candidate.publish()),
+                    ),
+                    StartupPreparationProgress::Completed(Err(error)) => {
+                        EditorProjectOpenProgress::Rejected(source_failure(error))
+                    }
+                    StartupPreparationProgress::Unavailable => {
+                        EditorProjectOpenProgress::Rejected(startup_worker_failure())
+                    }
                 }
             }
             EditorProjectOpenAttemptState::SessionPublication(receipt) => {
@@ -160,6 +186,9 @@ impl EditorProjectOpenHost {
     }
 }
 
+/// A linear project-open attempt. Dropping it revokes pending startup publication.
+///
+/// Cancellation does not interrupt a filesystem call already running on a task worker.
 pub struct EditorProjectOpenAttempt {
     state: EditorProjectOpenAttemptState,
 }
@@ -174,7 +203,8 @@ impl EditorProjectOpenAttempt {
             EditorProjectOpenAttemptState::AuthoringSchemaBundle(_) => {
                 EditorProjectOpenPhase::AuthoringSchemaBundle
             }
-            EditorProjectOpenAttemptState::StartupClosure(_) => {
+            EditorProjectOpenAttemptState::StartupClosure(_)
+            | EditorProjectOpenAttemptState::StartupPreparing(_) => {
                 EditorProjectOpenPhase::StartupClosure
             }
             EditorProjectOpenAttemptState::SessionPublication(_) => {
@@ -191,6 +221,7 @@ enum EditorProjectOpenAttemptState {
     },
     AuthoringSchemaBundle(PreparedAuthoringSchemaBasis),
     StartupClosure(PreparedAuthoringProject),
+    StartupPreparing(StartupPreparation),
     SessionPublication(AuthoringProjectReceipt),
 }
 
@@ -329,6 +360,19 @@ fn source_failure(error: AuthoringProjectSourceAdmissionError) -> EditorProjectO
         relative_source,
         "Repair the reported source without changing unrelated project files, then retry.",
         diagnostics,
+    )
+}
+
+fn startup_worker_failure() -> EditorProjectOpenFailure {
+    failure(
+        EditorProjectOpenPhase::StartupClosure,
+        EditorProjectOpenFailureSource::ProjectSource,
+        None,
+        "Retry project Open after other startup preparation has finished.",
+        single_error(
+            "project.editor.startup-preparation-unavailable",
+            "The startup authoring closure could not be prepared",
+        ),
     )
 }
 

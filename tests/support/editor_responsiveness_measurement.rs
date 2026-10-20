@@ -2,7 +2,10 @@
 
 use super::*;
 use nara::{
-    project_host::{EditorProjectCloseProgress, EditorProjectOpenHost, EditorProjectOpenProgress},
+    project_host::{
+        EditorProjectCloseProgress, EditorProjectOpenHost, EditorProjectOpenPhase,
+        EditorProjectOpenProgress,
+    },
     tooling::EditorDocumentDigest,
 };
 
@@ -41,22 +44,110 @@ fn measure_editor_owner_thread_work() {
             }
             let mut host = EditorProjectOpenHost::new();
             let mut attempt = host.begin(capability, None);
+            let open_started = Instant::now();
+            let mut startup_started = None;
+            let mut startup_first = None;
+            let mut startup_max = Duration::ZERO;
             let mut editor = loop {
+                assert!(
+                    open_started.elapsed() < ASYNC_DRIVER_TIMEOUT,
+                    "Open did not settle"
+                );
+                let startup = attempt.phase() == EditorProjectOpenPhase::StartupClosure;
+                if startup && startup_started.is_none() {
+                    startup_started = Some(Instant::now());
+                }
                 let phase = format!("open-{:?}", attempt.phase());
                 let started = Instant::now();
                 let progress = host.advance(attempt);
                 let duration = started.elapsed();
-                if measured {
+                if startup {
+                    startup_first.get_or_insert(duration);
+                    startup_max = startup_max.max(duration);
+                } else if measured {
                     emit(population, source.len(), sample, &phase, duration);
                 }
                 match progress {
-                    EditorProjectOpenProgress::Pending(next) => attempt = next,
+                    EditorProjectOpenProgress::Pending(next) => {
+                        if startup
+                            && next.phase() != EditorProjectOpenPhase::StartupClosure
+                            && measured
+                        {
+                            emit(
+                                population,
+                                source.len(),
+                                sample,
+                                "startup-v4-first-drive",
+                                startup_first.unwrap(),
+                            );
+                            emit(
+                                population,
+                                source.len(),
+                                sample,
+                                "startup-v4-max-drive",
+                                startup_max,
+                            );
+                            emit(
+                                population,
+                                source.len(),
+                                sample,
+                                "startup-v4-completion",
+                                startup_started.unwrap().elapsed(),
+                            );
+                        }
+                        let waiting =
+                            startup && next.phase() == EditorProjectOpenPhase::StartupClosure;
+                        attempt = next;
+                        if waiting {
+                            thread::sleep(ASYNC_POLL_INTERVAL);
+                        }
+                    }
                     EditorProjectOpenProgress::Opened(editor) => break editor,
                     EditorProjectOpenProgress::Rejected(error) => {
                         panic!("measurement project rejected: {error:?}");
                     }
                 }
             };
+            if measured {
+                emit(
+                    population,
+                    source.len(),
+                    sample,
+                    "open-v4-completion",
+                    open_started.elapsed(),
+                );
+            }
+
+            // A separate linear attempt reaches prepared receipt admission but never creates
+            // a session. Time its actual owner-thread disposal; do not call this worker CPU
+            // or untaken TaskTerminal destruction, which has a different observation point.
+            let mut discarded = host.begin(project.capability(), None);
+            let discard_deadline = Instant::now() + ASYNC_DRIVER_TIMEOUT;
+            while discarded.phase() != EditorProjectOpenPhase::SessionPublication {
+                assert!(
+                    Instant::now() < discard_deadline,
+                    "discard candidate did not settle"
+                );
+                discarded = match host.advance(discarded) {
+                    EditorProjectOpenProgress::Pending(next) => next,
+                    _ => panic!("discard measurement must stop before session publication"),
+                };
+                if discarded.phase() == EditorProjectOpenPhase::StartupClosure {
+                    thread::sleep(ASYNC_POLL_INTERVAL);
+                }
+            }
+            let discard_started = Instant::now();
+            drop(discarded);
+            let discard = discard_started.elapsed();
+            if measured {
+                emit(
+                    population,
+                    source.len(),
+                    sample,
+                    "startup-v4-prepared-discard",
+                    discard,
+                );
+            }
             let document = editor.current_frame().workspace().active_document.unwrap();
             assert_eq!(
                 current_scene_model(&editor, document)
@@ -291,7 +382,7 @@ fn emit(population: usize, source_bytes: usize, sample: usize, phase: &str, dura
     println!(
         "{}",
         serde_json::json!({
-            "measurement": "editor-owner-thread-v3",
+            "measurement": "editor-owner-thread-v4",
             "population": population,
             "baseline_source_bytes": source_bytes,
             "sample": sample,

@@ -82,9 +82,17 @@ fn feature_off_editor_preserves_ui_structure_gate_for_retained_data_catalogs() {
     .unwrap();
     let mut host = EditorProjectOpenHost::new();
     let mut attempt = host.begin(capability, None);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
     let mut editor = loop {
         match host.advance(attempt) {
-            EditorProjectOpenProgress::Pending(next) => attempt = next,
+            EditorProjectOpenProgress::Pending(next) => {
+                attempt = next;
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "generic Open timed out"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
             EditorProjectOpenProgress::Opened(editor) => break editor,
             EditorProjectOpenProgress::Rejected(failure) => {
                 panic!("generic open failed: {:?}", failure.diagnostics())

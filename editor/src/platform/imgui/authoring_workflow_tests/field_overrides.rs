@@ -245,11 +245,13 @@ impl AuthoringWorkflow<'_> {
     }
 
     fn run_field_overrides(mut self, project: &Path) -> Result<u64, String> {
-        for _ in 0..120 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
             self.paint(|_| {})?;
             if self.application.current_frame().is_some() {
                 break;
             }
+            std::thread::sleep(Duration::from_millis(1));
         }
         self.frame()?;
         for _ in 0..4 {

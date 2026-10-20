@@ -22,6 +22,55 @@ use super::{
 };
 
 #[test]
+fn startup_preparation_exit_revokes_initial_and_replacement_publication() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../reference-game");
+    let source = root.join("scenes/startup.scene.json");
+    let original = fs::read(&source).unwrap();
+    for replacement in [false, true] {
+        let mut application =
+            EditorApplication::new(EditorLaunchOptions::new(&root).with_profile("desktop"));
+        application.native_shell_ready();
+        if replacement {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while application.current_frame().is_none() && Instant::now() < deadline {
+                application.advance_project_open();
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(application.current_frame().is_some());
+            assert!(application.request_project_replacement(&root, Some("desktop".to_owned())));
+        }
+        let retained = application.current_frame();
+        super::tests::advance_to_startup_preparation(&mut application);
+        assert!(!application.advance_project_open().actions_observed());
+        if let Some(before) = retained {
+            assert!(std::sync::Arc::ptr_eq(
+                &before,
+                &application.current_frame().unwrap()
+            ));
+        } else {
+            assert!(application.current_frame().is_none());
+        }
+
+        // Exit revokes publication; it does not claim that the OS read has already returned.
+        let mut exited = application.request_exit().exit_ready();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !exited && Instant::now() < deadline {
+            assert!(!application.advance_project_open().actions_observed());
+            exited = application
+                .drive_editor_frame(Duration::ZERO, false, false)
+                .exit_ready();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(exited);
+        assert_eq!(application.state(), EditorApplicationState::ProjectManager);
+        assert!(application.current_frame().is_none());
+        assert!(!application.advance_project_open().actions_observed());
+        assert!(application.current_frame().is_none());
+        assert_eq!(fs::read(&source).unwrap(), original);
+    }
+}
+
+#[test]
 fn pending_save_retries_close_project_and_exit_after_its_receipt() {
     for retirement in [
         EditorSessionRetirement::CloseProject,
@@ -155,7 +204,8 @@ fn pending_save_replacement_retries_close_and_refreshes_the_prepared_source() {
     let mut application = fixture.open();
     queue_save(&mut application);
     assert!(application.request_project_replacement(&fixture.root, Some("desktop".to_owned())));
-    for _ in 0..8 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
         application.advance_project_open();
         if matches!(
             application.state,
@@ -163,6 +213,7 @@ fn pending_save_replacement_retries_close_and_refreshes_the_prepared_source() {
         ) {
             break;
         }
+        std::thread::sleep(Duration::from_millis(1));
     }
     let deadline = Instant::now() + Duration::from_secs(10);
     while application.state() == EditorApplicationState::OpeningReplacement
@@ -362,11 +413,13 @@ impl PersistenceFixture {
         let mut application =
             EditorApplication::new(EditorLaunchOptions::new(&self.root).with_profile("desktop"));
         application.native_shell_ready();
-        for _ in 0..8 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
             if application.current_frame().is_some() {
                 break;
             }
             application.advance_project_open();
+            std::thread::sleep(Duration::from_millis(1));
         }
         assert_eq!(
             application.state(),

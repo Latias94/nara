@@ -1349,11 +1349,13 @@ mod tests {
             crate::EditorApplication::new(options)
         };
         application.native_shell_ready();
-        for _ in 0..8 {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
             if application.current_frame().is_some() {
                 break;
             }
             application.advance_project_open();
+            std::thread::sleep(Duration::from_millis(1));
         }
         let frame = application.current_frame().expect("the UI fixture opens");
         let scene = frame.workspace().active_scene.as_ref().unwrap();

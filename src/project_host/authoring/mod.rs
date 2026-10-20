@@ -13,9 +13,9 @@ pub(crate) use document::{
 };
 #[cfg(any(feature = "tooling", test))]
 pub(crate) use project::{
-    AuthoringProjectReadiness, AuthoringProjectReceipt, AuthoringProjectSessionSnapshot,
-    AuthoringProjectSnapshot, AuthoringProjectSourceAdmissionError, AuthoringSourceKind,
-    PreparedAuthoringProject,
+    AuthoringProjectCandidate, AuthoringProjectReadiness, AuthoringProjectReceipt,
+    AuthoringProjectSessionSnapshot, AuthoringProjectSnapshot,
+    AuthoringProjectSourceAdmissionError, AuthoringSourceKind, PreparedAuthoringProject,
 };
 
 pub(crate) const MAX_AUTHORING_IMAGE_IDENTITIES: usize = 4_096;

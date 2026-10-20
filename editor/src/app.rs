@@ -1327,7 +1327,9 @@ impl EditorApplication {
         mut opening: OpeningProjectState,
     ) -> (EditorProductState, bool) {
         match self.advance_opening_step(&mut opening) {
-            OpenStepResult::Pending => (EditorProductState::OpeningInitial(opening), true),
+            OpenStepResult::Pending(changed) => {
+                (EditorProductState::OpeningInitial(opening), changed)
+            }
             OpenStepResult::Opened(project) => (EditorProductState::from_published(project), true),
             OpenStepResult::Rejected(recovery) => (EditorProductState::Recovery(recovery), true),
         }
@@ -1361,11 +1363,11 @@ impl EditorApplication {
                     }
                 }
                 match self.advance_opening_step(&mut opening) {
-                    OpenStepResult::Pending => (
+                    OpenStepResult::Pending(changed) => (
                         EditorProductState::OpeningReplacement(
                             OpeningReplacementState::Preparing { retained, opening },
                         ),
-                        true,
+                        changed,
                     ),
                     OpenStepResult::Rejected(_) => {
                         (EditorProductState::from_published(retained), true)
@@ -1387,12 +1389,12 @@ impl EditorApplication {
                 retained,
                 mut opening,
             } => match self.advance_opening_step(&mut opening) {
-                OpenStepResult::Pending => (
+                OpenStepResult::Pending(changed) => (
                     EditorProductState::OpeningReplacement(OpeningReplacementState::Refreshing {
                         retained,
                         opening,
                     }),
-                    true,
+                    changed,
                 ),
                 OpenStepResult::Rejected(_) => {
                     let mut retained = retained;
@@ -1650,18 +1652,20 @@ impl EditorApplication {
                     .open_host
                     .begin(project_root, opening.request.owned_profile());
                 opening.step = OpeningProjectStep::Host(attempt);
-                OpenStepResult::Pending
+                OpenStepResult::Pending(true)
             }
             OpeningProjectStep::Host(_) => {
                 let attempt =
                     match std::mem::replace(&mut opening.step, OpeningProjectStep::ProjectRoot) {
                         OpeningProjectStep::Host(attempt) => attempt,
-                        OpeningProjectStep::ProjectRoot => return OpenStepResult::Pending,
+                        OpeningProjectStep::ProjectRoot => return OpenStepResult::Pending(false),
                     };
+                let previous_phase = attempt.phase();
                 match self.open_host.advance(attempt) {
                     EditorProjectOpenProgress::Pending(attempt) => {
+                        let changed = attempt.phase() != previous_phase;
                         opening.step = OpeningProjectStep::Host(attempt);
-                        OpenStepResult::Pending
+                        OpenStepResult::Pending(changed)
                     }
                     EditorProjectOpenProgress::Opened(session) => {
                         OpenStepResult::Opened(PublishedEditorProject::new(
@@ -1725,7 +1729,7 @@ impl EditorApplication {
 }
 
 enum OpenStepResult {
-    Pending,
+    Pending(bool),
     Opened(PublishedEditorProject),
     Rejected(RecoveryState),
 }
@@ -2093,6 +2097,85 @@ mod tests {
 
     #[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
     #[test]
+    fn startup_preparation_polls_are_quiet_and_cancel_cannot_publish_a_late_initial_project() {
+        let project = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../reference-game");
+        let mut application = super::EditorApplication::new(
+            super::EditorLaunchOptions::new(project).with_profile("desktop"),
+        );
+        let _ = application.native_shell_ready();
+        advance_to_startup_preparation(&mut application);
+        let launched = application.advance_project_open();
+        assert!(
+            !launched.actions_observed(),
+            "the unchanged Startup phase needs no repaint"
+        );
+        assert!(application.current_frame().is_none());
+        let _ = application.submit_shell_action(super::EditorProjectShellAction::Cancel);
+        assert_eq!(
+            application.state(),
+            super::EditorApplicationState::ProjectManager
+        );
+        for _ in 0..3 {
+            assert!(!application.advance_project_open().actions_observed());
+            assert!(application.current_frame().is_none());
+        }
+    }
+
+    #[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
+    #[test]
+    fn cancelling_preparing_replacement_preserves_the_exact_published_project() {
+        let project = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../reference-game");
+        let mut application = super::EditorApplication::new(
+            super::EditorLaunchOptions::new(project.clone()).with_profile("desktop"),
+        );
+        let _ = application.native_shell_ready();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while application.current_frame().is_none() {
+            assert!(std::time::Instant::now() < deadline);
+            application.advance_project_open();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let before = application.current_frame().unwrap();
+        let generation = application.workspace_generation();
+        assert!(application.request_project_replacement(project, Some("desktop".to_owned())));
+        advance_to_startup_preparation(&mut application);
+        assert!(!application.advance_project_open().actions_observed());
+        let _ = application.submit_shell_action(super::EditorProjectShellAction::Cancel);
+        assert_eq!(application.workspace_generation(), generation);
+        assert!(std::sync::Arc::ptr_eq(
+            &before,
+            &application.current_frame().unwrap()
+        ));
+        assert!(!application.advance_project_open().actions_observed());
+        assert!(std::sync::Arc::ptr_eq(
+            &before,
+            &application.current_frame().unwrap()
+        ));
+    }
+
+    #[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
+    pub(super) fn advance_to_startup_preparation(application: &mut super::EditorApplication) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let opening = match &application.state {
+                super::EditorProductState::OpeningInitial(opening) => opening,
+                super::EditorProductState::OpeningReplacement(
+                    super::OpeningReplacementState::Preparing { opening, .. },
+                ) => opening,
+                state => panic!("the source must reach startup preparation: {state:?}"),
+            };
+            if matches!(&opening.step, super::OpeningProjectStep::Host(attempt)
+                if attempt.phase() == nara::project_host::EditorProjectOpenPhase::StartupClosure)
+            {
+                return;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            application.advance_project_open();
+        }
+    }
+
+    #[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
+    #[test]
     fn consecutive_batches_preserve_each_originating_feedback_before_redraw() {
         use nara::{
             scene::{
@@ -2110,11 +2193,14 @@ mod tests {
             super::EditorLaunchOptions::new(project).with_profile("desktop"),
         );
         let _ = application.native_shell_ready();
-        for _ in 0..64 {
-            if application.current_frame().is_some() {
-                break;
-            }
+        let open_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while application.current_frame().is_none() {
+            assert!(
+                std::time::Instant::now() < open_deadline,
+                "project Open did not settle"
+            );
             let _ = application.advance_project_open();
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
         let mut frontend = crate::ImguiEditorFrontend::new();
         let mut context = dear_imgui_rs::Context::create();
@@ -2210,11 +2296,14 @@ mod tests {
             super::EditorLaunchOptions::new(project.clone()).with_profile("desktop"),
         );
         let _ = application.native_shell_ready();
-        for _ in 0..64 {
-            if application.current_frame().is_some() {
-                break;
-            }
+        let open_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while application.current_frame().is_none() {
+            assert!(
+                std::time::Instant::now() < open_deadline,
+                "project Open did not settle"
+            );
             let _ = application.advance_project_open();
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
         let before = application
             .current_frame()
@@ -2227,16 +2316,19 @@ mod tests {
         ));
 
         assert!(application.request_project_replacement(project, None));
-        for _ in 0..64 {
-            if matches!(
-                application.state,
-                super::EditorProductState::OpeningReplacement(
-                    super::OpeningReplacementState::Closing { .. }
-                )
-            ) {
-                break;
-            }
+        let open_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !matches!(
+            application.state,
+            super::EditorProductState::OpeningReplacement(
+                super::OpeningReplacementState::Closing { .. }
+            )
+        ) {
+            assert!(
+                std::time::Instant::now() < open_deadline,
+                "replacement Open did not settle"
+            );
             let _ = application.advance_project_open();
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
         assert!(matches!(
             application.state,

@@ -553,7 +553,8 @@ fn open_ordinary(project_root: &Path) -> EditorApplication {
 }
 
 fn drive_open_to_terminal(application: &mut EditorApplication) {
-    for _ in 0..8 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         match application.state() {
             EditorApplicationState::AuthoringReady
             | EditorApplicationState::AuthoringDegraded
@@ -565,6 +566,7 @@ fn drive_open_to_terminal(application: &mut EditorApplication) {
                 panic!("the native shell must arm the project-open request")
             }
         }
+        std::thread::sleep(Duration::from_millis(1));
     }
     panic!("the bounded project-open state machine did not reach a terminal state")
 }

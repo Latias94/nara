@@ -814,7 +814,8 @@ impl CompositionProject {
         let mut app =
             EditorApplication::new(EditorLaunchOptions::new(&self.root).with_profile("desktop"));
         let _ = app.native_shell_ready();
-        for _ in 0..8 {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
             if !matches!(
                 app.state(),
                 EditorApplicationState::OpeningInitial | EditorApplicationState::OpeningReplacement
@@ -822,6 +823,7 @@ impl CompositionProject {
                 break;
             }
             let _ = app.advance_project_open();
+            std::thread::sleep(Duration::from_millis(1));
         }
         assert!(matches!(
             app.state(),

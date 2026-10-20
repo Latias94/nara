@@ -305,7 +305,8 @@ impl ManagerWorkflow<'_> {
     }
 
     fn wait_for(&mut self, state: EditorApplicationState) -> Result<(), String> {
-        for _ in 0..240 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
             self.application.advance_project_open();
             self.paint(|_| {})?;
             if self.application.state() == state {
@@ -323,7 +324,8 @@ impl ManagerWorkflow<'_> {
     }
 
     fn wait_for_workspace(&mut self) -> Result<(), String> {
-        for _ in 0..240 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
             self.application.advance_project_open();
             self.paint(|_| {})?;
             if matches!(

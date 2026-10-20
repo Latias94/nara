@@ -1319,9 +1319,17 @@ fn generic_editor_drives_the_initial_source_index_and_retains_it_during_refresh(
 
     let mut host = super::editor::EditorProjectOpenHost::new();
     let mut attempt = host.begin(project.writable_capability(), None);
+    let open_deadline = Instant::now() + Duration::from_secs(5);
     let mut editor = loop {
         match host.advance(attempt) {
-            super::editor::EditorProjectOpenProgress::Pending(next) => attempt = next,
+            super::editor::EditorProjectOpenProgress::Pending(next) => {
+                assert!(
+                    Instant::now() < open_deadline,
+                    "project Open did not settle"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+                attempt = next;
+            }
             super::editor::EditorProjectOpenProgress::Opened(session) => break session,
             super::editor::EditorProjectOpenProgress::Rejected(failure) => panic!(
                 "the generic project should open before indexing: {:?}",
@@ -2693,9 +2701,17 @@ fn open_generic_editor_with_ready_index(
 ) -> super::editor::EditorProjectSession {
     let mut host = super::editor::EditorProjectOpenHost::new();
     let mut attempt = host.begin(project.writable_capability(), None);
+    let open_deadline = Instant::now() + Duration::from_secs(5);
     let mut editor = loop {
         match host.advance(attempt) {
-            super::editor::EditorProjectOpenProgress::Pending(next) => attempt = next,
+            super::editor::EditorProjectOpenProgress::Pending(next) => {
+                assert!(
+                    Instant::now() < open_deadline,
+                    "project Open did not settle"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+                attempt = next;
+            }
             super::editor::EditorProjectOpenProgress::Opened(session) => break session,
             super::editor::EditorProjectOpenProgress::Rejected(failure) => panic!(
                 "the generic project should open before document admission: {:?}",
@@ -2962,9 +2978,17 @@ fn external_play_restart_rechecks_saved_files_before_requesting_child_retirement
         }
         let mut host = super::editor::EditorProjectOpenHost::new();
         let mut attempt = host.begin(project.writable_capability(), Some("desktop".to_owned()));
+        let open_deadline = Instant::now() + Duration::from_secs(5);
         let mut editor = loop {
             match host.advance(attempt) {
-                super::editor::EditorProjectOpenProgress::Pending(next) => attempt = next,
+                super::editor::EditorProjectOpenProgress::Pending(next) => {
+                    assert!(
+                        Instant::now() < open_deadline,
+                        "project Open did not settle"
+                    );
+                    std::thread::sleep(Duration::from_millis(1));
+                    attempt = next;
+                }
                 super::editor::EditorProjectOpenProgress::Opened(session) => break session,
                 super::editor::EditorProjectOpenProgress::Rejected(failure) => {
                     panic!(
@@ -3048,9 +3072,17 @@ fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successo
 
     let mut host = super::editor::EditorProjectOpenHost::new();
     let mut attempt = host.begin(project.writable_capability(), Some("desktop".to_owned()));
+    let open_deadline = Instant::now() + Duration::from_secs(5);
     let mut editor = loop {
         match host.advance(attempt) {
-            super::editor::EditorProjectOpenProgress::Pending(next) => attempt = next,
+            super::editor::EditorProjectOpenProgress::Pending(next) => {
+                assert!(
+                    Instant::now() < open_deadline,
+                    "project Open did not settle"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+                attempt = next;
+            }
             super::editor::EditorProjectOpenProgress::Opened(session) => break session,
             super::editor::EditorProjectOpenProgress::Rejected(failure) => panic!(
                 "the supervised authoring project should open: {:?}",
@@ -4203,9 +4235,17 @@ fn authoring_prefab_source_survives_failed_publication_close_and_reopen() {
 
     let mut host = super::editor::EditorProjectOpenHost::new();
     let mut attempt = host.begin(project.writable_capability(), None);
+    let open_deadline = Instant::now() + Duration::from_secs(5);
     let mut editor = loop {
         match host.advance(attempt) {
-            super::editor::EditorProjectOpenProgress::Pending(next) => attempt = next,
+            super::editor::EditorProjectOpenProgress::Pending(next) => {
+                assert!(
+                    Instant::now() < open_deadline,
+                    "project Open did not settle"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+                attempt = next;
+            }
             super::editor::EditorProjectOpenProgress::Opened(session) => break session,
             super::editor::EditorProjectOpenProgress::Rejected(failure) => panic!(
                 "the authoring project should open before the Prefab lifecycle test: {:?}",
