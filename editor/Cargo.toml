@@ -24,6 +24,7 @@ winit.workspace = true
 rustix = { workspace = true, features = ["event", "fs", "process"] }
 
 [target.'cfg(windows)'.dependencies]
+dunce.workspace = true
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Globalization",

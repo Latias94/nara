@@ -103,6 +103,7 @@ bytemuck = { version = "1", features = ["derive"] }
 dear-imgui-rs = { version = "=0.21.0", features = ["multi-viewport"] }
 dear-imgui-wgpu = { version = "=0.21.0", default-features = false, features = ["wgpu-30", "multi-viewport-winit"] }
 dear-imgui-winit = { version = "=0.21.0", features = ["multi-viewport"] }
+dunce = "1.0.5"
 glam = { version = "0.33", features = ["serde"] }
 getrandom = { version = "0.3.4", features = ["std"] }
 guillotiere = "=0.7.0"

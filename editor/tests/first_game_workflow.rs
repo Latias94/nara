@@ -40,6 +40,8 @@ use serde_json::Value;
 
 #[path = "support/imgui.rs"]
 mod imgui;
+#[path = "support/rust_play_iteration_measurement.rs"]
+mod rust_play_iteration_measurement;
 
 const CAMERA: &str = "nara.render.Camera2d";
 const COLLECTIBLE: &str = "collect-game.Collectible";

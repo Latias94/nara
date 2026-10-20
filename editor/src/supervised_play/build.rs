@@ -78,6 +78,10 @@ impl DesktopBuildRequest {
         }
         let project_root = fs::canonicalize(&project_root)
             .map_err(DesktopBuildRequestError::ProjectRootCanonicalize)?;
+        // Keep Cargo's tool input representation stable after resolving the real directory.
+        // This changes only compatible path spelling, not filesystem authority.
+        #[cfg(windows)]
+        let project_root = dunce::simplified(&project_root).to_path_buf();
         if !fs::metadata(&project_root)
             .map_err(DesktopBuildRequestError::ProjectRootInspect)?
             .is_dir()
