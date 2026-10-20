@@ -1,6 +1,6 @@
-use nara::advanced_prelude::StartupSceneSource;
+use nara::advanced_prelude::SceneSource;
 
-fn duplicate(source: &StartupSceneSource) -> StartupSceneSource {
+fn duplicate(source: &SceneSource) -> SceneSource {
     source.clone()
 }
 

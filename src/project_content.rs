@@ -53,14 +53,14 @@ use crate::scene_retention::{
     ARC_CONTROL_BLOCK_BYTES, BTREE_ENTRY_OVERHEAD, STRING_ALLOCATION_OVERHEAD,
     VALUE_NODE_ALLOCATION_BYTES,
 };
-use crate::startup_scene::StartupSceneSource;
+use crate::startup_scene::SceneSource;
 
-pub(crate) use budget::ProjectContentLease;
-use budget::{BudgetTicket, ProjectContentGenerationLease};
+use budget::{BudgetTicket, GENERATION_LEASE_RETAINED_BYTES};
 pub use budget::{
     ProjectContentBudgetError, ProjectContentBudgetHost, ProjectContentBudgetKind,
     ProjectContentBudgetSnapshot, ProjectContentLimits,
 };
+pub(crate) use budget::{ProjectContentGenerationLease, ProjectContentLease};
 use catalogue::ReferenceCatalogue;
 use closure::{ProjectContentClosureBuilder, ProjectContentClosureDraft};
 pub use closure::{
@@ -198,6 +198,7 @@ impl ProjectImageContent {
 ///
 /// Clones retain the same content generation. Source-only receipts obtained through
 /// [`Self::content_closure`] retain their own fact budget without retaining decoded content.
+/// Escaped Scene sources and shared Images retain the generation until their last owner drops.
 #[derive(Clone)]
 pub struct ProjectContentSnapshot {
     inner: Arc<ProjectContentSnapshotInner>,
@@ -215,6 +216,13 @@ struct ProjectContentSnapshotInner {
     assets: Arc<ProjectContentAssets>,
     _generation_lease: ProjectContentGenerationLease,
     _runtime_lease: ProjectContentLease,
+}
+
+// Pixel consumers retain the byte reservation and generation claim without retaining the
+// snapshot, its Images, or any decoded Scene candidate back through this owner.
+struct ProjectImageRetention {
+    _lease: ProjectContentLease,
+    _generation: ProjectContentGenerationLease,
 }
 
 /// Keeps a materializer's admitted identity context and its reservation together.
@@ -336,11 +344,12 @@ impl ProjectContentSnapshot {
 
     /// Retains the exact expanded selected source for one runtime materialization.
     #[must_use]
-    pub fn scene_source(&self) -> StartupSceneSource {
-        StartupSceneSource::from_project_content(
+    pub fn scene_source(&self) -> SceneSource {
+        SceneSource::from_project_content(
             Arc::clone(&self.inner.expanded_scene),
             Arc::clone(&self.inner.assets),
             self.inner._runtime_lease.clone(),
+            self.inner._generation_lease.clone(),
             startup_scene_retained_bytes(
                 self.inner.expanded_scene.document(),
                 self.inner.expanded_scene.provenance(),
@@ -353,7 +362,7 @@ impl ProjectContentSnapshot {
         &self,
         document: &SceneDocument,
         registry: &nara_reflect::ComponentRegistry,
-    ) -> Result<StartupSceneSource, ProjectContentError> {
+    ) -> Result<SceneSource, ProjectContentError> {
         let resolver = SnapshotPrefabResolver {
             prefabs: self.prefabs(),
             database: self.inner.assets.database(),
@@ -387,10 +396,11 @@ impl ProjectContentSnapshot {
             ._runtime_lease
             .reserve_retained(retained_bytes)
             .map_err(ProjectContentError::budget)?;
-        Ok(StartupSceneSource::from_project_content(
+        Ok(SceneSource::from_project_content(
             Arc::new(expanded_candidate),
             Arc::clone(&self.inner.assets),
             lease,
+            self.inner._generation_lease.clone(),
             retained_bytes,
         ))
     }
@@ -1183,27 +1193,6 @@ impl<'a> LoadContext<'a> {
             .take()
             .expect("load context owns one budget ticket until publication");
         let runtime_lease = budget.into_lease().map_err(ProjectContentError::budget)?;
-        let assets = Arc::new(ProjectContentAssets {
-            database,
-            _lease: runtime_lease.clone(),
-        });
-        if !images.is_empty() {
-            let image_retention = Arc::new(runtime_lease.clone());
-            for content in &mut images {
-                if !content
-                    .image
-                    .try_attach_retention_owner(Arc::clone(&image_retention))
-                {
-                    return Err(ProjectContentError::single(
-                        ProjectContentErrorKind::ImageImport,
-                        "project.content.image-retention-conflict",
-                        "Project image retention owner was already installed",
-                    ));
-                }
-            }
-        }
-        let content_closure =
-            content_closure.publish(self.loader.root.share(), content_closure_lease);
         let generation_lease = self
             .loader
             .budget_host
@@ -1232,6 +1221,30 @@ impl<'a> LoadContext<'a> {
                     diagnostics,
                 )
             })?;
+        let assets = Arc::new(ProjectContentAssets {
+            database,
+            _lease: runtime_lease.clone(),
+        });
+        if !images.is_empty() {
+            let image_retention = Arc::new(ProjectImageRetention {
+                _lease: runtime_lease.clone(),
+                _generation: generation_lease.clone(),
+            });
+            for content in &mut images {
+                if !content
+                    .image
+                    .try_attach_retention_owner(Arc::clone(&image_retention))
+                {
+                    return Err(ProjectContentError::single(
+                        ProjectContentErrorKind::ImageImport,
+                        "project.content.image-retention-conflict",
+                        "Project image retention owner was already installed",
+                    ));
+                }
+            }
+        }
+        let content_closure =
+            content_closure.publish(self.loader.root.share(), content_closure_lease);
 
         Ok(ProjectContentSnapshot {
             inner: Arc::new(ProjectContentSnapshotInner {
@@ -2466,7 +2479,7 @@ fn content_closure_entry_work_bytes(path_bytes: usize) -> Result<usize, ProjectC
 
 const SNAPSHOT_LEASE_OVERHEAD: usize = 128;
 const IMAGE_RETENTION_OWNER_OVERHEAD: usize =
-    ARC_CONTROL_BLOCK_BYTES + size_of::<ProjectContentLease>();
+    ARC_CONTROL_BLOCK_BYTES + size_of::<ProjectImageRetention>();
 const IMAGE_METADATA_OVERHEAD: usize = 256;
 const ENTITY_WORK_BYTES: usize = 128;
 const COMPONENT_WORK_BYTES: usize = 96;
@@ -2664,6 +2677,7 @@ fn snapshot_retained_overhead(
             3 * ARC_CONTROL_BLOCK_BYTES,
             size_of::<Arc<SceneDocument>>(),
             SNAPSHOT_LEASE_OVERHEAD,
+            GENERATION_LEASE_RETAINED_BYTES,
             if images.is_empty() {
                 0
             } else {

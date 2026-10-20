@@ -1,13 +1,13 @@
 use nara::{
-    advanced_prelude::{StartupSceneActivation, StartupSceneSource},
+    advanced_prelude::{CurrentScene, SceneSource},
     identity::SpawnedSceneInstance,
 };
 
 fn forge(
-    source: StartupSceneSource,
+    source: SceneSource,
     receipt: SpawnedSceneInstance,
-) -> StartupSceneActivation<'static> {
-    StartupSceneActivation { source, receipt }
+) -> CurrentScene<'static> {
+    CurrentScene { source, receipt }
 }
 
 fn main() {}

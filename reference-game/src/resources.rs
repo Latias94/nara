@@ -1,7 +1,6 @@
 use std::{collections::BTreeMap, error::Error, fmt};
 
 use nara::{
-    advanced_prelude::StartupSceneSourceView,
     ecs::Entity,
     identity::{SceneEntityId, SpawnedSceneInstance, WorldEntityToken},
     prelude::{Component, Resource, Vec2},
@@ -302,35 +301,21 @@ impl SceneProductResource for WaveRetryStatus {}
 
 #[derive(Debug, Resource)]
 pub(crate) struct WaveRunOwner {
-    source: StartupSceneSourceView,
     receipt: SpawnedSceneInstance,
     scene_entities: BTreeMap<SceneEntityId, Entity>,
     projectiles: Vec<WorldEntityToken>,
-    baseline: WaveRunBaseline,
 }
 
 impl WaveRunOwner {
     pub(crate) fn new(
-        source: StartupSceneSourceView,
         receipt: SpawnedSceneInstance,
         scene_entities: BTreeMap<SceneEntityId, Entity>,
-        baseline: WaveRunBaseline,
     ) -> Self {
         Self {
-            source,
             receipt,
             scene_entities,
             projectiles: Vec::new(),
-            baseline,
         }
-    }
-
-    pub(crate) fn source(&self) -> &StartupSceneSourceView {
-        &self.source
-    }
-
-    pub(crate) fn receipt(&self) -> &SpawnedSceneInstance {
-        &self.receipt
     }
 
     pub(crate) fn projectile_tokens(&self) -> &[WorldEntityToken] {
@@ -373,12 +358,10 @@ impl WaveRunOwner {
         &mut self,
         receipt: SpawnedSceneInstance,
         scene_entities: BTreeMap<SceneEntityId, Entity>,
-        baseline: WaveRunBaseline,
     ) {
         self.receipt = receipt;
         self.scene_entities = scene_entities;
         self.projectiles.clear();
-        self.baseline = baseline;
     }
 }
 

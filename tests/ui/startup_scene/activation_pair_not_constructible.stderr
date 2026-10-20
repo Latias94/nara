@@ -1,15 +1,15 @@
-error[E0560]: struct `StartupSceneActivation<'_>` has no field named `source`
-  --> tests/ui/startup_scene/activation_pair_not_constructible.rs:10:30
+error[E0560]: struct `CurrentScene<'_>` has no field named `source`
+  --> tests/ui/startup_scene/activation_pair_not_constructible.rs:10:20
    |
-10 |     StartupSceneActivation { source, receipt }
-   |                              ^^^^^^ `StartupSceneActivation<'_>` does not have this field
+10 |     CurrentScene { source, receipt }
+   |                    ^^^^^^ `CurrentScene<'_>` does not have this field
    |
    = note: all struct fields are already assigned
 
-error[E0560]: struct `StartupSceneActivation<'_>` has no field named `receipt`
-  --> tests/ui/startup_scene/activation_pair_not_constructible.rs:10:38
+error[E0560]: struct `CurrentScene<'_>` has no field named `receipt`
+  --> tests/ui/startup_scene/activation_pair_not_constructible.rs:10:28
    |
-10 |     StartupSceneActivation { source, receipt }
-   |                                      ^^^^^^^ `StartupSceneActivation<'_>` does not have this field
+10 |     CurrentScene { source, receipt }
+   |                            ^^^^^^^ `CurrentScene<'_>` does not have this field
    |
    = note: all struct fields are already assigned

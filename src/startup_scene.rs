@@ -1,8 +1,12 @@
-//! Provisional startup-scene activation boundary for advanced product integrations.
+//! Retained current-Scene ownership and one-shot startup activation.
 //!
 //! Project Hosts use the same materialization operation as direct managed-App integrations. The
 //! operation owns the retained source, creates the scene receipt itself, and publishes the pair
-//! only after scene spawning succeeds, so callers cannot combine unrelated documents and receipts.
+//! only after scene spawning succeeds. Later data-only replacements keep that same owner current,
+//! so callers cannot combine unrelated documents and receipts.
+
+mod replacement;
+pub use replacement::{replace_current_scene_with_product, restart_current_scene_with_product};
 
 use std::{
     error::Error,
@@ -33,7 +37,9 @@ use nara_reflect::{ComponentRegistry, component_registry, validate_component_reg
 use nara_scene::{ExpandedSceneCandidate, SceneDocument, spawn_expanded_scene};
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-use crate::project_content::{ProjectContentAssets, ProjectContentLease};
+use crate::project_content::{
+    ProjectContentAssets, ProjectContentGenerationLease, ProjectContentLease,
+};
 use crate::scene_retention::direct_startup_scene_retained_bytes;
 
 /// Stable plugin identity for the provisional advanced startup-scene activation seam.
@@ -43,32 +49,31 @@ const STARTUP_SCENE_ACTIVATION_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(STARTUP_SCENE_ACTIVATION_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(&[nara_scene::SCENE_COMPONENTS_PLUGIN_ID]);
 
-/// Validation failure while binding a direct managed-App startup source.
+/// Validation failure while binding a direct managed-App Scene source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StartupSceneSourceError {
+pub enum SceneSourceError {
     /// Logical retained-byte accounting overflowed `usize`.
     RetainedBytesOverflow,
     /// The exact logical retained-byte charge exceeds the caller's declared limit.
     RetainedBytesExceeded { required: usize, limit: usize },
 }
 
-impl fmt::Display for StartupSceneSourceError {
+impl fmt::Display for SceneSourceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
-            Self::RetainedBytesOverflow => "startup scene retained-byte accounting overflowed",
-            Self::RetainedBytesExceeded { .. } => {
-                "startup scene exceeds the direct retained-byte limit"
-            }
+            Self::RetainedBytesOverflow => "scene retained-byte accounting overflowed",
+            Self::RetainedBytesExceeded { .. } => "scene exceeds the direct retained-byte limit",
         })
     }
 }
 
-impl Error for StartupSceneSourceError {}
+impl Error for SceneSourceError {}
 
-enum StartupSceneRetention {
+enum SceneRetention {
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     Project {
         _lease: ProjectContentLease,
+        _generation: ProjectContentGenerationLease,
         assets: Arc<ProjectContentAssets>,
         retained_bytes: usize,
     },
@@ -78,31 +83,31 @@ enum StartupSceneRetention {
     },
 }
 
-/// Move-only retained source accepted by [`materialize_startup_scene`].
+/// Move-only retained source accepted by startup materialization or current-Scene replacement.
 ///
 /// File-backed callers receive this value from Project Content. Direct managed-App callers use
-/// [`StartupSceneSource::direct`] and must declare a deterministic logical retained-byte limit.
+/// [`SceneSource::direct`] and must declare a deterministic logical retained-byte limit.
 /// That direct limit is neither allocator-capacity nor RSS accounting and does not claim a Project
 /// Content reservation. The value deliberately does not implement `Clone`: exactly one
 /// materialization consumes exactly one source owner.
-pub struct StartupSceneSource {
+pub struct SceneSource {
     candidate: Arc<ExpandedSceneCandidate>,
-    retention: StartupSceneRetention,
+    retention: SceneRetention,
 }
 
-/// Non-owning view of the startup source retained by the root activation authority.
+/// Non-owning view of the source retained by the current-Scene authority.
 ///
 /// The view deliberately holds neither a strong document reference nor the Project Content lease.
 /// Clones therefore cannot extend retained memory beyond candidate or runtime retirement. Product
 /// code may inspect the source only through a bounded borrow while the private root owner remains
-/// alive. The move-only [`StartupSceneSource`] remains the only materialization input.
+/// alive. The move-only [`SceneSource`] remains the only materialization input.
 #[derive(Clone)]
-pub struct StartupSceneSourceView {
-    source: Weak<StartupSceneSource>,
+pub struct SceneSourceView {
+    source: Weak<SceneSource>,
     retained_bytes: usize,
 }
 
-impl StartupSceneSource {
+impl SceneSource {
     /// Binds an owned source for a direct managed-App integration.
     ///
     /// This path enforces its explicit limit but does not claim or imply a
@@ -110,7 +115,7 @@ impl StartupSceneSource {
     pub fn direct(
         document: Arc<SceneDocument>,
         retained_byte_limit: ByteLimit,
-    ) -> Result<Self, StartupSceneSourceError> {
+    ) -> Result<Self, SceneSourceError> {
         Self::direct_expanded(ExpandedSceneCandidate::plain(document), retained_byte_limit)
     }
 
@@ -118,20 +123,20 @@ impl StartupSceneSource {
     pub fn direct_expanded(
         candidate: ExpandedSceneCandidate,
         retained_byte_limit: ByteLimit,
-    ) -> Result<Self, StartupSceneSourceError> {
+    ) -> Result<Self, SceneSourceError> {
         let retained_bytes =
             direct_startup_scene_retained_bytes(candidate.document(), candidate.provenance())
-                .map_err(|_| StartupSceneSourceError::RetainedBytesOverflow)?;
+                .map_err(|_| SceneSourceError::RetainedBytesOverflow)?;
         let limit = retained_byte_limit.get();
         if retained_bytes > limit {
-            return Err(StartupSceneSourceError::RetainedBytesExceeded {
+            return Err(SceneSourceError::RetainedBytesExceeded {
                 required: retained_bytes,
                 limit,
             });
         }
         Ok(Self {
             candidate: Arc::new(candidate),
-            retention: StartupSceneRetention::Direct {
+            retention: SceneRetention::Direct {
                 retained_bytes,
                 _limit: limit,
             },
@@ -143,12 +148,14 @@ impl StartupSceneSource {
         candidate: Arc<ExpandedSceneCandidate>,
         assets: Arc<ProjectContentAssets>,
         lease: ProjectContentLease,
+        generation: ProjectContentGenerationLease,
         retained_bytes: usize,
     ) -> Self {
         Self {
             candidate,
-            retention: StartupSceneRetention::Project {
+            retention: SceneRetention::Project {
                 _lease: lease,
+                _generation: generation,
                 assets,
                 retained_bytes,
             },
@@ -163,8 +170,16 @@ impl StartupSceneSource {
     fn asset_database(&self) -> Option<&nara_asset::ProjectAssetDatabase> {
         match &self.retention {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-            StartupSceneRetention::Project { assets, .. } => Some(assets.database()),
-            StartupSceneRetention::Direct { .. } => None,
+            SceneRetention::Project { assets, .. } => Some(assets.database()),
+            SceneRetention::Direct { .. } => None,
+        }
+    }
+
+    fn is_project_backed(&self) -> bool {
+        match self.retention {
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            SceneRetention::Project { .. } => true,
+            SceneRetention::Direct { .. } => false,
         }
     }
 
@@ -172,8 +187,8 @@ impl StartupSceneSource {
     pub(crate) const fn retained_bytes(&self) -> usize {
         match &self.retention {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-            StartupSceneRetention::Project { retained_bytes, .. } => *retained_bytes,
-            StartupSceneRetention::Direct { retained_bytes, .. } => *retained_bytes,
+            SceneRetention::Project { retained_bytes, .. } => *retained_bytes,
+            SceneRetention::Direct { retained_bytes, .. } => *retained_bytes,
         }
     }
 
@@ -181,31 +196,31 @@ impl StartupSceneSource {
     pub(crate) fn direct_limit(&self) -> Option<usize> {
         match self.retention {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-            StartupSceneRetention::Project { .. } => None,
-            StartupSceneRetention::Direct { _limit, .. } => Some(_limit),
+            SceneRetention::Project { .. } => None,
+            SceneRetention::Direct { _limit, .. } => Some(_limit),
         }
     }
 }
 
-impl fmt::Debug for StartupSceneSource {
+impl fmt::Debug for SceneSource {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("StartupSceneSource")
+            .debug_struct("SceneSource")
             .field("entity_count", &self.document().entities.len())
             .field("retained_bytes", &self.retained_bytes())
             .field(
                 "retention",
                 &match self.retention {
                     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-                    StartupSceneRetention::Project { .. } => "project-content",
-                    StartupSceneRetention::Direct { .. } => "direct-limit",
+                    SceneRetention::Project { .. } => "project-content",
+                    SceneRetention::Direct { .. } => "direct-limit",
                 },
             )
             .finish_non_exhaustive()
     }
 }
 
-impl StartupSceneSourceView {
+impl SceneSourceView {
     /// Borrows the exact immutable document while the root activation authority retains it.
     ///
     /// Returns `None` after that authority has retired. The temporary strong reference is kept
@@ -236,34 +251,34 @@ impl StartupSceneSourceView {
     }
 }
 
-impl fmt::Debug for StartupSceneSourceView {
+impl fmt::Debug for SceneSourceView {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("StartupSceneSourceView")
+            .debug_struct("SceneSourceView")
             .field("available", &(self.source.strong_count() > 0))
             .field("retained_bytes", &self.retained_bytes())
             .finish_non_exhaustive()
     }
 }
 
-/// Read-only product view of one exact startup source and its matching successful spawn receipt.
+/// Read-only product view of the committed Scene source and its matching instance receipt.
 ///
 /// The activation plugin promotes a private one-shot materialization input into a private owner
 /// before product-dependent Startup systems run. That root resource, which downstream code
-/// cannot name or remove, owns the retention guard for the candidate and runtime lifetime. Product
-/// systems receive this read-only system parameter; replacement ownership remains outside this
-/// provisional surface.
-pub struct StartupSceneActivation<'w> {
-    owner: Res<'w, StartupSceneActivationOwner>,
+/// cannot name or remove, owns source retention. Replacement and Restart update that same pair
+/// before their exclusive caller returns. A cloned receipt is an observation and an expected-state
+/// guard, not independently mutable current-Scene authority.
+pub struct CurrentScene<'w> {
+    owner: Res<'w, CurrentSceneOwner>,
 }
 
 #[derive(Resource)]
-pub(crate) struct StartupSceneActivationOwner {
-    source: Arc<StartupSceneSource>,
+pub(crate) struct CurrentSceneOwner {
+    source: Arc<SceneSource>,
     receipt: SpawnedSceneInstance,
 }
 
-impl StartupSceneActivation<'_> {
+impl CurrentScene<'_> {
     /// Returns the exact immutable source admitted for the active runtime.
     #[must_use]
     pub fn source(&self) -> &SceneDocument {
@@ -276,20 +291,20 @@ impl StartupSceneActivation<'_> {
         self.owner.receipt()
     }
 
-    /// Returns a non-owning view of the exact startup source for product-local Retry.
+    /// Returns a non-owning view of the exact committed source.
     ///
-    /// The private root activation owner remains the sole retention authority. Cloning or leaking
-    /// this view cannot keep its document or Project Content lease alive after runtime retirement.
+    /// Cloning or leaking this view cannot keep an old source alive after replacement or runtime
+    /// retirement. Restart keeps this source and publishes a new matching instance receipt.
     #[must_use]
-    pub fn source_view(&self) -> StartupSceneSourceView {
-        StartupSceneSourceView {
+    pub fn source_view(&self) -> SceneSourceView {
+        SceneSourceView {
             source: Arc::downgrade(&self.owner.source),
             retained_bytes: self.owner.source.retained_bytes(),
         }
     }
 }
 
-impl StartupSceneActivationOwner {
+impl CurrentSceneOwner {
     pub(crate) fn source(&self) -> &SceneDocument {
         self.source.document()
     }
@@ -299,10 +314,10 @@ impl StartupSceneActivationOwner {
     }
 }
 
-impl fmt::Debug for StartupSceneActivation<'_> {
+impl fmt::Debug for CurrentScene<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("StartupSceneActivation")
+            .debug_struct("CurrentScene")
             .field("source", &self.owner.source)
             .field("instance_id", &self.owner.receipt.instance_id())
             .field("entity_count", &self.owner.receipt.len())
@@ -310,14 +325,14 @@ impl fmt::Debug for StartupSceneActivation<'_> {
     }
 }
 
-// SAFETY: Every operation delegates to `Res<StartupSceneActivationOwner>` and therefore registers
+// SAFETY: Every operation delegates to `Res<CurrentSceneOwner>` and therefore registers
 // and performs only the same read access to the private owner resource.
-unsafe impl SystemParam for StartupSceneActivation<'_> {
+unsafe impl SystemParam for CurrentScene<'_> {
     type State = ComponentId;
-    type Item<'world, 'state> = StartupSceneActivation<'world>;
+    type Item<'world, 'state> = CurrentScene<'world>;
 
     fn init_state(world: &mut World) -> Self::State {
-        <Res<'_, StartupSceneActivationOwner> as SystemParam>::init_state(world)
+        <Res<'_, CurrentSceneOwner> as SystemParam>::init_state(world)
     }
 
     fn init_access(
@@ -326,7 +341,7 @@ unsafe impl SystemParam for StartupSceneActivation<'_> {
         system_access: &mut SystemAccess,
         world: &mut World,
     ) {
-        <Res<'_, StartupSceneActivationOwner> as SystemParam>::init_access(
+        <Res<'_, CurrentSceneOwner> as SystemParam>::init_access(
             state,
             system_meta,
             system_access,
@@ -342,22 +357,22 @@ unsafe impl SystemParam for StartupSceneActivation<'_> {
     ) -> Result<Self::Item<'world, 'state>, SystemParamValidationError> {
         // SAFETY: this method has exactly the access registered by the delegated `Res` parameter.
         let owner = unsafe {
-            <Res<'_, StartupSceneActivationOwner> as SystemParam>::get_param(
+            <Res<'_, CurrentSceneOwner> as SystemParam>::get_param(
                 state,
                 system_meta,
                 world,
                 change_tick,
             )?
         };
-        Ok(StartupSceneActivation { owner })
+        Ok(CurrentScene { owner })
     }
 }
 
 // SAFETY: the delegated resource parameter is read-only.
-unsafe impl ReadOnlySystemParam for StartupSceneActivation<'_> {}
+unsafe impl ReadOnlySystemParam for CurrentScene<'_> {}
 
 #[derive(Resource)]
-struct StartupSceneActivationInput(StartupSceneActivationOwner);
+struct StartupSceneActivationInput(CurrentSceneOwner);
 
 #[derive(Resource)]
 struct StartupSceneActivationAuthority {
@@ -441,7 +456,7 @@ impl Plugin for StartupSceneActivationPlugin {
 /// and validated against the candidate World; callers cannot substitute another registry.
 pub fn materialize_startup_scene(
     world: &mut World,
-    source: StartupSceneSource,
+    source: SceneSource,
 ) -> Result<DiagnosticReport, StartupSceneMaterializeError> {
     if !world.contains_resource::<StartupSceneActivationAuthority>() {
         return Err(StartupSceneMaterializeError::single(
@@ -465,7 +480,7 @@ pub fn materialize_startup_scene(
         }
     }
     if world.contains_resource::<StartupSceneActivationInput>()
-        || world.contains_resource::<StartupSceneActivationOwner>()
+        || world.contains_resource::<CurrentSceneOwner>()
     {
         return Err(StartupSceneMaterializeError::single(
             "startup.scene.activation-state-conflict",
@@ -498,7 +513,7 @@ pub fn materialize_startup_scene(
         .instance
         .take()
         .expect("successful scene spawning always publishes an instance receipt");
-    world.insert_resource(StartupSceneActivationInput(StartupSceneActivationOwner {
+    world.insert_resource(StartupSceneActivationInput(CurrentSceneOwner {
         source: Arc::new(source),
         receipt,
     }));
@@ -512,7 +527,7 @@ fn consume_startup_scene_activation(world: &mut World) -> Result<(), BevyError> 
     if !world.contains_resource::<StartupSceneActivationInput>() {
         return Ok(());
     }
-    if world.contains_resource::<StartupSceneActivationOwner>() {
+    if world.contains_resource::<CurrentSceneOwner>() {
         return Err(classified_startup_error(
             "startup.scene.activation-conflict",
             "Startup scene activation authority conflicts with pending input",
@@ -528,7 +543,7 @@ fn consume_startup_scene_activation(world: &mut World) -> Result<(), BevyError> 
 fn finalize_startup_scene_activation(
     mut authority: ResMut<StartupSceneActivationAuthority>,
     pending: Option<Res<StartupSceneActivationInput>>,
-    active: Option<Res<StartupSceneActivationOwner>>,
+    active: Option<Res<CurrentSceneOwner>>,
 ) -> Result<(), BevyError> {
     let phase = authority.phase;
     authority.phase = StartupSceneActivationPhase::Finalized;
@@ -597,6 +612,9 @@ impl fmt::Display for StartupSceneMaterializeError {
 impl Error for StartupSceneMaterializeError {}
 
 #[cfg(test)]
+mod replacement_tests;
+
+#[cfg(test)]
 mod tests {
     use std::sync::OnceLock;
 
@@ -613,19 +631,18 @@ mod tests {
         assert!(required > 1);
 
         let source =
-            StartupSceneSource::direct(Arc::clone(&document), ByteLimit::new(required).unwrap())
-                .unwrap();
+            SceneSource::direct(Arc::clone(&document), ByteLimit::new(required).unwrap()).unwrap();
 
         assert!(std::ptr::eq(source.document(), document.as_ref()));
         assert_eq!(source.retained_bytes(), required);
         assert_eq!(source.direct_limit(), Some(required));
         assert_eq!(
-            StartupSceneSource::direct(
+            SceneSource::direct(
                 document,
                 ByteLimit::new(required.checked_sub(1).unwrap()).unwrap(),
             )
             .unwrap_err(),
-            StartupSceneSourceError::RetainedBytesExceeded {
+            SceneSourceError::RetainedBytesExceeded {
                 required,
                 limit: required - 1,
             }
@@ -636,10 +653,9 @@ mod tests {
     fn source_view_cannot_extend_the_root_document_lifetime() {
         let document = Arc::new(SceneDocument::from_ordered_roots([]));
         let source = Arc::new(
-            StartupSceneSource::direct(Arc::clone(&document), ByteLimit::new(1024).unwrap())
-                .unwrap(),
+            SceneSource::direct(Arc::clone(&document), ByteLimit::new(1024).unwrap()).unwrap(),
         );
-        let view = StartupSceneSourceView {
+        let view = SceneSourceView {
             source: Arc::downgrade(&source),
             retained_bytes: source.retained_bytes(),
         };
@@ -682,7 +698,7 @@ mod tests {
                 nara_app::RuntimeClosePolicy::default(),
             )
             .unwrap();
-        let source = StartupSceneSource::direct(
+        let source = SceneSource::direct(
             Arc::new(SceneDocument::from_ordered_roots([])),
             ByteLimit::new(1024).unwrap(),
         )
@@ -714,22 +730,14 @@ mod tests {
                 .world()
                 .contains_resource::<StartupSceneActivationInput>()
         );
-        assert!(
-            !candidate
-                .world()
-                .contains_resource::<StartupSceneActivationOwner>()
-        );
+        assert!(!candidate.world().contains_resource::<CurrentSceneOwner>());
         let runtime = candidate.complete_startup().unwrap().promote();
         assert!(
             !runtime
                 .world()
                 .contains_resource::<StartupSceneActivationInput>()
         );
-        assert!(
-            runtime
-                .world()
-                .contains_resource::<StartupSceneActivationOwner>()
-        );
+        assert!(runtime.world().contains_resource::<CurrentSceneOwner>());
         assert_eq!(
             runtime
                 .world()
@@ -751,7 +759,7 @@ mod tests {
             phase: StartupSceneActivationPhase::Finalized,
         });
         let entity_count = world.entities().len();
-        let source = StartupSceneSource::direct(
+        let source = SceneSource::direct(
             Arc::new(SceneDocument::from_ordered_roots([])),
             ByteLimit::new(1024).unwrap(),
         )
@@ -764,7 +772,7 @@ mod tests {
         );
         assert_eq!(world.entities().len(), entity_count);
         assert!(!world.contains_resource::<StartupSceneActivationInput>());
-        assert!(!world.contains_resource::<StartupSceneActivationOwner>());
+        assert!(!world.contains_resource::<CurrentSceneOwner>());
         assert_eq!(
             world.resource::<StartupSceneActivationAuthority>().phase,
             StartupSceneActivationPhase::Finalized

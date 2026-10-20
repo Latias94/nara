@@ -179,6 +179,65 @@ fn shared_budget_host_retains_at_most_two_distinct_content_generations() {
 }
 
 #[test]
+fn escaped_scene_and_image_keep_their_generation_claim_until_the_last_owner_retires() {
+    let project = TestProject::with_prefab_startup();
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    let first = loader.load(&candidate, &plan).unwrap();
+    let first_revision = first.revision();
+    let source = first.scene_source();
+    let image = first.images()[0].image().share_retained().unwrap();
+    let pixels = image.pixels().to_vec();
+    let shared_image = image.share_retained().unwrap();
+    drop(first);
+    assert_eq!(loader.budget_snapshot().active_generations(), 1);
+    assert_eq!(loader.budget_snapshot().active_reservations(), 1);
+
+    project.write_prefab_source(&PrefabDocument::from_ordered_roots([
+        SceneEntityRecord::new(scene_id("enemy-second")),
+    ]));
+    let second = loader.load(&candidate, &plan).unwrap();
+    let second_revision = second.revision();
+    assert_ne!(second_revision, first_revision);
+    assert_eq!(loader.budget_snapshot().active_generations(), 2);
+
+    project.write_prefab_source(&PrefabDocument::from_ordered_roots([
+        SceneEntityRecord::new(scene_id("enemy-third")),
+    ]));
+    let before_refusal = loader.budget_snapshot();
+    let error = loader.load(&candidate, &plan).unwrap_err();
+    assert_eq!(
+        error.kind(),
+        ProjectContentErrorKind::GenerationCapacityExceeded
+    );
+    assert_active_charges_eq(loader.budget_snapshot(), before_refusal);
+    assert_eq!(second.revision(), second_revision);
+    assert_eq!(image.pixels(), pixels);
+
+    drop(source);
+    drop(image);
+    // A shared pixel allocation still owns A even after its Snapshot and Scene source retire.
+    assert_eq!(loader.budget_snapshot().active_generations(), 2);
+    assert_eq!(shared_image.pixels(), pixels);
+    let before_refusal = loader.budget_snapshot();
+    let error = loader.load(&candidate, &plan).unwrap_err();
+    assert_eq!(
+        error.kind(),
+        ProjectContentErrorKind::GenerationCapacityExceeded
+    );
+    assert_active_charges_eq(loader.budget_snapshot(), before_refusal);
+
+    drop(shared_image);
+    assert_eq!(loader.budget_snapshot().active_generations(), 1);
+    let third = loader.load(&candidate, &plan).unwrap();
+    assert_ne!(third.revision(), second_revision);
+    assert_eq!(loader.budget_snapshot().active_generations(), 2);
+    assert_eq!(loader.budget_snapshot().generation_high_water(), 2);
+    drop((second, third));
+    assert_no_active_charges(loader.budget_snapshot());
+}
+
+#[test]
 fn duplicate_dependency_edges_share_unique_prefab_and_image_work() {
     let single_edge_files = successful_high_water(ProjectContentBudgetKind::Files, |_| {});
     let project = TestProject::with_prefab_startup();
@@ -231,6 +290,21 @@ fn assert_no_active_charges(snapshot: ProjectContentBudgetSnapshot) {
     assert_eq!(snapshot.active_generations(), 0);
     for kind in ProjectContentBudgetKind::ALL.iter().copied() {
         assert_eq!(snapshot.active(kind), 0, "{kind:?} charge leaked");
+    }
+}
+
+fn assert_active_charges_eq(
+    actual: ProjectContentBudgetSnapshot,
+    expected: ProjectContentBudgetSnapshot,
+) {
+    assert_eq!(actual.active_reservations(), expected.active_reservations());
+    assert_eq!(actual.active_generations(), expected.active_generations());
+    for kind in ProjectContentBudgetKind::ALL {
+        assert_eq!(
+            actual.active(*kind),
+            expected.active(*kind),
+            "{kind:?} charge drifted"
+        );
     }
 }
 

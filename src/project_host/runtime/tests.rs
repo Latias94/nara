@@ -7,6 +7,7 @@ mod authoring_images;
 
 #[cfg(feature = "tooling")]
 mod browser_preparation;
+mod current_scene;
 #[cfg(feature = "tooling")]
 mod host_custody;
 #[cfg(feature = "tooling")]
@@ -101,9 +102,7 @@ use crate::project_host::advanced::{
 };
 use crate::project_host::ingest_project_manifest;
 use crate::project_host::runtime_agreement::prepare_runtime_schema_agreement;
-use crate::startup_scene::{
-    StartupSceneActivation, StartupSceneActivationOwner, StartupSceneActivationSet,
-};
+use crate::startup_scene::{CurrentScene, CurrentSceneOwner, StartupSceneActivationSet};
 
 use super::*;
 
@@ -402,7 +401,7 @@ impl Plugin for ActivationProbePlugin {
     }
 }
 
-fn observe_startup_activation(activation: StartupSceneActivation<'_>, probe: Res<ActivationProbe>) {
+fn observe_startup_activation(activation: CurrentScene<'_>, probe: Res<ActivationProbe>) {
     assert_eq!(
         activation.source().entities.len(),
         activation.receipt().len()
@@ -427,7 +426,7 @@ impl Plugin for ClassifiedStartupFailurePlugin {
     }
 }
 
-fn fail_classified_startup(_activation: StartupSceneActivation<'_>) -> Result<(), BevyError> {
+fn fail_classified_startup(_activation: CurrentScene<'_>) -> Result<(), BevyError> {
     let detail = RuntimeFaultDetail::new(
         "nara.test.startup-configuration-invalid",
         "Startup configuration is invalid",
@@ -5573,7 +5572,7 @@ fn bundled_startup_activation_shares_the_spawned_source_and_resolves_its_receipt
         panic!("runtime is not visible in the Host slot");
     };
     let world = published.runtime().world();
-    let activation = world.resource::<StartupSceneActivationOwner>();
+    let activation = world.resource::<CurrentSceneOwner>();
     assert_eq!(activation.source() as *const SceneDocument, source_pointer);
     assert_eq!(activation.receipt().entity_ids(), source_entity_ids);
     for entity_id in &source_entity_ids {
@@ -5873,6 +5872,46 @@ fn project_host_publishes_snapshot_images_without_copying_the_retained_pixels() 
     }
 
     close_host(&mut host);
+}
+
+#[test]
+fn published_host_retires_startup_snapshot_facts_and_keeps_only_live_content_owners() {
+    let project = TestProject::with_image("host-content-custody");
+    let (snapshot, plan, loader) =
+        project.snapshot_plan_and_loader_with_limits(ProjectContentLimits::default());
+    let startup_revision = snapshot.revision();
+    let budget = loader.budget_host();
+    assert_eq!(budget.snapshot().active_reservations(), 2);
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+
+    host.complete_start(&mut attempt).unwrap();
+
+    assert_eq!(host.running_content_revision(), Some(startup_revision));
+    assert_eq!(budget.snapshot().active_reservations(), 1);
+    assert_eq!(budget.snapshot().active_generations(), 1);
+    let escaped_image = host
+        .with_running_world(|world| {
+            world
+                .resource::<Assets<ImageAsset>>()
+                .iter()
+                .next()
+                .unwrap()
+                .1
+                .share_retained()
+                .unwrap()
+        })
+        .unwrap();
+
+    close_host(&mut host);
+
+    assert_eq!(host.running_content_revision(), None);
+    assert_eq!(budget.snapshot().active_reservations(), 1);
+    assert_eq!(budget.snapshot().active_generations(), 1);
+    assert!(!escaped_image.pixels().is_empty());
+    drop(escaped_image);
+    assert_eq!(budget.snapshot().active_reservations(), 0);
+    assert_eq!(budget.snapshot().active_generations(), 0);
 }
 
 #[test]
@@ -6721,7 +6760,8 @@ fn running_owner_identity(host: &ProjectHost) -> RunningOwnerIdentity {
         task_pools: world.resource::<TaskPools>() as *const TaskPools as usize,
         service_session: world.resource::<RuntimeServiceSessionId>().0,
         identity_domain: world.resource::<WorldIdentityDomain>().id().get(),
-        snapshot_scene: published._snapshot.expanded_scene() as *const SceneDocument as usize,
+        snapshot_scene: world.resource::<CurrentSceneOwner>().source() as *const SceneDocument
+            as usize,
         registry_snapshot: nara_reflect::component_registry(world)
             .expect("the published runtime registry is installed")
             .snapshot()

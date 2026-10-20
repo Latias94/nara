@@ -2,6 +2,7 @@ use std::{
     collections::BTreeMap,
     error::Error,
     fmt::{self, Display, Formatter},
+    mem::size_of,
     sync::{Arc, Mutex},
 };
 
@@ -267,6 +268,7 @@ impl ProjectContentBudgetSnapshot {
         self.active_reservations
     }
 
+    /// Distinct decoded generations retained by snapshots, Scene sources, or shared Images.
     #[must_use]
     pub const fn active_generations(self) -> usize {
         self.active_generations
@@ -364,8 +366,10 @@ impl ProjectContentBudgetHost {
             .max(state.active_generations.len());
         drop(state);
         Ok(ProjectContentGenerationLease {
-            host: self.clone(),
-            revision,
+            _inner: Arc::new(ProjectContentGenerationLeaseInner {
+                host: self.clone(),
+                revision,
+            }),
         })
     }
 
@@ -522,12 +526,21 @@ impl ProjectContentGenerationCapacityError {
     }
 }
 
-pub(super) struct ProjectContentGenerationLease {
+/// Shared custody of one admitted generation claim, independent of decoded objects.
+#[derive(Clone)]
+pub(crate) struct ProjectContentGenerationLease {
+    _inner: Arc<ProjectContentGenerationLeaseInner>,
+}
+
+pub(super) const GENERATION_LEASE_RETAINED_BYTES: usize =
+    size_of::<ProjectContentGenerationLeaseInner>() + super::ARC_CONTROL_BLOCK_BYTES;
+
+struct ProjectContentGenerationLeaseInner {
     host: ProjectContentBudgetHost,
     revision: ProjectContentRevision,
 }
 
-impl Drop for ProjectContentGenerationLease {
+impl Drop for ProjectContentGenerationLeaseInner {
     fn drop(&mut self) {
         self.host.release_generation(self.revision);
     }
@@ -697,6 +710,22 @@ fn aggregate_bytes(charge: &[usize; TRACKED_KIND_COUNT]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::{ProjectContentBudgetHost, ProjectContentBudgetKind, ProjectContentLimits};
+
+    #[test]
+    fn generation_token_clones_share_one_claim_and_independent_loads_release_separately() {
+        let host = ProjectContentBudgetHost::new(ProjectContentLimits::default());
+        let revision = super::super::ProjectContentRevision([1; 32]);
+        let first = host.retain_generation(revision).unwrap();
+        let cloned = first.clone();
+        let independent = host.retain_generation(revision).unwrap();
+        assert_eq!(host.snapshot().active_generations(), 1);
+        drop(first);
+        drop(cloned);
+        assert_eq!(host.snapshot().active_generations(), 1);
+        drop(independent);
+        assert_eq!(host.snapshot().active_generations(), 0);
+        assert_eq!(host.snapshot().generation_high_water(), 1);
+    }
 
     #[test]
     fn all_budget_kinds_follow_the_complete_discriminant_range() {

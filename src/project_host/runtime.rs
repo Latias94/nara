@@ -11,7 +11,7 @@ use super::{
     CompositionError, ProjectContentRevision, ProjectContentSnapshot, ProjectSettingsLineage,
     RuntimePlan, RuntimePlanError,
 };
-use crate::startup_scene::{StartupSceneSource, materialize_startup_scene};
+use crate::startup_scene::{SceneSource, materialize_startup_scene};
 use nara_app::{
     AppExit, PluginFailureReport, PluginHook, PluginHookMutation, PluginPlanError,
     RuntimeAdmissionError, RuntimeAdmissionReservation, RuntimeCandidateFailure,
@@ -115,7 +115,7 @@ impl PreparedRuntimeStart {
 struct RuntimeStartInputs {
     snapshot: ProjectContentSnapshot,
     plan: RuntimePlan,
-    startup_scene: StartupSceneSource,
+    startup_scene: SceneSource,
     commands: Vec<GameplayCommandSubmission>,
     obligations: RuntimeObligationLedger,
 }
@@ -268,7 +268,7 @@ enum ProjectHostSlot {
 struct PublishedProjectRuntime {
     epoch: u64,
     runtime: RuntimePublicationSlot,
-    _snapshot: ProjectContentSnapshot,
+    startup_admission_revision: ProjectContentRevision,
     _plan: RuntimePlan,
 }
 
@@ -437,7 +437,7 @@ impl ProjectHost {
 
     fn running_content_revision(&self) -> Option<ProjectContentRevision> {
         match &self.slot {
-            ProjectHostSlot::Running(published) => Some(published._snapshot.revision()),
+            ProjectHostSlot::Running(published) => Some(published.startup_admission_revision),
             ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => None,
         }
     }
@@ -525,7 +525,7 @@ impl ProjectHost {
         &mut self,
         snapshot: ProjectContentSnapshot,
         plan: RuntimePlan,
-        startup_scene: StartupSceneSource,
+        startup_scene: SceneSource,
         commands: Vec<GameplayCommandSubmission>,
     ) -> Result<RuntimeStartAttempt, HostFault> {
         self.begin_start_with_scene(snapshot, plan, startup_scene, commands)
@@ -535,7 +535,7 @@ impl ProjectHost {
         &mut self,
         snapshot: ProjectContentSnapshot,
         plan: RuntimePlan,
-        startup_scene: StartupSceneSource,
+        startup_scene: SceneSource,
         commands: Vec<GameplayCommandSubmission>,
     ) -> Result<RuntimeStartAttempt, HostFault> {
         if !matches!(self.slot, ProjectHostSlot::Empty) || self.start_claim.any_active() {
@@ -748,7 +748,9 @@ impl ProjectHost {
         self.slot = ProjectHostSlot::Running(Box::new(PublishedProjectRuntime {
             epoch,
             runtime,
-            _snapshot: snapshot,
+            // Freshness compares the admitted startup, even after a legal current-Scene change.
+            // Live sources and published Images retain their own decoded generation instead.
+            startup_admission_revision: snapshot.revision(),
             _plan: plan,
         }));
         claim.finish();
@@ -1042,7 +1044,7 @@ fn materialize_project_runtime(
     world: &mut World,
     plan: &RuntimePlan,
     snapshot: &ProjectContentSnapshot,
-    startup_scene: StartupSceneSource,
+    startup_scene: SceneSource,
     commands: Vec<GameplayCommandSubmission>,
 ) -> Result<DiagnosticReport, HostFault> {
     verify_runtime_registry(world, plan)?;

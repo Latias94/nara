@@ -1,3 +1,5 @@
+#[path = "first_wave/current_scene.rs"]
+mod current_scene;
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 #[path = "support/reference_project_copy.rs"]
@@ -11,7 +13,7 @@ use std::{
 };
 
 use nara::{
-    advanced_prelude::{StartupSceneSource, materialize_startup_scene},
+    advanced_prelude::{CurrentScene, SceneSource, materialize_startup_scene},
     app::{
         CoreStage, FixedUpdateSet, PluginCategory, PluginDeclaration, PluginDefinition, PluginId,
         RuntimeAdmissionReservation, RuntimeCandidateRetirementState, RuntimeClosePolicy,
@@ -25,11 +27,12 @@ use nara::{
         lifecycle::{Add, Despawn},
         observer::{Observer, On},
         schedule::IntoScheduleConfigs,
+        system::SystemState,
     },
     gameplay::{GameplayCommandSet, submit_gameplay_driver_command},
     identity::{
-        EntityLookup, RuntimeEntityReference, TombstoneCause, WorldIdentityDomain,
-        spawn_identity_entity,
+        EntityLookup, RuntimeEntityReference, SpawnedSceneInstance, TombstoneCause,
+        WorldIdentityDomain, spawn_identity_entity,
     },
     prelude::{
         App, Commands, ComponentTypeId, ComponentValue, FixedTime, Parent, Plugin, PluginError,
@@ -326,6 +329,7 @@ impl Plugin for RunInitializationAuditPlugin {
 #[derive(Debug, Default, Resource)]
 struct RunInitializationAudit {
     generations: BTreeMap<u64, NormalizedRunState>,
+    scene_receipts: BTreeMap<u64, SpawnedSceneInstance>,
 }
 
 #[derive(Debug, Default)]
@@ -608,10 +612,13 @@ fn capture_run_initialization(world: &mut World) {
         return;
     }
     let state = normalized_run_state(world);
-    world
-        .resource_mut::<RunInitializationAudit>()
-        .generations
-        .insert(generation, state);
+    let receipt = {
+        let mut current = SystemState::<CurrentScene<'_>>::new(world);
+        current.get(world).unwrap().receipt().clone()
+    };
+    let mut audit = world.resource_mut::<RunInitializationAudit>();
+    audit.generations.insert(generation, state);
+    audit.scene_receipts.insert(generation, receipt);
 }
 
 fn normalized_run_state(world: &World) -> NormalizedRunState {
@@ -1223,7 +1230,7 @@ fn reexpand_modified_authored_scene(
     scene: nara::scene::SceneDocument,
     snapshot: &nara::project_host::ProjectContentSnapshot,
     plan: &nara::project_host::RuntimePlan,
-) -> StartupSceneSource {
+) -> SceneSource {
     let resolver = snapshot.prefabs().iter().fold(
         nara::scene::InMemoryPrefabSourceResolver::new(),
         |resolver, prefab| {
@@ -1239,7 +1246,7 @@ fn reexpand_modified_authored_scene(
         "{:#?}",
         expansion.diagnostics
     );
-    StartupSceneSource::direct_expanded(
+    SceneSource::direct_expanded(
         expansion
             .candidate
             .expect("successful expansion binds source provenance"),
@@ -1248,7 +1255,7 @@ fn reexpand_modified_authored_scene(
     .expect("the modified reference scene fits the bounded direct retention limit")
 }
 
-fn assert_startup_rejected(plan: nara::project_host::RuntimePlan, source: StartupSceneSource) {
+fn assert_startup_rejected(plan: nara::project_host::RuntimePlan, source: SceneSource) {
     let candidate = admit_adapter_candidate(plan, source);
     let mut failure = match candidate.complete_startup() {
         Err(failure) => failure,
@@ -1712,7 +1719,7 @@ fn build_adapter_retry_runtime(
 
 fn admit_adapter_candidate(
     plan: nara::project_host::RuntimePlan,
-    source: StartupSceneSource,
+    source: SceneSource,
 ) -> nara::app::RuntimeCandidate {
     let runtime_time = plan.settings().runtime.runtime_time_settings();
     let fixed_time = plan.settings().runtime.fixed_time();

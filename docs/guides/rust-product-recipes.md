@@ -128,6 +128,15 @@ authorizes retrying a partially committed App.
 
 ## Strict tools use the compiled project
 
+Advanced managed-App Scene consumers inspect `CurrentScene` for the committed source and instance
+receipt. Use `restart_current_scene_with_product` for Retry and
+`replace_current_scene_with_product` for direct data-only replacement at an exclusive simulation
+boundary. Both require the complete expected receipt and derive the frozen registry from the World.
+The root updates source and receipt together; a product's copied receipt is a membership cache or
+expected-state guard. `SceneSource` is move-only and `SceneSourceView` does not retain its owner.
+Project-backed restart reuses resident content. Hosted replacement remains rejected until concrete
+project resource residency and retirement are supported; direct replacement does not load files.
+
 The project owns one recipe function shared by headless, desktop, Check, Export, and startup-Scene
 Repair. Add the `project-tooling` Nara feature to the headless dependency, declare the tool entry in
 the project's Cargo manifest, and dispatch it before normal argument parsing or gameplay startup:

@@ -3,22 +3,25 @@ use std::{collections::BTreeMap, error::Error, fmt};
 use nara::ecs as bevy_ecs;
 use nara::{
     advanced_prelude::{
-        SceneProductOverlayWriter, SceneProductTransactionLimits, StartupSceneActivation,
-        replace_expanded_scene_with_product,
+        CurrentScene, SceneProductOverlayWriter, SceneProductTransactionLimits,
+        restart_current_scene_with_product,
     },
     app::RuntimeFaultReporter,
     core::ItemLimit,
-    ecs::{Entity, Mut, With, Without, error::BevyError, system::SystemParam},
+    ecs::{
+        Entity, Mut, With, Without,
+        error::BevyError,
+        system::{SystemParam, SystemState},
+    },
     gameplay::{GameplayCommandBatch, GameplayCommandValue},
     hierarchy::{
         HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter, Parent,
     },
     identity::{EntityLookup, SpawnedSceneInstance, spawn_identity_entity},
     prelude::{
-        Commands, ComponentRegistry, ComponentSchema, ComponentTypeId, FixedTime,
-        PersistentComponentProvider, Query, Res, ResMut, SceneEntityId, Transform2d, Vec2, World,
+        Commands, ComponentSchema, ComponentTypeId, FixedTime, PersistentComponentProvider, Query,
+        Res, ResMut, SceneEntityId, Transform2d, Vec2, World,
     },
-    reflect::component_registry,
     scene::{SceneDocument, SceneEntityRecord, SceneEntitySource, retire_and_despawn_scene_entity},
     transform::GlobalTransform2d,
 };
@@ -78,7 +81,7 @@ impl PreparedReferenceRun {
     reason = "the Bevy system signature is the explicit startup access contract"
 )]
 pub(crate) fn initialize_reference_run(
-    activation: StartupSceneActivation<'_>,
+    activation: CurrentScene<'_>,
     mut commands: Commands,
     scene_entities: Query<(Entity, &SceneEntitySource)>,
     mut movement: ResMut<MovementIntent>,
@@ -115,17 +118,12 @@ pub(crate) fn initialize_reference_run(
     *retry = prepared.baseline.retry;
     *state = prepared.baseline.state.clone();
     *snapshot = WaveSnapshot::default();
-    commands.insert_resource(WaveRunOwner::new(
-        activation.source_view(),
-        activation.receipt().clone(),
-        entities,
-        prepared.baseline,
-    ));
+    commands.insert_resource(WaveRunOwner::new(activation.receipt().clone(), entities));
     Ok(())
 }
 
 fn resolve_startup_entities(
-    activation: &StartupSceneActivation<'_>,
+    activation: &CurrentScene<'_>,
     scene_entities: &Query<(Entity, &SceneEntitySource)>,
 ) -> Result<BTreeMap<SceneEntityId, Entity>, BevyError> {
     let mut entities = BTreeMap::new();
@@ -452,60 +450,25 @@ fn apply_wave_reset(world: &mut World) -> Result<bool, BevyError> {
         return Ok(false);
     }
 
-    let registry = component_registry(world)
-        .and_then(|registry| registry.snapshot().ok())
-        .map(ComponentRegistry::from_snapshot)
-        .ok_or_else(|| BevyError::error(ReferenceSimulationError::ComponentRegistryUnavailable))?;
-
     world.resource_scope(|world, mut owner: Mut<WaveRunOwner>| {
         let status = *world.resource::<WaveRetryStatus>();
         let last_rejection = status.last_rejection();
         let ui_action_sequence = status.pending_ui_action_sequence();
-        let replacement = owner.source().with_expanded_scene(|candidate, database| {
+        let (expected, prepared) = {
+            let mut current_state = SystemState::<CurrentScene<'_>>::new(world);
+            let current = current_state.get(world).map_err(BevyError::error)?;
             let prepared = prepare_reference_run(
-                candidate.document(),
+                current.source(),
                 next_generation,
                 RunPublication::Retry {
                     last_rejection,
                     ui_action_sequence,
                 },
-            )?;
-            let limits = SceneProductTransactionLimits::new(
-                ItemLimit::new(MAX_WAVE_SCENE_ENTITIES.saturating_mul(3))
-                    .expect("the reference overlay limit is non-zero"),
-                ItemLimit::new(MAX_WAVE_PROJECTILES)
-                    .expect("the reference projectile limit is non-zero"),
             );
-            let retirements = owner.projectile_tokens().to_vec();
-            let baseline = prepared.baseline.clone();
-            let report = replace_expanded_scene_with_product(
-                world,
-                &registry,
-                candidate,
-                database,
-                owner.receipt(),
-                limits,
-                &retirements,
-                |writer| {
-                    prepared.write_overlay(writer);
-                    writer
-                        .replace_resource(baseline.movement)
-                        .replace_resource(baseline.generation)
-                        .replace_resource(baseline.retry)
-                        .replace_resource(baseline.state.clone())
-                        .replace_resource(WaveSnapshot::default());
-                },
-            );
-            Ok::<_, ReferenceSimulationError>((prepared, report))
-        });
-        let Some(replacement) = replacement else {
-            world
-                .resource_mut::<WaveRetryStatus>()
-                .reject(WaveRetryRejection::InvalidAuthoredConfiguration);
-            return Ok(false);
+            (current.receipt().clone(), prepared)
         };
-        let (prepared, mut report) = match replacement {
-            Ok(replacement) => replacement,
+        let prepared = match prepared {
+            Ok(prepared) => prepared,
             Err(_) => {
                 world
                     .resource_mut::<WaveRetryStatus>()
@@ -513,6 +476,24 @@ fn apply_wave_reset(world: &mut World) -> Result<bool, BevyError> {
                 return Ok(false);
             }
         };
+        let limits = SceneProductTransactionLimits::new(
+            ItemLimit::new(MAX_WAVE_SCENE_ENTITIES.saturating_mul(3))
+                .expect("the reference overlay limit is non-zero"),
+            ItemLimit::new(MAX_WAVE_PROJECTILES)
+                .expect("the reference projectile limit is non-zero"),
+        );
+        let retirements = owner.projectile_tokens().to_vec();
+        let baseline = prepared.baseline.clone();
+        let mut report =
+            restart_current_scene_with_product(world, &expected, limits, &retirements, |writer| {
+                prepared.write_overlay(writer);
+                writer
+                    .replace_resource(baseline.movement)
+                    .replace_resource(baseline.generation)
+                    .replace_resource(baseline.retry)
+                    .replace_resource(baseline.state.clone())
+                    .replace_resource(WaveSnapshot::default());
+            });
         if report.diagnostics.has_errors() {
             world
                 .resource_mut::<WaveRetryStatus>()
@@ -525,7 +506,7 @@ fn apply_wave_reset(world: &mut World) -> Result<bool, BevyError> {
             .expect("successful product replacement publishes one scene receipt");
         let scene_entities = resolve_published_entities(world, &receipt)
             .expect("successful product replacement must publish exact scene membership");
-        owner.publish_replacement(receipt, scene_entities, prepared.baseline);
+        owner.publish_replacement(receipt, scene_entities);
         Ok(true)
     })
 }
@@ -1422,7 +1403,6 @@ fn axis_velocity(offset: f32, speed: f32) -> f32 {
 enum ReferenceSimulationError {
     TooManySceneEntities,
     SceneMembershipMismatch,
-    ComponentRegistryUnavailable,
     InvalidAuthoredConfiguration,
     InvalidRunTick,
     MissingPlayer,
@@ -1452,9 +1432,6 @@ impl fmt::Display for ReferenceSimulationError {
             Self::TooManySceneEntities => "reference wave scene entity limit was exceeded",
             Self::SceneMembershipMismatch => {
                 "reference wave scene identity membership is inconsistent"
-            }
-            Self::ComponentRegistryUnavailable => {
-                "reference wave component registry is unavailable"
             }
             Self::InvalidAuthoredConfiguration => {
                 "reference wave authored configuration is invalid"

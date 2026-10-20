@@ -1,6 +1,6 @@
-use nara::prelude::{StartupSceneSource, materialize_startup_scene};
+use nara::prelude::{SceneSource, materialize_startup_scene};
 
 fn main() {
     let _ = materialize_startup_scene;
-    let _: Option<StartupSceneSource> = None;
+    let _: Option<SceneSource> = None;
 }

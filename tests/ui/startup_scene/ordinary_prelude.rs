@@ -1,5 +1,5 @@
-use nara::prelude::StartupSceneActivation;
+use nara::prelude::CurrentScene;
 
 fn main() {
-    let _: Option<StartupSceneActivation> = None;
+    let _: Option<CurrentScene> = None;
 }

@@ -467,6 +467,7 @@ fn delivery_and_escaped_scene_authority_retain_budget_until_their_last_drop() {
     let source = second.scene_source();
     let closure = second.content_closure();
     drop((loader, second, delivery));
+    assert_eq!(budget.snapshot().active_generations(), 1);
     assert!(
         budget
             .snapshot()
@@ -474,6 +475,7 @@ fn delivery_and_escaped_scene_authority_retain_budget_until_their_last_drop() {
             > 0
     );
     drop(source);
+    assert_eq!(budget.snapshot().active_generations(), 0);
     assert_eq!(
         budget
             .snapshot()

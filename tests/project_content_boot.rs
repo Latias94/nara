@@ -778,9 +778,10 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
     for kind in ProjectContentBudgetKind::ALL {
         assert_eq!(image_only.active(*kind), leased.active(*kind));
     }
-    assert_eq!(image_only.active_generations(), 0);
+    assert_eq!(image_only.active_generations(), 1);
     drop(escaped);
     let closure_only = loader.budget_snapshot();
+    assert_eq!(closure_only.active_generations(), 0);
     assert_eq!(
         closure_only.active(ProjectContentBudgetKind::ArtifactBytes),
         0

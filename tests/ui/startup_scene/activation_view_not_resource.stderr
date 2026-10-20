@@ -1,13 +1,13 @@
-error[E0277]: `StartupSceneActivation<'static>` is not a `Resource`
+error[E0277]: `CurrentScene<'static>` is not a `Resource`
  --> tests/ui/startup_scene/activation_view_not_resource.rs:4:32
   |
-4 |     commands.remove_resource::<StartupSceneActivation<'static>>();
-  |              ---------------   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ invalid `Resource`
+4 |     commands.remove_resource::<CurrentScene<'static>>();
+  |              ---------------   ^^^^^^^^^^^^^^^^^^^^^ invalid `Resource`
   |              |
   |              required by a bound introduced by this call
   |
-  = help: the trait `Resource` is not implemented for `StartupSceneActivation<'static>`
-  = note: consider annotating `StartupSceneActivation<'static>` with `#[derive(Resource)]`
+  = help: the trait `Resource` is not implemented for `CurrentScene<'static>`
+  = note: consider annotating `CurrentScene<'static>` with `#[derive(Resource)]`
   = help: the following other types implement trait `Resource`:
             ActionCommandMap
             ActionMap

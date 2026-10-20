@@ -662,6 +662,7 @@ fn startup_source_keeps_its_admitted_identity_context_charged() {
     let source = snapshot.scene_source();
     drop(snapshot);
     assert_eq!(loader.budget_snapshot().active_reservations(), 1);
+    assert_eq!(loader.budget_snapshot().active_generations(), 1);
     assert!(
         loader
             .budget_snapshot()
@@ -670,6 +671,7 @@ fn startup_source_keeps_its_admitted_identity_context_charged() {
     );
     drop(source);
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+    assert_eq!(loader.budget_snapshot().active_generations(), 0);
 }
 
 fn replace_json_string(value: &mut serde_json::Value, expected: &str, replacement: &str) {

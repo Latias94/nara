@@ -21,8 +21,8 @@ research and implementation lanes have disjoint live file ownership. Preserve un
 - Strategy selects a Rust-first integrated production path, generalized from complete consumers.
 - ADRs 0037/0117 distinguish asset identity, immutable published values, dependencies and retention.
   A copied handle does not acquire or retain content.
-- ADR 0110 currently delivers exactly the startup closure. A second Scene on disk is insufficient
-  export authority. Extend that decision explicitly for a finite declared Scene-root set.
+- ADR 0110 originally delivered exactly the startup closure. P1 extends that decision explicitly
+  for a finite declared Scene-root set; a second Scene on disk alone is insufficient export authority.
 - ADR 0027 keeps game saves separate from authoring Scene/Prefab files and backend-native state.
 - ADR 0089 remains Proposed. Adopt only the concrete lifecycle behavior the consumer proves;
   do not implicitly accept its complete additive-loading or world-partition design.
@@ -91,6 +91,30 @@ preflight/commit/retirement; finally owned background preparation and the two-le
 Keep data-only replacement usable without importing the filesystem or a graphics backend. Do not
 expose full hosted travel after only the first slice, when destination resources cannot yet be
 installed and retired correctly.
+
+The residency slice uses one staged AssetServer for component decoding and destination resource
+bindings. A narrow nominal Scene asset-bindings input may carry an otherwise empty component batch;
+it must not accept unrelated staged component writes or expose scratch entities across calls.
+Prepare Image versions, exact owned catalog changes, TileSet publication/retirement and aggregate
+retention before the existing Scene commit. The protected exclusive operation then has no recoverable
+resource-publication failure after the Scene changes. Do not implement World rollback or copy the
+startup publisher's incremental reconciliation into travel. Native GPU/domain reconstruction keeps
+its separate accepted-but-degraded semantics.
+
+Keep a concrete current-level residency receipt, not a universal asset refcount service. Retire
+only publications still matching that receipt, preserve foreign catalog records, and keep historical
+AssetServer identity bindings. Empty destinations still retire old content. Shared identities may
+keep their handles, but publish the destination's admitted decoded Image values so the current level
+does not indefinitely retain its predecessor's generation. Preserve TileSet atlas-layout barriers;
+old packets retain their own immutable values until physical retirement.
+
+The owned preparation entry must use the original Host authority and shared loader budget, admit
+only startup or declared delivery roots, and expose the prepared target read-only before commit.
+Games validate logical checkpoint/progress references and build ordinary owned product state there,
+then reuse the protected overlay writer. Do not resolve a second independent plan in gameplay or
+convert project content into direct sources to bypass residency. Preparation completion is distinct
+from playable reconstruction; deletion facts and dynamic objects become usable only after the
+consumer's finite reconstruction succeeds.
 
 Use current tasks only where blocking preparation requires them. Reject stale project/runtime/
 request results and preserve cancellation and physical retirement. Keep the logical level path,

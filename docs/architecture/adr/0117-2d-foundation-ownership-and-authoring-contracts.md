@@ -73,8 +73,17 @@ source; importer-private auxiliaries do not imply a public product graph. Author
 document-local and opaque. Prefab provenance is structured; live lookup requires instance selection.
 Expanded Scene materialization carries one immutable document/provenance candidate. Source coverage
 and projection association are admitted before allocation or replacement retirement, and source
-fields publish inside that prepared commit. Startup retention shares the admitted document through
-its owner without exposing a clonable candidate from a borrowed activation view.
+fields publish inside that prepared commit. One private current-Scene owner retains the admitted
+source and its matching instance receipt. Startup installs that pair; protected restart and direct
+data-only replacement advance it together. A read-only view does not expose a clonable candidate
+or grant a competing authority. Hosted content replacement additionally requires concrete resource
+residency preparation and retirement; Scene data transaction success alone is insufficient.
+
+Decoded project snapshots, retained Scene sources and escaped immutable Images share an acyclic
+generation lease. Source-only closure and delivery receipts retain source facts independently.
+The existing decoded-generation ceiling follows the last real decoded owner, including prepared
+render packets. Hosts retain separate startup admission facts for freshness comparisons and release
+their decoded startup snapshots once ownership transfers to live sources and resource values.
 Saved dynamic identity and an explicit authored-instance binding do not establish a universal save format.
 
 Source rename preserves identity. Copy-as-new changes IDs and internal copied references; conflicting
