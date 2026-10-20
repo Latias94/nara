@@ -1,6 +1,7 @@
 # Production Cost Measurement
 
-Status: In progress. Source baseline: `33248b79b069e4d9023601e38e4c76515ea8e937`.
+Status: Complete within the scope below. Source baseline:
+`33248b79b069e4d9023601e38e4c76515ea8e937`.
 
 ## Purpose
 
@@ -37,14 +38,29 @@ as current defects. Follow STRATEGY, ADR 0093 and ADR 0099. Tile authoring tools
   operations and changed outcomes outside timed regions. Do not modify frozen formal protocols.
 - [x] Run optimized interaction/runtime observations and finite Rust iteration experiments
   serially. Retain samples, exact source/build context, aggregation and explicit limitations.
-- [ ] Attribute material costs to their owning boundary. Repair confirmed correctness defects;
+- [x] Attribute material costs to their owning boundary. Repair confirmed correctness defects;
   document evidence-triggered performance refactors without expanding into speculative systems.
-- [ ] Remove the confirmed quadratic Available-schema lookup through a private classification-owned
+- [x] Remove the confirmed quadratic Available-schema lookup through a private classification-owned
   index; preserve Scene/Prefab readiness/history/source contracts and repeat the same public
   measurements. Keep format-validation equivalence and Browser/Tile locality as separate work.
-- [ ] Obtain independent review, run relevant checks, publish a concise English report and update
+- [x] Obtain independent review, run relevant checks, publish a concise English report and update
   the existing external HTML issue overview. Commit and push precise changes to main.
 
 The result is a decision-local baseline and a ranked next action list, not a release SLO,
 cross-platform qualification, stable tail estimate, complete GPU residency measurement or a
 claim that all future architecture risks have been eliminated.
+
+## Result And Successor
+
+The [report](../benchmarks/2026-10-20-production-costs.md) retains three Editor baseline,
+three runtime baseline and three post-correction Editor processes, plus seventeen independent
+Rust build/run observations. Baseline collector/data commit: `b8e15cb`. Exact schema-lookup
+implementation: `d21d8c0`. The same 4,096-record model drive falls from approximately 60 ms to
+2 ms while scalar dispatch remains approximately 117-120 ms. All 274 Scene/tooling tests pass.
+
+The [proposed locality follow-up](2026-10-20-measured-work-locality-plan.md) orders remaining
+scalar attribution, Browser preparation, Tile visibility/cache and Rust/Play attribution. It
+does not turn those separate refactors into unfinished work in this measurement slice.
+
+The [qualification record](../knowledge/engineering/verification/2026-10/2026-10-20T081224Z-production-cost-baselines-and-indexed-authoring-schema-qualification-494a94898cf340b695e7332bbca06fc5.md)
+binds implementation, checks, corrected fixture failures and explicit interpretation limits.

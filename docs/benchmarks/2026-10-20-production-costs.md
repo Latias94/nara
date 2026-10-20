@@ -1,6 +1,6 @@
 # Ordinary Authoring And Runtime Costs
 
-Status: Baselines complete; a directly observed schema-lookup correction is in progress.
+Status: Baselines and the first schema-lookup correction are measured and independently reviewed.
 
 This decision-local experiment follows the
 [module review](../audits/2026-10-20-module-goal-alignment-review.md) and
@@ -164,11 +164,11 @@ cleanup snapshots per process have zero tracked current payload.
 
 ## Owning Boundaries And Next Changes
 
-1. **Remove proven quadratic schema lookup first.** Generic Inspector projection queries an
-   Available component once per entity. The current Scene/Prefab accessor scans all entities
-   and classification facts for each query. Use one private index built with the admitted
+1. **Remove proven quadratic schema lookup first (implemented at `d21d8c0`).** Generic Inspector projection queries an
+   Available component once per entity. At the baseline, the Scene/Prefab accessor scans all
+   entities and classification facts for each query. The correction uses one private index built with the admitted
    classification, preserving exact identity, readiness, version and schema basis. Do not
-   expose an unchecked schema-by-ID route. Repeat the public workload after the correction.
+   expose an unchecked schema-by-ID route. Post-correction observations follow separately.
 2. **Attribute remaining scalar preparation.** A field edit and Undo clone the complete document,
    validate publication shape, canonicalize and classify. Format validation currently encodes and
    shape-parses both pretty JSON and RON. Keep these acceptance rules until a bounded equivalent
@@ -195,3 +195,57 @@ Pinned source comparisons: Bevy `85503941` consumes `RenderVisibleEntities` in
 `81ab961f` processes dirty rendering quadrants/cells in
 [TileMapLayer](../../repo-ref/godot/modules/tilemap/tile_map_layer.cpp). These are source design
 references, not comparative engine benchmarks or latest-upstream claims.
+
+The [proposed locality follow-up](../plans/2026-10-20-measured-work-locality-plan.md) defines
+ordered attribution, Browser custody, Tile visibility/cache and Rust iteration units. It is a
+separate successor queue, not an unfinished acceptance requirement of this measurement slice.
+
+## Indexed Schema Lookup: Post-Correction Results
+
+Implementation `d21d8c0bc2b63df6aa8eb2bd70a7b8ba8298596e` adds a private nested index to
+`AuthoringDocumentState`. Classification populates only direct Available entity/component facts;
+the query still checks the same basis and admitted version. Scene and Prefab use that index
+without scanning entities or all record facts. Classification, successful history publication,
+fork and Reopen keep the document/state pair together. Native and unavailable records remain
+denied; no public API or format validation changes.
+
+The unchanged collector from `b8e15cb` passes three more optimized processes, each with 768 rows.
+Figures below are per-process P50 / P95 milliseconds at 4,096 Transform records.
+
+| Operation after indexed lookup | Run 1 | Run 2 | Run 3 |
+| --- | --- | --- | --- |
+| Scalar edit dispatch | 116.843 / 123.790 | 119.726 / 128.421 | 119.096 / 124.393 |
+| Frame drive after edit | 1.960 / 2.249 | 2.036 / 2.451 | 1.991 / 2.369 |
+| Undo dispatch | 116.124 / 118.783 | 120.127 / 124.842 | 119.557 / 125.199 |
+| Frame drive after Undo | 1.978 / 2.397 | 2.037 / 2.310 | 2.112 / 2.714 |
+| Browser Scene Open dispatch | 63.673 / 68.881 | 62.878 / 65.493 | 63.254 / 64.791 |
+| Browser Scene Open maximum drive | 2.281 / 3.605 | 2.250 / 2.939 | 2.292 / 2.817 |
+
+Projection calls drop from approximately 60 ms to approximately 2 ms, below the local 8 ms
+investigation trigger in all these retained calls. Dispatch remains approximately 117-120 ms
+for an edit and 63 ms for Scene Open; this correction does not resolve those costs or Browser
+filesystem blocking. Before/after processes are separate, with ordinary background activity
+and no pooled percentile. The stable large change supports removing the identified quadratic
+lookup; it is not a native input-to-display or total edit latency guarantee.
+
+The private index adds one exact key/version entry per Available direct component; its retained
+CPU heap cost is not measured here. Runtime GPU and Rust iteration results remain the frozen
+baseline; the authoring-only correction does not establish new measurements of those endpoints.
+
+The [post-correction summary](data/2026-10-20-production-costs/indexed-summary.json) retains 144
+groups, three run identities and raw gzip filenames/digests. The same aggregation rule and
+semantic, history, saved-byte, replacement and physical-session-close oracles apply. All 274
+Scene/tooling tests pass after the correction, including the three new exact-record, history
+and Reopen tests. Independent source review checks stale state, version/owner barriers and the
+native-authority denial path separately from performance interpretation.
+
+The [qualification record](../knowledge/engineering/verification/2026-10/2026-10-20T081224Z-production-cost-baselines-and-indexed-authoring-schema-qualification-494a94898cf340b695e7332bbca06fc5.md)
+records the actual checks, corrected fixture failures and source bindings. The locked workspace
+all-feature/all-target check and formatting pass; no fresh native UI release claim is added.
+
+```powershell
+$env:CARGO_BUILD_JOBS='1'
+cargo +1.95.0 nextest run --cargo-profile release --no-default-features --features project-workflow,tooling,runtime-ui,presentation-2d --test editor_persistence --locked --offline --run-ignored only -E 'test(measure_editor_interaction_costs)' --no-capture
+$env:NARA_RUNTIME_COST_OUTPUT='<distinct absolute JSONL file>'
+cargo +1.95.0 nextest run --release -p nara_render_wgpu --features sprite-submitter,ui-submitter --lib --locked --offline --run-ignored only --test-threads=1 -E 'test(tilemap_and_changing_hud_costs)' --success-output immediate
+```

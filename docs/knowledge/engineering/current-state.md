@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "8cd18916177e4a168de95a08b2c10d23363f7fbc2653b5b962026bf330449524"
+source_fingerprint: "800c7a252bfca6bcddb0892e1a2268ae3a3d2df4804f49063d71ba4f77a10956"
 ---
 
 # Current State
@@ -12,9 +12,9 @@ source_fingerprint: "8cd18916177e4a168de95a08b2c10d23363f7fbc2653b5b962026bf3304
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `8cd18916177e4a168de95a08b2c10d23363f7fbc2653b5b962026bf330449524`
-- Immutable records: 794
-- Active lane heads: 1
+- Source fingerprint: `800c7a252bfca6bcddb0892e1a2268ae3a3d2df4804f49063d71ba4f77a10956`
+- Immutable records: 796
+- Active lane heads: 0
 
 # Active Registrations
 
@@ -49,7 +49,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
-- [Production cost measurement](registry/2026-10/2026-10-20T072247Z-production-cost-measurement-codex-root-dc32ab2ce6bb49c0aa16224536e03bea.md): `active` (production-cost-measurement-codex-root; producer `codex-root`)
+- [Production cost measurement and first lookup correction complete](registry/2026-10/2026-10-20T081325Z-production-cost-measurement-codex-root-a439516aacba454aaecf22824bfe3635.md): `complete` (production-cost-measurement-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U18](registry/2026-07/2026-07-20T022923Z-reference-game-foundation-rgf-u18-codex-root-ff9c13e50df34a868c59c4ebd5435375.md): `completed` (reference-game-foundation-rgf-u18-codex-root; producer `codex-root`)
@@ -61,6 +61,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Production cost baselines and indexed authoring schema qualification](verification/2026-10/2026-10-20T081224Z-production-cost-baselines-and-indexed-authoring-schema-qualification-494a94898cf340b695e7332bbca06fc5.md) - Optimized public interaction, offscreen runtime and Rust iteration observations with exact schema lookup correction.
 - **Verification Evidence**: [Fixed world canvas and native UI qualification](verification/2026-10/2026-10-20T070752Z-fixed-world-canvas-and-native-ui-qualification-e7c7f1ee29e4459688d51f1ca20282d8.md) - Pixel readback, presented world input, native button resize and independent exported desktop qualification.
 - **Verification Evidence**: [Ordinary structural authoring and captured-source Reopen qualification](verification/2026-10/2026-10-20T051819Z-ordinary-structural-authoring-and-captured-source-reopen-qualification-f9b317e0ceda49a6b37f9000c61af8d7.md) - Source-local structural transactions, exact unavailable preservation, captured-source Reopen, ordinary public and actual Windows widget trajectories.
 - **Verification Evidence**: [Module goal alignment and concrete boundary repairs qualification](verification/2026-10/2026-10-20T044452Z-module-goal-alignment-and-concrete-boundary-repairs-qualification-f7676d2222234fd39b8b565dbcaf996f.md) - All workspace modules reviewed against Strategy, existing research and pinned mature engines; TileSet, native modes, GPU allocation and glyph clipping repaired with explicit evidence limits.
@@ -72,7 +73,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Editor responsiveness measurements and standalone task cancellation](verification/2026-10/2026-10-19T182252Z-editor-responsiveness-measurements-and-standalone-task-cancellation-0e2521d0010a4d94940d83fa865f3d0c.md) - Decision-local optimized Open Save Reopen timings, source-grounded rebuild seams, and failed-then-passing standalone pending cancellation.
 - **Verification Evidence**: [N05 safe plugin failure facts and invocation context](verification/2026-10/2026-10-19T170951Z-n05-safe-plugin-failure-facts-and-invocation-context-d01f7391b84348a8827a0daa760dd1a4.md) - Checked App plugin facts, actual invocation identity and retained primary/shutdown diagnostics through public product and Editor failure paths.
 - **Verification Evidence**: [Authoring S3 component constraints diagnostics and inventory](verification/2026-10/2026-10-19T162634Z-authoring-s3-component-constraints-diagnostics-and-inventory-64aacf18a3af432584d306af27d32eb3.md) - Shared interval contracts, safe domain facts, explicit UI evolution and independently compiled component authoring evidence.
-- **Verification Evidence**: [Authoring S2 exact results and retained field editing](verification/2026-10/2026-10-19T153834Z-authoring-s2-exact-results-and-retained-field-editing-2b09e865afc64b7990e2adc737fa2aa7.md) - Exact frontend dispatch correlation, retained Inspector drafts and public panel/native qualification within S2.
 
 # Integration Notes
 
