@@ -3,6 +3,8 @@
     all(target_os = "linux", target_arch = "x86_64")
 ))]
 
+#[path = "support/ordinary_starter_structure.rs"]
+mod ordinary_starter_structure;
 #[path = "support/supervised_play_project.rs"]
 mod supervised_play_project;
 
@@ -23,6 +25,7 @@ use supervised_play_project::CleanRoomSupervisedPlayProject;
 fn generated_starter_reaches_ready_stop_and_clean_editor_exit() {
     let project = CleanRoomSupervisedPlayProject::new();
     let mut application = open_application(project.root());
+    ordinary_starter_structure::arrange_save_reopen_and_check(&project, &mut application);
     let frame = current_frame(&application);
     assert_eq!(
         frame.runtime_availability(),

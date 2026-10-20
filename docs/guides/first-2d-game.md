@@ -148,6 +148,39 @@ Restart deliberately reuses the current executable generation. A deliberate
 diagnostics while authoring remains usable. Remove it and use Stop then Play.
 The ordinary external lane does not supply Pause or Step.
 
+### Arrange an ordinary Scene or Prefab
+
+Use `+ Root` or `+ Child` to insert an empty entity, then add components whose schema provides a
+creation template. Use `Up`/`Down` for sibling order and `Parent` to move the selected entity to
+another parent or the root. Reparenting retains authored local component values; it does not
+compensate a world-space transform. Add the appropriate Transform2d components when constructing
+a runtime transform chain, and run Check before Play.
+
+These operations work without loading the game's Rust, including in a Degraded document containing
+unavailable records. Moving such an entity preserves its component identities, values and
+references. Undo/Redo restores the exact document order and parent relationships. Save captures
+the current revision; if editing continues while Save is pending, its completion acknowledges
+only that captured revision and leaves newer working changes dirty.
+Explicit Reopen can discard those newer moves and restore the exact source previously admitted
+by that file Host, including a validated candidate after uncertain publication. Externally changed
+source retains the stricter unavailable-record preservation checks; a conservative refusal keeps
+the working document and source binding intact.
+
+`Remove Entity` asks for confirmation and removes the selected entity's whole subtree in one Undo
+step. Ordinary deletion requires a Complete document with no Prefab instance anchors. A remaining
+component's local reference to a removed entity rejects the operation, including references supplied
+by schema defaults. Unavailable records prevent this reference proof, even when the selected entity
+itself is empty. The Editor explains that limit rather than guessing which references may break.
+An ordinary Prefab source uses the same rules; specialized UI Prefabs retain their domain-specific
+structural controls. A Scene containing an instance of another Prefab can still be rearranged,
+but its source-closure deletion is outside this workflow.
+
+Try this first in a newly generated desktop starter or an ordinary source without Prefab anchors:
+create two Transform2d-bearing roots and a child; move the child between them, reorder the roots,
+remove a subtree, then Undo/Redo. Save and Reopen to verify the accepted hierarchy, then Check and
+Play. The collection game's supplied Player Prefab instance means its main Scene may require
+editing the separate Prefab source instead of deleting instances through this finite policy.
+
 ## Try a content variant
 
 With Play stopped, replace `prefabs/player.prefab.json` with

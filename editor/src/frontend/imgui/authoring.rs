@@ -1,7 +1,7 @@
 use dear_imgui_rs::{TreeNodeFlags, Ui};
 use nara::{
     reflect::{ComponentCapability, ComponentValue, ComponentValueKind},
-    scene::{SceneEntityId, ScenePlacement, ScenePlacementOwner},
+    scene::{AuthoringDocumentReadiness, SceneEntityId, ScenePlacement, ScenePlacementOwner},
     tooling::{
         EditorAction, EditorDocumentId, EditorDocumentKind, EditorDocumentMutation,
         EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
@@ -214,7 +214,8 @@ impl ImguiAuthoringPanels {
             return;
         };
         let editing = !self.read_only && editing_enabled(frame);
-        self.show_composition_controls(ui, scene, editing, actions);
+        let removal_reason = entity_removal_unavailable_reason(frame, scene);
+        self.show_composition_controls(ui, scene, editing, removal_reason, actions);
         for entity in &scene.editor.inspector.entities {
             let _id = ui.push_id(entity.id.as_str());
             let indent = entity.depth as f32 * 16.0;
@@ -248,7 +249,7 @@ impl ImguiAuthoringPanels {
         if scene.editor.inspector.entities.is_empty() {
             ui.text_disabled("No entities");
         }
-        self.show_remove_confirmation(ui, scene, editing, actions);
+        self.show_remove_confirmation(ui, scene, editing && removal_reason.is_none(), actions);
     }
 
     fn show_composition_controls(
@@ -256,6 +257,7 @@ impl ImguiAuthoringPanels {
         ui: &Ui,
         scene: &EditorSceneModel,
         editing: bool,
+        removal_reason: Option<&'static str>,
         actions: &mut Vec<EditorAction>,
     ) {
         let inspector = &scene.editor.inspector;
@@ -294,7 +296,6 @@ impl ImguiAuthoringPanels {
         let Some(selected) = selected else {
             return;
         };
-        let structural_editing = editing && !inspector.composition.generic_authoring;
         let owner = selected
             .row
             .parent
@@ -302,7 +303,7 @@ impl ImguiAuthoringPanels {
             .map_or(ScenePlacementOwner::Root, |parent| {
                 ScenePlacementOwner::Parent { parent }
             });
-        if enabled_button(ui, structural_editing && selected.previous.is_some(), "Up") {
+        if enabled_button(ui, editing && selected.previous.is_some(), "Up") {
             if let Some(previous) = selected.previous {
                 actions.push(compose_action(
                     scene,
@@ -314,7 +315,7 @@ impl ImguiAuthoringPanels {
             }
         }
         ui.same_line();
-        if enabled_button(ui, structural_editing && selected.next.is_some(), "Down") {
+        if enabled_button(ui, editing && selected.next.is_some(), "Down") {
             if let Some(next) = selected.next {
                 actions.push(compose_action(
                     scene,
@@ -326,21 +327,21 @@ impl ImguiAuthoringPanels {
             }
         }
         ui.same_line();
-        if enabled_button(ui, structural_editing, "Remove Entity") {
+        if enabled_button(ui, editing && removal_reason.is_none(), "Remove Entity") {
             self.pending_removal = Some(selected.row.id.clone());
         }
-        if inspector.composition.generic_authoring {
-            ui.text_disabled(
-                "Entity deletion and reparenting are unavailable for generic authoring",
-            );
-            return;
+        if let Some(reason) = removal_reason {
+            ui.text_disabled(reason);
         }
         let parent_label = selected
             .row
             .parent
             .as_ref()
             .map_or("Root", SceneEntityId::as_str);
-        if let Some(_combo) = ui.begin_combo("Parent", parent_label) {
+        let parent_combo = ui.begin_combo("Parent", parent_label);
+        #[cfg(test)]
+        super::interaction_tests::record_control(ui, "Parent");
+        if let Some(_combo) = parent_combo {
             if enabled_button(ui, editing && selected.row.parent.is_some(), "Root") {
                 actions.push(compose_action(
                     scene,
@@ -351,6 +352,8 @@ impl ImguiAuthoringPanels {
                 ));
                 ui.close_current_popup();
             }
+            #[cfg(test)]
+            super::interaction_tests::record_control(ui, "parent:root");
             for (index, candidate) in inspector.entities.iter().enumerate() {
                 let eligible = editing
                     && index != selected.index
@@ -368,6 +371,11 @@ impl ImguiAuthoringPanels {
                     ));
                     ui.close_current_popup();
                 }
+                #[cfg(test)]
+                super::interaction_tests::record_control(
+                    ui,
+                    format!("parent:{}", candidate.id.as_str()),
+                );
             }
         }
     }
@@ -400,7 +408,7 @@ impl ImguiAuthoringPanels {
             self.pending_removal = None;
         }
         ui.same_line();
-        if ui.button("Cancel removal") {
+        if enabled_button(ui, true, "Cancel removal") {
             self.pending_removal = None;
         }
     }
@@ -558,12 +566,45 @@ fn enabled_button(ui: &Ui, enabled: bool, label: &str) -> bool {
             | "Dismiss persistence result"
             | "Open Prefab Source"
             | "Remove Component"
+            | "+ Child"
+            | "Up"
+            | "Down"
+            | "Remove Entity"
+            | "Confirm removal"
+            | "Cancel removal"
             | "Apply"
     ) || label == super::interaction_tests::CUSTOM_COMPONENT
     {
         super::interaction_tests::record_control(ui, label);
     }
     clicked
+}
+
+fn entity_removal_unavailable_reason(
+    frame: &EditorFrameModel,
+    scene: &EditorSceneModel,
+) -> Option<&'static str> {
+    if !scene.editor.inspector.composition.generic_authoring {
+        return None;
+    }
+    if frame
+        .workspace()
+        .document(scene.document)
+        .and_then(|tab| tab.authoring_readiness)
+        != Some(AuthoringDocumentReadiness::Complete)
+    {
+        return Some("Entity deletion requires a Complete authoring document");
+    }
+    if scene
+        .editor
+        .inspector
+        .entities
+        .iter()
+        .any(|entity| entity.has_prefab)
+    {
+        return Some("Entity deletion requires a source without Prefab anchors");
+    }
+    None
 }
 
 pub(super) fn editing_enabled(frame: &EditorFrameModel) -> bool {

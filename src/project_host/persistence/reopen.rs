@@ -8,6 +8,8 @@ struct ReopenSource {
     encoding: DocumentEncoding,
     limits: SceneFileLimits,
     authoring: Option<AuthoringDocumentReadmission>,
+    observed_digest: ContentDigest,
+    validated_authoring_digest: Option<ContentDigest>,
 }
 
 struct ReopenedFile {
@@ -35,7 +37,13 @@ impl ReopenSource {
             encoding: file.encoding,
             limits: file.limits,
             authoring,
+            observed_digest: file.observed_digest(),
+            validated_authoring_digest: file.validated_authoring_digest,
         })
+    }
+
+    fn admits_source_bytes(&self, digest: ContentDigest) -> bool {
+        digest == self.observed_digest || self.validated_authoring_digest == Some(digest)
     }
 
     fn read(&self) -> Result<ReopenedFile, ReopenFailure> {
@@ -90,6 +98,7 @@ impl SceneReopenRequest {
 
     fn prepare_inner(self) -> Result<(SceneAdmission, FileIdentity, ContentDigest), ReopenFailure> {
         let reopened = self.0.read()?;
+        let admitted_source = self.0.admits_source_bytes(reopened.content_digest);
         let candidate = match self.0.encoding {
             DocumentEncoding::Json => SceneDocumentCandidate::decode_json_bytes_with_limits(
                 &reopened.bytes,
@@ -105,7 +114,9 @@ impl SceneReopenRequest {
                 let session = authoring
                     .reopen_scene_candidate(candidate)
                     .map_err(|_| ReopenFailure::Failed(EditorPersistenceFailureStage::Validate))?;
-                if !authoring.preserves_scene(&session) {
+                // Explicit Reopen can discard unsaved topology in favor of already admitted
+                // source bytes. Unobserved external changes still require exact preservation.
+                if !admitted_source && !authoring.preserves_scene(&session) {
                     return Err(ReopenFailure::Rejected(
                         EditorPersistenceRejection::PreservationMismatch,
                     ));
@@ -164,6 +175,7 @@ impl PrefabReopenRequest {
         self,
     ) -> Result<(PrefabAdmission, FileIdentity, ContentDigest), ReopenFailure> {
         let reopened = self.0.read()?;
+        let admitted_source = self.0.admits_source_bytes(reopened.content_digest);
         let candidate = match self.0.encoding {
             DocumentEncoding::Json => PrefabDocumentCandidate::decode_json_bytes_with_limits(
                 &reopened.bytes,
@@ -180,7 +192,7 @@ impl PrefabReopenRequest {
                 let session = authoring
                     .reopen_prefab_candidate(candidate)
                     .map_err(|_| ReopenFailure::Failed(EditorPersistenceFailureStage::Validate))?;
-                if !authoring.preserves_prefab(&session) {
+                if !admitted_source && !authoring.preserves_prefab(&session) {
                     return Err(ReopenFailure::Rejected(
                         EditorPersistenceRejection::PreservationMismatch,
                     ));

@@ -203,7 +203,11 @@ fn runtime_agreement_accepts_a_bundle_superset_and_rejects_divergence_or_unbound
     divergent_catalog
         .type_tombstones
         .push(ComponentTypeId::new("zz.runtime_agreement.Divergent"));
-    *selected = AuthoringSchemaBundleOwner::new(scene_owner, divergent_catalog, None);
+    *selected = AuthoringSchemaBundleOwner::new(
+        scene_owner,
+        divergent_catalog,
+        selected.predecessor().cloned(),
+    );
     fs::write(
         &divergent_path,
         AuthoringSchemaBundle::new(divergent_owners)

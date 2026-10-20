@@ -37,6 +37,8 @@ const UNKNOWN: &str = "studio.missing.Reference";
 const OWNER: &str = "studio.composition.components";
 static NEXT_ROOT: AtomicU64 = AtomicU64::new(1);
 
+#[path = "support/ordinary_structure.rs"]
+mod ordinary_structure;
 #[path = "support/recursive_component_values.rs"]
 mod recursive_component_values;
 
@@ -225,6 +227,13 @@ fn ordinary_prefab_composition_cannot_bypass_specialized_ui_structure_admission(
         PrefabCompositionCommand::RemoveComponent {
             entity: SceneEntityId::new("ui-root").unwrap(),
             component: ComponentTypeId::new("nara.ui.UiRoot"),
+        },
+        PrefabCompositionCommand::MoveEntity {
+            entity: SceneEntityId::new("ui-root").unwrap(),
+            to: ScenePlacement::last(ScenePlacementOwner::Root),
+        },
+        PrefabCompositionCommand::RemoveEntity {
+            entity: SceneEntityId::new("ui-root").unwrap(),
         },
     ];
     for command in commands {

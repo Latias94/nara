@@ -1407,37 +1407,51 @@ pub(crate) fn apply_authoring_structure_operation(
             }])
         }
         ScenePatchOperation::RemoveEntity { entity, from } => {
-            let index = find_entity(document, entity).ok_or_else(|| {
-                patch_diagnostic(
-                    operation_index,
-                    "scene.patch-missing-entity",
-                    "Patch removes a missing entity",
-                    Some(entity),
-                    None,
-                    None,
-                )
-            })?;
-            let record = &document.entities[index];
-            if !record.components.is_empty()
-                || !record.children.is_empty()
-                || record.prefab.is_some()
-                || !placement_matches(document, entity, from)
+            let removed =
+                prepare_subtree_removal_with(document, entity, from, operation_index, |_| Ok(()))?;
+            remove_subtree_records(document, &removed);
+            let mut removed = removed.into_iter();
+            let entity = removed.next().expect("prepared subtree contains its root");
+            let descendants = removed.collect::<Vec<_>>();
+            if entity.components.is_empty() && entity.children.is_empty() && entity.prefab.is_none()
             {
-                return Err(patch_diagnostic(
-                    operation_index,
-                    "scene.authoring-entity-inverse-unavailable",
-                    "Authoring history may remove only the exact empty entity it created",
-                    Some(entity),
-                    None,
-                    None,
-                ));
+                Ok(vec![ScenePatchOperation::AddEntity {
+                    entity,
+                    placement: from.clone(),
+                }])
+            } else {
+                Ok(vec![ScenePatchOperation::RestoreEntity {
+                    entity,
+                    descendants,
+                    placement: from.clone(),
+                }])
             }
-            let record = document.entities.remove(index);
-            detach_entity(document, entity);
-            Ok(vec![ScenePatchOperation::AddEntity {
-                entity: record,
-                placement: from.clone(),
+        }
+        ScenePatchOperation::RestoreEntity {
+            entity,
+            descendants,
+            placement,
+        } => {
+            prepare_entity_restoration_with(
+                document,
+                entity,
+                descendants,
+                placement,
+                operation_index,
+                |_| Ok(()),
+            )?;
+            let insertion =
+                resolve_insertion(document, &entity.id, placement, false, operation_index)?;
+            document.entities.push(entity.clone());
+            document.entities.extend(descendants.iter().cloned());
+            insert_placed_entity(document, &entity.id, insertion);
+            Ok(vec![ScenePatchOperation::RemoveEntity {
+                entity: entity.id.clone(),
+                from: placement.clone(),
             }])
+        }
+        ScenePatchOperation::MoveEntity { entity, from, to } => {
+            move_entity(document, entity, from, to, operation_index)
         }
         ScenePatchOperation::AddComponent {
             entity,
@@ -2303,6 +2317,21 @@ fn prepare_subtree_removal<D: EntityDocument + ?Sized>(
     from: &ScenePlacement,
     operation_index: usize,
 ) -> Result<Vec<SceneEntityRecord>, Diagnostic> {
+    prepare_subtree_removal_with(document, entity, from, operation_index, |record| {
+        for component in record.components.keys() {
+            require_whole_component_edit(registry, &record.id, component, operation_index)?;
+        }
+        Ok(())
+    })
+}
+
+fn prepare_subtree_removal_with<D: EntityDocument + ?Sized>(
+    document: &D,
+    entity: &SceneEntityId,
+    from: &ScenePlacement,
+    operation_index: usize,
+    mut admit_record: impl FnMut(&SceneEntityRecord) -> Result<(), Diagnostic>,
+) -> Result<Vec<SceneEntityRecord>, Diagnostic> {
     if find_entity(document, entity).is_none() {
         return Err(patch_diagnostic(
             operation_index,
@@ -2334,9 +2363,7 @@ fn prepare_subtree_removal<D: EntityDocument + ?Sized>(
         let record_index = find_entity(document, &id)
             .expect("validated subtree entity must remain in the source document");
         let record = &document.entities()[record_index];
-        for component in record.components.keys() {
-            require_whole_component_edit(registry, &id, component, operation_index)?;
-        }
+        admit_record(record)?;
         pending.extend(record.children.iter().rev().cloned());
         removed.push(record.clone());
     }
@@ -2350,6 +2377,29 @@ fn prepare_entity_restoration<D: EntityDocument + ?Sized>(
     descendants: &[SceneEntityRecord],
     placement: &ScenePlacement,
     operation_index: usize,
+) -> Result<(), Diagnostic> {
+    prepare_entity_restoration_with(
+        document,
+        entity,
+        descendants,
+        placement,
+        operation_index,
+        |record| {
+            for component in record.components.keys() {
+                require_whole_component_edit(registry, &record.id, component, operation_index)?;
+            }
+            Ok(())
+        },
+    )
+}
+
+fn prepare_entity_restoration_with<D: EntityDocument + ?Sized>(
+    document: &D,
+    entity: &SceneEntityRecord,
+    descendants: &[SceneEntityRecord],
+    placement: &ScenePlacement,
+    operation_index: usize,
+    mut admit_record: impl FnMut(&SceneEntityRecord) -> Result<(), Diagnostic>,
 ) -> Result<(), Diagnostic> {
     let mut restored_ids = BTreeSet::new();
     for record in std::iter::once(entity).chain(descendants) {
@@ -2373,9 +2423,7 @@ fn prepare_entity_restoration<D: EntityDocument + ?Sized>(
                 None,
             ));
         }
-        for component in record.components.keys() {
-            require_whole_component_edit(registry, &record.id, component, operation_index)?;
-        }
+        admit_record(record)?;
     }
     validate_placement_owner(document, &entity.id, placement, operation_index)
 }

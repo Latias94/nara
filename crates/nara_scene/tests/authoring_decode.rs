@@ -1,3 +1,5 @@
+#![cfg(feature = "serde")]
+
 use std::collections::BTreeMap;
 
 use nara_asset::AssetRef;
@@ -103,7 +105,7 @@ fn data_only_interval_rejection_retains_engine_code_and_root_without_nested_map_
 }
 
 #[test]
-fn generic_insertion_preserves_unknown_placement_and_rejects_prepend_atomically() {
+fn generic_insertion_tracks_unknown_placement_and_undo_restores_it_exactly() {
     let (bundle, adapter, document, _) = cross_component_authoring_fixture();
     let published =
         SceneDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
@@ -114,20 +116,15 @@ fn generic_insertion_preserves_unknown_placement_and_rejects_prepend_atomically(
     let mut session = SceneAuthoringSession::from_published_authoring_document(published);
     let manifest = session.unavailable_record_manifest().unwrap().clone();
     let before = session.document().clone();
-    let revision = session.revision();
-    let history = session.history_status();
     let prepend =
         session.apply_authoring_patch(&ScenePatchDocument::new([ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(scene_id("prepended")),
             placement: ScenePlacement::first(ScenePlacementOwner::Root),
         }]));
-    assert!(
-        !prepend.applied,
-        "prepending changed the semantic placement of an unavailable record"
-    );
+    assert!(prepend.applied, "{:?}", prepend.diagnostics);
+    assert_ne!(session.unavailable_record_manifest(), Some(&manifest));
+    assert!(session.undo_authoring().applied);
     assert_eq!(session.document(), &before);
-    assert_eq!(session.revision(), revision);
-    assert_eq!(session.history_status(), history);
     assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
     let append =
         session.apply_authoring_patch(&ScenePatchDocument::new([ScenePatchOperation::AddEntity {

@@ -1,3 +1,5 @@
+#![cfg(feature = "serde")]
+
 use std::collections::BTreeSet;
 
 use nara_asset::AssetRef;

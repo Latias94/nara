@@ -1,5 +1,9 @@
 //! Registry-free Scene and Prefab admission for persistent authoring.
 
+mod structure;
+
+use structure::{authoring_structure_rejection, prepare_scene_authoring_structure};
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
@@ -2302,139 +2306,6 @@ fn component_allows_composition(schema: &ComponentSchema) -> bool {
             .fields()
             .iter()
             .all(|field| field.has_capability(ComponentCapability::Edit))
-}
-
-fn prepare_scene_authoring_structure(
-    document: &SceneDocument,
-    state: &AuthoringDocumentState,
-    patch: &ScenePatchDocument,
-    history: bool,
-) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
-    // Structural commands are one operation. Field-only transactions retain their existing
-    // bounded multi-write contract, and history never broadens the public mutation vocabulary.
-    if patch.format_version != ScenePatchDocument::CURRENT_FORMAT_VERSION
-        || patch.operations.len() != 1
-    {
-        return Err(authoring_structure_rejection(
-            "Authoring composition requires one explicit structural operation",
-        ));
-    }
-    let operation = &patch.operations[0];
-    match operation {
-        ScenePatchOperation::AddEntity { entity, .. } => {
-            if !entity.components.is_empty()
-                || !entity.children.is_empty()
-                || entity.prefab.is_some()
-            {
-                return Err(authoring_structure_rejection(
-                    "Generic authoring creates only an empty entity",
-                ));
-            }
-        }
-        ScenePatchOperation::RemoveEntity { .. } if history => {}
-        ScenePatchOperation::AddComponent {
-            component, value, ..
-        } => {
-            let Some(entry) = state.basis.schemas.get(component) else {
-                return Err(authoring_structure_rejection(
-                    "Component has no admitted authoring schema",
-                ));
-            };
-            if entry.adapter.is_none()
-                || !component_allows_composition(&entry.schema)
-                || value.version != entry.schema.version()
-                || (if history {
-                    value.owner().is_some_and(|owner| owner != &entry.owner)
-                } else {
-                    value.owner() != Some(&entry.owner)
-                })
-                || (!history && entry.schema.authoring_initial_value() != Some(&value.value))
-            {
-                return Err(authoring_structure_rejection(
-                    "Component creation requires its exact admitted complete template",
-                ));
-            }
-        }
-        ScenePatchOperation::RemoveComponent { entity, component } => {
-            let available = state.record_facts.iter().any(|fact| {
-                fact.readiness.is_available() && &fact.component == component
-                    && matches!(&fact.location, AuthoringRecordLocation::EntityComponent { entity: owner } if owner == entity)
-            });
-            if !available
-                || !state
-                    .basis
-                    .schemas
-                    .get(component)
-                    .is_some_and(|entry| component_allows_composition(&entry.schema))
-            {
-                return Err(authoring_structure_rejection(
-                    "Component removal requires a current data-editable direct record",
-                ));
-            }
-        }
-        _ => {
-            return Err(authoring_structure_rejection(
-                "This structural operation is unavailable for generic authoring",
-            ));
-        }
-    }
-    let mut candidate = document.clone();
-    let inverse = crate::patch::apply_authoring_structure_operation(&mut candidate, operation, 0)
-        .map_err(|diagnostic| {
-        let mut diagnostics = DiagnosticReport::default();
-        diagnostics.push(diagnostic);
-        ScenePatchReport {
-            applied: false,
-            inverse: None,
-            diagnostics,
-        }
-    })?;
-    if crate::format::validate_scene_publication_shape(&candidate, state.limits).is_err() {
-        return Err(authoring_structure_rejection(
-            "Authoring structure exceeds the persistent format boundary",
-        ));
-    }
-    candidate.canonicalize();
-    let candidate_state = classify_scene_document(
-        &candidate,
-        state.source.clone(),
-        state.kind,
-        Arc::clone(&state.basis),
-        state.limits,
-    )
-    .map_err(|error| ScenePatchReport {
-        applied: false,
-        inverse: None,
-        diagnostics: error.into_diagnostics(),
-    })?;
-    if candidate_state.unavailable_manifest != state.unavailable_manifest {
-        return Err(authoring_structure_rejection(
-            "Authoring structure changed the complete unavailable-record manifest",
-        ));
-    }
-    Ok(PreparedSceneAuthoringPatch {
-        document: candidate,
-        state: candidate_state,
-        patch: patch.clone(),
-        report: ScenePatchReport {
-            applied: true,
-            inverse: Some(ScenePatchDocument::new(inverse)),
-            diagnostics: DiagnosticReport::default(),
-        },
-    })
-}
-
-fn authoring_structure_rejection(summary: &'static str) -> ScenePatchReport {
-    let mut diagnostics = DiagnosticReport::default();
-    diagnostics.push(diagnostic_error(
-        "scene.authoring-structure-unavailable",
-        summary,
-    ));
-    ScenePatchReport {
-        applied: false,
-        inverse: None,
-        diagnostics,
-    }
 }
 
 struct AuthoringFieldChange {

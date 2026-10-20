@@ -48,7 +48,12 @@ not define the ordinary product identity.
 
 ## Decision
 
-[ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md) adds pure creation templates, finite generic structural authoring and replaceable private frontend/workspace boundaries.
+[ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md) adds pure creation templates,
+document-owned generic structural authoring and replaceable private frontend/workspace boundaries.
+Its ordinary structural refinement admits stable-ID reparent/reorder with operation-relative
+unavailable-record preservation and reference-validated subtree deletion in Complete, source-local
+documents without Prefab anchors. These transactions do not grant project-code execution, native
+preview, unknown-reference remapping or unavailable-record deletion.
 It retains this ADR's ordinary data-only Open and strict compiled-project execution separation; trusted source-built Editor contributions do not authorize executing arbitrary project extensions on Open.
 
 Nara will ship one standalone, project-generic `nara-editor`. Project open and source authoring use

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-20 (owned Save observation and native lifecycle coordination)
+**Last Revised**: 2026-10-20 (ordinary structural transactions and operation-relative preservation)
 **Owner**: Private Editor product, tooling, reflection and Scene/Prefab document owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -166,11 +166,41 @@ Preparation, inverse construction, complete candidate validation and one revisio
 They do not require a fake native registry.
 Creation validates the exact retained catalog basis, template and document revision; removal is an explicit command with a complete inverse.
 
-Each admitted operation and inverse preserves the complete unavailable-record manifest, including placement, identities, values and references.
-Unknown/future/unsupported record mutation and deletion remain unavailable in this finite slice.
-Broader entity deletion/reference closure is not admitted by implication.
+The initial construction slice preserves the complete unavailable-record manifest through each
+operation and inverse. The ordinary structural refinement below defines explicit topology changes;
+neither construction nor moving grants unknown/future/unsupported record mutation or deletion.
 Scene and Prefab share tree/Inspector projections while retaining source kind, independent persistence and specialized UI Prefab domain gates.
 Successful data authoring does not assert native preview or strict Runtime readiness.
+
+#### Ordinary structural workflow refinement (2026-10-20)
+
+Ordinary Scene and non-specialized Prefab documents also admit explicit stable-ID reparent/reorder
+and source-local subtree deletion. One structural operation, its complete inverse, final shape/
+reference validation and history budgets stay inside the existing document owner. No native codec,
+project callback, reference remapping or second history is introduced.
+
+Reparent/reorder preserves record identity, source location, owner, version, payload, references and
+cardinality, including unavailable records. Only source-local placement and nested-patch anchor
+placement may change as the exact consequence of the admitted topology operation. The owner
+compares an operation-relative expected unavailable manifest with the candidate; it never globally
+ignores placement. This also accounts for an adjacent record whose previous-sibling anchor changes.
+Other edits retain their existing exact preservation rule unless their explicit topology operation
+changes such an anchor. The complete post-operation manifest becomes the next session authority.
+
+Explicit subtree deletion requires a Complete authoring document and no Prefab instance anchors
+anywhere in that document. This closes source-local reference semantics without resolving another
+source or guessing unknown records. Candidate classification validates surviving effective values,
+including defaulted and recursively declared local references; a dangling inbound reference rejects
+the whole transaction. Entity deletion owns entity presence separately from component field-edit
+capability and does not invoke a component removal callback. Unknown/future/unbound records remain
+a deletion barrier. Prefab-instance/source-closure deletion requires a separately demonstrated
+workflow. Specialized UI Prefab structural rules remain separate.
+
+Undo alone may restore the exact deleted records/subtree and placement. It cannot grant the public
+patch caller arbitrary record restoration. The established history-only removal of an exact empty
+insertion remains admitted in Degraded documents; the inverse chain cannot broaden public Delete.
+Rejection leaves document, revision, selection and history unchanged; successful deletion selects
+the surviving parent or clears a removed root selection through the existing action/result port.
 
 ### Evaluate Dear ImGui through a real workflow
 
@@ -220,6 +250,7 @@ The qualification probe and complete migration are separate milestones, and an u
 | GUI-independent application | No selected-toolkit types in application/project state; existing project lifecycle tests pass |
 | Useful source extension | A separately compiled panel installs, acts and closes through the same path as built-ins |
 | Generic construction | Custom component add/remove/Undo/Save/Reopen succeeds in Scene and Prefab without project execution |
+| Ordinary structure | Stable-ID reparent/reorder preserves unavailable semantics; reference-safe subtree Delete and exact Undo/Redo survive Save/Reopen and ordinary Check/Play |
 | Independent render views | Concurrent actual Scene/Game rendering with correct focus, resize and retirement |
 | Qualified replacement | Full parity matrix plus exact native/backend acceptance, not a demo |
 | Controlled scope | No competing history, generic widget IR, dynamic ABI or abandoned production frontend |

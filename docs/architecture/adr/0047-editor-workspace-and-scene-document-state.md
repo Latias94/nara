@@ -101,6 +101,14 @@ Rules:
   A stale, cancelled, failed or rejected preparation cannot update the document or Host baseline.
   Only a Completed task after physical return may publish; unlike Save, read preparation has no
   irreversible file write to acknowledge. Reopen exposes no new public Cancel action.
+- Explicit Reopen can discard unsaved structural changes in favor of exactly observed source bytes.
+  The concrete file Host captures its current observed digest and, after uncertain publication,
+  at most one fully authoring-validated candidate digest. A matching bounded read still decodes
+  and classifies under the captured schema basis/limits; it need not reproduce the unsaved working
+  topology. Unobserved external bytes retain exact unavailable-manifest preservation. A known
+  failed/rejected publication clears its candidate proof; uncertainty/unwind retains it until
+  successful Save binding or Reopen reconciliation. These private source proofs do not advance
+  the saved checkpoint or bypass exact revision/source/schema publication checks.
 - External file changes enter as conflict state, not silent overwrite. The editor may offer reload,
   merge, save-as, or keep-local actions, but these are explicit workspace commands.
 - Play Mode is anchored to a document snapshot and workspace mode state. Stop Play still discards

@@ -87,6 +87,10 @@ impl CleanRoomSupervisedPlayProject {
     pub fn root(&self) -> &Path {
         &self.project_root
     }
+
+    pub fn capability(&self) -> DirectoryCapability {
+        writable_directory(&self.project_root)
+    }
 }
 
 impl Drop for CleanRoomSupervisedPlayProject {

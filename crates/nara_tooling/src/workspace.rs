@@ -19,9 +19,9 @@ use nara_scene::{
 };
 
 use crate::composition::{
-    PrefabCompositionCommand, PrefabCompositionOutcome, PrefabCompositionSelection,
-    SceneCompositionCommand, SceneCompositionSelection, prepare_generic_composition,
-    prepare_prefab_composition, prepare_scene_composition,
+    GenericCompositionDocument, PrefabCompositionCommand, PrefabCompositionOutcome,
+    PrefabCompositionSelection, SceneCompositionCommand, SceneCompositionSelection,
+    prepare_generic_composition, prepare_prefab_composition, prepare_scene_composition,
 };
 use crate::diagnostic;
 use crate::inspector::{SceneInspectorCommand, SceneInspectorCommandReport};
@@ -326,6 +326,13 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => &mut slot.selection,
             Self::Prefab(slot) => &mut slot.selection,
+        }
+    }
+
+    fn selection(&self) -> &EditorSelectionSet {
+        match self {
+            Self::Scene(slot) => &slot.selection,
+            Self::Prefab(slot) => &slot.selection,
         }
     }
 
@@ -848,6 +855,12 @@ impl EditorWorkspace {
                     PrefabCompositionCommand::RemoveComponent { entity, component } => {
                         SceneCompositionCommand::RemoveComponent { entity, component }
                     }
+                    PrefabCompositionCommand::MoveEntity { entity, to } => {
+                        SceneCompositionCommand::MoveEntity { entity, to }
+                    }
+                    PrefabCompositionCommand::RemoveEntity { entity } => {
+                        SceneCompositionCommand::RemoveEntity { entity }
+                    }
                     _ => return authoring_command_error_report(self.active_document, document),
                 };
                 self.apply_generic_composition(
@@ -1246,6 +1259,19 @@ impl EditorWorkspace {
         if slot.kind() != kind {
             return authoring_command_error_report(active_document, document);
         }
+        if let (
+            EditorDocumentSlot::Prefab(prefab),
+            SceneCompositionCommand::MoveEntity { entity, to },
+        ) = (&*slot, &command)
+            && to.matches_current_prefab(prefab.session.document(), entity)
+        {
+            let mut report = report_for_document(document, active_document, slot);
+            report.applied = false;
+            report.prefab_composition_outcome = Some(PrefabCompositionOutcome::NoOp {
+                entity: entity.clone(),
+            });
+            return report;
+        }
         let allocation = if command.allocates_entity() {
             let candidate = match slot {
                 EditorDocumentSlot::Scene(slot) => slot.next_entity_candidate(),
@@ -1263,10 +1289,20 @@ impl EditorWorkspace {
         } else {
             None
         };
+        let source = match &*slot {
+            EditorDocumentSlot::Scene(slot) => {
+                GenericCompositionDocument::Scene(slot.session.document())
+            }
+            EditorDocumentSlot::Prefab(slot) => {
+                GenericCompositionDocument::Prefab(slot.session.document())
+            }
+        };
         let prepared = prepare_generic_composition(
+            source,
+            slot.selection().top_entity(),
             allocation.as_ref().map(|(entity, _)| entity.clone()),
             command,
-            |component| match slot {
+            |component| match &*slot {
                 EditorDocumentSlot::Scene(slot) => {
                     slot.session.authoring_initial_component(component)
                 }
@@ -1292,8 +1328,27 @@ impl EditorWorkspace {
         };
         let mut report = report_for_document_patch(document, active_document, slot, patch_report);
         if report.applied {
+            if let SceneCompositionSelection::Select(entity) = prepared.selection() {
+                slot.selection_mut().select_entity(entity.clone());
+            }
             if kind == EditorDocumentKind::Prefab {
                 report.prefab_composition_outcome = match &prepared.patch().operations[0] {
+                    nara_scene::ScenePatchOperation::AddEntity { entity, .. } => {
+                        Some(PrefabCompositionOutcome::Created {
+                            entity: entity.id.clone(),
+                        })
+                    }
+                    nara_scene::ScenePatchOperation::MoveEntity { entity, .. } => {
+                        Some(PrefabCompositionOutcome::Moved {
+                            entity: entity.clone(),
+                        })
+                    }
+                    nara_scene::ScenePatchOperation::RemoveEntity { entity, .. } => {
+                        Some(PrefabCompositionOutcome::Removed {
+                            entity: entity.clone(),
+                            selection: slot.selection().top_entity().cloned(),
+                        })
+                    }
                     nara_scene::ScenePatchOperation::AddComponent {
                         entity, component, ..
                     } => Some(PrefabCompositionOutcome::ComponentAdded {
@@ -1308,14 +1363,6 @@ impl EditorWorkspace {
                     }
                     _ => None,
                 };
-            }
-            if let SceneCompositionSelection::Select(entity) = prepared.selection() {
-                slot.selection_mut().select_entity(entity.clone());
-                if kind == EditorDocumentKind::Prefab {
-                    report.prefab_composition_outcome = entity
-                        .clone()
-                        .map(|entity| PrefabCompositionOutcome::Created { entity });
-                }
             }
             if let Some((_, next)) = allocation {
                 match slot {
@@ -2930,6 +2977,8 @@ fn prefab_field_value<'a>(
 
 #[cfg(test)]
 mod tests {
+    mod generic_structure;
+
     use super::*;
     use nara_asset::AssetRef;
     use nara_diagnostic::DiagnosticValueRef;
@@ -4647,9 +4696,12 @@ mod tests {
             command: SceneCompositionCommand::RemoveEntity { entity },
         });
         assert!(!structure.applied);
-        assert!(structure.diagnostics.iter().any(|entry| {
-            entry.code().as_str() == "tooling.workspace-authoring-command-unsupported"
-        }));
+        assert!(
+            structure
+                .diagnostics
+                .iter()
+                .any(|entry| { entry.code().as_str() == "scene.authoring-structure-unavailable" })
+        );
 
         let slot = workspace.scene(document).unwrap();
         assert_eq!(slot.revision(), accepted_revision);

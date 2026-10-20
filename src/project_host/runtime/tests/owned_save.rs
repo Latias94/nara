@@ -1,5 +1,141 @@
 use super::*;
 
+#[test]
+fn pending_save_keeps_captured_structural_manifest_separate_from_later_moves() {
+    for uncertain in [false, true] {
+        assert_structural_save_snapshot(uncertain);
+    }
+}
+
+fn assert_structural_save_snapshot(uncertain: bool) {
+    let project = TestProject::new("editor-save-structural-manifest");
+    let source_path = project.root.join("scenes/startup.scene.json");
+    let id = |name: &str| nara_identity::SceneEntityId::new(name).unwrap();
+    let original = SceneDocument::from_ordered_roots([
+        SceneEntityRecord::new(id("first-parent")),
+        SceneEntityRecord::new(id("second-parent")),
+        SceneEntityRecord::new(id("unknown")).with_component(
+            ComponentTypeId::new("game.Missing"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("preserve opaque source".into()),
+            ),
+        ),
+    ]);
+    fs::write(&source_path, original.to_json_string().unwrap()).unwrap();
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let document = editor.workspace().active_document().unwrap();
+    let move_to = |editor: &mut editor::EditorProjectSession, parent: &str| {
+        let base_revision = editor.workspace().scene(document).unwrap().revision();
+        let report = editor.apply_workspace_command(EditorWorkspaceCommand::ComposeScene {
+            document,
+            base_revision,
+            command: nara_tooling::SceneCompositionCommand::MoveEntity {
+                entity: id("unknown"),
+                to: ScenePlacement::last(ScenePlacementOwner::Parent { parent: id(parent) }),
+            },
+        });
+        assert!(report.applied, "{:?}", report.diagnostics);
+    };
+    move_to(&mut editor, "first-parent");
+    let captured = editor.workspace().scene(document).unwrap();
+    let captured_revision = captured.revision();
+    let previous_saved_revision = captured.saved_revision();
+    let captured_document = captured.session().document().clone();
+    let captured_manifest = captured
+        .session()
+        .unavailable_record_manifest()
+        .unwrap()
+        .clone();
+    if uncertain {
+        editor.test_reject_next_valid_persistence_receipt();
+    }
+    let control = editor.hold_next_save(editor::SaveTestPhase::BeforePublication);
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Save {
+            document: Some(document)
+        }),
+        nara_tooling::EditorPersistenceRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(control.wait_until_started());
+
+    move_to(&mut editor, "second-parent");
+    let later = editor.workspace().scene(document).unwrap();
+    let later_document = later.session().document().clone();
+    let later_manifest = later
+        .session()
+        .unavailable_record_manifest()
+        .unwrap()
+        .clone();
+    assert_ne!(captured_manifest, later_manifest);
+    control.release();
+    let completed = drive_persistence_to_terminal(&mut editor);
+    let result = completed.persistence().result();
+    if uncertain {
+        assert!(matches!(
+            result,
+            Some(EditorPersistenceResult::PersistenceUncertain { .. })
+        ));
+    } else {
+        assert!(matches!(result,
+            Some(EditorPersistenceResult::Saved { revision, .. }) if revision == captured_revision));
+    }
+    let slot = editor.workspace().scene(document).unwrap();
+    assert!(slot.is_dirty());
+    assert_eq!(
+        slot.saved_revision(),
+        if uncertain {
+            previous_saved_revision
+        } else {
+            captured_revision
+        }
+    );
+    assert_eq!(slot.session().document(), &later_document);
+    assert_eq!(
+        slot.session().unavailable_record_manifest(),
+        Some(&later_manifest)
+    );
+    assert_eq!(
+        fs::read_to_string(&source_path).unwrap(),
+        captured_document.to_json_string().unwrap()
+    );
+
+    // Exact admitted source bytes can restore the captured state despite later unsaved topology.
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+        nara_tooling::EditorPersistenceRequestResult::Accepted
+    );
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Reopen {
+            document: Some(document)
+        }),
+        nara_tooling::EditorPersistenceRequestResult::Accepted
+    );
+    let reopened_result = drive_persistence_to_terminal(&mut editor)
+        .persistence()
+        .result();
+    if !matches!(
+        reopened_result,
+        Some(EditorPersistenceResult::Opened { .. })
+    ) {
+        let _ = drive_editor_close_to_completion(&mut editor);
+        drop(editor);
+        panic!("structural Reopen failed after uncertain={uncertain}: {reopened_result:?}");
+    }
+    let reopened = editor.workspace().scene(document).unwrap();
+    assert!(!reopened.is_dirty());
+    assert_eq!(reopened.session().document(), &captured_document);
+    assert_eq!(
+        reopened.session().unavailable_record_manifest(),
+        Some(&captured_manifest)
+    );
+    assert!(matches!(
+        drive_editor_close_to_completion(&mut editor),
+        editor::EditorProjectCloseProgress::Complete(_)
+    ));
+}
+
 #[cfg(feature = "tooling")]
 #[test]
 fn pending_save_keeps_edits_available_and_close_retains_the_unpublished_owner() {

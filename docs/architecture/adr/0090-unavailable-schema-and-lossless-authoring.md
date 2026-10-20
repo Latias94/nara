@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-13
 **Accepted**: 2026-08-18
-**Last Revised**: 2026-10-19 (bounded field-override removal and exact inverse presence)
+**Last Revised**: 2026-10-20 (operation-relative structural preservation and closed Delete policy)
 **Owner**: `nara_reflect`, `nara_scene`, `nara_tooling`, and persistent document owners
 **Admission Trigger**: Scene/prefab fixtures with a missing provider, known schema without its
 required native or Adapter-specific runtime binding, missing migration, and future component schema
@@ -85,8 +85,12 @@ preservation before one history publication. No native codec or project callback
 
 ## Decision
 
-[ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md) admits a finite generic structural successor: empty-entity insertion and adding/removing current data-editable components, with complete unavailable-manifest preservation through forward and inverse operations.
-It does not admit unavailable-record deletion or broad entity reference-closure mutation.
+[ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md) admits generic empty-entity
+insertion, current data-editable component addition/removal and an ordinary structural workflow.
+Stable-ID reparent/reorder proves an operation-relative placement change while preserving the
+complete record semantics. Explicit subtree deletion requires a Complete, source-local document
+without Prefab instance anchors and validates surviving effective references. Unavailable records
+remain a deletion barrier; broad reference remapping and unresolved Prefab closure are not admitted.
 
 Nara authoring preserves a complete bounded semantic component record when the
 file envelope, document shape, and generic `ComponentValue` grammar are understood but its schema,
@@ -178,6 +182,21 @@ An allowed unrelated edit must prove that the complete canonical unavailable-rec
 identical before and after the unpublished candidate. Comparing only aggregate digests is
 insufficient because it can hide placement, ordering, duplication, or cardinality errors. Saving
 keeps the document `Degraded`; it does not silently declare it valid for runtime.
+
+An explicit topology operation under ADR 0118 instead compares the candidate with the exact
+operation-relative expected manifest. Only placement/anchor-placement consequences of that
+operation are updated; identity, source, semantic location, owner, version, value, reference and
+cardinality equality remain mandatory. A moved unavailable record is preserved, not interpreted or
+rewritten. Ordinary Delete remains unavailable for Degraded documents, including empty targets,
+because an unavailable survivor may contain an unprovable inbound reference.
+
+Explicit Reopen may discard unsaved topology and restore bytes already admitted by the owning
+persistence Host. An exact bounded read matching its observed source digest, or its retained
+authoring-validated candidate digest after an uncertain publication, supplies that source proof.
+The candidate still decodes and classifies against the captured schema basis and limits, followed
+by the normal revision/source/schema owner checks. Externally changed bytes without that proof
+retain the exact unavailable-manifest comparison. This does not make file hashes an independent
+schema authority or ignore placement in ordinary transaction preservation.
 
 Unavailable schema is also an asset/entity dependency barrier. `KnownUnbound` may perform schema-
 only reference traversal against an immutable, authenticated last-known owner catalog without

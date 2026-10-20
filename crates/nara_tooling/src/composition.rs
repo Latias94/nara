@@ -81,7 +81,30 @@ impl PreparedSceneComposition {
     }
 }
 
+pub(crate) enum GenericCompositionDocument<'a> {
+    Scene(&'a SceneDocument),
+    Prefab(&'a PrefabDocument),
+}
+
+impl GenericCompositionDocument<'_> {
+    fn current_placement(&self, entity: &SceneEntityId) -> Option<ScenePlacement> {
+        match self {
+            Self::Scene(document) => ScenePlacement::current(document, entity),
+            Self::Prefab(document) => ScenePlacement::current_prefab(document, entity),
+        }
+    }
+
+    fn subtree_contains(&self, root: &SceneEntityId, candidate: &SceneEntityId) -> bool {
+        match self {
+            Self::Scene(document) => subtree_contains(document, root, candidate),
+            Self::Prefab(document) => prefab_subtree_contains(document, root, candidate),
+        }
+    }
+}
+
 pub(crate) fn prepare_generic_composition(
+    document: GenericCompositionDocument<'_>,
+    selected: Option<&SceneEntityId>,
     allocated_entity: Option<SceneEntityId>,
     command: SceneCompositionCommand,
     initial_component: impl FnOnce(&ComponentTypeId) -> Option<SceneComponentRecord>,
@@ -123,10 +146,37 @@ pub(crate) fn prepare_generic_composition(
             ScenePatchOperation::RemoveComponent { entity, component },
             SceneCompositionSelection::Preserve,
         ),
+        SceneCompositionCommand::MoveEntity { entity, to } => {
+            let from = document
+                .current_placement(&entity)
+                .ok_or_else(|| missing_entity(&entity))?;
+            (
+                ScenePatchOperation::MoveEntity { entity, from, to },
+                SceneCompositionSelection::Preserve,
+            )
+        }
+        SceneCompositionCommand::RemoveEntity { entity } => {
+            let from = document
+                .current_placement(&entity)
+                .ok_or_else(|| missing_entity(&entity))?;
+            let selection =
+                if selected.is_some_and(|selected| document.subtree_contains(&entity, selected)) {
+                    SceneCompositionSelection::Select(match &from.owner {
+                        ScenePlacementOwner::Root => None,
+                        ScenePlacementOwner::Parent { parent } => Some(parent.clone()),
+                    })
+                } else {
+                    SceneCompositionSelection::Preserve
+                };
+            (
+                ScenePatchOperation::RemoveEntity { entity, from },
+                selection,
+            )
+        }
         _ => {
             return Err(diagnostic::error(
                 "tooling.workspace-authoring-command-unsupported",
-                "Generic composition admits empty creation and current component addition/removal",
+                "Generic composition creates empty entities; add components from their admitted templates",
             ));
         }
     };

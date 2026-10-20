@@ -43,6 +43,8 @@ struct PersistenceFileState {
     publication: FilePublicationHost,
     encoding: DocumentEncoding,
     limits: SceneFileLimits,
+    // One fully authoring-validated candidate may have reached disk without a confirmed receipt.
+    validated_authoring_digest: Option<ContentDigest>,
     #[cfg(test)]
     reject_next_valid_receipt: bool,
     #[cfg(test)]
@@ -224,6 +226,7 @@ impl PersistenceFileState {
                 ),
                 encoding,
                 limits,
+                validated_authoring_digest: None,
                 #[cfg(test)]
                 reject_next_valid_receipt: false,
                 #[cfg(test)]
@@ -267,6 +270,7 @@ impl PersistenceFileState {
             ),
             encoding,
             limits,
+            validated_authoring_digest: None,
             #[cfg(test)]
             reject_next_valid_receipt: false,
             #[cfg(test)]
@@ -343,6 +347,7 @@ impl PersistenceFileState {
 
     fn commit_reopen(&mut self, identity: FileIdentity, digest: ContentDigest) {
         self.publication.commit_reconciled(identity, digest);
+        self.validated_authoring_digest = None;
     }
 
     fn mark_uncertain(&mut self) {
@@ -484,8 +489,13 @@ impl ScenePersistenceHost {
                     );
                 }
             }
+            self.file.validated_authoring_digest = Some(ContentDigest::of_bytes(&bytes));
         }
-        self.file.save_preflighted(checkpoint, &bytes)
+        let outcome = self.file.save_preflighted(checkpoint, &bytes);
+        if !matches!(outcome, PersistenceSaveOutcome::PersistenceUncertain { .. }) {
+            self.file.validated_authoring_digest = None;
+        }
+        outcome
     }
 
     pub(super) fn commit_reopen(&mut self, identity: FileIdentity, digest: ContentDigest) {
@@ -614,8 +624,13 @@ impl PrefabPersistenceHost {
                     );
                 }
             }
+            self.file.validated_authoring_digest = Some(ContentDigest::of_bytes(&bytes));
         }
-        self.file.save_preflighted(checkpoint, &bytes)
+        let outcome = self.file.save_preflighted(checkpoint, &bytes);
+        if !matches!(outcome, PersistenceSaveOutcome::PersistenceUncertain { .. }) {
+            self.file.validated_authoring_digest = None;
+        }
+        outcome
     }
 
     pub(super) const fn publishes_runtime_content(&self) -> bool {

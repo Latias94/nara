@@ -33,6 +33,7 @@ const CUSTOM_COMPONENT: &str = "studio.interaction.Health";
 
 mod field_drafts;
 mod field_overrides;
+mod ordinary_structure;
 mod recursive_shapes;
 
 struct DocumentObservation {
