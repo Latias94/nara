@@ -102,6 +102,15 @@ digest is the runtime byte authority for version one; this decision does not cla
 reproducible closure of every Rust module, build-script input, environment input, or procedural
 macro.
 
+On supported Linux x86-64 hosts, the Host selects generation storage from the standard user cache location:
+an absolute, nonempty `XDG_CACHE_HOME`, otherwise an absolute `HOME` plus `.cache`.
+The cache base must be a physical directory owned by the effective user without group/other
+write access; the engine-owned child must additionally have mode `0700`. Existing unsafe
+permissions or symbolic links are rejected rather than repaired. This location does not grant
+filesystem support: publication still proves the exact ADR 0070 tier and fails closed elsewhere.
+Generations remain unique to one Editor run, with the existing marker locks, physical cleanup
+and bounded stale-store scavenging; the cache location does not enable reuse across Editor runs.
+
 The immutable generation excludes the per-launch nonce. Restart first readmits the current saved
 source closure and compares it with the running generation's source receipt. Divergence or failed
 source admission rejects Restart before requesting cleanup, preserving the running child. When the
