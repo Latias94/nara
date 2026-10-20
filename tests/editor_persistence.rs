@@ -3,6 +3,8 @@
 #[path = "support/editor_action_driver.rs"]
 mod editor_action_driver;
 
+#[path = "support/editor_interaction_cost_measurement.rs"]
+mod interaction_cost_measurement;
 #[path = "support/editor_responsiveness_measurement.rs"]
 mod responsiveness_measurement;
 

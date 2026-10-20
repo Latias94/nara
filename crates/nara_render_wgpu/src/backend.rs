@@ -1963,6 +1963,9 @@ pub(super) fn render_backend_state(state: WgpuBackendState) -> RenderBackendStat
     }
 }
 
+#[cfg(all(test, feature = "sprite-submitter", feature = "ui-submitter"))]
+mod runtime_measurement;
+
 #[cfg(test)]
 mod tests {
     use std::{ffi::OsStr, sync::Arc};
