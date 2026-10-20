@@ -2298,8 +2298,15 @@ impl EditorProjectSession {
     }
 
     #[cfg(test)]
-    pub(super) fn test_fail_next_image_metadata_after_write(&mut self) {
-        self.image_import.test_fail_next_metadata_after_write();
+    pub(super) fn test_fail_next_image_metadata_after_write(
+        &mut self,
+    ) -> crate::project_host::file_publication::CleanupTestControl {
+        self.image_import.test_fail_next_metadata_after_write()
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_panic_after_image_metadata_publication(&mut self) {
+        self.image_import.test_panic_after_metadata_publication();
     }
 
     #[cfg(test)]

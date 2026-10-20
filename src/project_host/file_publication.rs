@@ -126,12 +126,19 @@ pub(in crate::project_host) struct FilePublicationHost {
 /// Dropping this control does not release the failure: existing fault-injection callers may
 /// deliberately ignore it and later release through the Host's `test_allow_cleanup` method.
 #[cfg(test)]
+#[derive(Clone)]
 pub(crate) struct CleanupTestControl {
     blocked: Arc<AtomicBool>,
 }
 
 #[cfg(test)]
 impl CleanupTestControl {
+    pub(crate) fn blocked() -> Self {
+        Self {
+            blocked: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
     pub(crate) fn release(&self) {
         self.blocked.store(false, Ordering::Release);
     }
@@ -263,10 +270,18 @@ impl FilePublicationHost {
 
     #[cfg(test)]
     pub(in crate::project_host) fn test_fail_after_write(&mut self) -> CleanupTestControl {
+        let control = CleanupTestControl::blocked();
+        self.test_fail_after_write_with_control(&control);
+        control
+    }
+
+    #[cfg(test)]
+    pub(in crate::project_host) fn test_fail_after_write_with_control(
+        &mut self,
+        control: &CleanupTestControl,
+    ) {
         self.fail_after_write = true;
-        let blocked = Arc::new(AtomicBool::new(true));
-        self.block_cleanup = Some(Arc::clone(&blocked));
-        CleanupTestControl { blocked }
+        self.block_cleanup = Some(Arc::clone(&control.blocked));
     }
 
     #[cfg(test)]

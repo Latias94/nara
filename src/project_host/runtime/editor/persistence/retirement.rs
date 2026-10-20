@@ -1,4 +1,4 @@
-//! Runtime-owned file Hosts retain cleanup authority for their complete lane lifetime.
+//! Runtime-owned file Hosts retain cleanup authority until explicit retirement.
 
 use std::sync::{Arc, Mutex, TryLockError};
 
@@ -9,7 +9,9 @@ use nara_app::{
 };
 use nara_ecs::Resource;
 
-use crate::project_host::persistence::{PrefabPersistenceHost, ScenePersistenceHost};
+use crate::project_host::persistence::{
+    FilePublicationHost, PrefabPersistenceHost, ScenePersistenceHost,
+};
 
 trait RetirableHost {
     fn retry_cleanup(&mut self) -> bool;
@@ -24,6 +26,12 @@ impl RetirableHost for ScenePersistenceHost {
 impl RetirableHost for PrefabPersistenceHost {
     fn retry_cleanup(&mut self) -> bool {
         PrefabPersistenceHost::retry_cleanup(self)
+    }
+}
+
+impl RetirableHost for FilePublicationHost {
+    fn retry_cleanup(&mut self) -> bool {
+        FilePublicationHost::retry_cleanup(self)
     }
 }
 
@@ -109,6 +117,7 @@ impl<H: RetirableHost> RetainedHost<H> {
 enum HostRegistration {
     Scene(RetainedHost<ScenePersistenceHost>),
     Prefab(RetainedHost<PrefabPersistenceHost>),
+    Publication(RetainedHost<FilePublicationHost>),
 }
 
 impl HostRegistration {
@@ -116,6 +125,7 @@ impl HostRegistration {
         match self {
             Self::Scene(host) => host.retry_cleanup(),
             Self::Prefab(host) => host.retry_cleanup(),
+            Self::Publication(host) => host.retry_cleanup(),
         }
     }
 
@@ -123,6 +133,7 @@ impl HostRegistration {
         match self {
             Self::Scene(host) => host.is_retired(),
             Self::Prefab(host) => host.is_retired(),
+            Self::Publication(host) => host.is_retired(),
         }
     }
 
@@ -130,6 +141,7 @@ impl HostRegistration {
         match self {
             Self::Scene(host) => host.retire(),
             Self::Prefab(host) => host.retire(),
+            Self::Publication(host) => host.retire(),
         }
     }
 }
@@ -146,7 +158,7 @@ impl HostRegistry {
     }
 }
 
-/// Holds every admitted lane Host independently of any one persistence operation.
+/// Holds every admitted file Host independently of any one persistence operation.
 #[derive(Clone, Default, Resource)]
 pub(in crate::project_host::runtime::editor) struct HostCustody {
     registry: Arc<Mutex<HostRegistry>>,
@@ -184,6 +196,25 @@ impl HostCustody {
         registry.prune();
         let host = RetainedHost::new(host);
         registry.hosts.push(HostRegistration::Prefab(host.clone()));
+        Some(host)
+    }
+
+    pub(in crate::project_host::runtime::editor) fn retain_publication(
+        &self,
+        host: FilePublicationHost,
+    ) -> Option<RetainedHost<FilePublicationHost>> {
+        let mut registry = self
+            .registry
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if registry.closing {
+            return None;
+        }
+        registry.prune();
+        let host = RetainedHost::new(host);
+        registry
+            .hosts
+            .push(HostRegistration::Publication(host.clone()));
         Some(host)
     }
 
