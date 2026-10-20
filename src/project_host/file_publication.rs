@@ -3,6 +3,9 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+#[cfg(test)]
+use std::sync::{Arc, atomic::AtomicBool};
+
 use nara_fs::{
     ContentDigest, DirectoryCapability, ExpectedTarget, FileCapability, FileIdentity, FsError,
     LockMode, RelativeComponent, RelativePath, ReplaceReceipt, StageStatus, TemporaryFileCleanup,
@@ -115,7 +118,23 @@ pub(in crate::project_host) struct FilePublicationHost {
     #[cfg(test)]
     fail_after_write: bool,
     #[cfg(test)]
-    block_cleanup: bool,
+    block_cleanup: Option<Arc<AtomicBool>>,
+}
+
+/// Releases an injected cleanup failure without retaining the publication Host.
+///
+/// Dropping this control does not release the failure: existing fault-injection callers may
+/// deliberately ignore it and later release through the Host's `test_allow_cleanup` method.
+#[cfg(test)]
+pub(crate) struct CleanupTestControl {
+    blocked: Arc<AtomicBool>,
+}
+
+#[cfg(test)]
+impl CleanupTestControl {
+    pub(crate) fn release(&self) {
+        self.blocked.store(false, Ordering::Release);
+    }
 }
 
 /// Read-only access to the exact parent capability and target name retained by a publication Host.
@@ -148,7 +167,7 @@ impl FilePublicationHost {
             #[cfg(test)]
             fail_after_write: false,
             #[cfg(test)]
-            block_cleanup: false,
+            block_cleanup: None,
         }
     }
 
@@ -176,7 +195,7 @@ impl FilePublicationHost {
             #[cfg(test)]
             fail_after_write: false,
             #[cfg(test)]
-            block_cleanup: false,
+            block_cleanup: None,
         })
     }
 
@@ -200,7 +219,7 @@ impl FilePublicationHost {
             #[cfg(test)]
             fail_after_write: false,
             #[cfg(test)]
-            block_cleanup: false,
+            block_cleanup: None,
         })
     }
 
@@ -222,7 +241,12 @@ impl FilePublicationHost {
 
     pub(in crate::project_host) fn retry_cleanup(&mut self) -> bool {
         #[cfg(test)]
-        if self.block_cleanup && self.cleanup.is_some() {
+        if self
+            .block_cleanup
+            .as_ref()
+            .is_some_and(|blocked| blocked.load(Ordering::Acquire))
+            && self.cleanup.is_some()
+        {
             return false;
         }
         let Some(cleanup) = self.cleanup.take() else {
@@ -238,14 +262,18 @@ impl FilePublicationHost {
     }
 
     #[cfg(test)]
-    pub(in crate::project_host) fn test_fail_after_write(&mut self) {
+    pub(in crate::project_host) fn test_fail_after_write(&mut self) -> CleanupTestControl {
         self.fail_after_write = true;
-        self.block_cleanup = true;
+        let blocked = Arc::new(AtomicBool::new(true));
+        self.block_cleanup = Some(Arc::clone(&blocked));
+        CleanupTestControl { blocked }
     }
 
     #[cfg(test)]
     pub(in crate::project_host) fn test_allow_cleanup(&mut self) {
-        self.block_cleanup = false;
+        if let Some(blocked) = &self.block_cleanup {
+            blocked.store(false, Ordering::Release);
+        }
     }
 
     pub(in crate::project_host) fn preflight(&mut self) -> Result<(), FilePublicationRejection> {

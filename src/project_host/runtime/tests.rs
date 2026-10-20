@@ -6,6 +6,8 @@
 mod authoring_images;
 
 #[cfg(feature = "tooling")]
+mod host_custody;
+#[cfg(feature = "tooling")]
 mod owned_reopen;
 #[cfg(feature = "tooling")]
 mod owned_save;

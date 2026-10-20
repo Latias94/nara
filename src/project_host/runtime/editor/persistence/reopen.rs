@@ -157,7 +157,10 @@ impl EditorProjectSession {
                     },
                     ReopenRequest::Scene(
                         lane.host
-                            .prepare_reopen(slot.session().authoring_readmission())?,
+                            .try_with(|host| {
+                                host.prepare_reopen(slot.session().authoring_readmission())
+                            })
+                            .ok_or(EditorPersistenceRejection::Busy)??,
                     ),
                 )
             }
@@ -182,7 +185,10 @@ impl EditorProjectSession {
                     },
                     ReopenRequest::Prefab(
                         lane.host
-                            .prepare_reopen(slot.session().authoring_readmission())?,
+                            .try_with(|host| {
+                                host.prepare_reopen(slot.session().authoring_readmission())
+                            })
+                            .ok_or(EditorPersistenceRejection::Busy)??,
                     ),
                 )
             }
@@ -262,10 +268,11 @@ impl EditorProjectSession {
             }
             ReopenCompletion::Prefab(prepared) => {
                 let outcome = prepared.admit(registry);
-                let refresh = self
-                    .prefab_lane
-                    .as_ref()
-                    .is_some_and(|lane| lane.host.publishes_runtime_content());
+                let refresh = self.prefab_lane.as_ref().is_some_and(|lane| {
+                    lane.host
+                        .try_with(|host| host.publishes_runtime_content())
+                        .unwrap_or(false)
+                });
                 self.publish_prefab_reopen(
                     admission.document,
                     admission.revision,

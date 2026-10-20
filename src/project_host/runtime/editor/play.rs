@@ -135,7 +135,7 @@ impl EditorProjectSession {
     }
 
     pub(crate) fn request_play(&mut self, command: EditorPlayCommand) -> EditorPlayRequestResult {
-        if self.reopen_pending()
+        if (!self.accepts_new_work() || self.reopen_pending())
             && matches!(
                 command,
                 EditorPlayCommand::Play
@@ -255,7 +255,7 @@ impl EditorProjectSession {
         document: EditorDocumentId,
         revision: nara_scene::SceneAuthoringRevision,
     ) -> EditorPlayRequestResult {
-        if self.reopen_pending() {
+        if !self.accepts_new_work() || self.reopen_pending() {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
         }
         if self.external_play_view().is_some() && self.trusted_compiled().is_none() {

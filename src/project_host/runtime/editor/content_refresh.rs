@@ -105,6 +105,11 @@ impl EditorProjectSession {
         &mut self,
         action: EditorProjectContentAction,
     ) -> EditorProjectContentRefreshRequestResult {
+        if !self.accepts_new_work() {
+            return EditorProjectContentRefreshRequestResult::Rejected(
+                EditorProjectContentRefreshRejection::RetryNotAvailable,
+            );
+        }
         if self.trusted_compiled().is_none() {
             return EditorProjectContentRefreshRequestResult::Rejected(
                 EditorProjectContentRefreshRejection::RetryNotAvailable,
@@ -144,6 +149,9 @@ impl EditorProjectSession {
     }
 
     pub(super) fn resume_content_refresh_after_runtime_retirement(&mut self) {
+        if !self.accepts_new_work() {
+            return;
+        }
         let EditorProjectContentView::Stale {
             failure: EditorProjectContentRefreshFailure::RuntimeRetirementRequired,
             ..
@@ -173,9 +181,8 @@ impl EditorProjectSession {
     }
 
     pub(super) fn advance_project_content_refresh(&mut self) {
-        // A replacement runtime would retire the file-custody participant before the
-        // current session can recover its Host and acknowledge the admitted Save.
-        if self.pending_persistence.is_some() {
+        // Transfer the lifetime Host owner only when no operation still borrows its runtime.
+        if !self.accepts_new_work() || self.pending_persistence.is_some() {
             return;
         }
         let Some(request) = self.pending_content_refresh.take() else {
@@ -312,6 +319,13 @@ impl EditorProjectSession {
             );
             return;
         }
+        // All fallible preparation has completed. Move the one retirement registration
+        // before dropping the old runtime; cloning it would let the old owner close live Hosts.
+        assert!(
+            self.authoring_runtime
+                .host_custody()
+                .transfer_to(replacement_authoring_runtime.host_custody())
+        );
         self.trusted_compiled_mut()
             .expect("content refresh begins from the trusted compiled lane")
             .snapshot = successor;

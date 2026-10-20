@@ -70,7 +70,7 @@ impl SaveFixture {
     fn start(
         &mut self,
         pools: &TaskPools,
-        custody: &SaveCustody,
+        custody: &HostCustody,
         gate: Option<SaveTestGate>,
     ) -> BackgroundSave {
         let directory = DirectoryCapability::from_host_handle(
@@ -85,25 +85,25 @@ impl SaveFixture {
         let lane = SaveLane::Scene(EditorScenePersistenceLane {
             project_path: Arc::from("scenes/current.scene.json"),
             document: self.document,
-            host: opened.host,
+            host: custody.retain_scene(opened.host).unwrap(),
         });
         BackgroundSave::start(
             lane,
             PendingSave::Scene(self.candidate()),
             None,
             pools,
-            custody,
             gate,
         )
-        .unwrap_or_else(|_| panic!("the empty custody must accept one Save"))
     }
 
     fn assert_retry_can_publish(&mut self, lane: SaveLane) {
-        let SaveLane::Scene(mut lane) = lane else {
+        let SaveLane::Scene(lane) = lane else {
             panic!("the fixture owns a Scene Host")
         };
         assert!(matches!(
-            lane.host.save_owned(self.candidate(), None),
+            lane.host
+                .try_with(|host| host.save_owned(self.candidate(), None))
+                .unwrap(),
             PersistenceSaveOutcome::Saved { .. }
         ));
         assert!(
@@ -152,7 +152,7 @@ fn pool_rejection_returns_the_unchanged_host_without_reconciliation() {
     let mut fixture = SaveFixture::new();
     let pools = TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap();
     assert!(pools.shutdown_blocking().unwrap().is_complete());
-    let custody = SaveCustody::default();
+    let custody = HostCustody::default();
     let mut save = fixture.start(&pools, &custody, None);
     assert!(save.task.is_none());
     let (lane, outcome) = save
@@ -171,7 +171,7 @@ fn pool_rejection_returns_the_unchanged_host_without_reconciliation() {
 fn queued_logical_cancellation_returns_the_host_without_publishing() {
     let mut fixture = SaveFixture::new();
     let pools = TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap();
-    let custody = SaveCustody::default();
+    let custody = HostCustody::default();
     let mut save = fixture.start(&pools, &custody, None);
     assert!(save.task.as_ref().unwrap().cancel());
     let (lane, outcome) = save
@@ -193,7 +193,7 @@ fn queued_logical_cancellation_returns_the_host_without_publishing() {
 fn running_logical_cancellation_waits_for_the_host_and_preserves_the_published_outcome() {
     let mut fixture = SaveFixture::new();
     let pools = Arc::new(TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap());
-    let custody = SaveCustody::default();
+    let custody = HostCustody::default();
     let (gate, control) = SaveTestGate::new(SaveTestPhase::AfterPublication);
     let mut save = fixture.start(&pools, &custody, Some(gate));
     let runner_pools = Arc::clone(&pools);
@@ -236,7 +236,7 @@ fn running_logical_cancellation_waits_for_the_host_and_preserves_the_published_o
 fn worker_panic_recovers_the_poisoned_host_and_blocks_blind_retry() {
     let mut fixture = SaveFixture::new();
     let pools = TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap();
-    let custody = SaveCustody::default();
+    let custody = HostCustody::default();
     let mut save = fixture.start(&pools, &custody, None);
     // Break the worker's one-shot request invariant to unwind through its actual mutex guard.
     save.work.lock().unwrap().as_mut().unwrap().candidate = None;
@@ -273,13 +273,48 @@ fn worker_panic_recovers_the_poisoned_host_and_blocks_blind_retry() {
         EditorPersistenceRequestKind::Reopen,
         EditorDocumentId::from_raw(fixture.document.raw() + 1),
     ));
-    let SaveLane::Scene(mut lane) = lane else {
+    let SaveLane::Scene(lane) = lane else {
         panic!("the fixture owns a Scene Host")
     };
     assert!(matches!(
-        lane.host.save_owned(fixture.candidate(), None),
+        lane.host
+            .try_with(|host| host.save_owned(fixture.candidate(), None))
+            .unwrap(),
         PersistenceSaveOutcome::Rejected(EditorPersistenceRejection::RequiresReconcile)
     ));
+    assert_eq!(fixture.bytes(), fixture.original);
+    assert!(pools.shutdown_blocking().unwrap().is_complete());
+}
+
+#[test]
+fn queued_save_rejects_when_its_original_host_retires_before_execution() {
+    let mut fixture = SaveFixture::new();
+    let pools = TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap();
+    let custody = HostCustody::default();
+    let mut save = fixture.start(&pools, &custody, None);
+    let host = {
+        let work = save.work.lock().unwrap();
+        let SaveLane::Scene(lane) = &work.as_ref().unwrap().lane else {
+            panic!("the fixture owns a Scene Host")
+        };
+        lane.host.clone()
+    };
+    custody.close_admission();
+    assert!(host.retire());
+
+    assert_eq!(pools.run_pending_for_tests().executed, 1);
+    let (lane, outcome) = save
+        .poll()
+        .expect("a queued Save must finish after its Host retires");
+    assert_eq!(lane.document(), fixture.document);
+    assert!(matches!(
+        outcome,
+        PersistenceSaveOutcome::Rejected(EditorPersistenceRejection::Busy)
+    ));
+    assert!(
+        host.try_with(|_| ()).is_none(),
+        "a retired Host cannot regain file authority"
+    );
     assert_eq!(fixture.bytes(), fixture.original);
     assert!(pools.shutdown_blocking().unwrap().is_complete());
 }

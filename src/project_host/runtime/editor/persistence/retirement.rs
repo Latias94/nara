@@ -1,4 +1,4 @@
-//! Runtime-owned file cleanup custody survives abandonment of the Editor session.
+//! Runtime-owned file Hosts retain cleanup authority for their complete lane lifetime.
 
 use std::sync::{Arc, Mutex, TryLockError};
 
@@ -9,101 +9,295 @@ use nara_app::{
 };
 use nara_ecs::Resource;
 
-use super::background::SharedSaveWork;
+use crate::project_host::persistence::{PrefabPersistenceHost, ScenePersistenceHost};
 
-/// Keeps the one admitted file Host reachable independently of its task and Editor caller.
-#[derive(Clone, Default, Resource)]
-pub(in crate::project_host::runtime::editor) struct SaveCustody {
-    work: Arc<Mutex<Option<SharedSaveWork>>>,
+trait RetirableHost {
+    fn retry_cleanup(&mut self) -> bool;
 }
 
-impl SaveCustody {
-    /// Retains a new operation only after the previous operation returned its Host.
-    pub(super) fn retain(&self, work: SharedSaveWork) -> Result<(), SharedSaveWork> {
-        let mut retained = match self.work.try_lock() {
-            Ok(retained) => retained,
-            Err(TryLockError::WouldBlock) => return Err(work),
+impl RetirableHost for ScenePersistenceHost {
+    fn retry_cleanup(&mut self) -> bool {
+        ScenePersistenceHost::retry_cleanup(self)
+    }
+}
+
+impl RetirableHost for PrefabPersistenceHost {
+    fn retry_cleanup(&mut self) -> bool {
+        PrefabPersistenceHost::retry_cleanup(self)
+    }
+}
+
+/// Shares one concrete Host without duplicating its file or cleanup authority.
+pub(in crate::project_host::runtime::editor) struct RetainedHost<H> {
+    host: Arc<Mutex<Option<H>>>,
+}
+
+impl<H> Clone for RetainedHost<H> {
+    fn clone(&self) -> Self {
+        Self {
+            host: Arc::clone(&self.host),
+        }
+    }
+}
+
+impl<H> RetainedHost<H> {
+    fn new(host: H) -> Self {
+        Self {
+            host: Arc::new(Mutex::new(Some(host))),
+        }
+    }
+
+    pub(in crate::project_host::runtime::editor) fn try_with<R>(
+        &self,
+        apply: impl FnOnce(&mut H) -> R,
+    ) -> Option<R> {
+        let mut host = match self.host.try_lock() {
+            Ok(host) => host,
+            Err(TryLockError::WouldBlock) => return None,
             Err(TryLockError::Poisoned(error)) => error.into_inner(),
         };
-        if let Some(previous) = retained.as_ref() {
-            let retired = match previous.try_lock() {
-                Ok(previous) => previous.is_none(),
-                Err(TryLockError::WouldBlock) => false,
-                Err(TryLockError::Poisoned(error)) => error.into_inner().is_none(),
-            };
-            if !retired {
-                return Err(work);
-            }
+        host.as_mut().map(apply)
+    }
+
+    /// Workers may wait for the Host, but must never acquire custody while borrowing it.
+    pub(in crate::project_host::runtime::editor) fn with_worker<R>(
+        &self,
+        apply: impl FnOnce(&mut H) -> R,
+    ) -> Option<R> {
+        self.host
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_mut()
+            .map(apply)
+    }
+
+    fn is_retired(&self) -> bool {
+        match self.host.try_lock() {
+            Ok(host) => host.is_none(),
+            Err(TryLockError::WouldBlock) => false,
+            Err(TryLockError::Poisoned(error)) => error.into_inner().is_none(),
         }
-        *retained = Some(work);
-        Ok(())
+    }
+}
+
+#[allow(private_bounds)]
+impl<H: RetirableHost> RetainedHost<H> {
+    fn retry_cleanup(&self) -> bool {
+        let mut host = match self.host.try_lock() {
+            Ok(host) => host,
+            Err(TryLockError::WouldBlock) => return false,
+            Err(TryLockError::Poisoned(error)) => error.into_inner(),
+        };
+        host.as_mut().is_none_or(RetirableHost::retry_cleanup)
+    }
+
+    /// Releases the Host only after its current borrower and retained cleanup finish.
+    pub(in crate::project_host::runtime::editor) fn retire(&self) -> bool {
+        let mut host = match self.host.try_lock() {
+            Ok(host) => host,
+            Err(TryLockError::WouldBlock) => return false,
+            Err(TryLockError::Poisoned(error)) => error.into_inner(),
+        };
+        if host.as_mut().is_some_and(|host| !host.retry_cleanup()) {
+            return false;
+        }
+        *host = None;
+        true
+    }
+}
+
+enum HostRegistration {
+    Scene(RetainedHost<ScenePersistenceHost>),
+    Prefab(RetainedHost<PrefabPersistenceHost>),
+}
+
+impl HostRegistration {
+    fn retry_cleanup(&self) -> bool {
+        match self {
+            Self::Scene(host) => host.retry_cleanup(),
+            Self::Prefab(host) => host.retry_cleanup(),
+        }
+    }
+
+    fn is_retired(&self) -> bool {
+        match self {
+            Self::Scene(host) => host.is_retired(),
+            Self::Prefab(host) => host.is_retired(),
+        }
+    }
+
+    fn retire(&self) -> bool {
+        match self {
+            Self::Scene(host) => host.retire(),
+            Self::Prefab(host) => host.retire(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct HostRegistry {
+    closing: bool,
+    hosts: Vec<HostRegistration>,
+}
+
+impl HostRegistry {
+    fn prune(&mut self) {
+        self.hosts.retain(|host| !host.is_retired());
+    }
+}
+
+/// Holds every admitted lane Host independently of any one persistence operation.
+#[derive(Clone, Default, Resource)]
+pub(in crate::project_host::runtime::editor) struct HostCustody {
+    registry: Arc<Mutex<HostRegistry>>,
+}
+
+impl HostCustody {
+    pub(in crate::project_host::runtime::editor) fn retain_scene(
+        &self,
+        host: ScenePersistenceHost,
+    ) -> Option<RetainedHost<ScenePersistenceHost>> {
+        let mut registry = self
+            .registry
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if registry.closing {
+            return None;
+        }
+        registry.prune();
+        let host = RetainedHost::new(host);
+        registry.hosts.push(HostRegistration::Scene(host.clone()));
+        Some(host)
+    }
+
+    pub(in crate::project_host::runtime::editor) fn retain_prefab(
+        &self,
+        host: PrefabPersistenceHost,
+    ) -> Option<RetainedHost<PrefabPersistenceHost>> {
+        let mut registry = self
+            .registry
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if registry.closing {
+            return None;
+        }
+        registry.prune();
+        let host = RetainedHost::new(host);
+        registry.hosts.push(HostRegistration::Prefab(host.clone()));
+        Some(host)
+    }
+
+    pub(in crate::project_host::runtime::editor) fn is_accepting(&self) -> bool {
+        let registry = match self.registry.try_lock() {
+            Ok(registry) => registry,
+            Err(TryLockError::WouldBlock) => return false,
+            Err(TryLockError::Poisoned(error)) => error.into_inner(),
+        };
+        !registry.closing
+    }
+
+    pub(in crate::project_host::runtime::editor) fn close_admission(&self) {
+        self.registry
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .closing = true;
+    }
+
+    /// Retries every registered Host without retiring a lane that the session still owns.
+    pub(in crate::project_host::runtime::editor) fn retry_cleanup(&self) -> bool {
+        let registry = match self.registry.try_lock() {
+            Ok(registry) => registry,
+            Err(TryLockError::WouldBlock) => return false,
+            Err(TryLockError::Poisoned(error)) => error.into_inner(),
+        };
+        let mut complete = true;
+        for host in &registry.hosts {
+            complete &= host.retry_cleanup();
+        }
+        complete
+    }
+
+    /// Transfers live registrations at the final, infallible runtime replacement boundary.
+    ///
+    /// The old participant becomes closed and empty; only the successor may retire the Hosts.
+    pub(in crate::project_host::runtime::editor) fn transfer_to(&self, next: &Self) -> bool {
+        if Arc::ptr_eq(&self.registry, &next.registry) {
+            return false;
+        }
+        let mut current = match self.registry.try_lock() {
+            Ok(registry) => registry,
+            Err(TryLockError::WouldBlock) => return false,
+            Err(TryLockError::Poisoned(error)) => error.into_inner(),
+        };
+        let mut successor = match next.registry.try_lock() {
+            Ok(registry) => registry,
+            Err(TryLockError::WouldBlock) => return false,
+            Err(TryLockError::Poisoned(error)) => error.into_inner(),
+        };
+        successor.prune();
+        if current.closing || successor.closing || !successor.hosts.is_empty() {
+            return false;
+        }
+        current.prune();
+        successor.hosts = std::mem::take(&mut current.hosts);
+        current.closing = true;
+        true
     }
 
     fn poll_retirement(&self) -> RuntimeCloseProgress {
-        let mut retained = match self.work.try_lock() {
-            Ok(retained) => retained,
+        let mut registry = match self.registry.try_lock() {
+            Ok(registry) => registry,
             Err(TryLockError::WouldBlock) => return RuntimeCloseProgress::Pending,
             Err(TryLockError::Poisoned(error)) => error.into_inner(),
         };
-        let Some(work) = retained.as_ref() else {
-            return RuntimeCloseProgress::Complete;
-        };
-        let mut work = match work.try_lock() {
-            Ok(work) => work,
-            Err(TryLockError::WouldBlock) => return RuntimeCloseProgress::Pending,
-            Err(TryLockError::Poisoned(error)) => error.into_inner(),
-        };
-        // The worker holds this mutex throughout every file call. Acquiring it proves that
-        // the file Host is available, including after an unwind. Taking an unstarted request
-        // also prevents its queued closure from beginning publication: it observes None.
-        // The separate TaskPlugin participant still proves closure/capture/worker retirement.
-        if work.as_mut().is_some_and(|work| !work.retry_cleanup()) {
-            return RuntimeCloseProgress::Pending;
+        registry.closing = true;
+        registry.hosts.retain(|host| !host.retire());
+        if registry.hosts.is_empty() {
+            RuntimeCloseProgress::Complete
+        } else {
+            RuntimeCloseProgress::Pending
         }
-        *work = None;
-        drop(work);
-        *retained = None;
-        RuntimeCloseProgress::Complete
     }
 }
 
-const SAVE_CUSTODY_OBLIGATION: PluginShutdownObligationId =
-    PluginShutdownObligationId::new("nara.editor.persistence.save-custody");
-const SAVE_CUSTODY_PARTICIPANT: RuntimeCloseParticipantId =
-    RuntimeCloseParticipantId::new("nara.editor.persistence.save-custody");
-const SAVE_CUSTODY_DECLARATION: PluginDeclaration = PluginDeclaration::new(
-    PluginId::new("nara.editor.persistence.save-custody"),
+const HOST_CUSTODY_OBLIGATION: PluginShutdownObligationId =
+    PluginShutdownObligationId::new("nara.editor.persistence.host-custody");
+const HOST_CUSTODY_PARTICIPANT: RuntimeCloseParticipantId =
+    RuntimeCloseParticipantId::new("nara.editor.persistence.host-custody");
+const HOST_CUSTODY_DECLARATION: PluginDeclaration = PluginDeclaration::new(
+    PluginId::new("nara.editor.persistence.host-custody"),
     PluginCategory::Service,
 )
 .requires_plugins(&[nara_tasks::TASK_PLUGIN_ID])
-.shutdown_obligations(&[SAVE_CUSTODY_OBLIGATION]);
+.shutdown_obligations(&[HOST_CUSTODY_OBLIGATION]);
 
-pub(in crate::project_host::runtime::editor) struct SaveCustodyPlugin;
+pub(in crate::project_host::runtime::editor) struct HostCustodyPlugin;
 
-impl Plugin for SaveCustodyPlugin {
+impl Plugin for HostCustodyPlugin {
     fn declaration() -> &'static PluginDeclaration {
-        &SAVE_CUSTODY_DECLARATION
+        &HOST_CUSTODY_DECLARATION
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        let custody = SaveCustody::default();
+        let custody = HostCustody::default();
         app.register_plugin_runtime_close_participant(
-            SAVE_CUSTODY_OBLIGATION,
-            SAVE_CUSTODY_PARTICIPANT,
-            SaveCustodyCloseParticipant(custody.clone()),
+            HOST_CUSTODY_OBLIGATION,
+            HOST_CUSTODY_PARTICIPANT,
+            HostCustodyCloseParticipant(custody.clone()),
         )?;
         app.insert_resource(custody)?;
         Ok(())
     }
 }
 
-struct SaveCustodyCloseParticipant(SaveCustody);
+struct HostCustodyCloseParticipant(HostCustody);
 
-impl RuntimeCloseParticipant for SaveCustodyCloseParticipant {
+impl RuntimeCloseParticipant for HostCustodyCloseParticipant {
     fn begin_close(
         &mut self,
         _context: &mut RuntimeCloseContext<'_>,
     ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+        self.0.close_admission();
         Ok(RuntimeCloseProgress::Pending)
     }
 

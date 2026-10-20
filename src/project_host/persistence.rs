@@ -3,6 +3,9 @@ pub(super) use super::file_publication::{
     FilePublicationHost, FilePublicationOutcome, FilePublicationRejection,
 };
 
+#[cfg(test)]
+pub(super) use super::file_publication::CleanupTestControl;
+
 use nara_fs::{
     ContentDigest, DirectoryCapability, DurabilityProgress, FileIdentity, FsError,
     PublicationAtomicity, PublicationIdentityEvidence, RelativePath, StageStatus,
@@ -383,8 +386,8 @@ impl PersistenceFileState {
 
 impl ScenePersistenceHost {
     #[cfg(test)]
-    pub(super) fn test_fail_after_write(&mut self) {
-        self.file.publication.test_fail_after_write();
+    pub(super) fn test_fail_after_write(&mut self) -> CleanupTestControl {
+        self.file.publication.test_fail_after_write()
     }
 
     #[cfg(test)]
@@ -505,6 +508,16 @@ impl ScenePersistenceHost {
 }
 
 impl PrefabPersistenceHost {
+    #[cfg(test)]
+    pub(super) fn test_fail_after_write(&mut self) -> CleanupTestControl {
+        self.file.publication.test_fail_after_write()
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_allow_cleanup(&mut self) {
+        self.file.publication.test_allow_cleanup();
+    }
+
     pub(super) fn retry_cleanup(&mut self) -> bool {
         self.file.publication.retry_cleanup()
     }

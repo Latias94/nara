@@ -43,7 +43,8 @@ impl EditorProjectSession {
         relative_path: &str,
         kind: AuthoringDocumentKind,
     ) -> EditorDocumentOpenRequestResult {
-        if self.pending_document_open.is_some()
+        if !self.accepts_new_work()
+            || self.pending_document_open.is_some()
             || self.pending_workspace_intent.is_some()
             || self.pending_persistence.is_some()
         {
@@ -188,6 +189,9 @@ impl EditorProjectSession {
         &mut self,
         prepared: PreparedAuthoringDocumentOpen,
     ) -> Result<EditorDocumentId, &'static str> {
+        if !self.accepts_new_work() {
+            return Err("project.editor.document-open-busy");
+        }
         match prepared {
             PreparedAuthoringDocumentOpen::Scene {
                 relative_path,
@@ -217,6 +221,11 @@ impl EditorProjectSession {
                     return Err("project.editor.scene-persistence-binding-failed");
                 }
                 let _ = self.diagnostics.extend(diagnostics);
+                let host = self
+                    .authoring_runtime
+                    .host_custody()
+                    .retain_scene(host)
+                    .ok_or("project.editor.document-open-busy")?;
                 self.scene_lane = Some(EditorScenePersistenceLane {
                     project_path: relative_path,
                     document,
@@ -252,6 +261,11 @@ impl EditorProjectSession {
                     return Err("project.editor.prefab-persistence-binding-failed");
                 }
                 let _ = self.diagnostics.extend(diagnostics);
+                let host = self
+                    .authoring_runtime
+                    .host_custody()
+                    .retain_prefab(host)
+                    .ok_or("project.editor.document-open-busy")?;
                 self.prefab_lane = Some(EditorPrefabPersistenceLane {
                     project_path: relative_path,
                     document,

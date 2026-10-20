@@ -25,8 +25,12 @@ impl SaveLane {
 
     fn mark_uncertain(&mut self) {
         match self {
-            Self::Scene(lane) => lane.host.mark_uncertain(),
-            Self::Prefab(lane) => lane.host.mark_uncertain(),
+            Self::Scene(lane) => {
+                lane.host.try_with(|host| host.mark_uncertain());
+            }
+            Self::Prefab(lane) => {
+                lane.host.try_with(|host| host.mark_uncertain());
+            }
         }
     }
 }
@@ -41,23 +45,12 @@ pub(super) struct SaveWork {
     gate: Option<SaveTestGate>,
 }
 
-pub(super) type SharedSaveWork = Arc<Mutex<Option<SaveWork>>>;
-
-impl SaveWork {
-    pub(super) fn retry_cleanup(&mut self) -> bool {
-        match &mut self.lane {
-            SaveLane::Scene(lane) => lane.host.retry_cleanup(),
-            SaveLane::Prefab(lane) => lane.host.retry_cleanup(),
-        }
-    }
-}
+type SharedSaveWork = Arc<Mutex<Option<SaveWork>>>;
 
 pub(crate) struct BackgroundSave {
-    // The worker borrows the host in this slot. Panic, cancellation and lost interest never
-    // put the only file/cleanup owner inside a disposable TaskTerminal payload.
+    // Work retains a lane handle; the runtime independently retains the actual Host through
+    // operation completion. The task's disposable terminal contains no file authority.
     work: SharedSaveWork,
-    document: EditorDocumentId,
-    scene: bool,
     task: Option<TaskHandle<()>>,
 }
 
@@ -67,12 +60,9 @@ impl BackgroundSave {
         candidate: PendingSave,
         authoring: Option<AuthoringDocumentReadmission>,
         pools: &TaskPools,
-        custody: &SaveCustody,
         #[cfg(test)] gate: Option<SaveTestGate>,
-    ) -> Result<Self, SaveLane> {
+    ) -> Self {
         use nara_tasks::{TaskDomainKey, TaskPoolKind, TaskSpawnRequest};
-        let document = lane.document();
-        let scene = matches!(&lane, SaveLane::Scene(_));
         let work = Arc::new(Mutex::new(Some(SaveWork {
             lane,
             candidate: Some(candidate),
@@ -82,14 +72,6 @@ impl BackgroundSave {
             #[cfg(test)]
             gate,
         })));
-        if custody.retain(Arc::clone(&work)).is_err() {
-            let work = work
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .take()
-                .unwrap();
-            return Err(work.lane);
-        }
         let retained = Arc::clone(&work);
         let task = pools
             .spawn(
@@ -104,12 +86,18 @@ impl BackgroundSave {
                     let candidate = work.candidate.take().expect("a save runs once");
                     let basis = work.authoring.take();
                     work.outcome = Some(match (&mut work.lane, candidate) {
-                        (SaveLane::Scene(lane), PendingSave::Scene(candidate)) => {
-                            lane.host.save_owned(candidate, basis)
-                        }
-                        (SaveLane::Prefab(lane), PendingSave::Prefab(candidate)) => {
-                            lane.host.save_owned(candidate, basis)
-                        }
+                        (SaveLane::Scene(lane), PendingSave::Scene(candidate)) => lane
+                            .host
+                            .with_worker(|host| host.save_owned(candidate, basis))
+                            .unwrap_or(PersistenceSaveOutcome::Rejected(
+                                EditorPersistenceRejection::Busy,
+                            )),
+                        (SaveLane::Prefab(lane), PendingSave::Prefab(candidate)) => lane
+                            .host
+                            .with_worker(|host| host.save_owned(candidate, basis))
+                            .unwrap_or(PersistenceSaveOutcome::Rejected(
+                                EditorPersistenceRejection::Busy,
+                            )),
                         _ => PersistenceSaveOutcome::Rejected(
                             EditorPersistenceRejection::DocumentKindMismatch,
                         ),
@@ -120,18 +108,7 @@ impl BackgroundSave {
             )
             .into_handle()
             .ok();
-        Ok(Self {
-            work,
-            document,
-            scene,
-            task,
-        })
-    }
-
-    pub(in crate::project_host::runtime::editor) fn scene_document(
-        &self,
-    ) -> Option<EditorDocumentId> {
-        self.scene.then_some(self.document)
+        Self { work, task }
     }
 
     pub(super) fn poll(&mut self) -> Option<(SaveLane, PersistenceSaveOutcome)> {

@@ -687,16 +687,18 @@ impl AuthoringPrefabSourceObservation {
     }
 }
 
+#[derive(Clone)]
 struct EditorScenePersistenceLane {
     project_path: Arc<str>,
     document: EditorDocumentId,
-    host: ScenePersistenceHost,
+    host: persistence::RetainedHost<ScenePersistenceHost>,
 }
 
+#[derive(Clone)]
 struct EditorPrefabPersistenceLane {
     project_path: Arc<str>,
     document: EditorDocumentId,
-    host: PrefabPersistenceHost,
+    host: persistence::RetainedHost<PrefabPersistenceHost>,
 }
 
 struct TrustedCompiledEditorLane {
@@ -724,6 +726,7 @@ struct TrustedCompiledEditorLane {
 /// [`Self::dispatch_editor_actions`], and publish the next frame through
 /// [`Self::drive_editor_frame`]. Crate-private helpers remain owner-conformance seams only.
 pub struct EditorProjectSession {
+    closing: bool,
     workspace: EditorWorkspace,
     persistence_authority: EditorPersistenceAuthority,
     scene_lane: Option<EditorScenePersistenceLane>,
@@ -841,6 +844,8 @@ impl EditorProjectSession {
     /// this poll does not claim to preempt an OS call or roll back published bytes.
     #[doc(hidden)]
     pub fn advance_close(&mut self) -> EditorProjectCloseProgress {
+        self.closing = true;
+        self.authoring_runtime.host_custody().close_admission();
         self.advance_persistence();
         if self.pending_persistence.is_some() {
             return EditorProjectCloseProgress::Incomplete {
@@ -850,12 +855,7 @@ impl EditorProjectSession {
         }
         self.image_import.cancel_pending();
         let mut files_closed = self.image_import.retry_publication_cleanup();
-        if let Some(lane) = self.scene_lane.as_mut() {
-            files_closed &= lane.host.retry_cleanup();
-        }
-        if let Some(lane) = self.prefab_lane.as_mut() {
-            files_closed &= lane.host.retry_cleanup();
-        }
+        files_closed &= self.authoring_runtime.host_custody().retry_cleanup();
         match self.authoring_runtime.shutdown_tasks() {
             authoring_runtime::EditorAuthoringRuntimeCloseProgress::Incomplete(task_shutdown) => {
                 EditorProjectCloseProgress::Incomplete {
@@ -876,6 +876,10 @@ impl EditorProjectSession {
                 }
             }
         }
+    }
+
+    fn accepts_new_work(&self) -> bool {
+        !self.closing && self.authoring_runtime.host_custody().is_accepting()
     }
 
     #[must_use]
@@ -953,6 +957,9 @@ impl EditorProjectSession {
     }
 
     pub(crate) fn request_project_source_index_refresh(&mut self) -> bool {
+        if !self.accepts_new_work() {
+            return false;
+        }
         self.authoring_project_mut()
             .and_then(AuthoringProjectSessionSnapshot::request_source_index_refresh)
             .is_some()
@@ -995,6 +1002,11 @@ impl EditorProjectSession {
         project_relative_path: &str,
         settings: ImageImportSettings,
     ) -> image_import::EditorImageImportRequestResult {
+        if !self.accepts_new_work() {
+            return image_import::EditorImageImportRequestResult::Rejected(
+                image_import::EditorImageImportFailure::Busy,
+            );
+        }
         if let Some(failure) = self.image_import.request_blocker() {
             return image_import::EditorImageImportRequestResult::Rejected(failure);
         }
@@ -1032,6 +1044,11 @@ impl EditorProjectSession {
         expected_detail_revision: u64,
         settings: ImageImportSettings,
     ) -> image_import::EditorImageImportRequestResult {
+        if !self.accepts_new_work() {
+            return image_import::EditorImageImportRequestResult::Rejected(
+                image_import::EditorImageImportFailure::Busy,
+            );
+        }
         let result = {
             let EditorProjectSession {
                 execution,
@@ -1283,12 +1300,16 @@ impl EditorProjectSession {
         }
 
         let mut session = Self {
+            closing: false,
             workspace,
             persistence_authority,
             scene_lane: Some(EditorScenePersistenceLane {
                 project_path: startup_project_path,
                 document,
-                host: persistence,
+                host: authoring_runtime
+                    .host_custody()
+                    .retain_scene(persistence)
+                    .ok_or_else(|| editor_open_error("project.editor.persistence-owner-closed"))?,
             }),
             execution: EditorExecutionLane::Authoring(parts.snapshot),
             project_content: EditorProjectContentView::NotInstalled,
@@ -1488,12 +1509,16 @@ impl EditorProjectSession {
         let mut diagnostics = runtime_plan_selected_report(&plan);
         let _ = diagnostics.extend(report.diagnostics);
         let mut session = Self {
+            closing: false,
             workspace,
             persistence_authority,
             scene_lane: Some(EditorScenePersistenceLane {
                 project_path: startup_project_path,
                 document,
-                host: opened.host,
+                host: authoring_runtime
+                    .host_custody()
+                    .retain_scene(opened.host)
+                    .ok_or_else(|| editor_open_error("project.editor.persistence-owner-closed"))?,
             }),
             execution: EditorExecutionLane::TrustedCompiled(Box::new(TrustedCompiledEditorLane {
                 plan,
@@ -2106,14 +2131,7 @@ impl EditorProjectSession {
         let authoring = self.authoring_project().is_some();
         let mut projection_rejected = false;
         let mut projection_omitted = false;
-        let scene_document = self
-            .scene_lane
-            .as_ref()
-            .map(|lane| lane.document)
-            .or_else(|| match self.pending_persistence.as_ref() {
-                Some(PendingPersistence::Saving(save)) => save.scene_document(),
-                _ => None,
-            });
+        let scene_document = self.scene_lane.as_ref().map(|lane| lane.document);
         let source_identity = scene_document.and_then(|document| {
             self.workspace
                 .scene(document)
@@ -2345,7 +2363,10 @@ impl EditorProjectSession {
         &mut self,
         intent: EditorWorkspaceIntent,
     ) -> EditorWorkspaceIntentRequestResult {
-        if self.pending_workspace_intent.is_some() || self.pending_persistence.is_some() {
+        if !self.accepts_new_work()
+            || self.pending_workspace_intent.is_some()
+            || self.pending_persistence.is_some()
+        {
             return EditorWorkspaceIntentRequestResult::Rejected(
                 EditorWorkspaceIntentRejection::Busy,
             );
@@ -2823,10 +2844,18 @@ impl EditorProjectSession {
         match pending {
             PendingWorkspaceIntent::CloseDocument(pending) => {
                 let scene_clean = self.scene_lane.as_mut().is_none_or(|lane| {
-                    lane.document != pending.document || lane.host.retry_cleanup()
+                    lane.document != pending.document
+                        || lane
+                            .host
+                            .try_with(|host| host.retry_cleanup())
+                            .unwrap_or(false)
                 });
                 let prefab_clean = self.prefab_lane.as_mut().is_none_or(|lane| {
-                    lane.document != pending.document || lane.host.retry_cleanup()
+                    lane.document != pending.document
+                        || lane
+                            .host
+                            .try_with(|host| host.retry_cleanup())
+                            .unwrap_or(false)
                 });
                 if !scene_clean || !prefab_clean {
                     self.workspace_intent_result = Some(EditorWorkspaceIntentResult::Rejected {
@@ -2851,6 +2880,7 @@ impl EditorProjectSession {
                                 .as_ref()
                                 .is_some_and(|lane| lane.document == pending.document) =>
                         {
+                            assert!(self.scene_lane.as_ref().unwrap().host.retire());
                             self.scene_lane = None;
                         }
                         Some(EditorDocumentKind::Prefab)
@@ -2859,6 +2889,7 @@ impl EditorProjectSession {
                                 .as_ref()
                                 .is_some_and(|lane| lane.document == pending.document) =>
                         {
+                            assert!(self.prefab_lane.as_ref().unwrap().host.retire());
                             self.prefab_lane = None;
                         }
                         _ => {}

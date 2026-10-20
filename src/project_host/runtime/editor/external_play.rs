@@ -490,7 +490,7 @@ impl EditorProjectSession {
         &mut self,
         command: EditorPlayCommand,
     ) -> EditorPlayRequestResult {
-        if self.reopen_pending()
+        if (!self.accepts_new_work() || self.reopen_pending())
             && matches!(
                 command,
                 EditorPlayCommand::Play

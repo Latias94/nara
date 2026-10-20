@@ -484,10 +484,10 @@ impl EditorAuthoringRuntime {
         self.runtime.world().resource::<TaskPools>()
     }
 
-    pub(super) fn save_custody(&self) -> &super::persistence::SaveCustody {
+    pub(super) fn host_custody(&self) -> &super::persistence::HostCustody {
         self.runtime
             .world()
-            .resource::<super::persistence::SaveCustody>()
+            .resource::<super::persistence::HostCustody>()
     }
 
     pub(super) fn shutdown_tasks(&mut self) -> EditorAuthoringRuntimeCloseProgress {
@@ -586,7 +586,7 @@ fn build_authoring_app() -> Result<App, DiagnosticReport> {
         nara_transform::TransformPlugin,
         nara_render::RenderComponentsPlugin,
     ))
-    .and_then(|app| app.add_plugins(super::persistence::SaveCustodyPlugin))
+    .and_then(|app| app.add_plugins(super::persistence::HostCustodyPlugin))
     .and_then(|app| app.add_plugins(nara_image::ImagePlugin::default()))
     .and_then(|app| app.add_plugins(TileSetAssetPlugin))
     .map_err(|_| runtime_error("project.editor.preview-plugin-install-failed"))?;
