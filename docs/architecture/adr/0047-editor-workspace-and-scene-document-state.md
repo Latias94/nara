@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-19
+**Last Revised**: 2026-10-20
 **Amended**: 2026-08-15 to make selection single-owner and separate monotonic revision from
 receipt-backed content state
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
@@ -77,6 +77,14 @@ Rules:
   revision, content-state identity, exact Scene snapshot, canonical content digest,
   post-publication content observation, and required guarantee tier. A UI/tooling command or an
   unhosted `EditorWorkspace` cannot advance saved state.
+- Save is an owned operation across frames. Admission captures the checkpoint and the matching
+  authoring re-admission basis together. Encoding, preservation validation and file publication
+  may run on the existing task pools; only the Workspace owner consumes the resulting receipt.
+  Saving an older captured revision leaves later edits dirty. Navigation cannot replace its
+  document/source, and runtime replacement waits until that owner has recovered the original Host.
+  Task cancellation or terminality does not prove that filesystem calls returned: retained runtime
+  custody keeps the original Host and temporary cleanup alive through close or caller abandonment.
+  Save exposes no public Cancel action. Reopen retains its separate exact-base-revision policy.
 - External file changes enter as conflict state, not silent overwrite. The editor may offer reload,
   merge, save-as, or keep-local actions, but these are explicit workspace commands.
 - Play Mode is anchored to a document snapshot and workspace mode state. Stop Play still discards

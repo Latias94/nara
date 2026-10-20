@@ -1,0 +1,1082 @@
+[
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 64,
+    "phase": "idle-drive",
+    "samples": 16,
+    "p50_ns": 7450.0,
+    "p95_ns": 8700,
+    "max_ns": 8700
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 64,
+    "phase": "open-AuthoringSchemaBundle",
+    "samples": 16,
+    "p50_ns": 3443200.0,
+    "p95_ns": 3964900,
+    "max_ns": 3964900
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 64,
+    "phase": "open-ManifestAndProfile",
+    "samples": 16,
+    "p50_ns": 282550.0,
+    "p95_ns": 408100,
+    "max_ns": 408100
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 64,
+    "phase": "open-SessionPublication",
+    "samples": 16,
+    "p50_ns": 5460550.0,
+    "p95_ns": 6223800,
+    "max_ns": 6223800
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 64,
+    "phase": "open-StartupClosure",
+    "samples": 16,
+    "p50_ns": 854300.0,
+    "p95_ns": 1069500,
+    "max_ns": 1069500
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 64,
+    "phase": "reopen-drive",
+    "samples": 16,
+    "p50_ns": 391500.0,
+    "p95_ns": 578600,
+    "max_ns": 578600
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 64,
+    "phase": "reopen-request",
+    "samples": 16,
+    "p50_ns": 1100.0,
+    "p95_ns": 1400,
+    "max_ns": 1400
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 64,
+    "phase": "root-acquisition",
+    "samples": 16,
+    "p50_ns": 218600.0,
+    "p95_ns": 371900,
+    "max_ns": 371900
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 64,
+    "phase": "save-v2-completion",
+    "samples": 16,
+    "p50_ns": 4514150.0,
+    "p95_ns": 4620800,
+    "max_ns": 4620800
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 64,
+    "phase": "save-v2-first-drive",
+    "samples": 16,
+    "p50_ns": 15950.0,
+    "p95_ns": 19200,
+    "max_ns": 19200
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 64,
+    "phase": "save-v2-max-drive",
+    "samples": 16,
+    "p50_ns": 46500.0,
+    "p95_ns": 87800,
+    "max_ns": 87800
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 64,
+    "phase": "save-v2-request",
+    "samples": 16,
+    "p50_ns": 6650.0,
+    "p95_ns": 7700,
+    "max_ns": 7700
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 1024,
+    "phase": "idle-drive",
+    "samples": 16,
+    "p50_ns": 76650.0,
+    "p95_ns": 190200,
+    "max_ns": 190200
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 1024,
+    "phase": "open-AuthoringSchemaBundle",
+    "samples": 16,
+    "p50_ns": 3283250.0,
+    "p95_ns": 3485000,
+    "max_ns": 3485000
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 1024,
+    "phase": "open-ManifestAndProfile",
+    "samples": 16,
+    "p50_ns": 288350.0,
+    "p95_ns": 307300,
+    "max_ns": 307300
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 1024,
+    "phase": "open-SessionPublication",
+    "samples": 16,
+    "p50_ns": 5639750.0,
+    "p95_ns": 6827100,
+    "max_ns": 6827100
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 1024,
+    "phase": "open-StartupClosure",
+    "samples": 16,
+    "p50_ns": 3054500.0,
+    "p95_ns": 3579100,
+    "max_ns": 3579100
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 1024,
+    "phase": "reopen-drive",
+    "samples": 16,
+    "p50_ns": 2631300.0,
+    "p95_ns": 3677900,
+    "max_ns": 3677900
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 1024,
+    "phase": "reopen-request",
+    "samples": 16,
+    "p50_ns": 2150.0,
+    "p95_ns": 4800,
+    "max_ns": 4800
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 1024,
+    "phase": "root-acquisition",
+    "samples": 16,
+    "p50_ns": 227400.0,
+    "p95_ns": 313600,
+    "max_ns": 313600
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 1024,
+    "phase": "save-v2-completion",
+    "samples": 16,
+    "p50_ns": 7732950.0,
+    "p95_ns": 9111200,
+    "max_ns": 9111200
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 1024,
+    "phase": "save-v2-first-drive",
+    "samples": 16,
+    "p50_ns": 104700.0,
+    "p95_ns": 142500,
+    "max_ns": 142500
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 1024,
+    "phase": "save-v2-max-drive",
+    "samples": 16,
+    "p50_ns": 267000.0,
+    "p95_ns": 403500,
+    "max_ns": 403500
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 1024,
+    "phase": "save-v2-request",
+    "samples": 16,
+    "p50_ns": 56550.0,
+    "p95_ns": 74100,
+    "max_ns": 74100
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 4096,
+    "phase": "idle-drive",
+    "samples": 16,
+    "p50_ns": 299450.0,
+    "p95_ns": 526600,
+    "max_ns": 526600
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 4096,
+    "phase": "open-AuthoringSchemaBundle",
+    "samples": 16,
+    "p50_ns": 3434300.0,
+    "p95_ns": 5217700,
+    "max_ns": 5217700
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 4096,
+    "phase": "open-ManifestAndProfile",
+    "samples": 16,
+    "p50_ns": 294250.0,
+    "p95_ns": 433000,
+    "max_ns": 433000
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 4096,
+    "phase": "open-SessionPublication",
+    "samples": 16,
+    "p50_ns": 6188550.0,
+    "p95_ns": 9055400,
+    "max_ns": 9055400
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 4096,
+    "phase": "open-StartupClosure",
+    "samples": 16,
+    "p50_ns": 10606850.0,
+    "p95_ns": 12417700,
+    "max_ns": 12417700
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 4096,
+    "phase": "reopen-drive",
+    "samples": 16,
+    "p50_ns": 10329700.0,
+    "p95_ns": 14580900,
+    "max_ns": 14580900
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 4096,
+    "phase": "reopen-request",
+    "samples": 16,
+    "p50_ns": 3600.0,
+    "p95_ns": 5100,
+    "max_ns": 5100
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 4096,
+    "phase": "root-acquisition",
+    "samples": 16,
+    "p50_ns": 237250.0,
+    "p95_ns": 346900,
+    "max_ns": 346900
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 4096,
+    "phase": "save-v2-completion",
+    "samples": 16,
+    "p50_ns": 17379250.0,
+    "p95_ns": 19477900,
+    "max_ns": 19477900
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 4096,
+    "phase": "save-v2-first-drive",
+    "samples": 16,
+    "p50_ns": 407050.0,
+    "p95_ns": 675800,
+    "max_ns": 675800
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 4096,
+    "phase": "save-v2-max-drive",
+    "samples": 16,
+    "p50_ns": 716150.0,
+    "p95_ns": 1359100,
+    "max_ns": 1359100
+  },
+  {
+    "run": "run-1",
+    "nextest_run": "b1ed0b92-d6aa-44a0-9434-e5118f70ee02",
+    "population": 4096,
+    "phase": "save-v2-request",
+    "samples": 16,
+    "p50_ns": 220000.0,
+    "p95_ns": 408700,
+    "max_ns": 408700
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 64,
+    "phase": "idle-drive",
+    "samples": 16,
+    "p50_ns": 7400.0,
+    "p95_ns": 10400,
+    "max_ns": 10400
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 64,
+    "phase": "open-AuthoringSchemaBundle",
+    "samples": 16,
+    "p50_ns": 3439000.0,
+    "p95_ns": 4157000,
+    "max_ns": 4157000
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 64,
+    "phase": "open-ManifestAndProfile",
+    "samples": 16,
+    "p50_ns": 290050.0,
+    "p95_ns": 544200,
+    "max_ns": 544200
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 64,
+    "phase": "open-SessionPublication",
+    "samples": 16,
+    "p50_ns": 5509600.0,
+    "p95_ns": 6090800,
+    "max_ns": 6090800
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 64,
+    "phase": "open-StartupClosure",
+    "samples": 16,
+    "p50_ns": 856100.0,
+    "p95_ns": 1303100,
+    "max_ns": 1303100
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 64,
+    "phase": "reopen-drive",
+    "samples": 16,
+    "p50_ns": 451750.0,
+    "p95_ns": 610600,
+    "max_ns": 610600
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 64,
+    "phase": "reopen-request",
+    "samples": 16,
+    "p50_ns": 1200.0,
+    "p95_ns": 2200,
+    "max_ns": 2200
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 64,
+    "phase": "root-acquisition",
+    "samples": 16,
+    "p50_ns": 215700.0,
+    "p95_ns": 376200,
+    "max_ns": 376200
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 64,
+    "phase": "save-v2-completion",
+    "samples": 16,
+    "p50_ns": 4494850.0,
+    "p95_ns": 5969300,
+    "max_ns": 5969300
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 64,
+    "phase": "save-v2-first-drive",
+    "samples": 16,
+    "p50_ns": 16500.0,
+    "p95_ns": 22300,
+    "max_ns": 22300
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 64,
+    "phase": "save-v2-max-drive",
+    "samples": 16,
+    "p50_ns": 46350.0,
+    "p95_ns": 97400,
+    "max_ns": 97400
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 64,
+    "phase": "save-v2-request",
+    "samples": 16,
+    "p50_ns": 7150.0,
+    "p95_ns": 10900,
+    "max_ns": 10900
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 1024,
+    "phase": "idle-drive",
+    "samples": 16,
+    "p50_ns": 73600.0,
+    "p95_ns": 118100,
+    "max_ns": 118100
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 1024,
+    "phase": "open-AuthoringSchemaBundle",
+    "samples": 16,
+    "p50_ns": 3392100.0,
+    "p95_ns": 4128600,
+    "max_ns": 4128600
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 1024,
+    "phase": "open-ManifestAndProfile",
+    "samples": 16,
+    "p50_ns": 295800.0,
+    "p95_ns": 497300,
+    "max_ns": 497300
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 1024,
+    "phase": "open-SessionPublication",
+    "samples": 16,
+    "p50_ns": 5631250.0,
+    "p95_ns": 7615800,
+    "max_ns": 7615800
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 1024,
+    "phase": "open-StartupClosure",
+    "samples": 16,
+    "p50_ns": 3075900.0,
+    "p95_ns": 3700900,
+    "max_ns": 3700900
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 1024,
+    "phase": "reopen-drive",
+    "samples": 16,
+    "p50_ns": 2730400.0,
+    "p95_ns": 3162700,
+    "max_ns": 3162700
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 1024,
+    "phase": "reopen-request",
+    "samples": 16,
+    "p50_ns": 2550.0,
+    "p95_ns": 3700,
+    "max_ns": 3700
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 1024,
+    "phase": "root-acquisition",
+    "samples": 16,
+    "p50_ns": 228250.0,
+    "p95_ns": 317500,
+    "max_ns": 317500
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 1024,
+    "phase": "save-v2-completion",
+    "samples": 16,
+    "p50_ns": 7726350.0,
+    "p95_ns": 9179600,
+    "max_ns": 9179600
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 1024,
+    "phase": "save-v2-first-drive",
+    "samples": 16,
+    "p50_ns": 105800.0,
+    "p95_ns": 169900,
+    "max_ns": 169900
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 1024,
+    "phase": "save-v2-max-drive",
+    "samples": 16,
+    "p50_ns": 239400.0,
+    "p95_ns": 353200,
+    "max_ns": 353200
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 1024,
+    "phase": "save-v2-request",
+    "samples": 16,
+    "p50_ns": 62500.0,
+    "p95_ns": 79200,
+    "max_ns": 79200
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 4096,
+    "phase": "idle-drive",
+    "samples": 16,
+    "p50_ns": 295950.0,
+    "p95_ns": 319200,
+    "max_ns": 319200
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 4096,
+    "phase": "open-AuthoringSchemaBundle",
+    "samples": 16,
+    "p50_ns": 3415100.0,
+    "p95_ns": 3904700,
+    "max_ns": 3904700
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 4096,
+    "phase": "open-ManifestAndProfile",
+    "samples": 16,
+    "p50_ns": 301200.0,
+    "p95_ns": 395100,
+    "max_ns": 395100
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 4096,
+    "phase": "open-SessionPublication",
+    "samples": 16,
+    "p50_ns": 6204000.0,
+    "p95_ns": 6619800,
+    "max_ns": 6619800
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 4096,
+    "phase": "open-StartupClosure",
+    "samples": 16,
+    "p50_ns": 10864400.0,
+    "p95_ns": 11940000,
+    "max_ns": 11940000
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 4096,
+    "phase": "reopen-drive",
+    "samples": 16,
+    "p50_ns": 10593700.0,
+    "p95_ns": 12609500,
+    "max_ns": 12609500
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 4096,
+    "phase": "reopen-request",
+    "samples": 16,
+    "p50_ns": 3650.0,
+    "p95_ns": 4600,
+    "max_ns": 4600
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 4096,
+    "phase": "root-acquisition",
+    "samples": 16,
+    "p50_ns": 241850.0,
+    "p95_ns": 317800,
+    "max_ns": 317800
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 4096,
+    "phase": "save-v2-completion",
+    "samples": 16,
+    "p50_ns": 17907450.0,
+    "p95_ns": 18935100,
+    "max_ns": 18935100
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 4096,
+    "phase": "save-v2-first-drive",
+    "samples": 16,
+    "p50_ns": 401800.0,
+    "p95_ns": 519700,
+    "max_ns": 519700
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 4096,
+    "phase": "save-v2-max-drive",
+    "samples": 16,
+    "p50_ns": 693300.0,
+    "p95_ns": 1645000,
+    "max_ns": 1645000
+  },
+  {
+    "run": "run-2",
+    "nextest_run": "9622eeed-857c-43d2-97e1-470a29f0ab7c",
+    "population": 4096,
+    "phase": "save-v2-request",
+    "samples": 16,
+    "p50_ns": 229500.0,
+    "p95_ns": 298200,
+    "max_ns": 298200
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 64,
+    "phase": "idle-drive",
+    "samples": 16,
+    "p50_ns": 7600.0,
+    "p95_ns": 12800,
+    "max_ns": 12800
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 64,
+    "phase": "open-AuthoringSchemaBundle",
+    "samples": 16,
+    "p50_ns": 3431900.0,
+    "p95_ns": 3942300,
+    "max_ns": 3942300
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 64,
+    "phase": "open-ManifestAndProfile",
+    "samples": 16,
+    "p50_ns": 296200.0,
+    "p95_ns": 795900,
+    "max_ns": 795900
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 64,
+    "phase": "open-SessionPublication",
+    "samples": 16,
+    "p50_ns": 5483650.0,
+    "p95_ns": 8346800,
+    "max_ns": 8346800
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 64,
+    "phase": "open-StartupClosure",
+    "samples": 16,
+    "p50_ns": 841900.0,
+    "p95_ns": 1098400,
+    "max_ns": 1098400
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 64,
+    "phase": "reopen-drive",
+    "samples": 16,
+    "p50_ns": 441300.0,
+    "p95_ns": 646200,
+    "max_ns": 646200
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 64,
+    "phase": "reopen-request",
+    "samples": 16,
+    "p50_ns": 1000.0,
+    "p95_ns": 1300,
+    "max_ns": 1300
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 64,
+    "phase": "root-acquisition",
+    "samples": 16,
+    "p50_ns": 207600.0,
+    "p95_ns": 241500,
+    "max_ns": 241500
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 64,
+    "phase": "save-v2-completion",
+    "samples": 16,
+    "p50_ns": 4363100.0,
+    "p95_ns": 6184800,
+    "max_ns": 6184800
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 64,
+    "phase": "save-v2-first-drive",
+    "samples": 16,
+    "p50_ns": 15950.0,
+    "p95_ns": 27400,
+    "max_ns": 27400
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 64,
+    "phase": "save-v2-max-drive",
+    "samples": 16,
+    "p50_ns": 45550.0,
+    "p95_ns": 89200,
+    "max_ns": 89200
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 64,
+    "phase": "save-v2-request",
+    "samples": 16,
+    "p50_ns": 6950.0,
+    "p95_ns": 10900,
+    "max_ns": 10900
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 1024,
+    "phase": "idle-drive",
+    "samples": 16,
+    "p50_ns": 73550.0,
+    "p95_ns": 112400,
+    "max_ns": 112400
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 1024,
+    "phase": "open-AuthoringSchemaBundle",
+    "samples": 16,
+    "p50_ns": 3408900.0,
+    "p95_ns": 3626900,
+    "max_ns": 3626900
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 1024,
+    "phase": "open-ManifestAndProfile",
+    "samples": 16,
+    "p50_ns": 298100.0,
+    "p95_ns": 582100,
+    "max_ns": 582100
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 1024,
+    "phase": "open-SessionPublication",
+    "samples": 16,
+    "p50_ns": 5682200.0,
+    "p95_ns": 6418100,
+    "max_ns": 6418100
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 1024,
+    "phase": "open-StartupClosure",
+    "samples": 16,
+    "p50_ns": 3137450.0,
+    "p95_ns": 3541300,
+    "max_ns": 3541300
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 1024,
+    "phase": "reopen-drive",
+    "samples": 16,
+    "p50_ns": 2582250.0,
+    "p95_ns": 2872400,
+    "max_ns": 2872400
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 1024,
+    "phase": "reopen-request",
+    "samples": 16,
+    "p50_ns": 2350.0,
+    "p95_ns": 3000,
+    "max_ns": 3000
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 1024,
+    "phase": "root-acquisition",
+    "samples": 16,
+    "p50_ns": 224300.0,
+    "p95_ns": 442900,
+    "max_ns": 442900
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 1024,
+    "phase": "save-v2-completion",
+    "samples": 16,
+    "p50_ns": 7631850.0,
+    "p95_ns": 8181800,
+    "max_ns": 8181800
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 1024,
+    "phase": "save-v2-first-drive",
+    "samples": 16,
+    "p50_ns": 105900.0,
+    "p95_ns": 127300,
+    "max_ns": 127300
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 1024,
+    "phase": "save-v2-max-drive",
+    "samples": 16,
+    "p50_ns": 246350.0,
+    "p95_ns": 331900,
+    "max_ns": 331900
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 1024,
+    "phase": "save-v2-request",
+    "samples": 16,
+    "p50_ns": 63000.0,
+    "p95_ns": 104400,
+    "max_ns": 104400
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 4096,
+    "phase": "idle-drive",
+    "samples": 16,
+    "p50_ns": 303000.0,
+    "p95_ns": 526600,
+    "max_ns": 526600
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 4096,
+    "phase": "open-AuthoringSchemaBundle",
+    "samples": 16,
+    "p50_ns": 3234100.0,
+    "p95_ns": 3768300,
+    "max_ns": 3768300
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 4096,
+    "phase": "open-ManifestAndProfile",
+    "samples": 16,
+    "p50_ns": 295550.0,
+    "p95_ns": 558300,
+    "max_ns": 558300
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 4096,
+    "phase": "open-SessionPublication",
+    "samples": 16,
+    "p50_ns": 6544400.0,
+    "p95_ns": 9371100,
+    "max_ns": 9371100
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 4096,
+    "phase": "open-StartupClosure",
+    "samples": 16,
+    "p50_ns": 10805200.0,
+    "p95_ns": 14530200,
+    "max_ns": 14530200
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 4096,
+    "phase": "reopen-drive",
+    "samples": 16,
+    "p50_ns": 10594000.0,
+    "p95_ns": 13132300,
+    "max_ns": 13132300
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 4096,
+    "phase": "reopen-request",
+    "samples": 16,
+    "p50_ns": 3600.0,
+    "p95_ns": 4200,
+    "max_ns": 4200
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 4096,
+    "phase": "root-acquisition",
+    "samples": 16,
+    "p50_ns": 232950.0,
+    "p95_ns": 294000,
+    "max_ns": 294000
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 4096,
+    "phase": "save-v2-completion",
+    "samples": 16,
+    "p50_ns": 17803350.0,
+    "p95_ns": 22120400,
+    "max_ns": 22120400
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 4096,
+    "phase": "save-v2-first-drive",
+    "samples": 16,
+    "p50_ns": 404400.0,
+    "p95_ns": 548200,
+    "max_ns": 548200
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 4096,
+    "phase": "save-v2-max-drive",
+    "samples": 16,
+    "p50_ns": 762550.0,
+    "p95_ns": 1072100,
+    "max_ns": 1072100
+  },
+  {
+    "run": "run-3",
+    "nextest_run": "07f552ae-c62d-4481-8cce-918767dfe2d2",
+    "population": 4096,
+    "phase": "save-v2-request",
+    "samples": 16,
+    "p50_ns": 257350.0,
+    "p95_ns": 322800,
+    "max_ns": 322800
+  }
+]

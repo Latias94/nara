@@ -1,6 +1,6 @@
 # Authoring Interface Ergonomics
 
-**Status:** S1-S3 and the separate N05 App plugin-error follow-up are implemented and qualified within their linked verification scopes. D6 remains triggered future work.
+**Status:** S1-S3, the separate N05 App plugin-error follow-up and D6's measured Save slice are implemented and qualified within their linked verification scopes. Broader D6 work remains trigger-driven.
 **Date:** 2026-10-19.
 **Updated:** 2026-10-20.
 **Source baseline:** `f988852`.
@@ -577,7 +577,7 @@ results, not pooled samples or a subtraction of independent percentiles.
 
 This evidence prioritizes a targeted Save preparation design, followed by Reopen and startup-
 closure preparation. An 8 ms single-call owner-work threshold selects private investigation; it
-is not a product guarantee or native SLA. No asynchronous implementation lands in this follow-up.
+is not a product guarantee or native SLA. The investigation itself lands no asynchronous implementation.
 With sixteen samples, nearest-rank P95 equals max and does not estimate a stable tail. These
 shallow empty-entity probes do not qualify Browser Open, saved-source receipts, no-op Cargo,
 native redraw interruption, representative game components, cold storage or a supported scene
@@ -599,6 +599,24 @@ queue or polling refactor follows from that suspicion. Plugin hooks, component c
 commit and panel painting retain synchronous contracts. An asynchronous preparation implementation
 still needs a measured consumer, stale-result rejection, owner-thread publication and explicit
 physical retirement; D6 as a whole remains open.
+
+### Implemented Owned Save Slice
+
+The measured follow-up now implements Save through the existing task pools, with its original
+file Host retained independently of task terminality and its Workspace acknowledgement on the
+owner. Checkpoint and authoring re-admission basis are captured together; later edits remain dirty.
+Close/Exit, navigation and authoring-runtime/project replacement retain the admitted operation
+until it returns. Deterministic rejection/cancellation/panic/publication/Drop cases and native
+Scene/Prefab/Canvas workflows are qualified in the
+[Save verification](../knowledge/engineering/verification/2026-10/2026-10-20T013307Z-owned-editor-save-custody-native-observation-and-measurements-9828019f2f934061a1773899ce356ffb.md).
+
+The [v2 responsiveness report](../benchmarks/2026-10-20-owned-editor-save.md) retains three
+probe-free optimized processes, each with 576 numeric rows. At 4,096 empty entities, per-Save
+maximum owner-drive P50 is 0.716 / 0.693 / 0.763 ms and P95 is 1.359 / 1.645 / 1.072 ms.
+Completion observation remains separate and includes 1 ms polling; it does not measure native
+16 ms maintenance latency or total CPU work. Reopen stays synchronous, and bound-Play source
+receipt, compiled Prefab refresh, slow storage and complex content remain separately measured
+future consumers. There is no generic async interface or new Goal.
 
 ## Implementation Sequence And Ownership
 

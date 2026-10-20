@@ -101,6 +101,11 @@ and reject the second. Submit one existing atomic patch for a cohesive multi-fie
 
 The callback has no UI/context argument and cannot submit another action. Dispatch acceptance of
 Save does not mean disk publication completed; read the later owner projection for that state.
+While `EditorPersistenceOperation::Saving` is visible, continue driving the application and
+inspect its eventual `EditorPersistenceResult`. Later edits remain possible and stay dirty when
+an older captured revision finishes saving. Keep Close/Exit and project replacement with the
+application lifecycle owner; a panel must not infer completion from dispatch or remove the
+document while its Save is pending.
 
 Embedded shells pass the opaque move-only candidate returned by `frontend.show(...)` to that
 same frontend's `submit_and_drive(...)`. It cannot be cloned or converted to a plain action batch.

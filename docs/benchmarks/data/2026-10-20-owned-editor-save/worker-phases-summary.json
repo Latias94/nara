@@ -1,0 +1,92 @@
+[
+  {
+    "run": "worker-phases",
+    "nextest_run": "eba73d6b-acf3-41c4-a9e1-a69f5030c928",
+    "population": 64,
+    "phase": "scene_authoring_validation_ns",
+    "samples": 16,
+    "p50_ns": 158400.0,
+    "p95_ns": 237700,
+    "max_ns": 237700
+  },
+  {
+    "run": "worker-phases",
+    "nextest_run": "eba73d6b-acf3-41c4-a9e1-a69f5030c928",
+    "population": 64,
+    "phase": "scene_encode_ns",
+    "samples": 16,
+    "p50_ns": 33700.0,
+    "p95_ns": 63000,
+    "max_ns": 63000
+  },
+  {
+    "run": "worker-phases",
+    "nextest_run": "eba73d6b-acf3-41c4-a9e1-a69f5030c928",
+    "population": 64,
+    "phase": "scene_file_publication_ns",
+    "samples": 16,
+    "p50_ns": 3110500.0,
+    "p95_ns": 3438800,
+    "max_ns": 3438800
+  },
+  {
+    "run": "worker-phases",
+    "nextest_run": "eba73d6b-acf3-41c4-a9e1-a69f5030c928",
+    "population": 1024,
+    "phase": "scene_authoring_validation_ns",
+    "samples": 16,
+    "p50_ns": 2176950.0,
+    "p95_ns": 3105100,
+    "max_ns": 3105100
+  },
+  {
+    "run": "worker-phases",
+    "nextest_run": "eba73d6b-acf3-41c4-a9e1-a69f5030c928",
+    "population": 1024,
+    "phase": "scene_encode_ns",
+    "samples": 16,
+    "p50_ns": 426800.0,
+    "p95_ns": 535500,
+    "max_ns": 535500
+  },
+  {
+    "run": "worker-phases",
+    "nextest_run": "eba73d6b-acf3-41c4-a9e1-a69f5030c928",
+    "population": 1024,
+    "phase": "scene_file_publication_ns",
+    "samples": 16,
+    "p50_ns": 3862250.0,
+    "p95_ns": 4942300,
+    "max_ns": 4942300
+  },
+  {
+    "run": "worker-phases",
+    "nextest_run": "eba73d6b-acf3-41c4-a9e1-a69f5030c928",
+    "population": 4096,
+    "phase": "scene_authoring_validation_ns",
+    "samples": 16,
+    "p50_ns": 9419200.0,
+    "p95_ns": 11959000,
+    "max_ns": 11959000
+  },
+  {
+    "run": "worker-phases",
+    "nextest_run": "eba73d6b-acf3-41c4-a9e1-a69f5030c928",
+    "population": 4096,
+    "phase": "scene_encode_ns",
+    "samples": 16,
+    "p50_ns": 1754350.0,
+    "p95_ns": 2136900,
+    "max_ns": 2136900
+  },
+  {
+    "run": "worker-phases",
+    "nextest_run": "eba73d6b-acf3-41c4-a9e1-a69f5030c928",
+    "population": 4096,
+    "phase": "scene_file_publication_ns",
+    "samples": 16,
+    "p50_ns": 4838200.0,
+    "p95_ns": 6354000,
+    "max_ns": 6354000
+  }
+]

@@ -7,6 +7,11 @@ The starting source is `f93552c`; task behavior is `3b70e48` and the measurement
 `b93944e`. The [verification record](../knowledge/engineering/verification/2026-10/2026-10-19T182252Z-editor-responsiveness-measurements-and-standalone-task-cancellation-0e2521d0010a4d94940d83fa865f3d0c.md)
 records actual commands, run identities, review corrections and limits.
 
+This report retains the synchronous v1 source and data as historical evidence. The subsequent
+[owned Save implementation and v2 comparison](2026-10-20-owned-editor-save.md) moves the measured
+Save path to retained background work; statements about synchronous Save below describe v1.
+Reopen and the other separately identified preparation costs remain follow-ups.
+
 ## Ownership Findings
 
 | Operation | Work performed before returning to its caller | Correct future preparation seam |

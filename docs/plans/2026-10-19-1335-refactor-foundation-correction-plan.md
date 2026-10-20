@@ -471,6 +471,12 @@ reads and pure preparation off the UI thread while retaining attempt identity, s
 finite physical retirement and owner-thread publication. Extract private modules by responsibility
 as their owners change; line count alone is not an acceptance criterion.
 
+The subsequent [owned Save slice](2026-10-20-owned-editor-save-plan.md) implements the first
+measured persistence consumer using existing tasks, retained original file custody and owner
+acknowledgement. Its [v2 evidence](../benchmarks/2026-10-20-owned-editor-save.md) separates maximum
+owner drive from completion observation. Reopen, startup/source preparation and the other G9
+triggers remain separate; this does not reopen U1-U15 or create a blanket async migration.
+
 ### Decisions Reserved For Those Consumers
 
 The user will choose the first additional asset/domain workflow, the intended scene-travel/save behavior, and the tile identity/migration experience when those consumers enter scope.

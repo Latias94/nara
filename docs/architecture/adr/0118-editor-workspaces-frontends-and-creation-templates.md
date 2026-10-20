@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-19 (correlated authoring submissions and retained field drafts)
+**Last Revised**: 2026-10-20 (owned Save observation and native lifecycle coordination)
 **Owner**: Private Editor product, tooling, reflection and Scene/Prefab document owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -87,6 +87,14 @@ This completion means dispatch, not eventual Save/Play completion. Several actio
 same-basis document writes can conflict and are never silently rebased. A cohesive multi-field
 operation uses one existing atomic patch. No generic bus, polling-ticket framework, asynchronous
 panel trait or public controller state machine is introduced.
+
+Save completion is observed through the existing persistence projection across frames. The native
+Host schedules maintenance while persistence is pending and requests presentation when its state
+changes; unchanged polls alone do not require repaint. Close/Exit retain and retry their intent
+after an already admitted Save. Project replacement waits for that Save before preparing source
+bytes, including replacement by the same project. Physical file and task retirement remain with
+their existing owners under ADRs 0047/0052; the frontend never interprets task cancellation as a
+successful save or rollback.
 
 The native Host retains one event loop, device-creation authority and accountable close/recovery lifecycle.
 It may delegate secondary window/surface ownership to the selected platform/renderer adapter with explicit shutdown ordering.
