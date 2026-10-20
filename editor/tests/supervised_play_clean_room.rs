@@ -140,14 +140,16 @@ fn drive_until_external_state(
         assert_ne!(
             external.state(),
             EditorExternalPlayState::Faulted,
-            "the clean-room Play trajectory faulted: result={:?}",
+            "the clean-room Play trajectory faulted: result={:?}, output={:#?}",
             frame.play().result(),
+            external.output(),
         );
         assert!(
             Instant::now() < deadline,
-            "the clean-room Play trajectory did not reach {expected_state:?}/{expected_operation:?}: state={:?}, result={:?}",
+            "the clean-room Play trajectory did not reach {expected_state:?}/{expected_operation:?}: state={:?}, result={:?}, output={:#?}",
             external.state(),
             frame.play().result(),
+            external.output(),
         );
         let _ = application
             .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
@@ -166,8 +168,9 @@ fn drive_until_exit_ready(application: &mut EditorApplication, timeout: Duration
         }
         assert!(
             Instant::now() < deadline,
-            "the clean-room Editor exit did not complete: state={:?}",
+            "the clean-room Editor exit did not complete: state={:?}, output={:#?}",
             application.state(),
+            frame.play().external().map(|external| external.output()),
         );
         thread::sleep(Duration::from_millis(5));
     }

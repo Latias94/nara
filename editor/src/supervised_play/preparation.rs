@@ -12,7 +12,8 @@ use nara::fs::ContentDigest;
 use nara::tooling::EditorPlayFailure;
 
 use super::{
-    build::VerifiedDesktopBuildCandidate,
+    build::{DesktopBuildSupersededReason, VerifiedDesktopBuildCandidate},
+    failure::HostFailureFacts,
     generation::{
         ExecutableGenerationStore, GenerationManifestInput, ImmutableExecutableGeneration,
     },
@@ -32,13 +33,41 @@ pub(super) enum GenerationPreparationRequest {
 
 pub(super) struct GenerationPreparationOutcome {
     pub(super) store: Option<ExecutableGenerationStore>,
-    pub(super) result: Result<ImmutableExecutableGeneration, EditorPlayFailure>,
+    pub(super) result: Result<ImmutableExecutableGeneration, GenerationPreparationFailure>,
+}
+
+pub(super) struct GenerationPreparationFailure {
+    pub(super) failure: EditorPlayFailure,
+    pub(super) diagnostic: Option<HostFailureFacts>,
+}
+
+impl GenerationPreparationFailure {
+    fn cancelled() -> Self {
+        Self {
+            failure: EditorPlayFailure::Preparation,
+            diagnostic: None,
+        }
+    }
+
+    fn worker_failed(reason: &'static str) -> Self {
+        Self {
+            failure: EditorPlayFailure::Preparation,
+            diagnostic: Some(HostFailureFacts::capture("generation-worker", reason, None)),
+        }
+    }
+
+    fn store(stage: &'static str, error: super::generation::GenerationStoreError) -> Self {
+        Self {
+            failure: EditorPlayFailure::Start,
+            diagnostic: Some(HostFailureFacts::generation(stage, &error)),
+        }
+    }
 }
 
 struct PreparationState {
     store: Option<ExecutableGenerationStore>,
     request: Option<GenerationPreparationRequest>,
-    result: Option<Result<ImmutableExecutableGeneration, EditorPlayFailure>>,
+    result: Option<Result<ImmutableExecutableGeneration, GenerationPreparationFailure>>,
     #[cfg(test)]
     gate: Option<(
         std::sync::mpsc::SyncSender<()>,
@@ -101,7 +130,7 @@ impl GenerationPreparationOwner {
                     }
                     prepare(&mut state, &worker_cancel)
                 }))
-                .unwrap_or(Err(EditorPlayFailure::Preparation));
+                .unwrap_or_else(|_| Err(GenerationPreparationFailure::worker_failed("panicked")));
                 state.result = Some(result);
                 drop(state);
                 wake.notify();
@@ -169,12 +198,13 @@ impl GenerationPreparationOwner {
         let joined = worker.join();
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         let result = if joined.is_ok() {
-            state
-                .result
-                .take()
-                .unwrap_or(Err(EditorPlayFailure::Preparation))
+            state.result.take().unwrap_or_else(|| {
+                Err(GenerationPreparationFailure::worker_failed(
+                    "result-unavailable",
+                ))
+            })
         } else {
-            Err(EditorPlayFailure::Preparation)
+            Err(GenerationPreparationFailure::worker_failed("join-panicked"))
         };
         Some(GenerationPreparationOutcome {
             store: state.store.take(),
@@ -206,46 +236,90 @@ impl Drop for GenerationPreparationOwner {
 fn prepare(
     state: &mut PreparationState,
     cancel: &AtomicBool,
-) -> Result<ImmutableExecutableGeneration, EditorPlayFailure> {
+) -> Result<ImmutableExecutableGeneration, GenerationPreparationFailure> {
     if cancel.load(Ordering::Acquire) {
-        return Err(EditorPlayFailure::Preparation);
+        return Err(GenerationPreparationFailure::cancelled());
     }
-    let request = state.request.take().ok_or(EditorPlayFailure::Preparation)?;
+    let request = state
+        .request
+        .take()
+        .ok_or_else(|| GenerationPreparationFailure::worker_failed("request-unavailable"))?;
     if state.store.is_none() {
-        let base = generation_store_base_root().map_err(|_| EditorPlayFailure::Start)?;
+        let base = generation_store_base_root().map_err(|error| GenerationPreparationFailure {
+            failure: EditorPlayFailure::Start,
+            diagnostic: Some(HostFailureFacts::capture(
+                "generation-root",
+                "select",
+                Some(&error),
+            )),
+        })?;
         let _ = ExecutableGenerationStore::scavenge_inactive(&base);
         state.store =
-            Some(ExecutableGenerationStore::create(&base).map_err(|_| EditorPlayFailure::Start)?);
+            Some(ExecutableGenerationStore::create(&base).map_err(|error| {
+                GenerationPreparationFailure::store("generation-create", error)
+            })?);
     }
-    let store = state.store.as_mut().ok_or(EditorPlayFailure::Start)?;
+    let store = state
+        .store
+        .as_mut()
+        .ok_or_else(|| GenerationPreparationFailure {
+            failure: EditorPlayFailure::Start,
+            diagnostic: Some(HostFailureFacts::capture(
+                "generation-worker",
+                "store-unavailable",
+                None,
+            )),
+        })?;
     if cancel.load(Ordering::Acquire) {
-        return Err(EditorPlayFailure::Preparation);
+        return Err(GenerationPreparationFailure::cancelled());
     }
     match request {
         GenerationPreparationRequest::Build {
             candidate,
             manifest,
         } => {
-            candidate
-                .revalidate_for_publication()
-                .map_err(|_| EditorPlayFailure::Preparation)?;
+            candidate.revalidate_for_publication().map_err(|error| {
+                GenerationPreparationFailure {
+                    failure: EditorPlayFailure::Preparation,
+                    diagnostic: Some(HostFailureFacts::capture(
+                        "generation-source",
+                        match error {
+                            DesktopBuildSupersededReason::ManifestChanged => "manifest-changed",
+                            DesktopBuildSupersededReason::LockfileChanged => "lockfile-changed",
+                            DesktopBuildSupersededReason::InputUnavailable(_) => {
+                                "input-unavailable"
+                            }
+                        },
+                        None,
+                    )),
+                }
+            })?;
             let generation = store
                 .publish_candidate_cancellable(candidate.artifact_path(), manifest, cancel)
-                .map_err(|_| EditorPlayFailure::Start)?;
+                .map_err(|error| {
+                    GenerationPreparationFailure::store("generation-publish", error)
+                })?;
             store
                 .activate_candidate(generation.id())
-                .map_err(|_| EditorPlayFailure::Start)
+                .map_err(|error| GenerationPreparationFailure::store("generation-activate", error))
         }
         GenerationPreparationRequest::LastGood { source_receipt } => {
             if !store
                 .last_good()
                 .is_some_and(|generation| generation.source_receipt() == source_receipt)
             {
-                return Err(EditorPlayFailure::Start);
+                return Err(GenerationPreparationFailure {
+                    failure: EditorPlayFailure::Start,
+                    diagnostic: Some(HostFailureFacts::capture(
+                        "generation-last-good",
+                        "source-receipt-mismatch",
+                        None,
+                    )),
+                });
             }
             store
                 .activate_last_good()
-                .map_err(|_| EditorPlayFailure::Start)
+                .map_err(|error| GenerationPreparationFailure::store("generation-last-good", error))
         }
     }
 }

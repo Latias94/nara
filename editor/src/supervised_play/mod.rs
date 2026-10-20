@@ -1,4 +1,5 @@
 mod build;
+mod failure;
 mod generation;
 mod handshake;
 mod log;

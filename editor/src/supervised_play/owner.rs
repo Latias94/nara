@@ -21,16 +21,20 @@ use super::{
         DesktopBuildAttempt, DesktopBuildInputRevision, DesktopBuildRequest, DesktopBuildStatus,
         DesktopBuildTools, VerifiedDesktopBuildCandidate,
     },
+    failure::HostFailureFacts,
     generation::{
         ExecutableGenerationId, ExecutableGenerationStore, GenerationBuildObservation,
         GenerationManifestInput, GenerationPackageFacts, GenerationSourceFacts,
         GenerationTargetFacts, ImmutableExecutableGeneration,
     },
+    handshake::SupervisedDesktopHandshakeFailureKind,
     output_projection::EditorExternalPlayOutputProjection,
     preparation::{GenerationPreparationOwner, GenerationPreparationRequest},
+    process::{SupervisedProcessError, SupervisedProcessSpawnFailure},
     supervisor::{
         SupervisedDesktopAttemptId, SupervisedDesktopLaunchRequest,
-        SupervisedDesktopSessionSupervisor, SupervisedDesktopSupervisorFailure,
+        SupervisedDesktopSessionSupervisor, SupervisedDesktopSupervisorAdvanceError,
+        SupervisedDesktopSupervisorFailure, SupervisedDesktopSupervisorStartError,
         SupervisedDesktopSupervisorStatus, SupervisedDesktopSupervisorTerminal,
     },
     wake::SupervisedPlayWake,
@@ -92,6 +96,7 @@ pub(crate) struct SupervisedDesktopPlayOwner {
     build: Option<DesktopBuildAttempt>,
     preparation: Option<GenerationPreparationOwner>,
     supervisor: Option<SupervisedDesktopSessionSupervisor>,
+    supervisor_advance_failure_reported: bool,
     pending: Option<PendingRequest>,
     completed: Option<EditorExternalPlayObservation>,
     last_observation: Option<EditorExternalPlayObservation>,
@@ -118,6 +123,7 @@ impl SupervisedDesktopPlayOwner {
             build: None,
             preparation: None,
             supervisor: None,
+            supervisor_advance_failure_reported: false,
             pending: None,
             completed: None,
             last_observation: None,
@@ -210,6 +216,8 @@ impl SupervisedDesktopPlayOwner {
         let source = match request.operation() {
             EditorPlayOperation::Play | EditorPlayOperation::RunLastGood => {
                 let Some(encoded) = request.source_receipt() else {
+                    self.output
+                        .observe_host_failure("source", "missing-receipt", None);
                     self.complete_failure(
                         &request,
                         None,
@@ -220,7 +228,12 @@ impl SupervisedDesktopPlayOwner {
                 };
                 match admit_supervised_desktop_source_receipt(encoded) {
                     Ok(source) => Some(source),
-                    Err(_) => {
+                    Err(error) => {
+                        self.output.observe_host_failure(
+                            "source",
+                            "receipt-admission",
+                            Some(&error),
+                        );
                         self.complete_failure(
                             &request,
                             Some(ContentDigest::of_bytes(encoded)),
@@ -901,6 +914,20 @@ impl SupervisedDesktopPlayOwner {
         let (advance_result, status, ready, terminal) = {
             let supervisor = self.supervisor.as_mut()?;
             let advance_result = supervisor.advance(now);
+            if !close_requested {
+                if let Err(error) = &advance_result {
+                    observe_supervisor_advance_failure(
+                        &mut self.output,
+                        &mut self.supervisor_advance_failure_reported,
+                        error,
+                    );
+                }
+                if let Some(SupervisedDesktopSupervisorTerminal::Failed(failure)) =
+                    supervisor.terminal()
+                {
+                    observe_supervisor_failure(&mut self.output, failure);
+                }
+            }
             if !close_requested
                 && project_product_logs
                 && let Some(project_root) = project_root.as_deref()
@@ -1222,6 +1249,12 @@ impl SupervisedDesktopPlayOwner {
         }
         let result = outcome
             .result
+            .map_err(|error| {
+                if let Some(facts) = error.diagnostic {
+                    self.output.observe_host_failure_facts(facts);
+                }
+                error.failure
+            })
             .and_then(|generation| self.launch_generation(&mut pending, generation, now));
         match result {
             Ok(()) => {
@@ -1264,17 +1297,21 @@ impl SupervisedDesktopPlayOwner {
         let Some(source) = pending.source.as_ref() else {
             return Err(self.abort_generation_launch(pending, id));
         };
-        let working_directory = match self
-            .store
-            .as_mut()
-            .ok_or(EditorPlayFailure::Start)
-            .and_then(|store| {
-                store
-                    .begin_work_directory()
-                    .map_err(|_| EditorPlayFailure::Start)
-            }) {
+        let Some(store) = self.store.as_mut() else {
+            self.output
+                .observe_host_failure("work-directory", "store-unavailable", None);
+            return Err(self.abort_generation_launch(pending, id));
+        };
+        let working_directory = match store.begin_work_directory() {
             Ok(working_directory) => working_directory,
-            Err(_) => return Err(self.abort_generation_launch(pending, id)),
+            Err(error) => {
+                self.output
+                    .observe_host_failure_facts(HostFailureFacts::generation(
+                        "work-directory",
+                        &error,
+                    ));
+                return Err(self.abort_generation_launch(pending, id));
+            }
         };
         let launch = match SupervisedDesktopLaunchRequest::new(
             attempt,
@@ -1285,14 +1322,29 @@ impl SupervisedDesktopPlayOwner {
             READY_TIMEOUT,
         ) {
             Ok(launch) => launch,
-            Err(_) => return Err(self.abort_generation_launch(pending, id)),
+            Err(error) => {
+                self.output.observe_host_failure(
+                    "launch-context",
+                    supervisor_start_failure_reason(&error),
+                    Some(&error),
+                );
+                return Err(self.abort_generation_launch(pending, id));
+            }
         };
         let supervisor =
             match SupervisedDesktopSessionSupervisor::start(launch, now, self.wake.clone()) {
                 Ok(supervisor) => supervisor,
-                Err(_) => return Err(self.abort_generation_launch(pending, id)),
+                Err(error) => {
+                    self.output.observe_host_failure(
+                        "supervisor-start",
+                        supervisor_start_failure_reason(&error),
+                        Some(&error),
+                    );
+                    return Err(self.abort_generation_launch(pending, id));
+                }
             };
         self.supervisor = Some(supervisor);
+        self.supervisor_advance_failure_reported = false;
         pending.phase = PendingPhase::Starting;
         Ok(())
     }
@@ -1332,7 +1384,14 @@ impl SupervisedDesktopPlayOwner {
             .as_mut()
             .ok_or(EditorPlayFailure::Start)?
             .admit_ready(active_id)
-            .map_err(|_| EditorPlayFailure::Start)
+            .map_err(|error| {
+                self.output
+                    .observe_host_failure_facts(HostFailureFacts::generation(
+                        "ready-admission",
+                        &error,
+                    ));
+                EditorPlayFailure::Start
+            })
     }
 
     fn finish_launch(&mut self, id: ExecutableGenerationId) -> Result<(), EditorPlayFailure> {
@@ -1565,6 +1624,90 @@ fn supervisor_terminal_kind(
     }
 }
 
+fn observe_supervisor_failure(
+    output: &mut EditorExternalPlayOutputProjection,
+    failure: &SupervisedDesktopSupervisorFailure,
+) {
+    if let SupervisedDesktopSupervisorFailure::Spawn(SupervisedProcessSpawnFailure::Process(
+        SupervisedProcessError::Generation(error),
+    )) = failure
+    {
+        output.observe_host_failure_facts(HostFailureFacts::generation("spawn-generation", error));
+        return;
+    }
+    let (stage, reason) = match failure {
+        SupervisedDesktopSupervisorFailure::Spawn(error) => ("spawn", spawn_failure_reason(error)),
+        SupervisedDesktopSupervisorFailure::SpawnTimeout => ("spawn", "deadline"),
+        SupervisedDesktopSupervisorFailure::HandshakeStart(_) => ("handshake-start", "dispatch"),
+        SupervisedDesktopSupervisorFailure::Handshake(kind) => (
+            "handshake",
+            match kind {
+                SupervisedDesktopHandshakeFailureKind::Writer => "writer-worker",
+                SupervisedDesktopHandshakeFailureKind::Write => "bootstrap-write",
+                SupervisedDesktopHandshakeFailureKind::Read => "ready-read",
+                SupervisedDesktopHandshakeFailureKind::Wire => "ready-invalid",
+                SupervisedDesktopHandshakeFailureKind::ReadyTooLarge => "ready-too-large",
+                SupervisedDesktopHandshakeFailureKind::AllocationFailed => "allocation",
+                SupervisedDesktopHandshakeFailureKind::DuplicateOrTrailingReady => "ready-trailing",
+                SupervisedDesktopHandshakeFailureKind::EofBeforeReady => "eof-before-ready",
+                SupervisedDesktopHandshakeFailureKind::LaunchFactsMismatch => "launch-facts",
+                SupervisedDesktopHandshakeFailureKind::RuntimeFactsMismatch => "runtime-facts",
+                SupervisedDesktopHandshakeFailureKind::ReadyTimeout => "ready-deadline",
+                SupervisedDesktopHandshakeFailureKind::Cancelled => "cancelled",
+            },
+        ),
+        SupervisedDesktopSupervisorFailure::ExitedBeforeReady => ("handshake", "child-exited"),
+        SupervisedDesktopSupervisorFailure::NonZeroExit(_) => ("runtime", "non-zero-exit"),
+        SupervisedDesktopSupervisorFailure::InvalidState => ("supervisor", "invalid-state"),
+        SupervisedDesktopSupervisorFailure::ReadyDeadlineOverflow => {
+            ("handshake", "deadline-overflow")
+        }
+    };
+    output.observe_host_failure(stage, reason, Some(failure));
+}
+
+fn observe_supervisor_advance_failure(
+    output: &mut EditorExternalPlayOutputProjection,
+    reported: &mut bool,
+    error: &SupervisedDesktopSupervisorAdvanceError,
+) {
+    if !*reported {
+        output.observe_host_failure("supervisor-advance", "process-observation", Some(error));
+        *reported = true;
+    }
+}
+
+fn spawn_failure_reason(failure: &SupervisedProcessSpawnFailure) -> &'static str {
+    match failure {
+        SupervisedProcessSpawnFailure::Dispatch(_) => "worker-dispatch",
+        SupervisedProcessSpawnFailure::WorkerDisconnected => "worker-disconnected",
+        SupervisedProcessSpawnFailure::WorkerPanicked => "worker-panicked",
+        SupervisedProcessSpawnFailure::Process(SupervisedProcessError::Generation(_)) => {
+            "generation-revalidation"
+        }
+        SupervisedProcessSpawnFailure::Process(SupervisedProcessError::Spawn(_)) => "os-spawn",
+        SupervisedProcessSpawnFailure::Process(_) => "process-setup",
+        SupervisedProcessSpawnFailure::Cleanup(_) => "late-process-cleanup",
+    }
+}
+
+fn supervisor_start_failure_reason(error: &SupervisedDesktopSupervisorStartError) -> &'static str {
+    match error {
+        SupervisedDesktopSupervisorStartError::SourceAdmission(_) => "source-admission",
+        SupervisedDesktopSupervisorStartError::SourceReceiptMismatch => "source-receipt-mismatch",
+        SupervisedDesktopSupervisorStartError::InvalidReadyTimeout => "ready-timeout-invalid",
+        SupervisedDesktopSupervisorStartError::InvalidWorkingDirectory => {
+            "working-directory-invalid"
+        }
+        SupervisedDesktopSupervisorStartError::SpawnDeadlineOverflow => "spawn-deadline-overflow",
+        SupervisedDesktopSupervisorStartError::Wire(_) => "launch-invalid",
+        SupervisedDesktopSupervisorStartError::NonceIo(_) => "session-nonce",
+        SupervisedDesktopSupervisorStartError::Spawn(error) => spawn_failure_reason(error),
+        #[cfg(not(any(windows, all(unix, target_os = "linux", target_arch = "x86_64"))))]
+        SupervisedDesktopSupervisorStartError::UnsupportedPlatform => "unsupported-platform",
+    }
+}
+
 impl DesktopBuildInputRevision {
     fn from_source(source: &SupervisedDesktopSourceAuthority) -> Option<Self> {
         Some(Self::new(
@@ -1614,6 +1757,124 @@ mod tests {
                 failure: EditorPlayFailure::Start,
             })
         ));
+        assert_eq!(observation.output().messages().len(), 1);
+        let message = &observation.output().messages()[0];
+        assert_eq!(message.code(), Some("external-play.source"));
+        assert_eq!(
+            message.text(),
+            "External Play failed: stage=source; reason=receipt-admission"
+        );
+        assert!(owner.build.is_none());
+        assert!(owner.supervisor.is_none());
+        assert!(owner.store.is_none());
+    }
+
+    #[test]
+    fn spawn_failure_reports_the_typed_boundary_without_error_text() {
+        let mut owner = SupervisedDesktopPlayOwner::new();
+        let failure =
+            SupervisedDesktopSupervisorFailure::Spawn(SupervisedProcessSpawnFailure::Process(
+                SupervisedProcessError::Spawn(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "private-token /private/project/product C:\\private\\product.exe",
+                )),
+            ));
+        observe_supervisor_failure(&mut owner.output, &failure);
+
+        let output = owner.output.snapshot();
+        assert_eq!(output.messages().len(), 1);
+        let message = &output.messages()[0];
+        assert_eq!(message.code(), Some("external-play.spawn"));
+        assert_eq!(
+            message.text(),
+            "External Play failed: stage=spawn; reason=os-spawn; io_kind=PermissionDenied"
+        );
+        assert!(owner.build.is_none());
+        assert!(owner.supervisor.is_none());
+        assert!(owner.store.is_none());
+    }
+
+    #[test]
+    fn repeated_supervisor_advance_failure_preserves_the_first_output_sequence() {
+        let mut owner = SupervisedDesktopPlayOwner::new();
+        let failure = SupervisedDesktopSupervisorAdvanceError::Process(
+            SupervisedProcessError::Containment(std::io::Error::from_raw_os_error(13)),
+        );
+        observe_supervisor_advance_failure(
+            &mut owner.output,
+            &mut owner.supervisor_advance_failure_reported,
+            &failure,
+        );
+        let first = owner.output.snapshot();
+        assert_eq!(first.messages().len(), 1);
+        assert!(first.messages()[0].text().ends_with("os_error=13"));
+        for _ in 0..16 {
+            observe_supervisor_advance_failure(
+                &mut owner.output,
+                &mut owner.supervisor_advance_failure_reported,
+                &SupervisedDesktopSupervisorAdvanceError::InvalidState,
+            );
+            assert_eq!(owner.output.snapshot(), first);
+        }
+    }
+
+    #[test]
+    fn preparation_failure_returns_store_and_projects_exact_reason() {
+        let base = unique_test_root("preparation-failure-facts");
+        fs::create_dir_all(&base).unwrap();
+        let store = ExecutableGenerationStore::create(&base).unwrap();
+        let (preparation, started, release) = GenerationPreparationOwner::held_for_test(store);
+        started.recv_timeout(Duration::from_secs(10)).unwrap();
+        let mut owner = SupervisedDesktopPlayOwner::new();
+        owner.preparation = Some(preparation);
+        owner.pending = Some(PendingRequest {
+            request: request(31, EditorPlayOperation::Play, None),
+            operation: EditorPlayOperation::Play,
+            project_root: base.clone(),
+            source: None,
+            source_receipt_digest: None,
+            phase: PendingPhase::PreparingGeneration,
+            completion: None,
+            ready_reported: false,
+        });
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let terminal = loop {
+            if let Some(observation) = owner.advance(Instant::now()) {
+                break observation;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "preparation failure was not returned"
+            );
+            thread::sleep(Duration::from_millis(1));
+        };
+        assert_eq!(terminal.state(), EditorExternalPlayState::Faulted);
+        assert_eq!(
+            terminal.result(),
+            Some(EditorPlayOperationResult::Failed {
+                operation: EditorPlayOperation::Play,
+                failure: EditorPlayFailure::Start,
+            })
+        );
+        assert_eq!(terminal.output().messages().len(), 1);
+        assert_eq!(
+            terminal.output().messages()[0].code(),
+            Some("external-play.generation-last-good")
+        );
+        assert_eq!(
+            terminal.output().messages()[0].text(),
+            "External Play failed: stage=generation-last-good; reason=source-receipt-mismatch"
+        );
+        assert!(
+            owner.store.is_some(),
+            "the finished worker returns physical store ownership"
+        );
+        assert!(owner.supervisor.is_none());
+        owner.request_close(Instant::now());
+        assert!(owner.close_complete());
+        drop(owner);
+        fs::remove_dir_all(base).unwrap();
     }
 
     #[test]

@@ -12,6 +12,7 @@ use nara::{
 
 use super::{
     ProcessOutputStream,
+    failure::HostFailureFacts,
     log::{ProcessLogRing, ProcessLogStats},
 };
 
@@ -107,6 +108,48 @@ impl EditorExternalPlayOutputProjection {
 
     pub(super) fn snapshot(&self) -> EditorExternalPlayOutput {
         self.published.clone()
+    }
+
+    pub(super) fn observe_host_failure(
+        &mut self,
+        stage: &'static str,
+        reason: &'static str,
+        source: Option<&(dyn std::error::Error + 'static)>,
+    ) {
+        self.observe_host_failure_facts(HostFailureFacts::capture(stage, reason, source));
+    }
+
+    pub(super) fn observe_host_failure_facts(&mut self, facts: HostFailureFacts) {
+        // Only fixed owner labels and numeric/category I/O facts cross the public output seam.
+        let mut text = format!(
+            "External Play failed: stage={}; reason={}",
+            facts.stage, facts.reason
+        );
+        if let Some(operation) = facts.operation {
+            text.push_str(&format!("; operation={operation}"));
+        }
+        if let Some(category) = facts.fs_failure {
+            text.push_str(&format!("; fs_failure={category}"));
+        }
+        if let Some(kind) = facts.io_kind {
+            text.push_str(&format!("; io_kind={kind:?}"));
+        }
+        if let Some(code) = facts.os_error {
+            text.push_str(&format!("; os_error={code}"));
+        }
+        let (text, truncated) = sanitize_message(
+            text.as_bytes(),
+            Path::new(""),
+            self.limits.message_byte_limit,
+        );
+        self.truncated_messages = self.truncated_messages.saturating_add(u64::from(truncated));
+        self.push_message(
+            EditorExternalPlayMessageKind::OutputNotice,
+            Some(format!("external-play.{}", facts.stage)),
+            text,
+            truncated,
+        );
+        self.refresh_snapshot();
     }
 
     pub(super) fn observe_cargo_diagnostics(
@@ -577,6 +620,46 @@ mod tests {
 
     use super::*;
     use crate::supervised_play::log::ProcessLogLimits;
+
+    #[test]
+    fn host_failure_projects_only_bounded_labels_and_io_facts() {
+        let mut projection = EditorExternalPlayOutputProjection::with_limits(ProjectionLimits {
+            message_limit: 2,
+            byte_limit: 512,
+            message_byte_limit: 128,
+        });
+        let sensitive = std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "private-token /private/project/product https://secret.invalid",
+        );
+        projection.observe_host_failure("spawn", "os-spawn", Some(&sensitive));
+        let numeric = std::io::Error::from_raw_os_error(13);
+        projection.observe_host_failure("spawn", "os-spawn", Some(&numeric));
+        let output = projection.snapshot();
+        assert_eq!(output.messages().len(), 2);
+        assert_eq!(output.compiler(), EditorExternalPlayDiagnostics::default());
+        assert_eq!(
+            output.messages()[0].kind(),
+            EditorExternalPlayMessageKind::OutputNotice
+        );
+        assert_eq!(
+            output.messages()[0].text(),
+            "External Play failed: stage=spawn; reason=os-spawn; io_kind=PermissionDenied"
+        );
+        assert!(output.messages()[1].text().ends_with("; os_error=13"));
+        assert!(
+            output
+                .messages()
+                .iter()
+                .all(|message| !message.text().contains("private-token"))
+        );
+
+        projection.observe_host_failure("handshake", "ready-deadline", None);
+        let output = projection.snapshot();
+        assert_eq!(output.messages().len(), 2);
+        assert_eq!(output.dropped_messages(), 1);
+        assert_eq!(output.messages()[1].code(), Some("external-play.handshake"));
+    }
 
     #[test]
     fn projection_removes_terminal_controls_sensitive_locators_and_multiline_text() {
