@@ -134,7 +134,7 @@ the project's Cargo manifest, and dispatch it before normal argument parsing or 
 
 ```toml
 [package.metadata.nara]
-project-tool-protocol = 1
+project-tool-protocol = 2
 ```
 
 ```rust
@@ -162,7 +162,8 @@ that process. The parent CLI receives bounded display summaries, never reconstru
 
 Default tools require no window, graphics backend, or editor toolkit. Explicitly checking the
 `desktop` profile builds the matching Cargo feature. Missing or unsupported tool metadata rejects
-an old headless entry before launch, since old entries may ignore arguments and start gameplay.
+an old headless entry, including protocol version 1, before launch, since old entries may ignore
+arguments and start gameplay.
 The declaration is a compatibility contract for trusted Rust and Cargo code, not a sandbox or proof
 that arbitrary project code obeys the entry contract. The generated starter includes this wiring.
 

@@ -91,7 +91,7 @@ fn canonical_prefab_edit_reaches_reloaded_runtime_adapter_without_rust_changes()
     );
     let retry_id = reloaded
         .snapshot
-        .expanded_startup_scene_provenance()
+        .expanded_scene_provenance()
         .iter()
         .find_map(|(id, source)| {
             (source.source_entity_id().as_str() == RETRY_BUTTON
@@ -103,7 +103,7 @@ fn canonical_prefab_edit_reaches_reloaded_runtime_adapter_without_rust_changes()
         .expect("the reloaded retry projection must retain its source identity");
     assert_eq!(
         retry_width(
-            &reloaded.snapshot.expanded_startup_scene().entities,
+            &reloaded.snapshot.expanded_scene().entities,
             retry_id.as_str(),
         ),
         EDITED_RETRY_WIDTH

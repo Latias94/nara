@@ -25,9 +25,9 @@ use nara::{
         TrustedCompiledEditorProjectIntent,
     },
     project_workflow::{
-        LocalDependencyRelation, NaraDependencySource, ProjectCheckRequest, ProjectCreationOutcome,
-        ProjectCreationRequest, ProjectSlug, StartupContentMemberKind, check_project,
-        prepare_desktop_2d_project,
+        LocalDependencyRelation, NaraDependencySource, ProjectCheckRequest,
+        ProjectContentMemberKind, ProjectCreationOutcome, ProjectCreationRequest, ProjectSlug,
+        check_project, prepare_desktop_2d_project,
     },
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     render::Extent2d,
@@ -581,19 +581,19 @@ fn starter_semantic_edit_crosses_editor_check_generated_product_and_export() {
         .members()
         .iter()
         .find(|member| {
-            member.kind() == StartupContentMemberKind::Scene
+            member.kind() == ProjectContentMemberKind::Scene
                 && member.path().as_str() == "scenes/startup.scene.json"
         })
         .expect("the checked startup closure contains the edited Scene");
     assert_eq!(scene_member.digest(), saved_scene_digest);
     let manifest_digest = checked.manifest_digest();
-    let content_digest = checked.content_digest();
-    let closure_plan_digest = checked.closure_plan_digest();
+    let content_digest = checked.startup_content().content_digest();
+    let closure_plan_digest = checked.startup_content().closure_plan_digest();
     let schema_fingerprint = checked.schema_fingerprint().to_string();
     let authoring_bundle_digest = checked
         .members()
         .iter()
-        .find(|member| member.kind() == StartupContentMemberKind::AuthoringSchemaBundle)
+        .find(|member| member.kind() == ProjectContentMemberKind::AuthoringSchemaBundle)
         .expect("the checked closure contains its exact schema bundle")
         .digest();
     drop(checked);

@@ -79,6 +79,11 @@ It records four concrete boundary repairs and their qualification, then orders t
 around ordinary authoring, measured iteration and one persistent two-level game. Capability gaps
 and unmeasured costs remain separate from confirmed defects; Tile tools remain deferred.
 
+The [persistent two-level consumer](../plans/2026-10-20-persistent-two-level-game-plan.md) orders
+selected Scene loading and finite declared delivery before current-level ownership, travel and
+game-owned checkpoint persistence. ADR 0110 distinguishes delivery source facts from executable
+startup agreement; Proposed ADR 0089 does not grant a general scene manager or native rollback.
+
 The [ordinary authoring workflow](../plans/2026-10-20-ordinary-authoring-workflow-plan.md)
 implements the first structural consumer from that review: stable-ID reparent/reorder, closed
 source-local subtree deletion and exact history through ordinary Scene/Prefab authoring. ADRs

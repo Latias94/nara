@@ -22,7 +22,7 @@ by the commands below; it does not create an Editor-private project format.
 
 For one observable authored-data edit, change the startup Scene's
 `Camera2d.clear_color.r` value in `scenes/startup.scene.json` from `0.06` to `0.14`. No Rust source
-change is required. Then check the admitted startup closure and run both products from any process
+change is required. Then check the project's declared content and run both products from any process
 working directory:
 
 ```text
@@ -38,10 +38,10 @@ through normal runtime cleanup.
 Check, schema refresh, Export, and startup-Scene Repair build the existing headless executable and enter its explicit
 tool mode before gameplay. Define custom systems, persistent components, and migrations once in
 `product_recipe()` with `SchemaContribution`; the same recipe serves both binaries and strict tools.
-The generated `package.metadata.nara.project-tool-protocol = 1` declares that entry contract. Older
-projects must migrate their headless entry before using these commands. Project Rust and Cargo code
-remain trusted native code. Default tooling has no window or graphics backend; checking the explicit
-`desktop` profile builds its desktop feature set.
+The generated `package.metadata.nara.project-tool-protocol = 2` declares that entry contract. Older
+projects, including version 1 entries, must migrate their headless entry before using these commands.
+Project Rust and Cargo code remain trusted native code. Default tooling has no window or graphics
+backend; checking the explicit `desktop` profile builds its desktop feature set.
 
 After changing persistent component definitions or their contributions, refresh the declared
 data-only schema bundle explicitly, then reopen the project in the Editor:
@@ -57,7 +57,19 @@ publishes the bundle generated from `product_recipe()` at `authoring.schema_bund
 start gameplay or rewrite Scene/Prefab records. Pass `--profile desktop` when checking or writing
 that profile's schema. Generic Editor Open reads the bundle without compiling project code.
 
-Publish and accept a source-carrying startup-closure candidate into an absent destination:
+After creating another Scene, such as `scenes/level-b.scene.json`, declare it in `nara.toml` so
+Check and Export include it and its admitted Prefab, Image, TileSet, and metadata dependencies:
+
+```toml
+[content]
+scenes = ["level-b.scene.json"]
+```
+
+These project-wide paths are relative to the selected profile's effective `paths.scenes` directory.
+The selected startup Scene is always included implicitly. Declaring another Scene does not activate
+it at runtime, and undeclared dynamic content is not included automatically.
+
+Publish and accept a source-carrying declared-content candidate into an absent destination:
 
 ```text
 nara export . --parent .. --destination candidate-before-repair
@@ -82,7 +94,7 @@ nara export . --parent .. --destination candidate-after-repair
 Repair updates only the selected startup Scene after a fresh authoritative check. It does not infer
 renames or rewrite arbitrary asset references.
 
-This export is a source-carrying startup-closure development and verification candidate. It is not
+This export is a source-carrying declared-content development and verification candidate. It is not
 a complete project backup, cooked/source-free build, formal release package, Editor workflow, or
 inventory of dynamically requested content. Edit authored content under `scenes/`, `prefabs/`, and
 `assets/`; do not hand-maintain generated starter metadata as a second product configuration.

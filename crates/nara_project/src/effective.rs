@@ -5,6 +5,7 @@ use nara_tasks::TaskPoolConfig;
 use nara_window::{PresentMode, Window, WindowMode, WindowResolution};
 
 use crate::capability::{ProductCapabilitySet, RuntimePreset};
+use crate::content::EffectiveProjectContentSettings;
 use crate::manifest::ProjectManifest;
 use crate::path::ProjectPath;
 use crate::profile::ProjectProfileError;
@@ -24,6 +25,7 @@ pub struct EffectiveProjectSettings {
     pub paths: EffectiveProjectPaths,
     /// Project-wide authoring schema bundle source. Profiles cannot replace this path.
     pub authoring_schema_bundle: Option<ProjectPath>,
+    pub content: EffectiveProjectContentSettings,
     pub startup: EffectiveStartupSettings,
     pub runtime: EffectiveRuntimeSettings,
     pub tasks: EffectiveTaskSettings,
@@ -55,6 +57,7 @@ impl EffectiveProjectSettings {
                 .map(ProjectPath::new)
                 .transpose()
                 .map_err(ProjectProfileError::InvalidProjectPath)?,
+            content: EffectiveProjectContentSettings::from_manifest(&manifest.content)?,
             startup: EffectiveStartupSettings::from_manifest(manifest.startup.clone())?,
             runtime: manifest.runtime.lower()?,
             tasks: manifest.tasks.lower()?,

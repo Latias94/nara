@@ -95,6 +95,10 @@ fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
     assert!(guide.contains("nara check ."));
     assert!(guide.contains("nara export ."));
     assert!(guide.contains("nara repair startup-scene ."));
+    assert!(guide.contains("source-carrying declared-content candidate"));
+    assert!(guide.contains("[content]"));
+    assert!(guide.contains("scenes = [\"level-b.scene.json\"]"));
+    assert!(!guide.contains("source-carrying startup-closure"));
     assert_eq!(
         plan.dependency().immutable_git_repository_digest(),
         Some(ContentDigest::of_bytes(

@@ -484,7 +484,7 @@ fn historical_values_migrate_without_clamping_and_strict_check_uses_the_same_rec
         check_project(ProjectCheckRequest::new(project.capability(), recipe())).unwrap_err();
     assert!(
         error
-            .startup_content_error()
+            .content_error()
             .unwrap()
             .diagnostics()
             .iter()

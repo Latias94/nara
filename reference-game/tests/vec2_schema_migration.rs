@@ -117,7 +117,7 @@ fn strict_check_admits_saved_vec2_predecessor_without_rewriting_source() {
     assert!(loaded.snapshot.source_upgrade_required());
     let player = loaded
         .snapshot
-        .startup_scene()
+        .scene()
         .entities
         .iter()
         .find(|entity| entity.id.as_str() == "player")

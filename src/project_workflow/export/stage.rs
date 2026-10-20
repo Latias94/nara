@@ -7,7 +7,7 @@ use nara_fs::{DirectoryCapability, FsError, FsOperation, RelativeComponent, Rela
 use nara_project::ProjectPath;
 
 use super::{ProjectExportBuildReceipt, ProjectExportMemberSource, ProjectExportPlanReceipt};
-use crate::project_host::StartupContentClosureReceipt;
+use crate::project_host::ProjectContentDeliveryReceipt;
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum ProjectExportStageError {
@@ -70,7 +70,7 @@ struct ExportDirectories {
 pub(super) fn stage_export_tree(
     staging: DirectoryCapability,
     plan: &ProjectExportPlanReceipt,
-    startup_content: &StartupContentClosureReceipt,
+    delivery_content: &ProjectContentDeliveryReceipt,
     build: &ProjectExportBuildReceipt,
 ) -> Result<(), ProjectExportStageError> {
     let directories = create_directories(&staging, plan)?;
@@ -96,7 +96,7 @@ pub(super) fn stage_export_tree(
                     path: member.path.clone(),
                     source,
                 })?,
-            ProjectExportMemberSource::StartupContent(source_path) => startup_content
+            ProjectExportMemberSource::Content(source_path) => delivery_content
                 .project_root()
                 .open_file(
                     &RelativePath::new(source_path.as_str())
@@ -113,7 +113,7 @@ pub(super) fn stage_export_tree(
             | super::ProjectExportMemberKind::DesktopExecutable => {
                 parent.create_child_executable_file(&leaf)
             }
-            super::ProjectExportMemberKind::StartupContent(_) => parent.create_child_file(&leaf),
+            super::ProjectExportMemberKind::Content(_) => parent.create_child_file(&leaf),
         };
         let mut target_file =
             target_file.map_err(|source| ProjectExportStageError::CreateFile {

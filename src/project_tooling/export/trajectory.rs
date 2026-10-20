@@ -9,9 +9,10 @@ use std::{
 
 use crate::{
     fs::{ContentDigest, RelativeComponent},
+    project_host::ProjectContentDeliveryReceipt,
     project_workflow::{
-        ProjectExportBinaryTarget, ProjectExportMemberKind, ProjectExportMemberReceipt,
-        ProjectExportRequest, StartupContentClosureReceipt, StartupContentMemberKind,
+        ProjectContentMemberKind, ProjectExportBinaryTarget, ProjectExportMemberKind,
+        ProjectExportMemberReceipt, ProjectExportRequest, StartupContentClosureReceipt,
         prepare_project_export,
     },
 };
@@ -33,7 +34,7 @@ mod check {
 
     pub(super) fn execute(
         arguments: CheckArguments,
-    ) -> Result<StartupContentClosureReceipt, crate::project_workflow::ProjectCheckError> {
+    ) -> Result<ProjectContentDeliveryReceipt, crate::project_workflow::ProjectCheckError> {
         let root = host_fs::readable_directory(&arguments.project).unwrap();
         let request =
             crate::project_workflow::ProjectCheckRequest::new(root, crate::ProductRecipe::new());
@@ -143,16 +144,16 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
             &fs::read(project.join("README.md")).unwrap(),
         )),
         "manifest": digest_value(created.manifest_digest()),
-        "content": digest_value(created.content_digest()),
+        "content": digest_value(created.startup_content().content_digest()),
     });
-    let created_content_digest = created.content_digest();
+    let created_content_digest = created.startup_content().content_digest();
     drop(created);
 
     let edited_scene_digest = edit_startup_scene(&project);
     public_commands.expect_success(&project, ["check", "."].map(OsString::from));
     let checked_before = check_products(&project);
     assert_ne!(
-        checked_before.headless.content_digest(),
+        checked_before.headless.startup_content().content_digest(),
         created_content_digest
     );
     generate_lockfile(&project, &unrelated_cwd);
@@ -228,7 +229,7 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
     public_commands.expect_success(&project, ["check", "."].map(OsString::from));
     let checked_after = check_products(&project);
     let after_manifest_digest = checked_after.headless.manifest_digest();
-    let after_content_digest = checked_after.headless.content_digest();
+    let after_content_digest = checked_after.headless.startup_content().content_digest();
     assert_ne!(after_manifest_digest, issue_manifest_digest);
     assert_eq!(
         checked_after
@@ -236,7 +237,7 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
             .members()
             .iter()
             .find(|member| {
-                member.kind() == StartupContentMemberKind::Scene
+                member.kind() == ProjectContentMemberKind::Scene
                     && member.path().as_str() == format!("scenes/{REPLACEMENT_SCENE}")
             })
             .expect("the repaired closure contains the selected replacement Scene")
@@ -303,8 +304,8 @@ fn fresh_project_export_repair_is_one_linked_product_trajectory() {
 }
 
 struct CheckedProducts {
-    headless: StartupContentClosureReceipt,
-    desktop: StartupContentClosureReceipt,
+    headless: ProjectContentDeliveryReceipt,
+    desktop: ProjectContentDeliveryReceipt,
 }
 
 fn check_products(project: &Path) -> CheckedProducts {
@@ -319,7 +320,10 @@ fn check_products(project: &Path) -> CheckedProducts {
     })
     .unwrap();
     assert_eq!(headless.manifest_digest(), desktop.manifest_digest());
-    assert_eq!(headless.content_digest(), desktop.content_digest());
+    assert_eq!(
+        headless.startup_content().content_digest(),
+        desktop.startup_content().content_digest()
+    );
     assert_ne!(headless.settings_lineage(), desktop.settings_lineage());
     CheckedProducts { headless, desktop }
 }
@@ -486,9 +490,9 @@ fn run_source_products(
             &headless_path,
             headless_digest,
             checked.headless.manifest_digest(),
-            checked.headless.content_digest(),
-            checked.headless.closure_plan_digest(),
-            authoring_bundle_digest(&checked.headless),
+            checked.headless.startup_content().content_digest(),
+            checked.headless.startup_content().closure_plan_digest(),
+            authoring_bundle_digest(checked.headless.startup_content()),
         ),
         working_directory,
         source_product_command(
@@ -513,9 +517,9 @@ fn run_source_products(
             &desktop_path,
             desktop_digest,
             checked.desktop.manifest_digest(),
-            checked.desktop.content_digest(),
-            checked.desktop.closure_plan_digest(),
-            authoring_bundle_digest(&checked.desktop),
+            checked.desktop.startup_content().content_digest(),
+            checked.desktop.startup_content().closure_plan_digest(),
+            authoring_bundle_digest(checked.desktop.startup_content()),
         ),
         working_directory,
         source_product_command(
@@ -641,12 +645,19 @@ fn export_project(
     checked: CheckedProducts,
 ) -> AcceptedExport {
     let manifest_digest = checked.headless.manifest_digest();
-    let content_digest = checked.headless.content_digest();
+    let content_digest = checked.headless.startup_content().content_digest();
     assert_eq!(manifest_digest, checked.desktop.manifest_digest());
-    assert_eq!(content_digest, checked.desktop.content_digest());
-    let build = cargo::build_in_target_directory(project, &checked.headless, target_directory)
-        .unwrap()
-        .into_receipt();
+    assert_eq!(
+        content_digest,
+        checked.desktop.startup_content().content_digest()
+    );
+    let build = cargo::build_in_target_directory(
+        project,
+        checked.headless.startup_content(),
+        target_directory,
+    )
+    .unwrap()
+    .into_receipt();
     let prepared = prepare_project_export(ProjectExportRequest::new(
         host_fs::writable_directory(parent).unwrap(),
         RelativeComponent::new(destination).unwrap(),
@@ -799,9 +810,7 @@ fn manifest_member_digest(members: &[ProjectExportMemberReceipt]) -> ContentDige
         .iter()
         .find(|member| {
             member.kind()
-                == ProjectExportMemberKind::StartupContent(
-                    StartupContentMemberKind::ProjectManifest,
-                )
+                == ProjectExportMemberKind::Content(ProjectContentMemberKind::ProjectManifest)
         })
         .expect("the export plan must retain its manifest")
         .digest()
@@ -833,7 +842,7 @@ fn authoring_bundle_digest(closure: &StartupContentClosureReceipt) -> ContentDig
     closure
         .members()
         .iter()
-        .find(|member| member.kind() == StartupContentMemberKind::AuthoringSchemaBundle)
+        .find(|member| member.kind() == ProjectContentMemberKind::AuthoringSchemaBundle)
         .expect("checked product closure contains its authoring schema bundle")
         .digest()
 }

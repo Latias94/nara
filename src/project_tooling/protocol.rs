@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use super::{ProjectToolRequest, ProjectToolSummary, ToolError};
 
 pub(super) const TOOL_ARGUMENT: &str = "--nara-project-tool";
-pub(super) const PROTOCOL_VERSION: &str = "1";
+pub(super) const PROTOCOL_VERSION: &str = "2";
 pub(super) const MAX_RESPONSE_BYTES: u64 = 64 * 1024;
 pub(super) const MAX_DIAGNOSTIC_BYTES: usize = 16 * 1024;
 const MAX_ARGUMENT_BYTES: usize = 128 * 1024;
@@ -101,20 +101,20 @@ pub(super) fn encode_response(
     result: Result<ProjectToolSummary, ToolError>,
 ) -> Value {
     match result {
-        Ok(ProjectToolSummary::Checked { startup_members }) => {
-            json!({"version":1,"operation":operation,"success":true,"startup_members":startup_members})
+        Ok(ProjectToolSummary::Checked { content_members }) => {
+            json!({"version":2,"operation":operation,"success":true,"content_members":content_members})
         }
         Ok(ProjectToolSummary::Schema { written }) => {
-            json!({"version":1,"operation":operation,"success":true,"written":written})
+            json!({"version":2,"operation":operation,"success":true,"written":written})
         }
         Ok(ProjectToolSummary::Exported {
-            startup_members,
+            content_members,
             product_observations,
         }) => {
-            json!({"version":1,"operation":operation,"success":true,"startup_members":startup_members,"product_observations":product_observations})
+            json!({"version":2,"operation":operation,"success":true,"content_members":content_members,"product_observations":product_observations})
         }
         Ok(ProjectToolSummary::Repaired { replacement }) => {
-            json!({"version":1,"operation":operation,"success":true,"replacement":replacement})
+            json!({"version":2,"operation":operation,"success":true,"replacement":replacement})
         }
         Err(error) => {
             let mut diagnostic = error.diagnostic();
@@ -125,7 +125,7 @@ pub(super) fn encode_response(
                 }
                 diagnostic.truncate(end);
             }
-            json!({"version":1,"operation":operation,"success":false,"diagnostic":diagnostic})
+            json!({"version":2,"operation":operation,"success":false,"diagnostic":diagnostic})
         }
     }
 }
@@ -138,7 +138,7 @@ pub(super) fn decode_response(
         return Err("project tool response exceeds its bounded size");
     }
     let value: Value = serde_json::from_slice(bytes).map_err(|_| "project headless executable did not return a project tool response; update its tool-mode entry")?;
-    if value["version"].as_u64() != Some(1) || value["operation"].as_str() != Some(operation) {
+    if value["version"].as_u64() != Some(2) || value["operation"].as_str() != Some(operation) {
         return Err("project tool response version or operation does not match the request");
     }
     match value["success"].as_bool() {
@@ -151,14 +151,14 @@ pub(super) fn decode_response(
         }
         Some(true) => {
             let count = || {
-                value["startup_members"]
+                value["content_members"]
                     .as_u64()
                     .and_then(|value| usize::try_from(value).ok())
                     .ok_or("invalid project tool member count")
             };
             let summary = match operation {
                 "check" => ProjectToolSummary::Checked {
-                    startup_members: count()?,
+                    content_members: count()?,
                 },
                 "schema-check" | "schema-write" => ProjectToolSummary::Schema {
                     written: value["written"]
@@ -167,7 +167,7 @@ pub(super) fn decode_response(
                         .ok_or("invalid project tool schema publication outcome")?,
                 },
                 "export" => ProjectToolSummary::Exported {
-                    startup_members: count()?,
+                    content_members: count()?,
                     product_observations: value["product_observations"]
                         .as_u64()
                         .filter(|value| *value == 2)
@@ -205,6 +205,27 @@ mod tests {
                 .unwrap()
                 .is_err()
         );
+        assert!(
+            parse_request([OsString::from(TOOL_ARGUMENT), OsString::from("1")])
+                .unwrap()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn delivery_counts_require_the_current_tool_protocol() {
+        let summary = ProjectToolSummary::Checked {
+            content_members: 11,
+        };
+        let response = encode_response("check", Ok(summary.clone()));
+        assert_eq!(response["content_members"], 11);
+        assert!(response.get("startup_members").is_none());
+        assert_eq!(
+            decode_response(&serde_json::to_vec(&response).unwrap(), "check"),
+            Ok(Ok(summary))
+        );
+        let legacy = br#"{"version":1,"operation":"check","success":true,"startup_members":11}"#;
+        assert!(decode_response(legacy, "check").is_err());
     }
 
     #[test]

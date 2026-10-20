@@ -27,13 +27,10 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
         .find(|prefab| prefab.path().as_str() == "reference-ui.prefab.json")
         .unwrap();
 
-    assert_eq!(loaded.snapshot.startup_scene(), &expected_scene);
+    assert_eq!(loaded.snapshot.scene(), &expected_scene);
     assert_eq!(enemy_prefab.document(), &expected_prefab);
     assert_eq!(
-        format!(
-            "{}\n",
-            loaded.snapshot.startup_scene().to_json_string().unwrap(),
-        ),
+        format!("{}\n", loaded.snapshot.scene().to_json_string().unwrap(),),
         include_str!("../scenes/startup.scene.json"),
     );
     assert_eq!(
@@ -43,7 +40,7 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
 
     let startup_ids = loaded
         .snapshot
-        .startup_scene()
+        .scene()
         .entities
         .iter()
         .map(|entity| entity.id.as_str())
@@ -67,8 +64,8 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
         .collect::<Vec<_>>();
     assert_eq!(prefab_ids, ["enemy"]);
 
-    let expanded = loaded.snapshot.expanded_startup_scene();
-    let provenance = loaded.snapshot.expanded_startup_scene_provenance();
+    let expanded = loaded.snapshot.expanded_scene();
+    let provenance = loaded.snapshot.expanded_scene_provenance();
     assert_eq!(expanded.entities.len(), 24);
     assert_eq!(provenance.len(), expanded.entities.len());
     assert_eq!(

@@ -7,7 +7,7 @@ use nara_tooling::{
 };
 
 use crate::project_host::runtime_agreement::prepare_runtime_schema_agreement;
-use crate::project_host::{ProjectContentError, ProjectContentErrorKind, StartupContentMemberKind};
+use crate::project_host::{ProjectContentError, ProjectContentErrorKind, ProjectContentMemberKind};
 
 use super::{
     EditorPersistenceReceipt, EditorProjectContentGeneration, EditorProjectSession,
@@ -91,11 +91,11 @@ impl EditorProjectSession {
             prefab.as_str()
         );
         lane.snapshot
-            .startup_content_closure()
+            .content_closure()
             .members()
             .iter()
             .any(|member| {
-                member.kind() == StartupContentMemberKind::Prefab
+                member.kind() == ProjectContentMemberKind::Prefab
                     && member.path().as_str() == path
                     && member.digest() == digest
             })
@@ -398,6 +398,7 @@ impl EditorProjectSession {
             | ProjectContentErrorKind::ProjectRootUnbound
             | ProjectContentErrorKind::ProjectRootMismatch
             | ProjectContentErrorKind::MissingStartupScene
+            | ProjectContentErrorKind::MissingSelectedScene
             | ProjectContentErrorKind::InvalidLogicalPath
             | ProjectContentErrorKind::ClosurePathCollision
             | ProjectContentErrorKind::SceneFormat

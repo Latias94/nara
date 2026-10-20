@@ -14,7 +14,7 @@ mod repair;
 mod starter;
 
 pub use crate::project_host::{
-    StartupContentClosureReceipt, StartupContentMemberKind, StartupContentMemberReceipt,
+    ProjectContentMemberKind, ProjectContentMemberReceipt, StartupContentClosureReceipt,
 };
 pub use check::{
     ProjectCheckError, ProjectCheckErrorKind, ProjectCheckRequest, ProjectStartupSceneIssue,

@@ -6,6 +6,7 @@
 lineages, capability-derived local dependency relations, parent-owned cross-process evidence,
 creation terminality, build-input freshness and startup-closure ownership
 **Amended**: 2026-10-16 by the First 2D Author Workflow for repository-external local projects
+**Amended**: 2026-10-21 by finite declared Scene delivery for the persistent two-level consumer
 **Owner**: root product workflow, `nara_project`, `nara_fs`, project content and Runtime Hosts
 **Refines**: [ADR 0020](0020-project-layout-and-package-format.md),
 [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
@@ -40,7 +41,7 @@ schema editing.
 ## Decision
 
 Nara adopts one first-party `desktop-2d/v1` starter and one root project-workflow Module. The Module
-owns concrete creation, check, source-carrying startup-closure export and startup-selection repair
+owns concrete creation, check, source-carrying declared-content export and startup-selection repair
 transactions. A thin CLI owns argument parsing and terminal rendering; a separate private
 Cargo/process Adapter owns invocation and JSON artifact selection. Future Editor UI may call the
 same Module, but no Editor dependency or contribution seam is added by this decision.
@@ -50,7 +51,7 @@ flowchart LR
   Author[Author request] --> Workflow[Root project-workflow Module]
   Workflow --> Manifest[nara_project typed semantics]
   Workflow --> Files[nara_fs capability transactions]
-  Workflow --> Content[Project content startup closure]
+  Workflow --> Content[Selected Scene closures and declared delivery]
   Workflow --> Host[Desktop and headless ProjectHost]
   CLI[Thin CLI Adapter] --> Workflow
   CLI --> Cargo[Private Cargo and process Adapter]
@@ -113,18 +114,43 @@ flowchart LR
   admitted startup content and live backend generation within a product-owned timeout, uses the real
   Winit/WGPU path and exits through normal App/Host shutdown; initialization alone or a test-private
   presenter cannot satisfy product evidence.
-- The project-content owner produces the exact bounded `StartupContentClosureReceipt`: ordered logical
-  paths, member kinds, byte lengths, digests, source/content revision and manifest/schema facts. Export
-  consumes that receipt and reopens bytes through `nara_fs`; it does not rediscover dependencies.
+- The project-content owner produces a bounded `ProjectContentClosureReceipt` for one explicitly
+  selected Scene and its required dependencies. Selection does not change manifest or settings
+  lineage, and the snapshot binds the selected Scene path. `StartupContentClosureReceipt` is
+  available only for the effective default Scene and remains the executable startup agreement.
+- Project-wide `[content] scenes` declares at most 64 additional Scene paths relative to the
+  effective `paths.scenes`. Startup is an implicit root; duplicate explicit entries and invalid
+  paths reject. Profiles may change the directory or startup selection, but not this global list.
+- Strict Check validates startup and every declared Scene with the same bounded loader. It returns
+  a separate `ProjectContentDeliveryReceipt`: sorted roots, exact deduplicated member facts and a
+  delivery digest, bound to one project, manifest and schema authority. Differing kind/digest facts
+  for the same path reject. The owner loads roots sequentially and independently charges retained
+  union facts, without keeping all decoded Scene/Image values or generation leases resident.
+- Export consumes the delivery receipt and reopens every exact member through `nara_fs`; it does
+  not rediscover dependencies. Pre-staging and pre-publication revalidation cover the complete
+  union. Startup product observations remain distinct from the delivery plan and do not prove
+  that a later Scene has already been activated. Source receipts are bounded observations, not a
+  simultaneous filesystem snapshot or runtime-residency grant.
 - Exact Cargo artifacts are selected from one `cargo build --locked` JSON stream by invocation,
   workspace/manifest, package, binary target, triple, named profile and normalized features. A private
-  build-input revision binds the application Cargo manifest, `Cargo.lock` and generated Rust sources;
-  stale inputs reject export before publication.
-- The artifact is a **source-carrying startup-closure export**: selected executables plus an
-  executable-relative `project/` tree sufficient for the admitted startup path. It may contain
+  build-input revision binds the closed five-file inventory: `Cargo.toml`, `Cargo.lock`,
+  `src/lib.rs`, `src/bin/headless.rs` and `src/bin/desktop.rs`; changed captured inputs reject
+  export before publication. Cargo compiles ordinary modules and local dependency crates without
+  an engine-owned Rust resolver. This additional observation does not capture every module,
+  local dependency, build-script, environment or procedural-macro input. Executable digests own
+  the actual delivered runtime bytes; neither `--locked` nor this revision freezes all sources.
+- A build receipt revalidates its executable startup observations against the current manifest,
+  startup content, closure plan, authoring bundle and schema fingerprint. Fresh Check results
+  cannot retarget an earlier build observation to changed startup content merely because Rust
+  inputs and executable bytes remain unchanged. A change exclusive to another declared Scene
+  does not require claiming that the executable already activated that Scene.
+- The artifact is a **source-carrying declared-content export**: selected executables plus an
+  executable-relative `project/` tree for startup and explicitly declared Scene roots. It may contain
   source manifests, Scene/Prefab documents, images, metadata and schema facts. It does not claim to
-  contain unreferenced or dynamically requested project content, and it is neither a complete
+  contain undeclared and unreferenced project content, and it is neither a complete
   project backup nor a cooked/source-free catalog. ADR 0088 remains Proposed.
+- The compiled-project tool protocol uses version 2 and reports `content_members` for Check and
+  Export. Version 1 responses reject rather than mislabeling delivery counts as startup-only facts.
 - All member and source-change validation precedes directory publication. Process acceptance occurs
   afterward. A published candidate that fails acceptance remains present and is reported as
   published-but-unaccepted; no rollback or in-place acceptance retry is claimed.

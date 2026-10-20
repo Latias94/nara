@@ -4,13 +4,17 @@
 //! this package. Callers supply an already-authorized request and receive the public preparation or
 //! terminal publication outcome unchanged.
 
+use nara::project::ProjectPath;
+use nara::project_host::{
+    ProjectContentDeliveryReceipt, ProjectContentError, ProjectContentLoader,
+    ProjectContentSnapshot, ProjectSettingsCandidate, RuntimePlan, StartupContentClosureReceipt,
+};
 use nara::project_workflow::{
     PreparedProjectCreation, PreparedProjectExport, ProjectCheckError, ProjectCheckRequest,
     ProjectCreationOutcome, ProjectCreationPlanError, ProjectCreationRequest, ProjectExportOutcome,
     ProjectExportPlanError, ProjectExportRequest, ProjectStartupSceneRepairError,
-    ProjectStartupSceneRepairOutcome, ProjectStartupSceneRepairRequest,
-    StartupContentClosureReceipt, check_project, prepare_desktop_2d_project,
-    prepare_project_export, repair_startup_scene,
+    ProjectStartupSceneRepairOutcome, ProjectStartupSceneRepairRequest, check_project,
+    prepare_desktop_2d_project, prepare_project_export, repair_startup_scene,
 };
 
 /// Prepares the immutable `desktop-2d/v1` creation plan through the public root Module.
@@ -31,13 +35,28 @@ pub fn publish_creation(prepared: PreparedProjectCreation) -> ProjectCreationOut
     clippy::result_large_err,
     reason = "This compile-only consumer preserves the public transaction result unchanged"
 )]
-pub fn check_startup_content(
+pub fn check_delivery_content(
     request: ProjectCheckRequest,
-) -> Result<StartupContentClosureReceipt, ProjectCheckError> {
+) -> Result<ProjectContentDeliveryReceipt, ProjectCheckError> {
     check_project(request)
 }
 
-/// Prepares one startup-closure export without importing Cargo JSON, processes, or native paths.
+/// Selects a source Scene without rewriting startup settings or declaring delivery membership.
+pub fn load_selected_scene(
+    loader: &ProjectContentLoader,
+    settings: &ProjectSettingsCandidate,
+    plan: &RuntimePlan,
+    scene: &ProjectPath,
+) -> Result<ProjectContentSnapshot, ProjectContentError> {
+    loader.load_scene(settings, plan, scene)
+}
+
+/// Retains the startup attestation explicitly within a complete delivery receipt.
+pub fn startup_content(delivery: &ProjectContentDeliveryReceipt) -> &StartupContentClosureReceipt {
+    delivery.startup_content()
+}
+
+/// Prepares one declared-content export without importing Cargo JSON, processes, or native paths.
 pub fn prepare_export(
     request: ProjectExportRequest,
 ) -> Result<PreparedProjectExport, ProjectExportPlanError> {

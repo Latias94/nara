@@ -231,7 +231,20 @@ Prefab from your own version control when done.
 
 This is an explicit data mod example. It adds no discovery service, conflict
 resolver, package manager or dynamic native-library ABI. All active content must
-be reachable from the startup Scene for the current export workflow.
+be reachable from startup or a declared Scene root for the export workflow.
+
+Declare additional levels in the project manifest, with paths relative to the effective
+`paths.scenes` directory:
+
+```toml
+[content]
+scenes = ["second.scene.json"]
+```
+
+Check validates each declared Scene and its transitive dependencies. Export includes their exact
+source union and excludes undeclared, unreferenced files. A declaration grants delivery, not
+automatic loading or runtime residency. Code-first content consumers can use
+`ProjectContentLoader::load_scene` to prepare one selected Scene without changing startup.
 
 ## Export and run independently
 
@@ -250,7 +263,7 @@ try {
 The executables use their sibling project/ tree and do not need the development
 project's CWD. Keep that tree with them. A published candidate that fails product
 acceptance remains present and is reported as such; do not treat it as success.
-This is a source-carrying startup-closure development candidate, not a full project
+This is a source-carrying declared-content development candidate, not a full project
 backup or final distribution package. Inactive variant sources are not exported.
 
 ## What to measure

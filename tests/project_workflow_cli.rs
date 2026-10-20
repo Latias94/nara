@@ -15,6 +15,8 @@ use std::{
 
 static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
 
+#[path = "support/project_content_fixture.rs"]
+mod content_fixture;
 #[path = "support/project_tooling_game.rs"]
 mod custom_game;
 
@@ -23,7 +25,8 @@ mod custom_game;
 fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_gameplay() {
     use nara::{
         fs::RelativePath,
-        project_host::{ingest_project_manifest, resolve_product_recipe},
+        project::ProjectPath,
+        project_host::{ProjectContentLoader, ingest_project_manifest, resolve_product_recipe},
     };
     let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let sequence = NEXT_TEST_ROOT.fetch_add(1, Ordering::Relaxed);
@@ -86,6 +89,7 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
         serde_json::to_vec_pretty(&scene).unwrap(),
     )
     .unwrap();
+    let expected_second_scene = install_declared_second_scene(&project);
     let marker = parent.path().join("gameplay.txt");
     assert!(!project.join("Cargo.lock").exists());
     let checked = Command::new(env!("CARGO_BIN_EXE_nara"))
@@ -181,6 +185,158 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
             .join(format!("bin/desktop{}", std::env::consts::EXE_SUFFIX))
             .is_file()
     );
+
+    // Remove the development coordinate before consuming the independently published product.
+    // Both this source and the destination belong to the test's private generated-project parent.
+    fs::rename(&project, parent.path().join("detached-development-project")).unwrap();
+    assert!(!project.exists());
+    let published_project = candidate.join("project");
+    let published_root =
+        nara::project_tooling::host_fs::readable_directory(&published_project).unwrap();
+    assert_ne!(published_root.identity(), root.identity());
+    let manifest = published_root
+        .open_file(&RelativePath::new("nara.toml").unwrap())
+        .unwrap();
+    let settings = ingest_project_manifest(&manifest, None).unwrap();
+    let plan = resolve_product_recipe(&settings, custom_game::custom_recipe().unwrap()).unwrap();
+    let loader = ProjectContentLoader::new(published_root).unwrap();
+    let second = loader
+        .load_scene(
+            &settings,
+            &plan,
+            &ProjectPath::new("second.scene.json").unwrap(),
+        )
+        .unwrap();
+    assert_eq!(second.scene(), &expected_second_scene);
+    assert!(second.startup_content_closure().is_none());
+    assert!(
+        second
+            .expanded_scene_provenance()
+            .values()
+            .any(|source| source.source_entity_id() == &content_fixture::scene_id("second-sprite"))
+    );
+    assert_eq!(second.images().len(), 1);
+    assert_eq!(second.images()[0].path().as_str(), "textures/second.png");
+    assert_eq!(second.images()[0].image().pixels(), &[24, 120, 220, 255]);
+    let delivery = loader.load_delivery(&settings, &plan).unwrap();
+    assert!(String::from_utf8_lossy(&exported.stdout).contains(&format!(
+        "candidate with {} content-delivery members",
+        delivery.members().len()
+    )));
+    assert!(
+        delivery
+            .scene_roots()
+            .iter()
+            .any(|scene| scene.as_str() == "second.scene.json")
+    );
+    assert!(
+        delivery
+            .members()
+            .iter()
+            .any(|member| member.path().as_str() == "prefabs/second.prefab.json")
+    );
+    assert!(
+        delivery
+            .members()
+            .iter()
+            .any(|member| member.path().as_str() == "assets/textures/second.png.meta")
+    );
+    assert!(
+        !published_project
+            .join("scenes/undeclared.scene.json")
+            .exists()
+    );
+
+    let unrelated = TestRoot::new("exported-second-scene-cwd");
+    let published_marker = parent.path().join("published-gameplay.txt");
+    let run = Command::new(candidate.join(format!("bin/headless{}", std::env::consts::EXE_SUFFIX)))
+        .current_dir(unrelated.path())
+        .env("NARA_TEST_PULSE_MARKER", &published_marker)
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "published product failed:\n{}\n{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(published_marker).unwrap(),
+        "migrated-pulse=42\n"
+    );
+}
+
+fn install_declared_second_scene(project: &Path) -> nara::scene::SceneDocument {
+    use content_fixture::{
+        identity_transform_record, image_meta, scene_id, sprite_value, valid_png_bytes,
+    };
+    use nara::{
+        asset::AssetRef,
+        reflect::{ComponentSchemaVersion, ComponentTypeId},
+        scene::{
+            PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityRecord,
+            ScenePatchDocument,
+        },
+    };
+
+    fs::create_dir_all(project.join("assets/textures")).unwrap();
+    fs::create_dir_all(project.join("prefabs")).unwrap();
+    fs::write(
+        project.join("assets/textures/second.png"),
+        valid_png_bytes(),
+    )
+    .unwrap();
+    fs::write(
+        project.join("assets/textures/second.png.meta"),
+        image_meta(
+            "d591edb8-3f1b-46b4-95bf-e9b2f77457a3",
+            "textures/second.png",
+        )
+        .to_json_string()
+        .unwrap(),
+    )
+    .unwrap();
+    let prefab =
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("second-sprite"))
+            .with_component(
+                ComponentTypeId::new("nara.transform.Transform2d"),
+                identity_transform_record(),
+            )
+            .with_component(
+                ComponentTypeId::new("nara.sprite.Sprite"),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    sprite_value(&AssetRef::path("textures/second.png").unwrap()),
+                ),
+            )]);
+    fs::write(
+        project.join("prefabs/second.prefab.json"),
+        prefab.to_json_string().unwrap(),
+    )
+    .unwrap();
+    let mut anchor = SceneEntityRecord::new(scene_id("second-anchor")).with_component(
+        ComponentTypeId::new("nara.transform.Transform2d"),
+        identity_transform_record(),
+    );
+    anchor.prefab = Some(PrefabInstance {
+        source: AssetRef::path("second.prefab.json").unwrap(),
+        overrides: ScenePatchDocument::default(),
+    });
+    let scene = SceneDocument::from_ordered_roots([anchor]);
+    fs::write(
+        project.join("scenes/second.scene.json"),
+        scene.to_json_string().unwrap(),
+    )
+    .unwrap();
+    fs::write(project.join("scenes/undeclared.scene.json"), b"not a Scene").unwrap();
+    let manifest_path = project.join("nara.toml");
+    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    fs::write(
+        manifest_path,
+        format!("{manifest}\n[content]\nscenes = [\"second.scene.json\"]\n"),
+    )
+    .unwrap();
+    scene
 }
 
 #[test]
@@ -247,7 +403,7 @@ fn legacy_tool_entry_and_failed_bootstrap_never_launch_or_publish() {
             .output()
             .unwrap()
     };
-    for protocol in [None, Some(999)] {
+    for protocol in [None, Some(1), Some(999)] {
         let metadata = protocol.map_or(String::new(), |version| {
             format!("\n[package.metadata.nara]\nproject-tool-protocol = {version}\n")
         });
@@ -267,7 +423,7 @@ fn legacy_tool_entry_and_failed_bootstrap_never_launch_or_publish() {
     }
     fs::write(
         root.path().join("Cargo.toml"),
-        format!("{manifest}\n[package.metadata.nara]\nproject-tool-protocol = 1\n"),
+        format!("{manifest}\n[package.metadata.nara]\nproject-tool-protocol = 2\n"),
     )
     .unwrap();
     fs::write(

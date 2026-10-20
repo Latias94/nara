@@ -366,7 +366,7 @@ impl LoadContext<'_> {
         )?;
         self.verify_catalogued_metadata(path, root, digest)?;
         self.record_member(
-            StartupContentMemberKind::AssetMetadata,
+            ProjectContentMemberKind::AssetMetadata,
             root,
             &meta_path,
             digest,

@@ -51,7 +51,7 @@ rust-version = "1.95"
 publish = false
 
 [package.metadata.nara]
-project-tool-protocol = 1
+project-tool-protocol = 2
 
 [workspace]
 resolver = "3"
@@ -259,7 +259,9 @@ fn validate_author_guide(
         || !guide.contains("nara check .")
         || !guide.contains("nara export .")
         || !guide.contains("nara repair startup-scene .")
-        || !guide.contains("source-carrying startup-closure candidate")
+        || !guide.contains("source-carrying declared-content candidate")
+        || !guide.contains("[content]")
+        || !guide.contains("scenes = [\"level-b.scene.json\"]")
     {
         return Err("generated author guide disagrees with the starter workflow");
     }
@@ -295,7 +297,7 @@ fn validate_cargo_manifest(
             .and_then(|value| value.get("nara"))
             .and_then(|value| value.get("project-tool-protocol"))
             .and_then(Value::as_integer)
-            != Some(1)
+            != Some(2)
     {
         return Err("generated Cargo package contract disagrees with the starter");
     }

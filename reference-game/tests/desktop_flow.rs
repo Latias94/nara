@@ -421,7 +421,7 @@ fn rejected_physical_local_command_faults_the_managed_runtime() {
     let snapshot = loader.load(&project, &plan).unwrap();
     let runtime_time = plan.settings().runtime.runtime_time_settings();
     let fixed_time = plan.settings().runtime.fixed_time();
-    let source = snapshot.startup_scene_source();
+    let source = snapshot.scene_source();
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut candidate = RuntimeAdmissionReservation::try_acquire()
         .unwrap()
@@ -495,7 +495,7 @@ fn desktop_runtime_with_context(context: Option<Arc<AtomicBool>>) -> RuntimeInst
     let snapshot = loader.load(&candidate, &plan).unwrap();
     let runtime_time = plan.settings().runtime.runtime_time_settings();
     let fixed_time = plan.settings().runtime.fixed_time();
-    let source = snapshot.startup_scene_source();
+    let source = snapshot.scene_source();
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut candidate = RuntimeAdmissionReservation::try_acquire()
         .unwrap()

@@ -28,6 +28,8 @@ struct ProjectSourceCheckOptions {
 }
 
 pub(crate) struct CheckedProjectSource {
+    candidate: ProjectSettingsCandidate,
+    loader: ProjectContentLoader,
     plan: RuntimePlan,
     snapshot: ProjectContentSnapshot,
 }
@@ -35,6 +37,17 @@ pub(crate) struct CheckedProjectSource {
 impl CheckedProjectSource {
     pub(crate) fn into_parts(self) -> (RuntimePlan, ProjectContentSnapshot) {
         (self.plan, self.snapshot)
+    }
+
+    pub(crate) fn into_delivery_parts(
+        self,
+    ) -> (
+        ProjectSettingsCandidate,
+        RuntimePlan,
+        ProjectContentSnapshot,
+        ProjectContentLoader,
+    ) {
+        (self.candidate, self.plan, self.snapshot, self.loader)
     }
 }
 
@@ -242,7 +255,12 @@ fn load_checked_candidate(
     }
     .map_err(|error| startup_content_failure(error, &candidate, manifest_identity))?;
 
-    Ok(CheckedProjectSource { plan, snapshot })
+    Ok(CheckedProjectSource {
+        candidate,
+        loader,
+        plan,
+        snapshot,
+    })
 }
 
 fn startup_content_failure(

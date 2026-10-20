@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "d1fde90b1b8ba228ee0f00fc16e20c5f0c5815b65c3d2e3fae923287320ceb21"
+source_fingerprint: "255f6aae9323721fd737c82286dcdc8c03ec4be082c63038f097dc8f56ac6994"
 ---
 
 # Current State
@@ -12,9 +12,9 @@ source_fingerprint: "d1fde90b1b8ba228ee0f00fc16e20c5f0c5815b65c3d2e3fae923287320
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `d1fde90b1b8ba228ee0f00fc16e20c5f0c5815b65c3d2e3fae923287320ceb21`
-- Immutable records: 808
-- Active lane heads: 1
+- Source fingerprint: `255f6aae9323721fd737c82286dcdc8c03ec4be082c63038f097dc8f56ac6994`
+- Immutable records: 812
+- Active lane heads: 2
 
 # Active Registrations
 
@@ -49,6 +49,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
+- [Persistent two-level delivery qualified; current-level ownership next](registry/2026-10/2026-10-20T170238Z-persistent-two-level-game-codex-root-2cf0020dc12844fc98eb46ff28375145.md): `active` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
 - [Production cost measurement and first lookup correction complete](registry/2026-10/2026-10-20T081325Z-production-cost-measurement-codex-root-a439516aacba454aaecf22824bfe3635.md): `complete` (production-cost-measurement-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
@@ -64,6 +65,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Selected Scene content and exact declared delivery qualification](verification/2026-10/2026-10-20T165833Z-selected-scene-content-and-exact-declared-delivery-qualification-714d8d9ea4f14a27ae83137124e24ae6.md) - Verification Evidence for Selected Scene content and exact declared delivery qualification.
+- **Verification Evidence**: [Linux default workspace suite requires the native display profile](verification/2026-10/2026-10-20T163530Z-linux-default-workspace-suite-requires-the-native-display-profile-799d137d781d4786abfa72505101cdc0.md) - Verification Evidence for Linux default workspace suite requires the native display profile.
 - **Verification Evidence**: [Reflection declaration checks and Linux supervised Play storage corrections](verification/2026-10/2026-10-20T152924Z-reflection-declaration-checks-and-linux-supervised-play-storage-corrections-efc879a2a8974c989725df994b86e5db.md) - Local target reuse, eager float proofs, bounded Play failure facts and real Linux cache publication; complete successor hosted qualification remains pending.
 - **Verification Evidence**: [Hosted CI contract corrections and signed Linux process groups](verification/2026-10/2026-10-20T115517Z-hosted-ci-contract-corrections-and-signed-linux-process-groups-b976e5720228491691361ab578614f12.md) - Observed hosted failures, signed process groups, native local-workspace policy and deterministic contract fixtures; full successor CI pending.
 - **Verification Evidence**: [Rust Play attribution and Windows Cargo input qualification](verification/2026-10/2026-10-20T112401Z-rust-play-attribution-and-windows-cargo-input-qualification-2abb1db859f04d848d88a1706ad167be.md) - Public Play/Restart, private native Cargo attribution, exact CLI cache interoperability and compiler failure recovery at the corrected Windows path boundary.
@@ -74,8 +77,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Fixed world canvas and native UI qualification](verification/2026-10/2026-10-20T070752Z-fixed-world-canvas-and-native-ui-qualification-e7c7f1ee29e4459688d51f1ca20282d8.md) - Pixel readback, presented world input, native button resize and independent exported desktop qualification.
 - **Verification Evidence**: [Ordinary structural authoring and captured-source Reopen qualification](verification/2026-10/2026-10-20T051819Z-ordinary-structural-authoring-and-captured-source-reopen-qualification-f9b317e0ceda49a6b37f9000c61af8d7.md) - Source-local structural transactions, exact unavailable preservation, captured-source Reopen, ordinary public and actual Windows widget trajectories.
 - **Verification Evidence**: [Module goal alignment and concrete boundary repairs qualification](verification/2026-10/2026-10-20T044452Z-module-goal-alignment-and-concrete-boundary-repairs-qualification-f7676d2222234fd39b8b565dbcaf996f.md) - All workspace modules reviewed against Strategy, existing research and pinned mature engines; TileSet, native modes, GPU allocation and glyph clipping repaired with explicit evidence limits.
-- **Verification Evidence**: [Editor Image metadata publication cleanup custody qualification](verification/2026-10/2026-10-20T035244Z-editor-image-metadata-publication-cleanup-custody-qualification-c097c716d6f3480692d800285ec53544.md) - Register metadata publication before writes and retain cleanup through terminal failure, close, unwind and abandonment.
-- **Verification Evidence**: [Owned startup closure publication and responsiveness qualification](verification/2026-10/2026-10-20T032446Z-owned-startup-closure-publication-and-responsiveness-qualification-f187b61104d4443187cea8b9bc392460.md) - Bounded background startup preparation preserves linear Open ownership, owner session publication, cancellation and retained project replacement.
 
 # Integration Notes
 

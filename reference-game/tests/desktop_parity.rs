@@ -77,7 +77,7 @@ fn runtime_with_scene(
     let snapshot = loader.load(&candidate, &plan).unwrap();
     let runtime_time = plan.settings().runtime.runtime_time_settings();
     let fixed_time = plan.settings().runtime.fixed_time();
-    let source = snapshot.startup_scene_source();
+    let source = snapshot.scene_source();
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut runtime = RuntimeAdmissionReservation::try_acquire()
         .unwrap()

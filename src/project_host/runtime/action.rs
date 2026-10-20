@@ -1420,7 +1420,9 @@ fn prepare_project_start(
     })?;
     let (plan, snapshot) = checked.into_parts();
     let plan_diagnostics = runtime_plan_selected_report(&plan);
-    let startup_content_closure = snapshot.startup_content_closure();
+    let startup_content_closure = snapshot
+        .startup_content_closure()
+        .expect("the runtime startup check selects the manifest's default Scene");
 
     let mut host = ProjectHost::new(cleanup_policy);
     let attempt = host

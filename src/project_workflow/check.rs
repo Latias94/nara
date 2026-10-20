@@ -6,13 +6,13 @@ use nara_project::ProjectPath;
 use crate::{
     ProductRecipe,
     project_host::{
-        ProjectCandidateError, ProjectContentError, ProjectSettingsLineage, RuntimePlanError,
-        StartupContentClosureReceipt,
+        ProjectCandidateError, ProjectContentDeliveryReceipt, ProjectContentError,
+        ProjectSettingsLineage, RuntimePlanError,
         check::{MissingStartupSceneContext, ProjectSourceCheckError, check_project_source},
     },
 };
 
-/// Inputs for one authoritative startup-content check.
+/// Inputs for one authoritative check of startup and all declared Scene roots.
 pub struct ProjectCheckRequest {
     project_root: DirectoryCapability,
     profile: Option<String>,
@@ -51,7 +51,7 @@ impl fmt::Debug for ProjectCheckRequest {
 pub enum ProjectCheckErrorKind {
     Manifest,
     ProductComposition,
-    StartupContent,
+    Content,
 }
 
 pub struct ProjectCheckError {
@@ -62,7 +62,7 @@ pub struct ProjectCheckError {
 enum ProjectCheckErrorInner {
     Manifest(ProjectCandidateError),
     ProductComposition(RuntimePlanError),
-    StartupContent(ProjectContentError),
+    Content(ProjectContentError),
 }
 
 impl ProjectCheckError {
@@ -73,7 +73,7 @@ impl ProjectCheckError {
             ProjectCheckErrorInner::ProductComposition(_) => {
                 ProjectCheckErrorKind::ProductComposition
             }
-            ProjectCheckErrorInner::StartupContent(_) => ProjectCheckErrorKind::StartupContent,
+            ProjectCheckErrorInner::Content(_) => ProjectCheckErrorKind::Content,
         }
     }
 
@@ -81,8 +81,9 @@ impl ProjectCheckError {
     pub const fn manifest_error(&self) -> Option<&ProjectCandidateError> {
         match &self.inner {
             ProjectCheckErrorInner::Manifest(error) => Some(error),
-            ProjectCheckErrorInner::ProductComposition(_)
-            | ProjectCheckErrorInner::StartupContent(_) => None,
+            ProjectCheckErrorInner::ProductComposition(_) | ProjectCheckErrorInner::Content(_) => {
+                None
+            }
         }
     }
 
@@ -90,14 +91,14 @@ impl ProjectCheckError {
     pub const fn product_composition_error(&self) -> Option<&RuntimePlanError> {
         match &self.inner {
             ProjectCheckErrorInner::ProductComposition(error) => Some(error),
-            ProjectCheckErrorInner::Manifest(_) | ProjectCheckErrorInner::StartupContent(_) => None,
+            ProjectCheckErrorInner::Manifest(_) | ProjectCheckErrorInner::Content(_) => None,
         }
     }
 
     #[must_use]
-    pub const fn startup_content_error(&self) -> Option<&ProjectContentError> {
+    pub const fn content_error(&self) -> Option<&ProjectContentError> {
         match &self.inner {
-            ProjectCheckErrorInner::StartupContent(error) => Some(error),
+            ProjectCheckErrorInner::Content(error) => Some(error),
             ProjectCheckErrorInner::Manifest(_) | ProjectCheckErrorInner::ProductComposition(_) => {
                 None
             }
@@ -133,7 +134,7 @@ impl ProjectCheckError {
                 error,
                 missing_startup_scene,
             } => (
-                ProjectCheckErrorInner::StartupContent(error),
+                ProjectCheckErrorInner::Content(error),
                 missing_startup_scene,
             ),
         };
@@ -238,15 +239,15 @@ impl Error for ProjectCheckError {
         match &self.inner {
             ProjectCheckErrorInner::Manifest(error) => Some(error),
             ProjectCheckErrorInner::ProductComposition(error) => Some(error),
-            ProjectCheckErrorInner::StartupContent(error) => Some(error),
+            ProjectCheckErrorInner::Content(error) => Some(error),
         }
     }
 }
 
-/// Validates one authorized project and returns its exact admitted startup source closure.
+/// Validates startup and all declared Scene roots, returning their exact delivery source union.
 pub fn check_project(
     request: ProjectCheckRequest,
-) -> Result<StartupContentClosureReceipt, ProjectCheckError> {
+) -> Result<ProjectContentDeliveryReceipt, ProjectCheckError> {
     let ProjectCheckRequest {
         project_root,
         profile,
@@ -259,6 +260,11 @@ pub fn check_project(
         check_project_source(project_root, profile.as_deref(), recipe).map_err(|error| {
             ProjectCheckError::from_source(error, issue_project_root, issue_profile, issue_recipe)
         })?;
-    let (_, snapshot) = checked.into_parts();
-    Ok(snapshot.startup_content_closure())
+    let (candidate, plan, snapshot, loader) = checked.into_delivery_parts();
+    loader
+        .load_delivery_with_startup(&candidate, &plan, snapshot)
+        .map_err(|error| ProjectCheckError {
+            inner: ProjectCheckErrorInner::Content(error),
+            startup_scene_issue: None,
+        })
 }

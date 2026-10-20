@@ -1,8 +1,9 @@
-//! Authorized, World-independent startup content loading.
+//! Authorized, World-independent Scene content loading.
 
 mod budget;
 mod catalogue;
 mod closure;
+mod delivery;
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -61,10 +62,12 @@ pub use budget::{
     ProjectContentBudgetSnapshot, ProjectContentLimits,
 };
 use catalogue::ReferenceCatalogue;
-use closure::{StartupContentClosureBuilder, StartupContentClosureDraft};
+use closure::{ProjectContentClosureBuilder, ProjectContentClosureDraft};
 pub use closure::{
-    StartupContentClosureReceipt, StartupContentMemberKind, StartupContentMemberReceipt,
+    ProjectContentClosureReceipt, ProjectContentMemberKind, ProjectContentMemberReceipt,
+    StartupContentClosureReceipt,
 };
+pub use delivery::ProjectContentDeliveryReceipt;
 
 /// Computes the canonical Runtime startup-content digest from already admitted logical members.
 ///
@@ -75,13 +78,13 @@ pub(crate) fn startup_content_digest_from_members(
     manifest_digest: ContentDigest,
     members: impl IntoIterator<
         Item = (
-            StartupContentMemberKind,
+            ProjectContentMemberKind,
             nara_project::ProjectPath,
             ContentDigest,
         ),
     >,
 ) -> Result<ContentDigest, ProjectContentError> {
-    let mut builder = StartupContentClosureBuilder::new(manifest_digest)?;
+    let mut builder = ProjectContentClosureBuilder::new(manifest_digest)?;
     for (kind, path, digest) in members {
         builder.insert_project_path(kind, path, digest)?;
     }
@@ -191,6 +194,10 @@ impl ProjectImageContent {
     }
 }
 
+/// One selected Scene and its exact expanded, decoded dependency closure.
+///
+/// Clones retain the same content generation. Source-only receipts obtained through
+/// [`Self::content_closure`] retain their own fact budget without retaining decoded content.
 #[derive(Clone)]
 pub struct ProjectContentSnapshot {
     inner: Arc<ProjectContentSnapshotInner>,
@@ -198,10 +205,10 @@ pub struct ProjectContentSnapshot {
 
 struct ProjectContentSnapshotInner {
     schema_authority: ComponentRegistrySnapshotWitness,
-    startup_closure: StartupContentClosureReceipt,
+    content_closure: ProjectContentClosureReceipt,
     source_upgrade_required: bool,
-    startup_scene: Arc<SceneDocument>,
-    expanded_startup_scene: Arc<ExpandedSceneCandidate>,
+    scene: Arc<SceneDocument>,
+    expanded_scene: Arc<ExpandedSceneCandidate>,
     prefabs: Box<[ProjectPrefabContent]>,
     images: Box<[ProjectImageContent]>,
     tilesets: Box<[ProjectTileSetContent]>,
@@ -225,12 +232,12 @@ impl ProjectContentAssets {
 impl ProjectContentSnapshot {
     #[must_use]
     pub fn lineage(&self) -> ProjectSettingsLineage {
-        self.inner.startup_closure.settings_lineage()
+        self.inner.content_closure.settings_lineage()
     }
 
     #[must_use]
     pub fn schema_fingerprint(&self) -> SchemaCompositionFingerprint {
-        self.inner.startup_closure.schema_fingerprint()
+        self.inner.content_closure.schema_fingerprint()
     }
 
     #[must_use]
@@ -240,22 +247,35 @@ impl ProjectContentSnapshot {
 
     #[must_use]
     pub(crate) fn has_runtime_schema_agreement(&self) -> bool {
-        self.inner.startup_closure.has_runtime_schema_agreement()
+        self.inner.content_closure.has_runtime_schema_agreement()
     }
 
     #[must_use]
     pub fn revision(&self) -> ProjectContentRevision {
-        self.inner.startup_closure.content_revision()
+        self.inner.content_closure.content_revision()
     }
 
     #[must_use]
     pub fn content_digest(&self) -> ContentDigest {
-        self.inner.startup_closure.content_digest()
+        self.inner.content_closure.content_digest()
     }
 
+    /// Returns independently retained source facts, without retaining this decoded generation.
     #[must_use]
-    pub fn startup_content_closure(&self) -> StartupContentClosureReceipt {
-        self.inner.startup_closure.clone()
+    pub fn content_closure(&self) -> ProjectContentClosureReceipt {
+        self.inner.content_closure.clone()
+    }
+
+    /// Returns startup attestation only when this snapshot selected the manifest's default Scene.
+    #[must_use]
+    pub fn startup_content_closure(&self) -> Option<StartupContentClosureReceipt> {
+        self.inner.content_closure.startup_receipt()
+    }
+
+    /// The selected path, relative to the configured Scenes directory.
+    #[must_use]
+    pub fn selected_scene_path(&self) -> &nara_project::ProjectPath {
+        self.inner.content_closure.selected_scene_path()
     }
 
     #[must_use]
@@ -264,19 +284,19 @@ impl ProjectContentSnapshot {
     }
 
     #[must_use]
-    pub fn startup_scene(&self) -> &SceneDocument {
-        &self.inner.startup_scene
+    pub fn scene(&self) -> &SceneDocument {
+        &self.inner.scene
     }
 
     #[must_use]
-    pub fn expanded_startup_scene(&self) -> &SceneDocument {
-        self.inner.expanded_startup_scene.document()
+    pub fn expanded_scene(&self) -> &SceneDocument {
+        self.inner.expanded_scene.document()
     }
 
-    /// Returns the structured source identity paired with the expanded startup document.
+    /// Returns the structured source identity paired with the expanded selected document.
     #[must_use]
-    pub fn expanded_startup_scene_provenance(&self) -> &SceneEntityProvenanceMap {
-        self.inner.expanded_startup_scene.provenance()
+    pub fn expanded_scene_provenance(&self) -> &SceneEntityProvenanceMap {
+        self.inner.expanded_scene.provenance()
     }
 
     #[must_use]
@@ -314,18 +334,18 @@ impl ProjectContentSnapshot {
             .and_then(|content| content.image.share_retained())
     }
 
-    /// Retains the exact expanded startup source for one runtime materialization.
+    /// Retains the exact expanded selected source for one runtime materialization.
     #[must_use]
-    pub fn startup_scene_source(&self) -> StartupSceneSource {
+    pub fn scene_source(&self) -> StartupSceneSource {
         StartupSceneSource::from_project_content(
-            Arc::clone(&self.inner.expanded_startup_scene),
+            Arc::clone(&self.inner.expanded_scene),
             Arc::clone(&self.inner.assets),
             self.inner._runtime_lease.clone(),
             startup_scene_retained_bytes(
-                self.inner.expanded_startup_scene.document(),
-                self.inner.expanded_startup_scene.provenance(),
+                self.inner.expanded_scene.document(),
+                self.inner.expanded_scene.provenance(),
             )
-            .expect("an admitted startup scene already has a valid retained-byte plan"),
+            .expect("an admitted Scene already has a valid retained-byte plan"),
         )
     }
 
@@ -423,6 +443,7 @@ impl fmt::Debug for ProjectContentSnapshot {
             .field("schema_fingerprint", &self.schema_fingerprint())
             .field("revision", &self.revision())
             .field("content_digest", &self.content_digest())
+            .field("selected_scene_path", self.selected_scene_path())
             .field("prefab_count", &self.inner.prefabs.len())
             .field("image_count", &self.inner.images.len())
             .field("tileset_count", &self.inner.tilesets.len())
@@ -437,6 +458,7 @@ pub enum ProjectContentErrorKind {
     ProjectRootUnbound,
     ProjectRootMismatch,
     MissingStartupScene,
+    MissingSelectedScene,
     InvalidLogicalPath,
     ClosurePathCollision,
     HostIo,
@@ -623,11 +645,12 @@ impl Display for ProjectContentError {
                 "project content root does not match project settings"
             }
             ProjectContentErrorKind::MissingStartupScene => "project startup Scene is missing",
+            ProjectContentErrorKind::MissingSelectedScene => "selected project Scene is missing",
             ProjectContentErrorKind::InvalidLogicalPath => {
                 "project content contains an invalid logical path"
             }
             ProjectContentErrorKind::ClosurePathCollision => {
-                "project startup closure contains conflicting logical path facts"
+                "project Scene closure contains conflicting logical path facts"
             }
             ProjectContentErrorKind::HostIo => "project content host I/O failed",
             ProjectContentErrorKind::HostAuthorityUnsupported => {
@@ -653,7 +676,7 @@ impl Display for ProjectContentError {
                 "project asset metadata does not match its source"
             }
             ProjectContentErrorKind::UnsupportedAssetKind => {
-                "project startup content references an unsupported asset kind"
+                "project Scene content references an unsupported asset kind"
             }
             ProjectContentErrorKind::ImageImport => "project image import failed",
             ProjectContentErrorKind::AllocationFailed => {
@@ -730,12 +753,26 @@ impl ProjectContentLoader {
         self.root.share()
     }
 
+    /// Loads the default startup Scene and its required dependency closure.
     pub fn load(
         &self,
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
-        self.load_inner(candidate, plan, None, None, None)
+        self.load_inner(candidate, plan, None, None, None, None)
+    }
+
+    /// Loads one Scene path relative to the configured Scenes directory.
+    ///
+    /// This source-backed operation preserves the admitted project settings and schema authority.
+    /// It neither changes the default startup Scene nor declares content for delivery.
+    pub fn load_scene(
+        &self,
+        candidate: &ProjectSettingsCandidate,
+        plan: &RuntimePlan,
+        scene: &nara_project::ProjectPath,
+    ) -> Result<ProjectContentSnapshot, ProjectContentError> {
+        self.load_inner(candidate, plan, Some(scene), None, None, None)
     }
 
     pub(crate) fn load_with_runtime_agreement(
@@ -744,7 +781,7 @@ impl ProjectContentLoader {
         plan: &RuntimePlan,
         agreement: PreparedRuntimeSchemaAgreement,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
-        self.load_inner(candidate, plan, None, None, Some(agreement))
+        self.load_inner(candidate, plan, None, None, None, Some(agreement))
     }
 
     pub(crate) fn load_with_expected_startup_scene_digest_and_runtime_agreement(
@@ -757,6 +794,7 @@ impl ProjectContentLoader {
         self.load_inner(
             candidate,
             plan,
+            None,
             Some(expected_startup_scene_digest),
             None,
             Some(agreement),
@@ -775,6 +813,7 @@ impl ProjectContentLoader {
             candidate,
             plan,
             None,
+            None,
             Some(ExpectedPrefabSource {
                 path,
                 digest,
@@ -788,6 +827,7 @@ impl ProjectContentLoader {
         &self,
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
+        selected_scene: Option<&nara_project::ProjectPath>,
         expected_startup_scene_digest: Option<ContentDigest>,
         expected_prefab: Option<ExpectedPrefabSource>,
         runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
@@ -810,7 +850,7 @@ impl ProjectContentLoader {
             candidate.manifest_digest(),
             runtime_agreement,
         )?;
-        context.load(candidate)
+        context.load(candidate, selected_scene)
     }
 
     fn validate_inputs(
@@ -883,8 +923,8 @@ struct LoadContext<'a> {
     expected_startup_scene_digest: Option<ContentDigest>,
     expected_prefab: Option<ExpectedPrefabSource>,
     runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
-    startup_closure: Option<StartupContentClosureBuilder>,
-    startup_closure_work_bytes: usize,
+    content_closure: Option<ProjectContentClosureBuilder>,
+    content_closure_work_bytes: usize,
     asset_database: ProjectAssetDatabase,
     asset_database_work_bytes: usize,
     catalogue: Option<ReferenceCatalogue>,
@@ -912,12 +952,12 @@ impl<'a> LoadContext<'a> {
         manifest_digest: ContentDigest,
         runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
     ) -> Result<Self, ProjectContentError> {
-        let startup_closure_work_bytes = startup_closure_entry_work_bytes("nara.toml".len())?;
+        let content_closure_work_bytes = content_closure_entry_work_bytes("nara.toml".len())?;
         let mut budget = loader.budget_host.reserve();
         budget
             .add(
                 ProjectContentBudgetKind::WorkBytes,
-                startup_closure_work_bytes,
+                content_closure_work_bytes,
             )
             .map_err(ProjectContentError::budget)?;
         Ok(Self {
@@ -928,8 +968,8 @@ impl<'a> LoadContext<'a> {
             expected_startup_scene_digest,
             expected_prefab,
             runtime_agreement,
-            startup_closure: Some(StartupContentClosureBuilder::new(manifest_digest)?),
-            startup_closure_work_bytes,
+            content_closure: Some(ProjectContentClosureBuilder::new(manifest_digest)?),
+            content_closure_work_bytes,
             asset_database: ProjectAssetDatabase::default(),
             asset_database_work_bytes: 0,
             catalogue: None,
@@ -940,6 +980,7 @@ impl<'a> LoadContext<'a> {
     fn load(
         &mut self,
         candidate: &ProjectSettingsCandidate,
+        selected_scene: Option<&nara_project::ProjectPath>,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
         self.add_budget(ProjectContentBudgetKind::OpenHandles, 1)?;
         let settings = candidate.settings();
@@ -947,9 +988,9 @@ impl<'a> LoadContext<'a> {
             settings.paths.assets.clone(),
             settings.paths.prefabs.clone(),
         ]);
-        self.startup_closure
+        self.content_closure
             .as_mut()
-            .expect("load context owns one startup closure builder until publication")
+            .expect("load context owns one Scene closure builder until publication")
             .set_runtime_directories([
                 &settings.paths.assets,
                 &settings.paths.scenes,
@@ -958,18 +999,28 @@ impl<'a> LoadContext<'a> {
         let scenes = self.open_directory(&settings.paths.scenes)?;
         let prefabs = self.open_directory(&settings.paths.prefabs)?;
         let assets = self.open_directory(&settings.paths.assets)?;
-        let startup = settings.startup.default_scene.as_ref().ok_or_else(|| {
-            ProjectContentError::single(
-                ProjectContentErrorKind::MissingStartupScene,
-                "project.content.startup-scene-missing",
-                "Project manifest does not select a startup scene",
-            )
-        })?;
+        let scene_path = selected_scene
+            .or(settings.startup.default_scene.as_ref())
+            .ok_or_else(|| {
+                ProjectContentError::single(
+                    ProjectContentErrorKind::MissingStartupScene,
+                    "project.content.startup-scene-missing",
+                    "Project manifest does not select a startup scene",
+                )
+            })?;
+        let is_startup = settings.startup.default_scene.as_ref() == Some(scene_path);
+        let selected_path_work = string_retained_bytes(scene_path.as_str())?;
+        self.add_budget(ProjectContentBudgetKind::WorkBytes, selected_path_work)?;
+        self.content_closure_work_bytes = self
+            .content_closure_work_bytes
+            .checked_add(selected_path_work)
+            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
 
-        let (scene_bytes, scene_digest) = self.read_startup_scene_file(
+        let (scene_bytes, scene_digest) = self.read_selected_scene_file(
             &scenes,
-            startup.as_str(),
+            scene_path.as_str(),
             self.loader.limits.scene_file().encoded_bytes().get(),
+            is_startup,
         )?;
         if self
             .expected_startup_scene_digest
@@ -982,15 +1033,14 @@ impl<'a> LoadContext<'a> {
             ));
         }
         self.record_member(
-            StartupContentMemberKind::Scene,
+            ProjectContentMemberKind::Scene,
             &settings.paths.scenes,
-            startup.as_str(),
+            scene_path.as_str(),
             scene_digest,
         )?;
-        let startup_scene = self.decode_scene(startup.as_str(), &scene_bytes)?;
+        let scene = self.decode_scene(scene_path.as_str(), &scene_bytes)?;
 
-        let loaded_prefabs =
-            self.load_prefab_closure(&prefabs, &settings.paths.prefabs, &startup_scene)?;
+        let loaded_prefabs = self.load_prefab_closure(&prefabs, &settings.paths.prefabs, &scene)?;
         for path in loaded_prefabs.keys() {
             self.admit_prefab_metadata(&prefabs, &settings.paths.prefabs, path)?;
         }
@@ -1011,18 +1061,14 @@ impl<'a> LoadContext<'a> {
         let options = nara_scene::PrefabExpansionOptions::default()
             .with_limits(self.loader.limits.prefab_expansion());
         let expansion = if self.catalogue.is_some() {
-            startup_scene.expand_prefabs_with_options_and_asset_database(
+            scene.expand_prefabs_with_options_and_asset_database(
                 self.validation.registry(),
                 &resolver,
                 options,
                 &self.asset_database,
             )
         } else {
-            startup_scene.expand_prefabs_with_options(
-                self.validation.registry(),
-                &resolver,
-                options,
-            )
+            scene.expand_prefabs_with_options(self.validation.registry(), &resolver, options)
         };
         let nara_scene::PrefabExpansionReport {
             candidate: expanded_candidate,
@@ -1039,7 +1085,7 @@ impl<'a> LoadContext<'a> {
         if let Some(agreement) = self.runtime_agreement.take() {
             let (path, digest) = agreement.revalidate_and_into_closure_member(&self.loader.root)?;
             self.record_project_member(
-                StartupContentMemberKind::AuthoringSchemaBundle,
+                ProjectContentMemberKind::AuthoringSchemaBundle,
                 path,
                 digest,
             )?;
@@ -1078,12 +1124,15 @@ impl<'a> LoadContext<'a> {
             candidate.lineage(),
             self.validation.composition_fingerprint(),
             content_digest,
+            scene_path,
         )?;
-        let startup_closure = self
-            .startup_closure
+        let content_closure = self
+            .content_closure
             .take()
-            .expect("load context owns one startup closure builder until publication")
+            .expect("load context owns one Scene closure builder until publication")
             .finish(
+                scene_path.clone(),
+                is_startup,
                 candidate.lineage(),
                 self.validation.composition_fingerprint(),
                 revision,
@@ -1092,15 +1141,15 @@ impl<'a> LoadContext<'a> {
 
         let snapshot_overhead =
             snapshot_retained_overhead(&loaded_prefabs, images.as_slice(), tilesets.as_slice())?;
-        let startup_closure_retained = startup_closure_retained_bytes(&startup_closure)?;
+        let content_closure_retained = content_closure_retained_bytes(&content_closure)?;
         let retained_bytes = self
             .budget_value(ProjectContentBudgetKind::RetainedBytes)
             .checked_add(snapshot_overhead)
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::RetainedBytes))?;
         self.set_budget(ProjectContentBudgetKind::RetainedBytes, retained_bytes)?;
 
-        let startup_scene = Arc::new(startup_scene);
-        let expanded_startup_scene = Arc::new(expanded_candidate);
+        let scene = Arc::new(scene);
+        let expanded_scene = Arc::new(expanded_candidate);
         let mut prefab_values = Vec::new();
         prefab_values
             .try_reserve_exact(loaded_prefabs.len())
@@ -1114,21 +1163,21 @@ impl<'a> LoadContext<'a> {
         let mut images = images.into_boxed_slice();
         let tilesets = tilesets.into_boxed_slice();
 
-        let mut startup_closure_budget = self.loader.budget_host.reserve();
-        startup_closure_budget
+        let mut content_closure_budget = self.loader.budget_host.reserve();
+        content_closure_budget
             .set(
                 ProjectContentBudgetKind::RetainedBytes,
-                startup_closure_retained,
+                content_closure_retained,
             )
             .map_err(ProjectContentError::budget)?;
-        let startup_closure_lease = startup_closure_budget
+        let content_closure_lease = content_closure_budget
             .into_lease()
             .map_err(ProjectContentError::budget)?;
         self.subtract_budget(
             ProjectContentBudgetKind::WorkBytes,
-            self.startup_closure_work_bytes,
+            self.content_closure_work_bytes,
         );
-        self.startup_closure_work_bytes = 0;
+        self.content_closure_work_bytes = 0;
         let budget = self
             .budget
             .take()
@@ -1153,8 +1202,8 @@ impl<'a> LoadContext<'a> {
                 }
             }
         }
-        let startup_closure =
-            startup_closure.publish(self.loader.root.share(), startup_closure_lease);
+        let content_closure =
+            content_closure.publish(self.loader.root.share(), content_closure_lease);
         let generation_lease = self
             .loader
             .budget_host
@@ -1187,10 +1236,10 @@ impl<'a> LoadContext<'a> {
         Ok(ProjectContentSnapshot {
             inner: Arc::new(ProjectContentSnapshotInner {
                 schema_authority: component_registry_snapshot_witness(self.validation.snapshot()),
-                startup_closure,
+                content_closure,
                 source_upgrade_required: self.source_upgrade_required,
-                startup_scene,
-                expanded_startup_scene,
+                scene,
+                expanded_scene,
                 prefabs,
                 images,
                 tilesets,
@@ -1234,16 +1283,17 @@ impl<'a> LoadContext<'a> {
         logical_path: &str,
         encoded_ceiling: usize,
     ) -> Result<(Vec<u8>, ContentDigest), ProjectContentError> {
-        self.read_file_inner(directory, logical_path, encoded_ceiling, false)
+        self.read_file_inner(directory, logical_path, encoded_ceiling, None)
     }
 
-    fn read_startup_scene_file(
+    fn read_selected_scene_file(
         &mut self,
         directory: &DirectoryCapability,
         logical_path: &str,
         encoded_ceiling: usize,
+        is_startup: bool,
     ) -> Result<(Vec<u8>, ContentDigest), ProjectContentError> {
-        self.read_file_inner(directory, logical_path, encoded_ceiling, true)
+        self.read_file_inner(directory, logical_path, encoded_ceiling, Some(is_startup))
     }
 
     fn read_file_inner(
@@ -1251,7 +1301,7 @@ impl<'a> LoadContext<'a> {
         directory: &DirectoryCapability,
         logical_path: &str,
         encoded_ceiling: usize,
-        selected_startup_scene: bool,
+        selected_scene: Option<bool>,
     ) -> Result<(Vec<u8>, ContentDigest), ProjectContentError> {
         let relative = self.observe_path(logical_path)?;
         self.add_budget(ProjectContentBudgetKind::Files, 1)?;
@@ -1266,11 +1316,25 @@ impl<'a> LoadContext<'a> {
                     ProjectContentBudgetKind::OpenHandles,
                     RELATIVE_OPEN_HANDLE_PEAK,
                 );
-                if selected_startup_scene && fs_error_is_not_found(&error) {
+                if let Some(is_startup) = selected_scene
+                    && fs_error_is_not_found(&error)
+                {
                     return Err(ProjectContentError::with_identifier(
-                        ProjectContentErrorKind::MissingStartupScene,
-                        "project.content.selected-startup-scene-missing",
-                        "Selected project startup Scene is missing",
+                        if is_startup {
+                            ProjectContentErrorKind::MissingStartupScene
+                        } else {
+                            ProjectContentErrorKind::MissingSelectedScene
+                        },
+                        if is_startup {
+                            "project.content.selected-startup-scene-missing"
+                        } else {
+                            "project.content.selected-scene-missing"
+                        },
+                        if is_startup {
+                            "Selected project startup Scene is missing"
+                        } else {
+                            "Selected project Scene is missing"
+                        },
                         "scene",
                         logical_path,
                     ));
@@ -1369,7 +1433,7 @@ impl<'a> LoadContext<'a> {
             }
         }
         self.record_member(
-            StartupContentMemberKind::Prefab,
+            ProjectContentMemberKind::Prefab,
             prefab_root,
             path.as_str(),
             digest,
@@ -1573,7 +1637,7 @@ impl<'a> LoadContext<'a> {
                             return Err(ProjectContentError::with_identifier(
                                 ProjectContentErrorKind::UnsupportedAssetKind,
                                 "project.content.asset-kind-unsupported",
-                                "Project startup content references an unsupported asset kind",
+                                "Project Scene content references an unsupported asset kind",
                                 "asset",
                                 path.as_str(),
                             ));
@@ -1772,7 +1836,7 @@ impl<'a> LoadContext<'a> {
         )?;
         self.verify_catalogued_metadata(path, asset_root, meta_digest)?;
         self.record_member(
-            StartupContentMemberKind::AssetMetadata,
+            ProjectContentMemberKind::AssetMetadata,
             asset_root,
             &meta_path,
             meta_digest,
@@ -1827,7 +1891,7 @@ impl<'a> LoadContext<'a> {
         self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
         self.verify_catalogued_metadata(path, asset_root, meta_digest)?;
         self.record_member(
-            StartupContentMemberKind::AssetSource,
+            ProjectContentMemberKind::AssetSource,
             asset_root,
             path.as_str(),
             source_digest,
@@ -1858,7 +1922,7 @@ impl<'a> LoadContext<'a> {
         )?;
         self.verify_catalogued_metadata(path, asset_root, meta_digest)?;
         self.record_member(
-            StartupContentMemberKind::AssetMetadata,
+            ProjectContentMemberKind::AssetMetadata,
             asset_root,
             &meta_path,
             meta_digest,
@@ -1887,7 +1951,7 @@ impl<'a> LoadContext<'a> {
             return Err(ProjectContentError::with_identifier(
                 ProjectContentErrorKind::UnsupportedAssetKind,
                 "project.content.asset-kind-unsupported",
-                "Project startup content references an unsupported asset kind",
+                "Project Scene content references an unsupported asset kind",
                 "asset",
                 path.as_str(),
             ));
@@ -1904,7 +1968,7 @@ impl<'a> LoadContext<'a> {
                 ProjectContentError::with_identifier(
                     ProjectContentErrorKind::AssetMetaMismatch,
                     "project.content.asset-identity-conflict",
-                    "Project asset identity conflicts within the startup closure",
+                    "Project asset identity conflicts within the Scene closure",
                     "asset",
                     path.as_str(),
                 )
@@ -1931,7 +1995,7 @@ impl<'a> LoadContext<'a> {
         let image = import.import().map_err(map_image_import_error)?;
         self.set_budget(ProjectContentBudgetKind::WorkBytes, work_before)?;
         self.record_member(
-            StartupContentMemberKind::AssetSource,
+            ProjectContentMemberKind::AssetSource,
             asset_root,
             path.as_str(),
             source_digest,
@@ -2037,7 +2101,7 @@ impl<'a> LoadContext<'a> {
 
     fn record_member(
         &mut self,
-        kind: StartupContentMemberKind,
+        kind: ProjectContentMemberKind,
         directory: &nara_project::ProjectPath,
         path: &str,
         digest: ContentDigest,
@@ -2048,14 +2112,14 @@ impl<'a> LoadContext<'a> {
             .checked_add(1)
             .and_then(|length| length.checked_add(path.len()))
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::PathBytes))?;
-        let work = startup_closure_entry_work_bytes(logical_path_bytes)?;
+        let work = content_closure_entry_work_bytes(logical_path_bytes)?;
         self.add_budget(ProjectContentBudgetKind::WorkBytes, work)?;
-        self.startup_closure
+        self.content_closure
             .as_mut()
-            .expect("load context owns one startup closure builder until publication")
+            .expect("load context owns one Scene closure builder until publication")
             .insert(kind, directory, path, digest)?;
-        self.startup_closure_work_bytes = self
-            .startup_closure_work_bytes
+        self.content_closure_work_bytes = self
+            .content_closure_work_bytes
             .checked_add(work)
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
         Ok(())
@@ -2063,34 +2127,34 @@ impl<'a> LoadContext<'a> {
 
     fn record_project_member(
         &mut self,
-        kind: StartupContentMemberKind,
+        kind: ProjectContentMemberKind,
         path: nara_project::ProjectPath,
         digest: ContentDigest,
     ) -> Result<(), ProjectContentError> {
-        let work = startup_closure_entry_work_bytes(path.as_str().len())?;
+        let work = content_closure_entry_work_bytes(path.as_str().len())?;
         self.add_budget(ProjectContentBudgetKind::WorkBytes, work)?;
-        self.startup_closure
+        self.content_closure
             .as_mut()
-            .expect("load context owns one startup closure builder until publication")
+            .expect("load context owns one Scene closure builder until publication")
             .insert_project_path(kind, path, digest)?;
-        self.startup_closure_work_bytes = self
-            .startup_closure_work_bytes
+        self.content_closure_work_bytes = self
+            .content_closure_work_bytes
             .checked_add(work)
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
         Ok(())
     }
 
     fn finish_content_digest(&mut self) -> Result<ContentDigest, ProjectContentError> {
-        let startup_closure = self
-            .startup_closure
+        let content_closure = self
+            .content_closure
             .as_ref()
-            .expect("load context owns one startup closure builder until publication");
-        let frame_work = startup_closure.content_digest_framed_bytes()?;
+            .expect("load context owns one Scene closure builder until publication");
+        let frame_work = content_closure.content_digest_framed_bytes()?;
         self.add_budget(ProjectContentBudgetKind::WorkBytes, frame_work)?;
         let digest = self
-            .startup_closure
+            .content_closure
             .as_ref()
-            .expect("load context owns one startup closure builder until publication")
+            .expect("load context owns one Scene closure builder until publication")
             .content_digest(frame_work)?;
         self.subtract_budget(ProjectContentBudgetKind::WorkBytes, frame_work);
         Ok(digest)
@@ -2361,6 +2425,7 @@ fn content_revision(
     lineage: ProjectSettingsLineage,
     schema: SchemaCompositionFingerprint,
     content: ContentDigest,
+    selected_scene_path: &nara_project::ProjectPath,
 ) -> Result<ProjectContentRevision, ProjectContentError> {
     let mut framed = Vec::with_capacity(160);
     framed.extend_from_slice(b"nara.project-content-revision.v2\0");
@@ -2372,6 +2437,7 @@ fn content_revision(
     append_frame(&mut framed, schema.to_hex().as_bytes())?;
     framed.extend_from_slice(&content.length().to_le_bytes());
     framed.extend_from_slice(content.as_bytes());
+    append_frame(&mut framed, selected_scene_path.as_str().as_bytes())?;
     Ok(ProjectContentRevision(
         *ContentDigest::of_bytes(&framed).as_bytes(),
     ))
@@ -2385,11 +2451,11 @@ fn append_frame(output: &mut Vec<u8>, value: &[u8]) -> Result<(), ProjectContent
     Ok(())
 }
 
-fn startup_closure_entry_work_bytes(path_bytes: usize) -> Result<usize, ProjectContentError> {
+fn content_closure_entry_work_bytes(path_bytes: usize) -> Result<usize, ProjectContentError> {
     checked_plan_sum(
         ProjectContentBudgetKind::WorkBytes,
         [
-            size_of::<StartupContentMemberReceipt>(),
+            size_of::<ProjectContentMemberReceipt>(),
             BTREE_ENTRY_OVERHEAD,
             path_bytes
                 .checked_add(STRING_ALLOCATION_OVERHEAD)
@@ -2647,34 +2713,39 @@ fn snapshot_retained_overhead(
     Ok(total)
 }
 
-fn startup_closure_retained_bytes(
-    startup_closure: &StartupContentClosureDraft,
+fn content_closure_retained_bytes(
+    content_closure: &ProjectContentClosureDraft,
 ) -> Result<usize, ProjectContentError> {
     let mut total = checked_plan_sum(
         ProjectContentBudgetKind::RetainedBytes,
         [
-            size_of::<closure::StartupContentClosureReceiptInner>(),
+            size_of::<closure::ProjectContentClosureReceiptInner>(),
             ARC_CONTROL_BLOCK_BYTES,
             checked_plan_product(
                 ProjectContentBudgetKind::RetainedBytes,
-                startup_closure.members().len(),
-                size_of::<StartupContentMemberReceipt>(),
+                content_closure.members().len(),
+                size_of::<ProjectContentMemberReceipt>(),
             )?,
             checked_plan_product(
                 ProjectContentBudgetKind::RetainedBytes,
-                startup_closure.runtime_directories().len(),
+                content_closure.runtime_directories().len(),
                 size_of::<nara_project::ProjectPath>(),
             )?,
         ],
     )?;
-    for path in startup_closure.runtime_directories() {
+    checked_add_to(
+        &mut total,
+        string_retained_bytes(content_closure.selected_scene_path().as_str())?,
+        ProjectContentBudgetKind::RetainedBytes,
+    )?;
+    for path in content_closure.runtime_directories() {
         checked_add_to(
             &mut total,
             string_retained_bytes(path.as_str())?,
             ProjectContentBudgetKind::RetainedBytes,
         )?;
     }
-    for member in startup_closure.members() {
+    for member in content_closure.members() {
         checked_add_to(
             &mut total,
             string_retained_bytes(member.path().as_str())?,

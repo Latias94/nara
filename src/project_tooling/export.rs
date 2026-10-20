@@ -87,9 +87,9 @@ pub(crate) fn execute(
     let parent_path =
         fs::canonicalize(arguments.parent).map_err(ExportCommandError::ResolveParent)?;
     let project_root = host_fs::readable_directory(&project_path)?;
-    let startup_content = check_project(ProjectCheckRequest::new(project_root, recipe))?;
-    let manifest_digest = startup_content.manifest_digest();
-    let build = cargo::build(&project_path, &startup_content)?.into_receipt();
+    let delivery = check_project(ProjectCheckRequest::new(project_root, recipe))?;
+    let manifest_digest = delivery.manifest_digest();
+    let build = cargo::build(&project_path, delivery.startup_content())?.into_receipt();
     let publication_parent = host_fs::writable_directory(&parent_path)?;
     let destination_name = arguments.destination;
     let published_root = parent_path.join(&destination_name);
@@ -98,7 +98,7 @@ pub(crate) fn execute(
     let prepared = prepare_project_export(ProjectExportRequest::new(
         publication_parent,
         destination,
-        startup_content,
+        delivery,
         build,
     ))?;
     Ok(match prepared.publish() {

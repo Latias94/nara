@@ -5,6 +5,8 @@ use std::fmt;
 use nara_fs::{
     ContentDigest, DirectoryCapability, FileCapability, FileIdentity, FsError, RelativePath,
 };
+#[cfg(feature = "project-tooling")]
+use nara_reflect::SchemaCompositionFingerprint;
 
 use crate::project_host::StartupContentClosureReceipt;
 
@@ -128,6 +130,10 @@ impl ProjectExportBuildReceipt {
         }
         self.build_input_revision
             .revalidate(&startup_content.project_root())?;
+        let authoring_schema_bundle_digest = startup_content
+            .runtime_schema_bundle_digest()
+            .ok_or(ProjectExportBuildError::RuntimeSchemaAgreementMissing)?;
+        let schema_fingerprint = startup_content.schema_fingerprint().to_string();
         for executable in &self.executables {
             executable
                 .file
@@ -136,6 +142,19 @@ impl ProjectExportBuildReceipt {
                     target: executable.receipt.target,
                     source,
                 })?;
+            let agreement = &self.product_agreements[executable.receipt.target.index()];
+            if !agreement.matches_inputs(
+                &executable.receipt,
+                startup_content.manifest_digest(),
+                startup_content.content_digest(),
+                startup_content.closure_plan_digest(),
+                authoring_schema_bundle_digest,
+                &schema_fingerprint,
+            ) {
+                return Err(ProjectExportBuildError::ProductAgreementMismatch {
+                    target: executable.receipt.target,
+                });
+            }
         }
         Ok(())
     }
@@ -177,6 +196,7 @@ pub struct ProjectExportBuildPreparation {
     startup_content_digest: ContentDigest,
     startup_closure_plan_digest: ContentDigest,
     authoring_schema_bundle_digest: ContentDigest,
+    schema_fingerprint: SchemaCompositionFingerprint,
 }
 
 #[cfg(feature = "project-tooling")]
@@ -196,6 +216,7 @@ impl ProjectExportBuildPreparation {
             startup_content_digest: startup_content.content_digest(),
             startup_closure_plan_digest: startup_content.closure_plan_digest(),
             authoring_schema_bundle_digest,
+            schema_fingerprint: startup_content.schema_fingerprint(),
         })
     }
 
@@ -257,6 +278,7 @@ impl ProjectExportBuildPreparation {
             self.startup_content_digest,
             self.startup_closure_plan_digest,
             self.authoring_schema_bundle_digest,
+            &self.schema_fingerprint.to_string(),
         )?;
         Ok(ProjectExportBuildReceipt {
             project_root_identity: self.project_root.identity(),
@@ -288,6 +310,7 @@ impl fmt::Debug for ProjectExportBuildPreparation {
                 "authoring_schema_bundle_digest",
                 &self.authoring_schema_bundle_digest,
             )
+            .field("schema_fingerprint", &self.schema_fingerprint)
             .finish()
     }
 }
@@ -309,6 +332,24 @@ pub struct ProjectExportProductAgreement {
 }
 
 impl ProjectExportProductAgreement {
+    fn matches_inputs(
+        &self,
+        executable: &ProjectExportExecutableReceipt,
+        manifest_digest: ContentDigest,
+        startup_content_digest: ContentDigest,
+        startup_closure_plan_digest: ContentDigest,
+        authoring_schema_bundle_digest: ContentDigest,
+        schema_fingerprint: &str,
+    ) -> bool {
+        self.target == executable.target
+            && self.executable_digest == executable.digest
+            && self.manifest_digest == manifest_digest
+            && self.startup_content_digest == startup_content_digest
+            && self.startup_closure_plan_digest == startup_closure_plan_digest
+            && self.authoring_schema_bundle_digest == authoring_schema_bundle_digest
+            && self.schema_fingerprint.as_ref() == schema_fingerprint
+    }
+
     #[cfg(feature = "project-tooling")]
     pub fn new(
         target: ProjectExportBinaryTarget,
@@ -371,17 +412,20 @@ fn bind_product_agreements(
     startup_content_digest: ContentDigest,
     startup_closure_plan_digest: ContentDigest,
     authoring_schema_bundle_digest: ContentDigest,
+    schema_fingerprint: &str,
 ) -> Result<[ProjectExportProductAgreement; 2], ProjectExportBuildError> {
     let mut ordered: [Option<ProjectExportProductAgreement>; 2] = array::from_fn(|_| None);
     for agreement in agreements {
         let target = agreement.target;
         let executable = executables[target.index()];
-        if agreement.executable_digest != executable.digest
-            || agreement.manifest_digest != manifest_digest
-            || agreement.startup_content_digest != startup_content_digest
-            || agreement.startup_closure_plan_digest != startup_closure_plan_digest
-            || agreement.authoring_schema_bundle_digest != authoring_schema_bundle_digest
-        {
+        if !agreement.matches_inputs(
+            executable,
+            manifest_digest,
+            startup_content_digest,
+            startup_closure_plan_digest,
+            authoring_schema_bundle_digest,
+            schema_fingerprint,
+        ) {
             return Err(ProjectExportBuildError::ProductAgreementMismatch { target });
         }
         if ordered[target.index()].replace(agreement).is_some() {

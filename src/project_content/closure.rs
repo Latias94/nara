@@ -13,9 +13,9 @@ use super::{
 };
 use crate::project_host::ProjectSettingsLineage;
 
-/// The role of one source file in the admitted startup runtime closure.
+/// The role of one source file in an admitted Scene content closure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StartupContentMemberKind {
+pub enum ProjectContentMemberKind {
     ProjectManifest,
     AuthoringSchemaBundle,
     Scene,
@@ -24,7 +24,7 @@ pub enum StartupContentMemberKind {
     AssetSource,
 }
 
-impl StartupContentMemberKind {
+impl ProjectContentMemberKind {
     pub(super) const fn digest_role(self) -> &'static str {
         match self {
             Self::ProjectManifest => "manifest",
@@ -37,17 +37,17 @@ impl StartupContentMemberKind {
     }
 }
 
-/// One exact source member admitted into the startup runtime closure.
+/// One exact source member admitted into a Scene content closure.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StartupContentMemberReceipt {
-    kind: StartupContentMemberKind,
+pub struct ProjectContentMemberReceipt {
+    kind: ProjectContentMemberKind,
     path: ProjectPath,
     digest: ContentDigest,
 }
 
-impl StartupContentMemberReceipt {
+impl ProjectContentMemberReceipt {
     #[must_use]
-    pub const fn kind(&self) -> StartupContentMemberKind {
+    pub const fn kind(&self) -> ProjectContentMemberKind {
         self.kind
     }
 
@@ -67,19 +67,21 @@ impl StartupContentMemberReceipt {
     }
 }
 
-/// Ordered, bounded source facts for one admitted startup runtime closure.
+/// Ordered, bounded source facts for one explicitly selected Scene content closure.
 ///
-/// The receipt deliberately excludes dynamically requested or unreferenced project content. Its
-/// member paths are relative to the exact authorized project root retained privately by the
-/// receipt, so source-carrying export can reopen the admitted authority without accepting a second
-/// caller-supplied source root. The capability is process-local and is never serialized as evidence.
+/// This receipt retains source facts and their budget, not decoded Scene or Image values. Its
+/// member paths are relative to the exact project root retained privately by the receipt. The
+/// selected Scene path is relative to the project's configured Scenes directory. Neither this
+/// receipt nor its clonable source authority establishes runtime residency or delivery admission.
 #[derive(Clone)]
-pub struct StartupContentClosureReceipt {
-    inner: Arc<StartupContentClosureReceiptInner>,
+pub struct ProjectContentClosureReceipt {
+    inner: Arc<ProjectContentClosureReceiptInner>,
 }
 
-pub(super) struct StartupContentClosureReceiptInner {
+pub(super) struct ProjectContentClosureReceiptInner {
     project_root: DirectoryCapability,
+    selected_scene_path: ProjectPath,
+    is_startup: bool,
     settings_lineage: ProjectSettingsLineage,
     manifest_digest: ContentDigest,
     schema_fingerprint: SchemaCompositionFingerprint,
@@ -87,11 +89,16 @@ pub(super) struct StartupContentClosureReceiptInner {
     content_digest: ContentDigest,
     closure_plan_digest: ContentDigest,
     runtime_directories: Box<[ProjectPath]>,
-    members: Box<[StartupContentMemberReceipt]>,
+    members: Box<[ProjectContentMemberReceipt]>,
     _lease: ProjectContentLease,
 }
 
-impl StartupContentClosureReceipt {
+impl ProjectContentClosureReceipt {
+    #[must_use]
+    pub fn selected_scene_path(&self) -> &ProjectPath {
+        &self.inner.selected_scene_path
+    }
+
     #[must_use]
     pub fn settings_lineage(&self) -> ProjectSettingsLineage {
         self.inner.settings_lineage
@@ -130,7 +137,7 @@ impl StartupContentClosureReceipt {
     }
 
     #[must_use]
-    pub fn members(&self) -> &[StartupContentMemberReceipt] {
+    pub fn members(&self) -> &[ProjectContentMemberReceipt] {
         &self.inner.members
     }
 
@@ -155,16 +162,23 @@ impl StartupContentClosureReceipt {
         self.inner
             .members
             .iter()
-            .find(|member| member.kind() == StartupContentMemberKind::AuthoringSchemaBundle)
-            .map(StartupContentMemberReceipt::digest)
+            .find(|member| member.kind() == ProjectContentMemberKind::AuthoringSchemaBundle)
+            .map(ProjectContentMemberReceipt::digest)
+    }
+
+    pub(super) fn startup_receipt(&self) -> Option<StartupContentClosureReceipt> {
+        self.inner.is_startup.then(|| StartupContentClosureReceipt {
+            content: self.clone(),
+        })
     }
 }
 
-impl std::fmt::Debug for StartupContentClosureReceipt {
+impl std::fmt::Debug for ProjectContentClosureReceipt {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("StartupContentClosureReceipt")
+            .debug_struct("ProjectContentClosureReceipt")
             .field("project_root_identity", &self.project_root_identity())
+            .field("selected_scene_path", self.selected_scene_path())
             .field("settings_lineage", &self.inner.settings_lineage)
             .field("manifest_digest", &self.inner.manifest_digest)
             .field("schema_fingerprint", &self.inner.schema_fingerprint)
@@ -184,7 +198,91 @@ impl std::fmt::Debug for StartupContentClosureReceipt {
     }
 }
 
-pub(super) struct StartupContentClosureDraft {
+/// The exact default Scene closure admitted by the project content owner.
+///
+/// Explicitly selected non-default Scenes cannot create this startup attestation. The wrapper
+/// shares the generic receipt's source facts and budget without retaining decoded content.
+#[derive(Clone)]
+pub struct StartupContentClosureReceipt {
+    content: ProjectContentClosureReceipt,
+}
+
+impl StartupContentClosureReceipt {
+    #[must_use]
+    pub fn content_closure(&self) -> &ProjectContentClosureReceipt {
+        &self.content
+    }
+
+    #[must_use]
+    pub fn settings_lineage(&self) -> ProjectSettingsLineage {
+        self.content.settings_lineage()
+    }
+
+    #[must_use]
+    pub fn manifest_digest(&self) -> ContentDigest {
+        self.content.manifest_digest()
+    }
+
+    #[must_use]
+    pub fn schema_fingerprint(&self) -> SchemaCompositionFingerprint {
+        self.content.schema_fingerprint()
+    }
+
+    #[must_use]
+    pub fn content_revision(&self) -> ProjectContentRevision {
+        self.content.content_revision()
+    }
+
+    #[must_use]
+    pub fn content_digest(&self) -> ContentDigest {
+        self.content.content_digest()
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn closure_plan_digest(&self) -> ContentDigest {
+        self.content.closure_plan_digest()
+    }
+
+    #[must_use]
+    pub fn members(&self) -> &[ProjectContentMemberReceipt] {
+        self.content.members()
+    }
+
+    #[must_use]
+    pub fn project_root_identity(&self) -> FileIdentity {
+        self.content.project_root_identity()
+    }
+
+    pub(crate) fn runtime_directories(&self) -> &[ProjectPath] {
+        self.content.runtime_directories()
+    }
+
+    pub(crate) fn project_root(&self) -> DirectoryCapability {
+        self.content.project_root()
+    }
+
+    pub(crate) fn has_runtime_schema_agreement(&self) -> bool {
+        self.content.has_runtime_schema_agreement()
+    }
+
+    pub(crate) fn runtime_schema_bundle_digest(&self) -> Option<ContentDigest> {
+        self.content.runtime_schema_bundle_digest()
+    }
+}
+
+impl std::fmt::Debug for StartupContentClosureReceipt {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("StartupContentClosureReceipt")
+            .field("content", &self.content)
+            .finish()
+    }
+}
+
+pub(super) struct ProjectContentClosureDraft {
+    selected_scene_path: ProjectPath,
+    is_startup: bool,
     settings_lineage: ProjectSettingsLineage,
     manifest_digest: ContentDigest,
     schema_fingerprint: SchemaCompositionFingerprint,
@@ -192,11 +290,15 @@ pub(super) struct StartupContentClosureDraft {
     content_digest: ContentDigest,
     closure_plan_digest: ContentDigest,
     runtime_directories: Box<[ProjectPath]>,
-    members: Box<[StartupContentMemberReceipt]>,
+    members: Box<[ProjectContentMemberReceipt]>,
 }
 
-impl StartupContentClosureDraft {
-    pub(super) fn members(&self) -> &[StartupContentMemberReceipt] {
+impl ProjectContentClosureDraft {
+    pub(super) fn selected_scene_path(&self) -> &ProjectPath {
+        &self.selected_scene_path
+    }
+
+    pub(super) fn members(&self) -> &[ProjectContentMemberReceipt] {
         &self.members
     }
 
@@ -208,10 +310,12 @@ impl StartupContentClosureDraft {
         self,
         project_root: DirectoryCapability,
         lease: ProjectContentLease,
-    ) -> StartupContentClosureReceipt {
-        StartupContentClosureReceipt {
-            inner: Arc::new(StartupContentClosureReceiptInner {
+    ) -> ProjectContentClosureReceipt {
+        ProjectContentClosureReceipt {
+            inner: Arc::new(ProjectContentClosureReceiptInner {
                 project_root,
+                selected_scene_path: self.selected_scene_path,
+                is_startup: self.is_startup,
                 settings_lineage: self.settings_lineage,
                 manifest_digest: self.manifest_digest,
                 schema_fingerprint: self.schema_fingerprint,
@@ -226,19 +330,19 @@ impl StartupContentClosureDraft {
     }
 }
 
-pub(super) struct StartupContentClosureBuilder {
+pub(super) struct ProjectContentClosureBuilder {
     manifest_digest: ContentDigest,
     runtime_directories: BTreeSet<String>,
-    members: BTreeMap<String, StartupContentMemberFacts>,
+    members: BTreeMap<String, ProjectContentMemberFacts>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-struct StartupContentMemberFacts {
-    kind: StartupContentMemberKind,
+struct ProjectContentMemberFacts {
+    kind: ProjectContentMemberKind,
     digest: ContentDigest,
 }
 
-impl StartupContentClosureBuilder {
+impl ProjectContentClosureBuilder {
     pub(super) fn new(manifest_digest: ContentDigest) -> Result<Self, ProjectContentError> {
         let mut builder = Self {
             manifest_digest,
@@ -246,7 +350,7 @@ impl StartupContentClosureBuilder {
             members: BTreeMap::new(),
         };
         builder.insert_path(
-            StartupContentMemberKind::ProjectManifest,
+            ProjectContentMemberKind::ProjectManifest,
             ProjectPath::new("nara.toml").expect("the engine-owned manifest path is valid"),
             manifest_digest,
         )?;
@@ -260,7 +364,7 @@ impl StartupContentClosureBuilder {
 
     pub(super) fn insert(
         &mut self,
-        kind: StartupContentMemberKind,
+        kind: ProjectContentMemberKind,
         directory: &ProjectPath,
         path: &str,
         digest: ContentDigest,
@@ -269,7 +373,7 @@ impl StartupContentClosureBuilder {
             ProjectContentError::single(
                 ProjectContentErrorKind::HostAuthorityRejected,
                 "project.content.closure-path-invalid",
-                "Project startup closure contains an invalid logical path",
+                "Project Scene closure contains an invalid logical path",
             )
         })?;
         self.insert_path(kind, path, digest)
@@ -332,7 +436,7 @@ impl StartupContentClosureBuilder {
 
     pub(super) fn insert_project_path(
         &mut self,
-        kind: StartupContentMemberKind,
+        kind: ProjectContentMemberKind,
         path: ProjectPath,
         digest: ContentDigest,
     ) -> Result<(), ProjectContentError> {
@@ -341,12 +445,12 @@ impl StartupContentClosureBuilder {
 
     fn insert_path(
         &mut self,
-        kind: StartupContentMemberKind,
+        kind: ProjectContentMemberKind,
         path: ProjectPath,
         digest: ContentDigest,
     ) -> Result<(), ProjectContentError> {
         let key = path.as_str().to_owned();
-        let facts = StartupContentMemberFacts { kind, digest };
+        let facts = ProjectContentMemberFacts { kind, digest };
         match self.members.entry(key) {
             Entry::Vacant(entry) => {
                 entry.insert(facts);
@@ -356,18 +460,20 @@ impl StartupContentClosureBuilder {
             Entry::Occupied(_) => Err(ProjectContentError::single(
                 ProjectContentErrorKind::ClosurePathCollision,
                 "project.content.closure-path-collision",
-                "Project startup closure assigns conflicting facts to one logical path",
+                "Project Scene closure assigns conflicting facts to one logical path",
             )),
         }
     }
 
     pub(super) fn finish(
         self,
+        selected_scene_path: ProjectPath,
+        is_startup: bool,
         settings_lineage: ProjectSettingsLineage,
         schema_fingerprint: SchemaCompositionFingerprint,
         content_revision: ProjectContentRevision,
         content_digest: ContentDigest,
-    ) -> StartupContentClosureDraft {
+    ) -> ProjectContentClosureDraft {
         let runtime_directories = self
             .runtime_directories
             .into_iter()
@@ -379,15 +485,17 @@ impl StartupContentClosureBuilder {
         let members = self
             .members
             .into_iter()
-            .map(|(path, facts)| StartupContentMemberReceipt {
+            .map(|(path, facts)| ProjectContentMemberReceipt {
                 kind: facts.kind,
                 path: ProjectPath::new(path)
-                    .expect("startup closure paths were validated before admission"),
+                    .expect("Scene closure paths were validated before admission"),
                 digest: facts.digest,
             })
             .collect::<Box<[_]>>();
         let closure_plan_digest = closure_plan_digest(&runtime_directories, &members);
-        StartupContentClosureDraft {
+        ProjectContentClosureDraft {
+            selected_scene_path,
+            is_startup,
             settings_lineage,
             manifest_digest: self.manifest_digest,
             schema_fingerprint,
@@ -402,7 +510,7 @@ impl StartupContentClosureBuilder {
 
 fn closure_plan_digest(
     runtime_directories: &[ProjectPath],
-    members: &[StartupContentMemberReceipt],
+    members: &[ProjectContentMemberReceipt],
 ) -> ContentDigest {
     let mut framed = Vec::new();
     framed.extend_from_slice(b"nara.project-startup-closure-plan.v1\0");
@@ -424,7 +532,7 @@ fn append_plan_frame(target: &mut Vec<u8>, bytes: &[u8]) {
     target.extend_from_slice(bytes);
 }
 
-impl StartupContentMemberKind {
+impl ProjectContentMemberKind {
     const fn contributes_to_runtime_content_digest(self) -> bool {
         !matches!(self, Self::ProjectManifest | Self::AuthoringSchemaBundle)
     }

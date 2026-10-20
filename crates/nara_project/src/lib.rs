@@ -13,8 +13,14 @@ pub const MAX_PROJECT_FIXED_DEBT_STEPS: u32 = MAX_PROJECT_FIXED_STEPS_PER_FRAME 
 pub const MAX_PROJECT_UI_LOGICAL_EXTENT: u32 = 65_536;
 /// Maximum bytes retained for one profile execution contract identifier.
 pub const MAX_PROJECT_EXECUTION_CONTRACT_BYTES: usize = 128;
+/// Maximum explicit Scene roots in the version-1 project content declaration.
+///
+/// The selected startup Scene is implicit and does not consume this declaration limit. This is
+/// a manifest admission bound, not a promise about supported scene size or runtime performance.
+pub const MAX_PROJECT_CONTENT_SCENES: usize = 64;
 
 mod capability;
+mod content;
 mod defaults;
 mod effective;
 mod manifest;
@@ -25,6 +31,7 @@ mod sections;
 mod validation;
 
 pub use capability::{ProductCapability, ProductCapabilitySet, RuntimePreset};
+pub use content::{EffectiveProjectContentSettings, ProjectContentManifest};
 pub use effective::{
     DESKTOP_SUPERVISED_PLAY_V1_CONTRACT, EffectiveDiagnosticsSettings, EffectiveInputSettings,
     EffectivePrimaryUiSurface, EffectiveProjectExecutionSettings, EffectiveProjectInfo,
@@ -58,16 +65,17 @@ pub mod prelude {
     pub use crate::{
         CURRENT_PROJECT_SCHEMA_VERSION, DEFAULT_MANIFEST_BYTE_LIMIT,
         DESKTOP_SUPERVISED_PLAY_V1_CONTRACT, EffectiveDiagnosticsSettings, EffectiveInputSettings,
-        EffectivePrimaryUiSurface, EffectiveProjectExecutionSettings, EffectiveProjectInfo,
-        EffectiveProjectPaths, EffectiveProjectSettings, EffectiveRenderSettings,
-        EffectiveRuntimeSettings, EffectiveStartupSettings, EffectiveTaskSettings,
-        EffectiveUiSafeArea, EffectiveUiSettings, EffectiveWindowSettings, EffectiveWorldCanvas,
+        EffectivePrimaryUiSurface, EffectiveProjectContentSettings,
+        EffectiveProjectExecutionSettings, EffectiveProjectInfo, EffectiveProjectPaths,
+        EffectiveProjectSettings, EffectiveRenderSettings, EffectiveRuntimeSettings,
+        EffectiveStartupSettings, EffectiveTaskSettings, EffectiveUiSafeArea, EffectiveUiSettings,
+        EffectiveWindowSettings, EffectiveWorldCanvas, MAX_PROJECT_CONTENT_SCENES,
         MAX_PROJECT_EXECUTION_CONTRACT_BYTES, MAX_PROJECT_FIXED_DEBT_STEPS,
         MAX_PROJECT_FIXED_STEPS_PER_FRAME, MAX_PROJECT_UI_LOGICAL_EXTENT, ProductCapability,
         ProductCapabilitySet, ProjectAuthoringManifest, ProjectCapabilitiesManifest,
-        ProjectCapabilitiesPatch, ProjectDiagnosticsManifest, ProjectExecutionContract,
-        ProjectExecutionPatch, ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest,
-        ProjectManifest, ProjectManifestLoad, ProjectManifestMutationError,
+        ProjectCapabilitiesPatch, ProjectContentManifest, ProjectDiagnosticsManifest,
+        ProjectExecutionContract, ProjectExecutionPatch, ProjectFixedCatchUpPolicy, ProjectInfo,
+        ProjectInputManifest, ProjectManifest, ProjectManifestLoad, ProjectManifestMutationError,
         ProjectManifestWriteError, ProjectPath, ProjectPathError, ProjectPathsManifest,
         ProjectPresentMode, ProjectProfileError, ProjectProfileKind, ProjectProfileOverlay,
         ProjectRenderManifest, ProjectRenderPatch, ProjectRuntimeManifest, ProjectStartupManifest,

@@ -508,7 +508,7 @@ fn render_runtime_with_admission_edit(
     let (project, plan, root) = desktop_candidate_plan_and_root();
     let loader = ProjectContentLoader::new(root).unwrap();
     let content = loader.load(&project, &plan).unwrap();
-    let source = content.startup_scene_source();
+    let source = content.scene_source();
     let runtime_time = plan.settings().runtime.runtime_time_settings();
     let fixed_time = plan.settings().runtime.fixed_time();
     let sealed = plan.plugin_plan().instantiate().unwrap();

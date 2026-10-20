@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     fs::ContentDigest,
-    project_host::{StartupContentClosureReceipt, StartupContentMemberKind},
+    project_host::{ProjectContentMemberKind, StartupContentClosureReceipt},
 };
 
 pub use crate::project_workflow::ProjectExportBinaryTarget as ProductObservationTarget;
@@ -57,8 +57,8 @@ pub fn record_product_observation(
     let bundle = closure
         .members()
         .iter()
-        .find(|member| member.kind() == StartupContentMemberKind::AuthoringSchemaBundle)
-        .map(crate::project_host::StartupContentMemberReceipt::digest)
+        .find(|member| member.kind() == ProjectContentMemberKind::AuthoringSchemaBundle)
+        .map(crate::project_host::ProjectContentMemberReceipt::digest)
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,

@@ -11,10 +11,13 @@ use nara_fs::{
 };
 use nara_project::ProjectPath;
 
-use crate::project_host::{StartupContentClosureReceipt, StartupContentMemberKind};
+use crate::project_host::{ProjectContentDeliveryReceipt, ProjectContentMemberKind};
 
 mod build;
 mod stage;
+
+#[cfg(all(test, feature = "project-tooling"))]
+mod source_tests;
 
 pub use build::{
     ProjectExportBinaryTarget, ProjectExportBuildError, ProjectExportBuildReceipt,
@@ -32,15 +35,15 @@ use stage::{ProjectExportStageError, stage_export_tree};
 const MAX_EXPORT_MEMBERS: usize = 4096;
 const MAX_EXPORT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
-/// The source role of one member in the closed startup-closure export layout.
+/// The source role of one member in the declared-content export layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectExportMemberKind {
     HeadlessExecutable,
     DesktopExecutable,
-    StartupContent(StartupContentMemberKind),
+    Content(ProjectContentMemberKind),
 }
 
-/// One immutable member fact in a prepared startup-closure export.
+/// One immutable member fact in a prepared declared-content export.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectExportMemberReceipt {
     kind: ProjectExportMemberKind,
@@ -70,6 +73,7 @@ pub struct ProjectExportPlanReceipt {
     destination: RelativeComponent,
     startup_content_digest: ContentDigest,
     startup_closure_plan_digest: ContentDigest,
+    delivery_digest: ContentDigest,
     build_input_digest: ContentDigest,
     member_plan_digest: ContentDigest,
     runtime_directories: Box<[ProjectPath]>,
@@ -78,6 +82,11 @@ pub struct ProjectExportPlanReceipt {
 }
 
 impl ProjectExportPlanReceipt {
+    #[must_use]
+    pub const fn delivery_digest(&self) -> ContentDigest {
+        self.delivery_digest
+    }
+
     #[must_use]
     pub const fn destination(&self) -> &RelativeComponent {
         &self.destination
@@ -119,6 +128,7 @@ impl Debug for ProjectExportPlanReceipt {
             .debug_struct("ProjectExportPlanReceipt")
             .field("destination", &self.destination)
             .field("startup_content_digest", &self.startup_content_digest)
+            .field("delivery_digest", &self.delivery_digest)
             .field(
                 "startup_closure_plan_digest",
                 &self.startup_closure_plan_digest,
@@ -134,14 +144,14 @@ impl Debug for ProjectExportPlanReceipt {
 #[derive(Debug)]
 enum ProjectExportMemberSource {
     Executable(ProjectExportBinaryTarget),
-    StartupContent(ProjectPath),
+    Content(ProjectPath),
 }
 
-/// Inputs for one exact startup-closure export publication.
+/// Inputs for one exact declared-content export publication.
 pub struct ProjectExportRequest {
     publication_parent: DirectoryCapability,
     destination: RelativeComponent,
-    startup_content: StartupContentClosureReceipt,
+    delivery_content: ProjectContentDeliveryReceipt,
     build: ProjectExportBuildReceipt,
 }
 
@@ -150,13 +160,13 @@ impl ProjectExportRequest {
     pub fn new(
         publication_parent: DirectoryCapability,
         destination: RelativeComponent,
-        startup_content: StartupContentClosureReceipt,
+        delivery_content: ProjectContentDeliveryReceipt,
         build: ProjectExportBuildReceipt,
     ) -> Self {
         Self {
             publication_parent,
             destination,
-            startup_content,
+            delivery_content,
             build,
         }
     }
@@ -171,7 +181,7 @@ impl Debug for ProjectExportRequest {
                 &self.publication_parent.identity(),
             )
             .field("destination", &self.destination)
-            .field("startup_content", &self.startup_content)
+            .field("delivery_content", &self.delivery_content)
             .field("build", &self.build)
             .finish()
     }
@@ -181,7 +191,7 @@ impl Debug for ProjectExportRequest {
 pub struct PreparedProjectExport {
     publication_parent: DirectoryCapability,
     plan: ProjectExportPlanReceipt,
-    startup_content: StartupContentClosureReceipt,
+    delivery_content: ProjectContentDeliveryReceipt,
     build: ProjectExportBuildReceipt,
 }
 
@@ -206,7 +216,7 @@ impl Debug for PreparedProjectExport {
                 &self.publication_parent.identity(),
             )
             .field("plan", &self.plan)
-            .field("startup_content", &self.startup_content)
+            .field("delivery_content", &self.delivery_content)
             .field("build", &self.build)
             .finish()
     }
@@ -219,18 +229,21 @@ pub fn prepare_project_export(
     let ProjectExportRequest {
         publication_parent,
         destination,
-        startup_content,
+        delivery_content,
         build,
     } = request;
-    if !startup_content.has_runtime_schema_agreement() {
+    if !delivery_content
+        .startup_content()
+        .has_runtime_schema_agreement()
+    {
         return Err(ProjectExportPlanError::RuntimeSchemaAgreementMissing);
     }
-    revalidate_sources(&startup_content, &build)?;
-    let plan = plan_export(destination, &startup_content, &build)?;
+    revalidate_sources(&delivery_content, &build)?;
+    let plan = plan_export(destination, &delivery_content, &build)?;
     Ok(PreparedProjectExport {
         publication_parent,
         plan,
-        startup_content,
+        delivery_content,
         build,
     })
 }
@@ -241,23 +254,23 @@ pub enum ProjectExportPlanError {
     RuntimeSchemaAgreementMissing,
     #[error(transparent)]
     Build(#[from] ProjectExportBuildError),
-    #[error("startup-content member {path} changed after project check")]
-    StartupContentChanged {
+    #[error("declared-content member {path} changed after project check")]
+    ContentChanged {
         path: ProjectPath,
         #[source]
         source: FsError,
     },
-    #[error("startup runtime directory {path} changed after project check")]
-    StartupDirectoryChanged {
+    #[error("declared-content runtime directory {path} changed after project check")]
+    ContentDirectoryChanged {
         path: ProjectPath,
         #[source]
         source: FsError,
     },
-    #[error("startup-closure export contains too many members")]
+    #[error("declared-content export contains too many members")]
     MemberLimitExceeded,
-    #[error("startup-closure export exceeds its total byte limit")]
+    #[error("declared-content export exceeds its total byte limit")]
     ByteLimitExceeded,
-    #[error("startup-closure export target path collides: {path}")]
+    #[error("declared-content export target path collides: {path}")]
     TargetPathCollision { path: ProjectPath },
 }
 
@@ -503,10 +516,10 @@ impl Error for ProjectExportUnresolved {
 
 fn plan_export(
     destination: RelativeComponent,
-    startup_content: &StartupContentClosureReceipt,
+    delivery_content: &ProjectContentDeliveryReceipt,
     build: &ProjectExportBuildReceipt,
 ) -> Result<ProjectExportPlanReceipt, ProjectExportPlanError> {
-    let runtime_directories = startup_content
+    let runtime_directories = delivery_content
         .runtime_directories()
         .iter()
         .map(|path| {
@@ -514,7 +527,7 @@ fn plan_export(
                 .expect("an admitted runtime directory remains valid under the project prefix")
         })
         .collect::<Box<[_]>>();
-    let mut members = Vec::with_capacity(startup_content.members().len().saturating_add(2));
+    let mut members = Vec::with_capacity(delivery_content.members().len().saturating_add(2));
     let mut sources = Vec::with_capacity(members.capacity());
     let executable_suffix = if build.target_triple().contains("windows") {
         ".exe"
@@ -538,16 +551,14 @@ fn plan_export(
         });
         sources.push(ProjectExportMemberSource::Executable(target));
     }
-    for member in startup_content.members() {
+    for member in delivery_content.members() {
         members.push(ProjectExportMemberReceipt {
-            kind: ProjectExportMemberKind::StartupContent(member.kind()),
+            kind: ProjectExportMemberKind::Content(member.kind()),
             path: ProjectPath::new(format!("project/{}", member.path().as_str()))
                 .expect("an admitted project path remains valid under the project prefix"),
             digest: member.digest(),
         });
-        sources.push(ProjectExportMemberSource::StartupContent(
-            member.path().clone(),
-        ));
+        sources.push(ProjectExportMemberSource::Content(member.path().clone()));
     }
     if members.len() > MAX_EXPORT_MEMBERS {
         return Err(ProjectExportPlanError::MemberLimitExceeded);
@@ -572,8 +583,9 @@ fn plan_export(
     let member_plan_digest = digest_member_plan(&runtime_directories, &members);
     Ok(ProjectExportPlanReceipt {
         destination,
-        startup_content_digest: startup_content.content_digest(),
-        startup_closure_plan_digest: startup_content.closure_plan_digest(),
+        startup_content_digest: delivery_content.startup_content().content_digest(),
+        startup_closure_plan_digest: delivery_content.startup_content().closure_plan_digest(),
+        delivery_digest: delivery_content.delivery_digest(),
         build_input_digest: build.build_input_digest(),
         member_plan_digest,
         runtime_directories,
@@ -587,7 +599,7 @@ fn digest_member_plan(
     members: &[ProjectExportMemberReceipt],
 ) -> ContentDigest {
     let mut framed = Vec::new();
-    framed.extend_from_slice(b"nara.project-startup-closure-export.v2\0");
+    framed.extend_from_slice(b"nara.project-declared-content-export.v3\0");
     for directory in runtime_directories {
         append_frame(&mut framed, b"runtime-directory");
         append_frame(&mut framed, directory.as_str().as_bytes());
@@ -605,18 +617,16 @@ fn member_kind_name(kind: ProjectExportMemberKind) -> &'static str {
     match kind {
         ProjectExportMemberKind::HeadlessExecutable => "headless-executable",
         ProjectExportMemberKind::DesktopExecutable => "desktop-executable",
-        ProjectExportMemberKind::StartupContent(StartupContentMemberKind::ProjectManifest) => {
+        ProjectExportMemberKind::Content(ProjectContentMemberKind::ProjectManifest) => {
             "project-manifest"
         }
-        ProjectExportMemberKind::StartupContent(
-            StartupContentMemberKind::AuthoringSchemaBundle,
-        ) => "authoring-schema-bundle",
-        ProjectExportMemberKind::StartupContent(StartupContentMemberKind::Scene) => "scene",
-        ProjectExportMemberKind::StartupContent(StartupContentMemberKind::Prefab) => "prefab",
-        ProjectExportMemberKind::StartupContent(StartupContentMemberKind::AssetMetadata) => {
-            "asset-meta"
+        ProjectExportMemberKind::Content(ProjectContentMemberKind::AuthoringSchemaBundle) => {
+            "authoring-schema-bundle"
         }
-        ProjectExportMemberKind::StartupContent(StartupContentMemberKind::AssetSource) => "asset",
+        ProjectExportMemberKind::Content(ProjectContentMemberKind::Scene) => "scene",
+        ProjectExportMemberKind::Content(ProjectContentMemberKind::Prefab) => "prefab",
+        ProjectExportMemberKind::Content(ProjectContentMemberKind::AssetMetadata) => "asset-meta",
+        ProjectExportMemberKind::Content(ProjectContentMemberKind::AssetSource) => "asset",
     }
 }
 
@@ -626,32 +636,38 @@ fn append_frame(target: &mut Vec<u8>, bytes: &[u8]) {
 }
 
 fn revalidate_sources(
-    startup_content: &StartupContentClosureReceipt,
+    delivery_content: &ProjectContentDeliveryReceipt,
     build: &ProjectExportBuildReceipt,
 ) -> Result<(), ProjectExportPlanError> {
-    build.revalidate(startup_content)?;
-    let project_root = startup_content.project_root();
-    for directory in startup_content.runtime_directories() {
+    build.revalidate(delivery_content.startup_content())?;
+    revalidate_delivery_sources(delivery_content)
+}
+
+fn revalidate_delivery_sources(
+    delivery_content: &ProjectContentDeliveryReceipt,
+) -> Result<(), ProjectExportPlanError> {
+    let project_root = delivery_content.project_root();
+    for directory in delivery_content.runtime_directories() {
         let path = RelativePath::new(directory.as_str())
             .expect("the project-content owner publishes valid runtime directory paths");
         project_root.open_directory(&path).map_err(|source| {
-            ProjectExportPlanError::StartupDirectoryChanged {
+            ProjectExportPlanError::ContentDirectoryChanged {
                 path: directory.clone(),
                 source,
             }
         })?;
     }
-    for member in startup_content.members() {
+    for member in delivery_content.members() {
         let path = RelativePath::new(member.path().as_str())
             .expect("the project-content owner publishes valid project paths");
         let file = project_root.open_file(&path).map_err(|source| {
-            ProjectExportPlanError::StartupContentChanged {
+            ProjectExportPlanError::ContentChanged {
                 path: member.path().clone(),
                 source,
             }
         })?;
         file.verify_digest(member.digest(), member.byte_len())
-            .map_err(|source| ProjectExportPlanError::StartupContentChanged {
+            .map_err(|source| ProjectExportPlanError::ContentChanged {
                 path: member.path().clone(),
                 source,
             })?;
@@ -663,10 +679,10 @@ fn publish_prepared(prepared: PreparedProjectExport) -> ProjectExportOutcome {
     let PreparedProjectExport {
         publication_parent,
         plan,
-        startup_content,
+        delivery_content,
         build,
     } = prepared;
-    if let Err(error) = revalidate_sources(&startup_content, &build) {
+    if let Err(error) = revalidate_sources(&delivery_content, &build) {
         return ProjectExportOutcome::Rejected(ProjectExportRejection {
             plan,
             inner: ProjectExportRejectionInner::SourceChanged(error),
@@ -711,7 +727,7 @@ fn publish_prepared(prepared: PreparedProjectExport) -> ProjectExportOutcome {
     if let Err(error) = stage_export_tree(
         transaction.staging_directory(),
         &plan,
-        &startup_content,
+        &delivery_content,
         &build,
     ) {
         return finish_aborted_export(
@@ -720,7 +736,7 @@ fn publish_prepared(prepared: PreparedProjectExport) -> ProjectExportOutcome {
             transaction.abort(),
         );
     }
-    if let Err(error) = revalidate_sources(&startup_content, &build) {
+    if let Err(error) = revalidate_sources(&delivery_content, &build) {
         return finish_aborted_export(
             plan,
             ProjectExportFailure::SourceChanged(error),

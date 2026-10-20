@@ -295,8 +295,8 @@ fn desktop_profile_configures_one_window_slot_and_preserves_source_content() {
         .load(&repeated_candidate, &repeated)
         .unwrap();
     assert_eq!(
-        desktop_snapshot.expanded_startup_scene(),
-        repeated_snapshot.expanded_startup_scene()
+        desktop_snapshot.expanded_scene(),
+        repeated_snapshot.expanded_scene()
     );
     assert_eq!(
         desktop_snapshot.images()[0].image().source().source_hash(),
@@ -327,8 +327,12 @@ fn desktop_profile_configures_one_window_slot_and_preserves_source_content() {
     assert_eq!(headless_loader.budget_snapshot().active_reservations(), 2);
     assert_eq!(desktop_loader.budget_snapshot().active_reservations(), 2);
     assert_eq!(repeated_loader.budget_snapshot().active_reservations(), 2);
-    let headless_closure = headless_snapshot.startup_content_closure();
-    let desktop_closure = desktop_snapshot.startup_content_closure();
+    let headless_closure = headless_snapshot
+        .startup_content_closure()
+        .expect("the headless loader selected the manifest's startup Scene");
+    let desktop_closure = desktop_snapshot
+        .startup_content_closure()
+        .expect("the desktop loader selected the manifest's startup Scene");
     assert_eq!(headless_loader.budget_snapshot().active_reservations(), 2);
     assert_eq!(desktop_loader.budget_snapshot().active_reservations(), 2);
 

@@ -48,10 +48,10 @@ fn main() -> ExitCode {
 
 fn run_check(arguments: args::CheckArguments) -> ExitCode {
     match check::execute(arguments) {
-        Ok(ProjectToolSummary::Checked { startup_members }) => {
+        Ok(ProjectToolSummary::Checked { content_members }) => {
             println!(
-                "Project check passed with {} startup-closure members.",
-                startup_members
+                "Project check passed with {} content-delivery members.",
+                content_members
             );
             ExitCode::SUCCESS
         }
@@ -98,12 +98,12 @@ fn run_repair(arguments: args::RepairArguments) -> ExitCode {
 fn run_export(arguments: args::ExportArguments) -> ExitCode {
     match export::execute(arguments) {
         Ok(ProjectToolSummary::Exported {
-            startup_members,
+            content_members,
             product_observations,
         }) => {
             println!(
-                "Exported and accepted a candidate with {} startup-closure members through {} exact product observations.",
-                startup_members, product_observations
+                "Exported and accepted a candidate with {} content-delivery members through {} exact product observations.",
+                content_members, product_observations
             );
             ExitCode::SUCCESS
         }

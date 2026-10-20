@@ -6,7 +6,7 @@ rust-version = "1.95"
 publish = false
 
 [package.metadata.nara]
-project-tool-protocol = 1
+project-tool-protocol = 2
 
 [workspace]
 resolver = "3"

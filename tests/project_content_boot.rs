@@ -11,7 +11,7 @@ use nara::asset::AssetMeta;
 use nara::diagnostic::DiagnosticValueRef;
 use nara::image::{ImageColorSpace, ImageImportSettings};
 use nara::project_host::{
-    ProjectContentBudgetKind, ProjectContentLoader, StartupContentMemberKind,
+    ProjectContentBudgetKind, ProjectContentLoader, ProjectContentMemberKind,
 };
 use nara::reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue};
 use nara::scene::{PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityRecord};
@@ -226,7 +226,7 @@ fn strict_content_rejects_cells_outside_the_admitted_tileset() {
             tileset, tile,
         )]));
         let snapshot = loader.load(&candidate, &plan).unwrap();
-        assert_eq!(snapshot.expanded_startup_scene().entities.len(), 1);
+        assert_eq!(snapshot.expanded_scene().entities.len(), 1);
     }
 }
 
@@ -481,6 +481,7 @@ fn file_backed_tileset_enters_the_startup_closure_with_its_image_dependency() {
     assert!(
         snapshot
             .startup_content_closure()
+            .expect("the loader selected the manifest's startup Scene")
             .members()
             .iter()
             .any(|member| { member.path().as_str() == "assets/tilesets/terrain.tileset.ron" })
@@ -488,6 +489,7 @@ fn file_backed_tileset_enters_the_startup_closure_with_its_image_dependency() {
     assert!(
         snapshot
             .startup_content_closure()
+            .expect("the loader selected the manifest's startup Scene")
             .members()
             .iter()
             .any(|member| { member.path().as_str() == "assets/tilesets/terrain.tileset.ron.meta" })
@@ -495,6 +497,7 @@ fn file_backed_tileset_enters_the_startup_closure_with_its_image_dependency() {
     assert!(
         snapshot
             .startup_content_closure()
+            .expect("the loader selected the manifest's startup Scene")
             .members()
             .iter()
             .any(|member| { member.path().as_str() == "assets/textures/player.png" })
@@ -502,6 +505,7 @@ fn file_backed_tileset_enters_the_startup_closure_with_its_image_dependency() {
     assert!(
         snapshot
             .startup_content_closure()
+            .expect("the loader selected the manifest's startup Scene")
             .members()
             .iter()
             .any(|member| { member.path().as_str() == "assets/textures/player.png.meta" })
@@ -686,7 +690,9 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
 
     let snapshot = loader.load(&candidate, &plan).unwrap();
     let cloned = snapshot.clone();
-    let closure = snapshot.startup_content_closure();
+    let closure = snapshot
+        .startup_content_closure()
+        .expect("the loader selected the manifest's startup Scene");
 
     assert_eq!(snapshot.lineage(), candidate.lineage());
     assert_eq!(
@@ -718,18 +724,18 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
         vec![
             (
                 "assets/textures/player.png",
-                StartupContentMemberKind::AssetSource,
+                ProjectContentMemberKind::AssetSource,
             ),
             (
                 "assets/textures/player.png.meta",
-                StartupContentMemberKind::AssetMetadata,
+                ProjectContentMemberKind::AssetMetadata,
             ),
-            ("nara.toml", StartupContentMemberKind::ProjectManifest),
+            ("nara.toml", ProjectContentMemberKind::ProjectManifest),
             (
                 "prefabs/enemy.prefab.json",
-                StartupContentMemberKind::Prefab,
+                ProjectContentMemberKind::Prefab,
             ),
-            ("scenes/startup.scene.json", StartupContentMemberKind::Scene,),
+            ("scenes/startup.scene.json", ProjectContentMemberKind::Scene,),
         ]
     );
     assert!(
@@ -743,15 +749,12 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
     assert_eq!(snapshot.images()[0].image().extent().width, 1);
     assert_eq!(snapshot.images()[0].image().extent().height, 1);
     assert_eq!(snapshot.images()[0].image().pixels(), &[24, 120, 220, 255]);
-    assert!(
-        snapshot
-            .expanded_startup_scene_provenance()
-            .values()
-            .any(|source| source.source_entity_id() == &scene_id("enemy")
-                && source
-                    .projection_path()
-                    .is_some_and(|path| path.root_anchor() == &scene_id("enemy-anchor")))
-    );
+    assert!(snapshot.expanded_scene_provenance().values().any(|source| {
+        source.source_entity_id() == &scene_id("enemy")
+            && source
+                .projection_path()
+                .is_some_and(|path| path.root_anchor() == &scene_id("enemy-anchor"))
+    }));
     assert!(std::ptr::eq(
         snapshot.images()[0].image().pixels(),
         cloned.images()[0].image().pixels(),
@@ -916,9 +919,11 @@ requested = ["runtime-2d", "runtime-ui"]
         .unwrap();
     assert_eq!(snapshot.images().len(), 1);
     assert_eq!(snapshot.images()[0].path().as_str(), "textures/player.png");
-    let members = snapshot.startup_content_closure();
+    let members = snapshot
+        .startup_content_closure()
+        .expect("the loader selected the manifest's startup Scene");
     assert!(members.members().iter().any(|member| {
-        member.kind() == StartupContentMemberKind::AssetSource
+        member.kind() == ProjectContentMemberKind::AssetSource
             && member.path().as_str() == "assets/textures/player.png"
     }));
 

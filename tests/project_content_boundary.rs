@@ -76,11 +76,13 @@ fn stable_id_prefab_references_survive_source_rename() {
     .unwrap();
     let after = loader.load(&candidate, &plan).unwrap();
     assert_eq!(after.prefabs()[0].path().as_str(), "renamed.prefab.json");
-    assert_eq!(before.startup_scene(), after.startup_scene());
-    let members = after.startup_content_closure();
+    assert_eq!(before.scene(), after.scene());
+    let members = after
+        .startup_content_closure()
+        .expect("the loader selected the manifest's startup Scene");
     assert!(members.members().iter().any(|member| {
         member.path().as_str() == "prefabs/renamed.prefab.json.meta"
-            && member.kind() == nara::project_host::StartupContentMemberKind::AssetMetadata
+            && member.kind() == nara::project_host::ProjectContentMemberKind::AssetMetadata
     }));
     drop((before, after, members));
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
@@ -153,7 +155,7 @@ fn stable_id_component_asset_references_survive_source_rename() {
     let after = loader.load(&candidate, &plan).unwrap();
     assert_eq!(after.images()[0].path().as_str(), "textures/renamed.png");
     assert_eq!(after.images()[0].image().pixels(), original_pixels);
-    assert_eq!(before.startup_scene(), after.startup_scene());
+    assert_eq!(before.scene(), after.scene());
     assert_eq!(
         before.prefabs()[0].document(),
         after.prefabs()[0].document()
@@ -198,6 +200,7 @@ fn stable_reference_catalogue_excludes_unreferenced_sources_from_the_runtime_clo
     assert!(
         before
             .startup_content_closure()
+            .expect("the loader selected the manifest's startup Scene")
             .members()
             .iter()
             .all(|member| !member.path().as_str().contains("unreferenced"))
@@ -599,7 +602,7 @@ fn parented_transform_loads_while_inherited_visibility_remains_fail_closed() {
         .write_scene_source(&SceneDocument::new([scene_id("parent")], [parent, child]));
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&candidate, &plan).unwrap();
-    let expanded = snapshot.expanded_startup_scene();
+    let expanded = snapshot.expanded_scene();
     let parent = expanded
         .entities
         .iter()
@@ -656,7 +659,7 @@ fn startup_source_keeps_its_admitted_identity_context_charged() {
     let (candidate, plan, root) = project.candidate_plan_and_root();
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&candidate, &plan).unwrap();
-    let source = snapshot.startup_scene_source();
+    let source = snapshot.scene_source();
     drop(snapshot);
     assert_eq!(loader.budget_snapshot().active_reservations(), 1);
     assert!(

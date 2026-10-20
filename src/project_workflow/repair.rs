@@ -17,7 +17,7 @@ use thiserror::Error;
 
 use super::{ProjectCheckError, ProjectCheckRequest, ProjectStartupSceneIssue, check_project};
 use crate::project_host::{
-    StartupContentClosureReceipt, StartupContentMemberKind,
+    ProjectContentMemberKind, StartupContentClosureReceipt,
     check::check_project_source_from_manifest_bytes,
 };
 
@@ -302,7 +302,9 @@ pub fn repair_startup_scene(
         ))
     })?;
     let (_, prepared_snapshot) = checked.into_parts();
-    let prepared = prepared_snapshot.startup_content_closure();
+    let prepared = prepared_snapshot
+        .startup_content_closure()
+        .expect("the startup check selects the manifest's default Scene");
     let replacement_scene_digest =
         startup_scene_digest(&prepared, &issue.scenes_path, &replacement)
             .ok_or(ProjectStartupSceneRepairError::PreparedFactsUnavailable)?;
@@ -402,9 +404,12 @@ pub fn repair_startup_scene(
     if fresh.manifest_digest() != manifest_digest
         || fresh.settings_lineage() != prepared.settings_lineage()
         || fresh.schema_fingerprint() != prepared.schema_fingerprint()
-        || fresh.content_digest() != prepared.content_digest()
-        || startup_scene_digest(&fresh, &issue.scenes_path, publication.replacement())
-            != Some(replacement_scene_digest)
+        || fresh.startup_content().content_digest() != prepared.content_digest()
+        || startup_scene_digest(
+            fresh.startup_content(),
+            &issue.scenes_path,
+            publication.replacement(),
+        ) != Some(replacement_scene_digest)
     {
         return Ok(ProjectStartupSceneRepairOutcome::PublishedButNotRepaired(
             PublishedButNotRepaired {
@@ -417,7 +422,7 @@ pub fn repair_startup_scene(
     Ok(ProjectStartupSceneRepairOutcome::Repaired(
         ProjectStartupSceneRepairReceipt {
             publication,
-            startup_content: fresh,
+            startup_content: fresh.startup_content().clone(),
         },
     ))
 }
@@ -489,7 +494,7 @@ fn startup_scene_digest(
     closure
         .members()
         .iter()
-        .find(|member| member.kind() == StartupContentMemberKind::Scene && member.path() == &path)
+        .find(|member| member.kind() == ProjectContentMemberKind::Scene && member.path() == &path)
         .map(|member| member.digest())
 }
 

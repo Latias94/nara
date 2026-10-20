@@ -5519,7 +5519,7 @@ fn failed_and_uncertain_saves_do_not_advance_workspace_persistence_state() {
 fn sequential_starts_share_immutable_authority_and_rebuild_runtime_sessions() {
     let project = TestProject::new("publication-cut");
     let (snapshot, plan) = project.snapshot_and_session_plan();
-    let shared_scene = snapshot.expanded_startup_scene() as *const SceneDocument as usize;
+    let shared_scene = snapshot.expanded_scene() as *const SceneDocument as usize;
     let shared_registry = plan.schema_validation().snapshot().clone();
     let stable_plan = plan.plugin_plan().fingerprint();
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
@@ -5557,9 +5557,9 @@ fn sequential_starts_share_immutable_authority_and_rebuild_runtime_sessions() {
 fn bundled_startup_activation_shares_the_spawned_source_and_resolves_its_receipt() {
     let project = TestProject::new("startup-activation-source");
     let (snapshot, plan) = project.snapshot_and_plan(false);
-    let source_pointer = snapshot.expanded_startup_scene() as *const SceneDocument;
+    let source_pointer = snapshot.expanded_scene() as *const SceneDocument;
     let source_entity_ids = snapshot
-        .expanded_startup_scene()
+        .expanded_scene()
         .entities
         .iter()
         .map(|entity| entity.id.clone())
@@ -5613,7 +5613,7 @@ fn editor_startup_source_has_an_exact_independent_retained_budget_lease() {
 
     let source = snapshot
         .prepare_editor_startup_scene(
-            snapshot.expanded_startup_scene(),
+            snapshot.expanded_scene(),
             plan.schema_validation().registry(),
         )
         .unwrap();
@@ -5656,7 +5656,7 @@ fn editor_startup_source_has_an_exact_independent_retained_budget_lease() {
     let exact_budget = loader.budget_host();
     let source = snapshot
         .prepare_editor_startup_scene(
-            snapshot.expanded_startup_scene(),
+            snapshot.expanded_scene(),
             plan.schema_validation().registry(),
         )
         .unwrap();
@@ -5685,7 +5685,7 @@ fn editor_startup_source_has_an_exact_independent_retained_budget_lease() {
     let rejected_budget = loader.budget_host();
     let rejected_baseline_reservations = rejected_budget.snapshot().active_reservations();
     let result = snapshot.prepare_editor_startup_scene(
-        snapshot.expanded_startup_scene(),
+        snapshot.expanded_scene(),
         plan.schema_validation().registry(),
     );
     assert!(result.is_err());
@@ -5762,7 +5762,7 @@ fn editor_activation_lease_survives_failed_startup_until_delayed_cleanup_finishe
     let baseline_reservations = budget_host.snapshot().active_reservations();
     let source = snapshot
         .prepare_editor_startup_scene(
-            snapshot.expanded_startup_scene(),
+            snapshot.expanded_scene(),
             plan.schema_validation().registry(),
         )
         .unwrap();
@@ -5879,7 +5879,7 @@ fn project_host_publishes_snapshot_images_without_copying_the_retained_pixels() 
 fn concurrent_starts_share_immutable_content_but_isolate_every_runtime_owner() {
     let project = TestProject::new("runtime-owner-isolation");
     let (snapshot, plan) = project.snapshot_and_session_plan();
-    let shared_scene = snapshot.expanded_startup_scene() as *const SceneDocument as usize;
+    let shared_scene = snapshot.expanded_scene() as *const SceneDocument as usize;
     let shared_registry = plan.schema_validation().snapshot().clone();
     let stable_plan = plan.plugin_plan().fingerprint();
     let mut first_host = ProjectHost::new(RuntimeClosePolicy::default());
@@ -6721,8 +6721,7 @@ fn running_owner_identity(host: &ProjectHost) -> RunningOwnerIdentity {
         task_pools: world.resource::<TaskPools>() as *const TaskPools as usize,
         service_session: world.resource::<RuntimeServiceSessionId>().0,
         identity_domain: world.resource::<WorldIdentityDomain>().id().get(),
-        snapshot_scene: published._snapshot.expanded_startup_scene() as *const SceneDocument
-            as usize,
+        snapshot_scene: published._snapshot.expanded_scene() as *const SceneDocument as usize,
         registry_snapshot: nara_reflect::component_registry(world)
             .expect("the published runtime registry is installed")
             .snapshot()

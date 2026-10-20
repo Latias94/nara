@@ -156,7 +156,7 @@ impl CargoMetadataFacts {
                     .and_then(|metadata| metadata.get("nara"))
                     .and_then(|metadata| metadata.get("project-tool-protocol"))
                     .and_then(Value::as_u64)
-                    != Some(1)
+                    != Some(2)
                 {
                     return Err(CargoMetadataFactsError::ProjectToolProtocol);
                 }
@@ -263,7 +263,7 @@ pub enum CargoMetadataFactsError {
     #[error("the Cargo root package did not define the exact `headless` binary target")]
     MissingHeadlessTarget,
     #[error(
-        "the project does not declare supported package.metadata.nara.project-tool-protocol = 1; update its headless tool entry before invoking project tools"
+        "the project does not declare supported package.metadata.nara.project-tool-protocol = 2; update its headless tool entry before invoking project tools"
     )]
     ProjectToolProtocol,
     #[error("the Cargo root package defined the `desktop` target more than once")]

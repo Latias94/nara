@@ -517,7 +517,7 @@ impl ProjectHost {
         plan: RuntimePlan,
         commands: Vec<GameplayCommandSubmission>,
     ) -> Result<RuntimeStartAttempt, HostFault> {
-        let startup_scene = snapshot.startup_scene_source();
+        let startup_scene = snapshot.scene_source();
         self.begin_start_with_scene(snapshot, plan, startup_scene, commands)
     }
 

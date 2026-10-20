@@ -7,6 +7,7 @@ use nara_core::{
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use serde::{Deserialize, Serialize};
 
+use crate::content::ProjectContentManifest;
 use crate::effective::EffectiveProjectSettings;
 use crate::path::ProjectPath;
 use crate::profile::{ProjectProfileError, ProjectProfileOverlay};
@@ -71,6 +72,8 @@ pub struct ProjectManifest {
     pub paths: ProjectPathsManifest,
     #[serde(default)]
     pub authoring: ProjectAuthoringManifest,
+    #[serde(default, skip_serializing_if = "ProjectContentManifest::is_empty")]
+    pub content: ProjectContentManifest,
     #[serde(default)]
     pub startup: ProjectStartupManifest,
     #[serde(default)]
@@ -230,6 +233,7 @@ impl ProjectManifest {
         if let Some(scene) = &self.startup.default_scene {
             validate_path_field(&mut diagnostics, "startup.default_scene", scene);
         }
+        self.content.validate_into(&mut diagnostics);
 
         self.capabilities
             .validate_into(&mut diagnostics, "capabilities");

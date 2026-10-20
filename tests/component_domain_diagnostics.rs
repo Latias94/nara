@@ -215,10 +215,7 @@ fn strict_check_and_editor_actions_preserve_native_domain_failures_without_paylo
             recipe(),
         ))
         .unwrap_err();
-        assert_domain(
-            rejection.startup_content_error().unwrap().diagnostics(),
-            code,
-        );
+        assert_domain(rejection.content_error().unwrap().diagnostics(), code);
     }
     project.write_scene_source(&document(0));
     let mut editor = EditorProjectSession::open_trusted_compiled(

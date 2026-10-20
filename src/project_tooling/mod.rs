@@ -14,7 +14,7 @@ use std::{
 
 use crate::{
     ProductRecipe,
-    project_workflow::{ProjectCheckRequest, check_project},
+    project_workflow::{ProjectCheckRequest, ProjectExportMemberKind, check_project},
 };
 use thiserror::Error;
 
@@ -86,13 +86,13 @@ impl ProjectToolRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectToolSummary {
     Checked {
-        startup_members: usize,
+        content_members: usize,
     },
     Schema {
         written: bool,
     },
     Exported {
-        startup_members: usize,
+        content_members: usize,
         product_observations: usize,
     },
     Repaired {
@@ -189,7 +189,7 @@ fn execute(
             }
             let closure = check_project(request)?;
             Ok(ProjectToolSummary::Checked {
-                startup_members: closure.members().len(),
+                content_members: closure.members().len(),
             })
         }
         ProjectToolRequest::Schema {
@@ -217,7 +217,14 @@ fn execute(
                     export::record_acceptance_observation(&receipt, &acceptance)
                         .map_err(|error| ToolError::Operation(error.to_string()))?;
                     Ok(ProjectToolSummary::Exported {
-                        startup_members: receipt.plan().members().len(),
+                        content_members: receipt
+                            .plan()
+                            .members()
+                            .iter()
+                            .filter(|member| {
+                                matches!(member.kind(), ProjectExportMemberKind::Content(_))
+                            })
+                            .count(),
                         product_observations: acceptance.products().len(),
                     })
                 }
@@ -232,7 +239,7 @@ fn execute(
                 }
                 export::ExportCommandOutcome::PublishedButUnaccepted { receipt, error } => {
                     Err(ToolError::Operation(format!(
-                        "candidate with {} startup-closure members was published but acceptance failed: {error}",
+                        "candidate with {} export members was published but acceptance failed: {error}",
                         receipt.plan().members().len(),
                     )))
                 }

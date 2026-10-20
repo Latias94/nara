@@ -8,7 +8,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use nara::project_host::{ProjectContentBudgetKind, StartupContentMemberKind};
+use nara::project_host::{ProjectContentBudgetKind, ProjectContentMemberKind};
 use nara_reference_game::REFERENCE_GAME_SCHEMA_OWNER_ID;
 use project_content_fixture::{load_project_content, texture_stable_id};
 
@@ -95,13 +95,10 @@ fn assert_committed_content() {
     let before_clone = loaded.loader.budget_snapshot();
     let cloned = snapshot.clone();
     assert_eq!(loaded.loader.budget_snapshot(), before_clone);
+    assert!(std::ptr::eq(snapshot.scene(), cloned.scene(),));
     assert!(std::ptr::eq(
-        snapshot.startup_scene(),
-        cloned.startup_scene(),
-    ));
-    assert!(std::ptr::eq(
-        snapshot.expanded_startup_scene(),
-        cloned.expanded_startup_scene(),
+        snapshot.expanded_scene(),
+        cloned.expanded_scene(),
     ));
     assert!(
         snapshot
@@ -117,33 +114,34 @@ fn assert_committed_content() {
     assert_eq!(
         snapshot
             .startup_content_closure()
+            .expect("the loader selected the committed startup Scene")
             .members()
             .iter()
             .map(|member| (member.kind(), member.path().as_str().to_owned()))
             .collect::<Vec<_>>(),
         [
             (
-                StartupContentMemberKind::AssetSource,
+                ProjectContentMemberKind::AssetSource,
                 "assets/textures/tiny-dungeon.png".to_owned()
             ),
             (
-                StartupContentMemberKind::AssetMetadata,
+                ProjectContentMemberKind::AssetMetadata,
                 "assets/textures/tiny-dungeon.png.meta".to_owned()
             ),
             (
-                StartupContentMemberKind::ProjectManifest,
+                ProjectContentMemberKind::ProjectManifest,
                 "nara.toml".to_owned()
             ),
             (
-                StartupContentMemberKind::Prefab,
+                ProjectContentMemberKind::Prefab,
                 "prefabs/enemy.prefab.json".to_owned()
             ),
             (
-                StartupContentMemberKind::Prefab,
+                ProjectContentMemberKind::Prefab,
                 "prefabs/reference-ui.prefab.json".to_owned()
             ),
             (
-                StartupContentMemberKind::Scene,
+                ProjectContentMemberKind::Scene,
                 "scenes/startup.scene.json".to_owned()
             ),
         ],

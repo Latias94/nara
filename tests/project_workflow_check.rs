@@ -10,9 +10,9 @@ use nara::{
     project::ProjectPath,
     project_host::{ProjectContentErrorKind, ProjectContentLoader},
     project_workflow::{
-        ProjectCheckErrorKind, ProjectCheckRequest, ProjectStartupSceneRepairError,
-        ProjectStartupSceneRepairOutcome, ProjectStartupSceneRepairRequest,
-        StartupContentMemberKind, check_project, repair_startup_scene,
+        ProjectCheckErrorKind, ProjectCheckRequest, ProjectContentMemberKind,
+        ProjectStartupSceneRepairError, ProjectStartupSceneRepairOutcome,
+        ProjectStartupSceneRepairRequest, check_project, repair_startup_scene,
     },
     reflect::{
         AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentSchema, ComponentSchemaCatalog,
@@ -37,7 +37,10 @@ fn public_check_returns_the_exact_loader_owned_startup_closure() {
     assert_eq!(receipt.project_root_identity(), root_identity);
     assert_eq!(receipt.manifest_digest(), candidate.manifest_digest());
     assert_eq!(receipt.settings_lineage(), candidate.lineage());
-    assert_eq!(receipt.content_digest(), raw_snapshot.content_digest());
+    assert_eq!(
+        receipt.startup_content().content_digest(),
+        raw_snapshot.content_digest()
+    );
     assert_eq!(
         receipt.schema_fingerprint(),
         plan.schema_validation().composition_fingerprint()
@@ -51,21 +54,21 @@ fn public_check_returns_the_exact_loader_owned_startup_closure() {
         vec![
             (
                 "assets/textures/player.png",
-                StartupContentMemberKind::AssetSource,
+                ProjectContentMemberKind::AssetSource,
             ),
             (
                 "assets/textures/player.png.meta",
-                StartupContentMemberKind::AssetMetadata,
+                ProjectContentMemberKind::AssetMetadata,
             ),
-            ("nara.toml", StartupContentMemberKind::ProjectManifest),
+            ("nara.toml", ProjectContentMemberKind::ProjectManifest),
             (
                 "prefabs/enemy.prefab.json",
-                StartupContentMemberKind::Prefab,
+                ProjectContentMemberKind::Prefab,
             ),
-            ("scenes/startup.scene.json", StartupContentMemberKind::Scene,),
+            ("scenes/startup.scene.json", ProjectContentMemberKind::Scene,),
             (
                 "schema/authoring.bundle.json",
-                StartupContentMemberKind::AuthoringSchemaBundle,
+                ProjectContentMemberKind::AuthoringSchemaBundle,
             ),
         ]
     );
@@ -96,10 +99,13 @@ fn unreferenced_import_does_not_enter_the_checked_startup_closure() {
     .unwrap();
 
     assert_eq!(successor.manifest_digest(), baseline.manifest_digest());
-    assert_eq!(successor.content_digest(), baseline.content_digest());
     assert_eq!(
-        successor.closure_plan_digest(),
-        baseline.closure_plan_digest()
+        successor.startup_content().content_digest(),
+        baseline.startup_content().content_digest()
+    );
+    assert_eq!(
+        successor.startup_content().closure_plan_digest(),
+        baseline.startup_content().closure_plan_digest()
     );
     assert_eq!(
         successor.schema_fingerprint(),
@@ -138,8 +144,8 @@ fn public_check_rejects_a_bundle_missing_one_selected_native_owner() {
 
     let error = check_project(ProjectCheckRequest::new(root, ProductRecipe::new())).unwrap_err();
 
-    assert_eq!(error.kind(), ProjectCheckErrorKind::StartupContent);
-    let startup_error = error.startup_content_error().unwrap();
+    assert_eq!(error.kind(), ProjectCheckErrorKind::Content);
+    let startup_error = error.content_error().unwrap();
     assert_eq!(
         startup_error.kind(),
         ProjectContentErrorKind::SchemaMismatch
@@ -223,7 +229,7 @@ fn runtime_agreement_accepts_a_bundle_superset_and_rejects_divergence_or_unbound
     .unwrap_err();
     assert!(
         error
-            .startup_content_error()
+            .content_error()
             .unwrap()
             .diagnostics()
             .iter()
@@ -260,7 +266,7 @@ fn runtime_agreement_accepts_a_bundle_superset_and_rejects_divergence_or_unbound
     ))
     .unwrap_err();
     let codes = error
-        .startup_content_error()
+        .content_error()
         .unwrap()
         .diagnostics()
         .iter()
@@ -291,9 +297,9 @@ fn typed_missing_startup_scene_issue_drives_one_explicit_repair() {
     ))
     .unwrap_err();
 
-    assert_eq!(error.kind(), ProjectCheckErrorKind::StartupContent);
+    assert_eq!(error.kind(), ProjectCheckErrorKind::Content);
     assert_eq!(
-        error.startup_content_error().unwrap().kind(),
+        error.content_error().unwrap().kind(),
         ProjectContentErrorKind::MissingStartupScene
     );
     assert!(error.manifest_error().is_none());

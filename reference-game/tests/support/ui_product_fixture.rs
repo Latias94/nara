@@ -865,7 +865,7 @@ fn product_runtime_from_project(
 ) -> RuntimeInstance {
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&project, &plan).unwrap();
-    let source = snapshot.startup_scene_source();
+    let source = snapshot.scene_source();
     let runtime_time = plan.settings().runtime.runtime_time_settings();
     let fixed_time = plan.settings().runtime.fixed_time();
     let sealed = plan.plugin_plan().instantiate().unwrap();

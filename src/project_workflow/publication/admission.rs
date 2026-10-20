@@ -116,7 +116,9 @@ fn admit_project(
     )
     .map_err(project_admission_error)?;
     let (_, content) = checked.into_parts();
-    Ok(content.startup_content_closure())
+    Ok(content
+        .startup_content_closure()
+        .expect("project admission loads the manifest's startup Scene"))
 }
 
 fn project_admission_error(error: ProjectSourceCheckError) -> ProjectCreationAdmissionError {

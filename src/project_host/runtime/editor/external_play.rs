@@ -4,7 +4,7 @@ use nara_fs::{ContentDigest, RelativePath};
 use nara_project::ProjectPath;
 use nara_tooling::{EditorRuntimeAvailability, EditorRuntimeUnavailableReason};
 
-use crate::project_content::{StartupContentMemberKind, startup_content_digest_from_members};
+use crate::project_content::{ProjectContentMemberKind, startup_content_digest_from_members};
 use crate::project_host::authoring::{
     AuthoringProjectAdmissionHost, AuthoringProjectSessionSnapshot, AuthoringProjectSnapshot,
     AuthoringSourceKind, PreparedAuthoringProject, project_authoring_adapters,
@@ -234,23 +234,23 @@ fn authoring_basis_matches(
 
 const fn authoring_source_kinds(
     kind: AuthoringSourceKind,
-) -> (EditorExternalPlaySourceKind, StartupContentMemberKind) {
+) -> (EditorExternalPlaySourceKind, ProjectContentMemberKind) {
     match kind {
         AuthoringSourceKind::Scene => (
             EditorExternalPlaySourceKind::Scene,
-            StartupContentMemberKind::Scene,
+            ProjectContentMemberKind::Scene,
         ),
         AuthoringSourceKind::Prefab => (
             EditorExternalPlaySourceKind::Prefab,
-            StartupContentMemberKind::Prefab,
+            ProjectContentMemberKind::Prefab,
         ),
         AuthoringSourceKind::AssetMetadata => (
             EditorExternalPlaySourceKind::AssetMetadata,
-            StartupContentMemberKind::AssetMetadata,
+            ProjectContentMemberKind::AssetMetadata,
         ),
         AuthoringSourceKind::AssetSource => (
             EditorExternalPlaySourceKind::AssetSource,
-            StartupContentMemberKind::AssetSource,
+            ProjectContentMemberKind::AssetSource,
         ),
     }
 }

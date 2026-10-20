@@ -1175,7 +1175,7 @@ fn invalid_authored_weapon_configuration_rejects_startup_before_runtime_publicat
     let (project, plan, root) = headless_wave_candidate_plan_and_root();
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&project, &plan).unwrap();
-    let mut scene = snapshot.startup_scene().clone();
+    let mut scene = snapshot.scene().clone();
     let weapon_id = ComponentTypeId::new("reference_game.Weapon");
     let weapon = scene
         .entities
@@ -1197,7 +1197,7 @@ fn missing_authored_weapon_sprite_rejects_startup_before_runtime_publication() {
     let (project, plan, root) = headless_wave_candidate_plan_and_root();
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&project, &plan).unwrap();
-    let mut scene = snapshot.startup_scene().clone();
+    let mut scene = snapshot.scene().clone();
     let weapon = scene
         .entities
         .iter_mut()
@@ -1703,7 +1703,7 @@ fn build_adapter_retry_runtime(
 ) -> RuntimeInstance {
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&project, &plan).unwrap();
-    let source = snapshot.startup_scene_source();
+    let source = snapshot.scene_source();
     admit_adapter_candidate(plan, source)
         .complete_startup()
         .unwrap()

@@ -11,9 +11,9 @@ use std::{
 use crate::{
     fs::{ContentDigest, FsError},
     project_workflow::{
-        __private::ProjectExportProductAgreement, ProjectExportBinaryTarget,
-        ProjectExportBuildError, ProjectExportMemberKind, ProjectExportMemberReceipt,
-        ProjectExportPlanReceipt, StartupContentClosureReceipt, StartupContentMemberKind,
+        __private::ProjectExportProductAgreement, ProjectContentMemberKind,
+        ProjectExportBinaryTarget, ProjectExportBuildError, ProjectExportMemberKind,
+        ProjectExportMemberReceipt, ProjectExportPlanReceipt, StartupContentClosureReceipt,
     },
 };
 use serde_json::Value;
@@ -263,9 +263,7 @@ fn export_bundle_digest(
         .iter()
         .find(|member| {
             member.kind()
-                == ProjectExportMemberKind::StartupContent(
-                    StartupContentMemberKind::AuthoringSchemaBundle,
-                )
+                == ProjectExportMemberKind::Content(ProjectContentMemberKind::AuthoringSchemaBundle)
         })
         .map(ProjectExportMemberReceipt::digest)
         .ok_or(ExportAcceptanceError::MissingAuthoringSchemaBundle)
@@ -277,8 +275,8 @@ fn startup_bundle_digest(
     startup_content
         .members()
         .iter()
-        .find(|member| member.kind() == StartupContentMemberKind::AuthoringSchemaBundle)
-        .map(crate::project_workflow::StartupContentMemberReceipt::digest)
+        .find(|member| member.kind() == ProjectContentMemberKind::AuthoringSchemaBundle)
+        .map(crate::project_workflow::ProjectContentMemberReceipt::digest)
         .ok_or(ExportAcceptanceError::MissingAuthoringSchemaBundle)
 }
 
