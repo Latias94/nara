@@ -11,14 +11,23 @@ use std::{
 use serde_json::Value as JsonValue;
 use toml::Value as TomlValue;
 
-const EXPECTED_DEPENDENCIES: [&str; 9] = [
+// The exact dev-only workflow facade is validated separately from direct module consumption.
+const EXPECTED_DEPENDENCIES: [&str; 17] = [
     "dependencies.nara_reflect",
     "dependencies.nara_scene",
     "dev-dependencies.bevy_ecs",
     "dev-dependencies.nara_app",
     "dev-dependencies.nara_asset",
+    "dev-dependencies.nara_core",
     "dev-dependencies.nara_ecs",
+    "dev-dependencies.nara_fs",
+    "dev-dependencies.nara_hierarchy",
     "dev-dependencies.nara_identity",
+    "dev-dependencies.nara_image",
+    "dev-dependencies.nara_render",
+    "dev-dependencies.nara_tasks",
+    "dev-dependencies.nara_tooling",
+    "dev-dependencies.nara_transform",
     "dev-dependencies.ron",
     "dev-dependencies.serde",
 ];
@@ -219,6 +228,42 @@ fn manifest_boundary_rejects_product_and_workspace_shortcuts() {
 }
 
 #[test]
+fn workflow_facade_is_dev_only_and_has_exact_headless_features() {
+    let source = fs::read_to_string(module_consumer_root().join("Cargo.toml")).unwrap();
+    let manifest = toml::from_str::<TomlValue>(&source).unwrap();
+    assert_manifest_boundary(&manifest).unwrap();
+
+    let mut runtime_facade = manifest.clone();
+    let facade = runtime_facade["dev-dependencies"]
+        .as_table_mut()
+        .unwrap()
+        .remove("nara_engine")
+        .unwrap();
+    runtime_facade["dependencies"]
+        .as_table_mut()
+        .unwrap()
+        .insert("nara_engine".to_owned(), facade);
+    assert!(assert_manifest_boundary(&runtime_facade).is_err());
+
+    let mut desktop_facade = manifest.clone();
+    desktop_facade["dev-dependencies"]["nara_engine"]["features"]
+        .as_array_mut()
+        .unwrap()
+        .push(TomlValue::String("desktop-winit".to_owned()));
+    assert!(assert_manifest_boundary(&desktop_facade).is_err());
+
+    let mut default_features = manifest.clone();
+    default_features["dev-dependencies"]["nara_engine"]["default-features"] =
+        TomlValue::Boolean(true);
+    assert!(assert_manifest_boundary(&default_features).is_err());
+
+    let mut wrong_path = manifest;
+    wrong_path["dev-dependencies"]["nara_engine"]["path"] =
+        TomlValue::String("../../../reference-game".to_owned());
+    assert!(assert_manifest_boundary(&wrong_path).is_err());
+}
+
+#[test]
 fn filesystem_manifest_boundary_rejects_facade_workspace_and_private_shortcuts() {
     let source = fs::read_to_string(module_consumer_root().join("fs-consumer/Cargo.toml")).unwrap();
     let manifest = toml::from_str::<TomlValue>(&source).unwrap();
@@ -395,16 +440,51 @@ fn filesystem_module_documentation_names_the_bounded_public_contract() {
 }
 
 fn assert_manifest_boundary(manifest: &TomlValue) -> Result<(), String> {
+    let expected_facade = dependency_table([
+        ("package", TomlValue::String("nara".to_owned())),
+        ("path", TomlValue::String("../../..".to_owned())),
+        ("default-features", TomlValue::Boolean(false)),
+        (
+            "features",
+            TomlValue::Array(vec![
+                TomlValue::String("tooling".to_owned()),
+                TomlValue::String("project-workflow".to_owned()),
+            ]),
+        ),
+    ]);
+    if manifest
+        .get("dev-dependencies")
+        .and_then(|dependencies| dependencies.get("nara_engine"))
+        != Some(&expected_facade)
+    {
+        return Err(
+            "the dev-only workflow facade must retain its exact package, path and features"
+                .to_owned(),
+        );
+    }
+    let mut direct_modules = manifest.clone();
+    direct_modules["dev-dependencies"]
+        .as_table_mut()
+        .expect("the validated workflow facade belongs to the dev-dependencies table")
+        .remove("nara_engine");
     assert_direct_manifest_boundary(
-        manifest,
+        &direct_modules,
         &EXPECTED_DEPENDENCIES,
         &[
             "nara_scene",
             "nara_reflect",
             "nara_app",
             "nara_asset",
+            "nara_core",
             "nara_ecs",
+            "nara_fs",
+            "nara_hierarchy",
             "nara_identity",
+            "nara_image",
+            "nara_render",
+            "nara_tasks",
+            "nara_tooling",
+            "nara_transform",
         ],
     )
 }

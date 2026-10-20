@@ -101,20 +101,37 @@ fn standalone_editor_has_no_project_crate_dependency() {
         .expect("standalone editor metadata must contain the editor package");
     assert_eq!(package["name"], "nara-editor");
 
-    for dependency in package["dependencies"]
+    let local_dependencies = package["dependencies"]
         .as_array()
         .expect("package dependencies must be an array")
         .iter()
         .filter(|dependency| dependency["kind"].is_null())
-    {
-        let Some(path) = dependency["path"].as_str() else {
-            continue;
+        .filter(|dependency| dependency["path"].is_string())
+        .collect::<Vec<_>>();
+    assert_eq!(local_dependencies.len(), 2, "{local_dependencies:#?}");
+    for dependency in local_dependencies {
+        assert!(dependency["rename"].is_null(), "{dependency:#?}");
+        assert!(dependency["target"].is_null(), "{dependency:#?}");
+        assert_eq!(dependency["optional"], false, "{dependency:#?}");
+        let expected_path = match dependency["name"].as_str() {
+            Some("nara") => {
+                assert_eq!(dependency["uses_default_features"], false);
+                repository.to_owned()
+            }
+            Some("nara_render_wgpu") => {
+                assert_eq!(dependency["features"], serde_json::json!(["editor-imgui"]));
+                repository.join("crates/nara_render_wgpu")
+            }
+            _ => {
+                panic!("the standalone editor has an unreviewed local dependency: {dependency:#?}")
+            }
         };
-        assert_eq!(dependency["name"], "nara", "{dependency:#?}");
         assert_eq!(
-            Path::new(path).canonicalize().unwrap(),
-            repository.canonicalize().unwrap(),
-            "the standalone editor may depend only on the public root package"
+            Path::new(dependency["path"].as_str().unwrap())
+                .canonicalize()
+                .unwrap(),
+            expected_path.canonicalize().unwrap(),
+            "the standalone editor must use the exact root or private renderer adapter path"
         );
     }
 }

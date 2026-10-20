@@ -116,6 +116,7 @@ fn accepted_scene_revision_publishes_one_matching_preview_candidate() {
 
 #[test]
 fn persistence_authority_surface_is_opaque_and_linear() {
+    static_assertions::assert_not_impl_any!(EditorWorkspace: nara_ecs::Resource);
     let tests = trybuild::TestCases::new();
     tests.compile_fail("tests/ui/editor_persistence/authority_not_clone.rs");
     tests.compile_fail("tests/ui/editor_persistence/checkpoint_not_clone.rs");
@@ -123,7 +124,6 @@ fn persistence_authority_surface_is_opaque_and_linear() {
     tests.compile_fail("tests/ui/editor_persistence/replace_receipt_not_clone.rs");
     tests.compile_fail("tests/ui/editor_persistence/receiptless_commit.rs");
     tests.compile_fail("tests/ui/editor_persistence/workspace_saved_state_is_private.rs");
-    tests.compile_fail("tests/ui/editor_persistence/workspace_not_resource.rs");
 }
 
 #[test]
