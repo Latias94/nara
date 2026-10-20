@@ -1,6 +1,10 @@
 use crate::texture::{
     WgpuCachedImageView, WgpuCachedTextureBinding, WgpuSpriteTextureCache, WgpuTextureError,
 };
+use crate::{
+    allocation::{checked_allocation, create_buffer_with_data},
+    budget::MAX_INSTANCE_BUFFER_BYTES_PER_SCOPE,
+};
 use bytemuck::{Pod, Zeroable};
 use nara_image::PreparedImageSnapshot;
 use nara_material::{AlphaMode2d, Material2dDefinition, SamplerDescriptor};
@@ -8,9 +12,6 @@ use nara_render::{RenderResourceKey, ViewportRect};
 #[cfg(feature = "ui-submitter")]
 use nara_ui_render::{UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot};
 use thiserror::Error;
-use wgpu::util::DeviceExt;
-
-use crate::budget::MAX_INSTANCE_BUFFER_BYTES_PER_SCOPE;
 
 const VERTICES_PER_QUAD: u32 = 6;
 pub(crate) const WGPU_QUAD_SHAPE_PLAIN: u32 = 0;
@@ -141,31 +142,35 @@ pub(crate) struct WgpuQuadBatchBuffer {
     logical_bytes: u64,
 }
 
-pub(crate) fn create_material_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("nara_material_2d_bind_group_layout"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: wgpu::BufferSize::new(16),
+pub(crate) fn create_material_bind_group_layout(
+    device: &wgpu::Device,
+) -> Result<wgpu::BindGroupLayout, WgpuTextureError> {
+    checked_allocation(device, "nara_material_2d_bind_group_layout", || {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("nara_material_2d_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(16),
+                    },
+                    count: None,
                 },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
                 },
-                count: None,
-            },
-        ],
+            ],
+        })
     })
 }
 
@@ -193,27 +198,29 @@ pub(crate) struct WgpuQuadInstanceBudgetError {
 
 pub(crate) fn create_quad_texture_bind_group_layout(
     device: &wgpu::Device,
-) -> wgpu::BindGroupLayout {
-    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("nara_wgpu_quad_texture_bind_group_layout"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
+) -> Result<wgpu::BindGroupLayout, WgpuTextureError> {
+    checked_allocation(device, "nara_wgpu_quad_texture_bind_group_layout", || {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("nara_wgpu_quad_texture_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
                 },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            },
-        ],
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        })
     })
 }
 
@@ -346,20 +353,23 @@ pub(crate) fn create_quad_batch_buffers(
                 &batch.texture,
                 frame_index,
             )?;
-            let (material_bind_group, material_image) =
-                if let Some(material) = &batch.material_extension {
-                    let view = texture_cache.prepared_image_view(
-                        device,
-                        queue,
-                        &material.texture,
-                        frame_index,
-                    )?;
-                    let parameters = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("nara_material_2d_parameters"),
-                        contents: bytemuck::cast_slice(&material.parameters),
-                        usage: wgpu::BufferUsages::UNIFORM,
-                    });
-                    let binding = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            let (material_bind_group, material_image) = if let Some(material) =
+                &batch.material_extension
+            {
+                let view = texture_cache.prepared_image_view(
+                    device,
+                    queue,
+                    &material.texture,
+                    frame_index,
+                )?;
+                let parameters = create_buffer_with_data(
+                    device,
+                    "nara_material_2d_parameters",
+                    bytemuck::cast_slice(&material.parameters),
+                    wgpu::BufferUsages::UNIFORM,
+                )?;
+                let binding = checked_allocation(device, "nara_material_2d_bind_group", || {
+                    device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("nara_material_2d_bind_group"),
                         layout: material_layout,
                         entries: &[
@@ -372,18 +382,20 @@ pub(crate) fn create_quad_batch_buffers(
                                 resource: wgpu::BindingResource::TextureView(&view.view),
                             },
                         ],
-                    });
-                    (Some(binding), Some(view))
-                } else {
-                    (None, None)
-                };
+                    })
+                })?;
+                (Some(binding), Some(view))
+            } else {
+                (None, None)
+            };
             let instance_count = saturating_u32(batch.instances.len());
             let logical_bytes = quad_instance_byte_len(batch.instances.len());
-            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("nara_wgpu_quad_instances"),
-                contents: bytemuck::cast_slice(&batch.instances),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+            let buffer = create_buffer_with_data(
+                device,
+                "nara_wgpu_quad_instances",
+                bytemuck::cast_slice(&batch.instances),
+                wgpu::BufferUsages::VERTEX,
+            )?;
 
             Ok(WgpuQuadBatchBuffer {
                 buffer,

@@ -1538,6 +1538,9 @@ impl WgpuRenderBackend {
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         {
             let lowered = payload.lower_draw(target, viewport, view_index)?;
+            #[cfg(test)]
+            let batches = crate::allocation::take_test_batches().unwrap_or(lowered.batches);
+            #[cfg(not(test))]
             let batches = lowered.batches;
             #[cfg(feature = "ui-submitter")]
             let ui_packets = lowered.ui_packets;
@@ -1586,17 +1589,7 @@ impl WgpuRenderBackend {
                 &mut self.quad_textures,
                 frame_index,
             )
-            .map_err(|error| {
-                if error.is_deferred() {
-                    WgpuRenderError::UploadDeferred {
-                        message: error.to_string(),
-                    }
-                } else {
-                    WgpuRenderError::ContentRejected {
-                        message: error.to_string(),
-                    }
-                }
-            })?;
+            .map_err(WgpuRenderError::from)?;
             Ok(PreparedSubmitterDraw {
                 pipelines,
                 buffers,
@@ -1646,7 +1639,7 @@ impl WgpuRenderBackend {
             .device
             .as_ref()
             .ok_or(WgpuRenderError::BackendNotReady)?;
-        let layout = create_quad_texture_bind_group_layout(device);
+        let layout = create_quad_texture_bind_group_layout(device)?;
         self.quad_texture_bind_group_layout = Some(layout.clone());
         Ok(layout)
     }
@@ -1662,7 +1655,7 @@ impl WgpuRenderBackend {
             .device
             .as_ref()
             .ok_or(WgpuRenderError::BackendNotReady)?;
-        let layout = create_material_bind_group_layout(device);
+        let layout = create_material_bind_group_layout(device)?;
         self.quad_material_bind_group_layout = Some(layout.clone());
         Ok(layout)
     }
@@ -2359,7 +2352,7 @@ mod tests {
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
                 .expect("texture-cache isolation requires a wgpu device");
-        let layout = create_quad_texture_bind_group_layout(&device);
+        let layout = create_quad_texture_bind_group_layout(&device).unwrap();
         let predecessor_key = WgpuQuadMaterialKey {
             texture: crate::quad::WgpuQuadTextureKey::Fallback,
             sampler: SamplerDescriptor::default(),

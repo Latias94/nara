@@ -3,6 +3,8 @@
 #[cfg(all(feature = "ui-submitter", test))]
 use std::sync::Arc;
 
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+mod allocation;
 mod backend;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 mod budget;

@@ -1,0 +1,117 @@
+use crate::texture::WgpuTextureError;
+
+/// Checks a single resource operation before its returned handle can be consumed.
+pub(crate) fn checked_allocation<T>(
+    device: &wgpu::Device,
+    label: &'static str,
+    create: impl FnOnce() -> T,
+) -> Result<T, WgpuTextureError> {
+    let allocation_scope = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+    let validation_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let resource = create();
+    let validation_error = pollster::block_on(validation_scope.pop());
+    let allocation_error =
+        pollster::block_on(allocation_scope.pop()).map(|error| error.to_string());
+    #[cfg(test)]
+    let allocation_error = allocation_error.or_else(|| take_test_failure(label));
+    // OOM can also invalidate a returned handle. Keep it retryable even when validation fails.
+    if let Some(message) = allocation_error {
+        return Err(WgpuTextureError::AllocationFailed { label, message });
+    }
+    if let Some(error) = validation_error {
+        return Err(WgpuTextureError::ResourceRejected {
+            label,
+            message: error.to_string(),
+        });
+    }
+    Ok(resource)
+}
+
+/// Unlike DeviceExt::create_buffer_init, allocation is checked before accessing the mapping.
+pub(crate) fn create_buffer_with_data(
+    device: &wgpu::Device,
+    label: &'static str,
+    contents: &[u8],
+    usage: wgpu::BufferUsages,
+) -> Result<wgpu::Buffer, WgpuTextureError> {
+    let size = u64::try_from(contents.len())
+        .ok()
+        .and_then(|size| size.checked_add(wgpu::COPY_BUFFER_ALIGNMENT - 1))
+        .map(|size| size & !(wgpu::COPY_BUFFER_ALIGNMENT - 1))
+        .ok_or_else(|| WgpuTextureError::ResourceRejected {
+            label,
+            message: "buffer size cannot be represented".to_owned(),
+        })?;
+    let buffer = checked_allocation(device, label, || {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size,
+            usage,
+            mapped_at_creation: !contents.is_empty(),
+        })
+    })?;
+    if !contents.is_empty() {
+        {
+            let mut mapping = buffer.get_mapped_range_mut(..).map_err(|error| {
+                WgpuTextureError::ResourceRejected {
+                    label,
+                    message: format!("initial buffer mapping failed: {error}"),
+                }
+            })?;
+            mapping.slice(..contents.len()).copy_from_slice(contents);
+        }
+        buffer.unmap();
+    }
+    Ok(buffer)
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static ALLOCATION_FAILURE: std::cell::Cell<Option<&'static str>> = const {
+        std::cell::Cell::new(None)
+    };
+}
+
+#[cfg(test)]
+fn take_test_failure(label: &'static str) -> Option<String> {
+    ALLOCATION_FAILURE.with(|failure| {
+        if failure.get() == Some(label) {
+            failure.set(None);
+            Some("injected allocation failure".to_owned())
+        } else {
+            None
+        }
+    })
+}
+
+#[cfg(test)]
+struct AllocationFailureGuard;
+
+#[cfg(test)]
+impl AllocationFailureGuard {
+    fn at(label: &'static str) -> Self {
+        ALLOCATION_FAILURE.with(|failure| {
+            assert!(failure.replace(Some(label)).is_none());
+        });
+        Self
+    }
+
+    fn was_consumed(&self) -> bool {
+        ALLOCATION_FAILURE.with(|failure| failure.get().is_none())
+    }
+}
+
+#[cfg(test)]
+impl Drop for AllocationFailureGuard {
+    fn drop(&mut self) {
+        ALLOCATION_FAILURE.with(|failure| failure.set(None));
+    }
+}
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+pub(crate) fn take_test_batches() -> Option<Vec<crate::quad::WgpuQuadBatch>> {
+    tests::take_batches()
+}

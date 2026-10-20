@@ -83,8 +83,8 @@ fn auxiliary_image_extent_admission_rejects_device_excess_and_recovers() {
 fn image_extent_admission_readback(auxiliary: bool) {
     let (pixels, ()) = render_to_rgba(|device, queue, format, output_view, encoder| {
         assert_eq!(device.limits().max_texture_dimension_2d, 8_192);
-        let texture_layout = create_quad_texture_bind_group_layout(device);
-        let material_layout = create_material_bind_group_layout(device);
+        let texture_layout = create_quad_texture_bind_group_layout(device)?;
+        let material_layout = create_material_bind_group_layout(device)?;
         let mut cache = WgpuSpriteTextureCache::default();
         cache.begin_frame(1);
         for width in [8_192, 8_193, 16_384] {
@@ -256,8 +256,8 @@ fn exact_image_versions_render_together_and_repeat_without_reupload() {
         .collect::<Vec<_>>();
     let (pixels, (first, repeated)) =
         render_to_rgba(|device, queue, format, output_view, encoder| {
-            let texture_layout = create_quad_texture_bind_group_layout(device);
-            let material_layout = create_material_bind_group_layout(device);
+            let texture_layout = create_quad_texture_bind_group_layout(device)?;
+            let material_layout = create_material_bind_group_layout(device)?;
             let pipelines = crate::required_quad_pipeline_keys(&batches, format)
                 .into_iter()
                 .map(|key| {
@@ -339,8 +339,8 @@ pub(crate) fn render_batches_to_rgba(
     batches: &[WgpuQuadBatch],
 ) -> Result<Vec<u8>, crate::WgpuRenderError> {
     render_to_rgba(|device, queue, format, output_view, encoder| {
-        let texture_layout = create_quad_texture_bind_group_layout(&device);
-        let material_layout = create_material_bind_group_layout(&device);
+        let texture_layout = create_quad_texture_bind_group_layout(&device)?;
+        let material_layout = create_material_bind_group_layout(&device)?;
         let pipelines = crate::required_quad_pipeline_keys(batches, format)
             .into_iter()
             .map(|key| {

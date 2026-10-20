@@ -12,7 +12,10 @@ use nara_render::{RenderResourceKey, RenderResourceKind, RenderResourceSnapshot}
 use nara_ui_render::{UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot};
 use thiserror::Error;
 
-use crate::quad::{WgpuQuadMaterialKey, WgpuQuadTexture, WgpuQuadTextureKey};
+use crate::{
+    allocation::checked_allocation,
+    quad::{WgpuQuadMaterialKey, WgpuQuadTexture, WgpuQuadTextureKey},
+};
 
 const RGBA8_BYTES_PER_PIXEL: u32 = 4;
 #[cfg(feature = "ui-submitter")]
@@ -178,7 +181,7 @@ impl WgpuSpriteTextureCache {
                     &view,
                     material.sampler,
                     frame_index,
-                );
+                )?;
                 binding.image = image.clone();
                 let bindings = self.bindings.entry(material).or_default();
                 let index = bindings.len();
@@ -675,8 +678,13 @@ pub(crate) enum WgpuTextureError {
         height: u32,
         maximum: u32,
     },
-    #[error("texture {label} allocation failed: {message}")]
-    TextureAllocationFailed {
+    #[error("GPU resource {label} allocation failed: {message}")]
+    AllocationFailed {
+        label: &'static str,
+        message: String,
+    },
+    #[error("GPU resource {label} was rejected: {message}")]
+    ResourceRejected {
         label: &'static str,
         message: String,
     },
@@ -757,7 +765,7 @@ impl WgpuTextureError {
             Self::FallbackUploadDeferred { .. }
                 | Self::ImageUploadDeferred { .. }
                 | Self::ImageResidencyDeferred { .. }
-                | Self::TextureAllocationFailed { .. }
+                | Self::AllocationFailed { .. }
         ) {
             return true;
         }
@@ -766,6 +774,20 @@ impl WgpuTextureError {
             return true;
         }
         false
+    }
+}
+
+impl From<WgpuTextureError> for crate::WgpuRenderError {
+    fn from(error: WgpuTextureError) -> Self {
+        if error.is_deferred() {
+            Self::UploadDeferred {
+                message: error.to_string(),
+            }
+        } else {
+            Self::ContentRejected {
+                message: error.to_string(),
+            }
+        }
     }
 }
 
@@ -830,47 +852,46 @@ fn create_texture_resource(
     bytes_per_pixel: u32,
     format: wgpu::TextureFormat,
 ) -> Result<WgpuTextureResource, WgpuTextureError> {
-    let allocation_scope = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some(label),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
-    if let Some(error) = pollster::block_on(allocation_scope.pop()) {
-        return Err(WgpuTextureError::TextureAllocationFailed {
-            label,
-            message: error.to_string(),
-        });
-    }
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: &texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        pixels,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(width.saturating_mul(bytes_per_pixel)),
-            rows_per_image: Some(height),
-        },
-        wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let texture = checked_allocation(device, label, || {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        })
+    })?;
+    checked_allocation(device, "nara_wgpu_texture_upload", || {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width.saturating_mul(bytes_per_pixel)),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        )
+    })?;
+    let view = checked_allocation(device, "nara_wgpu_texture_view", || {
+        texture.create_view(&wgpu::TextureViewDescriptor::default())
+    })?;
     Ok(WgpuTextureResource {
         _texture: texture,
         view,
@@ -885,37 +906,41 @@ fn create_texture_binding(
     view: &wgpu::TextureView,
     sampler_descriptor: SamplerDescriptor,
     last_used_frame: u64,
-) -> WgpuTextureBinding {
-    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        label: Some("nara_wgpu_quad_sampler"),
-        address_mode_u: address_mode(sampler_descriptor.address_mode_u),
-        address_mode_v: address_mode(sampler_descriptor.address_mode_v),
-        address_mode_w: wgpu::AddressMode::ClampToEdge,
-        mag_filter: filter_mode(sampler_descriptor.mag_filter),
-        min_filter: filter_mode(sampler_descriptor.min_filter),
-        mipmap_filter: mipmap_filter_mode(sampler_descriptor.mipmap_filter),
-        ..Default::default()
-    });
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some(label),
-        layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(&sampler),
-            },
-        ],
-    });
-    WgpuTextureBinding {
+) -> Result<WgpuTextureBinding, WgpuTextureError> {
+    let sampler = checked_allocation(device, "nara_wgpu_quad_sampler", || {
+        device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("nara_wgpu_quad_sampler"),
+            address_mode_u: address_mode(sampler_descriptor.address_mode_u),
+            address_mode_v: address_mode(sampler_descriptor.address_mode_v),
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: filter_mode(sampler_descriptor.mag_filter),
+            min_filter: filter_mode(sampler_descriptor.min_filter),
+            mipmap_filter: mipmap_filter_mode(sampler_descriptor.mipmap_filter),
+            ..Default::default()
+        })
+    })?;
+    let bind_group = checked_allocation(device, label, || {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(label),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        })
+    })?;
+    Ok(WgpuTextureBinding {
         bind_group,
         _sampler: sampler,
         last_used_frame,
         image: None,
-    }
+    })
 }
 
 fn unused_past_grace(frame_index: u64, last_used_frame: u64, grace_frames: u64) -> bool {
@@ -1103,7 +1128,7 @@ mod tests {
     fn image_residency_capacity_preserves_existing_versions_and_counts_actual_holders() {
         let [first, second] = crate::readback_tests::two_image_versions();
         crate::readback_tests::render_to_rgba(|device, queue, _, _, _| {
-            let layout = crate::quad::create_quad_texture_bind_group_layout(device);
+            let layout = crate::quad::create_quad_texture_bind_group_layout(device)?;
             for limits in [
                 WgpuImageResidencyLimits {
                     versions: 1,
@@ -1176,7 +1201,7 @@ mod tests {
     fn clearing_image_cache_retires_namespace_without_forgetting_live_allocations() {
         let [snapshot, _] = crate::readback_tests::two_image_versions();
         crate::readback_tests::render_to_rgba(|device, queue, _, _, _| {
-            let layout = crate::quad::create_quad_texture_bind_group_layout(device);
+            let layout = crate::quad::create_quad_texture_bind_group_layout(device)?;
             let material = WgpuQuadMaterialKey {
                 texture: WgpuQuadTextureKey::Image(snapshot.identity().key()),
                 sampler: SamplerDescriptor::NEAREST_CLAMP,
@@ -1237,7 +1262,7 @@ mod tests {
     #[test]
     fn fallback_binding_eviction_does_not_count_as_an_image_binding() {
         crate::readback_tests::render_to_rgba(|device, queue, _, _, _| {
-            let layout = crate::quad::create_quad_texture_bind_group_layout(device);
+            let layout = crate::quad::create_quad_texture_bind_group_layout(device)?;
             let material = WgpuQuadMaterialKey {
                 texture: WgpuQuadTextureKey::Fallback,
                 sampler: SamplerDescriptor::NEAREST_CLAMP,
