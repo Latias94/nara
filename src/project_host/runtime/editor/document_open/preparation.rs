@@ -1,0 +1,236 @@
+//! Owned immutable reads and Host binding; no Workspace or predecessor-close authority.
+
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
+use super::*;
+use crate::project_host::authoring::OwnedAuthoringDocumentRequest;
+use nara_tasks::{
+    TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest, TaskTerminal,
+};
+
+pub(in crate::project_host::runtime::editor) struct DocumentOpenPreparation {
+    task: Option<TaskHandle<Result<PreparedAuthoringDocumentOpen, &'static str>>>,
+    returned: Arc<AtomicBool>,
+}
+
+impl DocumentOpenPreparation {
+    pub(super) fn start(
+        request: OwnedAuthoringDocumentRequest,
+        custody: persistence::HostCustody,
+        pools: &TaskPools,
+        #[cfg(test)] mut gate: Option<OpenTestGate>,
+    ) -> Self {
+        let returned = Arc::new(AtomicBool::new(false));
+        let input = PreparationInput {
+            request: Some(request),
+            custody,
+            _returned: PhysicalReturn(Arc::clone(&returned)),
+        };
+        let task = pools
+            .spawn(
+                TaskPoolKind::Io,
+                TaskSpawnRequest::new(0, TaskDomainKey::new(0x6272_6f77_7365_726f)),
+                move |cancellation| {
+                    // The complete request and its capabilities retire before the returned flag.
+                    let mut input = input;
+                    #[cfg(test)]
+                    wait_at(&mut gate, OpenTestPhase::BeforeRead);
+                    if cancellation.is_cancelled() {
+                        return Err("project.editor.document-open-cancelled");
+                    }
+                    let request = input.request.take().expect("Open prepares once");
+                    let root = request.project_root();
+                    let admitted = request.prepare().map_err(|error| error.code())?;
+                    #[cfg(test)]
+                    wait_at(&mut gate, OpenTestPhase::BeforeBinding);
+                    if cancellation.is_cancelled() {
+                        return Err("project.editor.document-open-cancelled");
+                    }
+                    let prepared = bind_document_open(&root, &input.custody, admitted)?;
+                    #[cfg(test)]
+                    wait_at(&mut gate, OpenTestPhase::AfterPreparation);
+                    if cancellation.is_cancelled() {
+                        return Err("project.editor.document-open-cancelled");
+                    }
+                    Ok(prepared)
+                },
+            )
+            .into_handle()
+            .ok();
+        Self { task, returned }
+    }
+
+    pub(super) fn poll(&mut self) -> Option<Result<PreparedAuthoringDocumentOpen, &'static str>> {
+        if !self.returned.load(Ordering::Acquire) {
+            return None;
+        }
+        Some(match self.task.as_mut() {
+            None => Err("project.editor.document-open-preparation-unavailable"),
+            Some(task) => match task.try_take()? {
+                TaskTerminal::Completed(result) => result,
+                TaskTerminal::Cancelled(_) | TaskTerminal::Failed(_) => {
+                    Err("project.editor.document-open-preparation-unavailable")
+                }
+            },
+        })
+    }
+
+    pub(super) fn cancel(&self) {
+        if let Some(task) = &self.task {
+            task.cancel();
+        }
+    }
+}
+
+impl Drop for DocumentOpenPreparation {
+    fn drop(&mut self) {
+        self.cancel();
+    }
+}
+
+struct PhysicalReturn(Arc<AtomicBool>);
+impl Drop for PhysicalReturn {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+struct PreparationInput {
+    request: Option<OwnedAuthoringDocumentRequest>,
+    custody: persistence::HostCustody,
+    _returned: PhysicalReturn,
+}
+
+fn bind_document_open(
+    root: &DirectoryCapability,
+    custody: &persistence::HostCustody,
+    admitted: AdmittedAuthoringDocument,
+) -> Result<PreparedAuthoringDocumentOpen, &'static str> {
+    let path: Arc<str> = Arc::from(admitted.source().relative_path());
+    let digest = editor_document_digest(admitted.source().digest());
+    let (document, host) = match admitted {
+        AdmittedAuthoringDocument::Scene { source, document } => {
+            let (host, observed) = ScenePersistenceHost::bind_authoring_source(
+                root,
+                source.relative_path(),
+                source.identity(),
+                source.digest(),
+            )
+            .map_err(document_open_failure_code)?;
+            if observed != digest {
+                return Err("project.editor.document-persistence-digest-mismatch");
+            }
+            let host = custody
+                .retain_scene(host)
+                .ok_or("project.editor.document-open-busy")?;
+            (
+                PreparedDocument::Scene {
+                    relative_path: path,
+                    digest,
+                    host: host.clone(),
+                    document,
+                },
+                PreparedHost::Scene(host),
+            )
+        }
+        AdmittedAuthoringDocument::Prefab { source, document } => {
+            let (host, observed) = PrefabPersistenceHost::bind_authoring_source(
+                root,
+                EditorDocumentSourceBinding::new(source.relative_path()),
+                source.identity(),
+                source.digest(),
+            )
+            .map_err(document_open_failure_code)?;
+            if observed != digest {
+                return Err("project.editor.document-persistence-digest-mismatch");
+            }
+            let host = custody
+                .retain_prefab(host)
+                .ok_or("project.editor.document-open-busy")?;
+            (
+                PreparedDocument::Prefab {
+                    relative_path: path,
+                    digest,
+                    host: host.clone(),
+                    document,
+                },
+                PreparedHost::Prefab(host),
+            )
+        }
+    };
+    Ok(PreparedAuthoringDocumentOpen {
+        document: Some(document),
+        host: Some(host),
+    })
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OpenTestPhase {
+    BeforeRead,
+    BeforeBinding,
+    AfterPreparation,
+}
+
+#[cfg(test)]
+pub(in crate::project_host::runtime::editor) struct OpenTestGate {
+    phase: OpenTestPhase,
+    started: std::sync::mpsc::Sender<()>,
+    release: std::sync::mpsc::Receiver<()>,
+}
+
+#[cfg(test)]
+pub(crate) struct OpenTestControl {
+    started: std::sync::mpsc::Receiver<()>,
+    release: Option<std::sync::mpsc::Sender<()>>,
+}
+
+#[cfg(test)]
+impl OpenTestControl {
+    pub(crate) fn wait_until_started(&self) -> bool {
+        self.started.recv_timeout(Duration::from_secs(5)).is_ok()
+    }
+    pub(crate) fn release(mut self) {
+        if let Some(release) = self.release.take() {
+            let _ = release.send(());
+        }
+    }
+}
+#[cfg(test)]
+impl Drop for OpenTestControl {
+    fn drop(&mut self) {
+        if let Some(release) = self.release.take() {
+            let _ = release.send(());
+        }
+    }
+}
+#[cfg(test)]
+impl OpenTestGate {
+    pub(super) fn new(phase: OpenTestPhase) -> (Self, OpenTestControl) {
+        let (started_tx, started) = std::sync::mpsc::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        (
+            Self {
+                phase,
+                started: started_tx,
+                release: release_rx,
+            },
+            OpenTestControl {
+                started,
+                release: Some(release),
+            },
+        )
+    }
+}
+#[cfg(test)]
+fn wait_at(gate: &mut Option<OpenTestGate>, phase: OpenTestPhase) {
+    if !gate.as_ref().is_some_and(|gate| gate.phase == phase) {
+        return;
+    }
+    let gate = gate.take().expect("matching Open gate exists");
+    let _ = gate.started.send(());
+    let _ = gate.release.recv();
+}

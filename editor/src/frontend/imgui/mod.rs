@@ -986,6 +986,7 @@ fn paint_hierarchy(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
 }
 
 fn paint_project_browser(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
+    project::show_document_open(ui, context.input.frame, context.actions);
     context.widgets.project.show_browser(
         ui,
         context.input.frame.project_browser(),
@@ -1034,7 +1035,9 @@ fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
             ui,
             context.input.frame.project_browser(),
             context.input.frame.image_import(),
-            !context.input.read_only,
+            !context.input.read_only
+                && !context.input.frame.document_open().has_pending_work()
+                && context.input.frame.document_open().result().is_none(),
             context.input.frame.image_import_work_pending(),
             context.actions,
         );

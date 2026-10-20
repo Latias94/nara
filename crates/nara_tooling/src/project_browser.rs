@@ -1,10 +1,15 @@
 //! UI-neutral Project Browser snapshots, local query state, and Host action seams.
 
+mod open;
 mod state;
 #[cfg(test)]
 mod tests;
 
 use std::sync::Arc;
+
+pub use open::{
+    EditorDocumentOpenId, EditorDocumentOpenPhase, EditorDocumentOpenResult, EditorDocumentOpenView,
+};
 
 pub use state::{
     EditorProjectBrowserKindFilter, EditorProjectBrowserLocalAction,
@@ -363,6 +368,8 @@ impl EditorProjectBrowserSnapshot {
 pub enum EditorProjectBrowserAction {
     Refresh,
     Open { relative_path: Arc<str> },
+    CancelOpen { request: EditorDocumentOpenId },
+    AcknowledgeOpen { request: EditorDocumentOpenId },
 }
 
 /// Typed Host result for one accepted Project Browser action.
@@ -370,8 +377,9 @@ pub enum EditorProjectBrowserAction {
 pub enum EditorProjectBrowserActionOutcome {
     RefreshRequested,
     RefreshAlreadyPending,
+    Preparing { request: EditorDocumentOpenId },
+    OpenCancellationRequested { request: EditorDocumentOpenId },
+    OpenAcknowledged { request: EditorDocumentOpenId },
     Activated { document: EditorDocumentId },
-    Opened { document: EditorDocumentId },
-    AwaitingClose { closing_document: EditorDocumentId },
     Rejected { code: &'static str },
 }

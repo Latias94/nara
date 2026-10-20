@@ -208,6 +208,24 @@ identity-bound post-publication content creates an `EditorPersistenceCommit`. Fa
 ambiguous publication leaves the saved checkpoint unchanged and the document dirty; ambiguous
 publication additionally blocks retry until explicit Reopen reconciliation.
 
+Browser document Open reserves one session-local request before immutable source reading,
+decode, classification and persistence-Host binding on the existing task pools. Dispatch reports
+Preparing, never Opened or AwaitingClose while that preparation is still pending. The exact
+request retains a terminal Opened/Rejected/Cancelled result until matching acknowledgement.
+Selection changes do not retarget it; a second Open is refused while preparation, replacement
+close or an unacknowledged result occupies the slot. Cancellation of preparation revokes its
+publication interest; physical worker return remains a separate admission/retirement condition.
+
+Prepared Open publication requires the exact current source-index incarnation and captured
+predecessor DocumentId, revision, source binding and schema basis. Recheck these pure owner facts
+before starting irreversible predecessor retirement, including after a dirty decision or Save.
+Preparation refusal or stale admission leaves the predecessor intact. Once physical close starts,
+its existing outcome is retained independently from the eventual Open result; failed later Open
+publication does not promise rollback of that close. Keep the bounded identity/digest read used
+to bind the prepared persistence Host. This admits an immutable observed source snapshot, not a
+claim that the external file remains unchanged until the user's later close decision. Future
+Save continues to detect conflicting external changes through the existing Host observation.
+
 Dirty Close and Exit require Save, Discard, or Cancel and retain the document until the selected
 persistence action plus runtime retirement complete. The Host issues a prompt token binding its
 session, prompt generation and exact decision document. Resolve consumes that token once;

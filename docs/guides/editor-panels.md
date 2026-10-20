@@ -112,6 +112,23 @@ new Play requests. If another valid consumer edits the document before publicati
 rejects the stale read rather than discarding that later edit. A completed read does not grant a
 panel permission to replace a document, and a task's cancellation is not an Opened result.
 
+Project Browser Open uses a separate request-specific projection. Dispatching
+`EditorProjectBrowserAction::Open` returns `Preparing { request }` while source reading and
+validation run. Observe `frame.document_open()` across drives; preparation can complete before
+the first subsequent frame. The terminal `EditorDocumentOpenResult` reports the exact request's
+Opened, Rejected or Cancelled outcome. Submit `AcknowledgeOpen { request }` to release that result
+before another Open. An already bound source returns Activated directly.
+
+During preparation, `CancelOpen { request }` revokes that exact request's publication interest.
+`OpenCancellationRequested` does not mean its filesystem call has physically returned; the
+Cancelling projection keeps its work slot until return. Once preparation enters AwaitingClose,
+use the existing dirty-close prompt's Save/Discard/Cancel. Refresh and selection can continue,
+but changed index or predecessor facts reject a stale candidate before destructive retirement.
+Copy the opaque request ID from the public result/projection; its numeric sequence alone is not
+request authority. Exact cancellation and acknowledgement remain valid after unrelated frame
+advances and cannot affect another Editor session. Keep driving pending work even when a panel
+does not request another presentation.
+
 Embedded shells pass the opaque move-only candidate returned by `frontend.show(...)` to that
 same frontend's `submit_and_drive(...)`. It cannot be cloned or converted to a plain action batch.
 Painting a newer candidate supersedes unfinished observations from the previous cycle; dropping

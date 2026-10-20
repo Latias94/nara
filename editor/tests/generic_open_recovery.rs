@@ -12,7 +12,7 @@ use std::{
 
 #[cfg(windows)]
 use nara::tooling::{
-    EditorDocumentKind, EditorProjectBrowserAction, EditorProjectBrowserDiagnosticPhase,
+    EditorDocumentKind, EditorDocumentOpenResult, EditorProjectBrowserAction,
     EditorProjectBrowserStatus, EditorProjectSourceKind,
 };
 use nara::{
@@ -87,12 +87,13 @@ fn standalone_project_browser_opens_external_documents_and_retains_last_good_ref
     assert!(initial.entry(".git/ignored.scene.json").is_none());
     assert!(initial.entry("target/ignored.prefab.json").is_none());
 
-    let opened_scene = dispatch(
+    let requested_scene = dispatch(
         &mut application,
         EditorAction::ProjectBrowser(EditorProjectBrowserAction::Open {
             relative_path: "worlds/external.scene.json".into(),
         }),
     );
+    let opened_scene = wait_document_open(&mut application, requested_scene);
     let external_scene_document = opened_scene
         .workspace()
         .documents
@@ -111,12 +112,13 @@ fn standalone_project_browser_opens_external_documents_and_retains_last_good_ref
         Some(external_scene_document)
     );
 
-    let opened_prefab = dispatch(
+    let requested_prefab = dispatch(
         &mut application,
         EditorAction::ProjectBrowser(EditorProjectBrowserAction::Open {
             relative_path: "blueprints/external.prefab.json".into(),
         }),
     );
+    let opened_prefab = wait_document_open(&mut application, requested_prefab);
     let external_scene = opened_prefab
         .workspace()
         .documents
@@ -178,12 +180,14 @@ fn standalone_project_browser_opens_external_documents_and_retains_last_good_ref
     let retained_entries = refreshed_snapshot.entries();
     let retained_diagnostics = refreshed_snapshot.diagnostics();
     let retained_usage = refreshed_snapshot.usage();
+    let manifest_path = project.root().join("nara.toml");
+    let mut changed_manifest = fs::read(&manifest_path).unwrap();
+    changed_manifest.extend_from_slice(b"\n# Changed after the project authority was admitted.\n");
+    fs::write(&manifest_path, changed_manifest).unwrap();
     let _ = dispatch(
         &mut application,
         EditorAction::ProjectBrowser(EditorProjectBrowserAction::Refresh),
     );
-    drive_browser_to_revalidation(&mut application);
-    project.replace_scripts_root();
     let failed = drive_browser_to_idle(&mut application);
     assert_eq!(
         failed.project_browser().status(),
@@ -198,6 +202,10 @@ fn standalone_project_browser_opens_external_documents_and_retains_last_good_ref
         .project_browser()
         .failure()
         .expect("the failed refresh must publish one safe diagnostic");
+    assert_eq!(
+        diagnostic.code(),
+        "project.source-index.manifest-lineage-changed"
+    );
     let root = project.root().display().to_string();
     for text in [
         diagnostic.code(),
@@ -580,6 +588,53 @@ fn current_frame(
 }
 
 #[cfg(windows)]
+fn wait_document_open(
+    application: &mut EditorApplication,
+    requested: std::sync::Arc<nara::tooling::EditorFrameModel>,
+) -> std::sync::Arc<nara::tooling::EditorFrameModel> {
+    // A fast worker can already have completed in submit_and_drive's first frame.
+    let request = requested
+        .document_open()
+        .pending()
+        .map(|(request, _, _)| request)
+        .or_else(|| {
+            requested
+                .document_open()
+                .result()
+                .map(|result| result.request())
+        })
+        .expect("Browser Open must expose its accepted request");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let frame = current_frame(application);
+        if let Some(result) = frame.document_open().result() {
+            assert_eq!(result.request(), request);
+            assert!(!frame.document_open().has_pending_work());
+            let EditorDocumentOpenResult::Opened { document, .. } = result else {
+                panic!("Browser Open did not publish the requested document: {result:?}");
+            };
+            assert!(frame.workspace().document(document).is_some());
+            let acknowledged = dispatch(
+                application,
+                EditorAction::ProjectBrowser(EditorProjectBrowserAction::AcknowledgeOpen {
+                    request,
+                }),
+            );
+            assert!(acknowledged.document_open().result().is_none());
+            assert!(!acknowledged.document_open().has_pending_work());
+            return acknowledged;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Browser Open did not settle: {:?}",
+            frame.document_open()
+        );
+        application.submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[cfg(windows)]
 fn drive_browser_to_settled(
     application: &mut EditorApplication,
 ) -> std::sync::Arc<nara::tooling::EditorFrameModel> {
@@ -595,35 +650,20 @@ fn drive_browser_to_settled(
 fn drive_browser_to_idle(
     application: &mut EditorApplication,
 ) -> std::sync::Arc<nara::tooling::EditorFrameModel> {
-    for _ in 0..128 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
         let frame = current_frame(application);
         if !frame.project_browser().has_pending_work() {
             return frame;
         }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the bounded Project Browser did not settle"
+        );
         let _ = application
             .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
     }
-    panic!("the bounded Project Browser did not settle")
-}
-
-#[cfg(windows)]
-fn drive_browser_to_revalidation(application: &mut EditorApplication) {
-    for _ in 0..128 {
-        let frame = current_frame(application);
-        if frame
-            .project_browser()
-            .scan_progress()
-            .is_some_and(|progress| {
-                progress.phase() == EditorProjectBrowserDiagnosticPhase::LineageRevalidation
-            })
-        {
-            return;
-        }
-        assert!(frame.project_browser().has_pending_work());
-        let _ = application
-            .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
-    }
-    panic!("the bounded Project Browser did not reach lineage revalidation")
 }
 
 #[cfg(windows)]
@@ -744,15 +784,6 @@ impl GuardedGenericProject {
 
     fn unbuildable_source(&self) -> PathBuf {
         self.root.join("src/lib.rs")
-    }
-
-    #[cfg(windows)]
-    fn replace_scripts_root(&self) {
-        let current = self.root.join("scripts");
-        let retained = self.root.join("scripts-before-refresh");
-        fs::rename(&current, &retained).unwrap();
-        fs::create_dir(&current).unwrap();
-        fs::write(current.join("replacement.rs"), "fn replacement() {}\n").unwrap();
     }
 }
 

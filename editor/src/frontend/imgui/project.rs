@@ -439,11 +439,16 @@ impl ImguiProjectPanels {
                 EditorProjectBrowserActionOutcome::RefreshAlreadyPending => {
                     "Project refresh is already running"
                 }
-                EditorProjectBrowserActionOutcome::Activated { .. } => "Project document activated",
-                EditorProjectBrowserActionOutcome::Opened { .. } => "Project document opened",
-                EditorProjectBrowserActionOutcome::AwaitingClose { .. } => {
-                    "Resolve the current dirty document before opening this source"
+                EditorProjectBrowserActionOutcome::Preparing { .. } => {
+                    "Preparing the project document"
                 }
+                EditorProjectBrowserActionOutcome::OpenCancellationRequested { .. } => {
+                    "Document preparation cancellation requested"
+                }
+                EditorProjectBrowserActionOutcome::OpenAcknowledged { .. } => {
+                    "Document result acknowledged"
+                }
+                EditorProjectBrowserActionOutcome::Activated { .. } => "Project document activated",
                 EditorProjectBrowserActionOutcome::Rejected { .. } => {
                     "Project Browser action was safely rejected"
                 }
@@ -604,6 +609,48 @@ pub(super) fn show_editor_status(
         if ui.button("Dismiss workspace") {
             actions.push(EditorAction::WorkspaceIntent(
                 EditorWorkspaceIntentAction::AcknowledgeResult,
+            ));
+        }
+    }
+}
+
+pub(super) fn show_document_open(
+    ui: &Ui,
+    frame: &EditorFrameModel,
+    actions: &mut Vec<EditorAction>,
+) {
+    use nara::tooling::{EditorDocumentOpenPhase, EditorDocumentOpenResult};
+    if let Some((request, path, phase)) = frame.document_open().pending() {
+        ui.text_wrapped(format!(
+            "{}: {path}",
+            match phase {
+                EditorDocumentOpenPhase::Preparing => "Preparing document",
+                EditorDocumentOpenPhase::AwaitingClose { .. } =>
+                    "Waiting for current document close",
+                EditorDocumentOpenPhase::Cancelling => "Cancelling document preparation",
+            }
+        ));
+        if phase == EditorDocumentOpenPhase::Preparing && ui.button("Cancel document preparation") {
+            actions.push(EditorAction::ProjectBrowser(
+                EditorProjectBrowserAction::CancelOpen { request },
+            ));
+        }
+    }
+    if let Some(result) = frame.document_open().result() {
+        match result {
+            EditorDocumentOpenResult::Opened { .. } => ui.text_wrapped("Project document opened"),
+            EditorDocumentOpenResult::Cancelled { .. } => {
+                ui.text_wrapped("Document preparation cancelled")
+            }
+            EditorDocumentOpenResult::Rejected { code, .. } => {
+                ui.text_wrapped(format!("Document opening rejected: {code}"))
+            }
+        }
+        if ui.button("Dismiss document result") {
+            actions.push(EditorAction::ProjectBrowser(
+                EditorProjectBrowserAction::AcknowledgeOpen {
+                    request: result.request(),
+                },
             ));
         }
     }
@@ -1016,6 +1063,9 @@ fn external_state(state: EditorExternalPlayState) -> &'static str {
         EditorExternalPlayState::CleanupIncomplete => "External cleanup incomplete",
     }
 }
+
+#[cfg(test)]
+mod browser_open_tests;
 
 #[cfg(test)]
 mod tests {

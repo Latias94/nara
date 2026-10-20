@@ -30,6 +30,8 @@ mod ui_preview;
 #[cfg(test)]
 pub(crate) use authoring_runtime::EditorImageRuntimeFailure;
 pub(crate) use document_open::EditorDocumentOpenRequestResult;
+#[cfg(test)]
+pub(crate) use document_open::preparation::OpenTestPhase;
 #[doc(hidden)]
 pub use external_play::{
     EditorExternalPlayReceiptError, SupervisedDesktopSourceAdmissionError,
@@ -736,7 +738,11 @@ pub struct EditorProjectSession {
     pending_content_refresh: Option<PendingProjectContentRefresh>,
     failed_content_refresh: Option<PendingProjectContentRefresh>,
     prefab_lane: Option<EditorPrefabPersistenceLane>,
-    pending_document_open: Option<document_open::PreparedAuthoringDocumentOpen>,
+    pending_document_open: Option<document_open::PendingDocumentOpen>,
+    next_document_open_request: u64,
+    document_open_result: Option<nara_tooling::EditorDocumentOpenResult>,
+    #[cfg(test)]
+    next_document_open_gate: Option<document_open::preparation::OpenTestGate>,
     project_browser: project_browser::EditorProjectBrowserHost,
     image_import: image_import::EditorImageImportHost,
     authoring_prefab_source_observations:
@@ -831,7 +837,11 @@ impl fmt::Debug for EditorProjectSession {
 
 impl Drop for EditorProjectSession {
     fn drop(&mut self) {
+        if let Some(project) = self.authoring_project_mut() {
+            project.cancel_source_index();
+        }
         self.image_import.cancel_pending();
+        self.cancel_pending_document_open();
     }
 }
 
@@ -845,6 +855,10 @@ impl EditorProjectSession {
     #[doc(hidden)]
     pub fn advance_close(&mut self) -> EditorProjectCloseProgress {
         self.closing = true;
+        self.cancel_pending_document_open();
+        if let Some(project) = self.authoring_project_mut() {
+            project.cancel_source_index();
+        }
         self.authoring_runtime.host_custody().close_admission();
         self.advance_persistence();
         if self.pending_persistence.is_some() {
@@ -963,6 +977,16 @@ impl EditorProjectSession {
         self.authoring_project_mut()
             .and_then(AuthoringProjectSessionSnapshot::request_source_index_refresh)
             .is_some()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn hold_next_source_index_scan(
+        &mut self,
+        phase: crate::project_host::authoring::ScanTestPhase,
+    ) -> crate::project_host::authoring::ScanTestControl {
+        self.authoring_project_mut()
+            .expect("source-index gate requires authoring project")
+            .hold_next_source_index_scan(phase)
     }
 
     pub(crate) fn editor_image_import_work_pending(&self) -> bool {
@@ -1318,6 +1342,10 @@ impl EditorProjectSession {
             failed_content_refresh: None,
             prefab_lane: None,
             pending_document_open: None,
+            next_document_open_request: 0,
+            document_open_result: None,
+            #[cfg(test)]
+            next_document_open_gate: None,
             project_browser: project_browser::EditorProjectBrowserHost::new(),
             image_import,
             authoring_prefab_source_observations: BTreeMap::new(),
@@ -1546,6 +1574,10 @@ impl EditorProjectSession {
             failed_content_refresh: None,
             prefab_lane: None,
             pending_document_open: None,
+            next_document_open_request: 0,
+            document_open_result: None,
+            #[cfg(test)]
+            next_document_open_gate: None,
             project_browser: project_browser::EditorProjectBrowserHost::new(),
             image_import: image_import::EditorImageImportHost::default(),
             authoring_prefab_source_observations: BTreeMap::new(),
@@ -2409,6 +2441,7 @@ impl EditorProjectSession {
             EditorWorkspaceIntent::Exit => {
                 let documents = self.workspace.__document_ids();
                 if documents.is_empty() {
+                    self.cancel_pending_document_open();
                     self.workspace_intent_result =
                         Some(EditorWorkspaceIntentResult::Applied { intent });
                     return EditorWorkspaceIntentRequestResult::Accepted;
@@ -2418,6 +2451,9 @@ impl EditorProjectSession {
                 PendingWorkspaceIntent::Exit(pending)
             }
         };
+        if self.document_open_preparing() {
+            self.cancel_pending_document_open();
+        }
         self.refresh_workspace_close_prompt(&mut pending);
         let should_retire = pending.phase() == EditorWorkspaceIntentPhase::RetiringRuntime;
         self.pending_workspace_intent = Some(pending);
@@ -2756,6 +2792,13 @@ impl EditorProjectSession {
         if pending.phase() != EditorWorkspaceIntentPhase::RetiringRuntime {
             return;
         }
+        if !self.admit_document_open_retirement() {
+            return;
+        }
+        let pending = self
+            .pending_workspace_intent
+            .as_ref()
+            .expect("admitted intent remains owned");
         let close_document = match pending {
             PendingWorkspaceIntent::CloseDocument(pending) => Some(pending.document),
             PendingWorkspaceIntent::Exit(_) => None,

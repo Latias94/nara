@@ -131,11 +131,6 @@ impl AuthoringSourceIndexAttempt {
         ProjectSourceIndexProgress::new(phase, self.budget.usage())
     }
 
-    #[cfg(test)]
-    pub(super) fn is_revalidating(&self) -> bool {
-        matches!(&self.phase, AttemptPhase::Revalidating(_))
-    }
-
     fn normalize_declared_roots(&mut self) -> Result<(), ProjectSourceIndexFailure> {
         let mut grouped = BTreeMap::<String, BTreeSet<ProjectSourceRootRole>>::new();
         let mut folded = BTreeMap::<String, String>::new();

@@ -141,7 +141,10 @@ impl EditorProjectSession {
         base_revision: nara_scene::SceneAuthoringRevision,
         entity: &SceneEntityId,
     ) -> EditorWorkspaceCommandReport {
-        if !self.accepts_new_work() || self.pending_persistence.is_some() {
+        if !self.accepts_new_work()
+            || self.pending_persistence.is_some()
+            || self.document_open_preparing()
+        {
             return editor_workspace_command_rejected(
                 self.workspace.active_document(),
                 "project.editor.document-open-busy",
@@ -548,7 +551,7 @@ impl EditorProjectSession {
         command: EditorPersistenceCommand,
     ) -> EditorPersistenceRequestResult {
         if command != EditorPersistenceCommand::AcknowledgeResult
-            && self.pending_workspace_intent.is_some()
+            && (self.pending_workspace_intent.is_some() || self.document_open_preparing())
         {
             return EditorPersistenceRequestResult::Rejected(EditorPersistenceRejection::Busy);
         }

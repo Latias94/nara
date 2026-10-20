@@ -6,6 +6,8 @@
 mod authoring_images;
 
 #[cfg(feature = "tooling")]
+mod browser_preparation;
+#[cfg(feature = "tooling")]
 mod host_custody;
 #[cfg(feature = "tooling")]
 mod image_publication_custody;
@@ -1346,7 +1348,8 @@ fn generic_editor_drives_the_initial_source_index_and_retains_it_during_refresh(
     );
     assert!(editor.project_source_index_work_pending());
     assert!(editor.project_source_index_snapshot().is_none());
-    for _ in 0..64 {
+    let index_deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < index_deadline {
         if !editor.project_source_index_work_pending() {
             break;
         }
@@ -1354,6 +1357,7 @@ fn generic_editor_drives_the_initial_source_index_and_retains_it_during_refresh(
         if editor.project_source_index_work_pending() {
             assert!(editor.project_source_index_snapshot().is_none());
         }
+        std::thread::sleep(Duration::from_millis(1));
     }
 
     assert_eq!(
@@ -1373,16 +1377,22 @@ fn generic_editor_drives_the_initial_source_index_and_retains_it_during_refresh(
         &first,
         &editor.project_source_index_snapshot().unwrap()
     ));
+    let refresh_gate = editor
+        .hold_next_source_index_scan(crate::project_host::authoring::ScanTestPhase::BeforeBegin);
     editor.drive_editor_frame(Duration::ZERO);
+    assert!(refresh_gate.wait_until_started());
     assert!(Arc::ptr_eq(
         &first,
         &editor.project_source_index_snapshot().unwrap()
     ));
-    for _ in 0..64 {
+    refresh_gate.release();
+    let index_deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < index_deadline {
         if !editor.project_source_index_work_pending() {
             break;
         }
         editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
     }
     let second = editor.project_source_index_snapshot().unwrap();
     assert_eq!(second.generation().get(), 2);
@@ -2013,6 +2023,9 @@ fn generic_editor_image_import_refresh_failure_retains_last_good_without_pending
     drive_image_import_host_until_idle(&mut editor);
 
     editor.test_reject_next_valid_image_metadata_receipt();
+    let refresh_gate = editor.hold_next_source_index_scan(
+        crate::project_host::authoring::ScanTestPhase::BeforeRevalidation,
+    );
     let update_frame = editor.drive_editor_frame(Duration::ZERO);
     let update_action = update_frame
         .image_import()
@@ -2035,25 +2048,15 @@ fn generic_editor_image_import_refresh_failure_retains_last_good_without_pending
         )]
     ));
 
-    let mut reached_revalidation = false;
-    for _ in 0..1_024 {
-        if editor.project_source_index_progress().is_some_and(|progress| {
-            progress.phase()
-                == crate::project_host::authoring::ProjectSourceIndexDiagnosticPhase::LineageRevalidation
-        }) {
-            reached_revalidation = true;
-            break;
-        }
-        assert!(editor.project_source_index_work_pending());
-        editor.drive_editor_frame(Duration::ZERO);
-    }
-    assert!(reached_revalidation);
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(refresh_gate.wait_until_started());
     fs::rename(
         project.root.join("assets"),
         project.root.join("assets-before-refresh"),
     )
     .unwrap();
     fs::create_dir(project.root.join("assets")).unwrap();
+    refresh_gate.release();
     drive_image_import_host_until_idle(&mut editor);
 
     assert!(editor.project_source_index_failure().is_some());
@@ -2171,25 +2174,19 @@ fn generic_editor_image_import_fallback_binds_freshness_and_attempt_to_the_selec
         )]
     ));
 
+    let refresh_gate = editor.hold_next_source_index_scan(
+        crate::project_host::authoring::ScanTestPhase::BeforeRevalidation,
+    );
     assert!(editor.request_project_source_index_refresh());
-    let mut reached_revalidation = false;
-    for _ in 0..1_024 {
-        if editor.project_source_index_progress().is_some_and(|progress| {
-            progress.phase()
-                == crate::project_host::authoring::ProjectSourceIndexDiagnosticPhase::LineageRevalidation
-        }) {
-            reached_revalidation = true;
-            break;
-        }
-        editor.drive_editor_frame(Duration::ZERO);
-    }
-    assert!(reached_revalidation);
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(refresh_gate.wait_until_started());
     fs::rename(
         project.root.join("assets"),
         project.root.join("assets-before-target-bound-refresh"),
     )
     .unwrap();
     fs::create_dir(project.root.join("assets")).unwrap();
+    refresh_gate.release();
     drive_image_import_host_until_idle(&mut editor);
     assert!(editor.project_source_index_failure().is_some());
 
@@ -2721,11 +2718,13 @@ fn open_generic_editor_with_ready_index(
             ),
         }
     };
-    for _ in 0..128 {
+    let index_deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < index_deadline {
         if !editor.project_source_index_work_pending() {
             break;
         }
         editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
     }
     assert!(!editor.project_source_index_work_pending());
     assert!(matches!(
@@ -3469,11 +3468,13 @@ fn refresh_project_source_index(
     editor: &mut super::editor::EditorProjectSession,
 ) -> Arc<crate::project_host::authoring::ProjectSourceIndexSnapshot> {
     assert!(editor.request_project_source_index_refresh());
-    for _ in 0..128 {
+    let index_deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < index_deadline {
         if !editor.project_source_index_work_pending() {
             break;
         }
         editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
     }
     assert!(!editor.project_source_index_work_pending());
     assert!(matches!(
@@ -3775,13 +3776,30 @@ fn project_browser_rejects_unindexed_and_identity_replaced_sources_before_open()
             )],
         ))
         .unwrap();
+    let [
+        EditorActionOutcome::ProjectBrowser(EditorProjectBrowserActionOutcome::Preparing {
+            request,
+        }),
+    ] = replaced.outcomes()
+    else {
+        panic!("{replaced:?}");
+    };
+    let request = *request;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let result = loop {
+        let frame = editor.drive_editor_frame(Duration::ZERO);
+        if let Some(result) = frame.document_open().result() {
+            break result;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(1));
+    };
     assert_eq!(
-        replaced.outcomes(),
-        [EditorActionOutcome::ProjectBrowser(
-            EditorProjectBrowserActionOutcome::Rejected {
-                code: "project.editor.document-source-identity-changed",
-            }
-        )]
+        result,
+        nara_tooling::EditorDocumentOpenResult::Rejected {
+            request,
+            code: "project.editor.document-source-identity-changed"
+        }
     );
     assert_eq!(editor.workspace().active_document(), original_document);
 }

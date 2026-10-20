@@ -6,13 +6,16 @@ use std::{
     os::windows::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicU64, Ordering},
     },
+    thread,
+    time::{Duration, Instant},
 };
 
 use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
 use nara_reflect::{AuthoringSchemaBundle, AuthoringSchemaBundleOwner};
+use nara_tasks::{TaskPoolConfig, TaskPoolKind, TaskPools};
 
 use super::*;
 use crate::project_host::authoring::AuthoringProjectAdmissionHost;
@@ -46,10 +49,13 @@ fn mixed_source_tree_publishes_once_in_lexical_order_with_safe_rejections() {
             ..ProjectSourceIndexLimits::default()
         },
     );
+    let control = state.hold_next_scan(ScanTestPhase::BeforeBegin);
     assert!(state.request_refresh().is_some());
-    state.advance();
+    assert!(state.advance(pools()));
+    assert!(control.wait_until_started());
     assert_eq!(state.kind(), ProjectSourceIndexStateKind::Scanning);
     assert!(state.snapshot().is_none());
+    control.release();
 
     drive_to_terminal(&mut state);
 
@@ -137,15 +143,27 @@ fn refresh_requested_during_a_scan_publishes_one_coalesced_successor() {
         },
     );
 
+    let control = state.hold_next_scan(ScanTestPhase::AfterPreparation);
     let first_generation = state.request_refresh().unwrap();
     let queued_generation = state.request_refresh().unwrap();
     assert_eq!(first_generation.get(), 1);
     assert_eq!(queued_generation.get(), 2);
+    assert_eq!(state.request_refresh(), Some(queued_generation));
+    assert!(state.advance(pools()));
+    assert!(control.wait_until_started());
+    assert_eq!(state.request_refresh(), Some(queued_generation));
+    control.release();
+    let deadline = Instant::now() + Duration::from_secs(5);
     while state
         .snapshot()
         .is_none_or(|snapshot| snapshot.generation() < first_generation)
     {
-        state.advance();
+        state.advance(pools());
+        assert!(
+            Instant::now() < deadline,
+            "first coalesced scan did not settle"
+        );
+        thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(state.snapshot().unwrap().generation(), first_generation);
     assert!(state.has_pending_work());
@@ -224,13 +242,13 @@ fn final_lineage_revalidation_rejects_directory_replacement() {
     let first = state.snapshot().unwrap();
     assert_eq!(first.generation().get(), 1);
 
+    let control = state.hold_next_scan(ScanTestPhase::BeforeRevalidation);
     assert!(state.request_refresh().is_some());
-    while state.has_pending_work() && !state.is_revalidating() {
-        state.advance();
-    }
-    assert!(state.is_revalidating());
+    state.advance(pools());
+    assert!(control.wait_until_started());
     fs::rename(project.path("assets"), project.path("assets-old")).unwrap();
     fs::create_dir(project.path("assets")).unwrap();
+    control.release();
     drive_to_terminal(&mut state);
 
     assert_eq!(state.kind(), ProjectSourceIndexStateKind::Unavailable);
@@ -241,6 +259,155 @@ fn final_lineage_revalidation_rejects_directory_replacement() {
     );
 }
 
+#[test]
+fn cancelled_terminal_waits_for_the_held_worker_then_allows_a_fresh_retry() {
+    let project = TestSourceProject::new("cancelled-scan", true);
+    project.write("assets/stable.bin", b"stable");
+    let schema = project.schema_receipt();
+    let mut state = ProjectSourceIndexState::new(&schema);
+    state.request_refresh().unwrap();
+    drive_to_terminal(&mut state);
+    let first = state.snapshot().unwrap();
+
+    project.write("assets/new.bin", b"new");
+    let control = state.hold_next_scan(ScanTestPhase::AfterPreparation);
+    state.request_refresh().unwrap();
+    state.advance(pools());
+    assert!(control.wait_until_started());
+    state.advance(pools());
+    state.attempt.as_ref().unwrap().cancel();
+    // Cancellation is logically terminal, but the closure and its prepared candidate still
+    // belong to the pool. Polling never waits for the gate or publishes that candidate.
+    assert!(!state.advance(pools()));
+    assert!(state.has_pending_work());
+    assert!(Arc::ptr_eq(&first, &state.snapshot().unwrap()));
+    control.release();
+    drive_to_terminal(&mut state);
+    assert!(Arc::ptr_eq(&first, &state.snapshot().unwrap()));
+    assert_eq!(
+        state.failure().unwrap().diagnostic().code(),
+        ProjectSourceIndexDiagnosticCode::PreparationUnavailable
+    );
+    let retry = state.request_refresh().unwrap();
+    drive_to_terminal(&mut state);
+    assert_eq!(state.snapshot().unwrap().generation(), retry);
+    assert!(state.snapshot().unwrap().entry("assets/new.bin").is_some());
+    assert!(state.failure().is_none());
+}
+
+#[test]
+fn cancelled_state_closes_admission_without_starting_its_queued_successor() {
+    let project = TestSourceProject::new("closed-scan", true);
+    let schema = project.schema_receipt();
+    let mut state = ProjectSourceIndexState::new(&schema);
+    let control = state.hold_next_scan(ScanTestPhase::BeforeBegin);
+    state.request_refresh().unwrap();
+    state.advance(pools());
+    assert!(control.wait_until_started());
+    state.request_refresh().unwrap();
+    state.cancel();
+    assert!(state.request_refresh().is_none());
+    assert!(!state.advance(pools()));
+    assert!(state.has_pending_work());
+    assert!(state.snapshot().is_none());
+    control.release();
+    drive_to_terminal(&mut state);
+    assert!(!state.has_pending_work());
+    assert!(state.snapshot().is_none());
+    assert!(state.request_refresh().is_none());
+}
+
+#[test]
+fn dropping_a_scan_keeps_its_held_capabilities_in_the_existing_pool_until_return() {
+    let project = TestSourceProject::new("drop-held-scan", true);
+    let schema = project.schema_receipt();
+    let pools = TaskPools::try_new(TaskPoolConfig::default()).unwrap();
+    let mut state = ProjectSourceIndexState::new(&schema);
+    let control = state.hold_next_scan(ScanTestPhase::BeforeBegin);
+    state.request_refresh().unwrap();
+    state.advance(&pools);
+    assert!(control.wait_until_started());
+    assert_eq!(pools.stats().for_kind(TaskPoolKind::Io).running, 1);
+    drop(state);
+    assert_eq!(pools.stats().for_kind(TaskPoolKind::Io).running, 1);
+    control.release();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while pools.stats().for_kind(TaskPoolKind::Io).running != 0 {
+        assert!(
+            Instant::now() < deadline,
+            "dropped scan did not physically return"
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert!(pools.shutdown_blocking().unwrap().is_complete());
+}
+
+#[test]
+fn worker_panic_retains_last_good_and_rejected_pool_admission_is_truthful() {
+    let project = TestSourceProject::new("panic-scan", true);
+    let schema = project.schema_receipt();
+    let mut state = ProjectSourceIndexState::new(&schema);
+    state.request_refresh().unwrap();
+    drive_to_terminal(&mut state);
+    let first = state.snapshot().unwrap();
+    let (gate, control) = preparation::ScanTestGate::new(ScanTestPhase::AfterPreparation, true);
+    state.gate = Some(gate);
+    state.request_refresh().unwrap();
+    state.advance(pools());
+    assert!(control.wait_until_started());
+    control.release();
+    drive_to_terminal(&mut state);
+    assert!(Arc::ptr_eq(&first, &state.snapshot().unwrap()));
+    assert_eq!(
+        state.failure().unwrap().diagnostic().code(),
+        ProjectSourceIndexDiagnosticCode::PreparationUnavailable
+    );
+
+    let closed = TaskPools::try_new(TaskPoolConfig::default()).unwrap();
+    assert!(closed.shutdown_blocking().unwrap().is_complete());
+    state.request_refresh().unwrap();
+    state.advance(&closed);
+    assert!(!state.has_pending_work());
+    assert!(Arc::ptr_eq(&first, &state.snapshot().unwrap()));
+    assert_eq!(
+        state.failure().unwrap().diagnostic().code(),
+        ProjectSourceIndexDiagnosticCode::PreparationUnavailable
+    );
+}
+
+#[test]
+fn worker_revalidates_exact_manifest_and_bundle_digest_before_publication() {
+    for path in [PROJECT_MANIFEST_PATH, BUNDLE_PATH] {
+        let project = TestSourceProject::new("authority-lineage", true);
+        let schema = project.schema_receipt();
+        let mut state = ProjectSourceIndexState::new(&schema);
+        state.request_refresh().unwrap();
+        drive_to_terminal(&mut state);
+        let first = state.snapshot().unwrap();
+        let original = fs::read(project.path(path)).unwrap();
+        let control = state.hold_next_scan(ScanTestPhase::BeforeRevalidation);
+        state.request_refresh().unwrap();
+        state.advance(pools());
+        assert!(control.wait_until_started());
+        project.write(path, b"changed bytes under the same name");
+        control.release();
+        drive_to_terminal(&mut state);
+        assert!(Arc::ptr_eq(&first, &state.snapshot().unwrap()));
+        assert_eq!(
+            state.failure().unwrap().diagnostic().code(),
+            if path == PROJECT_MANIFEST_PATH {
+                ProjectSourceIndexDiagnosticCode::ManifestLineageChanged
+            } else {
+                ProjectSourceIndexDiagnosticCode::SchemaBundleLineageChanged
+            }
+        );
+        project.write(path, &original);
+        state.request_refresh().unwrap();
+        drive_to_terminal(&mut state);
+        assert!(state.failure().is_none());
+    }
+}
+
 fn assert_entry(snapshot: &ProjectSourceIndexSnapshot, path: &str, expected: ProjectSourceKind) {
     assert_eq!(
         snapshot.entry(path).map(ProjectSourceIndexEntry::kind),
@@ -249,13 +416,23 @@ fn assert_entry(snapshot: &ProjectSourceIndexSnapshot, path: &str, expected: Pro
 }
 
 fn drive_to_terminal(state: &mut ProjectSourceIndexState) {
-    for _ in 0..1_024 {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
         if !state.has_pending_work() {
             return;
         }
-        state.advance();
+        state.advance(pools());
+        assert!(
+            Instant::now() < deadline,
+            "source index did not reach a terminal state"
+        );
+        thread::sleep(Duration::from_millis(1));
     }
-    panic!("source index did not reach a terminal state");
+}
+
+fn pools() -> &'static TaskPools {
+    static POOLS: OnceLock<TaskPools> = OnceLock::new();
+    POOLS.get_or_init(|| TaskPools::try_new(TaskPoolConfig::default()).unwrap())
 }
 
 struct TestSourceProject {

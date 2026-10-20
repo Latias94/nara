@@ -1,7 +1,9 @@
 use std::{error::Error, fmt, sync::Arc};
 
 use nara_asset::{AssetPath, AssetPathError, AssetRef};
-use nara_fs::{ContentDigest, FileIdentity, FsError, PathValidationError, RelativePath};
+use nara_fs::{
+    ContentDigest, DirectoryCapability, FileIdentity, FsError, PathValidationError, RelativePath,
+};
 use nara_project::{ProjectPath, ProjectPathError};
 use nara_reflect::AuthoringSchemaBundle;
 use nara_scene::__private::AuthoringAdapterReceipt;
@@ -14,6 +16,9 @@ use nara_scene::{
 use super::{
     AuthoringSchemaReceipt, ProjectSourceIndexSnapshot, source_index::ProjectSourceOpenCapability,
 };
+
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AuthoringDocumentKind {
@@ -81,14 +86,14 @@ impl AdmittedAuthoringDocument {
 
 pub(super) struct AuthoringDocumentAdmissionBasis<'basis> {
     schema: &'basis AuthoringSchemaReceipt,
-    adapters: &'basis [AuthoringAdapterReceipt],
+    adapters: &'basis Arc<[AuthoringAdapterReceipt]>,
     limits: SceneFileLimits,
 }
 
 impl<'basis> AuthoringDocumentAdmissionBasis<'basis> {
     pub(super) const fn new(
         schema: &'basis AuthoringSchemaReceipt,
-        adapters: &'basis [AuthoringAdapterReceipt],
+        adapters: &'basis Arc<[AuthoringAdapterReceipt]>,
         limits: SceneFileLimits,
     ) -> Self {
         Self {
@@ -98,94 +103,181 @@ impl<'basis> AuthoringDocumentAdmissionBasis<'basis> {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn admit(
         &self,
         index: &ProjectSourceIndexSnapshot,
         relative_path: &str,
         expected_kind: AuthoringDocumentKind,
     ) -> Result<AdmittedAuthoringDocument, AuthoringDocumentAdmissionError> {
-        self.verify_index_lineage(index)?;
-        let entry = index
-            .entry(relative_path)
-            .ok_or(AuthoringDocumentAdmissionError::MissingIndexMember)?;
-        let expected_identity = entry
-            .scoped_identity()
-            .ok_or(AuthoringDocumentAdmissionError::IdentityUnavailable)?;
-        let open_capability = match expected_kind {
-            AuthoringDocumentKind::Scene => ProjectSourceOpenCapability::Scene,
-            AuthoringDocumentKind::Prefab => ProjectSourceOpenCapability::Prefab,
-        };
-        if entry.open_capability() != open_capability {
-            return Err(AuthoringDocumentAdmissionError::DocumentKindMismatch);
-        }
+        DocumentIndexLineage::capture(self.schema).verify(index)?;
+        admit_indexed_document(
+            &self.schema.project_root(),
+            index,
+            relative_path,
+            expected_kind,
+            self.limits,
+            self.schema.bundle(),
+            self.adapters,
+        )
+    }
 
-        let path = ProjectPath::new(relative_path.to_owned())
-            .map_err(AuthoringDocumentAdmissionError::ProjectPath)?;
-        let relative = RelativePath::new(relative_path)
-            .map_err(AuthoringDocumentAdmissionError::RelativePath)?;
-        let capability = self
-            .schema
-            .project_root()
-            .open_file(&relative)
-            .map_err(AuthoringDocumentAdmissionError::OpenSource)?;
-        if capability.identity() != expected_identity {
-            return Err(AuthoringDocumentAdmissionError::SourceIdentityChanged);
-        }
-        let bytes = capability
-            .read_to_end_bounded(
-                u64::try_from(self.limits.encoded_bytes().get()).unwrap_or(u64::MAX),
-            )
-            .map_err(|error| match error {
-                FsError::ByteLimitExceeded { .. } => {
-                    AuthoringDocumentAdmissionError::SourceTooLarge
-                }
-                error => AuthoringDocumentAdmissionError::ReadSource(error),
-            })?;
-        let source = AuthoringDocumentSourceFact {
-            relative_path: Arc::from(relative_path),
-            identity: capability.identity(),
-            parent_identity: capability.parent_identity(),
-            digest: ContentDigest::of_bytes(&bytes),
-        };
-        match expected_kind {
-            AuthoringDocumentKind::Scene => Ok(AdmittedAuthoringDocument::Scene {
-                source,
-                document: admit_scene_bytes(
-                    &path,
-                    &bytes,
-                    self.limits,
-                    self.schema.bundle(),
-                    self.adapters,
-                )
-                .map_err(AuthoringDocumentAdmissionError::Document)?,
-            }),
-            AuthoringDocumentKind::Prefab => Ok(AdmittedAuthoringDocument::Prefab {
-                source,
-                document: admit_prefab_bytes(
-                    &path,
-                    &bytes,
-                    self.limits,
-                    self.schema.bundle(),
-                    self.adapters,
-                )
-                .map_err(AuthoringDocumentAdmissionError::Document)?,
-            }),
+    /// Captures immutable admission authority without opening or decoding the source.
+    pub(super) fn capture(
+        &self,
+        index: Arc<ProjectSourceIndexSnapshot>,
+        relative_path: Arc<str>,
+        expected_kind: AuthoringDocumentKind,
+    ) -> Result<OwnedAuthoringDocumentRequest, AuthoringDocumentAdmissionError> {
+        let lineage = DocumentIndexLineage::capture(self.schema);
+        lineage.verify(&index)?;
+        indexed_document_source(&index, &relative_path, expected_kind)?;
+        Ok(OwnedAuthoringDocumentRequest {
+            root: self.schema.project_root(),
+            index,
+            relative_path,
+            expected_kind,
+            bundle: self.schema.bundle.shared_bundle(),
+            adapters: Arc::clone(self.adapters),
+            limits: self.limits,
+            lineage,
+        })
+    }
+}
+
+/// Finite, data-only preparation input. This grants no Workspace publication authority.
+pub(crate) struct OwnedAuthoringDocumentRequest {
+    root: DirectoryCapability,
+    index: Arc<ProjectSourceIndexSnapshot>,
+    relative_path: Arc<str>,
+    expected_kind: AuthoringDocumentKind,
+    bundle: Arc<AuthoringSchemaBundle>,
+    adapters: Arc<[AuthoringAdapterReceipt]>,
+    limits: SceneFileLimits,
+    lineage: DocumentIndexLineage,
+}
+
+impl OwnedAuthoringDocumentRequest {
+    pub(crate) fn project_root(&self) -> DirectoryCapability {
+        self.root.share()
+    }
+
+    pub(crate) fn prepare(
+        self,
+    ) -> Result<AdmittedAuthoringDocument, AuthoringDocumentAdmissionError> {
+        self.lineage.verify(&self.index)?;
+        admit_indexed_document(
+            &self.root,
+            &self.index,
+            &self.relative_path,
+            self.expected_kind,
+            self.limits,
+            &self.bundle,
+            &self.adapters,
+        )
+    }
+}
+
+struct DocumentIndexLineage {
+    root_identity: FileIdentity,
+    manifest_identity: FileIdentity,
+    manifest_digest: ContentDigest,
+    bundle_identity: FileIdentity,
+    bundle_digest: ContentDigest,
+}
+
+impl DocumentIndexLineage {
+    fn capture(schema: &AuthoringSchemaReceipt) -> Self {
+        Self {
+            root_identity: schema.root_identity(),
+            manifest_identity: schema.manifest_identity(),
+            manifest_digest: schema.manifest_digest(),
+            bundle_identity: schema.bundle_identity(),
+            bundle_digest: schema.bundle_digest(),
         }
     }
 
-    fn verify_index_lineage(
+    fn verify(
         &self,
         index: &ProjectSourceIndexSnapshot,
     ) -> Result<(), AuthoringDocumentAdmissionError> {
-        if index.root_identity() != self.schema.root_identity()
-            || index.manifest_identity() != self.schema.manifest_identity()
-            || index.manifest_digest() != self.schema.manifest_digest()
-            || index.bundle_identity() != self.schema.bundle_identity()
-            || index.bundle_digest() != self.schema.bundle_digest()
+        if index.root_identity() != self.root_identity
+            || index.manifest_identity() != self.manifest_identity
+            || index.manifest_digest() != self.manifest_digest
+            || index.bundle_identity() != self.bundle_identity
+            || index.bundle_digest() != self.bundle_digest
         {
             return Err(AuthoringDocumentAdmissionError::IndexLineageMismatch);
         }
         Ok(())
+    }
+}
+
+fn indexed_document_source(
+    index: &ProjectSourceIndexSnapshot,
+    relative_path: &str,
+    expected_kind: AuthoringDocumentKind,
+) -> Result<(ProjectPath, RelativePath, FileIdentity), AuthoringDocumentAdmissionError> {
+    let entry = index
+        .entry(relative_path)
+        .ok_or(AuthoringDocumentAdmissionError::MissingIndexMember)?;
+    let expected_identity = entry
+        .scoped_identity()
+        .ok_or(AuthoringDocumentAdmissionError::IdentityUnavailable)?;
+    let open_capability = match expected_kind {
+        AuthoringDocumentKind::Scene => ProjectSourceOpenCapability::Scene,
+        AuthoringDocumentKind::Prefab => ProjectSourceOpenCapability::Prefab,
+    };
+    if entry.open_capability() != open_capability {
+        return Err(AuthoringDocumentAdmissionError::DocumentKindMismatch);
+    }
+    let path = ProjectPath::new(relative_path.to_owned())
+        .map_err(AuthoringDocumentAdmissionError::ProjectPath)?;
+    let relative =
+        RelativePath::new(relative_path).map_err(AuthoringDocumentAdmissionError::RelativePath)?;
+    Ok((path, relative, expected_identity))
+}
+
+fn admit_indexed_document(
+    root: &DirectoryCapability,
+    index: &ProjectSourceIndexSnapshot,
+    relative_path: &str,
+    expected_kind: AuthoringDocumentKind,
+    limits: SceneFileLimits,
+    bundle: &AuthoringSchemaBundle,
+    adapters: &[AuthoringAdapterReceipt],
+) -> Result<AdmittedAuthoringDocument, AuthoringDocumentAdmissionError> {
+    let (path, relative, expected_identity) =
+        indexed_document_source(index, relative_path, expected_kind)?;
+    let capability = root
+        .open_file(&relative)
+        .map_err(AuthoringDocumentAdmissionError::OpenSource)?;
+    if capability.identity() != expected_identity {
+        return Err(AuthoringDocumentAdmissionError::SourceIdentityChanged);
+    }
+    let bytes = capability
+        .read_to_end_bounded(u64::try_from(limits.encoded_bytes().get()).unwrap_or(u64::MAX))
+        .map_err(|error| match error {
+            FsError::ByteLimitExceeded { .. } => AuthoringDocumentAdmissionError::SourceTooLarge,
+            error => AuthoringDocumentAdmissionError::ReadSource(error),
+        })?;
+    let source = AuthoringDocumentSourceFact {
+        relative_path: Arc::from(relative_path),
+        identity: capability.identity(),
+        parent_identity: capability.parent_identity(),
+        digest: ContentDigest::of_bytes(&bytes),
+    };
+    match expected_kind {
+        AuthoringDocumentKind::Scene => Ok(AdmittedAuthoringDocument::Scene {
+            source,
+            document: admit_scene_bytes(&path, &bytes, limits, bundle, adapters)
+                .map_err(AuthoringDocumentAdmissionError::Document)?,
+        }),
+        AuthoringDocumentKind::Prefab => Ok(AdmittedAuthoringDocument::Prefab {
+            source,
+            document: admit_prefab_bytes(&path, &bytes, limits, bundle, adapters)
+                .map_err(AuthoringDocumentAdmissionError::Document)?,
+        }),
     }
 }
 

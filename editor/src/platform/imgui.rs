@@ -1786,7 +1786,7 @@ fn imgui_next_deadline(
         deadline = earliest_deadline(deadline, Some(now + Duration::from_millis(16)));
     }
     if let Some(frame) = application.current_frame() {
-        if frame.project_browser().has_pending_work() {
+        if frame.project_browser().has_pending_work() || frame.document_open().has_pending_work() {
             deadline = earliest_deadline(deadline, Some(now + Duration::from_millis(16)));
         }
         let state = frame.play().state();
@@ -2016,13 +2016,15 @@ mod opening_tests {
         let pending_deadline = imgui_next_deadline(&application, None, now);
         let pending_presentation_deadline =
             imgui_next_presentation_deadline(&application, None, now);
-        for _ in 0..128 {
+        let browser_deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < browser_deadline {
             let frame = application.current_frame().unwrap();
             if !frame.project_browser().has_pending_work() {
                 break;
             }
             application
                 .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
+            std::thread::sleep(Duration::from_millis(1));
         }
         assert!(
             !application

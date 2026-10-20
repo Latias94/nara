@@ -73,13 +73,15 @@ pub use play::{
     SceneEditorModel, SceneEditorState,
 };
 pub use project_browser::{
-    EditorProjectBrowserAction, EditorProjectBrowserActionOutcome, EditorProjectBrowserBudgetUsage,
-    EditorProjectBrowserDiagnosticPhase, EditorProjectBrowserDiagnosticView,
-    EditorProjectBrowserEntry, EditorProjectBrowserKindFilter, EditorProjectBrowserLocalAction,
-    EditorProjectBrowserPendingWork, EditorProjectBrowserQueryAdvance, EditorProjectBrowserRow,
-    EditorProjectBrowserScanProgress, EditorProjectBrowserSnapshot, EditorProjectBrowserState,
-    EditorProjectBrowserStatus, EditorProjectBrowserView, EditorProjectSourceInspectReason,
-    EditorProjectSourceKind, EditorProjectSourceOpenCapability,
+    EditorDocumentOpenId, EditorDocumentOpenPhase, EditorDocumentOpenResult,
+    EditorDocumentOpenView, EditorProjectBrowserAction, EditorProjectBrowserActionOutcome,
+    EditorProjectBrowserBudgetUsage, EditorProjectBrowserDiagnosticPhase,
+    EditorProjectBrowserDiagnosticView, EditorProjectBrowserEntry, EditorProjectBrowserKindFilter,
+    EditorProjectBrowserLocalAction, EditorProjectBrowserPendingWork,
+    EditorProjectBrowserQueryAdvance, EditorProjectBrowserRow, EditorProjectBrowserScanProgress,
+    EditorProjectBrowserSnapshot, EditorProjectBrowserState, EditorProjectBrowserStatus,
+    EditorProjectBrowserView, EditorProjectSourceInspectReason, EditorProjectSourceKind,
+    EditorProjectSourceOpenCapability,
 };
 pub use snapshot::{DEFAULT_WORLD_IDENTITY_SNAPSHOT_LOCATOR_LIMIT, WorldIdentitySnapshot};
 pub use workspace::{

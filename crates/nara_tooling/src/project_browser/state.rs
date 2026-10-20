@@ -88,7 +88,7 @@ impl EditorProjectBrowserRow {
     }
 }
 
-/// Pending synchronous Editor work that must schedule another bounded redraw.
+/// Pending Browser work that requires another maintenance advance.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum EditorProjectBrowserPendingWork {
     #[default]
@@ -187,7 +187,7 @@ impl EditorProjectBrowserView {
         self.pending_work.is_pending()
     }
 
-    /// Returns whether the Host advanced scan/query work while publishing this frame.
+    /// Returns whether Browser preparation, query or Open facts changed for this frame.
     #[must_use]
     pub const fn work_observed(&self) -> bool {
         self.work_observed

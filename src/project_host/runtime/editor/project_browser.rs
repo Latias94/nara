@@ -196,11 +196,25 @@ impl EditorProjectSession {
                         return rejected("project.editor.document-source-not-openable");
                     }
                 };
-                map_open_result(self.open_indexed_authoring_document(
+                map_open_result(self.request_indexed_authoring_document(
                     Arc::clone(index),
                     &relative_path,
                     kind,
                 ))
+            }
+            EditorProjectBrowserAction::CancelOpen { request } => {
+                if self.cancel_document_open_request(request) {
+                    EditorProjectBrowserActionOutcome::OpenCancellationRequested { request }
+                } else {
+                    rejected("project.editor.document-open-cancel-stale")
+                }
+            }
+            EditorProjectBrowserAction::AcknowledgeOpen { request } => {
+                if self.acknowledge_document_open(request) {
+                    EditorProjectBrowserActionOutcome::OpenAcknowledged { request }
+                } else {
+                    rejected("project.editor.document-open-acknowledgement-stale")
+                }
             }
         }
     }
@@ -332,16 +346,16 @@ fn project_usage(
 
 fn map_open_result(result: EditorDocumentOpenRequestResult) -> EditorProjectBrowserActionOutcome {
     match result {
+        EditorDocumentOpenRequestResult::Preparing { request } => {
+            EditorProjectBrowserActionOutcome::Preparing { request }
+        }
         EditorDocumentOpenRequestResult::Activated { document } => {
             EditorProjectBrowserActionOutcome::Activated { document }
         }
-        EditorDocumentOpenRequestResult::Opened { document } => {
-            EditorProjectBrowserActionOutcome::Opened { document }
-        }
-        EditorDocumentOpenRequestResult::AwaitingClose { document } => {
-            EditorProjectBrowserActionOutcome::AwaitingClose {
-                closing_document: document,
-            }
+        #[cfg(test)]
+        EditorDocumentOpenRequestResult::Opened { .. }
+        | EditorDocumentOpenRequestResult::AwaitingClose { .. } => {
+            unreachable!("the product request always prepares before replacement")
         }
         EditorDocumentOpenRequestResult::Rejected { code } => {
             EditorProjectBrowserActionOutcome::Rejected { code }

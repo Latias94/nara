@@ -38,6 +38,10 @@ impl AdmittedAuthoringSchemaBundle {
         &self.bundle
     }
 
+    pub(super) fn shared_bundle(&self) -> Arc<AuthoringSchemaBundle> {
+        Arc::clone(&self.bundle)
+    }
+
     pub(super) fn fingerprint(&self) -> SchemaCompositionFingerprint {
         self.bundle.fingerprint()
     }

@@ -33,10 +33,18 @@ impl EditorProjectSession {
         real_delta: Duration,
         drive_runtime: bool,
     ) -> Arc<EditorFrameModel> {
-        let scan_work_observed = self.project_source_index_work_pending();
-        if let Some(project) = self.authoring_project_mut() {
-            project.advance_source_index();
-        }
+        let open_before = self.document_open_view();
+        let mut scan_work_observed = match &mut self.execution {
+            super::EditorExecutionLane::Authoring(project) => {
+                if self.closing {
+                    project.observe_source_index()
+                } else {
+                    project.advance_source_index(self.authoring_runtime.persistence_tasks())
+                }
+            }
+            super::EditorExecutionLane::TrustedCompiled(_) => false,
+        };
+        scan_work_observed |= self.advance_document_open();
         self.advance_editor_image_import();
         if self.trusted_compiled().is_some() {
             self.resume_content_refresh_after_runtime_retirement();
@@ -49,6 +57,7 @@ impl EditorProjectSession {
             self.drive_play_owner(real_delta);
         }
         self.advance_workspace_retirement();
+        scan_work_observed |= open_before != self.document_open_view();
         #[cfg(feature = "presentation-2d")]
         self.drive_editor_preview();
         self.publish_editor_frame(scan_work_observed)
@@ -106,7 +115,8 @@ impl EditorProjectSession {
                     reopen_target,
                     self.field_feedback.clone(),
                 )
-                .with_image_import(image_import_view, image_import_work_pending),
+                .with_image_import(image_import_view, image_import_work_pending)
+                .with_document_open(self.document_open_view()),
         );
         #[cfg(feature = "runtime-ui")]
         self.publish_ui_authoring_frame(frame.revision());

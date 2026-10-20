@@ -195,9 +195,13 @@ fn generic_editor_rejects_a_malformed_tileset_before_a_late_image_can_publish() 
     let held = editor.test_hold_next_image_import_through_shutdown();
     write_editor_tileset(&project, AssetRef::path("textures/b.png").unwrap());
     assert!(editor.request_project_source_index_refresh());
-    for _ in 0..128 {
+    let refresh_deadline = Instant::now() + Duration::from_secs(5);
+    while editor.project_source_index_work_pending() {
+        assert!(Instant::now() < refresh_deadline);
         editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
     }
+    drive_until_image_import_detail_admits(&mut editor, "assets/textures/b.png");
     assert!(held.wait_until_started());
     fs::write(
         project.root.join("assets/tilesets/terrain.tileset.ron"),
@@ -529,9 +533,17 @@ fn generic_editor_explicit_image_import_is_admitted_during_background_hydration(
         );
         let mut host = super::super::editor::EditorProjectOpenHost::new();
         let mut attempt = host.begin(project.writable_capability(), None);
+        let open_deadline = Instant::now() + Duration::from_secs(5);
         let mut editor = loop {
             match host.advance(attempt) {
-                super::super::editor::EditorProjectOpenProgress::Pending(next) => attempt = next,
+                super::super::editor::EditorProjectOpenProgress::Pending(next) => {
+                    assert!(
+                        Instant::now() < open_deadline,
+                        "the Image fixture did not open"
+                    );
+                    std::thread::sleep(Duration::from_millis(1));
+                    attempt = next;
+                }
                 super::super::editor::EditorProjectOpenProgress::Opened(session) => break session,
                 super::super::editor::EditorProjectOpenProgress::Rejected(failure) => {
                     panic!("the Image fixture must open: {:?}", failure.diagnostics())
@@ -539,15 +551,19 @@ fn generic_editor_explicit_image_import_is_admitted_during_background_hydration(
             }
         };
         let held = editor.test_hold_next_image_import();
-        for _ in 0..128 {
+        let index_deadline = Instant::now() + Duration::from_secs(5);
+        while editor.project_source_index_work_pending() {
+            assert!(Instant::now() < index_deadline);
             editor.drive_editor_frame(Duration::ZERO);
+            std::thread::sleep(Duration::from_millis(1));
         }
-        let hydration_started = held.wait_until_started();
         let target = if same_source {
             "textures/a-running.png"
         } else {
             "textures/z-queued.png"
         };
+        drive_until_image_import_detail_admits(&mut editor, &format!("assets/{target}"));
+        let hydration_started = held.wait_until_started();
         let result = editor.request_editor_image_import(
             editor.current_frame().revision(),
             &format!("assets/{target}"),
@@ -629,7 +645,8 @@ fn generic_editor_catalog_revocation_cancels_a_late_image_import_even_after_meta
     let admitted_metadata = fs::read(&metadata_path).unwrap();
     fs::write(&metadata_path, b"invalid metadata").unwrap();
     editor.request_project_source_index_refresh();
-    for _ in 0..256 {
+    let revocation_deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < revocation_deadline {
         editor.drive_editor_frame(Duration::ZERO);
         if editor
             .editor_image_last_good(&AssetPath::new(path).unwrap())
@@ -637,6 +654,7 @@ fn generic_editor_catalog_revocation_cancels_a_late_image_import_even_after_meta
         {
             break;
         }
+        std::thread::sleep(Duration::from_millis(1));
     }
     let revoked_before_release = editor
         .editor_image_last_good(&AssetPath::new(path).unwrap())
@@ -818,7 +836,7 @@ fn generic_editor_saves_an_imported_asset_ref_and_hydrates_the_same_recipe_on_re
         save.outcomes()[0],
         EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
     ));
-    editor.drive_editor_frame(Duration::ZERO);
+    drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
         editor.persistence_view().result(),
         Some(EditorPersistenceResult::Saved { document, .. }) if document == prefab_document
@@ -870,6 +888,37 @@ fn generic_editor_saves_an_imported_asset_ref_and_hydrates_the_same_recipe_on_re
         ),
         2
     );
+}
+
+fn drive_until_image_import_detail_admits(
+    editor: &mut super::editor::EditorProjectSession,
+    relative_path: &str,
+) {
+    editor.apply_project_browser_local_action(EditorProjectBrowserLocalAction::Select {
+        relative_path: Some(Arc::from(relative_path)),
+    });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let frame = editor.drive_editor_frame(Duration::ZERO);
+        let current_generation = editor
+            .project_source_index_snapshot()
+            .map(|index| index.generation().get());
+        if !editor.project_source_index_work_pending()
+            && frame.image_import().is_some_and(|detail| {
+                detail.relative_path() == relative_path
+                    && detail.can_submit()
+                    && Some(detail.detail_revision().get()) == current_generation
+            })
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the current image catalog did not admit {relative_path}: {:?}",
+            frame.image_import()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 fn assert_current_ui_image_canvas(

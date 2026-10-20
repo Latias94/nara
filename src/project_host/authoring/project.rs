@@ -432,7 +432,7 @@ impl AuthoringProjectReceipt {
         Ok(AuthoringProjectSessionParts {
             snapshot: AuthoringProjectSessionSnapshot {
                 schema: inner.schema,
-                adapters: inner.adapters,
+                adapters: Arc::from(inner.adapters),
                 scene_limits: inner.scene_limits,
                 readiness: inner.readiness,
                 startup_source: inner.startup_source,
@@ -483,7 +483,7 @@ pub(crate) struct AuthoringProjectSessionParts {
 
 pub(crate) struct AuthoringProjectSessionSnapshot {
     schema: AuthoringSchemaReceipt,
-    adapters: Box<[AuthoringAdapterReceipt]>,
+    adapters: Arc<[AuthoringAdapterReceipt]>,
     scene_limits: SceneFileLimits,
     readiness: AuthoringProjectReadiness,
     startup_source: Arc<AuthoringSourceFact>,
@@ -609,8 +609,24 @@ impl AuthoringProjectSessionSnapshot {
         self.source_index.progress()
     }
 
-    pub(crate) fn advance_source_index(&mut self) {
-        self.source_index.advance();
+    pub(crate) fn advance_source_index(&mut self, pools: &nara_tasks::TaskPools) -> bool {
+        self.source_index.advance(pools)
+    }
+
+    pub(crate) fn observe_source_index(&mut self) -> bool {
+        self.source_index.poll_preparation()
+    }
+
+    pub(crate) fn cancel_source_index(&mut self) {
+        self.source_index.cancel();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn hold_next_source_index_scan(
+        &mut self,
+        phase: super::source_index::ScanTestPhase,
+    ) -> super::source_index::ScanTestControl {
+        self.source_index.hold_next_scan(phase)
     }
 
     pub(crate) fn request_source_index_refresh(
@@ -619,18 +635,21 @@ impl AuthoringProjectSessionSnapshot {
         self.source_index.request_refresh()
     }
 
-    pub(crate) fn admit_indexed_document(
+    pub(crate) fn capture_indexed_document(
         &self,
-        index: &super::ProjectSourceIndexSnapshot,
-        relative_path: &str,
+        index: Arc<super::ProjectSourceIndexSnapshot>,
+        relative_path: Arc<str>,
         expected_kind: super::AuthoringDocumentKind,
-    ) -> Result<super::AdmittedAuthoringDocument, super::AuthoringDocumentAdmissionError> {
+    ) -> Result<
+        super::document::OwnedAuthoringDocumentRequest,
+        super::AuthoringDocumentAdmissionError,
+    > {
         super::document::AuthoringDocumentAdmissionBasis::new(
             &self.schema,
             &self.adapters,
             self.scene_limits,
         )
-        .admit(index, relative_path, expected_kind)
+        .capture(index, relative_path, expected_kind)
     }
 }
 

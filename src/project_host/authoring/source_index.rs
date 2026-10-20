@@ -5,16 +5,20 @@ use std::{
 };
 
 use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity};
+use nara_tasks::TaskPools;
 
 use super::AuthoringSchemaReceipt;
 
 mod attempt;
 mod budget;
+mod preparation;
 
 #[cfg(test)]
 mod tests;
 
-use attempt::{AuthoringSourceIndexAttempt, SourceIndexAttemptProgress};
+use preparation::{ScanPreparation, ScanPreparationPoll};
+#[cfg(test)]
+pub(crate) use preparation::{ScanTestControl, ScanTestPhase};
 
 const PROJECT_MANIFEST_PATH: &str = "nara.toml";
 
@@ -169,6 +173,7 @@ pub(crate) enum ProjectSourceIndexDiagnosticCode {
     DiagnosticBudgetExceeded,
     RetainedSnapshotBudgetExceeded,
     GenerationExhausted,
+    PreparationUnavailable,
 }
 
 impl ProjectSourceIndexDiagnosticCode {
@@ -196,6 +201,7 @@ impl ProjectSourceIndexDiagnosticCode {
                 "project.source-index.retained-snapshot-budget-exceeded"
             }
             Self::GenerationExhausted => "project.source-index.generation-exhausted",
+            Self::PreparationUnavailable => "project.source-index.preparation-unavailable",
         }
     }
 
@@ -227,6 +233,7 @@ impl ProjectSourceIndexDiagnosticCode {
                 "The retained project source snapshot budget was exceeded"
             }
             Self::GenerationExhausted => "The project source index generation space was exhausted",
+            Self::PreparationUnavailable => "Project source index preparation did not complete",
         }
     }
 
@@ -273,6 +280,9 @@ impl ProjectSourceIndexDiagnosticCode {
                 "Reduce the declared source tree and refresh the Project Browser."
             }
             Self::GenerationExhausted => "Reopen the project to create a fresh indexing session.",
+            Self::PreparationUnavailable => {
+                "Retry the Project Browser refresh after pending work retires."
+            }
         }
     }
 }
@@ -605,10 +615,15 @@ pub(crate) struct ProjectSourceIndexState {
     basis: AuthoringSourceIndexBasis,
     limits: ProjectSourceIndexLimits,
     next_generation: Option<NonZeroU64>,
-    attempt: Option<AuthoringSourceIndexAttempt>,
+    pending: Option<ProjectSourceIndexGeneration>,
+    attempt: Option<ScanPreparation>,
     refresh_queued: Option<ProjectSourceIndexGeneration>,
+    progress: Option<ProjectSourceIndexProgress>,
+    closing: bool,
     snapshot: Option<Arc<ProjectSourceIndexSnapshot>>,
     failure: Option<ProjectSourceIndexFailure>,
+    #[cfg(test)]
+    gate: Option<preparation::ScanTestGate>,
 }
 
 impl ProjectSourceIndexState {
@@ -621,25 +636,41 @@ impl ProjectSourceIndexState {
             basis: AuthoringSourceIndexBasis::from_schema(schema),
             limits,
             next_generation: Some(NonZeroU64::MIN),
+            pending: None,
             attempt: None,
             refresh_queued: None,
+            progress: None,
+            closing: false,
             snapshot: None,
             failure: None,
+            #[cfg(test)]
+            gate: None,
         }
     }
 
     pub(crate) fn request_refresh(&mut self) -> Option<ProjectSourceIndexGeneration> {
-        if self.attempt.is_some() {
-            let generation = self
-                .refresh_queued
-                .or_else(|| self.next_generation.map(ProjectSourceIndexGeneration))?;
+        if self.closing {
+            return None;
+        }
+        if self.has_pending_work() {
+            if let Some(generation) = self.refresh_queued {
+                return Some(generation);
+            }
+            let generation = self.reserve_generation()?;
             self.refresh_queued = Some(generation);
             return Some(generation);
         }
-        self.begin_refresh()
+        let generation = self.reserve_generation()?;
+        self.pending = Some(generation);
+        self.progress = Some(ProjectSourceIndexProgress::new(
+            ProjectSourceIndexDiagnosticPhase::RootNormalization,
+            ProjectSourceIndexBudgetUsage::default(),
+        ));
+        self.failure = None;
+        Some(generation)
     }
 
-    fn begin_refresh(&mut self) -> Option<ProjectSourceIndexGeneration> {
+    fn reserve_generation(&mut self) -> Option<ProjectSourceIndexGeneration> {
         let Some(generation) = self.next_generation else {
             self.failure = Some(ProjectSourceIndexFailure::new(
                 ProjectSourceIndexDiagnosticCode::GenerationExhausted,
@@ -650,48 +681,119 @@ impl ProjectSourceIndexState {
             return None;
         };
         self.next_generation = generation.get().checked_add(1).and_then(NonZeroU64::new);
-        let generation = ProjectSourceIndexGeneration(generation);
-        match AuthoringSourceIndexAttempt::begin(self.basis.share(), generation, self.limits) {
-            Ok(attempt) => {
-                self.attempt = Some(attempt);
-                self.failure = None;
-                Some(generation)
+        Some(ProjectSourceIndexGeneration(generation))
+    }
+
+    /// Starts or observes one finite worker; no filesystem preparation runs on this caller.
+    pub(crate) fn advance(&mut self, pools: &TaskPools) -> bool {
+        if self.attempt.is_none()
+            && !self.closing
+            && let Some(generation) = self.pending.take()
+        {
+            self.attempt = ScanPreparation::start(
+                self.basis.share(),
+                generation,
+                self.limits,
+                pools,
+                #[cfg(test)]
+                self.gate.take(),
+            );
+            if self.attempt.is_none() {
+                self.preparation_unavailable();
+                self.finish_attempt();
             }
-            Err(failure) => {
-                self.failure = Some(failure);
-                None
+            return true;
+        }
+        self.poll_preparation()
+    }
+
+    /// Observes only an existing worker, including after its originating pool has shut down.
+    pub(crate) fn poll_preparation(&mut self) -> bool {
+        let Some(attempt) = self.attempt.as_mut() else {
+            return false;
+        };
+        let before = self.progress;
+        if let Some(progress) = attempt.progress() {
+            self.progress = Some(progress);
+        }
+        let result = attempt.poll();
+        match result {
+            ScanPreparationPoll::Pending => return self.progress != before,
+            ScanPreparationPoll::Completed(snapshot) if !self.closing => {
+                // This worker belongs only to this state and its reserved generation. The
+                // snapshot also retains the exact root/manifest/schema identities it checked.
+                if snapshot.root_identity == self.basis.root_identity
+                    && snapshot.manifest_identity == self.basis.manifest_identity
+                    && snapshot.manifest_digest == self.basis.manifest_digest
+                    && snapshot.bundle_identity == self.basis.bundle_identity
+                    && snapshot.bundle_digest == self.basis.bundle_digest
+                    && snapshot.generation == attempt.generation()
+                {
+                    self.snapshot = Some(Arc::new(snapshot));
+                    self.failure = None;
+                } else {
+                    self.preparation_unavailable();
+                }
             }
+            ScanPreparationPoll::Failed(failure) if !self.closing => self.failure = Some(failure),
+            ScanPreparationPoll::Unavailable if !self.closing => self.preparation_unavailable(),
+            _ => {}
+        }
+        self.attempt = None;
+        self.finish_attempt();
+        true
+    }
+
+    fn preparation_unavailable(&mut self) {
+        let progress = self.progress;
+        self.failure = Some(ProjectSourceIndexFailure::new(
+            ProjectSourceIndexDiagnosticCode::PreparationUnavailable,
+            progress.map_or(
+                ProjectSourceIndexDiagnosticPhase::RootNormalization,
+                |progress| progress.phase(),
+            ),
+            None,
+            progress.map_or_else(ProjectSourceIndexBudgetUsage::default, |progress| {
+                progress.usage()
+            }),
+        ));
+    }
+
+    fn finish_attempt(&mut self) {
+        self.progress = None;
+        if !self.closing
+            && let Some(generation) = self.refresh_queued.take()
+        {
+            self.pending = Some(generation);
+            self.progress = Some(ProjectSourceIndexProgress::new(
+                ProjectSourceIndexDiagnosticPhase::RootNormalization,
+                ProjectSourceIndexBudgetUsage::default(),
+            ));
+            self.failure = None;
         }
     }
 
-    pub(crate) fn advance(&mut self) {
-        let Some(mut attempt) = self.attempt.take() else {
-            return;
-        };
-        match attempt.advance() {
-            SourceIndexAttemptProgress::Pending => self.attempt = Some(attempt),
-            SourceIndexAttemptProgress::Published(snapshot) => {
-                self.snapshot = Some(Arc::new(snapshot));
-                self.failure = None;
-            }
-            SourceIndexAttemptProgress::Failed(failure) => {
-                self.failure = Some(failure);
-            }
-        };
-        if self.attempt.is_none() {
-            if let Some(expected_generation) = self.refresh_queued.take() {
-                let started_generation = self.begin_refresh();
-                debug_assert!(
-                    started_generation.is_none() || started_generation == Some(expected_generation),
-                    "a queued source-index refresh keeps its reserved generation"
-                );
-            }
+    pub(crate) fn cancel(&mut self) {
+        self.closing = true;
+        self.pending = None;
+        self.refresh_queued = None;
+        if let Some(attempt) = &self.attempt {
+            attempt.cancel();
+        } else {
+            self.progress = None;
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn hold_next_scan(&mut self, phase: ScanTestPhase) -> ScanTestControl {
+        let (gate, control) = preparation::ScanTestGate::new(phase, false);
+        self.gate = Some(gate);
+        control
     }
 
     #[must_use]
     pub(crate) fn kind(&self) -> ProjectSourceIndexStateKind {
-        if self.attempt.is_some() {
+        if self.has_pending_work() {
             ProjectSourceIndexStateKind::Scanning
         } else if self.failure.is_some() {
             ProjectSourceIndexStateKind::Unavailable
@@ -712,14 +814,12 @@ impl ProjectSourceIndexState {
 
     #[must_use]
     pub(crate) const fn has_pending_work(&self) -> bool {
-        self.attempt.is_some()
+        self.attempt.is_some() || self.pending.is_some()
     }
 
     #[must_use]
     pub(crate) fn progress(&self) -> Option<ProjectSourceIndexProgress> {
-        self.attempt
-            .as_ref()
-            .map(AuthoringSourceIndexAttempt::progress)
+        self.progress
     }
 
     #[must_use]
@@ -731,12 +831,11 @@ impl ProjectSourceIndexState {
     pub(crate) const fn failure(&self) -> Option<&ProjectSourceIndexFailure> {
         self.failure.as_ref()
     }
+}
 
-    #[cfg(test)]
-    fn is_revalidating(&self) -> bool {
-        self.attempt
-            .as_ref()
-            .is_some_and(AuthoringSourceIndexAttempt::is_revalidating)
+impl Drop for ProjectSourceIndexState {
+    fn drop(&mut self) {
+        self.cancel();
     }
 }
 

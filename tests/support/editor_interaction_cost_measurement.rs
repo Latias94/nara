@@ -285,16 +285,12 @@ fn measure_browser_scene_open(population: usize, source: &str) {
             }),
         );
         let outcome = one_outcome(outcome);
-        assert!(
-            matches!(
-                outcome,
-                EditorActionOutcome::ProjectBrowser(
-                    EditorProjectBrowserActionOutcome::Opened { .. }
-                        | EditorProjectBrowserActionOutcome::AwaitingClose { .. }
-                )
-            ),
-            "Browser Scene Open was not admitted: {outcome:?}"
-        );
+        let EditorActionOutcome::ProjectBrowser(EditorProjectBrowserActionOutcome::Preparing {
+            request: open_request,
+        }) = outcome
+        else {
+            panic!("Browser Scene Open was not admitted: {outcome:?}");
+        };
         let mut first_drive = None;
         let mut max_drive = Duration::ZERO;
         loop {
@@ -310,6 +306,9 @@ fn measure_browser_scene_open(population: usize, source: &str) {
                 .and_then(|document| document.source_binding.as_ref())
                 .is_some_and(|binding| binding.locator() == path);
             if opened && frame.workspace_intent().phase().is_none() {
+                assert!(
+                    matches!(frame.document_open().result(), Some(nara::tooling::EditorDocumentOpenResult::Opened { request, .. }) if request == open_request)
+                );
                 break;
             }
             assert!(
@@ -346,8 +345,23 @@ fn measure_browser_scene_open(population: usize, source: &str) {
         assert!(editor_driver::acknowledge_workspace_intent_result(
             &mut editor
         ));
+        let (acknowledgement, _) = timed_dispatch(
+            &mut editor,
+            EditorAction::ProjectBrowser(EditorProjectBrowserAction::AcknowledgeOpen {
+                request: open_request,
+            }),
+        );
+        assert_eq!(
+            one_outcome(acknowledgement),
+            EditorActionOutcome::ProjectBrowser(
+                EditorProjectBrowserActionOutcome::OpenAcknowledged {
+                    request: open_request
+                }
+            )
+        );
         let acknowledged = editor.drive_editor_frame(Duration::ZERO);
         assert!(acknowledged.workspace_intent().result().is_none());
+        assert!(acknowledged.document_open().result().is_none());
         if iteration >= WARMUPS {
             for (phase, elapsed) in [
                 ("request", request),

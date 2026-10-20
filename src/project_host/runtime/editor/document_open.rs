@@ -2,42 +2,161 @@ use super::*;
 
 use crate::project_host::authoring::{AdmittedAuthoringDocument, AuthoringDocumentKind};
 
+use super::persistence::RetainedHost;
+use nara_scene::{AuthoringSchemaBasis, SceneAuthoringRevision};
 use nara_tooling::{EditorDocumentDigest, EditorDocumentSourceBinding};
+use nara_tooling::{
+    EditorDocumentOpenId, EditorDocumentOpenPhase, EditorDocumentOpenResult, EditorDocumentOpenView,
+};
+
+pub(super) mod preparation;
+use preparation::DocumentOpenPreparation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum EditorDocumentOpenRequestResult {
-    Activated { document: EditorDocumentId },
-    Opened { document: EditorDocumentId },
-    AwaitingClose { document: EditorDocumentId },
-    Rejected { code: &'static str },
+    Preparing {
+        request: EditorDocumentOpenId,
+    },
+    Activated {
+        document: EditorDocumentId,
+    },
+    #[cfg(test)]
+    Opened {
+        document: EditorDocumentId,
+    },
+    #[cfg(test)]
+    AwaitingClose {
+        document: EditorDocumentId,
+    },
+    Rejected {
+        code: &'static str,
+    },
 }
 
-pub(super) enum PreparedAuthoringDocumentOpen {
+enum PreparedDocument {
     Scene {
         relative_path: Arc<str>,
         digest: EditorDocumentDigest,
-        host: ScenePersistenceHost,
+        host: RetainedHost<ScenePersistenceHost>,
         document: nara_scene::PublishedAuthoringSceneDocument,
     },
     Prefab {
         relative_path: Arc<str>,
         digest: EditorDocumentDigest,
-        host: PrefabPersistenceHost,
+        host: RetainedHost<PrefabPersistenceHost>,
         document: nara_scene::PublishedAuthoringPrefabDocument,
     },
 }
 
-impl PreparedAuthoringDocumentOpen {
-    const fn kind(&self) -> AuthoringDocumentKind {
-        match self {
-            Self::Scene { .. } => AuthoringDocumentKind::Scene,
-            Self::Prefab { .. } => AuthoringDocumentKind::Prefab,
+enum PreparedHost {
+    Scene(RetainedHost<ScenePersistenceHost>),
+    Prefab(RetainedHost<PrefabPersistenceHost>),
+}
+
+/// Retires an unpublished Host on every refusal, cancellation and disposable-result path.
+pub(super) struct PreparedAuthoringDocumentOpen {
+    document: Option<PreparedDocument>,
+    host: Option<PreparedHost>,
+}
+
+impl Drop for PreparedAuthoringDocumentOpen {
+    fn drop(&mut self) {
+        if let Some(host) = self.host.take() {
+            match host {
+                PreparedHost::Scene(host) => {
+                    host.retire();
+                }
+                PreparedHost::Prefab(host) => {
+                    host.retire();
+                }
+            }
         }
     }
 }
 
+pub(super) struct OpenAdmission {
+    request: EditorDocumentOpenId,
+    path: Arc<str>,
+    kind: AuthoringDocumentKind,
+    index: Arc<ProjectSourceIndexSnapshot>,
+    replacing: Option<ReplacingDocument>,
+}
+
+struct ReplacingDocument {
+    document: EditorDocumentId,
+    revision: SceneAuthoringRevision,
+    binding: Option<EditorDocumentSourceBinding>,
+    schema: Option<AuthoringSchemaBasis>,
+}
+
+pub(super) enum PendingDocumentOpen {
+    Preparing {
+        admission: OpenAdmission,
+        worker: DocumentOpenPreparation,
+        cancelled: bool,
+    },
+    AwaitingClose {
+        admission: OpenAdmission,
+        prepared: PreparedAuthoringDocumentOpen,
+        retirement_admitted: bool,
+    },
+}
+
 impl EditorProjectSession {
+    #[cfg(test)]
+    pub(crate) fn hold_next_document_open(
+        &mut self,
+        phase: preparation::OpenTestPhase,
+    ) -> preparation::OpenTestControl {
+        let (gate, control) = preparation::OpenTestGate::new(phase);
+        self.next_document_open_gate = Some(gate);
+        control
+    }
+
+    /// Owner-conformance tests retain their synchronous observation helper. Product consumers
+    /// must use dispatch and the explicit pending/result projection.
+    #[cfg(test)]
     pub(crate) fn open_indexed_authoring_document(
+        &mut self,
+        index: Arc<ProjectSourceIndexSnapshot>,
+        path: &str,
+        kind: AuthoringDocumentKind,
+    ) -> EditorDocumentOpenRequestResult {
+        self.document_open_result = None;
+        let result = self.request_indexed_authoring_document(index, path, kind);
+        let EditorDocumentOpenRequestResult::Preparing { request } = result else {
+            return result;
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            self.drive_editor_frame(Duration::ZERO);
+            if let Some(result) = self.document_open_result.take() {
+                return match result {
+                    EditorDocumentOpenResult::Opened { document, .. } => {
+                        EditorDocumentOpenRequestResult::Opened { document }
+                    }
+                    EditorDocumentOpenResult::Rejected { code, .. } => rejected(code),
+                    EditorDocumentOpenResult::Cancelled { .. } => {
+                        rejected("project.editor.document-open-cancelled")
+                    }
+                };
+            }
+            if let Some(PendingDocumentOpen::AwaitingClose { admission, .. }) =
+                &self.pending_document_open
+            {
+                return EditorDocumentOpenRequestResult::AwaitingClose {
+                    document: admission.replacing.as_ref().unwrap().document,
+                };
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Open {request:?} did not settle"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    pub(crate) fn request_indexed_authoring_document(
         &mut self,
         index: Arc<ProjectSourceIndexSnapshot>,
         relative_path: &str,
@@ -47,6 +166,7 @@ impl EditorProjectSession {
             || self.pending_document_open.is_some()
             || self.pending_workspace_intent.is_some()
             || self.pending_persistence.is_some()
+            || self.document_open_result.is_some()
         {
             return rejected("project.editor.document-open-busy");
         }
@@ -69,37 +189,40 @@ impl EditorProjectSession {
             };
         }
 
-        let admitted = match project.admit_indexed_document(&index, relative_path, kind) {
-            Ok(admitted) => admitted,
+        let relative_path: Arc<str> = Arc::from(relative_path);
+        let captured = match project.capture_indexed_document(
+            Arc::clone(&index),
+            Arc::clone(&relative_path),
+            kind,
+        ) {
+            Ok(captured) => captured,
             Err(error) => return rejected(error.code()),
         };
-        let prepared = match self.prepare_document_open(admitted) {
-            Ok(prepared) => prepared,
-            Err(code) => return rejected(code),
+        let Some(next) = self.next_document_open_request.checked_add(1) else {
+            return rejected("project.editor.document-open-id-exhausted");
         };
-        debug_assert_eq!(prepared.kind(), kind);
-        let replacing = match kind {
-            AuthoringDocumentKind::Scene => self.scene_lane.as_ref().map(|lane| lane.document),
-            AuthoringDocumentKind::Prefab => self.prefab_lane.as_ref().map(|lane| lane.document),
+        self.next_document_open_request = next;
+        let request = EditorDocumentOpenId::new(self.current_frame().revision(), next);
+        let admission = OpenAdmission {
+            request,
+            path: relative_path,
+            kind,
+            index,
+            replacing: self.capture_replacing_document(kind),
         };
-        if let Some(document) = replacing {
-            self.pending_document_open = Some(prepared);
-            let requested =
-                self.request_workspace_intent(EditorWorkspaceIntent::CloseDocument { document });
-            if requested != EditorWorkspaceIntentRequestResult::Accepted {
-                self.pending_document_open = None;
-                return rejected("project.editor.document-replacement-close-rejected");
-            }
-            return match self.bound_document(relative_path, kind) {
-                Some(document) => EditorDocumentOpenRequestResult::Opened { document },
-                None => EditorDocumentOpenRequestResult::AwaitingClose { document },
-            };
-        }
-
-        self.publish_prepared_document_open(prepared)
-            .map_or_else(rejected, |document| {
-                EditorDocumentOpenRequestResult::Opened { document }
-            })
+        let worker = DocumentOpenPreparation::start(
+            captured,
+            self.authoring_runtime.host_custody().clone(),
+            self.authoring_runtime.persistence_tasks(),
+            #[cfg(test)]
+            self.next_document_open_gate.take(),
+        );
+        self.pending_document_open = Some(PendingDocumentOpen::Preparing {
+            admission,
+            worker,
+            cancelled: false,
+        });
+        EditorDocumentOpenRequestResult::Preparing { request }
     }
 
     fn bound_document(
@@ -117,83 +240,280 @@ impl EditorProjectSession {
         }
     }
 
-    fn prepare_document_open(
-        &self,
-        admitted: AdmittedAuthoringDocument,
-    ) -> Result<PreparedAuthoringDocumentOpen, &'static str> {
-        let root = self
-            .authoring_project()
-            .expect("indexed authoring admission requires the authoring execution lane")
-            .project_root();
-        let source = admitted.source();
-        let relative_path: Arc<str> = Arc::from(source.relative_path());
-        let digest = editor_document_digest(source.digest());
-        match admitted {
-            AdmittedAuthoringDocument::Scene { source, document } => {
-                let (host, opened_digest) = ScenePersistenceHost::bind_authoring_source(
-                    &root,
-                    source.relative_path(),
-                    source.identity(),
-                    source.digest(),
+    fn capture_replacing_document(&self, kind: AuthoringDocumentKind) -> Option<ReplacingDocument> {
+        let document = match kind {
+            AuthoringDocumentKind::Scene => self.scene_lane.as_ref()?.document,
+            AuthoringDocumentKind::Prefab => self.prefab_lane.as_ref()?.document,
+        };
+        let (binding, schema) = match kind {
+            AuthoringDocumentKind::Scene => {
+                let slot = self.workspace.scene(document)?;
+                (
+                    slot.source_binding().cloned(),
+                    slot.session().authoring_schema_basis(),
                 )
-                .map_err(document_open_failure_code)?;
-                if opened_digest != digest {
-                    return Err("project.editor.document-persistence-digest-mismatch");
-                }
-                Ok(PreparedAuthoringDocumentOpen::Scene {
-                    relative_path,
-                    digest,
-                    host,
-                    document,
-                })
             }
-            AdmittedAuthoringDocument::Prefab { source, document } => {
-                let source_binding = EditorDocumentSourceBinding::new(source.relative_path());
-                let (host, opened_digest) = PrefabPersistenceHost::bind_authoring_source(
-                    &root,
-                    source_binding,
-                    source.identity(),
-                    source.digest(),
+            AuthoringDocumentKind::Prefab => {
+                let slot = self.workspace.prefab(document)?;
+                (
+                    Some(slot.source_binding().clone()),
+                    slot.session().authoring_schema_basis(),
                 )
-                .map_err(document_open_failure_code)?;
-                if opened_digest != digest {
-                    return Err("project.editor.document-persistence-digest-mismatch");
-                }
-                Ok(PreparedAuthoringDocumentOpen::Prefab {
-                    relative_path,
-                    digest,
-                    host,
-                    document,
-                })
             }
+        };
+        Some(ReplacingDocument {
+            document,
+            revision: self.workspace.document_revision(document)?,
+            binding,
+            schema,
+        })
+    }
+
+    fn validate_document_open(&self, admission: &OpenAdmission) -> Result<(), &'static str> {
+        if !self.accepts_new_work() {
+            return Err("project.editor.document-open-busy");
+        }
+        let current = self
+            .project_source_index_snapshot()
+            .ok_or("project.editor.document-index-unavailable")?;
+        if !Arc::ptr_eq(&current, &admission.index) {
+            return Err("project.editor.document-index-stale");
+        }
+        match (
+            &admission.replacing,
+            self.capture_replacing_document(admission.kind),
+        ) {
+            (None, None) => Ok(()),
+            (Some(before), Some(now))
+                if before.document == now.document
+                    && before.revision == now.revision
+                    && before.binding == now.binding
+                    && before.schema == now.schema =>
+            {
+                Ok(())
+            }
+            _ => Err("project.editor.document-open-stale-document"),
+        }
+    }
+
+    pub(super) fn document_open_view(&self) -> EditorDocumentOpenView {
+        let pending = self
+            .pending_document_open
+            .as_ref()
+            .map(|pending| match pending {
+                PendingDocumentOpen::Preparing {
+                    admission,
+                    cancelled,
+                    ..
+                } => (
+                    admission.request,
+                    Arc::clone(&admission.path),
+                    if *cancelled {
+                        EditorDocumentOpenPhase::Cancelling
+                    } else {
+                        EditorDocumentOpenPhase::Preparing
+                    },
+                ),
+                PendingDocumentOpen::AwaitingClose { admission, .. } => (
+                    admission.request,
+                    Arc::clone(&admission.path),
+                    EditorDocumentOpenPhase::AwaitingClose {
+                        document: admission
+                            .replacing
+                            .as_ref()
+                            .expect("replacement has a predecessor")
+                            .document,
+                    },
+                ),
+            });
+        EditorDocumentOpenView::new(pending, self.document_open_result)
+    }
+
+    pub(super) fn acknowledge_document_open(&mut self, request: EditorDocumentOpenId) -> bool {
+        if self
+            .document_open_result
+            .is_some_and(|result| result.request() == request)
+        {
+            self.document_open_result = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(super) fn cancel_document_open_request(&mut self, request: EditorDocumentOpenId) -> bool {
+        match self.pending_document_open.as_mut() {
+            Some(PendingDocumentOpen::Preparing {
+                admission,
+                worker,
+                cancelled,
+            }) if admission.request == request => {
+                *cancelled = true;
+                worker.cancel();
+                true
+            }
+            // Once dirty close is admitted, its existing prompt owns Save/Discard/Cancel.
+            _ => false,
+        }
+    }
+
+    pub(super) fn document_open_preparing(&self) -> bool {
+        matches!(
+            self.pending_document_open,
+            Some(PendingDocumentOpen::Preparing { .. })
+        )
+    }
+
+    pub(super) fn advance_document_open(&mut self) -> bool {
+        let Some(PendingDocumentOpen::Preparing { .. }) = self.pending_document_open.as_ref()
+        else {
+            return false;
+        };
+        let Some(PendingDocumentOpen::Preparing {
+            admission,
+            mut worker,
+            cancelled,
+        }) = self.pending_document_open.take()
+        else {
+            unreachable!()
+        };
+        let Some(completion) = worker.poll() else {
+            self.pending_document_open = Some(PendingDocumentOpen::Preparing {
+                admission,
+                worker,
+                cancelled,
+            });
+            return false;
+        };
+        let request = admission.request;
+        if cancelled || !self.accepts_new_work() {
+            self.document_open_result = Some(EditorDocumentOpenResult::Cancelled { request });
+            return true;
+        }
+        let prepared = match completion
+            .and_then(|prepared| self.validate_document_open(&admission).map(|()| prepared))
+        {
+            Ok(prepared) => prepared,
+            Err(code) => {
+                self.document_open_result =
+                    Some(EditorDocumentOpenResult::Rejected { request, code });
+                return true;
+            }
+        };
+        if let Some(replacing) = &admission.replacing {
+            let document = replacing.document;
+            self.pending_document_open = Some(PendingDocumentOpen::AwaitingClose {
+                admission,
+                prepared,
+                retirement_admitted: false,
+            });
+            if self.request_workspace_intent(EditorWorkspaceIntent::CloseDocument { document })
+                != EditorWorkspaceIntentRequestResult::Accepted
+            {
+                self.reject_pending_document_open(
+                    "project.editor.document-replacement-close-rejected",
+                );
+            }
+        } else {
+            self.document_open_result = Some(match self.publish_prepared_document_open(prepared) {
+                Ok(document) => EditorDocumentOpenResult::Opened { request, document },
+                Err(code) => EditorDocumentOpenResult::Rejected { request, code },
+            });
+        }
+        true
+    }
+
+    /// Recheck pure owner facts immediately before any irreversible predecessor retirement.
+    pub(super) fn admit_document_open_retirement(&mut self) -> bool {
+        let Some(PendingDocumentOpen::AwaitingClose {
+            admission,
+            retirement_admitted,
+            ..
+        }) = self.pending_document_open.as_ref()
+        else {
+            return true;
+        };
+        if *retirement_admitted {
+            return true;
+        }
+        if let Err(code) = self.validate_document_open(admission) {
+            self.reject_pending_document_open(code);
+            if let Some(pending) = self.pending_workspace_intent.take() {
+                self.workspace_intent_result = Some(EditorWorkspaceIntentResult::Rejected {
+                    intent: pending.intent(),
+                    reason: EditorWorkspaceIntentRejection::PersistenceRejected(
+                        EditorPersistenceRejection::StaleRevision,
+                    ),
+                });
+            }
+            return false;
+        }
+        if let Some(PendingDocumentOpen::AwaitingClose {
+            retirement_admitted,
+            ..
+        }) = self.pending_document_open.as_mut()
+        {
+            *retirement_admitted = true;
+        }
+        true
+    }
+
+    fn reject_pending_document_open(&mut self, code: &'static str) {
+        if let Some(PendingDocumentOpen::AwaitingClose { admission, .. }) =
+            self.pending_document_open.take()
+        {
+            self.document_open_result = Some(EditorDocumentOpenResult::Rejected {
+                request: admission.request,
+                code,
+            });
         }
     }
 
     pub(super) fn publish_pending_document_open(&mut self) {
-        let Some(prepared) = self.pending_document_open.take() else {
+        let Some(PendingDocumentOpen::AwaitingClose {
+            admission,
+            prepared,
+            ..
+        }) = self.pending_document_open.take()
+        else {
             return;
         };
-        if let Err(code) = self.publish_prepared_document_open(prepared) {
-            let _ = self.diagnostics.extend(single_error(
-                code,
-                "the admitted authoring document could not enter its Editor persistence lane",
-            ));
-        }
+        let request = admission.request;
+        self.document_open_result = Some(match self.publish_prepared_document_open(prepared) {
+            Ok(document) => EditorDocumentOpenResult::Opened { request, document },
+            Err(code) => EditorDocumentOpenResult::Rejected { request, code },
+        });
     }
 
     pub(super) fn cancel_pending_document_open(&mut self) {
-        self.pending_document_open = None;
+        if let Some(PendingDocumentOpen::Preparing {
+            worker, cancelled, ..
+        }) = self.pending_document_open.as_mut()
+        {
+            *cancelled = true;
+            worker.cancel();
+        } else if let Some(PendingDocumentOpen::AwaitingClose { admission, .. }) =
+            self.pending_document_open.take()
+        {
+            self.document_open_result = Some(EditorDocumentOpenResult::Cancelled {
+                request: admission.request,
+            });
+        }
     }
 
     fn publish_prepared_document_open(
         &mut self,
-        prepared: PreparedAuthoringDocumentOpen,
+        mut prepared: PreparedAuthoringDocumentOpen,
     ) -> Result<EditorDocumentId, &'static str> {
         if !self.accepts_new_work() {
             return Err("project.editor.document-open-busy");
         }
-        match prepared {
-            PreparedAuthoringDocumentOpen::Scene {
+        let result = match prepared
+            .document
+            .take()
+            .expect("a prepared document publishes once")
+        {
+            PreparedDocument::Scene {
                 relative_path,
                 digest,
                 host,
@@ -221,11 +541,6 @@ impl EditorProjectSession {
                     return Err("project.editor.scene-persistence-binding-failed");
                 }
                 let _ = self.diagnostics.extend(diagnostics);
-                let host = self
-                    .authoring_runtime
-                    .host_custody()
-                    .retain_scene(host)
-                    .ok_or("project.editor.document-open-busy")?;
                 self.scene_lane = Some(EditorScenePersistenceLane {
                     project_path: relative_path,
                     document,
@@ -233,7 +548,7 @@ impl EditorProjectSession {
                 });
                 Ok(document)
             }
-            PreparedAuthoringDocumentOpen::Prefab {
+            PreparedDocument::Prefab {
                 relative_path,
                 digest,
                 host,
@@ -261,11 +576,6 @@ impl EditorProjectSession {
                     return Err("project.editor.prefab-persistence-binding-failed");
                 }
                 let _ = self.diagnostics.extend(diagnostics);
-                let host = self
-                    .authoring_runtime
-                    .host_custody()
-                    .retain_prefab(host)
-                    .ok_or("project.editor.document-open-busy")?;
                 self.prefab_lane = Some(EditorPrefabPersistenceLane {
                     project_path: relative_path,
                     document,
@@ -273,7 +583,11 @@ impl EditorProjectSession {
                 });
                 Ok(document)
             }
+        };
+        if result.is_ok() {
+            prepared.host = None;
         }
+        result
     }
 }
 

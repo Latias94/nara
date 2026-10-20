@@ -116,6 +116,22 @@ OS read stopped. A bounded preparation owner retains running captures through th
 retirement path. Unchanged pending polls need maintenance, not repeated presentation. Retained
 replacement projects and persistence-before-preparation/Save-before-refresh ordering stay intact.
 
+Project Browser scan preparation runs as one finite owned attempt on the existing I/O task pool.
+Its generation reservation, absolute budgets, capability-bound paths and final lineage checks
+remain with the source-index owner. The owner polls progress without waiting, preserves last-good
+snapshots on refusal and publishes only an actual completed matching attempt. Public Refresh
+coalesces without spawning duplicate work; internal publication can reserve one successor scan.
+Logical cancellation never certifies physical capture disposal or session close completion.
+
+Browser document Open exposes request-specific preparation, dirty-close waiting and terminal
+results in the public frame. Native maintenance polls pending work without repainting unchanged
+polls. Panels can cancel preparation and acknowledge only the exact terminal request through the
+ordinary action port; the dispatch callback still reports dispatch rather than eventual Open.
+Existing Save/Discard/Cancel owns a dirty replacement after preparation is admitted. File reads,
+pure classification and Host binding can leave the owner thread; Workspace mutation, predecessor
+retirement and publication stay with their current owner under ADR 0047. Cancelled or rejected
+prepared Hosts retire through existing Host custody rather than accumulating until project exit.
+
 The native Host retains one event loop, device-creation authority and accountable close/recovery lifecycle.
 It may delegate secondary window/surface ownership to the selected platform/renderer adapter with explicit shutdown ordering.
 The adapter uses the engine-created GPU lineage rather than a second device/runtime.

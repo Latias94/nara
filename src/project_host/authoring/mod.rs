@@ -10,6 +10,7 @@ mod source_index;
 pub(crate) use adapter::{first_party_authoring_preview_registry, project_authoring_adapters};
 pub(crate) use document::{
     AdmittedAuthoringDocument, AuthoringDocumentAdmissionError, AuthoringDocumentKind,
+    OwnedAuthoringDocumentRequest,
 };
 #[cfg(any(feature = "tooling", test))]
 pub(crate) use project::{
@@ -26,6 +27,8 @@ pub(crate) use source_index::{
     ProjectSourceIndexProgress, ProjectSourceIndexSnapshot, ProjectSourceIndexStateKind,
     ProjectSourceInspectReason, ProjectSourceKind, ProjectSourceOpenCapability,
 };
+#[cfg(test)]
+pub(crate) use source_index::{ScanTestControl, ScanTestPhase};
 
 use std::{
     error::Error,

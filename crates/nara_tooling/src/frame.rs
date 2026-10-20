@@ -113,6 +113,7 @@ impl EditorFrameClock {
             field_feedback,
             image_import: None,
             image_import_work_pending: false,
+            document_open: Default::default(),
         }
     }
 }
@@ -275,9 +276,22 @@ pub struct EditorFrameModel {
     field_feedback: Option<EditorFieldFeedback>,
     image_import: Option<EditorImageImportView>,
     image_import_work_pending: bool,
+    document_open: crate::EditorDocumentOpenView,
 }
 
 impl EditorFrameModel {
+    /// Installs the exact project-global pending Open and terminal result.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_document_open(mut self, view: crate::EditorDocumentOpenView) -> Self {
+        self.document_open = view;
+        self
+    }
+
+    #[must_use]
+    pub const fn document_open(&self) -> &crate::EditorDocumentOpenView {
+        &self.document_open
+    }
     /// Installs the Host-owned selected-image projection and project-global pending-work fact.
     #[doc(hidden)]
     #[must_use]
@@ -574,11 +588,14 @@ impl EditorAction {
     pub const fn requires_current_frame(&self) -> bool {
         match self {
             Self::Navigate(_)
-            | Self::ProjectBrowser(_)
             | Self::ImageImport(_)
             | Self::RuntimeEdit { .. }
             | Self::ApplyChanges { .. }
             | Self::Gesture(_) => true,
+            Self::ProjectBrowser(action) => matches!(
+                action,
+                EditorProjectBrowserAction::Refresh | EditorProjectBrowserAction::Open { .. }
+            ),
             Self::Play(action) => matches!(action, EditorPlayAction::Play { .. }),
             Self::Mutate(_)
             | Self::Persistence(_)
