@@ -100,6 +100,11 @@ preparation. Opening keeps authoring controls disabled and rejects new Play/Rest
 admission at the Host, including frame-bound and external routes. Native codec affinity and
 exact source/revision publication stay with the existing document owner. Switching an already
 open active tab does not retarget an admitted operation.
+Physical session close is monotonic: its first attempt closes new-work admission even while an
+already admitted Save/Reopen is still preparing. A caller may observe or acknowledge results and
+retry cleanup, but cannot reopen file or Play admission on that closing or stopped session.
+Scene/Prefab Host cleanup remains registered across idle operation periods and transfers explicitly
+when content refresh replaces the authoring runtime; frontend retirement does not release it.
 
 The native Host retains one event loop, device-creation authority and accountable close/recovery lifecycle.
 It may delegate secondary window/surface ownership to the selected platform/renderer adapter with explicit shutdown ordering.

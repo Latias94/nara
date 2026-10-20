@@ -629,6 +629,12 @@ pre-existing post-terminal failed-cleanup custody gap. Full lane-lifetime file H
 is the next repair before more startup/source latency work; successful read abandonment does
 not cover a prior failed Save cleanup owner.
 
+The subsequent [Host lifetime custody correction](../plans/2026-10-20-editor-host-lifetime-custody-plan.md)
+gives each concrete Scene/Prefab Host a private retirement registration across idle, Save/Reopen,
+runtime replacement and session abandonment. This closes the ownership gap independently of the
+v3 read-preparation timing evidence. Startup-closure preparation remains the next measured trigger;
+unmeasured source/receipt paths and future capabilities retain their separate admission criteria.
+
 ## Implementation Sequence And Ownership
 
 S1 / E1-E2, S2 / E3-E4 and S3 / E6-E5 are complete within their linked verification scope.

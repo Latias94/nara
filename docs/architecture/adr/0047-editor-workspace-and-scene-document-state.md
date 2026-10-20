@@ -81,10 +81,19 @@ Rules:
   authoring re-admission basis together. Encoding, preservation validation and file publication
   may run on the existing task pools; only the Workspace owner consumes the resulting receipt.
   Saving an older captured revision leaves later edits dirty. Navigation cannot replace its
-  document/source, and runtime replacement waits until that owner has recovered the original Host.
+  document/source, and runtime replacement waits until the operation has physically returned.
   Task cancellation or terminality does not prove that filesystem calls returned: retained runtime
   custody keeps the original Host and temporary cleanup alive through close or caller abandonment.
   Save exposes no public Cancel action. Reopen retains its separate exact-base-revision policy.
+- The private Scene/Prefab lane retains one concrete file Host for its entire lifetime, including
+  idle periods after an operation failed. Its runtime retirement registration is independent of
+  task results and remains accountable for temporary cleanup after session abandonment. Operations
+  borrow that Host; completing Save does not remove its retirement registration. A successful
+  authoring-runtime replacement transfers that registration once, after fallible preparation and
+  before dropping the predecessor. A rejected replacement cannot retire the live lane. Closing a
+  document still rejects while its cleanup is pending. Starting physical session close immediately
+  rejects new file, Play and runtime-replacement admission, while previously admitted persistence
+  may finish. A stopped runtime cannot acquire new file obligations.
 - Reopen captures the exact source/document/revision and prepares a bounded read away from the
   Workspace owner. Pure authoring validation may run there; native registry codecs and migrations
   remain on owner admission. Before those callbacks or document replacement, the owner rechecks

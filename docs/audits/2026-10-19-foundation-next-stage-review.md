@@ -19,13 +19,49 @@ removing data-only Set-only gates and implementing exact inverse presence; corre
 alone did not complete the workflow. S2 subsequently corrects N03 with exact result correlation,
 retained field drafts and the default public field helper; its
 [verification record](../knowledge/engineering/verification/2026-10/2026-10-19T153834Z-authoring-s2-exact-results-and-retained-field-editing-2b09e865afc64b7990e2adc737fa2aa7.md)
-separates ordinary/public/native evidence from remaining capability limits. N04-N07 and triggered
-G follow-ups remain open.
+separates ordinary/public/native evidence from remaining capability limits. At that S2 milestone,
+N04-N07 and triggered G follow-ups remained open; the dated disposition below records later work.
 
 Six independent research lanes covered execution/tasks, components/plugins, content/persistence,
 Editor workflows, iteration/delivery and render/platform ownership. A seventh lane challenged the
 combined conclusions. Researchers were read-only; the integration owner ran the bounded Prefab
 canaries below. No new runtime architecture or production fix was implemented in this review.
+
+## Current Disposition — 20 October 2026
+
+The findings, source locations, canaries and recommended sequence below describe the original
+review baseline. They are retained as history, not as a list of present defects. S1-S3 and the
+separate N05 App follow-up are implemented and qualified within the evidence linked from the
+[authoring design](../architecture/authoring-interface-ergonomics-design.md). S3 closes the selected
+finite-constraint and component-domain diagnostic work; arbitrary cross-field/native invariants
+remain an explicit validation boundary. N06 and N07 remain capability triggers, not confirmed bugs.
+
+The selected I/G follow-ups now have distinct dispositions:
+
+| Follow-up | Current disposition | Next dependency |
+| --- | --- | --- |
+| I01 / G1 standalone cancellation | Corrected at `3b70e48`: pending handles become logically cancelled before retained capture disposal. Task API semantics are explicit. The [v1 investigation](../benchmarks/2026-10-20-editor-responsiveness.md) owns the regression and limits. | Measure rejected/coalesced capture disposal and queue pressure before promising bounded caller latency or changing the queue. Logical cancellation still does not prove physical retirement. |
+| I03 / G2/G9 Save and Reopen | [Owned Save](../benchmarks/2026-10-20-owned-editor-save.md) and [Owned Reopen](../benchmarks/2026-10-20-owned-editor-reopen.md) are implemented and qualified within their linked scopes. Native codecs, migrations and document publication retain owner-thread admission. | Full Host lifetime custody is the adjacent correctness follow-up below; slow storage, complex codecs and total CPU remain separate measurements. |
+| Post-terminal failed-Save cleanup | Full Scene/Prefab Host lifetime custody is implemented and qualified at `fe3ad96`. The [custody plan](../plans/2026-10-20-editor-host-lifetime-custody-plan.md) and [verification record](../knowledge/engineering/verification/2026-10/2026-10-20T030524Z-editor-host-lifetime-cleanup-custody-qualification-12c6b025d6c74ed1bf6900c8b0413877.md) own acceptance and limits. | The next selected slice is Project Open startup-closure preparation; no further Host framework is required by this repair. |
+| I02 / Project Open startup closure | The v1 workload triggered investigation: at 4,096 empty entities, startup-closure P50 was 9.920 / 10.048 / 9.911 ms and P95 11.194 / 10.312 / 12.028 ms across three processes. | Next selected slice after custody qualification: owned bounded startup-closure preparation, with session/runtime construction and final publication on the owner thread. The 8 ms trigger is not a product SLA. |
+| Other G1/G2/G3 latency concerns | Browser Open, source-receipt/compiled-Prefab refresh, caller capture disposal, GPU completion holds and aggregate Runtime workers have no qualifying measurement here. | Measure their actual consumer before choosing queue indexing, callback deduplication, another executor or another job system. |
+| N06/N07 and G4-G8 | Code freshness/state restore, multiple same-kind documents, dependency roles, live rename, residency/save, reusable domain fields and Tile authoring are workflow-dependent capability work. | Let a concrete game or tool establish the required contract; these are not hidden closure conditions for the completed corrections. |
+
+The lifetime follow-up gives each admitted file Host one retained owner across idle periods,
+terminal failed Save, failed/stale Reopen, lane replacement, content-runtime replacement and
+session abandonment. The runtime close participant retains cleanup authority until physical
+retirement, and admission closes on the first close attempt, including while prior work is still
+pending. It replaces operation-scoped Save custody rather than fabricating idle Save requests.
+Final qualification passes 125 selected root/public tests, 189 Editor/application tests and three
+selected actual Windows/DX12 native workflows, plus the locked all-features/all-targets workspace
+check. Counts overlap; this is not cross-platform release certification. The linked record owns
+compound failed-cleanup, runtime-replacement and held-read admission evidence. Existing v1/v2/v3
+measurements remain frozen; no new latency result follows.
+
+Reconciliation found no remaining unclosed confirmed correctness defect in the selected N/I
+corrections after that custody follow-up. This bounded result does not establish
+that every engine workflow is correct. Cross-platform release proof, unmeasured workloads and
+the named future capabilities retain their own acceptance and consumer requirements.
 
 ## Assessment
 
@@ -35,7 +71,7 @@ foundations. Remaining weaknesses cluster around admission of public raw data, t
 submit/accept/reject lifecycle of authoring actions, and the meaning of data/code/document identity
 as workflows grow.
 
-Five current behaviors deserve correction before adding more authoring tools. Other rows identify
+At the review baseline, five behaviors deserved correction before adding more authoring tools. Other rows identify
 contracts to settle when their concrete consumers enter; they are not all current defects.
 
 | ID | Finding | Classification | Recommended order |
@@ -315,7 +351,7 @@ Split privately as each owner changes; preserve exports and observable ordering.
 by arbitrary line limits, introducing new crates merely to move code, or growing a generic test
 framework. N01 can be corrected in its existing owner without a whole Scene rewrite.
 
-## Recommended Repair And Design Sequence
+## Review-Time Recommended Repair And Design Sequence
 
 1. Repair N01 source topology admission and N08 target allocation failure, then N02 default/reset
    semantics and N09 permanent pipeline rejection. Use focused red/green
@@ -334,6 +370,7 @@ It does not declare the findings fixed, authorize implementation of every future
 reopen the completed U1-U15 goal.
 
 The subsequent [authoring interface ergonomics design](../architecture/authoring-interface-ergonomics-design.md)
-compares three interface directions and proposes the default field editor, exact dispatch
-correlation, component inventory and bounded constraint contracts. Its implementation units and
-acceptance criteria remain proposed rather than completion evidence for these findings.
+compares three interface directions and records the implemented default field editor, exact
+dispatch correlation, component inventory and bounded constraints. Its linked S1-S3 and N05
+verification records, followed by the Save/Reopen reports and current custody plan above, own
+completion evidence. The original review-time recommendations do not reopen those corrections.

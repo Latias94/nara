@@ -103,6 +103,10 @@ The next ownership repair should retain each Scene/Prefab Host for its entire la
 including after runtime stop and lane replacement. It should precede additional startup/source
 latency work and must not fabricate an idle `SaveWork` to hide a separate retirement obligation.
 
+Subsequent correction: the [Host lifetime custody plan](../plans/2026-10-20-editor-host-lifetime-custody-plan.md)
+implements that separate owner and its compound cleanup regressions. This does not change the
+frozen v3 measurement or extend the native qualification recorded here.
+
 The [verification record](../knowledge/engineering/verification/2026-10/2026-10-20T022302Z-owned-editor-reopen-preparation-and-publication-qualification-557ea95db99b4b8a87829870db1d6b13.md)
 records actual tests, source review and selected Windows/DX12 qualification. The three native
 trajectories do not establish other platforms, monitor scanout, accessibility or a full release.
