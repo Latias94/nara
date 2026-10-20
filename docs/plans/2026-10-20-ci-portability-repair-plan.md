@@ -63,6 +63,9 @@ results and source review do not replace hosted Linux external Play/Stop and des
   signaling/leader reservation contract. Qualify the exact query source and actual Play/Stop.
 - Make identity-replacement test inputs deterministic by retaining the old object before creating
   the replacement; preserve complete rejection and workspace-state assertions across platforms.
+- Let each root/reference nextest suite report all independent test failures with `--no-fail-fast`.
+  Keep serial execution, existing timeouts and failure exit status; an early defect should not
+  leave thousands of later tests unobserved on every cold hosted build.
 - Format independent workspaces and refresh only required lockfile dependency edges.
 - Reconcile the stale exact fixture dependency policy with its existing dev-only component
   integration consumer. Keep the library's direct-domain dependencies and explicit facade features.
