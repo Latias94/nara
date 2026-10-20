@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "8a04948e4df532f50bad8159edef4c7487b1b1563b65374c50df0ce43acd72da"
+source_fingerprint: "7caf341f5231228dc86e21992bdb1577c8962975879aca3f8b4273d26d631144"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "8a04948e4df532f50bad8159edef4c7487b1b1563b65374c50df0ce43ac
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `8a04948e4df532f50bad8159edef4c7487b1b1563b65374c50df0ce43acd72da`
-- Immutable records: 787
+- Source fingerprint: `7caf341f5231228dc86e21992bdb1577c8962975879aca3f8b4273d26d631144`
+- Immutable records: 790
 - Active lane heads: 0
 
 # Active Registrations
@@ -46,6 +46,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
+- [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -58,6 +59,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Ordinary structural authoring and captured-source Reopen qualification](verification/2026-10/2026-10-20T051819Z-ordinary-structural-authoring-and-captured-source-reopen-qualification-f9b317e0ceda49a6b37f9000c61af8d7.md) - Source-local structural transactions, exact unavailable preservation, captured-source Reopen, ordinary public and actual Windows widget trajectories.
 - **Verification Evidence**: [Module goal alignment and concrete boundary repairs qualification](verification/2026-10/2026-10-20T044452Z-module-goal-alignment-and-concrete-boundary-repairs-qualification-f7676d2222234fd39b8b565dbcaf996f.md) - All workspace modules reviewed against Strategy, existing research and pinned mature engines; TileSet, native modes, GPU allocation and glyph clipping repaired with explicit evidence limits.
 - **Verification Evidence**: [Editor Image metadata publication cleanup custody qualification](verification/2026-10/2026-10-20T035244Z-editor-image-metadata-publication-cleanup-custody-qualification-c097c716d6f3480692d800285ec53544.md) - Register metadata publication before writes and retain cleanup through terminal failure, close, unwind and abandonment.
 - **Verification Evidence**: [Owned startup closure publication and responsiveness qualification](verification/2026-10/2026-10-20T032446Z-owned-startup-closure-publication-and-responsiveness-qualification-f187b61104d4443187cea8b9bc392460.md) - Bounded background startup preparation preserves linear Open ownership, owner session publication, cancellation and retained project replacement.
@@ -69,7 +71,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Authoring S3 component constraints diagnostics and inventory](verification/2026-10/2026-10-19T162634Z-authoring-s3-component-constraints-diagnostics-and-inventory-64aacf18a3af432584d306af27d32eb3.md) - Shared interval contracts, safe domain facts, explicit UI evolution and independently compiled component authoring evidence.
 - **Verification Evidence**: [Authoring S2 exact results and retained field editing](verification/2026-10/2026-10-19T153834Z-authoring-s2-exact-results-and-retained-field-editing-2b09e865afc64b7990e2adc737fa2aa7.md) - Exact frontend dispatch correlation, retained Inspector drafts and public panel/native qualification within S2.
 - **Verification Evidence**: [Authoring S1 safety and field override recovery](verification/2026-10/2026-10-19T143606Z-authoring-s1-safety-and-field-override-recovery-0aca8f3bff914ffeaf0254f40a5cb118.md) - Owner-local Prefab/render rejection fixes and complete data-only Reset/Remove history with explicit test and platform limits.
-- **Work Progress**: [Authoring architecture refinements and workflow delivery order](progress/2026-10/2026-10-19T132019Z-authoring-architecture-refinements-and-workflow-delivery-order-9db915d26cb2407291ac76b756a2126c.md) - Keep existing owners, refine exact edit/result and value contracts, and qualify complete workflows within each stage.
 
 # Integration Notes
 

@@ -46,6 +46,13 @@ It records four concrete boundary repairs and their qualification, then orders t
 around ordinary authoring, measured iteration and one persistent two-level game. Capability gaps
 and unmeasured costs remain separate from confirmed defects; Tile tools remain deferred.
 
+The [ordinary authoring workflow](../plans/2026-10-20-ordinary-authoring-workflow-plan.md)
+implements the first structural consumer from that review: stable-ID reparent/reorder, closed
+source-local subtree deletion and exact history through ordinary Scene/Prefab authoring. ADRs
+0090/0118 own operation-relative preservation; ADR 0047 owns captured-source Reopen after later
+unsaved moves. Its [qualification record](../knowledge/engineering/verification/2026-10/2026-10-20T051819Z-ordinary-structural-authoring-and-captured-source-reopen-qualification-f9b317e0ceda49a6b37f9000c61af8d7.md)
+separates domain/public/native results from the still-separate presentation and measurement work.
+
 The [2026-10-18 foundation audit](../audits/2026-10-18-foundation-contract-audit.md) records
 confirmed ownership repairs and proposed refactor dependencies. Its standalone HTML deliverable
 is kept outside the repository. The audit does not change Accepted ADRs.
