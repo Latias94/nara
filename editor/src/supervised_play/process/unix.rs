@@ -783,6 +783,7 @@ mod exact_launch_tests {
                 requested.push(name.to_owned());
                 match name {
                     "DISPLAY" => Some(OsString::from(":19")),
+                    "XAUTHORITY" => Some(OsString::from("/tmp/nara display/auth cookie")),
                     "LANG" => Some(OsString::from("C.UTF-8")),
                     _ => None,
                 }
@@ -794,11 +795,34 @@ mod exact_launch_tests {
             .map(|entry| entry.to_str().expect("the fixture environment is UTF-8"))
             .collect::<Vec<_>>();
 
-        assert_eq!(entries, ["DISPLAY=:19", "LANG=C.UTF-8"]);
+        assert_eq!(
+            entries,
+            [
+                "DISPLAY=:19",
+                "XAUTHORITY=/tmp/nara display/auth cookie",
+                "LANG=C.UTF-8",
+            ]
+        );
         assert!(!requested.iter().any(|name| matches!(
             name.as_str(),
-            "PATH" | "HTTP_PROXY" | "LD_PRELOAD" | "LD_LIBRARY_PATH"
+            "PATH"
+                | "HOME"
+                | "HTTP_PROXY"
+                | "HTTPS_PROXY"
+                | "ALL_PROXY"
+                | "AWS_ACCESS_KEY_ID"
+                | "LD_PRELOAD"
+                | "LD_LIBRARY_PATH"
         )));
+
+        for invalid in ["/tmp/auth\0cookie".to_owned(), "x".repeat(64 * 1024)] {
+            let error = project_product_environment(
+                SupervisedProductEnvironmentPolicy::AllowlistedDesktopSession,
+                |name| (name == "XAUTHORITY").then(|| OsString::from(&invalid)),
+            )
+            .expect_err("the session locator must retain the NUL and total-byte limits");
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        }
 
         let mut sealed_lookups = 0;
         let sealed =

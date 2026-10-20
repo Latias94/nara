@@ -46,6 +46,18 @@ of the same source scans the real `/proc` and safely observes two zero-group rec
 Windows supervised-process capture/flood/force-kill/exit/descendant tests pass. These bounded
 results and source review do not replace hosted Linux external Play/Stop and descendant coverage.
 
+The successor `49423ae` run executes all 151 Linux reference-game all-feature tests: 150 pass,
+one external Play test reaches Faulted/Start. The old helper waits 600 seconds without printing
+its existing bounded output. Make terminal Faulted fail immediately with that public diagnostic
+projection, retaining the exact Running/Restart/Stop/Exit success requirements.
+
+Independent source review also confirms a desktop-session input omission: exact product launches
+clear ambient environment, retain DISPLAY but discard XAUTHORITY and HOME. `xvfb-run` creates a
+temporary authentication file, so the existing desktop-session grant needs its explicit XAUTHORITY
+locator. Add only that fixed key with existing size/NUL limits; do not read or log cookie contents,
+inherit arbitrary credentials or weaken Sealed/injection exclusions. This is a confirmed projection
+gap; the earlier generic Start result alone does not establish it as the only failure cause.
+
 ## Ordered Corrections
 
 - Implement Linux enumeration behind the existing capability owner using `rustix::fs::Dir` and
@@ -66,6 +78,9 @@ results and source review do not replace hosted Linux external Play/Stop and des
 - Let each root/reference nextest suite report all independent test failures with `--no-fail-fast`.
   Keep serial execution, existing timeouts and failure exit status; an early defect should not
   leave thousands of later tests unobserved on every cold hosted build.
+- Preserve the selected X11 desktop session's XAUTHORITY input and make terminal external-start
+  failures print existing bounded public diagnostics immediately. Qualify the actual Linux
+  Play/Restart/Stop/Exit journey without expanding ambient environment inheritance.
 - Format independent workspaces and refresh only required lockfile dependency edges.
 - Reconcile the stale exact fixture dependency policy with its existing dev-only component
   integration consumer. Keep the library's direct-domain dependencies and explicit facade features.

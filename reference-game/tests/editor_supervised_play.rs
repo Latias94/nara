@@ -241,10 +241,17 @@ fn drive_until_external_state(
             return;
         }
         assert!(
+            external.state() != EditorExternalPlayState::Faulted,
+            "external Play faulted before {expected_state:?}/{expected_operation:?}: result={:?}, output={:#?}",
+            frame.play().result(),
+            external.output(),
+        );
+        assert!(
             Instant::now() < deadline,
-            "external Play did not reach {expected_state:?}/{expected_operation:?}: state={:?}, result={:?}",
+            "external Play did not reach {expected_state:?}/{expected_operation:?}: state={:?}, result={:?}, output={:#?}",
             external.state(),
             frame.play().result(),
+            external.output(),
         );
         let _ = application
             .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);

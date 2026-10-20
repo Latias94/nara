@@ -106,6 +106,7 @@ const DESKTOP_SESSION_ENVIRONMENT_ALLOWLIST: &[&str] = &["SystemRoot", "WINDIR",
 #[cfg(unix)]
 const DESKTOP_SESSION_ENVIRONMENT_ALLOWLIST: &[&str] = &[
     "DISPLAY",
+    "XAUTHORITY",
     "WAYLAND_DISPLAY",
     "XDG_RUNTIME_DIR",
     "LANG",
