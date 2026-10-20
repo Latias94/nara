@@ -281,7 +281,16 @@ impl PreparedWorldCanvas {
         if end[0] <= begin[0] || end[1] <= begin[1] {
             return;
         }
-        pass.set_viewport(min[0], min[1], max[0] - min[0], max[1] - min[1], 0.0, 1.0);
+        // Rasterize the full integer pixel-center coverage. The exact fractional content rect
+        // remains in the uniform and owns source sampling independently of viewport coverage.
+        pass.set_viewport(
+            begin[0] as f32,
+            begin[1] as f32,
+            (end[0] - begin[0]) as f32,
+            (end[1] - begin[1]) as f32,
+            0.0,
+            1.0,
+        );
         pass.set_scissor_rect(begin[0], begin[1], end[0] - begin[0], end[1] - begin[1]);
         pass.set_pipeline(&self.resources.pipeline);
         pass.set_bind_group(0, &self.binding, &[]);
