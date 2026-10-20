@@ -23,10 +23,10 @@ use nara::{
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentKind,
-        EditorDocumentMutation, EditorNavigationAction, EditorPersistenceAction,
-        EditorProjectBrowserAction, EditorReopenTarget, PrefabCompositionCommand,
-        PrefabCompositionEntityDraft, SceneCompositionCommand, SceneCompositionEntityKind,
-        SceneInspectorCommand,
+        EditorDocumentMutation, EditorDocumentOpenResult, EditorNavigationAction,
+        EditorPersistenceAction, EditorProjectBrowserAction, EditorProjectBrowserStatus,
+        EditorReopenTarget, PrefabCompositionCommand, PrefabCompositionEntityDraft,
+        SceneCompositionCommand, SceneCompositionEntityKind, SceneInspectorCommand,
     },
 };
 use nara_editor::{EditorApplication, EditorApplicationState, EditorLaunchOptions};
@@ -193,12 +193,7 @@ fn ordinary_prefab_composition_cannot_bypass_specialized_ui_structure_admission(
     )
     .unwrap();
     let mut app = project.open();
-    for _ in 0..128 {
-        if !frame(&app).project_browser().has_pending_work() {
-            break;
-        }
-        dispatch(&mut app, None);
-    }
+    settle_browser(&mut app);
     dispatch(
         &mut app,
         Some(EditorAction::ProjectBrowser(
@@ -301,12 +296,7 @@ fn empty_documents_offer_catalog_templates_before_any_component_exists() {
     let mut app = project.open();
     for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
         if kind == EditorDocumentKind::Prefab {
-            for _ in 0..128 {
-                if !frame(&app).project_browser().has_pending_work() {
-                    break;
-                }
-                dispatch(&mut app, None);
-            }
+            settle_browser(&mut app);
             dispatch(
                 &mut app,
                 Some(EditorAction::ProjectBrowser(
@@ -370,12 +360,7 @@ fn ordinary_scene_and_prefab_create_custom_components_without_project_execution(
     let mut app = project.open();
     for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
         if kind == EditorDocumentKind::Prefab {
-            for _ in 0..128 {
-                if !frame(&app).project_browser().has_pending_work() {
-                    break;
-                }
-                dispatch(&mut app, None);
-            }
+            settle_browser(&mut app);
             dispatch(
                 &mut app,
                 Some(EditorAction::ProjectBrowser(
@@ -727,9 +712,89 @@ fn frame(app: &EditorApplication) -> std::sync::Arc<nara::tooling::EditorFrameMo
     app.current_frame().unwrap()
 }
 
+fn settle_browser(app: &mut EditorApplication) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while frame(app).project_browser().has_pending_work() {
+        assert!(
+            Instant::now() < deadline,
+            "the Browser index did not settle: {:?}",
+            frame(app).project_browser()
+        );
+        dispatch(app, None);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let current = frame(app);
+    assert!(
+        matches!(
+            current.project_browser().status(),
+            EditorProjectBrowserStatus::Ready | EditorProjectBrowserStatus::ReadyWithDiagnostics
+        ),
+        "the Browser index is unavailable: {:?}",
+        current.project_browser()
+    );
+}
+
+fn settle_document_open(app: &mut EditorApplication) {
+    let requested = frame(app);
+    // The first drive may already publish a fast worker's terminal result.
+    let request = requested
+        .document_open()
+        .pending()
+        .map(|(request, _, _)| request)
+        .or_else(|| {
+            requested
+                .document_open()
+                .result()
+                .map(|result| result.request())
+        })
+        .expect("Browser Open must expose its accepted request");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let current = frame(app);
+        if let Some(result) = current.document_open().result() {
+            assert_eq!(result.request(), request);
+            assert!(!current.document_open().has_pending_work());
+            let EditorDocumentOpenResult::Opened { document, .. } = result else {
+                panic!("Browser Open did not publish the requested document: {result:?}");
+            };
+            assert!(current.workspace().document(document).is_some());
+            dispatch(
+                app,
+                Some(EditorAction::ProjectBrowser(
+                    EditorProjectBrowserAction::AcknowledgeOpen { request },
+                )),
+            );
+            let acknowledged = frame(app);
+            assert!(acknowledged.document_open().result().is_none());
+            assert!(!acknowledged.document_open().has_pending_work());
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Browser Open did not settle: {:?}",
+            current.document_open()
+        );
+        dispatch(app, None);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 fn dispatch(app: &mut EditorApplication, action: Option<EditorAction>) {
+    let opens_document = matches!(
+        action.as_ref(),
+        Some(EditorAction::ProjectBrowser(
+            EditorProjectBrowserAction::Open { .. }
+        ))
+    );
+    if opens_document {
+        assert!(frame(app).document_open().result().is_none());
+        assert!(!frame(app).document_open().has_pending_work());
+    }
     let revision = frame(app).revision();
     let _ = app.submit_and_drive(EditorActionBatch::new(revision, action), Duration::ZERO);
+    if opens_document {
+        settle_document_open(app);
+    }
 }
 
 struct CompositionProject {
