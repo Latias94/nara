@@ -169,7 +169,10 @@ fn open_generic_authoring_session() -> EditorProjectSession {
         match host.advance(attempt) {
             EditorProjectOpenProgress::Pending(next) => {
                 attempt = next;
-                assert!(Instant::now() < deadline, "Reference Game generic Open timed out");
+                assert!(
+                    Instant::now() < deadline,
+                    "Reference Game generic Open timed out"
+                );
                 thread::sleep(Duration::from_millis(1));
             }
             EditorProjectOpenProgress::Opened(session) => return session,

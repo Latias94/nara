@@ -18,6 +18,9 @@ serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 uuid.workspace = true
 
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+
 [dev-dependencies]
 serde_json.workspace = true
 

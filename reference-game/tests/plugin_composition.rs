@@ -323,12 +323,31 @@ fn desktop_profile_configures_one_window_slot_and_preserves_source_content() {
         headless_snapshot.images()[0].image().source().source_hash(),
         desktop_snapshot.images()[0].image().source().source_hash(),
     );
-    assert_eq!(headless_loader.budget_snapshot().active_reservations(), 1);
-    assert_eq!(desktop_loader.budget_snapshot().active_reservations(), 1);
+    // The materialized content and independently retainable startup closure each own a lease.
+    assert_eq!(headless_loader.budget_snapshot().active_reservations(), 2);
+    assert_eq!(desktop_loader.budget_snapshot().active_reservations(), 2);
+    assert_eq!(repeated_loader.budget_snapshot().active_reservations(), 2);
+    let headless_closure = headless_snapshot.startup_content_closure();
+    let desktop_closure = desktop_snapshot.startup_content_closure();
+    assert_eq!(headless_loader.budget_snapshot().active_reservations(), 2);
+    assert_eq!(desktop_loader.budget_snapshot().active_reservations(), 2);
 
     drop(headless_snapshot);
     drop(desktop_snapshot);
     drop(repeated_snapshot);
+    assert_eq!(headless_loader.budget_snapshot().active_reservations(), 1);
+    assert_eq!(desktop_loader.budget_snapshot().active_reservations(), 1);
+    assert_eq!(repeated_loader.budget_snapshot().active_reservations(), 0);
+    assert_eq!(headless_loader.budget_snapshot().active_generations(), 0);
+    assert_eq!(desktop_loader.budget_snapshot().active_generations(), 0);
+    assert_eq!(
+        headless_closure.content_digest(),
+        desktop_closure.content_digest()
+    );
+    assert!(!headless_closure.members().is_empty());
+    assert!(!desktop_closure.members().is_empty());
+    drop(headless_closure);
+    drop(desktop_closure);
     assert_eq!(headless_loader.budget_snapshot().active_reservations(), 0);
     assert_eq!(desktop_loader.budget_snapshot().active_reservations(), 0);
     assert_eq!(repeated_loader.budget_snapshot().active_reservations(), 0);

@@ -33,6 +33,35 @@ const LINUX_PACKAGES: [&str; 10] = [
 ];
 
 #[test]
+fn hosted_ci_checks_portable_wasm_libraries_without_claiming_browser_execution() {
+    let workflow = load_workflow(CI_WORKFLOW);
+    let root = mapping(&workflow, "CI workflow");
+    let jobs = mapping(required_field(root, "jobs", "CI workflow"), "CI jobs");
+    let wasm = required_job(jobs, "wasm");
+    assert_eq!(scalar_field(wasm, "runs-on"), "ubuntu-latest");
+    assert_eq!(integer_field(wasm, "timeout-minutes"), 20);
+    assert!(
+        field(wasm, "if").is_none(),
+        "Wasm compilation must not be skipped"
+    );
+    assert_checkout(wasm, "wasm", false);
+    let script = step_runs(wasm);
+    assert_contains_all(
+        &script,
+        &[
+            "rustup toolchain install 1.95.0 --profile minimal --target wasm32-unknown-unknown",
+            "cargo check -p nara_fs --locked --lib --target wasm32-unknown-unknown",
+            "cargo check -p nara --locked --no-default-features --features runtime-core --lib --target wasm32-unknown-unknown",
+            "cargo check -p nara --locked --no-default-features --features runtime-2d,presentation-2d,presentation-ui,tooling,serde --lib --target wasm32-unknown-unknown",
+        ],
+        "portable Wasm CI",
+    );
+    assert!(!script.contains("--all-features"));
+    assert!(!script.contains("--all-targets"));
+    assert!(!script.contains("fragile-send-sync-non-atomic-wasm"));
+}
+
+#[test]
 fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
     for lockfile in [
         "Cargo.lock",
@@ -349,12 +378,38 @@ fn assert_external_manifest_boundaries() {
             "dev-dependencies.bevy_ecs",
             "dev-dependencies.nara_app",
             "dev-dependencies.nara_asset",
+            "dev-dependencies.nara_core",
             "dev-dependencies.nara_ecs",
+            "dev-dependencies.nara_engine",
+            "dev-dependencies.nara_fs",
+            "dev-dependencies.nara_hierarchy",
             "dev-dependencies.nara_identity",
+            "dev-dependencies.nara_image",
+            "dev-dependencies.nara_render",
+            "dev-dependencies.nara_tasks",
+            "dev-dependencies.nara_tooling",
+            "dev-dependencies.nara_transform",
             "dev-dependencies.ron",
             "dev-dependencies.serde",
         ]),
-        "module-consumer must remain a direct-domain fixture"
+        "module-consumer must keep its direct-domain library and explicit test-only integration dependencies"
+    );
+    // The inventory test shares one public component recipe between native and Editor consumers.
+    let engine = &module["dev-dependencies"]["nara_engine"];
+    assert_eq!(
+        engine.get("package").and_then(TomlValue::as_str),
+        Some("nara")
+    );
+    assert_eq!(
+        engine.get("default-features").and_then(TomlValue::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        engine.get("features").and_then(TomlValue::as_array),
+        Some(&vec![
+            TomlValue::String("tooling".to_owned()),
+            TomlValue::String("project-workflow".to_owned()),
+        ])
     );
     assert_no_workspace_dependencies(&module, "module-consumer");
 

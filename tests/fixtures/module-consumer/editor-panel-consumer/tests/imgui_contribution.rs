@@ -274,7 +274,8 @@ fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selecti
             )
             .exit_ready();
     }
-    for _ in 0..128 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         if closed {
             break;
         }

@@ -1,6 +1,10 @@
 use std::fs::File;
 #[cfg(target_os = "linux")]
-use std::{io::Read, os::fd::AsRawFd};
+use std::{
+    ffi::OsString,
+    io::Read,
+    os::{fd::AsRawFd, unix::ffi::OsStringExt},
+};
 
 use rustix::fs::{FileType, FlockOperation, Mode, OFlags, fstat, fsync, mkdirat, openat, renameat};
 #[cfg(target_os = "linux")]
@@ -13,7 +17,10 @@ use crate::{
     platform::{DirectoryPublicationSupport, FileCreateMode, NativeDirectoryEntry},
 };
 
-pub(crate) struct DirectoryEnumerationCursor;
+pub(crate) struct DirectoryEnumerationCursor {
+    #[cfg(target_os = "linux")]
+    entries: rustix::fs::Dir,
+}
 
 pub(crate) fn restrictive_clone_directory(file: &File) -> Result<File, FsError> {
     file.try_clone()
@@ -48,12 +55,46 @@ pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
         file_sync: FileSyncTier::DataAndMetadata,
         directory_sync,
         advisory_lock: ProofStatus::Proven,
-        read_directory: ProofStatus::Unsupported,
+        read_directory: if cfg!(target_os = "linux") {
+            ProofStatus::Proven
+        } else {
+            ProofStatus::Unsupported
+        },
         relative_unlink: ProofStatus::Unsupported,
         non_overwrite_rename: ProofStatus::Unsupported,
     }
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) fn begin_directory_enumeration(
+    directory: &File,
+) -> Result<DirectoryEnumerationCursor, FsError> {
+    let original = facts(directory)?;
+    if original.kind != FileKind::Directory {
+        return Err(FsError::NotDirectory);
+    }
+    // A dup would share the directory offset. Opening "." relative to the live authority
+    // creates an independent cursor on that same object, even after its external name changes.
+    let opened = openat(
+        directory,
+        ".",
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .map(File::from)
+    .map_err(|error| super::rustix_io(FsOperation::ReadDirectory, error))?;
+    let current = facts(&opened)?;
+    if current.kind != FileKind::Directory || current.identity != original.identity {
+        return Err(FsError::CapabilityIdentityDrift {
+            operation: FsOperation::ReadDirectory,
+        });
+    }
+    let entries = rustix::fs::Dir::new(opened)
+        .map_err(|error| super::rustix_io(FsOperation::ReadDirectory, error))?;
+    Ok(DirectoryEnumerationCursor { entries })
+}
+
+#[cfg(not(target_os = "linux"))]
 pub(crate) fn begin_directory_enumeration(
     _directory: &File,
 ) -> Result<DirectoryEnumerationCursor, FsError> {
@@ -63,6 +104,34 @@ pub(crate) fn begin_directory_enumeration(
     })
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) fn next_directory_entry(
+    cursor: &mut DirectoryEnumerationCursor,
+) -> Result<Option<NativeDirectoryEntry>, FsError> {
+    loop {
+        let Some(entry) = cursor.entries.next() else {
+            return Ok(None);
+        };
+        let entry = entry.map_err(|error| super::rustix_io(FsOperation::ReadDirectory, error))?;
+        let name = entry.file_name().to_bytes();
+        if matches!(name, b"." | b"..") {
+            continue;
+        }
+        let kind = match entry.file_type() {
+            FileType::Directory => FileKind::Directory,
+            FileType::RegularFile => FileKind::Regular,
+            _ => FileKind::Other,
+        };
+        return Ok(Some(NativeDirectoryEntry {
+            name: OsString::from_vec(name.to_vec()),
+            name_bytes: name.len(),
+            kind,
+            reparse: entry.file_type() == FileType::Symlink,
+        }));
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
 pub(crate) fn next_directory_entry(
     _cursor: &mut DirectoryEnumerationCursor,
 ) -> Result<Option<NativeDirectoryEntry>, FsError> {

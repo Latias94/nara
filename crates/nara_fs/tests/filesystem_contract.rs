@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 use std::collections::HashSet;
 #[cfg(windows)]
 use std::fs::OpenOptions;
@@ -18,7 +18,7 @@ use nara_fs::{
     PublicationAtomicity, PublicationIdentityEvidence, PublicationSourceBinding, RelativeComponent,
     RelativePath, ResolutionTier, StageStatus, TrustMode, platform_capability_matrix,
 };
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 use nara_fs::{DirectoryEnumerationSession, FileKind};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -224,7 +224,7 @@ fn trusted_read_write(root: &TestRoot) -> DirectoryCapability {
     .unwrap()
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 fn collect_directory_entries(
     mut session: DirectoryEnumerationSession,
     batch_limit: usize,
@@ -984,7 +984,7 @@ fn strict_non_linux_unix_capability_is_explicitly_unproven() {
     );
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 #[test]
 fn handle_bound_directory_enumeration_is_bounded_and_cursor_independent() {
     let root = TestRoot::new();
@@ -1057,7 +1057,7 @@ fn handle_bound_directory_enumeration_is_bounded_and_cursor_independent() {
     assert_eq!(child_entries[0].kind(), FileKind::Regular);
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 #[test]
 fn handle_bound_directory_enumeration_stays_on_open_object_after_name_replacement() {
     let outer = TestRoot::new();
@@ -1078,6 +1078,19 @@ fn handle_bound_directory_enumeration_stays_on_open_object_after_name_replacemen
     fs::create_dir(&original).unwrap();
     fs::write(original.join("replacement.scene"), b"replacement").unwrap();
 
+    let reopened_names = collect_directory_entries(
+        capability
+            .begin_child_enumeration(DirectoryEnumerationLimits::default())
+            .unwrap(),
+        1,
+    )
+    .into_iter()
+    .map(|entry| entry.name().clone())
+    .collect::<HashSet<_>>();
+    assert_eq!(
+        reopened_names,
+        HashSet::from([component("authorized.scene")])
+    );
     let names = collect_directory_entries(session, 1)
         .into_iter()
         .map(|entry| entry.name().clone())
@@ -1085,7 +1098,7 @@ fn handle_bound_directory_enumeration_stays_on_open_object_after_name_replacemen
     assert_eq!(names, HashSet::from([component("authorized.scene")]));
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 #[test]
 fn directory_enumeration_limit_failure_is_terminal() {
     let root = TestRoot::new();
@@ -1107,7 +1120,83 @@ fn directory_enumeration_limit_failure_is_terminal() {
     ));
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_directory_enumeration_isolates_unsafe_entries_without_following_or_opening_them() {
+    use nara_fs::DirectoryEntryRejectionReason;
+    use std::{
+        ffi::OsString,
+        os::unix::{ffi::OsStringExt, fs::symlink},
+    };
+
+    let root = TestRoot::new();
+    fs::write(root.path().join("safe.txt"), b"safe").unwrap();
+    fs::write(root.path().join("linked.txt"), b"multiple links").unwrap();
+    fs::hard_link(
+        root.path().join("linked.txt"),
+        root.path().join("alias.txt"),
+    )
+    .unwrap();
+    fs::write(
+        root.path().join(OsString::from_vec(vec![0xff])),
+        b"unportable",
+    )
+    .unwrap();
+    symlink("safe.txt", root.path().join("symlink")).unwrap();
+    rustix::fs::mkfifoat(
+        rustix::fs::CWD,
+        root.path().join("fifo"),
+        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+    )
+    .unwrap();
+    let capability = portable_read_only(&root);
+    let mut session = capability
+        .begin_child_enumeration(DirectoryEnumerationLimits::new(16, 1_024, 8))
+        .unwrap();
+    let mut entries = Vec::new();
+    let mut rejected = Vec::new();
+    loop {
+        let batch = session.next_batch(1).unwrap();
+        assert!(batch.entries().len() + batch.rejected_entry_facts().len() <= 1);
+        entries.extend_from_slice(batch.entries());
+        rejected.extend_from_slice(batch.rejected_entry_facts());
+        if batch.is_complete() {
+            break;
+        }
+    }
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name(), &component("safe.txt"));
+    assert_eq!(entries[0].kind(), FileKind::Regular);
+    assert!(entries[0].identity().is_some());
+    assert_eq!(rejected.len(), 5);
+    for (name, reason) in [
+        (
+            Some(component("linked.txt")),
+            DirectoryEntryRejectionReason::MultipleLinks,
+        ),
+        (
+            Some(component("alias.txt")),
+            DirectoryEntryRejectionReason::MultipleLinks,
+        ),
+        (None, DirectoryEntryRejectionReason::UnportableName),
+        (
+            Some(component("symlink")),
+            DirectoryEntryRejectionReason::ReparsePoint,
+        ),
+        (
+            Some(component("fifo")),
+            DirectoryEntryRejectionReason::UnsupportedKind,
+        ),
+    ] {
+        assert!(
+            rejected
+                .iter()
+                .any(|fact| fact.name() == name.as_ref() && fact.reason() == reason)
+        );
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 #[test]
 fn unsupported_directory_enumeration_matches_the_platform_matrix() {
     let root = TestRoot::new();

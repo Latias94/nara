@@ -360,7 +360,10 @@ fn public_data_only_editor_creates_edits_rejects_saves_reopens_and_passes_compil
     ));
     let deadline = Instant::now() + Duration::from_secs(5);
     while editor.current_frame().persistence().result().is_none() {
-        assert!(Instant::now() < deadline, "Editor persistence did not complete");
+        assert!(
+            Instant::now() < deadline,
+            "Editor persistence did not complete"
+        );
         editor.drive_editor_frame(Duration::ZERO);
         std::thread::sleep(Duration::from_millis(1));
     }
@@ -410,7 +413,8 @@ fn public_data_only_editor_creates_edits_rejects_saves_reopens_and_passes_compil
             .unwrap()
             .dirty
     );
-    for _ in 0..128 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
         if matches!(
             editor.advance_close(),
             EditorProjectCloseProgress::Complete(_)

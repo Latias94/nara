@@ -12,7 +12,10 @@ pub fn drive_until_result(editor: &mut EditorProjectSession) -> Arc<EditorFrameM
         if frame.persistence().result().is_some() {
             return frame;
         }
-        assert!(Instant::now() < deadline, "Editor persistence did not complete");
+        assert!(
+            Instant::now() < deadline,
+            "Editor persistence did not complete"
+        );
         std::thread::sleep(Duration::from_millis(1));
     }
 }

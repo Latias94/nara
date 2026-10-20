@@ -181,9 +181,14 @@ foundation capability:
 The completed [Editor Project Browser and Source Index v1](../../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
 plan implements the previously reserved handle-bound enumeration primitive and its first Host and
 Editor consumer. Its hosted product claim is limited to
-Windows x86-64 on local NTFS with per-capability proof. Other Windows filesystems, remote shares,
-Linux, macOS, and other targets remain `Unproven` or `Unsupported` until their own implementation
-and hosted evidence exist. `nara_fs` owns only bounded handle-relative enumeration and scoped entry
+Windows x86-64 on local NTFS with per-capability proof. Linux now implements independent cursors
+through an identity-checked readable `openat(".")` relative to the live directory and `rustix::fs::Dir`.
+Raw entry names remain observations; existing name budgets, strict child opens and identity checks
+own admission. No ambient-path fallback, shared cursor offset or stronger unlink/publication claim
+follows. Cross-compilation alone does not qualify the Linux hosted product; its runtime evidence
+must be recorded separately. Other Windows filesystems, remote shares, macOS and other targets
+remain `Unproven` or `Unsupported` until their own implementation and evidence exist.
+`nara_fs` owns only bounded handle-relative enumeration and scoped entry
 observations; root selection, traversal budgets, classification, immutable index publication, and
 document admission remain Host responsibilities.
 

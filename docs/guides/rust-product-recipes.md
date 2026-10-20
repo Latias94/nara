@@ -263,3 +263,27 @@ fingerprints; an explicitly added duplicate plugin still rejects. Each definitio
 includes the font content ID. Fresh runtime construction shares immutable font bytes while
 constructing independent UI and rasterization state. A planner rejects a foreign face before
 replacing its retained packet; glyph packets retain their atlas pixels through backend submission.
+
+## Compile-Only WebAssembly Checks
+
+CI checks the portable runtime and backend-neutral presentation libraries for
+`wasm32-unknown-unknown`. Reproduce the same library checks from the engine checkout:
+
+```text
+rustup target add wasm32-unknown-unknown --toolchain 1.95.0
+cargo +1.95.0 check -p nara_fs --locked --lib --target wasm32-unknown-unknown
+cargo +1.95.0 check -p nara --locked --no-default-features --features runtime-core --lib --target wasm32-unknown-unknown
+cargo +1.95.0 check -p nara --locked --no-default-features --features runtime-2d,presentation-2d,presentation-ui,tooling,serde --lib --target wasm32-unknown-unknown
+```
+
+These checks cover library compilation and dependency/trait boundaries. They do not run a game,
+create browser workers, initialize WebGPU, open a canvas, or qualify input and presentation.
+The native task pool still requires OS threads at runtime, and the filesystem adapter reports
+unsupported capabilities on this target. Desktop runners, file watching and the Editor remain
+outside this compile-only matrix. Browser WebGPU's local ownership and asynchronous initialization
+remain an incomplete implementation of
+[ADR 0078](../architecture/adr/0078-render-host-affinity-webgpu-initialization-and-device-recovery.md).
+
+Stable asset identity generation enables `getrandom`'s `wasm_js` backend only for this target,
+using Web Crypto through `wasm-bindgen`. Native targets keep their existing entropy provider.
+Successful compilation does not provide an entropy source to a non-JavaScript Wasm host.

@@ -19,6 +19,25 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  wasm:
+    name: "Wasm portable libraries"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install Rust and Wasm target
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --target wasm32-unknown-unknown
+          rustup default 1.95.0
+      - name: Check portable Wasm libraries
+        run: |
+          cargo check -p nara_fs --locked --lib --target wasm32-unknown-unknown
+          cargo check -p nara --locked --no-default-features --features runtime-core --lib --target wasm32-unknown-unknown
+          cargo check -p nara --locked --no-default-features --features runtime-2d,presentation-2d,presentation-ui,tooling,serde --lib --target wasm32-unknown-unknown
+
   root:
     name: "Root (${{ matrix.os }})"
     runs-on: "${{ matrix.os }}"

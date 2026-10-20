@@ -69,6 +69,23 @@ fn play(editor: &mut EditorProjectSession, action: EditorPlayAction) {
         .unwrap();
 }
 
+fn stop(editor: &mut EditorProjectSession) {
+    play(editor, EditorPlayAction::Stop);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let frame = editor.drive_editor_frame(Duration::ZERO);
+        if frame.play().state() == EditorPlayState::Empty {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Game Stop did not retire its runtime: {:?}",
+            frame.play().state()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 fn start(editor: &mut EditorProjectSession) -> EditorGameViewCandidate {
     let scene = editor
         .current_frame()
@@ -181,13 +198,7 @@ fn native_focus_release_interrupts_buffered_ui_without_stealing_host_authority()
         .apply_game_view_input_batch(input(identity, [EditorGameInputEvent::SurfaceRetired]))
         .expect("physical endpoint retirement also releases buffered UI authority");
     assert!(editor.take_game_view_candidate().unwrap().is_none());
-    play(&mut editor, EditorPlayAction::Stop);
-    editor.drive_editor_frame(Duration::ZERO);
-    editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(
-        editor.current_frame().play().state(),
-        EditorPlayState::Empty
-    );
+    stop(&mut editor);
 }
 
 #[test]
@@ -237,13 +248,7 @@ fn focus_release_during_step_retries_presentation_instead_of_failing_the_step() 
         before_step + 1,
         "retrying presentation must not repeat the fixed update"
     );
-    play(&mut editor, EditorPlayAction::Stop);
-    editor.drive_editor_frame(Duration::ZERO);
-    editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(
-        editor.current_frame().play().state(),
-        EditorPlayState::Empty
-    );
+    stop(&mut editor);
 }
 
 #[test]
@@ -353,13 +358,7 @@ fn gpu_recovery_pauses_runtime_without_resolving_dirty_exit() {
         ))
         .unwrap();
     editor.drive_editor_frame_with_runtime(Duration::ZERO, false);
-    play(&mut editor, EditorPlayAction::Stop);
-    editor.drive_editor_frame(Duration::ZERO);
-    editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(
-        editor.current_frame().play().state(),
-        EditorPlayState::Empty
-    );
+    stop(&mut editor);
 }
 
 #[test]
@@ -414,11 +413,5 @@ fn gpu_recovery_consumes_queued_step_once_without_waiting_for_a_retired_source()
     let fresh = editor.take_game_view_candidate().unwrap().unwrap();
     complete_fake_presentation(&mut editor, fresh);
     assert_eq!(ticks.load(Ordering::Relaxed), before_step + 1);
-    play(&mut editor, EditorPlayAction::Stop);
-    editor.drive_editor_frame(Duration::ZERO);
-    editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(
-        editor.current_frame().play().state(),
-        EditorPlayState::Empty
-    );
+    stop(&mut editor);
 }

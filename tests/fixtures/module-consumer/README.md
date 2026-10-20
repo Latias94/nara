@@ -6,8 +6,11 @@ module contains the complete domain implementation.
 
 It owns its manifest and lockfile independently of the engine workspace. This catches missing
 direct dependencies, accidental workspace inheritance and unsupported facade shortcuts.
+The root fixture library depends directly on `nara_reflect` and `nara_scene`. Its integration tests
+declare their domain dependencies separately; a dev-only renamed root facade, `nara_engine`,
+verifies one component recipe across native composition, Editor authoring and strict project Check.
 The filesystem, project-workflow, material and editor-panel members exercise their own declared
-public surfaces; only the project-workflow member uses the root facade for that workflow.
+public surfaces. The project-workflow member consumes that workflow through the root facade.
 
 Run from the repository root, using the shared `target` directory through `CARGO_TARGET_DIR`:
 
