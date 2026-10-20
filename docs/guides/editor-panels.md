@@ -106,6 +106,11 @@ inspect its eventual `EditorPersistenceResult`. Later edits remain possible and 
 an older captured revision finishes saving. Keep Close/Exit and project replacement with the
 application lifecycle owner; a panel must not infer completion from dispatch or remove the
 document while its Save is pending.
+Reopen also completes across frames through `EditorPersistenceOperation::Opening`. Drive and
+observe its eventual Opened/rejection result. Opening disables ordinary authoring controls and
+new Play requests. If another valid consumer edits the document before publication, the owner
+rejects the stale read rather than discarding that later edit. A completed read does not grant a
+panel permission to replace a document, and a task's cancellation is not an Opened result.
 
 Embedded shells pass the opaque move-only candidate returned by `frontend.show(...)` to that
 same frontend's `submit_and_drive(...)`. It cannot be cloned or converted to a plain action batch.

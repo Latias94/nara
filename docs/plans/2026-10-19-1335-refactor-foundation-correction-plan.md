@@ -476,6 +476,9 @@ measured persistence consumer using existing tasks, retained original file custo
 acknowledgement. Its [v2 evidence](../benchmarks/2026-10-20-owned-editor-save.md) separates maximum
 owner drive from completion observation. Reopen, startup/source preparation and the other G9
 triggers remain separate; this does not reopen U1-U15 or create a blanket async migration.
+The following [owned Reopen slice](2026-10-20-owned-editor-reopen-plan.md) qualifies bounded read
+preparation with native callback affinity and exact stale-result rejection. Its review prioritizes
+the pre-existing post-terminal failed-cleanup Host lifetime gap before more source/startup work.
 
 ### Decisions Reserved For Those Consumers
 

@@ -1,6 +1,6 @@
 # Authoring Interface Ergonomics
 
-**Status:** S1-S3, the separate N05 App plugin-error follow-up and D6's measured Save slice are implemented and qualified within their linked verification scopes. Broader D6 work remains trigger-driven.
+**Status:** S1-S3, the separate N05 App plugin-error follow-up and D6's measured Save/Reopen slices are implemented and qualified within their linked verification scopes. Broader D6 work remains trigger-driven.
 **Date:** 2026-10-19.
 **Updated:** 2026-10-20.
 **Source baseline:** `f988852`.
@@ -614,9 +614,20 @@ The [v2 responsiveness report](../benchmarks/2026-10-20-owned-editor-save.md) re
 probe-free optimized processes, each with 576 numeric rows. At 4,096 empty entities, per-Save
 maximum owner-drive P50 is 0.716 / 0.693 / 0.763 ms and P95 is 1.359 / 1.645 / 1.072 ms.
 Completion observation remains separate and includes 1 ms polling; it does not measure native
-16 ms maintenance latency or total CPU work. Reopen stays synchronous, and bound-Play source
+16 ms maintenance latency or total CPU work. At that qualification, Reopen remains synchronous; bound-Play source
 receipt, compiled Prefab refresh, slow storage and complex content remain separately measured
 future consumers. There is no generic async interface or new Goal.
+
+The subsequent [owned Reopen slice](../benchmarks/2026-10-20-owned-editor-reopen.md) moves bounded
+read/parse/pure-authoring preparation to existing workers while retaining native codec/migration
+affinity and exact document/source/revision admission on the owner. Cancelled/failed preparation
+cannot publish, even if its bytes are ready. Three optimized v3 processes place 4,096-entity
+maximum owner-drive P95 at 0.965 / 0.780 / 0.881 ms; completion observation remains separate.
+The [Reopen verification](../knowledge/engineering/verification/2026-10/2026-10-20T022302Z-owned-editor-reopen-preparation-and-publication-qualification-557ea95db99b4b8a87829870db1d6b13.md)
+records actual native/consumer evidence and DetectOnly limits. Review also identifies a separate
+pre-existing post-terminal failed-cleanup custody gap. Full lane-lifetime file Host ownership
+is the next repair before more startup/source latency work; successful read abandonment does
+not cover a prior failed Save cleanup owner.
 
 ## Implementation Sequence And Ownership
 

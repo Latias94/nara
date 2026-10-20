@@ -95,6 +95,11 @@ after an already admitted Save. Project replacement waits for that Save before p
 bytes, including replacement by the same project. Physical file and task retirement remain with
 their existing owners under ADRs 0047/0052; the frontend never interprets task cancellation as a
 successful save or rollback.
+The same pending maintenance and retained Close/Exit/replacement policy observes owned Reopen
+preparation. Opening keeps authoring controls disabled and rejects new Play/Restart/RunLastGood
+admission at the Host, including frame-bound and external routes. Native codec affinity and
+exact source/revision publication stay with the existing document owner. Switching an already
+open active tab does not retarget an admitted operation.
 
 The native Host retains one event loop, device-creation authority and accountable close/recovery lifecycle.
 It may delegate secondary window/surface ownership to the selected platform/renderer adapter with explicit shutdown ordering.

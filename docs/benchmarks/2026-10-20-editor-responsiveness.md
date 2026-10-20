@@ -10,7 +10,8 @@ records actual commands, run identities, review corrections and limits.
 This report retains the synchronous v1 source and data as historical evidence. The subsequent
 [owned Save implementation and v2 comparison](2026-10-20-owned-editor-save.md) moves the measured
 Save path to retained background work; statements about synchronous Save below describe v1.
-Reopen and the other separately identified preparation costs remain follow-ups.
+The later [owned Reopen slice](2026-10-20-owned-editor-reopen.md) implements its bounded read
+preparation separately. Other identified source/startup costs remain follow-ups.
 
 ## Ownership Findings
 

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "4b6a288ef00dc28467150fd45803a3c43acb93daf1dd7d7472c92683964a2fc5"
+source_fingerprint: "0da894fb27e4207b39048f9933103ccefa8310814980190539009e3a083b03a4"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "4b6a288ef00dc28467150fd45803a3c43acb93daf1dd7d7472c92683964
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `4b6a288ef00dc28467150fd45803a3c43acb93daf1dd7d7472c92683964a2fc5`
-- Immutable records: 774
+- Source fingerprint: `0da894fb27e4207b39048f9933103ccefa8310814980190539009e3a083b03a4`
+- Immutable records: 777
 - Active lane heads: 0
 
 # Active Registrations
@@ -26,6 +26,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
 - [Editor Image Import and Reimport v1 complete](registry/2026-08/2026-08-21T025159Z-editor-image-import-reimport-v1-codex-root-6a48e230cc9c4e2eb1faf8121a85d9ea.md): `completed` (editor-image-import-reimport-v1-codex-root; producer `codex-root`)
+- [Owned Editor Reopen qualified with cleanup lifetime follow-up](registry/2026-10/2026-10-20T023343Z-editor-owned-reopen-codex-root-670715f95c9d41c39c6e04cf0c0c925b.md): `completed` (editor-owned-reopen-codex-root; producer `codex-root`)
 - [Owned background Editor Save qualified](registry/2026-10/2026-10-20T020203Z-editor-owned-save-codex-root-e752cdb15dd3493b96a52f17a336ca31.md): `completed` (editor-owned-save-codex-root; producer `codex-root`)
 - [Editor Project Browser and Source Index v1 complete; no successor active](registry/2026-08/2026-08-19T213600Z-editor-project-browser-source-index-v1-codex-root-6c28391e9cd8451f92b821dba9d0c9e3.md): `completed` (editor-project-browser-source-index-v1-codex-root; producer `codex-root`)
 - [Editor responsiveness characterized and task cancellation corrected](registry/2026-10/2026-10-19T182958Z-editor-responsiveness-codex-root-7730caec67d84a4e9a7f0bd4e433fa49.md): `completed` (editor-responsiveness-codex-root; producer `codex-root`)
@@ -53,6 +54,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Owned Editor Reopen preparation and publication qualification](verification/2026-10/2026-10-20T022302Z-owned-editor-reopen-preparation-and-publication-qualification-557ea95db99b4b8a87829870db1d6b13.md) - Bounded read preparation, owner native codec affinity, exact stale admission, task terminal policy and responsiveness evidence.
 - **Verification Evidence**: [Owned Editor Save custody native observation and measurements](verification/2026-10/2026-10-20T013307Z-owned-editor-save-custody-native-observation-and-measurements-9828019f2f934061a1773899ce356ffb.md) - Cross-frame Save ownership, retained filesystem cleanup, migrated consumers and decision-local owner-drive evidence.
 - **Verification Evidence**: [Editor responsiveness measurements and standalone task cancellation](verification/2026-10/2026-10-19T182252Z-editor-responsiveness-measurements-and-standalone-task-cancellation-0e2521d0010a4d94940d83fa865f3d0c.md) - Decision-local optimized Open Save Reopen timings, source-grounded rebuild seams, and failed-then-passing standalone pending cancellation.
 - **Verification Evidence**: [N05 safe plugin failure facts and invocation context](verification/2026-10/2026-10-19T170951Z-n05-safe-plugin-failure-facts-and-invocation-context-d01f7391b84348a8827a0daa760dd1a4.md) - Checked App plugin facts, actual invocation identity and retained primary/shutdown diagnostics through public product and Editor failure paths.
@@ -64,7 +66,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Post-correction foundation audit and withdrawn reference](progress/2026-10/2026-10-19T113248Z-post-correction-foundation-audit-and-withdrawn-reference-4b9d308fc38e4a31bdbe594c037e9b11.md) - Open post-correction findings, bounded Prefab failure proof and exclusion of the withdrawn reference.
 - **Verification Evidence**: [Foundation correction U1-U15 integration and review](verification/2026-10/2026-10-19-foundation-correction-completion.md) - Final source, consumer, native and review evidence with explicit deferred and platform limits.
 - **Verification Evidence**: [Foundation U13 external ordinary native runner and admitted Exit](verification/2026-10/2026-10-19-foundation-u13-public-native-runner.md) - A separately compiled panel runs through the public native entry and joins normal application retirement after authoritative Session publication.
-- **Verification Evidence**: [Foundation U12 ordinary profile-default font configuration](verification/2026-10/2026-10-19-foundation-u12-profile-defaults.md) - One ProductRecipe configures compilation and presentation through direct composition, Check, Editor Play and actual exported native startup.
 
 # Integration Notes
 

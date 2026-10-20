@@ -8,6 +8,8 @@ encoding, authoring re-admission and file publication to the existing task pool.
 Final lower-owner source is `78c8ddd`; Editor/consumer source is `1a90307`. The formal
 measurements precede final error-routing and native editing-policy corrections; the measured
 successful request, worker, publication and acknowledgement paths are unchanged by those fixes.
+The subsequent [owned Reopen qualification](2026-10-20-owned-editor-reopen.md) implements read
+preparation separately; synchronous-Reopen statements here describe the frozen v2 slice.
 
 ## Interpretation And Protocol
 

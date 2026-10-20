@@ -85,6 +85,13 @@ Rules:
   Task cancellation or terminality does not prove that filesystem calls returned: retained runtime
   custody keeps the original Host and temporary cleanup alive through close or caller abandonment.
   Save exposes no public Cancel action. Reopen retains its separate exact-base-revision policy.
+- Reopen captures the exact source/document/revision and prepares a bounded read away from the
+  Workspace owner. Pure authoring validation may run there; native registry codecs and migrations
+  remain on owner admission. Before those callbacks or document replacement, the owner rechecks
+  source binding, schema admission, original lane and the trusted Scene Runtime exclusion.
+  A stale, cancelled, failed or rejected preparation cannot update the document or Host baseline.
+  Only a Completed task after physical return may publish; unlike Save, read preparation has no
+  irreversible file write to acknowledge. Reopen exposes no new public Cancel action.
 - External file changes enter as conflict state, not silent overwrite. The editor may offer reload,
   merge, save-as, or keep-local actions, but these are explicit workspace commands.
 - Play Mode is anchored to a document snapshot and workspace mode state. Stop Play still discards
