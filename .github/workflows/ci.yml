@@ -41,7 +41,9 @@ jobs:
   root:
     name: "Root (${{ matrix.os }})"
     runs-on: "${{ matrix.os }}"
-    timeout-minutes: 75
+    # Cold Windows checks plus the default suite already take about 71 minutes;
+    # this job also owns the complete all-feature suite and Dear adapter gate.
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:

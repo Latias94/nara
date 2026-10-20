@@ -90,7 +90,7 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
     let reference_job = required_job(jobs, "reference-game");
     let module_job = required_job(jobs, "module-consumer");
     for (name, job, timeout) in [
-        ("root", root_job, 75),
+        ("root", root_job, 180),
         ("reference-game", reference_job, 45),
         ("module-consumer", module_job, 45),
     ] {
