@@ -706,7 +706,7 @@ struct EditorPrefabPersistenceLane {
 struct TrustedCompiledEditorLane {
     plan: RuntimePlan,
     content_candidate: ProjectSettingsCandidate,
-    content_loader: ProjectContentLoader,
+    content_loader: Arc<ProjectContentLoader>,
     snapshot: crate::project_host::ProjectContentSnapshot,
     prefab_root: DirectoryCapability,
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
@@ -1551,7 +1551,7 @@ impl EditorProjectSession {
             execution: EditorExecutionLane::TrustedCompiled(Box::new(TrustedCompiledEditorLane {
                 plan,
                 content_candidate: candidate,
-                content_loader: loader,
+                content_loader: Arc::new(loader),
                 snapshot,
                 prefab_root,
                 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
@@ -2287,6 +2287,16 @@ impl EditorProjectSession {
             .expect("project content is available only in the trusted compiled lane")
             .content_loader
             .budget_snapshot()
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_project_content_budget_host(
+        &self,
+    ) -> crate::project_host::ProjectContentBudgetHost {
+        self.trusted_compiled()
+            .expect("project content is available only in the trusted compiled lane")
+            .content_loader
+            .budget_host()
     }
 
     #[cfg(test)]

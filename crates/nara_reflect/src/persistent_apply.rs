@@ -455,6 +455,25 @@ impl ComponentApplyBatch {
         }
     }
 
+    /// Observes the exact scratch asset catalogue that this batch will publish.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn staged_asset_server(&self) -> &AssetServer {
+        &self.context.asset_server
+    }
+
+    /// Checks the captured World and asset catalogue even when decoding has not touched assets.
+    #[doc(hidden)]
+    pub fn validate_asset_server(&self, world: &World) -> Result<(), ComponentCodecError> {
+        validate_component_apply_world(
+            world,
+            self.world_id,
+            self.origin_asset_server.as_ref(),
+            true,
+            &self.components,
+        )
+    }
+
     pub fn with_decode_context<T>(
         &mut self,
         database: Option<&ProjectAssetDatabase>,

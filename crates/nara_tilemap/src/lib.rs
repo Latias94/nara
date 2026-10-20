@@ -35,6 +35,15 @@ pub use content::{
     TileSetRetentionSnapshot,
 };
 
+/// Finite prepared-publication inputs for the first-party project residency owner.
+#[doc(hidden)]
+#[cfg(feature = "serde")]
+pub mod __private {
+    pub use crate::content::{
+        PreparedTileSetPublications, TileSetOwnedSourceReceipt, TileSetPublicationInput,
+    };
+}
+
 #[cfg(feature = "serde")]
 pub use source::{
     TILESET_FORMAT_KIND, TileSetSource, TileSetSourceFileLimits, TileSetSourceFormatError,

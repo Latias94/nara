@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+mod asset_bindings;
+
 use super::*;
 use nara_asset::{
     AssetPath, AssetRecord, AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle,

@@ -6,6 +6,8 @@
 //! so callers cannot combine unrelated documents and receipts.
 
 mod replacement;
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+pub(crate) use replacement::current_scene_registry;
 pub use replacement::{replace_current_scene_with_product, restart_current_scene_with_product};
 
 use std::{
@@ -47,7 +49,11 @@ pub const STARTUP_SCENE_ACTIVATION_PLUGIN_ID: PluginId =
     PluginId::new("nara.startup-scene-activation");
 const STARTUP_SCENE_ACTIVATION_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(STARTUP_SCENE_ACTIVATION_PLUGIN_ID, PluginCategory::Runtime)
-        .requires_plugins(&[nara_scene::SCENE_COMPONENTS_PLUGIN_ID]);
+        .requires_plugins(&[nara_scene::SCENE_COMPONENTS_PLUGIN_ID])
+        .shutdown_obligations(&[
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            crate::project_host::PROJECT_SCENE_REQUEST_CLOSE_OBLIGATION,
+        ]);
 
 /// Validation failure while binding a direct managed-App Scene source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,7 +173,7 @@ impl SceneSource {
         self.candidate.document()
     }
 
-    fn asset_database(&self) -> Option<&nara_asset::ProjectAssetDatabase> {
+    pub(crate) fn asset_database(&self) -> Option<&nara_asset::ProjectAssetDatabase> {
         match &self.retention {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             SceneRetention::Project { assets, .. } => Some(assets.database()),
@@ -175,7 +181,7 @@ impl SceneSource {
         }
     }
 
-    fn is_project_backed(&self) -> bool {
+    pub(crate) fn is_project_backed(&self) -> bool {
         match self.retention {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             SceneRetention::Project { .. } => true,
@@ -305,6 +311,17 @@ impl CurrentScene<'_> {
 }
 
 impl CurrentSceneOwner {
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) fn is_project_backed(&self) -> bool {
+        self.source.is_project_backed()
+    }
+
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) fn commit_source(&mut self, source: SceneSource, receipt: SpawnedSceneInstance) {
+        self.source = Arc::new(source);
+        self.receipt = receipt;
+    }
+
     pub(crate) fn source(&self) -> &SceneDocument {
         self.source.document()
     }
@@ -424,6 +441,14 @@ impl Plugin for StartupSceneActivationPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        {
+            crate::project_host::register_project_scene_close_participant(app)?;
+            app.add_systems(
+                nara_app::CoreStage::TaskUpdate,
+                crate::project_host::poll_project_scene_requests,
+            )?;
+        }
         app.insert_resource(StartupSceneActivationAuthority {
             phase: StartupSceneActivationPhase::Open,
         })?

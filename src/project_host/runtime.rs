@@ -42,6 +42,16 @@ use plugin_diagnostics::{append_plugin_shutdown_diagnostics, runtime_constructio
 const PROJECT_MANIFEST: &str = "nara.toml";
 
 mod action;
+mod content_residency;
+mod scene_requests;
+pub(crate) use scene_requests::{
+    PROJECT_SCENE_REQUEST_CLOSE_OBLIGATION, poll_project_scene_requests,
+    register_close_participant as register_project_scene_close_participant,
+};
+pub use scene_requests::{
+    PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
+    ProjectSceneRequestState, ProjectScenes, commit_prepared_project_scene,
+};
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 mod desktop_verification;
@@ -118,6 +128,10 @@ struct RuntimeStartInputs {
     startup_scene: SceneSource,
     commands: Vec<GameplayCommandSubmission>,
     obligations: RuntimeObligationLedger,
+    scene_preparation: Option<(
+        super::ProjectSettingsCandidate,
+        Arc<crate::project_content::ProjectContentLoader>,
+    )>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -521,6 +535,23 @@ impl ProjectHost {
         self.begin_start_with_scene(snapshot, plan, startup_scene, commands)
     }
 
+    fn begin_project_start(
+        &mut self,
+        snapshot: ProjectContentSnapshot,
+        plan: RuntimePlan,
+        candidate: super::ProjectSettingsCandidate,
+        loader: Arc<crate::project_content::ProjectContentLoader>,
+        commands: Vec<GameplayCommandSubmission>,
+    ) -> Result<RuntimeStartAttempt, HostFault> {
+        let mut attempt = self.begin_start(snapshot, plan, commands)?;
+        attempt
+            .inputs
+            .as_mut()
+            .expect("a fresh start owns its inputs")
+            .scene_preparation = Some((candidate, loader));
+        Ok(attempt)
+    }
+
     fn begin_editor_start(
         &mut self,
         snapshot: ProjectContentSnapshot,
@@ -588,6 +619,7 @@ impl ProjectHost {
                 startup_scene,
                 commands,
                 obligations: RuntimeObligationLedger::new(),
+                scene_preparation: None,
             }),
         })
     }
@@ -611,6 +643,7 @@ impl ProjectHost {
             startup_scene,
             commands,
             obligations,
+            scene_preparation,
         } = inputs;
 
         let mut candidate = match plan.plugin_plan().instantiate_runtime_candidate(
@@ -640,7 +673,24 @@ impl ProjectHost {
                     &admission_snapshot,
                     startup_scene,
                     commands,
-                );
+                )
+                .and_then(|diagnostics| {
+                    if let Some((candidate, loader)) = scene_preparation {
+                        scene_requests::install_context(
+                            world,
+                            candidate,
+                            admission_plan.clone(),
+                            loader,
+                        )
+                        .map_err(|_| {
+                            HostFault::new(single_error(
+                                "project.scene.context-install-failed",
+                                "Project Scene preparation context could not be installed",
+                            ))
+                        })?;
+                    }
+                    Ok(diagnostics)
+                });
                 assert!(
                     command_result.set(value).is_ok(),
                     "one candidate admission command publishes one result"
@@ -1059,7 +1109,7 @@ fn materialize_project_runtime(
 
     let diagnostics = materialize_startup_scene(world, startup_scene)
         .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
-    publish_snapshot_assets(world, snapshot)?;
+    content_residency::publish_startup(world, snapshot)?;
     let faults = world
         .get_resource::<RuntimeFaultReporter>()
         .cloned()
@@ -1093,6 +1143,14 @@ fn materialize_project_runtime(
 fn publish_snapshot_assets(
     world: &mut World,
     snapshot: &ProjectContentSnapshot,
+) -> Result<(), HostFault> {
+    publish_snapshot_assets_with_database(world, snapshot, snapshot.asset_database())
+}
+
+fn publish_snapshot_assets_with_database(
+    world: &mut World,
+    snapshot: &ProjectContentSnapshot,
+    database: &nara_asset::ProjectAssetDatabase,
 ) -> Result<(), HostFault> {
     if snapshot.images().is_empty() && snapshot.tilesets().is_empty() {
         return Ok(());
@@ -1172,7 +1230,7 @@ fn publish_snapshot_assets(
             )
         },
     )?;
-    world.insert_resource(snapshot.asset_database().clone());
+    world.insert_resource(database.clone());
     publish_snapshot_tilesets(world, snapshot)?;
     Ok(())
 }

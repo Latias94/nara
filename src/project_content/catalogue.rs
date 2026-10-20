@@ -374,7 +374,7 @@ impl LoadContext<'_> {
     }
 }
 
-pub(super) fn asset_record_retained_bytes(
+pub(crate) fn asset_record_retained_bytes(
     record: &AssetRecord,
 ) -> Result<usize, ProjectContentError> {
     // The database owns four path copies and a case-folded key; Unicode folding can grow the key.

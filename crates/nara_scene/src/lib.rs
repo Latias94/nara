@@ -1,5 +1,6 @@
 //! Persistent scene documents, authoring operations, and runtime materialization.
 
+mod asset_bindings;
 mod authoring;
 #[cfg(feature = "serde")]
 mod authoring_decode;
@@ -79,10 +80,14 @@ pub use provenance::{
 /// These contracts have a real reference-game consumer but are not ordinary scene-authoring
 /// surface. They may change while ADR 0089 remains Proposed.
 pub mod advanced {
+    pub use crate::asset_bindings::SceneAssetBindings;
     pub use crate::product_transaction::{
         SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
     };
-    pub use crate::spawn::{replace_expanded_scene_with_product, replace_scene_with_product};
+    pub use crate::spawn::{
+        replace_expanded_scene_with_product, replace_expanded_scene_with_product_and_bindings,
+        replace_scene_with_product,
+    };
 }
 pub use scene_components::{
     Name, SCENE_COMPONENTS_PLUGIN_DECLARATION, SCENE_COMPONENTS_PLUGIN_ID,

@@ -62,6 +62,7 @@ pub use budget::{
 };
 pub(crate) use budget::{ProjectContentGenerationLease, ProjectContentLease};
 use catalogue::ReferenceCatalogue;
+pub(crate) use catalogue::asset_record_retained_bytes;
 use closure::{ProjectContentClosureBuilder, ProjectContentClosureDraft};
 pub use closure::{
     ProjectContentClosureReceipt, ProjectContentMemberKind, ProjectContentMemberReceipt,
@@ -333,6 +334,20 @@ impl ProjectContentSnapshot {
 
     pub(crate) fn asset_database(&self) -> &ProjectAssetDatabase {
         self.inner.assets.database()
+    }
+
+    pub(crate) fn expanded_candidate(&self) -> &nara_scene::ExpandedSceneCandidate {
+        &self.inner.expanded_scene
+    }
+
+    pub(crate) fn reserve_consumer_retained(
+        &self,
+        bytes: usize,
+    ) -> Result<ProjectContentLease, ProjectContentError> {
+        self.inner
+            ._runtime_lease
+            .reserve_retained(bytes)
+            .map_err(ProjectContentError::budget)
     }
 
     pub(crate) fn share_image_for_consumer(&self, index: usize) -> Option<ImageAsset> {

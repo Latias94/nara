@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "15549f696f167106926d561501e83af7a7a6f5ac65d4aeab82707bf3a573c2cc"
+source_fingerprint: "e7141d6c9f883c6b77b7a6cbdd1afe4d12b4f8da1ca43dfa672097d9cc3ac32c"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "15549f696f167106926d561501e83af7a7a6f5ac65d4aeab82707bf3a57
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `15549f696f167106926d561501e83af7a7a6f5ac65d4aeab82707bf3a573c2cc`
-- Immutable records: 814
+- Source fingerprint: `e7141d6c9f883c6b77b7a6cbdd1afe4d12b4f8da1ca43dfa672097d9cc3ac32c`
+- Immutable records: 816
 - Active lane heads: 2
 
 # Active Registrations
@@ -49,7 +49,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
-- [Current Scene custody qualified; project residency next](registry/2026-10/2026-10-20T172851Z-persistent-two-level-game-codex-root-f1a98e7ad8fe4a99a799e7a01557bfb9.md): `active` (persistent-two-level-game-codex-root; producer `codex-root`)
+- [Hosted Scene residency qualified; two-level gameplay in progress](registry/2026-10/2026-10-20T183542Z-persistent-two-level-game-codex-root-e644ed97d88a4c28b41f7894c75c5cf4.md): `active` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
 - [Production cost measurement and first lookup correction complete](registry/2026-10/2026-10-20T081325Z-production-cost-measurement-codex-root-a439516aacba454aaecf22824bfe3635.md): `complete` (production-cost-measurement-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
@@ -65,6 +65,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Hosted Scene residency and owned preparation qualification](verification/2026-10/2026-10-20T183137Z-hosted-scene-residency-and-owned-preparation-qualification-d8d63279f87c4b34bc83eeeccdc7550e.md) - Verification Evidence for Hosted Scene residency and owned preparation qualification.
 - **Verification Evidence**: [Current Scene ownership and decoded-generation custody qualification](verification/2026-10/2026-10-20T172653Z-current-scene-ownership-and-decoded-generation-custody-qualification-0bf781c53d9e4cc3950bfb77b98d2b8a.md) - Qualify the first P2 ownership slice and retain the concrete residency design limits.
 - **Verification Evidence**: [Selected Scene content and exact declared delivery qualification](verification/2026-10/2026-10-20T165833Z-selected-scene-content-and-exact-declared-delivery-qualification-714d8d9ea4f14a27ae83137124e24ae6.md) - Verification Evidence for Selected Scene content and exact declared delivery qualification.
 - **Verification Evidence**: [Linux default workspace suite requires the native display profile](verification/2026-10/2026-10-20T163530Z-linux-default-workspace-suite-requires-the-native-display-profile-799d137d781d4786abfa72505101cdc0.md) - Verification Evidence for Linux default workspace suite requires the native display profile.
@@ -76,7 +77,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Scalar preparation locality qualification](verification/2026-10/2026-10-20T090217Z-scalar-preparation-locality-qualification-7da17674f8c7464ea1612dc119686c45.md) - Field-only classification and conservative publication-shape reuse with exact validation, public timing and separate requested-allocation evidence.
 - **Verification Evidence**: [Production cost baselines and indexed authoring schema qualification](verification/2026-10/2026-10-20T081224Z-production-cost-baselines-and-indexed-authoring-schema-qualification-494a94898cf340b695e7332bbca06fc5.md) - Optimized public interaction, offscreen runtime and Rust iteration observations with exact schema lookup correction.
 - **Verification Evidence**: [Fixed world canvas and native UI qualification](verification/2026-10/2026-10-20T070752Z-fixed-world-canvas-and-native-ui-qualification-e7c7f1ee29e4459688d51f1ca20282d8.md) - Pixel readback, presented world input, native button resize and independent exported desktop qualification.
-- **Verification Evidence**: [Ordinary structural authoring and captured-source Reopen qualification](verification/2026-10/2026-10-20T051819Z-ordinary-structural-authoring-and-captured-source-reopen-qualification-f9b317e0ceda49a6b37f9000c61af8d7.md) - Source-local structural transactions, exact unavailable preservation, captured-source Reopen, ordinary public and actual Windows widget trajectories.
 
 # Integration Notes
 

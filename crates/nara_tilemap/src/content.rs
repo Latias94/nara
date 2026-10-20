@@ -18,8 +18,12 @@ use nara_image::{ImageAsset, ImageContentError, ImageContentSnapshot};
 use crate::{TileAtlasLayout, TileSet, TileSetSource};
 
 mod access;
+mod publication;
 
 pub use access::TileSetContent;
+pub use publication::{
+    PreparedTileSetPublications, TileSetOwnedSourceReceipt, TileSetPublicationInput,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TileSetAssetLimits {
@@ -88,6 +92,7 @@ struct DependencyObservation {
 
 #[derive(Debug)]
 struct TileSetEntry {
+    source_claim: Arc<()>,
     handle: Handle<TileSet>,
     record: AssetRecord,
     desired: TileSetSource,
@@ -239,10 +244,23 @@ impl TileSetAssets {
             }
             return Ok(handle);
         }
+        let source_claim = self
+            .entries
+            .get(&handle.id())
+            .filter(|entry| {
+                entry.record == record
+                    && entry.desired == source
+                    && entry.source_hash == source_hash
+                    && entry.slot == tilesets.slot_revision(handle)
+                    && entry.state == states.state_revision(handle.id())
+                    && entry.error != Some(TileSetAssetError::Superseded)
+            })
+            .map_or_else(|| Arc::new(()), |entry| Arc::clone(&entry.source_claim));
         states.set_loading(handle.id());
         self.entries.insert(
             handle.id(),
             TileSetEntry {
+                source_claim,
                 handle,
                 record,
                 desired: source,
@@ -580,6 +598,7 @@ pub enum TileSetAssetError {
     AtlasLayoutChangeRequiresRebuild,
     IdentityMismatch,
     Superseded,
+    InvalidPublicationBatch,
     Asset(AssetError),
     State(AssetStateError),
 }
@@ -603,6 +622,9 @@ impl fmt::Display for TileSetAssetError {
                 }
                 Self::IdentityMismatch => "TileSet source identity is no longer admitted",
                 Self::Superseded => "TileSet publication was superseded by another writer",
+                Self::InvalidPublicationBatch => {
+                    "TileSet publication inputs overlap or repeat an identity"
+                }
                 Self::Asset(_) | Self::State(_) => unreachable!(),
             }),
         }
@@ -655,6 +677,7 @@ mod tests {
     use crate::{TileAtlasLayout, TileIndex};
 
     mod access;
+    mod publication;
 
     struct Fixture {
         server: AssetServer,

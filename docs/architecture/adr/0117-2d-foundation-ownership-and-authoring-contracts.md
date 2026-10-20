@@ -79,6 +79,23 @@ data-only replacement advance it together. A read-only view does not expose a cl
 or grant a competing authority. Hosted content replacement additionally requires concrete resource
 residency preparation and retirement; Scene data transaction success alone is insufficient.
 
+For one hosted current Scene, CPU residency uses one staged asset catalogue shared with component
+decoding. Before Scene retirement, prepare exact Image slot/state replacements, owned TileSet
+source changes, merged project catalogue ownership and aggregate retained-byte admission. The
+exclusive commit then publishes these already validated changes with the new source/instance pair.
+Retire only still-matching old owned publications and catalogue records; preserve foreign values,
+foreign records and historical handle identities. Shared handles acquire the destination's admitted
+Image allocation, rather than retaining the predecessor's decoded generation indefinitely. This is
+a finite current-level receipt, not a general asset reference-counting service or native rollback.
+
+Hosted Scene preparation uses the original candidate, frozen RuntimePlan and shared content-loader
+budget. Admit only startup or declared delivery roots. Existing I/O task workers prepare content
+without the World; the owner exposes a read-only target before an explicit protected commit. One
+request/result slot remains occupied until cancellation physically returns, and terminal results
+require exact-ID acknowledgement. Runtime close revokes publication interest and existing Tasks
+retain physical worker custody. A later selected closure is not another executable startup
+agreement: its records decode against the already admitted frozen native schema authority.
+
 Decoded project snapshots, retained Scene sources and escaped immutable Images share an acyclic
 generation lease. Source-only closure and delivery receipts retain source facts independently.
 The existing decoded-generation ceiling follows the last real decoded owner, including prepared

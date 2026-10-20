@@ -312,6 +312,26 @@ impl ProjectAssetDatabase {
             .and_then(|path| self.by_path.get(path))
     }
 
+    /// Observes registered records in deterministic source-path order.
+    pub fn records(&self) -> impl ExactSizeIterator<Item = &AssetRecord> {
+        self.by_path.values()
+    }
+
+    /// Removes a record only while the source path still has exactly the expected identity.
+    ///
+    /// This updates all catalogue indexes together. An equal record is a comparison guard, not
+    /// proof of ownership; callers remain responsible for retiring only their own registrations.
+    pub fn remove_exact(&mut self, expected: &AssetRecord) -> bool {
+        if self.record_for_path(expected.path()) != Some(expected) {
+            return false;
+        }
+        self.by_path.remove(expected.path());
+        self.by_stable_id.remove(&expected.stable_id());
+        self.case_folded_paths
+            .remove(&expected.path().case_fold_key());
+        true
+    }
+
     pub fn resolve_ref(&self, asset_ref: &AssetRef) -> Result<&AssetRecord, AssetDatabaseError> {
         match asset_ref {
             AssetRef::Path(path) => self
@@ -373,6 +393,44 @@ impl ProjectAssetDatabase {
 #[cfg(test)]
 mod insertion_tests {
     use super::*;
+
+    #[test]
+    fn exact_removal_preserves_foreign_records_and_releases_every_identity_index() {
+        let own = AssetRecord::new(
+            StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap(),
+            AssetPath::new("textures/Icon.png").unwrap(),
+            AssetSourceKind::Image,
+        );
+        let foreign = AssetRecord::new(
+            StableAssetId::parse_str("4e438770-1757-44f0-bbeb-6237cd6768ab").unwrap(),
+            AssetPath::new("textures/foreign.png").unwrap(),
+            AssetSourceKind::Image,
+        );
+        let mut database = ProjectAssetDatabase::default();
+        database.insert(own.clone()).unwrap();
+        database.insert(foreign.clone()).unwrap();
+        let wrong_kind =
+            AssetRecord::new(own.stable_id(), own.path().clone(), AssetSourceKind::Scene);
+        let before = database.clone();
+        assert!(!database.remove_exact(&wrong_kind));
+        assert_eq!(database, before);
+        assert!(database.remove_exact(&own));
+        assert!(!database.remove_exact(&own));
+        assert_eq!(database.records().collect::<Vec<_>>(), vec![&foreign]);
+        assert_eq!(database.record_for_stable_id(own.stable_id()), None);
+        assert_eq!(
+            database.record_for_stable_id(foreign.stable_id()),
+            Some(&foreign)
+        );
+
+        let renamed = AssetRecord::new(
+            own.stable_id(),
+            AssetPath::new("textures/icon.png").unwrap(),
+            AssetSourceKind::Image,
+        );
+        database.insert(renamed.clone()).unwrap();
+        assert_eq!(database.record_for_path(renamed.path()), Some(&renamed));
+    }
 
     #[test]
     fn insertion_preflight_checks_collisions_without_mutation_or_reservation() {

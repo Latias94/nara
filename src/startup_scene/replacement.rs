@@ -88,27 +88,11 @@ fn replace_current<F>(
 where
     F: FnOnce(&mut SceneProductOverlayWriter<'_>),
 {
-    if !world
-        .get_resource::<StartupSceneActivationAuthority>()
-        .is_some_and(|authority| authority.phase == StartupSceneActivationPhase::Finalized)
-    {
-        return rejected(
-            "scene.current.startup-not-finalized",
-            "Current Scene replacement requires completed startup",
-        );
-    }
-    let Some(owner) = world.get_resource::<CurrentSceneOwner>() else {
-        return rejected(
-            "scene.current.owner-missing",
-            "Current Scene ownership is unavailable",
-        );
+    let registry = match current_scene_registry(world, expected) {
+        Ok(registry) => registry,
+        Err(report) => return report,
     };
-    if owner.receipt != *expected {
-        return rejected(
-            "scene.current.expected-instance-mismatch",
-            "Current Scene no longer matches the expected instance",
-        );
-    }
+    let owner = world.resource::<CurrentSceneOwner>();
     if source
         .as_ref()
         .is_some_and(|source| source.is_project_backed() || owner.source.is_project_backed())
@@ -118,22 +102,12 @@ where
             "Project Scene replacement requires content residency preparation",
         );
     }
-    if validate_component_registry_authority(world).is_err() {
+    if nara_ecs::__private::validate_resource_scope::<CurrentSceneOwner>(world).is_err() {
         return rejected(
-            "scene.current.component-registry-authority-invalid",
-            "Current Scene component registry authority is invalid",
+            "scene.current.owner-lifecycle-unsupported",
+            "Current Scene ownership cannot run lifecycle effects during replacement",
         );
     }
-    let Some(registry) = component_registry(world)
-        .and_then(|registry| registry.snapshot().ok())
-        .map(ComponentRegistry::from_snapshot)
-    else {
-        return rejected(
-            "scene.current.component-registry-unavailable",
-            "Current Scene component registry is unavailable",
-        );
-    };
-
     world.resource_scope(|world, mut owner: Mut<CurrentSceneOwner>| {
         let source = source.map_or_else(|| Arc::clone(&owner.source), Arc::new);
         let report = replace_expanded_scene_with_product(
@@ -154,6 +128,49 @@ where
         }
         report
     })
+}
+
+pub(crate) fn current_scene_registry(
+    world: &World,
+    expected: &SpawnedSceneInstance,
+) -> Result<ComponentRegistry, SceneSpawnReport> {
+    if !world
+        .get_resource::<StartupSceneActivationAuthority>()
+        .is_some_and(|authority| authority.phase == StartupSceneActivationPhase::Finalized)
+    {
+        return Err(rejected(
+            "scene.current.startup-not-finalized",
+            "Current Scene replacement requires completed startup",
+        ));
+    }
+    let Some(owner) = world.get_resource::<CurrentSceneOwner>() else {
+        return Err(rejected(
+            "scene.current.owner-missing",
+            "Current Scene ownership is unavailable",
+        ));
+    };
+    if owner.receipt != *expected {
+        return Err(rejected(
+            "scene.current.expected-instance-mismatch",
+            "Current Scene no longer matches the expected instance",
+        ));
+    }
+    if validate_component_registry_authority(world).is_err() {
+        return Err(rejected(
+            "scene.current.component-registry-authority-invalid",
+            "Current Scene component registry authority is invalid",
+        ));
+    }
+    let Some(registry) = component_registry(world)
+        .and_then(|registry| registry.snapshot().ok())
+        .map(ComponentRegistry::from_snapshot)
+    else {
+        return Err(rejected(
+            "scene.current.component-registry-unavailable",
+            "Current Scene component registry is unavailable",
+        ));
+    };
+    Ok(registry)
 }
 
 fn rejected(code: &'static str, summary: &'static str) -> SceneSpawnReport {

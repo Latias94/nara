@@ -1418,7 +1418,7 @@ fn prepare_project_start(
         fault: project_source_check_fault(error),
         startup_content_closure: None,
     })?;
-    let (plan, snapshot) = checked.into_parts();
+    let (candidate, plan, snapshot, loader) = checked.into_delivery_parts();
     let plan_diagnostics = runtime_plan_selected_report(&plan);
     let startup_content_closure = snapshot
         .startup_content_closure()
@@ -1426,7 +1426,13 @@ fn prepare_project_start(
 
     let mut host = ProjectHost::new(cleanup_policy);
     let attempt = host
-        .begin_start(snapshot, plan, commands)
+        .begin_project_start(
+            snapshot,
+            plan,
+            candidate,
+            std::sync::Arc::new(loader),
+            commands,
+        )
         .map_err(|fault| PreparedProjectStartError {
             fault,
             startup_content_closure: Some(startup_content_closure.clone()),

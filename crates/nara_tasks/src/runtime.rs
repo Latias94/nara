@@ -1417,6 +1417,15 @@ impl TaskPools {
         &self.config
     }
 
+    /// Whether this pool executes admitted work on worker threads.
+    ///
+    /// This distinguishes production workers from [`Self::inline_for_tests`]. It does not
+    /// promise that the pool is open or that a subsequent submission will be admitted.
+    #[must_use]
+    pub fn is_threaded(&self, kind: TaskPoolKind) -> bool {
+        !self.executor(kind).inline
+    }
+
     #[must_use]
     pub fn stats(&self) -> TaskStats {
         let mut stats = TaskStats::default();

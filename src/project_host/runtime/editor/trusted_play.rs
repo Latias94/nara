@@ -314,12 +314,25 @@ impl EditorProjectSession {
             }
         };
         let started = match self.trusted_compiled_mut() {
-            Some(lane) => lane.runtime_host.begin_editor_start(
-                lane.snapshot.clone(),
-                lane.plan.clone(),
-                expanded,
-                Vec::new(),
-            ),
+            Some(lane) => lane
+                .runtime_host
+                .begin_editor_start(
+                    lane.snapshot.clone(),
+                    lane.plan.clone(),
+                    expanded,
+                    Vec::new(),
+                )
+                .map(|mut attempt| {
+                    let inputs = attempt
+                        .inputs
+                        .as_mut()
+                        .expect("a fresh Editor start owns its inputs");
+                    inputs.scene_preparation = Some((
+                        lane.content_candidate.clone(),
+                        Arc::clone(&lane.content_loader),
+                    ));
+                    attempt
+                }),
             None => {
                 self.play_result = Some(EditorPlayOperationResult::Rejected {
                     operation,

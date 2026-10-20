@@ -26,13 +26,14 @@ use nara_reflect::{
         declare_persistent_apply_targets, validate_declared_persistent_apply_targets,
         validate_fresh_persistent_component_apply, validate_persistent_apply_support_topology,
     },
-    ComponentApplyBatch, ComponentCodecError, ComponentRegistry,
+    ComponentCodecError, ComponentRegistry,
 };
 
 use crate::{
     ExpandedSceneCandidate, PrefabDocument, PrefabExpansionReport, PrefabProjectionPath,
     PrefabSourceResolver, SceneDocument, SceneEntityId, SceneEntityProvenanceMap,
     ScenePatchDocument,
+    asset_bindings::SceneAssetBindings,
     candidate::validate_scene_provenance,
     diagnostics::{error as diagnostic_error, with_codec_error, with_public_locator},
     product_transaction::{
@@ -334,6 +335,42 @@ impl SceneSpawner {
         commit: SceneIdentityCommit<'_>,
         product: Option<SceneProductTransactionInput<'_>>,
     ) -> SceneSpawnReport {
+        let bindings = SceneAssetBindings::from_world(world);
+        self.spawn_with_asset_context_and_product_bindings(
+            world, registry, document, provenance, database, commit, product, bindings,
+        )
+    }
+
+    fn spawn_with_asset_context_and_product_bindings(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        document: &SceneDocument,
+        provenance: Option<&SceneEntityProvenanceMap>,
+        database: Option<&ProjectAssetDatabase>,
+        commit: SceneIdentityCommit<'_>,
+        product: Option<SceneProductTransactionInput<'_>>,
+        bindings: SceneAssetBindings,
+    ) -> SceneSpawnReport {
+        let mut component_batch = match bindings.into_batch(world) {
+            Ok(batch) => batch,
+            Err(error) => {
+                let mut diagnostics = DiagnosticReport::default();
+                diagnostics.push(with_codec_error(
+                    diagnostic_error(
+                        "scene.asset-bindings-invalid",
+                        "Prepared Scene asset bindings no longer match the target World",
+                    ),
+                    &error,
+                    None,
+                ));
+                return SceneSpawnReport {
+                    instance: None,
+                    diagnostics,
+                    retired_entities: 0,
+                };
+            }
+        };
         if provenance
             .is_some_and(|provenance| validate_scene_provenance(document, provenance).is_err())
         {
@@ -348,7 +385,6 @@ impl SceneSpawner {
                 retired_entities: 0,
             };
         }
-        let mut component_batch = ComponentApplyBatch::from_world(world);
         let mut preflight = component_batch.with_decode_context(database, |context| {
             preflight_scene_with_context(document, registry, context)
         });
@@ -1075,7 +1111,46 @@ pub fn replace_expanded_scene_with_product<F>(
 where
     F: FnOnce(&mut SceneProductOverlayWriter<'_>),
 {
-    SceneSpawner::new().spawn_with_asset_context_and_product(
+    let bindings = SceneAssetBindings::from_world(world);
+    replace_expanded_scene_with_product_and_bindings(
+        world,
+        registry,
+        candidate,
+        database,
+        current,
+        bindings,
+        limits,
+        additional_retirements,
+        configure,
+    )
+}
+
+/// Replaces an expanded Scene using the exact asset identities prepared by its content owner.
+///
+/// Bindings must originate in this World and its unchanged live AssetServer. Component decoding
+/// extends their one scratch catalogue; successful Scene commit publishes that same catalogue.
+/// Rejection publishes neither the catalogue nor candidate components and leaves the prior receipt
+/// authoritative. No temporary entities escape this call.
+///
+/// This is a data transaction, not asset residency publication. A concrete content owner must
+/// preflight its resource writes and retirement before calling, then perform only infallible commits
+/// after a successful report. The supplied database must be the candidate's admitted source context.
+#[must_use]
+pub fn replace_expanded_scene_with_product_and_bindings<F>(
+    world: &mut World,
+    registry: &ComponentRegistry,
+    candidate: &ExpandedSceneCandidate,
+    database: Option<&ProjectAssetDatabase>,
+    current: &SpawnedSceneInstance,
+    bindings: SceneAssetBindings,
+    limits: SceneProductTransactionLimits,
+    additional_retirements: &[WorldEntityToken],
+    configure: F,
+) -> SceneSpawnReport
+where
+    F: FnOnce(&mut SceneProductOverlayWriter<'_>),
+{
+    SceneSpawner::new().spawn_with_asset_context_and_product_bindings(
         world,
         registry,
         candidate.document(),
@@ -1087,6 +1162,7 @@ where
             additional_retirements,
             configure: Box::new(configure),
         }),
+        bindings,
     )
 }
 

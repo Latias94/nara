@@ -165,6 +165,11 @@ pub mod prelude {
     pub use crate::Runtime2dPlugins;
     #[cfg(feature = "runtime-ui")]
     pub use crate::RuntimeUiPlugins;
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub use crate::project_host::{
+        PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
+        ProjectSceneRequestState, ProjectScenes,
+    };
     pub use crate::{
         HeadlessRuntimePlugins, MinimalPlugins, ProductConfiguration, ProductRecipe,
         ProductRecipeEntry, ProductRecipeEntryKind, ProductRecipeError, SchemaContribution,
@@ -257,6 +262,8 @@ pub mod prelude {
 #[cfg(feature = "runtime-core")]
 pub mod advanced_prelude {
     pub use crate::prelude::*;
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub use crate::project_host::advanced::commit_prepared_project_scene;
     pub use nara_app::{
         AppExitRequests, AppFrameOutcome, EditedPluginGroup, FixedTimeError, PluginCategory,
         PluginCommitError, PluginConfigurationFingerprint, PluginDeclaration, PluginDefinition,

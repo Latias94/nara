@@ -66,8 +66,11 @@ receipt remains an observation or expected-state guard; products may cache entit
 must not independently select the current source or publish a competing Retry receipt.
 
 Project-backed restart reuses its already resident source. Replacing either side with project
-content remains rejected until concrete residency preparation, publication and retirement are
-implemented. Data-only replacement is not hosted project travel. The Host retains startup admission
+content through the direct data-only entry remains rejected. The narrow hosted replacement trial
+uses original-Host background requests and concrete CPU Image/TileSet/catalogue residency under
+ADR 0117. Its read-only prepared target lets the game validate logical progress before the protected
+commit; the request does not publish automatically. This does not admit additive Scene sets,
+arbitrary native rollback or this ADR's complete lifecycle proposal. The Host retains startup admission
 facts for Editor freshness, not the decoded startup snapshot forever. Snapshots, retained project
 sources and escaped immutable Images share an acyclic decoded-generation lease; source-only closure
 and delivery receipts do not hold that generation. The existing two-generation ceiling follows the

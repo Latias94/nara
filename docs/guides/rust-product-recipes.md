@@ -134,8 +134,21 @@ receipt. Use `restart_current_scene_with_product` for Retry and
 boundary. Both require the complete expected receipt and derive the frozen registry from the World.
 The root updates source and receipt together; a product's copied receipt is a membership cache or
 expected-state guard. `SceneSource` is move-only and `SceneSourceView` does not retain its owner.
-Project-backed restart reuses resident content. Hosted replacement remains rejected until concrete
-project resource residency and retirement are supported; direct replacement does not load files.
+Project-backed restart reuses resident content; direct replacement does not load files.
+
+Hosted products request startup or a declared delivery root through the `ProjectScenes` system
+parameter. Keep the returned `ProjectSceneRequestId` and observe its state. `Ready` exposes a
+borrowed `prepared(id)` view of the expanded target document, selected path and expected current
+instance. Validate game-owned checkpoint references and prepare owned runtime values before calling
+`commit_prepared_project_scene` at an exclusive simulation boundary. The Host reuses its original
+project/schema authority, loader budget and CPU residency transaction; gameplay does not resolve a
+second RuntimePlan or construct direct sources to bypass resource ownership.
+
+Preparation never commits automatically. A cancelled running request stays `Cancelling` until its
+worker physically returns. Inspect `diagnostics(id)` for a rejected request's safe report and
+`acknowledge(id)` after a terminal result before requesting another Scene. A wrong or obsolete ID
+cannot acknowledge or commit another request. These APIs preserve one current Scene and explicit
+game-owned session state; they do not provide additive loading or arbitrary native-state rollback.
 
 The project owns one recipe function shared by headless, desktop, Check, Export, and startup-Scene
 Repair. Add the `project-tooling` Nara feature to the headless dependency, declare the tool entry in

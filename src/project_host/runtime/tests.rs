@@ -7,7 +7,9 @@ mod authoring_images;
 
 #[cfg(feature = "tooling")]
 mod browser_preparation;
+mod content_residency;
 mod current_scene;
+mod editor_scene_travel;
 #[cfg(feature = "tooling")]
 mod host_custody;
 #[cfg(feature = "tooling")]
@@ -16,6 +18,7 @@ mod image_publication_custody;
 mod owned_reopen;
 #[cfg(feature = "tooling")]
 mod owned_save;
+mod project_scene_requests;
 
 use std::{
     error::Error,
@@ -5875,7 +5878,7 @@ fn project_host_publishes_snapshot_images_without_copying_the_retained_pixels() 
 }
 
 #[test]
-fn published_host_retires_startup_snapshot_facts_and_keeps_only_live_content_owners() {
+fn published_host_keeps_only_live_content_and_residency_owners() {
     let project = TestProject::with_image("host-content-custody");
     let (snapshot, plan, loader) =
         project.snapshot_plan_and_loader_with_limits(ProjectContentLimits::default());
@@ -5888,7 +5891,7 @@ fn published_host_retires_startup_snapshot_facts_and_keeps_only_live_content_own
     host.complete_start(&mut attempt).unwrap();
 
     assert_eq!(host.running_content_revision(), Some(startup_revision));
-    assert_eq!(budget.snapshot().active_reservations(), 1);
+    assert_eq!(budget.snapshot().active_reservations(), 2);
     assert_eq!(budget.snapshot().active_generations(), 1);
     let escaped_image = host
         .with_running_world(|world| {

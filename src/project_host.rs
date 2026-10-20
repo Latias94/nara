@@ -143,3 +143,13 @@ pub use runtime::{
 pub use runtime::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub use runtime::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport};
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+pub(crate) use runtime::{
+    PROJECT_SCENE_REQUEST_CLOSE_OBLIGATION, poll_project_scene_requests,
+    register_project_scene_close_participant,
+};
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+pub use runtime::{
+    PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
+    ProjectSceneRequestState, ProjectScenes,
+};
