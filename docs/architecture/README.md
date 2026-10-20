@@ -40,6 +40,12 @@ their completion conditions do not automatically apply to later tasks.
 
 ## Background Designs
 
+The [module and product-goal alignment review](../audits/2026-10-20-module-goal-alignment-review.md)
+covers all 35 workspace packages against Strategy, existing research and pinned Bevy/Godot source.
+It records four concrete boundary repairs and their qualification, then orders the remaining work
+around ordinary authoring, measured iteration and one persistent two-level game. Capability gaps
+and unmeasured costs remain separate from confirmed defects; Tile tools remain deferred.
+
 The [2026-10-18 foundation audit](../audits/2026-10-18-foundation-contract-audit.md) records
 confirmed ownership repairs and proposed refactor dependencies. Its standalone HTML deliverable
 is kept outside the repository. The audit does not change Accepted ADRs.
