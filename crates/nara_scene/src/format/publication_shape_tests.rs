@@ -1,0 +1,261 @@
+use super::*;
+use crate::{ScenePlacement, ScenePlacementOwner};
+use nara_asset::AssetRef;
+use nara_identity::EntityReference;
+use nara_reflect::{
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, PersistentComponentSchemaOwnerId,
+};
+
+// Preserve the complete pre-optimization validator as an independent acceptance oracle.
+fn reference<T: SceneFilePayload>(
+    payload: &T,
+    limits: SceneFileLimits,
+) -> Result<(), SceneFormatError> {
+    let envelope = canonical_envelope(payload, limits)?;
+    validate_json_publication_shape(&envelope, limits, false)?;
+    validate_ron_publication_shape(&envelope, limits, false)
+}
+
+fn equivalent<T: SceneFilePayload>(payload: &T, limits: SceneFileLimits) {
+    let expected = reference(payload, limits).map_err(|error| error.to_string());
+    let actual = validate_publication_shape(payload, limits).map_err(|error| error.to_string());
+    assert_eq!(actual, expected, "limits: {limits:?}");
+}
+
+fn certified<T: SceneFilePayload>(payload: &T, limits: SceneFileLimits) -> bool {
+    let envelope = canonical_envelope(payload, limits).unwrap();
+    envelope
+        .payload()
+        .entity_document()
+        .is_some_and(|(roots, entities)| {
+            publication_shape::certifies_entity_document(&envelope, roots, entities, limits.shape())
+        })
+}
+
+#[test]
+fn publication_shape_certificate_matches_full_oracle_for_supported_wire_values() {
+    let values = [
+        ComponentValue::Null,
+        ComponentValue::Bool(true),
+        ComponentValue::Bool(false),
+        ComponentValue::I64(i64::MIN),
+        ComponentValue::U64(u64::MAX),
+        ComponentValue::f64(-0.0).unwrap(),
+        ComponentValue::f64(f64::MAX).unwrap(),
+        ComponentValue::f64(f64::MIN).unwrap(),
+        ComponentValue::f64(f64::MIN_POSITIVE).unwrap(),
+        ComponentValue::f64(f64::from_bits(1)).unwrap(),
+        ComponentValue::String("quotes\" slash\\ newline\n tab\t NUL\0 中文🦀\u{2028}".into()),
+        ComponentValue::List(Vec::new()),
+        ComponentValue::Map(BTreeMap::new()),
+        ComponentValue::map([
+            ("", ComponentValue::Null),
+            (
+                "\"\\\n\0🦀",
+                ComponentValue::List(vec![
+                    ComponentValue::U64(1),
+                    ComponentValue::String("雪".into()),
+                ]),
+            ),
+        ]),
+    ];
+    for value in values {
+        for declared_owner in [false, true] {
+            let scene = document(value.clone(), declared_owner);
+            let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
+            assert!(certified(&scene, SceneFileLimits::default()), "{value:?}");
+            assert!(certified(&prefab, SceneFileLimits::default()), "{value:?}");
+            equivalent(&scene, SceneFileLimits::default());
+            equivalent(&prefab, SceneFileLimits::default());
+        }
+    }
+}
+
+#[test]
+fn publication_shape_certificate_preserves_each_shape_and_exact_encoding_boundary() {
+    let scene = document(
+        ComponentValue::map([
+            ("key\"\\\n🦀", ComponentValue::String("text\0\t雪".into())),
+            (
+                "list",
+                ComponentValue::List(vec![ComponentValue::Null, ComponentValue::Bool(true)]),
+            ),
+        ]),
+        true,
+    );
+    let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
+    let base = SceneFileLimits::default();
+    let shape = base.shape();
+    for maximum in 1..=80 {
+        let limits = base.with_shape(SerdeShapeLimits::new(
+            DepthLimit::new(maximum).unwrap(),
+            shape.nodes(),
+            shape.container_items(),
+            shape.string_bytes(),
+            shape.total_string_bytes(),
+        ));
+        equivalent(&scene, limits);
+        equivalent(&prefab, limits);
+    }
+    for maximum in 1..=192 {
+        let limits = base.with_shape(SerdeShapeLimits::new(
+            shape.depth(),
+            ItemLimit::new(maximum).unwrap(),
+            shape.container_items(),
+            shape.string_bytes(),
+            shape.total_string_bytes(),
+        ));
+        equivalent(&scene, limits);
+        equivalent(&prefab, limits);
+    }
+    for maximum in 1..=8 {
+        let limits = base.with_shape(SerdeShapeLimits::new(
+            shape.depth(),
+            shape.nodes(),
+            ItemLimit::new(maximum).unwrap(),
+            shape.string_bytes(),
+            shape.total_string_bytes(),
+        ));
+        equivalent(&scene, limits);
+        equivalent(&prefab, limits);
+    }
+    for maximum in 1..=32 {
+        let limits = base.with_shape(SerdeShapeLimits::new(
+            shape.depth(),
+            shape.nodes(),
+            shape.container_items(),
+            ByteLimit::new(maximum).unwrap(),
+            shape.total_string_bytes(),
+        ));
+        equivalent(&scene, limits);
+        equivalent(&prefab, limits);
+    }
+    for maximum in 1..=384 {
+        let limits = base.with_shape(SerdeShapeLimits::new(
+            shape.depth(),
+            shape.nodes(),
+            shape.container_items(),
+            shape.string_bytes(),
+            ByteLimit::new(maximum).unwrap(),
+        ));
+        equivalent(&scene, limits);
+        equivalent(&prefab, limits);
+    }
+    encoded_boundaries(&scene);
+    encoded_boundaries(&prefab);
+}
+
+#[test]
+fn publication_shape_certificate_falls_back_without_rejecting_valid_unsupported_values() {
+    let referenced = document(
+        ComponentValue::EntityReference(EntityReference::SceneLocal {
+            entity: id("child"),
+        }),
+        true,
+    );
+    let mut embedded = document(ComponentValue::Null, false);
+    embedded.entities[0].prefab = Some(PrefabInstance {
+        source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
+        overrides: ScenePatchDocument::new([ScenePatchOperation::SetField {
+            entity: id("nested"),
+            component: ComponentTypeId::new("test.Value"),
+            component_version: ComponentSchemaVersion::ONE,
+            field: nara_reflect::ComponentFieldId::new("value"),
+            value: ComponentValue::String("override".into()),
+        }]),
+    });
+    for scene in [referenced, embedded] {
+        let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
+        assert!(!certified(&scene, SceneFileLimits::default()));
+        assert!(!certified(&prefab, SceneFileLimits::default()));
+        assert!(reference(&scene, SceneFileLimits::default()).is_ok());
+        assert!(reference(&prefab, SceneFileLimits::default()).is_ok());
+        equivalent(&scene, SceneFileLimits::default());
+        equivalent(&prefab, SceneFileLimits::default());
+        encoded_boundaries(&scene);
+        encoded_boundaries(&prefab);
+    }
+    let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+        entity: SceneEntityRecord::new(id("new")),
+        placement: ScenePlacement::last(ScenePlacementOwner::Root),
+    }]);
+    assert!(!certified(&patch, SceneFileLimits::default()));
+    assert!(reference(&patch, SceneFileLimits::default()).is_ok());
+    encoded_boundaries(&patch);
+}
+
+#[test]
+fn publication_shape_certificate_depth_cutoff_is_fallback_not_a_new_limit() {
+    let mut value = ComponentValue::Null;
+    for _ in 0..13 {
+        value = ComponentValue::List(vec![value]);
+    }
+    let scene = document(value, false);
+    let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
+    let base = SceneFileLimits::default();
+    let shape = base.shape();
+    let limits = base.with_shape(SerdeShapeLimits::new(
+        DepthLimit::new(100).unwrap(),
+        shape.nodes(),
+        shape.container_items(),
+        shape.string_bytes(),
+        shape.total_string_bytes(),
+    ));
+    assert!(!certified(&scene, limits));
+    assert!(!certified(&prefab, limits));
+    assert!(
+        reference(&scene, limits).is_ok(),
+        "{:?}",
+        reference(&scene, limits)
+    );
+    assert!(
+        reference(&prefab, limits).is_ok(),
+        "{:?}",
+        reference(&prefab, limits)
+    );
+    equivalent(&scene, limits);
+    equivalent(&prefab, limits);
+}
+
+fn encoded_boundaries<T: SceneFilePayload>(payload: &T) {
+    let envelope = canonical_envelope(payload, SceneFileLimits::default()).unwrap();
+    let json = serde_json::to_vec_pretty(&envelope).unwrap();
+    let ron = ron::ser::to_string_pretty(&envelope, canonical_ron_pretty_config()).unwrap();
+    for maximum in [
+        json.len() - 1,
+        json.len(),
+        json.len() + 1,
+        ron.len() - 1,
+        ron.len(),
+        ron.len() + 1,
+    ] {
+        equivalent(
+            payload,
+            SceneFileLimits::default().with_encoded_bytes(ByteLimit::new(maximum).unwrap()),
+        );
+    }
+    let limits = SceneFileLimits::default()
+        .with_encoded_bytes(ByteLimit::new(json.len().max(ron.len())).unwrap());
+    assert!(validate_publication_shape(payload, limits).is_ok());
+}
+
+fn document(value: ComponentValue, declared_owner: bool) -> SceneDocument {
+    let mut record = SceneComponentRecord::new(ComponentSchemaVersion::ONE, value);
+    if declared_owner {
+        record.owner = Some(PersistentComponentSchemaOwnerId::try_new("test.owner").unwrap());
+    }
+    // Deliberately unsorted records: the existing canonical envelope remains the encoding owner.
+    SceneDocument {
+        roots: vec![id("parent")],
+        entities: vec![
+            SceneEntityRecord::new(id("parent"))
+                .with_children([id("child")])
+                .with_component(ComponentTypeId::new("test.Value"), record),
+            SceneEntityRecord::new(id("child")),
+        ],
+    }
+}
+
+fn id(value: &str) -> SceneEntityId {
+    SceneEntityId::new(value).unwrap()
+}

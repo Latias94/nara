@@ -1,5 +1,9 @@
 //! Canonical scene, prefab, and standalone patch file boundaries.
 
+mod publication_shape;
+#[cfg(test)]
+mod publication_shape_tests;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
@@ -714,6 +718,10 @@ trait SceneFilePayload: Clone + Serialize {
     fn canonicalize_payload(&mut self);
     fn validate_contract(&self) -> Result<(), SceneFormatError>;
     fn validate_budget(&self, limits: SceneFileLimits) -> Result<(), SceneFileBudgetError>;
+
+    fn entity_document(&self) -> Option<(&[SceneEntityId], &[SceneEntityRecord])> {
+        None
+    }
 }
 
 impl SceneFilePayload for SceneDocument {
@@ -737,6 +745,10 @@ impl SceneFilePayload for SceneDocument {
     fn validate_budget(&self, limits: SceneFileLimits) -> Result<(), SceneFileBudgetError> {
         SceneFileCounts::validate_entities(&self.roots, &self.entities, limits)
     }
+
+    fn entity_document(&self) -> Option<(&[SceneEntityId], &[SceneEntityRecord])> {
+        Some((&self.roots, &self.entities))
+    }
 }
 
 impl SceneFilePayload for PrefabDocument {
@@ -759,6 +771,10 @@ impl SceneFilePayload for PrefabDocument {
 
     fn validate_budget(&self, limits: SceneFileLimits) -> Result<(), SceneFileBudgetError> {
         SceneFileCounts::validate_entities(&self.roots, &self.entities, limits)
+    }
+
+    fn entity_document(&self) -> Option<(&[SceneEntityId], &[SceneEntityRecord])> {
+        Some((&self.roots, &self.entities))
     }
 }
 
@@ -1011,15 +1027,22 @@ fn validate_publication_shape<T: SceneFilePayload>(
     limits: SceneFileLimits,
 ) -> Result<(), SceneFormatError> {
     let envelope = canonical_envelope(payload, limits)?;
-    validate_json_publication_shape(&envelope, limits)?;
-    validate_ron_publication_shape(&envelope, limits)
+    let certified = envelope
+        .payload()
+        .entity_document()
+        .is_some_and(|(roots, entities)| {
+            publication_shape::certifies_entity_document(&envelope, roots, entities, limits.shape())
+        });
+    validate_json_publication_shape(&envelope, limits, certified)?;
+    validate_ron_publication_shape(&envelope, limits, certified)
 }
 
 fn validate_json_publication_shape<T: Serialize>(
     envelope: &T,
     limits: SceneFileLimits,
+    certified: bool,
 ) -> Result<(), SceneFormatError> {
-    let mut encoded = BoundedEncodedBuffer::new(limits.encoded_bytes().get());
+    let mut encoded = BoundedEncodedBuffer::new(limits.encoded_bytes().get(), !certified);
     if let Err(source) = serde_json::to_writer_pretty(&mut encoded, envelope) {
         if let Some(observed) = encoded.exceeded_at() {
             return Err(SceneFormatError::EncodedBytesExceeded {
@@ -1031,6 +1054,9 @@ fn validate_json_publication_shape<T: Serialize>(
             encoding: SceneFileEncoding::Json,
             source: Box::new(source),
         });
+    }
+    if certified {
+        return Ok(());
     }
     let mut deserializer = serde_json::Deserializer::from_slice(encoded.as_slice());
     preflight_serde_shape(&mut deserializer, limits.shape()).map_err(|source| {
@@ -1044,8 +1070,9 @@ fn validate_json_publication_shape<T: Serialize>(
 fn validate_ron_publication_shape<T: Serialize>(
     envelope: &T,
     limits: SceneFileLimits,
+    certified: bool,
 ) -> Result<(), SceneFormatError> {
-    let mut encoded = BoundedEncodedBuffer::new(limits.encoded_bytes().get());
+    let mut encoded = BoundedEncodedBuffer::new(limits.encoded_bytes().get(), !certified);
     if let Err(source) =
         ron::ser::to_writer_pretty(&mut encoded, envelope, canonical_ron_pretty_config())
     {
@@ -1059,6 +1086,9 @@ fn validate_ron_publication_shape<T: Serialize>(
             encoding: SceneFileEncoding::Ron,
             source: Box::new(source),
         });
+    }
+    if certified {
+        return Ok(());
     }
     let mut deserializer =
         ron::de::Deserializer::from_bytes(encoded.as_slice()).map_err(|source| {
@@ -1081,20 +1111,29 @@ fn canonical_ron_pretty_config() -> ron::ser::PrettyConfig {
 
 struct BoundedEncodedBuffer {
     bytes: Vec<u8>,
+    retain_bytes: bool,
+    written: usize,
     maximum: usize,
     exceeded_at: Option<usize>,
 }
 
 impl BoundedEncodedBuffer {
-    fn new(maximum: usize) -> Self {
+    fn new(maximum: usize, retain_bytes: bool) -> Self {
         Self {
-            bytes: Vec::with_capacity(maximum.min(64 * 1024)),
+            bytes: if retain_bytes {
+                Vec::with_capacity(maximum.min(64 * 1024))
+            } else {
+                Vec::new()
+            },
+            retain_bytes,
+            written: 0,
             maximum,
             exceeded_at: None,
         }
     }
 
     fn as_slice(&self) -> &[u8] {
+        debug_assert!(self.retain_bytes);
         &self.bytes
     }
 
@@ -1105,12 +1144,15 @@ impl BoundedEncodedBuffer {
 
 impl Write for BoundedEncodedBuffer {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        let observed = self.bytes.len().saturating_add(buffer.len());
+        let observed = self.written.saturating_add(buffer.len());
         if observed > self.maximum {
             self.exceeded_at = Some(observed);
             return Err(io::Error::other("persistent encoded byte limit exceeded"));
         }
-        self.bytes.extend_from_slice(buffer);
+        if self.retain_bytes {
+            self.bytes.extend_from_slice(buffer);
+        }
+        self.written = observed;
         Ok(buffer.len())
     }
 

@@ -1,5 +1,6 @@
 //! Registry-free Scene and Prefab admission for persistent authoring.
 
+mod field_candidate;
 mod structure;
 
 use structure::{authoring_structure_rejection, prepare_scene_authoring_structure};
@@ -2186,24 +2187,16 @@ pub(crate) fn prepare_scene_authoring_patch(
     }
     let edits = field_edits_from_patch(patch)?;
     let edit = &edits[0];
-    let (mut candidate, inverse) = prepare_field_edits(document.clone(), state, &edits)?;
-    field_edits_from_patch(&inverse)?;
-    if crate::format::validate_scene_publication_shape(&candidate, state.limits).is_err() {
+    let candidate = field_candidate::prepare(document.clone(), state, &edits)?;
+    if crate::format::validate_scene_publication_shape(candidate.document(), state.limits).is_err()
+    {
         return Err(field_edit_rejection(
             edit,
             "scene.authoring-field-edit-format-invalid",
             "Authoring field edit exceeds the persistent Scene format boundary",
         ));
     }
-    candidate.canonicalize();
-    let candidate_state = classify_scene_document(
-        &candidate,
-        state.source.clone(),
-        state.kind,
-        Arc::clone(&state.basis),
-        state.limits,
-    )
-    .map_err(|error| ScenePatchReport {
+    let candidate_state = candidate.classify().map_err(|error| ScenePatchReport {
         applied: false,
         inverse: None,
         diagnostics: error.into_diagnostics(),
@@ -2215,6 +2208,7 @@ pub(crate) fn prepare_scene_authoring_patch(
             "Authoring field edit changed the unavailable-record manifest",
         ));
     }
+    let (candidate, inverse) = candidate.into_parts();
     Ok(PreparedSceneAuthoringPatch {
         document: candidate,
         state: candidate_state,
@@ -2258,29 +2252,15 @@ pub(crate) fn prepare_prefab_authoring_patch(
     }
     let edits = field_edits_from_patch(patch)?;
     let edit = &edits[0];
-    let scene = document.instantiate();
-    let (candidate_scene, inverse) = prepare_field_edits(scene, state, &edits)?;
-    field_edits_from_patch(&inverse)?;
-    let mut candidate = PrefabDocument::new(
-        candidate_scene.roots.clone(),
-        candidate_scene.entities.clone(),
-    );
-    if crate::format::validate_prefab_publication_shape(&candidate, state.limits).is_err() {
-        return Err(field_edit_rejection(
+    let candidate = field_candidate::prepare(document.instantiate(), state, &edits)?;
+    let candidate = candidate.validate_prefab_shape().map_err(|_| {
+        field_edit_rejection(
             edit,
             "scene.authoring-field-edit-format-invalid",
             "Authoring field edit exceeds the persistent Prefab format boundary",
-        ));
-    }
-    candidate.canonicalize();
-    let candidate_state = classify_scene_document(
-        &candidate.instantiate(),
-        state.source.clone(),
-        state.kind,
-        Arc::clone(&state.basis),
-        state.limits,
-    )
-    .map_err(|error| ScenePatchReport {
+        )
+    })?;
+    let candidate_state = candidate.classify().map_err(|error| ScenePatchReport {
         applied: false,
         inverse: None,
         diagnostics: error.into_diagnostics(),
@@ -2292,8 +2272,12 @@ pub(crate) fn prepare_prefab_authoring_patch(
             "Authoring field edit changed the unavailable-record manifest",
         ));
     }
+    let (candidate, inverse) = candidate.into_parts();
     Ok(PreparedPrefabAuthoringPatch {
-        document: candidate,
+        document: PrefabDocument {
+            roots: candidate.roots,
+            entities: candidate.entities,
+        },
         state: candidate_state,
         patch: patch.clone(),
         report: ScenePatchReport {
