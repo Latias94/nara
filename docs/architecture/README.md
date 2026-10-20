@@ -34,6 +34,19 @@ existing task custody for finite scans and explicit request-specific Open prepar
 [report](../benchmarks/2026-10-20-browser-preparation.md) separates correctness, native scope and
 maximum owner occupancy from total completion.
 
+The [Tile locality report](../benchmarks/2026-10-20-tile-visibility.md) qualifies streaming
+material candidates and conservative per-view queue clipping at `15e6564`, including an
+unclipped real-GPU oracle. It preserves complete extraction and resource authorization without
+retained-cache authority. The separate [CI portability repair](../plans/2026-10-20-ci-portability-repair-plan.md)
+adds Linux handle enumeration and compile-only portable wasm checks; browser execution remains
+outside that matrix.
+
+The [Rust/Play attribution](../benchmarks/2026-10-20-rust-play.md) at `2c26c92` measures public
+Play through accepted first presentation and retains separate Restart/headless controls. A
+bounded Windows path-input correction proves same-parameter CLI artifact reuse without changing
+profile/linker settings or immutable generation custody. Mixed uncontrolled timing changes do
+not establish a general build-speed gain.
+
 Use [engineering memory](../knowledge/engineering/index.md) to resume work or recover its reasoning,
 verification and handoff context. Registration is continuity evidence, not a lock or an approval
 gate. Read records relevant to the task rather than treating the whole bundle as required context.

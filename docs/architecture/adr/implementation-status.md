@@ -4,6 +4,19 @@ This index separates architecture decisions from their recorded implementation c
 Decision and implementation states retain the scope of their linked evidence; updating this index
 does not requalify product behavior or change an ADR's acceptance.
 
+The [Tile locality qualification](../../benchmarks/2026-10-20-tile-visibility.md) at `15e6564`
+retains complete extraction/material admission while streaming candidates and conservatively
+clipping per view under ADR 0117. Source and actual pixel oracles plus three optimized processes
+support the bounded correction without cross-frame caches. The [CI portability repair](../../plans/2026-10-20-ci-portability-repair-plan.md)
+at `fce2e70` adds Linux handle enumeration, terminal consumer observation and compile-only portable
+wasm checks. Local Linux execution is separate from hosted/platform release and browser support.
+
+The [Rust/Play attribution](../../benchmarks/2026-10-20-rust-play.md) at `2c26c92` qualifies an
+ordinary public Play/Restart and compiler-failure recovery consumer under ADR 0116. Windows
+Cargo input spelling is stabilized after canonicalization; same-parameter ordinary CLI builds
+reuse all three project artifacts. Complete before/after observations retain mixed timing
+changes and do not select profile/linker changes or a native hot-patch ABI.
+
 The [Browser preparation qualification](../../benchmarks/2026-10-20-browser-preparation.md) at
 `7f78c59` implements finite source-index workers and explicit request-specific document Open
 under ADRs 0047/0118. Exact predecessor/index admission, dirty-close decisions and physical

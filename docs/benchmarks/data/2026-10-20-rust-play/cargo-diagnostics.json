@@ -1,0 +1,122 @@
+{
+  "scope": "Native Cargo 1.95 --timings reports: first private Play attribution, two unchanged-input windows from the second private attribution, and an explicitly labelled ordinary-path CLI control. Static HTML fields only; internal JS is not parsed.",
+  "reports": [
+    {
+      "file": "cargo-timing-20261020T105030424Z-49b32b8f920795bb.html.gz",
+      "uncompressed_sha256": "641cf50a993cb88ba6eb7ae9d394b36cd79eefcf0f6127e46390a168cbcc324c",
+      "total_time_display": "9.3s",
+      "fresh_units": 263,
+      "dirty_units": 3,
+      "build_start": "2026-10-20T10:50:30.4248959Z",
+      "context": "first private supervised Play attribution; includes unmarked bootstrap/failure/recovery"
+    },
+    {
+      "file": "cargo-timing-20261020T105042086Z-49b32b8f920795bb.html.gz",
+      "uncompressed_sha256": "01500a8f101a7f665ee3698f5a0d367981dae02324ade1a6f095edebda23770f",
+      "total_time_display": "9.9s",
+      "fresh_units": 263,
+      "dirty_units": 3,
+      "build_start": "2026-10-20T10:50:42.0860852Z",
+      "context": "first private supervised Play attribution; includes unmarked bootstrap/failure/recovery"
+    },
+    {
+      "file": "cargo-timing-20261020T105054189Z-49b32b8f920795bb.html.gz",
+      "uncompressed_sha256": "3f8178da33efdc15062ecfa5214db38c519964ff0381396e9b670aaca54c5753",
+      "total_time_display": "9.8s",
+      "fresh_units": 263,
+      "dirty_units": 3,
+      "build_start": "2026-10-20T10:50:54.1899469Z",
+      "context": "first private supervised Play attribution; includes unmarked bootstrap/failure/recovery"
+    },
+    {
+      "file": "cargo-timing-20261020T105106057Z-49b32b8f920795bb.html.gz",
+      "uncompressed_sha256": "cfe2eca8d9fac8f0142bed85111c55ea279b10e190479788b54ca0ed1f07be87",
+      "total_time_display": "15.3s",
+      "fresh_units": 263,
+      "dirty_units": 3,
+      "build_start": "2026-10-20T10:51:06.0573202Z",
+      "context": "first private supervised Play attribution; includes unmarked bootstrap/failure/recovery"
+    },
+    {
+      "file": "cargo-timing-20261020T105123452Z-49b32b8f920795bb.html.gz",
+      "uncompressed_sha256": "337b41b0318a451d653248115d7f5f60ee62726cf257effd4609e570acae8176",
+      "total_time_display": "9.1s",
+      "fresh_units": 263,
+      "dirty_units": 3,
+      "build_start": "2026-10-20T10:51:23.4520109Z",
+      "context": "first private supervised Play attribution; includes unmarked bootstrap/failure/recovery"
+    },
+    {
+      "file": "cargo-timing-20261020T105134695Z-49b32b8f920795bb.html.gz",
+      "uncompressed_sha256": "151ae2811e75696938ff81349cc8560ec408517f4cb3a9bf97f50669e1d4705c",
+      "total_time_display": "8.9s",
+      "fresh_units": 263,
+      "dirty_units": 3,
+      "build_start": "2026-10-20T10:51:34.6959156Z",
+      "context": "first private supervised Play attribution; includes unmarked bootstrap/failure/recovery"
+    },
+    {
+      "file": "cargo-timing-20261020T105145720Z-49b32b8f920795bb.html.gz",
+      "uncompressed_sha256": "c4c5b17ca458c3b1660e4655bfa6b6cadd59049440e9c1809291254125a676fa",
+      "total_time_display": "9.6s",
+      "fresh_units": 263,
+      "dirty_units": 3,
+      "build_start": "2026-10-20T10:51:45.720083Z",
+      "context": "first private supervised Play attribution; includes unmarked bootstrap/failure/recovery"
+    },
+    {
+      "file": "cargo-timing-20261020T105157432Z-49b32b8f920795bb.html.gz",
+      "uncompressed_sha256": "62a952048399176b4108d3457473a05f9fe49b8720cf0c3ae5008527345012fd",
+      "total_time_display": "12.6s",
+      "fresh_units": 263,
+      "dirty_units": 3,
+      "build_start": "2026-10-20T10:51:57.4328859Z",
+      "context": "first private supervised Play attribution; includes unmarked bootstrap/failure/recovery"
+    },
+    {
+      "file": "cargo-timing-20261020T105214865Z-49b32b8f920795bb.html.gz",
+      "uncompressed_sha256": "ee0e97cfb1bbf2788ace90527a4dd86aa31d1ebe51134cc5a358381edbbc0edb",
+      "total_time_display": "2.6s",
+      "fresh_units": 264,
+      "dirty_units": 2,
+      "build_start": "2026-10-20T10:52:14.8657096Z",
+      "context": "first private supervised Play attribution; includes unmarked bootstrap/failure/recovery"
+    },
+    {
+      "file": "cargo-timing-20261020T105218628Z-49b32b8f920795bb.html.gz",
+      "uncompressed_sha256": "51db94f1a3d2e116dd749e19550f26fa36ab8d1216ee454bbb50ae1f12f3bf46",
+      "total_time_display": "8.8s",
+      "fresh_units": 263,
+      "dirty_units": 3,
+      "build_start": "2026-10-20T10:52:18.62889Z",
+      "context": "first private supervised Play attribution; includes unmarked bootstrap/failure/recovery"
+    },
+    {
+      "file": "cargo-timing-20261020T105258127Z-eac3cd4f678ef716.html.gz",
+      "uncompressed_sha256": "1c710cfc582c41e75c731d06bc7c5808fe8ebe96dbb0f64db91a7cd5e67b24f2",
+      "total_time_display": "8.9s",
+      "fresh_units": 263,
+      "dirty_units": 3,
+      "build_start": "2026-10-20T10:52:58.1272621Z",
+      "context": "ordinary-path direct CLI control, source restored after attribution"
+    },
+    {
+      "file": "cargo-timing-20261020T105550262Z-49b32b8f920795bb.html.gz",
+      "uncompressed_sha256": "6e604bb9ae308a410c9ff4ddfb6e3c6659e3611a0441c6a933866af249548f7e",
+      "total_time_display": "0.0s",
+      "fresh_units": 266,
+      "dirty_units": 0,
+      "build_start": "2026-10-20T10:55:50.2629427Z",
+      "context": "second private supervised Play attribution, nextest d5e7eeeb-da3f-43a8-9b17-6e3c9427f1a6; retained no-edit sample 1"
+    },
+    {
+      "file": "cargo-timing-20261020T105554065Z-49b32b8f920795bb.html.gz",
+      "uncompressed_sha256": "d8b8b06ee75005b0522729e5d0c489d9354d9cc4056b7494df2cb8a603a8bcf8",
+      "total_time_display": "0.0s",
+      "fresh_units": 266,
+      "dirty_units": 0,
+      "build_start": "2026-10-20T10:55:54.0657713Z",
+      "context": "second private supervised Play attribution, nextest d5e7eeeb-da3f-43a8-9b17-6e3c9427f1a6; body cohort baseline warmup sample 0"
+    }
+  ]
+}

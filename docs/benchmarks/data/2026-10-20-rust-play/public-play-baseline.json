@@ -1,0 +1,460 @@
+{
+  "cargo_features": [
+    "desktop"
+  ],
+  "cargo_profile": "dev",
+  "editor_optimized": false,
+  "endpoint": "public_action_to_external_running_with_matching_applied_operation",
+  "environment": {
+    "CARGO_BUILD_JOBS": {
+      "Windows": [
+        49
+      ]
+    },
+    "CARGO_INCREMENTAL": {
+      "Windows": [
+        49
+      ]
+    },
+    "CARGO_PROFILE_DEV_DEBUG": null,
+    "CARGO_PROFILE_DEV_INCREMENTAL": null,
+    "CARGO_PROFILE_DEV_OPT_LEVEL": null,
+    "CARGO_TARGET_DIR": {
+      "Windows": [
+        70,
+        58,
+        92,
+        83,
+        111,
+        117,
+        114,
+        99,
+        101,
+        67,
+        111,
+        100,
+        101,
+        115,
+        92,
+        82,
+        117,
+        115,
+        116,
+        92,
+        110,
+        97,
+        114,
+        97,
+        92,
+        116,
+        97,
+        114,
+        103,
+        101,
+        116
+      ]
+    },
+    "RUSTUP_TOOLCHAIN": {
+      "Windows": [
+        49,
+        46,
+        57,
+        53,
+        46,
+        48,
+        45,
+        120,
+        56,
+        54,
+        95,
+        54,
+        52,
+        45,
+        112,
+        99,
+        45,
+        119,
+        105,
+        110,
+        100,
+        111,
+        119,
+        115,
+        45,
+        109,
+        115,
+        118,
+        99
+      ]
+    }
+  },
+  "files": [
+    {
+      "digest": "70a885f345922d3d61eb6956034dcc10406380b64239ed1a58d307f6ee0fd40d",
+      "path": "Cargo.toml"
+    },
+    {
+      "digest": "2bf35058ca959414f486c62f85cc2520ebc620074c05cfe5fc2edd83bca80f27",
+      "path": "Cargo.lock"
+    },
+    {
+      "digest": "bf78e85fda30fc9c01a9efa307370bbdff8826689fd3cf0d3481b53854c1c289",
+      "path": "gameplay-plugin/Cargo.toml"
+    },
+    {
+      "digest": "b242dbbd8c87dca04bef914ef4b17dbfe8c80759f62662fbf7dbbe4ab7687885",
+      "path": "nara.toml"
+    },
+    {
+      "digest": "bd34200062301835c03392dd5ff23918f7a422eb8ca3050da4aa6d1692c9e77f",
+      "path": "src/bin/desktop.rs"
+    },
+    {
+      "digest": "2058fa7e082c63ebec1a88129426846c17ac44a3c7363b9a2f30968b2bb967ea",
+      "path": "src/bin/headless.rs"
+    },
+    {
+      "digest": "178e1d3a8e3c6492eb5112a58faefc495153ec68a34dc9f99f4c2b3273dc1f18",
+      "path": "scenes/startup.scene.json"
+    },
+    {
+      "digest": "d26034db13ddf4183d3f6e8e3b4910d33226c9ae679a614e37f5f8a502185a76",
+      "path": "prefabs/player.prefab.json"
+    }
+  ],
+  "hash_algorithm": "blake3",
+  "limits": [
+    "Fixed order and five samples; report median and range, not stable tail latency.",
+    "Stop/Idle/AppliedStop, source writes, result acknowledgement, gameplay oracles and JSON output are outside each timer.",
+    "Play includes owner admission, supervised Cargo work, generation publication, process startup and accepted READY; no internal compiler or GPU attribution.",
+    "Running is the existing first-presentation-attested READY contract, not a GPU timestamp or a driven gameplay replay.",
+    "Restart reuses the admitted executable generation; it is separate from rebuilding edited Rust.",
+    "Headless gameplay oracles exercise each source variant separately outside Play timing.",
+    "The public view has no request nonce; clearing the old result and matching the next operation avoids reusing a prior Applied result.",
+    "Cohort warmups are baseline Play; representative body/layout source edits begin at retained sample one."
+  ],
+  "measurement": "rust-play-iteration-v1",
+  "observations": [
+    {
+      "class": "no-edit",
+      "elapsed_ns": 9699966200,
+      "generation": 2,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 0,
+      "source_changed": false,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": true
+    },
+    {
+      "class": "no-edit",
+      "elapsed_ns": 13836527200,
+      "generation": 3,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 1,
+      "source_changed": false,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": false
+    },
+    {
+      "class": "no-edit",
+      "elapsed_ns": 3054132800,
+      "generation": 4,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 2,
+      "source_changed": false,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": false
+    },
+    {
+      "class": "no-edit",
+      "elapsed_ns": 11750202100,
+      "generation": 5,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 3,
+      "source_changed": false,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": false
+    },
+    {
+      "class": "no-edit",
+      "elapsed_ns": 3181519500,
+      "generation": 6,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 4,
+      "source_changed": false,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": false
+    },
+    {
+      "class": "no-edit",
+      "elapsed_ns": 3624970400,
+      "generation": 7,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 5,
+      "source_changed": false,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": false
+    },
+    {
+      "class": "body",
+      "elapsed_ns": 12386589900,
+      "generation": 8,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 0,
+      "source_changed": false,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": true
+    },
+    {
+      "class": "body",
+      "elapsed_ns": 13540228700,
+      "generation": 9,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 1,
+      "source_changed": true,
+      "source_digest": "331e5a6a57b676c1c7e502554c88f95d10eb786c51576bf64f5a500a6ef489e9",
+      "warmup": false
+    },
+    {
+      "class": "body",
+      "elapsed_ns": 10530979100,
+      "generation": 10,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 2,
+      "source_changed": true,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": false
+    },
+    {
+      "class": "body",
+      "elapsed_ns": 13323343000,
+      "generation": 11,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 3,
+      "source_changed": true,
+      "source_digest": "331e5a6a57b676c1c7e502554c88f95d10eb786c51576bf64f5a500a6ef489e9",
+      "warmup": false
+    },
+    {
+      "class": "body",
+      "elapsed_ns": 11774635900,
+      "generation": 12,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 4,
+      "source_changed": true,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": false
+    },
+    {
+      "class": "body",
+      "elapsed_ns": 11029548900,
+      "generation": 13,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 5,
+      "source_changed": true,
+      "source_digest": "331e5a6a57b676c1c7e502554c88f95d10eb786c51576bf64f5a500a6ef489e9",
+      "warmup": false
+    },
+    {
+      "class": "layout",
+      "elapsed_ns": 11213687900,
+      "generation": 14,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 0,
+      "source_changed": true,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": true
+    },
+    {
+      "class": "layout",
+      "elapsed_ns": 13036545200,
+      "generation": 15,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 1,
+      "source_changed": true,
+      "source_digest": "33ed4a85b742e2dbd0322cbd3f9fb84c9565aadcd40294c9e5c51d60b0c19daf",
+      "warmup": false
+    },
+    {
+      "class": "layout",
+      "elapsed_ns": 14209451200,
+      "generation": 16,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 2,
+      "source_changed": true,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": false
+    },
+    {
+      "class": "layout",
+      "elapsed_ns": 12265338700,
+      "generation": 17,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 3,
+      "source_changed": true,
+      "source_digest": "33ed4a85b742e2dbd0322cbd3f9fb84c9565aadcd40294c9e5c51d60b0c19daf",
+      "warmup": false
+    },
+    {
+      "class": "layout",
+      "elapsed_ns": 14734200100,
+      "generation": 18,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 4,
+      "source_changed": true,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": false
+    },
+    {
+      "class": "layout",
+      "elapsed_ns": 14918160500,
+      "generation": 19,
+      "operation": "Play",
+      "result_precleared": true,
+      "sample": 5,
+      "source_changed": true,
+      "source_digest": "33ed4a85b742e2dbd0322cbd3f9fb84c9565aadcd40294c9e5c51d60b0c19daf",
+      "warmup": false
+    },
+    {
+      "class": "restart",
+      "elapsed_ns": 1391847600,
+      "generation": 20,
+      "operation": "Restart",
+      "result_precleared": true,
+      "sample": 0,
+      "source_changed": false,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": true
+    },
+    {
+      "class": "restart",
+      "elapsed_ns": 1377702500,
+      "generation": 20,
+      "operation": "Restart",
+      "result_precleared": true,
+      "sample": 1,
+      "source_changed": false,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": false
+    },
+    {
+      "class": "restart",
+      "elapsed_ns": 1450477200,
+      "generation": 20,
+      "operation": "Restart",
+      "result_precleared": true,
+      "sample": 2,
+      "source_changed": false,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": false
+    },
+    {
+      "class": "restart",
+      "elapsed_ns": 1429528600,
+      "generation": 20,
+      "operation": "Restart",
+      "result_precleared": true,
+      "sample": 3,
+      "source_changed": false,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": false
+    },
+    {
+      "class": "restart",
+      "elapsed_ns": 1418868500,
+      "generation": 20,
+      "operation": "Restart",
+      "result_precleared": true,
+      "sample": 4,
+      "source_changed": false,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": false
+    },
+    {
+      "class": "restart",
+      "elapsed_ns": 1375734200,
+      "generation": 20,
+      "operation": "Restart",
+      "result_precleared": true,
+      "sample": 5,
+      "source_changed": false,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "warmup": false
+    }
+  ],
+  "poll_interval_ms": 5,
+  "project_profile": "desktop",
+  "project_root": "\\\\?\\D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game",
+  "recovery_oracle": {
+    "compiler_marker_observed": true,
+    "desktop_source_restored": true,
+    "faulted_with_no_active_generation": true,
+    "gameplay_source_restored": true,
+    "repair_running_generation": 21
+  },
+  "retained_samples_per_class": 5,
+  "semantic_oracles": [
+    {
+      "collected": 3,
+      "player_x": 108.0,
+      "source_digest": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+      "targets": 3,
+      "tick": 62,
+      "variant": "baseline",
+      "won": true
+    },
+    {
+      "collected": 3,
+      "player_x": 108.8,
+      "source_digest": "331e5a6a57b676c1c7e502554c88f95d10eb786c51576bf64f5a500a6ef489e9",
+      "targets": 3,
+      "tick": 62,
+      "variant": "body",
+      "won": true
+    },
+    {
+      "collected": 3,
+      "player_x": 108.8,
+      "source_digest": "33ed4a85b742e2dbd0322cbd3f9fb84c9565aadcd40294c9e5c51d60b0c19daf",
+      "targets": 3,
+      "tick": 62,
+      "variant": "layout",
+      "won": true
+    }
+  ],
+  "source_original": "62b40e0d0d43f2d08fb4fe51f2898e043e2466bfb8d5e967870714c4ebf5a7ae",
+  "source_variants": {
+    "baseline": "1b61276eb62869101f1275efa703c53a25b044ae2b66bd65301c46dc18623041",
+    "body": "331e5a6a57b676c1c7e502554c88f95d10eb786c51576bf64f5a500a6ef489e9",
+    "layout": "33ed4a85b742e2dbd0322cbd3f9fb84c9565aadcd40294c9e5c51d60b0c19daf"
+  },
+  "started_unix_ms": 1792492804527,
+  "target": "rustc host",
+  "toolchain": {
+    "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)\n",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.95.0\nLLVM version: 22.1.2\n"
+  },
+  "warmup_samples_per_class": 1,
+  "engine_source": "fce2e70fc793b384646dfe0dbf12ac69edcb1678",
+  "nextest_id": "6edb2a6d-15d9-4e82-87f9-ed0c28f66fd5",
+  "collector_source": "Private test after engine source, independently reviewed; archived source differs from the compiled collector only by an added report-limit string.",
+  "archived_collector_sha256": "6b726053cb60db5a5e1d1062c8d9a1a2fde4bac3596b6f032e95ed56bf0f571b"
+}

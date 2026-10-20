@@ -1,0 +1,353 @@
+//! Decision-local public Play latency. Nested Cargo and native children run only when requested.
+
+use super::*;
+use nara::fs::ContentDigest;
+use serde_json::json;
+
+const SAMPLES: usize = 5;
+const FAILURE_MARKER: &str = "rust Play measurement deliberate compiler failure";
+
+#[test]
+#[ignore = "set NARA_PLAY_COST_PROJECT and NARA_PLAY_COST_OUTPUT; runs serial nested Cargo and native windows"]
+fn ordinary_rust_play_iteration_costs() {
+    let root = PathBuf::from(
+        std::env::var_os("NARA_PLAY_COST_PROJECT")
+            .expect("supply an existing disposable external Collect Game project"),
+    )
+    .canonicalize()
+    .unwrap();
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .canonicalize()
+        .unwrap();
+    assert!(
+        !root.starts_with(&checkout),
+        "never measure by editing the maintained sample"
+    );
+    let output = PathBuf::from(
+        std::env::var_os("NARA_PLAY_COST_OUTPUT").expect("supply a fresh JSON results path"),
+    );
+    assert!(output.is_absolute());
+    assert!(
+        !output.starts_with(&root),
+        "measurement output must stay outside project source"
+    );
+    drop(
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&output)
+            .unwrap(),
+    );
+
+    let mut source = SourceRestore::new(root.join("gameplay-plugin/src/lib.rs"));
+    let mut desktop = SourceRestore::new(root.join("src/bin/desktop.rs"));
+    let original = String::from_utf8(source.original.clone()).unwrap();
+    let baseline = replace_once(
+        &original,
+        "direction * config.speed * time.delta().as_secs_f32()",
+        "direction * (config.speed * 1.0) * time.delta().as_secs_f32()",
+    );
+    let body = replace_once(&baseline, "config.speed * 1.0", "config.speed * 1.1");
+    let newline = if original.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let layout = replace_once(
+        &baseline,
+        "    held: [bool; 4],",
+        &format!("    held: [bool; 4],{newline}    iteration_speed_multiplier: f32,"),
+    );
+    let layout = replace_once(
+        &layout,
+        "app.insert_resource(GameState::default())?",
+        "app.insert_resource(GameState { iteration_speed_multiplier: 1.1, ..GameState::default() })?",
+    );
+    let layout = replace_once(
+        &layout,
+        "config.speed * 1.0",
+        "config.speed * state.iteration_speed_multiplier",
+    );
+    let files = [
+        "Cargo.toml",
+        "Cargo.lock",
+        "gameplay-plugin/Cargo.toml",
+        "nara.toml",
+        "src/bin/desktop.rs",
+        "src/bin/headless.rs",
+        "scenes/startup.scene.json",
+        "prefabs/player.prefab.json",
+    ]
+    .map(|path| json!({"path": path, "digest": digest(&fs::read(root.join(path)).unwrap())}));
+    let mut report = json!({
+        "measurement": "rust-play-iteration-v1",
+        "endpoint": "public_action_to_external_running_with_matching_applied_operation",
+        "project_root": root,
+        "started_unix_ms": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis(),
+        "editor_optimized": !cfg!(debug_assertions),
+        "project_profile": "desktop",
+        "cargo_profile": "dev",
+        "cargo_features": ["desktop"],
+        "target": "rustc host",
+        "toolchain": {
+            "rustc": tool_identity(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()), "-Vv", &root),
+            "cargo": tool_identity(std::env::var_os("CARGO").unwrap_or_else(|| env!("CARGO").into()), "-V", &root),
+        },
+        "environment": {
+            "CARGO_TARGET_DIR": std::env::var_os("CARGO_TARGET_DIR"),
+            "CARGO_BUILD_JOBS": std::env::var_os("CARGO_BUILD_JOBS"),
+            "CARGO_INCREMENTAL": std::env::var_os("CARGO_INCREMENTAL"),
+            "RUSTUP_TOOLCHAIN": std::env::var_os("RUSTUP_TOOLCHAIN"),
+            "CARGO_PROFILE_DEV_OPT_LEVEL": std::env::var_os("CARGO_PROFILE_DEV_OPT_LEVEL"),
+            "CARGO_PROFILE_DEV_DEBUG": std::env::var_os("CARGO_PROFILE_DEV_DEBUG"),
+            "CARGO_PROFILE_DEV_INCREMENTAL": std::env::var_os("CARGO_PROFILE_DEV_INCREMENTAL"),
+        },
+        "hash_algorithm": "blake3",
+        "source_original": digest(&source.original),
+        "source_variants": {
+            "baseline": digest(baseline.as_bytes()),
+            "body": digest(body.as_bytes()),
+            "layout": digest(layout.as_bytes()),
+        },
+        "files": files,
+        "warmup_samples_per_class": 1,
+        "retained_samples_per_class": SAMPLES,
+        "poll_interval_ms": 5,
+        "semantic_oracles": [],
+        "observations": [],
+        "limits": [
+            "Each cohort's warmup is baseline Play; body/layout edits begin with retained sample one.",
+            "Fixed order and five samples; report median and range, not stable tail latency.",
+            "Stop/Idle/AppliedStop, source writes, result acknowledgement, gameplay oracles and JSON output are outside each timer.",
+            "Play includes owner admission, supervised Cargo work, generation publication, process startup and accepted READY; no internal compiler or GPU attribution.",
+            "Running is the existing first-presentation-attested READY contract, not a GPU timestamp or a driven gameplay replay.",
+            "Restart reuses the admitted executable generation; it is separate from rebuilding edited Rust.",
+            "Headless gameplay oracles exercise each source variant separately outside Play timing.",
+            "The public view has no request nonce; clearing the old result and matching the next operation avoids reusing a prior Applied result.",
+        ],
+    });
+    save_report(&output, &report);
+
+    // These separate semantic runs must not warm a particular timed Play sample in its timer.
+    for (name, variant, expected_x) in [
+        ("baseline", baseline.as_str(), 108.0),
+        ("body", body.as_str(), 108.8),
+        ("layout", layout.as_str(), 108.8),
+    ] {
+        fs::write(&source.path, variant).unwrap();
+        assert_eq!(
+            run_headless(&root),
+            expected_x,
+            "{name}: tick 62, three targets and victory must remain valid"
+        );
+        report["semantic_oracles"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({
+                "variant": name, "source_digest": digest(variant.as_bytes()),
+                "tick": 62, "collected": 3, "targets": 3, "won": true, "player_x": expected_x,
+            }));
+        save_report(&output, &report);
+    }
+    fs::write(&source.path, &baseline).unwrap();
+    let mut application = open_application(&root);
+    assert_eq!(
+        current_frame(&application).runtime_availability(),
+        EditorRuntimeAvailability::ExternalSupervised
+    );
+    // Establish the same completed Stop precondition even for the first warmup.
+    play(&mut application);
+    let bootstrap = wait_external(
+        &mut application,
+        EditorExternalPlayState::Running,
+        EditorPlayOperation::Play,
+    );
+    let mut previous_generation = bootstrap.play().external().unwrap().generation().unwrap();
+    stop(&mut application);
+
+    for class in ["no-edit", "body", "layout"] {
+        for sample in 0..=SAMPLES {
+            let variant = if sample % 2 == 1 && class != "no-edit" {
+                if class == "body" {
+                    body.as_str()
+                } else {
+                    layout.as_str()
+                }
+            } else {
+                baseline.as_str()
+            };
+            assert_stopped(&application);
+            let changed = fs::read(&source.path).unwrap() != variant.as_bytes();
+            if class == "no-edit" {
+                assert!(!changed);
+            }
+            if changed {
+                fs::write(&source.path, variant).unwrap();
+            }
+            clear_result(&mut application);
+            // Closed source writes and all setup precede the public-action timer.
+            let begin = Instant::now();
+            play(&mut application);
+            let running = wait_external(
+                &mut application,
+                EditorExternalPlayState::Running,
+                EditorPlayOperation::Play,
+            );
+            let elapsed_ns = u64::try_from(begin.elapsed().as_nanos()).unwrap();
+            let generation = running.play().external().unwrap().generation().unwrap();
+            assert_ne!(
+                generation, previous_generation,
+                "Play must publish a fresh executable generation"
+            );
+            previous_generation = generation;
+            stop(&mut application);
+            assert_stopped(&application);
+            assert_eq!(fs::read(&source.path).unwrap(), variant.as_bytes());
+            report["observations"].as_array_mut().unwrap().push(json!({
+                "class": class, "sample": sample, "warmup": sample == 0,
+                "operation": "Play", "elapsed_ns": elapsed_ns,
+                "source_changed": changed, "source_digest": digest(variant.as_bytes()),
+                "generation": generation, "result_precleared": true,
+            }));
+            save_report(&output, &report);
+        }
+    }
+
+    fs::write(&source.path, &baseline).unwrap();
+    clear_result(&mut application);
+    play(&mut application);
+    let running = wait_external(
+        &mut application,
+        EditorExternalPlayState::Running,
+        EditorPlayOperation::Play,
+    );
+    let restart_generation = running.play().external().unwrap().generation().unwrap();
+    assert_ne!(restart_generation, previous_generation);
+    for sample in 0..=SAMPLES {
+        clear_result(&mut application);
+        let begin = Instant::now();
+        dispatch(
+            &mut application,
+            EditorAction::Play(EditorPlayAction::Restart),
+        );
+        let restarted = wait_external(
+            &mut application,
+            EditorExternalPlayState::Running,
+            EditorPlayOperation::Restart,
+        );
+        let elapsed_ns = u64::try_from(begin.elapsed().as_nanos()).unwrap();
+        assert_eq!(
+            restarted.play().external().unwrap().generation(),
+            Some(restart_generation)
+        );
+        assert_eq!(fs::read(&source.path).unwrap(), baseline.as_bytes());
+        report["observations"].as_array_mut().unwrap().push(json!({
+            "class": "restart", "sample": sample, "warmup": sample == 0,
+            "operation": "Restart", "elapsed_ns": elapsed_ns,
+            "source_changed": false, "source_digest": digest(baseline.as_bytes()),
+            "generation": restart_generation, "result_precleared": true,
+        }));
+        save_report(&output, &report);
+    }
+    stop(&mut application);
+    assert_stopped(&application);
+
+    let mut broken = format!("compile_error!(\"{FAILURE_MARKER}\");\n").into_bytes();
+    broken.extend_from_slice(&desktop.original);
+    fs::write(&desktop.path, broken).unwrap();
+    clear_result(&mut application);
+    play(&mut application);
+    let faulted = wait_external(
+        &mut application,
+        EditorExternalPlayState::Faulted,
+        EditorPlayOperation::Play,
+    );
+    let external = faulted.play().external().unwrap();
+    assert!(external.diagnostics().has_errors());
+    assert!(external.output().messages().iter().any(|message| {
+        message.kind()
+            == EditorExternalPlayMessageKind::Compiler(EditorExternalPlayCompilerLevel::Error)
+            && message.text().contains(FAILURE_MARKER)
+    }));
+    assert!(external.last_good_available());
+    assert!(external.generation().is_none());
+    desktop.restore();
+    stop(&mut application);
+    clear_result(&mut application);
+    play(&mut application);
+    let repaired = wait_external(
+        &mut application,
+        EditorExternalPlayState::Running,
+        EditorPlayOperation::Play,
+    );
+    let repaired_generation = repaired.play().external().unwrap().generation().unwrap();
+    assert_ne!(repaired_generation, restart_generation);
+    stop(&mut application);
+    close_application(&mut application);
+    source.restore();
+    report["recovery_oracle"] = json!({
+        "compiler_marker_observed": true, "faulted_with_no_active_generation": true,
+        "repair_running_generation": repaired_generation,
+        "desktop_source_restored": fs::read(&desktop.path).unwrap() == desktop.original,
+        "gameplay_source_restored": fs::read(&source.path).unwrap() == source.original,
+    });
+    save_report(&output, &report);
+}
+
+fn assert_stopped(application: &EditorApplication) {
+    let frame = current_frame(application);
+    assert_eq!(
+        frame.play().external().unwrap().state(),
+        EditorExternalPlayState::Idle
+    );
+    assert!(matches!(
+        frame.play().result(),
+        Some(EditorPlayOperationResult::Applied {
+            operation: EditorPlayOperation::Stop,
+            ..
+        })
+    ));
+}
+
+fn clear_result(application: &mut EditorApplication) {
+    let frame = dispatch(
+        application,
+        EditorAction::Play(EditorPlayAction::AcknowledgeResult),
+    );
+    assert!(frame.play().result().is_none());
+}
+
+fn replace_once(source: &str, before: &str, after: &str) -> String {
+    assert_eq!(
+        source.matches(before).count(),
+        1,
+        "source variant anchor: {before}"
+    );
+    source.replacen(before, after, 1)
+}
+
+fn digest(bytes: &[u8]) -> String {
+    ContentDigest::of_bytes(bytes)
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn tool_identity(tool: std::ffi::OsString, argument: &str, root: &Path) -> String {
+    let output = Command::new(tool)
+        .arg(argument)
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn save_report(path: &Path, report: &Value) {
+    let mut bytes = serde_json::to_vec_pretty(report).unwrap();
+    bytes.push(b'\n');
+    fs::write(path, bytes).unwrap();
+}

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "30b88fd5af5a7fd589b4bf90af9fbf22996f9f66ffc9969dda4b3203a183a8c2"
+source_fingerprint: "e361f46250f58c9a45d7ac006014387e47f8179b285d495ccabccbaf76882551"
 ---
 
 # Current State
@@ -12,9 +12,9 @@ source_fingerprint: "30b88fd5af5a7fd589b4bf90af9fbf22996f9f66ffc9969dda4b3203a18
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `30b88fd5af5a7fd589b4bf90af9fbf22996f9f66ffc9969dda4b3203a183a8c2`
-- Immutable records: 802
-- Active lane heads: 0
+- Source fingerprint: `e361f46250f58c9a45d7ac006014387e47f8179b285d495ccabccbaf76882551`
+- Immutable records: 805
+- Active lane heads: 1
 
 # Active Registrations
 
@@ -60,9 +60,12 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Scalar preparation locality completed](registry/2026-10/2026-10-20T090441Z-scalar-preparation-locality-codex-root-598f1d3571a64d4c9dd5897e55337e37.md): `completed` (scalar-preparation-locality-codex-root; producer `codex-root`)
 - [Standalone Generic Editor: SGE complete; no successor active](registry/2026-08/2026-08-19T111039Z-standalone-generic-editor-open-recovery-codex-root-931591fb6d2b4bcbad3151922814d8e6.md): `completed` (standalone-generic-editor-open-recovery-codex-root; producer `codex-root`)
 - [Standalone Supervised Play transferred to 2D foundation refactor](registry/2026-10/2026-10-15T091614Z-standalone-supervised-play-v1-codex-root-d7cca2f42c6d4e07b762475aced7eb44.md): `closed` (standalone-supervised-play-v1-codex-root; producer `codex-root`)
+- [Tile locality and CI portability corrections in progress](registry/2026-10/2026-10-20T101920Z-tile-locality-ci-portability-codex-root-b34188b329c34ac0ada88964ca636829.md): `active` (tile-locality-ci-portability-codex-root; producer `codex-root`)
 
 # Recent Evidence
 
+- **Verification Evidence**: [Rust Play attribution and Windows Cargo input qualification](verification/2026-10/2026-10-20T112401Z-rust-play-attribution-and-windows-cargo-input-qualification-2abb1db859f04d848d88a1706ad167be.md) - Public Play/Restart, private native Cargo attribution, exact CLI cache interoperability and compiler failure recovery at the corrected Windows path boundary.
+- **Verification Evidence**: [CI portability and Tile locality qualification in progress](verification/2026-10/2026-10-20T102441Z-ci-portability-and-tile-locality-qualification-in-progress-b85485ff744b4ccf8d02562d94d50ce6.md) - Confirmed hosted failures, Linux capability enumeration, portable wasm compilation and measured per-view queue correction; final hosted and timing evidence pending.
 - **Verification Evidence**: [Browser preparation locality qualification](verification/2026-10/2026-10-20T095710Z-browser-preparation-locality-qualification-554a0c2edbfb455f84d4b32304446a2e.md) - Finite source-index workers and request-specific document Open with exact predecessor authority, physical retirement, public/native consumers and owner-occupancy measurements.
 - **Verification Evidence**: [Scalar preparation locality qualification](verification/2026-10/2026-10-20T090217Z-scalar-preparation-locality-qualification-7da17674f8c7464ea1612dc119686c45.md) - Field-only classification and conservative publication-shape reuse with exact validation, public timing and separate requested-allocation evidence.
 - **Verification Evidence**: [Production cost baselines and indexed authoring schema qualification](verification/2026-10/2026-10-20T081224Z-production-cost-baselines-and-indexed-authoring-schema-qualification-494a94898cf340b695e7332bbca06fc5.md) - Optimized public interaction, offscreen runtime and Rust iteration observations with exact schema lookup correction.
@@ -73,8 +76,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Owned startup closure publication and responsiveness qualification](verification/2026-10/2026-10-20T032446Z-owned-startup-closure-publication-and-responsiveness-qualification-f187b61104d4443187cea8b9bc392460.md) - Bounded background startup preparation preserves linear Open ownership, owner session publication, cancellation and retained project replacement.
 - **Verification Evidence**: [Editor Host lifetime cleanup custody qualification](verification/2026-10/2026-10-20T030524Z-editor-host-lifetime-cleanup-custody-qualification-12c6b025d6c74ed1bf6900c8b0413877.md) - Scene and Prefab cleanup survives terminal Save, Reopen, content runtime replacement, close and session abandonment.
 - **Verification Evidence**: [Owned Editor Reopen preparation and publication qualification](verification/2026-10/2026-10-20T022302Z-owned-editor-reopen-preparation-and-publication-qualification-557ea95db99b4b8a87829870db1d6b13.md) - Bounded read preparation, owner native codec affinity, exact stale admission, task terminal policy and responsiveness evidence.
-- **Verification Evidence**: [Owned Editor Save custody native observation and measurements](verification/2026-10/2026-10-20T013307Z-owned-editor-save-custody-native-observation-and-measurements-9828019f2f934061a1773899ce356ffb.md) - Cross-frame Save ownership, retained filesystem cleanup, migrated consumers and decision-local owner-drive evidence.
-- **Verification Evidence**: [Editor responsiveness measurements and standalone task cancellation](verification/2026-10/2026-10-19T182252Z-editor-responsiveness-measurements-and-standalone-task-cancellation-0e2521d0010a4d94940d83fa865f3d0c.md) - Decision-local optimized Open Save Reopen timings, source-grounded rebuild seams, and failed-then-passing standalone pending cancellation.
 
 # Integration Notes
 

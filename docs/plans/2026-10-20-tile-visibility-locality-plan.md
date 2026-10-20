@@ -1,6 +1,8 @@
 # Tile Visibility Locality
 
-Status: In progress after L2 integration at `8afbe42`. Selected L3 brief belongs to the
+Status: Complete at implementation `15e6564`, with three optimized processes at `fce2e70`.
+The [report](../benchmarks/2026-10-20-tile-visibility.md) records correctness, timing and limits.
+Selected L3 brief belongs to the
 [locality follow-up](2026-10-20-measured-work-locality-plan.md).
 
 ## Evidence And Selected Direction
@@ -31,16 +33,16 @@ frame without a new invalidation protocol. It still scans O(N) cells; the 8 ms t
 
 ## Acceptance
 
-- [ ] Attribute the current managed consumer and select the smallest effective owner correction.
-- [ ] Compare clipped output to an uncached/unclipped reference, including actual pixel readback:
+- [x] Attribute the current managed consumer and select the smallest effective owner correction.
+- [x] Compare clipped output to an uncached/unclipped reference, including actual pixel readback:
   rotation, negative scale, shear, partial/edge overlap, large coordinates, multiple views,
   shared-target clear/load, fixed canvas and native UI.
-- [ ] Preserve authored source order, layers, sort groups, world-Y and adjacent-only batching;
+- [x] Preserve authored source order, layers, sort groups, world-Y and adjacent-only batching;
   TileLayer is a sort layer, not a camera mask. Check semitransparent Sprite/Tile/material mixing.
-- [ ] Preserve budget/refusal behavior, immutable Image/TileSet authorization, old packets and
+- [x] Preserve budget/refusal behavior, immutable Image/TileSet authorization, old packets and
   physical resource retirement. Exercise map/cell replacement/removal and direct public edits.
-- [ ] Keep Editor preview hit candidates coherent with the actual per-view queued geometry.
-- [ ] Update only the new collector's actual queued counts; historical raw data stays immutable.
+- [x] Keep Editor preview hit candidates coherent with the actual per-view queued geometry.
+- [x] Update only the new collector's actual queued counts; historical raw data stays immutable.
   Repeat static/changing real-GPU measurements, independently review, document and commit.
 
 Root owns serial Cargo/fmt/Git, one build job and shared target. Allocate disjoint source/test
@@ -52,3 +54,11 @@ Initial lanes: root owns temporary attribution, the runtime collector, integrati
 correction after attribution; `save_consumer_migration` owns independent correctness/GPU oracle
 coverage; `persistence_adversarial_design` reviews authorization, order and numerical failures.
 Workers do not run Cargo, format, stage or revert concurrent changes.
+
+Qualification: 91 source/filesystem tests and 133 WGPU tests pass, including a real Runtime
+unclipped pixel oracle. Three release runs retain 1,972 conservative candidates from 65,536 cells,
+with 164,880 instance bytes including native UI. Managed-drive P50 is 4.165-4.645 ms, versus
+25.882-34.020 ms before. The full 126-group/raw evidence remains in the report. Extraction and
+material authorization still scan all cells; no retained chunk cache, streaming or supported-map
+capacity follows. Invisible content no longer incurs draw-related GPU admission charges, while
+existing submitted-work budget/refusal and physical retention remain explicit.

@@ -1,0 +1,119 @@
+{
+  "scope": "Two ordinary headless Cargo diagnostics on restored baseline source, no explicit target. Not public Editor Play samples. Second run has no intervening source write. Native Cargo static HTML only; no internal JavaScript parsing.",
+  "command": [
+    "cargo",
+    "+1.95.0",
+    "build",
+    "--manifest-path",
+    "D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game\\Cargo.toml",
+    "--bin",
+    "headless",
+    "--locked",
+    "--offline",
+    "--message-format=json",
+    "--timings"
+  ],
+  "cwd": "D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game",
+  "engine_revision": "da76a21436a642bebeb9c902a57c4479a162a5a1",
+  "environment": {
+    "CARGO_TARGET_DIR": "F:\\SourceCodes\\Rust\\nara\\target",
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "1"
+  },
+  "toolchain": {
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.95.0\nLLVM version: 22.1.2",
+    "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)"
+  },
+  "runs": [
+    {
+      "run": 1,
+      "wall_seconds": 8.33652880002046,
+      "file": "cargo-timing-20261020T111946862Z-eac3cd4f678ef716.html.gz",
+      "uncompressed_sha256": "60105330171d6aa702f27bee18cdcd63bcb1a04de3dd13ed09e70db45245e822",
+      "total_time_display": "8.2s",
+      "fresh_units": 165,
+      "dirty_units": 3,
+      "outcome": "collect_game: collected=1/3\ncollect_game: collected=2/3\ncollect_game: collected=3/3\ncollect_game: victory! Press R to reset.\ncollect_headless: ok tick=62 collected=3 targets=3 won=true resets=0 player=(108.0,0.0)",
+      "workspace_artifacts": [
+        {
+          "target": "collect_gameplay",
+          "fresh": false,
+          "profile": {
+            "opt_level": "0",
+            "debuginfo": 2,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          }
+        },
+        {
+          "target": "nara_game",
+          "fresh": false,
+          "profile": {
+            "opt_level": "0",
+            "debuginfo": 2,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          }
+        },
+        {
+          "target": "headless",
+          "fresh": false,
+          "profile": {
+            "opt_level": "0",
+            "debuginfo": 2,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          }
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "wall_seconds": 1.2706961999938358,
+      "file": "cargo-timing-20261020T111955955Z-eac3cd4f678ef716.html.gz",
+      "uncompressed_sha256": "61274bb96f13393fae0d982111e19fe2ac005a3081c381ea2656c7c35768f628",
+      "total_time_display": "0.0s",
+      "fresh_units": 168,
+      "dirty_units": 0,
+      "outcome": "collect_game: collected=1/3\ncollect_game: collected=2/3\ncollect_game: collected=3/3\ncollect_game: victory! Press R to reset.\ncollect_headless: ok tick=62 collected=3 targets=3 won=true resets=0 player=(108.0,0.0)",
+      "workspace_artifacts": [
+        {
+          "target": "collect_gameplay",
+          "fresh": true,
+          "profile": {
+            "opt_level": "0",
+            "debuginfo": 2,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          }
+        },
+        {
+          "target": "nara_game",
+          "fresh": true,
+          "profile": {
+            "opt_level": "0",
+            "debuginfo": 2,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          }
+        },
+        {
+          "target": "headless",
+          "fresh": true,
+          "profile": {
+            "opt_level": "0",
+            "debuginfo": 2,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          }
+        }
+      ]
+    }
+  ]
+}

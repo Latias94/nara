@@ -1,0 +1,33 @@
+{
+  "source": "fce2e70fc793b384646dfe0dbf12ac69edcb1678",
+  "scope": "diagnostic control, not public action timings; first invocation follows restored source bytes; second unchanged invocation still reports PathToSourceChanged for nara_game/desktop",
+  "controls": [
+    {
+      "invocation": 1,
+      "context": "identical explicit host-target Cargo command using verbatim manifest and working directory plus explicit rustc proxy; no source write between invocations",
+      "fingerprint_observations": [
+        "   2.347862700s  INFO prepare_target{force=false package_id=collect-game v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game) target=\"desktop\"}: cargo::core::compiler::fingerprint: stale: changed \"\\\\\\\\?\\\\D:\\\\Frankorz\\\\Downloads\\\\nara-locality-l4-20261020\\\\collect-game\\\\gameplay-plugin\\\\src\\\\lib.rs\"",
+        "   2.347887800s  INFO prepare_target{force=false package_id=collect-game v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game) target=\"desktop\"}: cargo::core::compiler::fingerprint:           (vs) \"F:\\\\SourceCodes\\\\Rust\\\\nara\\\\target\\\\x86_64-pc-windows-msvc\\\\debug\\\\.fingerprint\\\\collect-gameplay-b5c17414c7d9657c\\\\dep-lib-collect_gameplay\"",
+        "   2.347892900s  INFO prepare_target{force=false package_id=collect-game v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game) target=\"desktop\"}: cargo::core::compiler::fingerprint:                FileTime { seconds: 13436967421, nanos: 243732900 } < FileTime { seconds: 13436967437, nanos: 719242300 }",
+        "   2.350506800s  INFO prepare_target{force=false package_id=collect-game v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game) target=\"desktop\"}: cargo::core::compiler::fingerprint: fingerprint dirty for collect-game v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game)/Build/TargetInner { name: \"desktop\", required_features: Some([\"desktop\"]), doc: true, ..: with_path(\"\\\\\\\\?\\\\D:\\\\Frankorz\\\\Downloads\\\\nara-locality-l4-20261020\\\\collect-game\\\\src\\\\bin\\\\desktop.rs\", Edition2024) }",
+        "   2.350537600s  INFO prepare_target{force=false package_id=collect-game v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game) target=\"desktop\"}: cargo::core::compiler::fingerprint:     dirty: PathToSourceChanged",
+        "   2.352987300s  INFO prepare_target{force=false package_id=collect-game v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game) target=\"nara_game\"}: cargo::core::compiler::fingerprint: fingerprint dirty for collect-game v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game)/Build/TargetInner { ..: lib_target(\"nara_game\", [\"lib\"], \"\\\\\\\\?\\\\D:\\\\Frankorz\\\\Downloads\\\\nara-locality-l4-20261020\\\\collect-game\\\\src\\\\lib.rs\", Edition2024) }",
+        "   2.353011400s  INFO prepare_target{force=false package_id=collect-game v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game) target=\"nara_game\"}: cargo::core::compiler::fingerprint:     dirty: PathToSourceChanged",
+        "   2.355224300s  INFO prepare_target{force=false package_id=collect-gameplay v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game\\gameplay-plugin) target=\"collect_gameplay\"}: cargo::core::compiler::fingerprint: fingerprint dirty for collect-gameplay v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game\\gameplay-plugin)/Build/TargetInner { name_inferred: true, ..: lib_target(\"collect_gameplay\", [\"lib\"], \"\\\\\\\\?\\\\D:\\\\Frankorz\\\\Downloads\\\\nara-locality-l4-20261020\\\\collect-game\\\\gameplay-plugin\\\\src\\\\lib.rs\", Edition2024) }",
+        "   2.355249300s  INFO prepare_target{force=false package_id=collect-gameplay v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game\\gameplay-plugin) target=\"collect_gameplay\"}: cargo::core::compiler::fingerprint:     dirty: PathToSourceChanged",
+        "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.92s"
+      ]
+    },
+    {
+      "invocation": 2,
+      "context": "identical explicit host-target Cargo command using verbatim manifest and working directory plus explicit rustc proxy; no source write between invocations",
+      "fingerprint_observations": [
+        "   1.100419500s  INFO prepare_target{force=false package_id=collect-game v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game) target=\"desktop\"}: cargo::core::compiler::fingerprint: fingerprint dirty for collect-game v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game)/Build/TargetInner { name: \"desktop\", required_features: Some([\"desktop\"]), doc: true, ..: with_path(\"D:\\\\Frankorz\\\\Downloads\\\\nara-locality-l4-20261020\\\\collect-game\\\\src\\\\bin\\\\desktop.rs\", Edition2024) }",
+        "   1.100451200s  INFO prepare_target{force=false package_id=collect-game v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game) target=\"desktop\"}: cargo::core::compiler::fingerprint:     dirty: PathToSourceChanged",
+        "   1.102509600s  INFO prepare_target{force=false package_id=collect-game v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game) target=\"nara_game\"}: cargo::core::compiler::fingerprint: fingerprint dirty for collect-game v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game)/Build/TargetInner { ..: lib_target(\"nara_game\", [\"lib\"], \"D:\\\\Frankorz\\\\Downloads\\\\nara-locality-l4-20261020\\\\collect-game\\\\src\\\\lib.rs\", Edition2024) }",
+        "   1.102531000s  INFO prepare_target{force=false package_id=collect-game v0.1.0 (D:\\Frankorz\\Downloads\\nara-locality-l4-20261020\\collect-game) target=\"nara_game\"}: cargo::core::compiler::fingerprint:     dirty: PathToSourceChanged",
+        "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.40s"
+      ]
+    }
+  ]
+}

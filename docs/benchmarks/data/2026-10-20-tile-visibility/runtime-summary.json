@@ -1,0 +1,1939 @@
+{
+  "implementation": "15e65649eeb103fc93371137fa72ad748ef74c08",
+  "measured_source": "fce2e70fc793b384646dfe0dbf12ac69edcb1678",
+  "baseline": "../2026-10-20-production-costs/baseline-summary.json",
+  "percentile": "nearest rank per independent process; n=16 P95=max; retirement n=1 is not a timing distribution",
+  "runs": [
+    {
+      "process": 1,
+      "nextest_id": "653d4cc7-4bcb-42dc-be2c-10f311721e97",
+      "file": "runtime-locality-1.jsonl.gz",
+      "numeric_rows": 654,
+      "uncompressed_sha256": "9969ad883d28de88d0220fcaf69ebabfc470caab83ac80a880b037537c0c3290",
+      "environment": {
+        "measurement": "runtime-cost-environment",
+        "backend": "Vulkan",
+        "vendor": 4318,
+        "device": 9860
+      }
+    },
+    {
+      "process": 2,
+      "nextest_id": "22a45159-fdba-40fa-86bf-f79c9fd94549",
+      "file": "runtime-locality-2.jsonl.gz",
+      "numeric_rows": 654,
+      "uncompressed_sha256": "79115e583ddd12796f9152ef60aae3ae47668ce02eebe3a4e7ed83895729c8af",
+      "environment": {
+        "measurement": "runtime-cost-environment",
+        "backend": "Vulkan",
+        "vendor": 4318,
+        "device": 9860
+      }
+    },
+    {
+      "process": 3,
+      "nextest_id": "80367d0a-f72f-4340-b092-17a6c1f12b68",
+      "file": "runtime-locality-3.jsonl.gz",
+      "numeric_rows": 654,
+      "uncompressed_sha256": "534f78d53918bb374e0e0f8c0dabdd0d0fe73363e664059da8967511b29e8b8a",
+      "environment": {
+        "measurement": "runtime-cost-environment",
+        "backend": "Vulkan",
+        "vendor": 4318,
+        "device": 9860
+      }
+    }
+  ],
+  "groups": [
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.0952,
+      "p95_ms": 0.1395,
+      "min_ms": 0.0745,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.2791,
+      "p95_ms": 0.8044,
+      "min_ms": 0.2311,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.1702,
+      "p95_ms": 0.6778,
+      "min_ms": 0.1516,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 0.1079,
+      "p95_ms": 0.1356,
+      "min_ms": 0.09,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0027,
+      "p95_ms": 0.0027,
+      "min_ms": 0.0027,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.0147,
+      "p95_ms": 0.442,
+      "min_ms": 0.0132,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.2008,
+      "p95_ms": 0.3692,
+      "min_ms": 0.1738,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.0878,
+      "p95_ms": 0.1032,
+      "min_ms": 0.0771,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.2948,
+      "p95_ms": 0.4367,
+      "min_ms": 0.2346,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.205,
+      "p95_ms": 0.3577,
+      "min_ms": 0.1566,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 0.3718,
+      "p95_ms": 0.4321,
+      "min_ms": 0.3536,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0038,
+      "p95_ms": 0.0038,
+      "min_ms": 0.0038,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.0159,
+      "p95_ms": 0.4656,
+      "min_ms": 0.0148,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.2446,
+      "p95_ms": 0.3732,
+      "min_ms": 0.2109,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.1643,
+      "p95_ms": 0.4364,
+      "min_ms": 0.1487,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.4137,
+      "p95_ms": 1.0942,
+      "min_ms": 0.3417,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.2395,
+      "p95_ms": 0.9106,
+      "min_ms": 0.0138,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 4.3619,
+      "p95_ms": 4.7322,
+      "min_ms": 4.0449,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0044,
+      "p95_ms": 0.0044,
+      "min_ms": 0.0044,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.0337,
+      "p95_ms": 0.337,
+      "min_ms": 0.0264,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 1,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.3387,
+      "p95_ms": 0.4836,
+      "min_ms": 0.2722,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 64,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.0803,
+      "p95_ms": 0.0991,
+      "min_ms": 0.076,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 64,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.245,
+      "p95_ms": 0.2748,
+      "min_ms": 0.2262,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 64,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.1558,
+      "p95_ms": 0.1761,
+      "min_ms": 0.1504,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 64,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 0.1008,
+      "p95_ms": 0.2613,
+      "min_ms": 0.088,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 64,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0066,
+      "p95_ms": 0.0066,
+      "min_ms": 0.0066,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 64,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.0149,
+      "p95_ms": 0.0173,
+      "min_ms": 0.013,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 64,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.1943,
+      "p95_ms": 0.2736,
+      "min_ms": 0.1738,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.0845,
+      "p95_ms": 0.1535,
+      "min_ms": 0.079,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.2805,
+      "p95_ms": 1.1201,
+      "min_ms": 0.238,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.1979,
+      "p95_ms": 1.0119,
+      "min_ms": 0.1587,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 0.3665,
+      "p95_ms": 0.5105,
+      "min_ms": 0.3539,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0034,
+      "p95_ms": 0.0034,
+      "min_ms": 0.0034,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.0153,
+      "p95_ms": 0.022,
+      "min_ms": 0.0142,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.2173,
+      "p95_ms": 0.3421,
+      "min_ms": 0.2103,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.1543,
+      "p95_ms": 0.1769,
+      "min_ms": 0.1328,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.3571,
+      "p95_ms": 0.7121,
+      "min_ms": 0.3015,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.2078,
+      "p95_ms": 0.5565,
+      "min_ms": 0.1641,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 4.2379,
+      "p95_ms": 4.8054,
+      "min_ms": 3.9679,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0034,
+      "p95_ms": 0.0034,
+      "min_ms": 0.0034,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.0246,
+      "p95_ms": 0.0417,
+      "min_ms": 0.0221,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 1,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.2761,
+      "p95_ms": 0.3136,
+      "min_ms": 0.2587,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.0996,
+      "p95_ms": 0.1385,
+      "min_ms": 0.0753,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.276,
+      "p95_ms": 0.3384,
+      "min_ms": 0.2275,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.1698,
+      "p95_ms": 0.2386,
+      "min_ms": 0.1521,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 0.1048,
+      "p95_ms": 0.1267,
+      "min_ms": 0.0912,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0032,
+      "p95_ms": 0.0032,
+      "min_ms": 0.0032,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.0202,
+      "p95_ms": 0.442,
+      "min_ms": 0.0132,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.1929,
+      "p95_ms": 0.3578,
+      "min_ms": 0.1737,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.0972,
+      "p95_ms": 0.3247,
+      "min_ms": 0.0792,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.3013,
+      "p95_ms": 1.1451,
+      "min_ms": 0.2413,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.2195,
+      "p95_ms": 0.8589,
+      "min_ms": 0.1588,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 0.3766,
+      "p95_ms": 0.4904,
+      "min_ms": 0.3546,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0029,
+      "p95_ms": 0.0029,
+      "min_ms": 0.0029,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.0189,
+      "p95_ms": 0.2906,
+      "min_ms": 0.0151,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.2403,
+      "p95_ms": 0.37,
+      "min_ms": 0.2115,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.1779,
+      "p95_ms": 0.2363,
+      "min_ms": 0.1565,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.4532,
+      "p95_ms": 1.6325,
+      "min_ms": 0.359,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.2667,
+      "p95_ms": 1.3969,
+      "min_ms": 0.2028,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 4.6447,
+      "p95_ms": 5.6883,
+      "min_ms": 4.0814,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0035,
+      "p95_ms": 0.0035,
+      "min_ms": 0.0035,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.041,
+      "p95_ms": 0.3255,
+      "min_ms": 0.0265,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 2,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.3936,
+      "p95_ms": 0.5685,
+      "min_ms": 0.2801,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 64,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.081,
+      "p95_ms": 0.2413,
+      "min_ms": 0.0751,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 64,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.2382,
+      "p95_ms": 0.4016,
+      "min_ms": 0.2283,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 64,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.156,
+      "p95_ms": 0.1801,
+      "min_ms": 0.1503,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 64,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 0.0987,
+      "p95_ms": 0.1523,
+      "min_ms": 0.0899,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 64,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0041,
+      "p95_ms": 0.0041,
+      "min_ms": 0.0041,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 64,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.014,
+      "p95_ms": 0.0219,
+      "min_ms": 0.0133,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 64,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.1916,
+      "p95_ms": 0.2364,
+      "min_ms": 0.1737,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.0904,
+      "p95_ms": 0.1856,
+      "min_ms": 0.0801,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.2762,
+      "p95_ms": 1.4489,
+      "min_ms": 0.2393,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.1825,
+      "p95_ms": 1.346,
+      "min_ms": 0.1565,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 0.3899,
+      "p95_ms": 0.5639,
+      "min_ms": 0.3577,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0031,
+      "p95_ms": 0.0031,
+      "min_ms": 0.0031,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.0158,
+      "p95_ms": 0.042,
+      "min_ms": 0.0147,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.223,
+      "p95_ms": 0.2859,
+      "min_ms": 0.2127,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.1509,
+      "p95_ms": 0.2543,
+      "min_ms": 0.132,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.339,
+      "p95_ms": 1.482,
+      "min_ms": 0.3089,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.189,
+      "p95_ms": 1.2994,
+      "min_ms": 0.124,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 4.1645,
+      "p95_ms": 4.6026,
+      "min_ms": 3.9657,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0035,
+      "p95_ms": 0.0035,
+      "min_ms": 0.0035,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.0237,
+      "p95_ms": 0.0281,
+      "min_ms": 0.0213,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 2,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.2742,
+      "p95_ms": 0.3837,
+      "min_ms": 0.2492,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.0996,
+      "p95_ms": 0.2568,
+      "min_ms": 0.0828,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.3048,
+      "p95_ms": 1.2767,
+      "min_ms": 0.2354,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.2038,
+      "p95_ms": 1.1885,
+      "min_ms": 0.1112,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 0.1072,
+      "p95_ms": 0.1459,
+      "min_ms": 0.0964,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0034,
+      "p95_ms": 0.0034,
+      "min_ms": 0.0034,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.0208,
+      "p95_ms": 0.3311,
+      "min_ms": 0.0147,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 64,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.2183,
+      "p95_ms": 0.3159,
+      "min_ms": 0.178,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 3388372
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.1012,
+      "p95_ms": 0.1704,
+      "min_ms": 0.08,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.3055,
+      "p95_ms": 0.4046,
+      "min_ms": 0.2441,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.2036,
+      "p95_ms": 0.2748,
+      "min_ms": 0.1543,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 0.4145,
+      "p95_ms": 0.5504,
+      "min_ms": 0.3797,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0034,
+      "p95_ms": 0.0034,
+      "min_ms": 0.0034,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.0219,
+      "p95_ms": 0.2949,
+      "min_ms": 0.0153,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 4096,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.2497,
+      "p95_ms": 0.3683,
+      "min_ms": 0.216,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.1758,
+      "p95_ms": 0.3566,
+      "min_ms": 0.1646,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.4646,
+      "p95_ms": 0.9177,
+      "min_ms": 0.3429,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.2458,
+      "p95_ms": 0.7477,
+      "min_ms": 0.1703,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 4.5215,
+      "p95_ms": 5.0688,
+      "min_ms": 4.3316,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0039,
+      "p95_ms": 0.0039,
+      "min_ms": 0.0039,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.0855,
+      "p95_ms": 0.3439,
+      "min_ms": 0.0264,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 3,
+      "scenario": "one_cell_and_hud_label",
+      "population": 65536,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.3444,
+      "p95_ms": 0.4575,
+      "min_ms": 0.2808,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 3541012
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 64,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.091,
+      "p95_ms": 0.2349,
+      "min_ms": 0.0766,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 64,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.2634,
+      "p95_ms": 1.6513,
+      "min_ms": 0.2287,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 64,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.1653,
+      "p95_ms": 1.4948,
+      "min_ms": 0.151,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 64,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 0.1101,
+      "p95_ms": 0.1443,
+      "min_ms": 0.0933,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 64,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0059,
+      "p95_ms": 0.0059,
+      "min_ms": 0.0059,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 64,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.015,
+      "p95_ms": 0.0205,
+      "min_ms": 0.0137,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 64,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.1919,
+      "p95_ms": 0.2831,
+      "min_ms": 0.1792,
+      "queued_world_cells": 64,
+      "instance_payload_bytes": [
+        12240
+      ],
+      "tracked_peak_bytes": 1291220
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.0901,
+      "p95_ms": 0.1103,
+      "min_ms": 0.0795,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.2514,
+      "p95_ms": 0.9819,
+      "min_ms": 0.2342,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.1642,
+      "p95_ms": 0.8981,
+      "min_ms": 0.1548,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 0.388,
+      "p95_ms": 0.4501,
+      "min_ms": 0.3641,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.0055,
+      "p95_ms": 0.0055,
+      "min_ms": 0.0055,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.0155,
+      "p95_ms": 0.0209,
+      "min_ms": 0.0144,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 4096,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.2277,
+      "p95_ms": 0.4171,
+      "min_ms": 0.2147,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "encode_and_submit",
+      "count": 16,
+      "p50_ms": 0.1637,
+      "p95_ms": 0.18,
+      "min_ms": 0.1446,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "encode_start_to_completion_callback",
+      "count": 16,
+      "p50_ms": 0.4018,
+      "p95_ms": 0.7474,
+      "min_ms": 0.3279,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "gpu_drain",
+      "count": 16,
+      "p50_ms": 0.2297,
+      "p95_ms": 0.6009,
+      "min_ms": 0.1728,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "managed_drive",
+      "count": 16,
+      "p50_ms": 4.3939,
+      "p95_ms": 4.8884,
+      "min_ms": 4.2107,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "runtime_retirement",
+      "count": 1,
+      "p50_ms": 0.004,
+      "p95_ms": 0.004,
+      "min_ms": 0.004,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        0
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "ui_packet_plan",
+      "count": 16,
+      "p50_ms": 0.027,
+      "p95_ms": 0.0338,
+      "min_ms": 0.0254,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    },
+    {
+      "process": 3,
+      "scenario": "static",
+      "population": 65536,
+      "phase": "wgpu_prepare",
+      "count": 16,
+      "p50_ms": 0.2881,
+      "p95_ms": 0.3109,
+      "min_ms": 0.2656,
+      "queued_world_cells": 1972,
+      "instance_payload_bytes": [
+        164880
+      ],
+      "tracked_peak_bytes": 1443860
+    }
+  ]
+}

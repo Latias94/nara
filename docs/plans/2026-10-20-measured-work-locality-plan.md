@@ -1,7 +1,8 @@
 # Measured Work Locality Follow-Up
 
-Status: L1 attribution and its bounded owner-local correction and L2 Browser preparation are complete;
-L3/L4 are under source research before implementation. Remaining scalar latency is explicitly open.
+Status: L1 scalar, L2 Browser, L3 Tile queue and L4 Rust/Play are complete within their qualified
+scope. Remaining scalar latency and seconds of Rust compilation/startup are explicitly open
+measurement results rather than universal timing guarantees.
 
 ## Evidence And Intent
 
@@ -74,7 +75,10 @@ intent, project close and stale completion through the ordinary public consumer.
 
 ### L3: Bound Large-Map Work To Views And Changes
 
-Researched brief: [Tile visibility locality](2026-10-20-tile-visibility-locality-plan.md).
+Disposition: [Tile visibility locality](2026-10-20-tile-visibility-locality-plan.md) is implemented
+at `15e6564`; its [report](../benchmarks/2026-10-20-tile-visibility.md) binds source/GPU oracles
+and three optimized processes. Streaming candidates and conservative per-view clipping avoid
+cross-frame caches; O(N) extraction/material work remains. Original selected brief follows.
 
 First split the real managed drive into Tile extraction, per-view queueing and sort/batch work;
 the baseline includes UI and is not per-function CPU attribution. Retain the fixed camera,
@@ -97,7 +101,12 @@ Measure queued/uploaded bytes and changing/static cost separately with actual pi
 
 ### L4: Attribute The Rust And Play Iteration Path
 
-Researched brief: [Rust/Play attribution](2026-10-20-rust-play-attribution-plan.md).
+Disposition: [Rust/Play attribution](2026-10-20-rust-play-attribution-plan.md) is complete, including
+the bounded Windows Cargo path correction at `2c26c92`. Its [report](../benchmarks/2026-10-20-rust-play.md)
+records baseline and final public Play, separate Restart/headless controls, private native Cargo
+diagnostics, exact Supervisor-to-CLI Fresh reuse and compile-failure recovery. Profiles/linker
+settings remain unchanged; mixed uncontrolled timing changes do not establish a general Rust
+speed gain. Original selected brief follows.
 
 Use the retained independent-game collector and Cargo's existing build diagnostics to identify
 build units and dependency critical paths. Add bounded compiler/linker observations only when

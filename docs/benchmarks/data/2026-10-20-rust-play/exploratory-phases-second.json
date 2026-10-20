@@ -1,0 +1,317 @@
+{
+  "scope": "temporary env-gated attribution with Cargo fingerprint diagnostics, one baseline warmup and one retained observation per class; not final acceptance timings",
+  "engine_source": "fce2e70fc793b384646dfe0dbf12ac69edcb1678",
+  "nextest_id": "d5e7eeeb-da3f-43a8-9b17-6e3c9427f1a6",
+  "windows": [
+    {
+      "class": "no-edit",
+      "sample": 0,
+      "phases": [
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "cargo_identity_command",
+          "elapsed_ns": 110864700,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "rustc_identity_command",
+          "elapsed_ns": 139187600,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "metadata_command",
+          "elapsed_ns": 142791700,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "cargo_build_command",
+          "elapsed_ns": 13585481600,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "generation_worker_body",
+          "elapsed_ns": 234042700,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "spawn_request_to_verified_ready",
+          "attempt": 3,
+          "elapsed_ns": 1770531600,
+          "success": true
+        }
+      ],
+      "elapsed_ns": 16030323100
+    },
+    {
+      "class": "no-edit",
+      "sample": 1,
+      "phases": [
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "cargo_identity_command",
+          "elapsed_ns": 89363200,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "rustc_identity_command",
+          "elapsed_ns": 132201600,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "metadata_command",
+          "elapsed_ns": 125962900,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "cargo_build_command",
+          "elapsed_ns": 1821540300,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "generation_worker_body",
+          "elapsed_ns": 187279900,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "spawn_request_to_verified_ready",
+          "attempt": 5,
+          "elapsed_ns": 1309655700,
+          "success": true
+        }
+      ],
+      "elapsed_ns": 3702392100
+    },
+    {
+      "class": "body",
+      "sample": 0,
+      "phases": [
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "cargo_identity_command",
+          "elapsed_ns": 83322200,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "rustc_identity_command",
+          "elapsed_ns": 137352700,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "metadata_command",
+          "elapsed_ns": 137266800,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "cargo_build_command",
+          "elapsed_ns": 1314759800,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "generation_worker_body",
+          "elapsed_ns": 177813800,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "spawn_request_to_verified_ready",
+          "attempt": 7,
+          "elapsed_ns": 1437447600,
+          "success": true
+        }
+      ],
+      "elapsed_ns": 3327172900
+    },
+    {
+      "class": "body",
+      "sample": 1,
+      "phases": [
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "cargo_identity_command",
+          "elapsed_ns": 88960400,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "rustc_identity_command",
+          "elapsed_ns": 130553500,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "metadata_command",
+          "elapsed_ns": 141215600,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "cargo_build_command",
+          "elapsed_ns": 9459432300,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "generation_worker_body",
+          "elapsed_ns": 185021900,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "spawn_request_to_verified_ready",
+          "attempt": 9,
+          "elapsed_ns": 1272380200,
+          "success": true
+        }
+      ],
+      "elapsed_ns": 11315020400
+    },
+    {
+      "class": "layout",
+      "sample": 0,
+      "phases": [
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "cargo_identity_command",
+          "elapsed_ns": 83002200,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "rustc_identity_command",
+          "elapsed_ns": 137784100,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "metadata_command",
+          "elapsed_ns": 132346600,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "cargo_build_command",
+          "elapsed_ns": 16910658600,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "generation_worker_body",
+          "elapsed_ns": 162001800,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "spawn_request_to_verified_ready",
+          "attempt": 11,
+          "elapsed_ns": 1556718500,
+          "success": true
+        }
+      ],
+      "elapsed_ns": 19022980800
+    },
+    {
+      "class": "layout",
+      "sample": 1,
+      "phases": [
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "cargo_identity_command",
+          "elapsed_ns": 96594900,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "rustc_identity_command",
+          "elapsed_ns": 134106300,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "metadata_command",
+          "elapsed_ns": 139984300,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "cargo_build_command",
+          "elapsed_ns": 12637891700,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "generation_worker_body",
+          "elapsed_ns": 233920500,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "spawn_request_to_verified_ready",
+          "attempt": 13,
+          "elapsed_ns": 1383715400,
+          "success": true
+        }
+      ],
+      "elapsed_ns": 14671835100
+    },
+    {
+      "class": "restart",
+      "sample": 0,
+      "phases": [
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "generation_worker_body",
+          "elapsed_ns": 12900,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "spawn_request_to_verified_ready",
+          "attempt": 16,
+          "elapsed_ns": 1308734500,
+          "success": true
+        }
+      ],
+      "elapsed_ns": 1445541400
+    },
+    {
+      "class": "restart",
+      "sample": 1,
+      "phases": [
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "generation_worker_body",
+          "elapsed_ns": 12300,
+          "success": true
+        },
+        {
+          "measurement": "rust_play_phase_probe",
+          "phase": "spawn_request_to_verified_ready",
+          "attempt": 17,
+          "elapsed_ns": 1382611000,
+          "success": true
+        }
+      ],
+      "elapsed_ns": 1513861600
+    }
+  ],
+  "limits": [
+    "Tool phases include spawn, owner polling, output drain and physical reader/process cleanup; successful exit is not owner protocol admission.",
+    "Generation worker body excludes thread admission, owner join and local result publication.",
+    "Spawn request to verified READY is not public Applied and includes existing process/handshake validation.",
+    "Unmarked bootstrap/failure/repair oracles are excluded; native Cargo --timings changes the diagnostic invocation."
+  ]
+}
