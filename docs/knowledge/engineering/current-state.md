@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "1a128b28e55fee79a5c32169122639461dbf0350f6437546b02ad9c821055c8e"
+source_fingerprint: "d1fde90b1b8ba228ee0f00fc16e20c5f0c5815b65c3d2e3fae923287320ceb21"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "1a128b28e55fee79a5c32169122639461dbf0350f6437546b02ad9c8210
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `1a128b28e55fee79a5c32169122639461dbf0350f6437546b02ad9c821055c8e`
-- Immutable records: 806
+- Source fingerprint: `d1fde90b1b8ba228ee0f00fc16e20c5f0c5815b65c3d2e3fae923287320ceb21`
+- Immutable records: 808
 - Active lane heads: 1
 
 # Active Registrations
@@ -60,10 +60,11 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Scalar preparation locality completed](registry/2026-10/2026-10-20T090441Z-scalar-preparation-locality-codex-root-598f1d3571a64d4c9dd5897e55337e37.md): `completed` (scalar-preparation-locality-codex-root; producer `codex-root`)
 - [Standalone Generic Editor: SGE complete; no successor active](registry/2026-08/2026-08-19T111039Z-standalone-generic-editor-open-recovery-codex-root-931591fb6d2b4bcbad3151922814d8e6.md): `completed` (standalone-generic-editor-open-recovery-codex-root; producer `codex-root`)
 - [Standalone Supervised Play transferred to 2D foundation refactor](registry/2026-10/2026-10-15T091614Z-standalone-supervised-play-v1-codex-root-d7cca2f42c6d4e07b762475aced7eb44.md): `closed` (standalone-supervised-play-v1-codex-root; producer `codex-root`)
-- [Tile locality and CI portability corrections in progress](registry/2026-10/2026-10-20T101920Z-tile-locality-ci-portability-codex-root-b34188b329c34ac0ada88964ca636829.md): `active` (tile-locality-ci-portability-codex-root; producer `codex-root`)
+- [Local CI contract and Linux Play corrections qualified](registry/2026-10/2026-10-20T153200Z-tile-locality-ci-portability-codex-root-0e48eb6544e04458a9d668699ed2ebd2.md): `active` (tile-locality-ci-portability-codex-root; producer `codex-root`)
 
 # Recent Evidence
 
+- **Verification Evidence**: [Reflection declaration checks and Linux supervised Play storage corrections](verification/2026-10/2026-10-20T152924Z-reflection-declaration-checks-and-linux-supervised-play-storage-corrections-efc879a2a8974c989725df994b86e5db.md) - Local target reuse, eager float proofs, bounded Play failure facts and real Linux cache publication; complete successor hosted qualification remains pending.
 - **Verification Evidence**: [Hosted CI contract corrections and signed Linux process groups](verification/2026-10/2026-10-20T115517Z-hosted-ci-contract-corrections-and-signed-linux-process-groups-b976e5720228491691361ab578614f12.md) - Observed hosted failures, signed process groups, native local-workspace policy and deterministic contract fixtures; full successor CI pending.
 - **Verification Evidence**: [Rust Play attribution and Windows Cargo input qualification](verification/2026-10/2026-10-20T112401Z-rust-play-attribution-and-windows-cargo-input-qualification-2abb1db859f04d848d88a1706ad167be.md) - Public Play/Restart, private native Cargo attribution, exact CLI cache interoperability and compiler failure recovery at the corrected Windows path boundary.
 - **Verification Evidence**: [CI portability and Tile locality qualification in progress](verification/2026-10/2026-10-20T102441Z-ci-portability-and-tile-locality-qualification-in-progress-b85485ff744b4ccf8d02562d94d50ce6.md) - Confirmed hosted failures, Linux capability enumeration, portable wasm compilation and measured per-view queue correction; final hosted and timing evidence pending.
@@ -75,7 +76,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Module goal alignment and concrete boundary repairs qualification](verification/2026-10/2026-10-20T044452Z-module-goal-alignment-and-concrete-boundary-repairs-qualification-f7676d2222234fd39b8b565dbcaf996f.md) - All workspace modules reviewed against Strategy, existing research and pinned mature engines; TileSet, native modes, GPU allocation and glyph clipping repaired with explicit evidence limits.
 - **Verification Evidence**: [Editor Image metadata publication cleanup custody qualification](verification/2026-10/2026-10-20T035244Z-editor-image-metadata-publication-cleanup-custody-qualification-c097c716d6f3480692d800285ec53544.md) - Register metadata publication before writes and retain cleanup through terminal failure, close, unwind and abandonment.
 - **Verification Evidence**: [Owned startup closure publication and responsiveness qualification](verification/2026-10/2026-10-20T032446Z-owned-startup-closure-publication-and-responsiveness-qualification-f187b61104d4443187cea8b9bc392460.md) - Bounded background startup preparation preserves linear Open ownership, owner session publication, cancellation and retained project replacement.
-- **Verification Evidence**: [Editor Host lifetime cleanup custody qualification](verification/2026-10/2026-10-20T030524Z-editor-host-lifetime-cleanup-custody-qualification-12c6b025d6c74ed1bf6900c8b0413877.md) - Scene and Prefab cleanup survives terminal Save, Reopen, content runtime replacement, close and session abandonment.
 
 # Integration Notes
 

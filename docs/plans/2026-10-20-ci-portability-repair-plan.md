@@ -1,7 +1,8 @@
 # CI And Portable Wasm Repair
 
-Status: In progress alongside the selected locality follow-up. Requested after repeated hosted
-failures; this does not add browser execution to the first production proof.
+Status: Correctness successor CI is in progress; bounded local feedback-cost corrections continue
+without waiting for the hosted matrix. The locality units are separately complete within their
+qualified scopes. This work does not add browser execution to the first production proof.
 
 ## Confirmed Failures
 
@@ -120,6 +121,65 @@ before/after hosted evidence before claiming an improved feedback time. No new c
 framework, broad test exclusion or unmeasured speed claim is authorized by this comparison.
 The [source comparison and measured attribution](../research/2026-10-20-ci-feedback-and-bevy-comparison.md)
 records exact Bevy evidence, distinct feature obligations and the ordered small corrections.
+
+### Current Local Slices
+
+The user requests continued repairs with occasional CI observation rather than waiting on a full
+hosted run. The correctness baseline is `e856a5f`, run `39437200611`. Check it at implementation
+boundaries and retain its exact source attribution; do not call an older-source result proof of
+new test organization or measured speed gains.
+
+- Reflection: move the two positive derive cases to ordinary integration tests while preserving
+  their crate-override/alias scope and actual registry registration/freeze. Retain all nineteen
+  negative fixtures and diagnostics; remove only obsolete positive fixture sources.
+- Ordinary external consumers: use the existing Cargo target selection convention instead of
+  dedicated public-prelude and missing-prerequisite target directories. Preserve independent
+  manifests, feature graphs, locks and exact expected import failures. Keep trybuild's private
+  target/flags unchanged; Cargo owns artifact validity.
+- Root owns serial default/all-feature focused nextest, formatting, source/diff review and precise
+  commits. Separate read-only review checks retained coverage and cache-path semantics. Preserve
+  the unrelated untracked `vendor/` directory.
+- Cache/profile/job-layout changes remain subsequent measured work. Neither warm local results
+  nor a source-mechanism argument establishes a cold hosted speedup.
+
+The reflection move exposes a declaration-validation gap: check-only compilation accepts two
+non-finite initial values because their proof lives inside an unevaluated schema-method inline
+const. `23496a3` moves floating initial/range proofs into eager unnamed constants using actual
+field-access type inference. It preserves aliases and Self-associated types without new public
+helpers or Rust-name parsing. All nineteen original negative sources remain; three new
+no-schema-call cases verify overflow rejection independently of overflowing-literal lints. Both
+default and all-feature reflection cohorts pass 21/21, each including all 22 compile-fail cases
+and real registration/freeze. The linked research records the source mechanism.
+
+`dc2d855` implements ordinary target reuse. Both consumers pass with the repository fallback and
+with relative `CARGO_TARGET_DIR=target`; the latter repeats the public fixture checks after the
+derive repair. The missing-prerequisite case still fails at the removed direct import. These
+local elapsed times are not cold hosted comparisons.
+
+Run `39437200611` passes portable Wasm, both module-consumer jobs and Windows reference-game.
+Linux root completes its default cohort with 2,643/2,644 passing; its remaining clean-room Play
+consumer also reports Start, so the all-feature root cohort has not run. Linux reference-game
+again passes 83 default and 150/151 all-feature tests; bounded failure output now confirms generic
+Start but still lacks the private cause. Exact FD execution and executable creation mode have
+passing/source evidence, so do not guess another permission or environment change. Preserve the
+typed preparation/launch failure stage and safe I/O facts in the existing bounded output notice,
+including failures currently collapsed in the preparation worker. Emit a retained supervisor
+observation failure once so repeated polls preserve quiet output and the first cause. Keep actual
+Linux Start unresolved until the successor consumer qualifies the correction; other local work continues.
+
+A real-source WSL probe reveals a separate reproducible selection defect: production
+`generation_store_base_root` chooses `/tmp`, which is tmpfs on that machine, and actual directory
+publication rejects it before staging. An explicitly selected private home/ext4 root passes the
+same generation publication proof; a private `/dev/shm` root is rejected. This is not proof of
+the hosted runner's mount configuration. Move Linux generation storage to the standard user
+cache location, retaining owner/permission/no-symlink checks and exact filesystem rejection.
+Use one documented location rather than trial-and-error fallback or a broader filesystem tier.
+ADR 0116 owns the location policy; per-run identity, cleanup and last-good lifetime stay intact.
+The correction is implemented at `ce49696`; the actual Linux source's six tests pass and both
+default/explicit ext4 cache locations publish, while explicit tmpfs remains rejected. `258c1ab`
+adds bounded diagnostics and quiet repeated-error projection, with 175/175 Editor library tests
+and the complete Editor test-target check passing. Detailed commands, run IDs and source limits
+belong to the [successor verification record](../knowledge/engineering/verification/2026-10/2026-10-20T152924Z-reflection-declaration-checks-and-linux-supervised-play-storage-corrections-efc879a2a8974c989725df994b86e5db.md).
 
 ## Ordered Corrections
 

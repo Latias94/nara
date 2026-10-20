@@ -81,14 +81,51 @@ negative cases retained. Independent review confirms equivalent public-boundary 
 warm runs take 13.500 and 18.531 seconds; comparing them directly with cold hosted time would be
 invalid. Cache/profile and job-layout recommendations below have not been implemented by this slice.
 
-## Subsequent Order
+## Reflection And Ordinary Consumer Follow-up
+
+The next selected correction moves the two reflection positives to ordinary integration tests,
+preserving explicit crate override, nested aliases and actual registration/freeze. Merely removing
+their trybuild `pass` entries is insufficient: a real check-only run unexpectedly accepts two
+non-finite initial-value cases and changes a third diagnostic to a literal-overflow lint. The
+existing float proof is an inline const inside schema construction, so it depends on a later
+evaluation/code-generation phase. Restoring a positive case or weakening snapshots would conceal
+this owning declaration-validation gap.
+
+The correction emits an unnamed constant for each floating initial value or numeric range bound.
+An unselected `Some(component)` field access in a match on `Option::<&Component>::None` lets Rust
+infer the literal's actual field type. The selected branch contains only the literal; it neither
+constructs nor reads a component. This retains aliases and Self-associated field types without
+re-parsing Rust names or adding a helper trait that could shadow user types. The schema path still
+owns typed assignment, encoding, numeric interval construction and registration/freeze validation.
+
+The [Rust Reference](https://doc.rust-lang.org/stable/reference/items/constant-items.html#evaluation)
+specifies compile-time evaluation of free constants, including unused ones. A Rust 1.95.0
+metadata-only probe accepts a wide alias and a Self projection, while rejecting an overflowing
+actual f32 even when overflowing-literal lints are allowed. Actual derive tests additionally
+cover initial/range rejection without schema calls, integer-shaped float suffixes, and successful
+wide-alias/associated-type registry construction. All original nineteen negative sources remain;
+three new cases strengthen check-only coverage. Only inspected diagnostics are updated to the
+new literal-local E0080 span and the retained wrong-suffix type error.
+
+Ordinary public-prelude and missing-prerequisite consumers now select external `CARGO_TARGET_DIR`
+or the repository target instead of separate artifact directories. Their independent manifests,
+feature graphs, command flags and exact error assertions remain. This is artifact reuse, not
+cached success/failure. Existing trybuild target/flags remain untouched. These source changes
+still require separate hosted timing observations before a cold speedup claim.
+
+The reflection correction is committed at `23496a3`; both focused default/all-feature cohorts
+pass 21/21, each including all 22 negative fixtures. Ordinary target reuse is committed at
+`dc2d855`; both consumers pass with the repository fallback and with relative
+`CARGO_TARGET_DIR=target`. These are local correctness results. Hosted run `39437200611` uses
+the earlier `e856a5f` source and cannot qualify either follow-up or their timing.
+
+## Correction Order And Remaining Work
 
 1. Observe the first correction in complete hosted execution before claiming a speedup.
-2. Apply the same organization to reflection positives, retaining actual register/freeze execution
-   as ordinary integration behavior and all nineteen negative cases.
-3. Reuse the normal target for ordinary external fixtures where Cargo already distinguishes
-   manifests, features and profiles. Keep independent manifests/locks and expected failures;
-   do not override trybuild's private graph or invent compiler-analysis scripts.
+2. Reflection organization and declaration validation are locally qualified at `23496a3`, with
+   real register/freeze execution and all nineteen original plus three new negative cases.
+3. Ordinary external fixture target reuse is locally qualified at `dc2d855`. Independent
+   manifests/locks and expected failures remain; trybuild's private graph is unchanged.
 4. Add one maintainable cache configuration with consistent CI profile inputs. Measure restoration,
    cold misses, upload cost and total hot-run time. Cached dependencies do not eliminate real
    compile-contract and native workflow execution.
@@ -100,6 +137,28 @@ invalid. Cache/profile and job-layout recommendations below have not been implem
 Do not introduce a general CI command framework, dozens of unmeasured shards, changed runtime
 test semantics or a new compiler diagnostic parser. Cache hits must not become correctness
 evidence. Report actual cold and warm measurements separately, including unsuccessful runs.
+
+### Small Cache Candidate
+
+The next candidate keeps the current native jobs and profiles. Use pinned `actions/cache/restore`
+and `save` steps, with a distinct root/reference/module namespace per OS, architecture, Rust
+version and profile policy. Hash checked-in manifests, locks and workflow inputs; preserve those
+same boundaries in any restore prefix. PRs may restore; only successful main push jobs save.
+All existing commands run regardless of cache hits. A stable dependency-input key avoids uploading
+another full native cache on every source commit, but an exact hit is immutable and will not
+refresh later workspace artifacts. This is an explicit limitation, not a correctness shortcut.
+
+Candidate paths are Cargo registry/index/source and Git database plus the actual build paths:
+root `target/debug` and trybuild output, reference `reference-game/target/debug`, module consumers'
+already shared `target/debug`. Do not cache complete Cargo home, binaries/credentials or the
+whole target tree with temporary projects, measurements and process state. Do not cache generation
+stores. First measure each candidate's size and actual restore/upload cost against the repository
+quota; six large native caches can evict one another. Supervised Play's separate build target also
+needs attribution before it is included. Keep this candidate disabled until that bounded ownership
+and size check; then compare miss/seed/restore runs without a new prewarming workflow or sharding.
+The [pinned action strategy](https://raw.githubusercontent.com/actions/cache/55cc8345863c7cc4c66a329aec7e433d2d1c52a9/caching-strategies.md)
+and [GitHub cache reference](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching)
+describe immutable keys, restore prefixes and branch scope.
 
 ## Owning Sources
 
