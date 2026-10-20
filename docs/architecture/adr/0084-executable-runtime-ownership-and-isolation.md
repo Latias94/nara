@@ -2,8 +2,9 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-10-18
+**Last Revised**: 2026-10-20 (synchronize ADR 0117 ordinary managed startup)
 **Owner**: `nara_app` and concrete executable hosts
+**Refined By**: [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): 2D Foundation Ownership and Authoring Contracts
 **Admission Trigger**: RGD-U2 through RGD-U6 replaced the plan/World behavior split, removed
 process-global runtime contention, and proved three-Host parity, external Runner authority, and
 fresh session reconstruction. RGD-U7 independently accepted this bounded authority at `5ebc45e`.
@@ -399,8 +400,11 @@ This decision does not define:
 
 This does not defer external runner reachability. The managed path guarantees explicit
 Platform/Runner Adapter selection and one driver authority; only the exact trait/object/factory
-shape remains evidence-driven. Direct `App::set_runner` plus `App::run` is a separate embedding path
-and cannot be combined with managed-runtime admission for the same App.
+shape remains evidence-driven. Under the
+[ADR 0117 refinement](0117-2d-foundation-ownership-and-authoring-contracts.md), ordinary external
+embedding consumes configured App through `RuntimeInstance::start` or `start_with_options`.
+Hidden candidate admission remains first-party publication plumbing; a raw App runner is no longer
+a separate execution path. The same owner retains startup failure and incomplete-close retirement.
 
 ## Alternatives Considered
 

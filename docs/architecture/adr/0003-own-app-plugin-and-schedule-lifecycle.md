@@ -2,9 +2,10 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-27
+**Last Revised**: 2026-10-20 (synchronize ADR 0117 managed-execution refinement)
 **Refined By**: ADR 0010: Plugin Lifecycle, Dependencies, and Failure Containment; ADR 0046:
-Plugin Metadata and Default Plugin Groups; ADR 0056: Headless Runtime and Dedicated Server Readiness
+Plugin Metadata and Default Plugin Groups; ADR 0056: Headless Runtime and Dedicated Server Readiness;
+[ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): 2D Foundation Ownership and Authoring Contracts
 
 ## Context
 
@@ -159,13 +160,12 @@ values instead of panic-based helpers. `App::seal` closes configuration and retu
 terminal teardown uses `shutdown`, not the frame/startup-overloaded `cleanup` vocabulary. ADRs 0010
 and 0046 define the detailed lifecycle and composition contracts.
 
-The implemented code-first managed path consumes a sealed, unstarted `App` through
-`RuntimeCandidate` and then `RuntimeInstance`. The wrapper owns generation, control, fault, and
-registered close-obligation state only; the enclosed `App` remains the sole `World`, schedule,
-plugin, time, and tracker authority. A raw `App::set_runner` / `App::run` route remains available for
-embedding and is mutually exclusive with candidate admission. Dropping a raw `App` gives registered
-close participants one best-effort begin/poll pass, while retryable and truthfully observable close
-belongs to `RuntimeInstance`.
+[ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md) refines execution to one managed
+owner. App is configuration-only; ordinary code-first embedding uses `RuntimeInstance::start` or
+`start_with_options`. The owner retains generation, control, fault and registered close obligations,
+with one World and schedule authority. First-party Hosts retain hidden sealed-App/candidate stages
+for unpublished preparation and publication. Raw App runners are removed as a competing production
+lifecycle. Startup failure and incomplete close retain retryable physical retirement ownership.
 
 ## Alternatives Considered
 
