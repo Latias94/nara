@@ -1,6 +1,6 @@
 # Fixed World Canvas With Native UI
 
-Status: implementation and behavioral qualification complete; delivery closure in progress.
+Status: completed. Implementation: `4723296`; committed qualification is linked below.
 
 ## Outcome
 
@@ -84,6 +84,9 @@ formatting and diff checks pass. Root retains exact commands/run IDs for the com
 No complete GPU residency, frame-tail/iteration benchmark, native Linux/macOS, low-resolution HUD
 or Tile-tool qualification is implied. Future measurement must include the documented exclusions
 for Editor canvas targets and composite/material uniforms.
+
+The [qualification record](../knowledge/engineering/verification/2026-10/2026-10-20T070752Z-fixed-world-canvas-and-native-ui-qualification-e7c7f1ee29e4459688d51f1ca20282d8.md)
+binds exact commands, run IDs, corrected failures, source revision and remaining scope.
 
 ## Source Basis
 

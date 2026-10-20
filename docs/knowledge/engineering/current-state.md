@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "7caf341f5231228dc86e21992bdb1577c8962975879aca3f8b4273d26d631144"
+source_fingerprint: "dfaf44d7fdf8f161990f93597417b0d933f9a33d8fc014c77806e0411d18c01a"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "7caf341f5231228dc86e21992bdb1577c8962975879aca3f8b4273d26d6
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `7caf341f5231228dc86e21992bdb1577c8962975879aca3f8b4273d26d631144`
-- Immutable records: 790
+- Source fingerprint: `dfaf44d7fdf8f161990f93597417b0d933f9a33d8fc014c77806e0411d18c01a`
+- Immutable records: 793
 - Active lane heads: 0
 
 # Active Registrations
@@ -37,6 +37,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor UI Prefab Authoring and Canvas v1 complete; no successor active](registry/2026-08/2026-08-17T233146Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fcbd471b11774b599cd190ead6827654.md): `completed` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Structural Composition v1 complete; no successor active](registry/2026-08/2026-08-18T072656Z-editor-ui-prefab-structural-composition-v1-codex-root-5edbf5a02be34aa8bdf7f88e45981dab.md): `completed` (editor-ui-prefab-structural-composition-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Fixed world canvas qualified](registry/2026-10/2026-10-20T071017Z-fixed-world-canvas-codex-root-2c7ba6aade3b4998905de82e5455225a.md): `complete` (fixed-world-canvas-codex-root; producer `codex-root`)
 - [Foundation correctness closure](registry/2026-10/2026-10-17T123810Z-foundation-correctness-closure-codex-root-20261017-94169fb22505473c89504d4b41cab1de.md): `completed` (foundation-correctness-closure-codex-root-20261017; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Module and product-goal alignment review completed](registry/2026-10/2026-10-20T045244Z-module-goal-alignment-codex-root-16266656b5cb44cc836a760fd492fa8b.md): `completed` (module-goal-alignment-codex-root; producer `codex-root`)
@@ -59,6 +60,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Fixed world canvas and native UI qualification](verification/2026-10/2026-10-20T070752Z-fixed-world-canvas-and-native-ui-qualification-e7c7f1ee29e4459688d51f1ca20282d8.md) - Pixel readback, presented world input, native button resize and independent exported desktop qualification.
 - **Verification Evidence**: [Ordinary structural authoring and captured-source Reopen qualification](verification/2026-10/2026-10-20T051819Z-ordinary-structural-authoring-and-captured-source-reopen-qualification-f9b317e0ceda49a6b37f9000c61af8d7.md) - Source-local structural transactions, exact unavailable preservation, captured-source Reopen, ordinary public and actual Windows widget trajectories.
 - **Verification Evidence**: [Module goal alignment and concrete boundary repairs qualification](verification/2026-10/2026-10-20T044452Z-module-goal-alignment-and-concrete-boundary-repairs-qualification-f7676d2222234fd39b8b565dbcaf996f.md) - All workspace modules reviewed against Strategy, existing research and pinned mature engines; TileSet, native modes, GPU allocation and glyph clipping repaired with explicit evidence limits.
 - **Verification Evidence**: [Editor Image metadata publication cleanup custody qualification](verification/2026-10/2026-10-20T035244Z-editor-image-metadata-publication-cleanup-custody-qualification-c097c716d6f3480692d800285ec53544.md) - Register metadata publication before writes and retain cleanup through terminal failure, close, unwind and abandonment.
@@ -70,7 +72,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [N05 safe plugin failure facts and invocation context](verification/2026-10/2026-10-19T170951Z-n05-safe-plugin-failure-facts-and-invocation-context-d01f7391b84348a8827a0daa760dd1a4.md) - Checked App plugin facts, actual invocation identity and retained primary/shutdown diagnostics through public product and Editor failure paths.
 - **Verification Evidence**: [Authoring S3 component constraints diagnostics and inventory](verification/2026-10/2026-10-19T162634Z-authoring-s3-component-constraints-diagnostics-and-inventory-64aacf18a3af432584d306af27d32eb3.md) - Shared interval contracts, safe domain facts, explicit UI evolution and independently compiled component authoring evidence.
 - **Verification Evidence**: [Authoring S2 exact results and retained field editing](verification/2026-10/2026-10-19T153834Z-authoring-s2-exact-results-and-retained-field-editing-2b09e865afc64b7990e2adc737fa2aa7.md) - Exact frontend dispatch correlation, retained Inspector drafts and public panel/native qualification within S2.
-- **Verification Evidence**: [Authoring S1 safety and field override recovery](verification/2026-10/2026-10-19T143606Z-authoring-s1-safety-and-field-override-recovery-0aca8f3bff914ffeaf0254f40a5cb118.md) - Owner-local Prefab/render rejection fixes and complete data-only Reset/Remove history with explicit test and platform limits.
 
 # Integration Notes
 
