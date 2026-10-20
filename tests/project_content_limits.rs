@@ -180,6 +180,7 @@ fn shared_budget_host_retains_at_most_two_distinct_content_generations() {
 
 #[test]
 fn duplicate_dependency_edges_share_unique_prefab_and_image_work() {
+    let single_edge_files = successful_high_water(ProjectContentBudgetKind::Files, |_| {});
     let project = TestProject::with_prefab_startup();
     duplicate_prefab_edges(&project);
     let (candidate, plan, root) = project.candidate_plan_and_root();
@@ -191,7 +192,12 @@ fn duplicate_dependency_edges_share_unique_prefab_and_image_work() {
     assert_eq!(snapshot.images().len(), 1);
     let budget = loader.budget_snapshot();
     assert_eq!(budget.high_water(ProjectContentBudgetKind::QueuedJobs), 1);
-    assert_eq!(budget.high_water(ProjectContentBudgetKind::Files), 4);
+    // Source-kind discovery reads metadata before exact load-time revalidation. Duplicate
+    // references must add no file work beyond the same closure with a single Prefab edge.
+    assert_eq!(
+        budget.high_water(ProjectContentBudgetKind::Files),
+        single_edge_files,
+    );
     assert_eq!(
         budget.high_water(ProjectContentBudgetKind::DependencyEdges),
         4,

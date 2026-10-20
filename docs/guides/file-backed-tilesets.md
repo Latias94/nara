@@ -57,6 +57,10 @@ advance to a newer Image while a TileSet whose successor fails retains its coher
 Image/source identity revocation removes the publication; retaining a handle does not retain
 authority. Removing and recreating an Image cannot revive an old revoked publication.
 
+First requests and dependency changes may use an authorized published Image even while its next
+reload is pending or has failed. Only a cold Loading dependency without published content waits.
+Identity, publication and exact storage-slot checks still reject revoked or directly replaced data.
+
 The managed Editor refreshes known TileSet sources through its source catalogue and processes
 at most two source files per advance. Missing Image metadata retains a semantic dependency demand;
 after a source-index refresh admits that metadata and source, existing serial Image hydration can

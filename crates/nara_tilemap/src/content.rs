@@ -13,7 +13,7 @@ use nara_asset::{
 };
 use nara_core::{ByteLimit, ItemLimit};
 use nara_ecs::{Resource, schedule::IntoScheduleConfigs};
-use nara_image::{ImageAsset, ImageContentSnapshot};
+use nara_image::{ImageAsset, ImageContentError, ImageContentSnapshot};
 
 use crate::{TileAtlasLayout, TileSet, TileSetSource};
 
@@ -491,13 +491,20 @@ impl TileSetAssets {
                 return Err(TileSetAssetError::AtlasLayoutChangeRequiresRebuild);
             }
             let handle = image_handle.ok_or(TileSetAssetError::DependencyUnavailable)?;
-            match states.state(handle.id()).map(|state| state.load_state()) {
-                Some(LoadState::Loaded) => {}
-                Some(LoadState::Loading) => return Ok(None),
-                _ => return Err(TileSetAssetError::DependencyUnavailable),
-            }
-            let image = ImageContentSnapshot::capture(handle, server, states, images)
-                .map_err(|_| TileSetAssetError::DependencyUnavailable)?;
+            // Published content remains eligible while a later import is pending or failed.
+            // Snapshot admission owns identity, publication and exact storage-slot checks.
+            let image = match ImageContentSnapshot::capture(handle, server, states, images) {
+                Ok(image) => image,
+                Err(ImageContentError::Unavailable)
+                    if states.state(handle.id()).is_some_and(|state| {
+                        matches!(state.load_state(), LoadState::Loading)
+                            && state.usable_version().is_none()
+                    }) =>
+                {
+                    return Ok(None);
+                }
+                Err(_) => return Err(TileSetAssetError::DependencyUnavailable),
+            };
             entry
                 .desired
                 .validate_image_extent(image.extent())
@@ -814,6 +821,156 @@ mod tests {
             successor.normalized_region(TileIndex::new(1)).unwrap().min,
             Vec2::new(0.5, 0.0)
         );
+    }
+
+    #[test]
+    fn new_and_retargeted_tilesets_use_published_images_during_reload_or_failure() {
+        for retarget in [false, true] {
+            for reload_failed in [false, true] {
+                let mut fixture = Fixture::new(TileSetAssetLimits::default());
+                let dependency = if retarget {
+                    let tileset = fixture.request("a.png");
+                    fixture.reconcile();
+                    assert!(fixture.tilesets.get(tileset).is_some());
+                    fixture.database.insert(fixture.image_b.clone()).unwrap();
+                    fixture.publish_image(fixture.image_b.clone(), 2, 1, 20)
+                } else {
+                    fixture
+                        .server
+                        .reserve_record::<ImageAsset>(&fixture.image_a)
+                        .unwrap()
+                };
+                let published = ImageContentSnapshot::capture(
+                    dependency,
+                    &fixture.server,
+                    &fixture.states,
+                    &fixture.images,
+                )
+                .unwrap();
+                fixture.states.set_loading(dependency.id());
+                if reload_failed {
+                    fixture
+                        .images
+                        .record_reload_failure(
+                            dependency,
+                            &mut fixture.states,
+                            &mut fixture.events,
+                            "successor decode failed",
+                        )
+                        .unwrap();
+                }
+                assert!(published.is_current(&fixture.server, &fixture.states, &fixture.images));
+
+                let tileset = fixture.request(if retarget { "b.png" } else { "a.png" });
+                fixture.reconcile();
+                assert_eq!(fixture.owner.error(tileset), None);
+                let actual = fixture
+                    .tilesets
+                    .get(tileset)
+                    .expect("an authorized published dependency must admit its TileSet")
+                    .image_content()
+                    .unwrap();
+                assert!(actual.same_allocation(&published));
+                assert_eq!(actual.version(), published.version());
+                assert_eq!(actual.pixels(), published.pixels());
+
+                fixture
+                    .images
+                    .remove_with_state(dependency, &mut fixture.states, &mut fixture.events)
+                    .unwrap();
+                fixture.reconcile();
+                assert!(fixture.tilesets.get(tileset).is_none());
+                assert!(!published.is_authorized(
+                    &fixture.server,
+                    &fixture.states,
+                    &fixture.images,
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn unpublished_dependencies_wait_or_fail_and_recover_after_publication() {
+        for load_failed in [false, true] {
+            let mut fixture = Fixture::new(TileSetAssetLimits::default());
+            let dependency = fixture
+                .server
+                .reserve_record::<ImageAsset>(&fixture.image_a)
+                .unwrap();
+            fixture
+                .images
+                .remove_with_state(dependency, &mut fixture.states, &mut fixture.events)
+                .unwrap();
+            fixture.states.set_loading(dependency.id());
+            if load_failed {
+                fixture
+                    .images
+                    .record_load_failure(
+                        dependency,
+                        &mut fixture.states,
+                        &mut fixture.events,
+                        "initial decode failed",
+                    )
+                    .unwrap();
+            }
+            let tileset = fixture.request("a.png");
+            fixture.reconcile();
+            assert!(fixture.tilesets.get(tileset).is_none());
+            assert_eq!(
+                fixture.owner.error(tileset),
+                load_failed.then_some(&TileSetAssetError::DependencyUnavailable),
+            );
+
+            fixture.publish_image(fixture.image_a.clone(), 2, 1, 30);
+            fixture.reconcile();
+            assert_eq!(fixture.owner.error(tileset), None);
+            assert_eq!(
+                fixture
+                    .tilesets
+                    .get(tileset)
+                    .unwrap()
+                    .image_content()
+                    .unwrap()
+                    .pixels(),
+                &[30; 8],
+            );
+        }
+    }
+
+    #[test]
+    fn loading_cannot_hide_invalid_published_identity_or_storage() {
+        for wrong_identity in [false, true] {
+            let mut fixture = Fixture::new(TileSetAssetLimits::default());
+            let dependency = fixture
+                .server
+                .reserve_record::<ImageAsset>(&fixture.image_a)
+                .unwrap();
+            if wrong_identity {
+                let invalid = image(&fixture.image_b, 2, 1, 20);
+                fixture
+                    .images
+                    .commit_loaded(
+                        dependency,
+                        invalid,
+                        &mut fixture.states,
+                        &mut fixture.events,
+                        None,
+                        None,
+                    )
+                    .unwrap();
+            } else {
+                let removed = fixture.images.remove(dependency).unwrap();
+                fixture.images.insert(dependency, removed);
+            }
+            fixture.states.set_loading(dependency.id());
+            let tileset = fixture.request("a.png");
+            fixture.reconcile();
+            assert!(fixture.tilesets.get(tileset).is_none());
+            assert_eq!(
+                fixture.owner.error(tileset),
+                Some(&TileSetAssetError::DependencyUnavailable),
+            );
+        }
     }
 
     #[test]
