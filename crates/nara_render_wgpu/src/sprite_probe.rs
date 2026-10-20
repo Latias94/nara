@@ -26,6 +26,8 @@ use crate::{
     sprite::collect_sprite_quad_batches,
 };
 
+mod visibility;
+
 static MATERIALS: [Material2dDefinition; 1] = [Material2dDefinition {
     id: "probe.palette",
     fragment_shader: include_str!("../../../examples/support/palette_material.wgsl"),

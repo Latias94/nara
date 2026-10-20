@@ -94,8 +94,8 @@ fn runtime(population: usize, changing: bool) -> RuntimeInstance {
         "runtime cost",
         WindowResolution::new(WIDTH, HEIGHT),
     ));
-    // One fixed view makes the larger populations mostly offscreen. Current extraction queues
-    // all cells; this deliberately measures that cost instead of claiming every tile is visible.
+    // One fixed view makes the larger populations mostly offscreen. Extraction retains every
+    // cell; the per-view queue must omit separated quads while retaining boundary uncertainty.
     let camera = world
         .spawn((
             Camera2d {
@@ -265,6 +265,7 @@ fn tilemap_and_changing_hud_costs() {
             backend.telemetry.begin_device_epoch(1);
             let mut planner = UiPresentationPlanner::default();
             let window = Window::new("runtime cost", WindowResolution::new(WIDTH, HEIGHT));
+            let mut last_queued_cells = 0;
             // Device/fixture construction and output are excluded. Every sample drains the prior
             // submission, so this is serial latency attribution, not pipelined throughput.
             for sample in -WARMUP..SAMPLES {
@@ -343,13 +344,17 @@ fn tilemap_and_changing_hud_costs() {
                 assert_eq!(resources.lost_retirements(), 0);
                 let stats = *runtime.world().resource::<SpriteRenderStats>();
                 assert_eq!(stats.extracted_tile_cells as usize, population);
-                assert_eq!(stats.queued_items as usize, population);
+                let queued_cells = stats.queued_items as usize;
+                last_queued_cells = queued_cells;
+                // Inclusive conservative bounds also retain the two exactly touching rows.
+                let expected_queued = if population == 64 { 64 } else { 58 * 34 };
+                assert_eq!(queued_cells, expected_queued);
                 assert_eq!(
                     runtime
                         .world()
                         .resource::<SpriteBatches>()
                         .total_instances(),
-                    population
+                    queued_cells
                 );
                 assert_eq!(
                     stats.missing_tilesets + stats.invalid_tile_regions + stats.unprepared_textures,
@@ -390,6 +395,7 @@ fn tilemap_and_changing_hud_costs() {
                         &mut output,
                         scenario,
                         population,
+                        queued_cells,
                         sample,
                         phase,
                         elapsed_ns,
@@ -430,6 +436,7 @@ fn tilemap_and_changing_hud_costs() {
                 &mut output,
                 scenario,
                 population,
+                last_queued_cells,
                 SAMPLES,
                 "runtime_retirement",
                 retirement_ns,
@@ -448,6 +455,7 @@ fn row(
     output: &mut impl Write,
     scenario: &str,
     population: usize,
+    queued_cells: usize,
     sample: i32,
     phase: &str,
     elapsed_ns: u128,
@@ -462,7 +470,7 @@ fn row(
     // Camera bounds are +/-28.44445 by +/-16. Unit cells with positive intersection span
     // 58 columns and32 rows for the large maps; the8x8 map is entirely inside those bounds.
     let visible_cells = if population == 64 { 64 } else { 58 * 32 };
-    writeln!(output, "{{\"measurement\":\"runtime-cost-v1\",\"scenario\":\"{scenario}\",\"population\":{population},\"sample\":{sample},\"phase\":\"{phase}\",\"elapsed_ns\":{elapsed_ns},\"optimized\":true,\"camera_world_height\":32,\"camera_world_width\":56.88889,\"tile_world_size\":1,\"tilemap_entities\":1,\"queued_world_cells\":{population},\"geometrically_visible_cells\":{visible_cells},\"instance_payload_bytes\":{instance_bytes},\"canvas_bytes\":{},\"image_glyph_fallback_bytes\":{},\"glyph_snapshot_bytes\":{glyph_snapshot_bytes},\"tracked_current_bytes\":{},\"tracked_peak_bytes\":{},\"pending_retirements\":{},\"lost_retirements\":{},\"draw_calls\":{draw_calls},\"ui_primitives\":{ui_primitives}}}", backend.world_canvas.logical_bytes(), textures.texture_bytes, stats.current_total_bytes(), stats.peak_total_bytes(), stats.pending_retirements(), stats.lost_retirements()).unwrap();
+    writeln!(output, "{{\"measurement\":\"runtime-cost-v1\",\"scenario\":\"{scenario}\",\"population\":{population},\"sample\":{sample},\"phase\":\"{phase}\",\"elapsed_ns\":{elapsed_ns},\"optimized\":true,\"camera_world_height\":32,\"camera_world_width\":56.88889,\"tile_world_size\":1,\"tilemap_entities\":1,\"queued_world_cells\":{queued_cells},\"geometrically_visible_cells\":{visible_cells},\"instance_payload_bytes\":{instance_bytes},\"canvas_bytes\":{},\"image_glyph_fallback_bytes\":{},\"glyph_snapshot_bytes\":{glyph_snapshot_bytes},\"tracked_current_bytes\":{},\"tracked_peak_bytes\":{},\"pending_retirements\":{},\"lost_retirements\":{},\"draw_calls\":{draw_calls},\"ui_primitives\":{ui_primitives}}}", backend.world_canvas.logical_bytes(), textures.texture_bytes, stats.current_total_bytes(), stats.peak_total_bytes(), stats.pending_retirements(), stats.lost_retirements()).unwrap();
 }
 
 fn assert_pixels(

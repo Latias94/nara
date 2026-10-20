@@ -145,6 +145,13 @@ ordered view list executes serially, including shared targets and explicit offsc
 This supersedes the single-view cardinality clauses in 0018/0094/0111/0112, retaining exclusive target
 ownership. Optional pixel-canvas policies do not quantize simulation. No public render graph or RHI is added.
 
+Per-view queueing may omit a quad only when its actual projected instance is conservatively
+separated from the clip rectangle. Floating-point uncertainty, non-finite coefficients and overflow
+retain the quad; material/content authorization and diagnostics still run before visibility filtering.
+Extraction remains a complete world-space observation. Queue visibility does not erase an empty
+view's clear/load policy, change painter order or establish cross-frame cache authority. GPU draw
+admission accounts for the geometry actually submitted rather than invisible authored population.
+
 The first ordinary pixel-canvas consumer selects an optional fixed world raster extent. World
 views raster into that extent, then the completed canvas is nearest-sampled into the actual window
 using `DisplayScale::IntegerFit`; native runtime UI is drawn afterward at actual window resolution.

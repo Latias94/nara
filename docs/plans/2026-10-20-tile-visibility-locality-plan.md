@@ -1,6 +1,6 @@
 # Tile Visibility Locality
 
-Status: Researched, awaiting L2 integration. Selected L3 brief belongs to the
+Status: In progress after L2 integration at `8afbe42`. Selected L3 brief belongs to the
 [locality follow-up](2026-10-20-measured-work-locality-plan.md).
 
 ## Evidence And Selected Direction
@@ -46,3 +46,9 @@ frame without a new invalidation protocol. It still scans O(N) cells; the 8 ms t
 Root owns serial Cargo/fmt/Git, one build job and shared target. Allocate disjoint source/test
 paths before implementation; preserve concurrent work and read-only repo-ref. Tile authoring
 tools, chunk streaming and speculative render frameworks remain outside this unit.
+
+Initial lanes: root owns temporary attribution, the runtime collector, integration and reports;
+`persistence_worker_seam` researches the numerical/view boundary and will own the private queue
+correction after attribution; `save_consumer_migration` owns independent correctness/GPU oracle
+coverage; `persistence_adversarial_design` reviews authorization, order and numerical failures.
+Workers do not run Cargo, format, stage or revert concurrent changes.

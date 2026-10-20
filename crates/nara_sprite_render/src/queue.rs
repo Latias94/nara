@@ -22,19 +22,20 @@ pub fn queue_sprites(
     stats.unprepared_textures = 0;
     stats.invalid_texture_regions = 0;
 
-    let queueable_sprites = resolve_queueable_sprites(
+    for queueable in resolve_queueable_sprites(
         extracted.as_slice().iter(),
         prepared_images.as_deref(),
         &mut stats,
-    );
-
-    for (view_index, view) in views.as_slice().iter().enumerate() {
-        for queueable in &queueable_sprites {
+    ) {
+        for (view_index, view) in views.as_slice().iter().enumerate() {
             let Some(instance) =
                 project_sprite_to_view_with_uv(view, queueable.sprite, queueable.uv)
             else {
                 continue;
             };
+            if !clip_quad_may_intersect(&instance) {
+                continue;
+            }
 
             queued.push(QueuedSpriteItem {
                 entity: queueable.sprite.entity,
@@ -121,6 +122,27 @@ pub fn world_to_clip_instance_with_uv(
     })
 }
 
+fn clip_quad_may_intersect(instance: &SpriteInstance) -> bool {
+    // Use the same clip-space coefficients that the backend uploads. Material resolution has
+    // already run; invisible geometry must not hide invalid UVs or missing prepared resources.
+    let magnitude = instance.center.abs() + instance.x_axis.abs() + instance.y_axis.abs();
+    if !magnitude.is_finite() {
+        return true;
+    }
+
+    let axis_intersects = |center: f32, x_axis: f32, y_axis: f32| {
+        let center = f64::from(center);
+        let radius = f64::from(x_axis).abs() + f64::from(y_axis).abs();
+        // The vertex shader adds center + x_axis * sign + y_axis * sign in f32. Exact AABBs
+        // alone can exclude vertices moved inward by cancellation. Cover both additions and
+        // their rounding without assuming a viewport size or an unimplemented pixel-snap mode.
+        let margin = 8.0 * f64::from(f32::EPSILON) * (center.abs() + radius + 1.0);
+        center + radius + margin >= -1.0 && center - radius - margin <= 1.0
+    };
+    axis_intersects(instance.center.x, instance.x_axis.x, instance.y_axis.x)
+        && axis_intersects(instance.center.y, instance.x_axis.y, instance.y_axis.y)
+}
+
 #[must_use]
 pub fn build_sprite_batches(items: &[QueuedSpriteItem]) -> Vec<SpriteBatch> {
     let mut batches = Vec::<SpriteBatch>::new();
@@ -195,23 +217,21 @@ struct QueueableSprite<'a> {
 }
 
 fn resolve_queueable_sprites<'a>(
-    sprites: impl Iterator<Item = &'a ExtractedSprite>,
-    prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
-    stats: &mut SpriteRenderStats,
-) -> Vec<QueueableSprite<'a>> {
-    sprites
-        .filter_map(|sprite| {
-            resolve_sprite_material(sprite, prepared_images, stats).map(
-                |(material, image, material_extension, uv)| QueueableSprite {
-                    sprite,
-                    material,
-                    image,
-                    material_extension,
-                    uv,
-                },
-            )
-        })
-        .collect()
+    sprites: impl Iterator<Item = &'a ExtractedSprite> + 'a,
+    prepared_images: Option<&'a PreparedRenderResources<PreparedImageResource>>,
+    stats: &'a mut SpriteRenderStats,
+) -> impl Iterator<Item = QueueableSprite<'a>> + 'a {
+    sprites.filter_map(move |sprite| {
+        resolve_sprite_material(sprite, prepared_images, stats).map(
+            |(material, image, material_extension, uv)| QueueableSprite {
+                sprite,
+                material,
+                image,
+                material_extension,
+                uv,
+            },
+        )
+    })
 }
 
 fn resolve_sprite_material(

@@ -28,6 +28,8 @@ use nara_sprite::{Sprite, TextureRegion};
 use nara_tilemap::{TileAtlasLayout, TileCell, TileCoord, TileIndex, TileSet, Tilemap};
 use nara_transform::{GlobalTransform2d, Transform2d, TransformPlugin};
 
+mod visibility;
+
 fn test_view() -> ExtractedView {
     ExtractedView {
         camera_entity: Entity::PLACEHOLDER,
