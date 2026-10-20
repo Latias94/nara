@@ -22,6 +22,30 @@ Windows-only, with the portable close/admission case and Unix fail-closed orphan
 The focused Windows cohort passes all eight tests (`318c24ec-4f50-4f3e-a475-1de0fcb2a1f9`); the
 Linux test target cross-check also passes. These local results do not substitute for hosted CI.
 
+Run `39414102233` at `da76a21` passes the three portable wasm checks and the Linux independent
+consumer job. Linux reference-game passes 83 default tests, then exposes a production issue in
+all-feature external Play/Stop: probing every `/proc` PID through `rustix::getpgid` encounters a
+valid zero process-group result and aborts on its nonzero-ID assertion. The same upstream API
+can construct an invalid nonzero value in optimized builds; upgrading or selecting its libc
+backend does not resolve [rustix issue 1696](https://github.com/bytecodealliance/rustix/issues/1696).
+Use a narrow signed-result OS query that distinguishes failure, zero and positive group IDs.
+Keep the owned positive group, unreaped leader reservation, descendant observation and physical
+reaping contract. This production defect must be repaired rather than excluding its test.
+
+The same run's Linux root suite passes the previously repaired custody admission case, then
+exposes a nondeterministic identity-replacement fixture. Removing the old file before recreating
+identical bytes permits the filesystem to reuse its inode, as ADR 0070 explicitly allows. Retain
+the old object under another name before creating the replacement, so the test actually supplies
+a different live native identity. Keep the original identity-rejection and unchanged-workspace
+assertions. This fixture correction does not upgrade source-index values to persistent identity
+or silently change the admission contract.
+
+Local qualification of the signed query builds its exact private source for Linux musl in debug
+and optimized modes: three tests pass in each actual WSL execution. A separate temporary caller
+of the same source scans the real `/proc` and safely observes two zero-group records. Six existing
+Windows supervised-process capture/flood/force-kill/exit/descendant tests pass. These bounded
+results and source review do not replace hosted Linux external Play/Stop and descendant coverage.
+
 ## Ordered Corrections
 
 - Implement Linux enumeration behind the existing capability owner using `rustix::fs::Dir` and
@@ -34,6 +58,11 @@ Linux test target cross-check also passes. These local results do not substitute
   Do not upgrade Linux publication guarantees or silently suppress its failure.
 - Scope exact-discard recovery tests to their required Windows capability. Preserve portable
   admission and Unix recoverable-orphan coverage rather than pretending cleanup completed.
+- Admit signed Linux process-group query results before converting to a nonzero ID; zero means
+  no membership in the owned positive group. Preserve query errors and the existing process-group
+  signaling/leader reservation contract. Qualify the exact query source and actual Play/Stop.
+- Make identity-replacement test inputs deterministic by retaining the old object before creating
+  the replacement; preserve complete rejection and workspace-state assertions across platforms.
 - Format independent workspaces and refresh only required lockfile dependency edges.
 - Reconcile the stale exact fixture dependency policy with its existing dev-only component
   integration consumer. Keep the library's direct-domain dependencies and explicit facade features.

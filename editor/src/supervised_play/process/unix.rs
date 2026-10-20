@@ -1,5 +1,8 @@
 use std::io;
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+mod process_group;
+
 use nara::fs::RestrictiveCapabilityHandleLease;
 
 use super::{
@@ -36,9 +39,7 @@ use std::{
 use rustix::{
     event::{PollFd, PollFlags, poll},
     fs::{OFlags, fcntl_getfl, fcntl_setfl},
-    process::{
-        Pid, Signal, WaitId, WaitIdOptions, WaitIdStatus, getpgid, kill_process_group, waitid,
-    },
+    process::{Pid, Signal, WaitId, WaitIdOptions, WaitIdStatus, kill_process_group, waitid},
 };
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -896,10 +897,11 @@ fn process_group_has_other_members(process_group: Pid) -> io::Result<bool> {
         let Some(pid) = Pid::from_raw(raw_pid) else {
             continue;
         };
-        match getpgid(Some(pid)) {
-            Ok(group) if group == process_group => return Ok(true),
-            Ok(_) | Err(rustix::io::Errno::SRCH) => {}
-            Err(error) => return Err(error.into()),
+        match process_group::query(pid.as_raw_pid()) {
+            Ok(Some(group)) if group.get() == leader => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.raw_os_error() == Some(rustix::io::Errno::SRCH.raw_os_error()) => {}
+            Err(error) => return Err(error),
         }
     }
     Ok(false)

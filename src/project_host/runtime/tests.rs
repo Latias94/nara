@@ -3644,7 +3644,12 @@ fn indexed_document_admission_rejections_leave_the_workspace_unchanged() {
         ]
     );
 
-    fs::remove_file(project.root.join("scenes/external.scene.json")).unwrap();
+    // Keep the old object alive so the replacement cannot reuse its native identity.
+    fs::rename(
+        project.root.join("scenes/external.scene.json"),
+        project.root.join("scenes/previous.scene.json"),
+    )
+    .unwrap();
     fs::write(
         project.root.join("scenes/external.scene.json"),
         SceneDocument::default().to_json_string().unwrap(),
@@ -3760,7 +3765,12 @@ fn project_browser_rejects_unindexed_and_identity_replaced_sources_before_open()
     );
 
     let current = editor.drive_editor_frame(Duration::ZERO);
-    fs::remove_file(project.root.join("scenes/external.scene.json")).unwrap();
+    // Keep the old object alive so the replacement cannot reuse its native identity.
+    fs::rename(
+        project.root.join("scenes/external.scene.json"),
+        project.root.join("scenes/previous.scene.json"),
+    )
+    .unwrap();
     fs::write(
         project.root.join("scenes/external.scene.json"),
         SceneDocument::default().to_json_string().unwrap(),

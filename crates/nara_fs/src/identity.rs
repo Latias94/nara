@@ -22,8 +22,10 @@ impl CapabilityGeneration {
 
 /// Live-object identity scoped to one capability session and generation.
 ///
-/// This value is suitable for expected-object checks while its capability
-/// session remains alive. It is not a persistent project or trust identity.
+/// This value is suitable for expected-object checks while the observed object remains alive
+/// within its capability session and generation. A live root/session alone does not retain a
+/// previously opened leaf: native IDs may be reused after that object is deleted and closed.
+/// This is not a persistent project, trust identity, or proof of replacement history.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FileIdentity {
     session: CapabilitySessionId,
