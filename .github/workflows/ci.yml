@@ -108,10 +108,11 @@ jobs:
       - name: Test root workspace
         shell: bash
         run: |
-          cargo nextest run --workspace --locked --test-threads=1 --no-fail-fast
           if [[ "$RUNNER_OS" == "Linux" ]]; then
+            NARA_WGPU_FORCE_FALLBACK=1 xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" cargo nextest run --workspace --locked --test-threads=1 --no-fail-fast
             NARA_WGPU_FORCE_FALLBACK=1 xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" cargo nextest run --workspace --locked --all-features --test-threads=1 --no-fail-fast
           else
+            cargo nextest run --workspace --locked --test-threads=1 --no-fail-fast
             NARA_WGPU_FORCE_FALLBACK=1 cargo nextest run --workspace --locked --all-features --test-threads=1 --no-fail-fast
           fi
       - name: Test production Dear renderer adapter
