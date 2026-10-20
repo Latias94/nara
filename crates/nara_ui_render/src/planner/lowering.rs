@@ -316,15 +316,18 @@ fn append_glyphs(
         else {
             continue;
         };
-        let Some(baseline) = context
-            .environment
-            .content_transform()
-            .authored_to_physical(UiPoint::new(origin.x() + glyph.x(), origin.y() + glyph.y()))
-        else {
-            continue;
-        };
-        let baseline_x = snap_physical_coordinate(baseline.x());
-        let baseline_y = snap_physical_coordinate(baseline.y());
+        // A baseline may lie outside the surface while its glyph ink remains visible. Map paint
+        // coordinates without the hit-test bounds check, then clip the complete raster below.
+        let transform = context.environment.content_transform();
+        let physical_origin = transform.physical_content_origin();
+        let scale = transform.content_scale_factor();
+        let baseline_x = physical_origin.x() + (origin.x() + glyph.x()) * scale;
+        let baseline_y = physical_origin.y() + (origin.y() + glyph.y()) * scale;
+        if !baseline_x.is_finite() || !baseline_y.is_finite() {
+            return Err(UiPresentationContentError::ArithmeticOverflow);
+        }
+        let baseline_x = snap_physical_coordinate(baseline_x);
+        let baseline_y = snap_physical_coordinate(baseline_y);
         let width_i32 =
             i32::try_from(width).map_err(|_| UiPresentationContentError::ArithmeticOverflow)?;
         let height_i32 =

@@ -10,12 +10,12 @@ use nara_image::{
     PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash, image_resource_key,
 };
 use nara_render::{RenderResourceKey, RenderResourceKind, RenderResourceSnapshot, RenderTarget};
-use nara_text::{FontFace, bundled_font_face};
+use nara_text::{FontFace, TextEngine, bundled_font_face};
 use nara_ui_kernel::{
     UiAuthoringSnapshotBuilder, UiBorder, UiBrush, UiColor, UiCompiler, UiCornerRadii, UiEdges,
-    UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiOverflow, UiPaintPrimitive, UiRoot,
-    UiRootKey, UiSafeAreaInsets, UiSize, UiStyle, UiSurfaceContentTransform, UiSurfaceGenerations,
-    UiSurfaceId, UiText, UiTextOverflow, UiTheme, UiThemePalette, UiVisual,
+    UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiOverflow, UiPaintPrimitive, UiPoint,
+    UiRoot, UiRootKey, UiSafeAreaInsets, UiSize, UiStyle, UiSurfaceContentTransform,
+    UiSurfaceGenerations, UiSurfaceId, UiText, UiTextOverflow, UiTheme, UiThemePalette, UiVisual,
 };
 use nara_window::WindowId;
 
@@ -441,6 +441,128 @@ fn packet_lowering_uses_the_exact_letterboxed_surface_transform() {
         }
         UiPacketPrimitive::Rect { .. } => false,
     }));
+}
+
+#[test]
+fn visible_glyph_ink_survives_a_baseline_outside_the_surface() {
+    let surface = UiSurfaceId::new(1).unwrap();
+    let direct = UiEnvironment::new(surface, 100.0, 100.0, 1.0, 1, 1, 1, 1).unwrap();
+    let letterboxed = UiEnvironment::for_surface(
+        surface,
+        UiSurfaceContentTransform::new(
+            UiSize::new(100.0, 100.0).unwrap(),
+            UiSize::new(340.0, 225.0).unwrap(),
+            UiSafeAreaInsets::new(10.0, 0.0, 10.0, 0.0).unwrap(),
+            1.25,
+        )
+        .unwrap(),
+        UiSurfaceGenerations::new(1, 1, 1, 1).unwrap(),
+        1,
+        1,
+    )
+    .unwrap();
+
+    for environment in [direct, letterboxed] {
+        let node_at = |top| {
+            UiNode::new(UiStyle::absolute(10.0, top, 60.0, 32.0))
+                .with_key(UiLocalKey::runtime("packet-test", "bottom-edge-text").unwrap())
+                .with_text(UiText::new("M", 16.0).unwrap())
+        };
+        let probe = frame_with_environment(1, vec![node_at(0.0)], environment);
+        let UiPaintPrimitive::Text { layout, .. } = &probe.paint()[0] else {
+            panic!("the probe must compile display text")
+        };
+        assert_eq!(layout.glyphs().len(), 1);
+        let transform = environment.content_transform();
+        let scale = transform.content_scale_factor();
+        let authored_height = transform.authored_logical_size().height();
+        let top = authored_height - layout.glyphs()[0].y() + 0.5 / scale;
+        let candidate = frame_with_environment(2, vec![node_at(top)], environment);
+        assert!(candidate.diagnostics().is_empty());
+        let UiPaintPrimitive::Text { rect, layout, .. } = &candidate.paint()[0] else {
+            panic!("partially visible text must remain in the compiled frame")
+        };
+        let glyph = &layout.glyphs()[0];
+        let glyph_y = glyph.y();
+        let baseline = UiPoint::new(rect.origin().x() + glyph.x(), rect.origin().y() + glyph.y());
+        assert!(baseline.y() >= authored_height);
+        assert!(transform.authored_to_physical(baseline).is_none());
+        let mut text = TextEngine::new(bundled_font_face().unwrap(), Default::default()).unwrap();
+        let raster = text.rasterize(glyph.key()).unwrap();
+        assert!(raster.width() > 0 && raster.height() > 0);
+        let physical_baseline_x =
+            (transform.physical_content_origin().x() + baseline.x() * scale).round() as i32;
+        let physical_baseline_y =
+            (transform.physical_content_origin().y() + baseline.y() * scale).round() as i32;
+        let visible = environment.physical_rect(*rect).unwrap();
+        let has_visible_ink = raster.mask().iter().enumerate().any(|(index, alpha)| {
+            let x = physical_baseline_x + raster.left() + (index % raster.width() as usize) as i32;
+            let y = physical_baseline_y - raster.top() + (index / raster.width() as usize) as i32;
+            *alpha != 0
+                && x >= visible.min_x()
+                && x < visible.max_x()
+                && y >= visible.min_y()
+                && y < visible.max_y()
+        });
+        assert!(
+            has_visible_ink,
+            "the regression must contain real visible raster ink"
+        );
+        let physical_bottom = (transform.physical_content_origin().y()
+            + transform.physical_content_size().height())
+        .round() as i32;
+        assert!(physical_baseline_y >= physical_bottom);
+        let packet = UiPresentationPlanner::default()
+            .plan(
+                candidate,
+                RenderTarget::Window(WindowId::PRIMARY),
+                &UiPreparedImages::default(),
+            )
+            .unwrap();
+        assert!(
+            packet.primitives().iter().any(|primitive| match primitive {
+                UiPacketPrimitive::Glyph {
+                    rect,
+                    clip: Some(clip),
+                    ..
+                } => {
+                    rect.min_y() < physical_bottom
+                        && rect.max_y() > clip.min_y()
+                        && clip.min_y() < physical_bottom
+                        && clip.max_y() == physical_bottom
+                }
+                _ => false,
+            }),
+            "visible ink must produce a glyph clipped at the surface edge"
+        );
+
+        let outside_top = authored_height - glyph_y + (raster.top() + 2) as f32 / scale;
+        assert!(
+            outside_top < authored_height,
+            "the outside glyph's node still intersects the surface"
+        );
+        let outside = frame_with_environment(3, vec![node_at(outside_top)], environment);
+        let UiPaintPrimitive::Text { rect, layout, .. } = &outside.paint()[0] else {
+            panic!("the outside glyph must still reach packet clipping")
+        };
+        assert!(environment.physical_rect(*rect).is_some());
+        let outside_baseline = transform.physical_content_origin().y()
+            + (rect.origin().y() + layout.glyphs()[0].y()) * scale;
+        assert!(outside_baseline.round() as i32 - raster.top() >= physical_bottom);
+        let outside_packet = UiPresentationPlanner::default()
+            .plan(
+                outside,
+                RenderTarget::Window(WindowId::PRIMARY),
+                &UiPreparedImages::default(),
+            )
+            .unwrap();
+        assert!(
+            outside_packet
+                .primitives()
+                .iter()
+                .all(|primitive| !matches!(primitive, UiPacketPrimitive::Glyph { .. }))
+        );
+    }
 }
 
 #[test]
