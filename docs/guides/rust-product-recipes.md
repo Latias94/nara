@@ -201,7 +201,9 @@ let report = headless.execute_bounded();
 
 With the corresponding features enabled, use `DesktopRun::from_recipe(project_root, recipe()?)`
 for the first-party desktop Host. Ordinary generic Editor opening reads the declared authoring
-bundle and does not accept or load the game's native recipe. An engine integration that explicitly
+bundle and does not accept or load the game's native recipe. A user-selected local workspace uses
+cooperative `ReadWrite + TrustedLocal` filesystem authority for cross-platform Save, independently
+of this data-only Open and explicit project-code execution policy. An engine integration that explicitly
 needs trusted in-process execution uses
 `TrustedCompiledEditorProjectIntent::new().with_recipe(recipe()?)` with the trusted compiled
 Editor entry. This is an advanced placement boundary, not the ordinary generic authoring path.

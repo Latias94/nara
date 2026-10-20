@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-20 (ordinary structural transactions and operation-relative preservation)
+**Last Revised**: 2026-10-20 (ordinary structure, operation-relative preservation and local-workspace filesystem policy)
 **Owner**: Private Editor product, tooling, reflection and Scene/Prefab document owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -31,6 +31,27 @@ Document mutation remains revision-based; geometric input remains bound to the a
 No universal widget tree, generic command transport, parallel undo system or Editor kernel crate is required.
 Future custom UI reuses these semantic boundaries and render-view handoff, but may replace all widget, layout, focus and docking code.
 Sharing rendering does not require sharing the runtime game's complete UI toolkit.
+
+### Native local workspaces use cooperative filesystem authority
+
+When a user selects a local project through the native launch configuration or Project Manager,
+the native Host issues one `ReadWrite + TrustedLocal` project-root capability on every platform.
+Initial Open, replacement and the explicitly compiled companion use this same filesystem policy;
+the Host does not infer trust from the operating system or retry a refused strict write at a weaker
+tier. This is the local developer-workspace contract permitted by
+[ADR 0070](0070-capability-oriented-filesystem-substrate.md).
+
+Save retains capability-bound access, identity/digest checks, atomic name publication and the
+existing receipt-bound acknowledgement. Concurrent non-cooperating writers can still race a
+name-bound replacement; conflict detection does not promise atomic prevention of every overwrite.
+Receipts retain the actual platform guarantees. Linux replacement remains `NameBound`, and Unix
+temporary-file discard can remain unsupported with a recoverable orphan.
+
+This filesystem choice grants no project-code execution permission. Ordinary Open remains
+data-only; Play and trusted compiled integration retain their separate explicit admission.
+Lower Hosts continue to honor caller-issued `Untrusted` and `Recovery` capabilities without
+conversion. Their unsupported strict operations still fail closed under ADR 0070. Frontends and
+project content cannot widen these capabilities or select filesystem trust.
 
 ### Panels, layouts and render views are distinct
 

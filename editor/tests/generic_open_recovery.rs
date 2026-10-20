@@ -13,7 +13,8 @@ use std::{
 #[cfg(windows)]
 use nara::tooling::{
     EditorDocumentKind, EditorDocumentOpenResult, EditorProjectBrowserAction,
-    EditorProjectBrowserStatus, EditorProjectSourceKind,
+    EditorProjectBrowserStatus, EditorProjectSourceInspectReason, EditorProjectSourceKind,
+    EditorProjectSourceOpenCapability,
 };
 use nara::{
     fs::ContentDigest,
@@ -69,14 +70,27 @@ fn standalone_project_browser_opens_external_documents_and_retains_last_good_ref
         "media/icon.png.meta",
         EditorProjectSourceKind::AssetMeta,
     );
+    // Local cooperative browsing admits hard links without granting document or import authority.
     for path in ["media/linked.bin", "media/linked-copy.bin"] {
-        assert_browser_entry(initial, path, EditorProjectSourceKind::Unsupported);
+        assert_browser_entry(initial, path, EditorProjectSourceKind::AssetSource);
     }
-    assert!(initial.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == "project.source-index.entry-unsupported"
-            && diagnostic
-                .relative_source()
-                .is_some_and(|path| path.starts_with("media/linked"))
+    for path in [
+        "media/icon.png",
+        "media/icon.png.meta",
+        "media/linked.bin",
+        "media/linked-copy.bin",
+    ] {
+        assert_eq!(
+            initial.entry(path).unwrap().open_capability(),
+            EditorProjectSourceOpenCapability::InspectOnly(
+                EditorProjectSourceInspectReason::ReadOnlySource
+            )
+        );
+    }
+    assert!(!initial.diagnostics().iter().any(|diagnostic| {
+        diagnostic
+            .relative_source()
+            .is_some_and(|path| path.starts_with("media/linked"))
     }));
     assert_browser_entry(initial, "scripts/tool.rs", EditorProjectSourceKind::Script);
     assert_browser_entry(

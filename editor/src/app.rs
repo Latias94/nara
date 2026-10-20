@@ -63,6 +63,10 @@ pub struct EditorLaunchOptions {
 }
 
 impl EditorLaunchOptions {
+    /// Opens an explicitly selected local workspace for cooperative reads and writes.
+    ///
+    /// The native Host issues `TrustedLocal` filesystem authority on every platform. This does
+    /// not authorize project-code execution; ordinary Open remains data-only.
     #[must_use]
     pub fn new(project_root: impl Into<PathBuf>) -> Self {
         Self {
@@ -2012,24 +2016,12 @@ pub(crate) fn open_project_root(
         })?;
     DirectoryCapability::from_host_handle(
         file,
-        HostCapabilityOptions::new(CapabilityRights::ReadWrite, portable_project_root_trust()),
+        HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
     )
     .map_err(|source| EditorApplicationOpenError::ProjectRootCapability {
         path: path.to_path_buf(),
         source,
     })
-}
-
-fn portable_project_root_trust() -> TrustMode {
-    #[cfg(any(windows, target_os = "linux"))]
-    {
-        TrustMode::Untrusted
-    }
-
-    #[cfg(not(any(windows, target_os = "linux")))]
-    {
-        TrustMode::TrustedLocal
-    }
 }
 
 #[cfg(windows)]
@@ -2059,11 +2051,7 @@ mod persistence_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        EditorApplicationOpenError, portable_project_root_trust, root_error_code,
-        root_error_summary,
-    };
-    use nara::fs::TrustMode;
+    use super::{EditorApplicationOpenError, root_error_code, root_error_summary};
     use std::{io, path::PathBuf};
 
     #[test]
@@ -2086,13 +2074,17 @@ mod tests {
         assert!(!root_error_summary(&error).contains(private_path.as_ref()));
     }
 
+    #[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
     #[test]
-    fn ordinary_project_roots_use_the_portable_strict_trust_policy() {
-        #[cfg(any(windows, target_os = "linux"))]
-        assert_eq!(portable_project_root_trust(), TrustMode::Untrusted);
+    fn selected_local_workspace_root_admits_cooperative_publication() {
+        use nara::fs::{CapabilityRights, ExpectedTarget, TrustMode};
 
-        #[cfg(not(any(windows, target_os = "linux")))]
-        assert_eq!(portable_project_root_trust(), TrustMode::TrustedLocal);
+        let root = super::open_project_root(std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
+            .expect("the selected local workspace receives a real root capability");
+        assert_eq!(root.options().rights(), CapabilityRights::ReadWrite);
+        assert_eq!(root.options().trust(), TrustMode::TrustedLocal);
+        root.preflight_replace(ExpectedTarget::Any)
+            .expect("the local workspace must admit the platform's cooperative replacement tier");
     }
 
     #[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
