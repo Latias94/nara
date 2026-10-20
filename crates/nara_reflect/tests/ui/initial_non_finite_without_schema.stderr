@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: authoring initial float must be finite for its field type
+  --> tests/ui/initial_non_finite_without_schema.rs:16:53
+   |
+16 |     #[nara(id = "value", alias = "Value", initial = 1e100)]
+   |                                                     ^^^^^ evaluation of `_` failed here

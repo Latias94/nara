@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: range bounds must be finite for their field type
+  --> tests/ui/range_integer_float_suffix.rs:15:65
+   |
+15 |     #[nara(id = "value", alias = "Value", range(max_inclusive = 1000000000000000000000000000000000000000f32))]
+   |                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed here

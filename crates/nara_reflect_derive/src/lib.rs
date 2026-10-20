@@ -16,6 +16,8 @@ use syn::{
 /// integer and finite float literals, including negative numeric literals. Rust checks
 /// each literal against its field type. Expressions, callbacks and aggregate values are
 /// intentionally unsupported. Creation metadata never supplies missing decode fields.
+/// Float initial values and range bounds are checked for finiteness during `cargo check`,
+/// using the actual field type even through aliases and associated types.
 #[proc_macro_derive(PersistentComponent, attributes(nara))]
 pub fn derive_persistent_component(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -205,6 +207,7 @@ fn expand_persistent_component(input: DeriveInput) -> Result<TokenStream2> {
 
     let support = support_path(args.crate_path)?;
     let name = input.ident;
+    let finite_literal_checks = finite_literal_checks(&name, &persistent_fields);
     let primary_alias = &args.aliases[0];
     let additional_aliases = alias_extension(&args.aliases[1..]);
     let component_capability_tokens = component_capabilities
@@ -218,22 +221,13 @@ fn expand_persistent_component(input: DeriveInput) -> Result<TokenStream2> {
         let values = persistent_fields.iter().map(|field| {
             let id = &field.id;
             let ty = &field.ty;
-            let initial = field.initial.as_ref().expect("creation fields were validated");
+            let initial = field
+                .initial
+                .as_ref()
+                .expect("creation fields were validated");
             let value = match initial {
                 Expr::Lit(literal) if matches!(literal.lit, Lit::Str(_)) => {
                     quote!(::std::string::String::from(#initial))
-                }
-                _ if matches!(initial_scalar_literal(initial), Ok(literal) if is_float_literal(literal)) => {
-                    quote! {
-                        const {
-                            let initial_value: #ty = #initial;
-                            assert!(
-                                initial_value.is_finite(),
-                                "authoring initial float must be finite for its field type"
-                            );
-                            initial_value
-                        }
-                    }
                 }
                 _ => quote!(#initial),
             };
@@ -275,6 +269,8 @@ fn expand_persistent_component(input: DeriveInput) -> Result<TokenStream2> {
     });
 
     Ok(quote! {
+        #finite_literal_checks
+
         impl #support::PersistentComponentProvider for #name {
             fn persistent_component_schema() -> #support::ComponentSchema {
                 #support::ComponentSchema::new(
@@ -520,6 +516,51 @@ fn is_float_literal(literal: &Lit) -> bool {
     }
 }
 
+fn finite_literal_checks(name: &Ident, fields: &[PersistentField]) -> TokenStream2 {
+    let mut checks = TokenStream2::new();
+    for field in fields {
+        if let Some(initial) = &field.initial {
+            checks.extend(finite_literal_check(
+                name,
+                &field.ident,
+                initial,
+                "authoring initial float must be finite for its field type",
+            ));
+        }
+        if let Some(range) = &field.range {
+            for (_, value) in [range.min.as_ref(), range.max.as_ref()]
+                .into_iter()
+                .flatten()
+            {
+                checks.extend(finite_literal_check(
+                    name,
+                    &field.ident,
+                    value,
+                    "range bounds must be finite for their field type",
+                ));
+            }
+        }
+    }
+    checks
+}
+
+fn finite_literal_check(name: &Ident, field: &Ident, value: &Expr, message: &str) -> TokenStream2 {
+    if !matches!(initial_scalar_literal(value), Ok(literal) if is_float_literal(literal)) {
+        return TokenStream2::new();
+    }
+    // The unselected field access preserves its actual Rust type, including aliases and Self.
+    // An item-level constant is evaluated by cargo check even when no schema is constructed.
+    quote_spanned! {value.span()=>
+        const _: () = {
+            let value = match ::core::option::Option::<&#name>::None {
+                ::core::option::Option::Some(component) => component.#field,
+                ::core::option::Option::None => #value,
+            };
+            ::core::assert!(value.is_finite(), #message);
+        };
+    }
+}
+
 fn parse_capabilities(meta: syn::meta::ParseNestedMeta<'_>) -> Result<Vec<Capability>> {
     let mut capabilities = BTreeSet::new();
     meta.parse_nested_meta(|nested| {
@@ -574,16 +615,13 @@ fn field_schema(field: &PersistentField, support: &TokenStream2) -> TokenStream2
         let bound_tokens = |bound: &Option<(bool, Expr)>| match bound {
             None => quote!(::core::option::Option::None),
             Some((inclusive, value)) => {
-                let variant = if *inclusive { format_ident!("Included") } else { format_ident!("Excluded") };
-                let checked = if matches!(initial_scalar_literal(value), Ok(literal) if is_float_literal(literal)) {
-                    quote! { const {
-                        let bound: #ty = #value;
-                        assert!(bound.is_finite(), "range bounds must be finite for their field type");
-                        bound
-                    } }
-                } else { quote!(#value) };
+                let variant = if *inclusive {
+                    format_ident!("Included")
+                } else {
+                    format_ident!("Excluded")
+                };
                 quote!(::core::option::Option::Some(#support::ComponentNumericBound::#variant({
-                    let bound: #ty = #checked;
+                    let bound: #ty = #value;
                     bound
                 })))
             }

@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: range bounds must be finite for their field type
+  --> tests/ui/range_alias_overflow.rs:20:65
+   |
+20 |     #[nara(id = "value", alias = "Value", range(max_inclusive = 1e100))]
+   |                                                                 ^^^^^ evaluation of `_` failed here
