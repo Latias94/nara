@@ -108,3 +108,7 @@ custody contract does not prove that its current execution mechanism or worker a
 No replacement scheduler, generic executor trait, larger thread budget or new public async API is
 selected here. The open question is measured execution reuse **under the existing product custody
 contract**, not whether two package names look redundant.
+
+The subsequent [execution baseline](2026-10-21-task-execution-baseline.md) extends feature tracing to
+four product graphs and records actual Windows thread attribution. Its execution-budget plan owns
+the remaining owner/workload measurements and controlled corrections.

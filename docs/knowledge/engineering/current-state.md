@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "6650e47f1fc96ce522a3e3a8b88d61c2d29817c4d90a315ecb68e9cd4f7069c9"
+source_fingerprint: "53807a67a0c148cd83412715ee8ec1b17940b91359d87e5d216d11666416af0e"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "6650e47f1fc96ce522a3e3a8b88d61c2d29817c4d90a315ecb68e9cd4f7
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `6650e47f1fc96ce522a3e3a8b88d61c2d29817c4d90a315ecb68e9cd4f7069c9`
-- Immutable records: 818
+- Source fingerprint: `53807a67a0c148cd83412715ee8ec1b17940b91359d87e5d216d11666416af0e`
+- Immutable records: 823
 - Active lane heads: 2
 
 # Active Registrations
@@ -49,7 +49,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
-- [Hosted Scene committed; two-level headless maintenance gap isolated](registry/2026-10/2026-10-20T191110Z-persistent-two-level-game-codex-root-8eff546032334342a5b19d09a8312574.md): `active` (persistent-two-level-game-codex-root; producer `codex-root`)
+- [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
 - [Production cost measurement and first lookup correction complete](registry/2026-10/2026-10-20T081325Z-production-cost-measurement-codex-root-a439516aacba454aaecf22824bfe3635.md): `complete` (production-cost-measurement-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
@@ -61,10 +61,14 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Scalar preparation locality completed](registry/2026-10/2026-10-20T090441Z-scalar-preparation-locality-codex-root-598f1d3571a64d4c9dd5897e55337e37.md): `completed` (scalar-preparation-locality-codex-root; producer `codex-root`)
 - [Standalone Generic Editor: SGE complete; no successor active](registry/2026-08/2026-08-19T111039Z-standalone-generic-editor-open-recovery-codex-root-931591fb6d2b4bcbad3151922814d8e6.md): `completed` (standalone-generic-editor-open-recovery-codex-root; producer `codex-root`)
 - [Standalone Supervised Play transferred to 2D foundation refactor](registry/2026-10/2026-10-15T091614Z-standalone-supervised-play-v1-codex-root-d7cca2f42c6d4e07b762475aced7eb44.md): `closed` (standalone-supervised-play-v1-codex-root; producer `codex-root`)
+- [Task execution baseline recorded; owner workload attribution next](registry/2026-10/2026-10-21T032635Z-task-execution-budget-codex-root-6ac0fffb15f5499b8c2a042b7f248f6d.md): `active` (task-execution-budget-codex-root; producer `codex-root`)
 - [Local CI contract and Linux Play corrections qualified](registry/2026-10/2026-10-20T153200Z-tile-locality-ci-portability-codex-root-0e48eb6544e04458a9d668699ed2ebd2.md): `active` (tile-locality-ci-portability-codex-root; producer `codex-root`)
 
 # Recent Evidence
 
+- **Session Handoff**: [Checkpoint consumer qualified; task execution budget is the next investigation](sessions/2026-10/2026-10-21T032454Z-checkpoint-consumer-qualified-task-execution-budget-is-the-next-investigation-8f7f1c5d412d4b25b72aeb16bd3bab9a.md) - Session Handoff for Checkpoint consumer qualified; task execution budget is the next investigation.
+- **Verification Evidence**: [Atomic API rename under MSRV and portable wasm](verification/2026-10/2026-10-21T032015Z-atomic-api-rename-under-msrv-and-portable-wasm-284fef97fc6c4a208f370262189bdc6b.md) - Verification Evidence for Atomic API rename under MSRV and portable wasm.
+- **Verification Evidence**: [Two-level checkpoint consumer and complete-frame headless qualification](verification/2026-10/2026-10-21T025657Z-two-level-checkpoint-consumer-and-complete-frame-headless-qualification-72c5ef2705f0461e90916bb60e1bb345.md) - Verification Evidence for Two-level checkpoint consumer and complete-frame headless qualification.
 - **Session Handoff**: [Hosted Scene committed and two-level consumer verification open](sessions/2026-10/2026-10-20T190703Z-hosted-scene-committed-and-two-level-consumer-verification-open-ac1d26bed07c4a4ba3ebb1fab17c5ac8.md) - Session Handoff for Hosted Scene committed and two-level consumer verification open.
 - **Verification Evidence**: [Hosted Scene residency and owned preparation qualification](verification/2026-10/2026-10-20T183137Z-hosted-scene-residency-and-owned-preparation-qualification-d8d63279f87c4b34bc83eeeccdc7550e.md) - Verification Evidence for Hosted Scene residency and owned preparation qualification.
 - **Verification Evidence**: [Current Scene ownership and decoded-generation custody qualification](verification/2026-10/2026-10-20T172653Z-current-scene-ownership-and-decoded-generation-custody-qualification-0bf781c53d9e4cc3950bfb77b98d2b8a.md) - Qualify the first P2 ownership slice and retain the concrete residency design limits.
@@ -74,9 +78,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Hosted CI contract corrections and signed Linux process groups](verification/2026-10/2026-10-20T115517Z-hosted-ci-contract-corrections-and-signed-linux-process-groups-b976e5720228491691361ab578614f12.md) - Observed hosted failures, signed process groups, native local-workspace policy and deterministic contract fixtures; full successor CI pending.
 - **Verification Evidence**: [Rust Play attribution and Windows Cargo input qualification](verification/2026-10/2026-10-20T112401Z-rust-play-attribution-and-windows-cargo-input-qualification-2abb1db859f04d848d88a1706ad167be.md) - Public Play/Restart, private native Cargo attribution, exact CLI cache interoperability and compiler failure recovery at the corrected Windows path boundary.
 - **Verification Evidence**: [CI portability and Tile locality qualification in progress](verification/2026-10/2026-10-20T102441Z-ci-portability-and-tile-locality-qualification-in-progress-b85485ff744b4ccf8d02562d94d50ce6.md) - Confirmed hosted failures, Linux capability enumeration, portable wasm compilation and measured per-view queue correction; final hosted and timing evidence pending.
-- **Verification Evidence**: [Browser preparation locality qualification](verification/2026-10/2026-10-20T095710Z-browser-preparation-locality-qualification-554a0c2edbfb455f84d4b32304446a2e.md) - Finite source-index workers and request-specific document Open with exact predecessor authority, physical retirement, public/native consumers and owner-occupancy measurements.
-- **Verification Evidence**: [Scalar preparation locality qualification](verification/2026-10/2026-10-20T090217Z-scalar-preparation-locality-qualification-7da17674f8c7464ea1612dc119686c45.md) - Field-only classification and conservative publication-shape reuse with exact validation, public timing and separate requested-allocation evidence.
-- **Verification Evidence**: [Production cost baselines and indexed authoring schema qualification](verification/2026-10/2026-10-20T081224Z-production-cost-baselines-and-indexed-authoring-schema-qualification-494a94898cf340b695e7332bbca06fc5.md) - Optimized public interaction, offscreen runtime and Rust iteration observations with exact schema lookup correction.
 
 # Integration Notes
 

@@ -71,6 +71,13 @@ their completion conditions do not automatically apply to later tasks.
 | Historical plan and verification lineage | [Engineering memory](../knowledge/engineering/index.md) and [UI plan history](../plans/ui-program-roadmap.md) |
 | Foundation audit corrections and follow-up triggers | [Foundation correction plan](../plans/2026-10-19-1335-refactor-foundation-correction-plan.md) maps A01-A09, B01-B14 and M01-M04 to ordered units and consumer/measurement gates |
 
+The [task execution baseline](../research/2026-10-21-task-execution-baseline.md) traces four actual
+Bevy feature unions and observes 50 Nara workers plus three custody threads in one idle Windows
+product. The [execution-budget plan](../plans/2026-10-21-task-execution-budget-plan.md) measures
+Editor owner multiplicity and real work before selecting worker-policy or feature changes.
+Dependency names alone do not establish duplicate execution, and this observation does not measure
+CPU, memory, build size or frame P99.
+
 ## Background Designs
 
 The [module and product-goal alignment review](../audits/2026-10-20-module-goal-alignment-review.md)
