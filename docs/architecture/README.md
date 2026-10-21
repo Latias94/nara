@@ -80,6 +80,11 @@ CPU, memory, build size or frame P99.
 
 ## Background Designs
 
+The [Rust authoring, reload, and ECS direction study](../research/2026-10-21-rust-authoring-reload-and-ecs-direction.md)
+compares pinned Bevy/Godot mechanisms, other mature engines, and the supplied `hotcode` article.
+It recommends a complete Rust path, the existing ECS substrate, measured rebuild/resume, and a
+bounded function-patching experiment. It selects no new runtime contract or dependency.
+
 The [module and product-goal alignment review](../audits/2026-10-20-module-goal-alignment-review.md)
 covers all 35 workspace packages against Strategy, existing research and pinned Bevy/Godot source.
 It records four concrete boundary repairs and their qualification, then orders the remaining work
