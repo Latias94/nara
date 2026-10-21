@@ -40,13 +40,43 @@ use crate::ProductRecipe;
 
 type TerminalPredicate<O> = Box<dyn Fn(&O) -> bool + Send + 'static>;
 
+#[derive(Debug, Clone, Copy)]
+enum HeadlessDrive {
+    ExactTicks(NonZeroU32),
+    Frames {
+        count: NonZeroU32,
+        real_delta: Duration,
+    },
+}
+
+impl HeadlessDrive {
+    fn count(self) -> u32 {
+        match self {
+            Self::ExactTicks(count) | Self::Frames { count, .. } => count.get(),
+        }
+    }
+
+    fn limit_report(self) -> DiagnosticReport {
+        match self {
+            Self::ExactTicks(_) => single_error(
+                "project.run.tick-limit",
+                "Headless project run reached its fixed-tick limit",
+            ),
+            Self::Frames { .. } => single_error(
+                "project.run.frame-limit",
+                "Headless project run reached its frame limit",
+            ),
+        }
+    }
+}
+
 /// File-backed headless run intent for one concrete product action.
 ///
 /// The recipe is the complete Rust product-composition input. Candidate, publication, and cleanup
 /// choreography remain private to the root Host.
 pub struct HeadlessRunIntent<O> {
     profile: Option<String>,
-    fixed_ticks: NonZeroU32,
+    drive: HeadlessDrive,
     cleanup_policy: RuntimeClosePolicy,
     recipe: ProductRecipe,
     terminal_predicate: Option<TerminalPredicate<O>>,
@@ -57,7 +87,7 @@ impl<O> fmt::Debug for HeadlessRunIntent<O> {
         formatter
             .debug_struct("HeadlessRunIntent")
             .field("profile_present", &self.profile.is_some())
-            .field("fixed_ticks", &self.fixed_ticks)
+            .field("drive", &self.drive)
             .field("cleanup_policy", &self.cleanup_policy)
             .field("recipe", &self.recipe)
             .field(
@@ -69,14 +99,32 @@ impl<O> fmt::Debug for HeadlessRunIntent<O> {
 }
 
 impl<O> HeadlessRunIntent<O> {
+    /// Runs exactly this many fixed transactions, without normal gameplay frame stages.
+    ///
+    /// Entering exact-step mode first runs one paused maintenance frame.
+    /// Use [`Self::frames`] when gameplay requires local input collection, background result
+    /// integration, variable updates or other normal frame work.
     #[must_use]
     pub fn new(fixed_ticks: NonZeroU32) -> Self {
         Self {
             profile: None,
-            fixed_ticks,
+            drive: HeadlessDrive::ExactTicks(fixed_ticks),
             cleanup_policy: RuntimeClosePolicy::default(),
             recipe: ProductRecipe::new(),
             terminal_predicate: None,
+        }
+    }
+
+    /// Runs complete managed frames with the supplied real elapsed time per frame.
+    ///
+    /// Runtime time scale, clamping and fixed catch-up policies apply normally. Each frame may
+    /// execute zero, one or multiple fixed ticks; zero real delta still runs frame maintenance.
+    /// Neither the frame count nor the delta bounds operating-system I/O or wall-clock duration.
+    #[must_use]
+    pub fn frames(count: NonZeroU32, real_delta: Duration) -> Self {
+        Self {
+            drive: HeadlessDrive::Frames { count, real_delta },
+            ..Self::new(count)
         }
     }
 
@@ -99,11 +147,11 @@ impl<O> HeadlessRunIntent<O> {
         self
     }
 
-    /// Stops after the first complete fixed tick whose typed outcome matches `predicate` or that
+    /// Stops after the first complete tick or frame whose typed outcome matches `predicate` or that
     /// publishes an application exit request.
     ///
-    /// `fixed_ticks` remains the hard maximum. Reaching it without a match fails the product action
-    /// with `project.run.tick-limit` and drives the same bounded shutdown path as other failures.
+    /// The selected tick/frame count remains the hard maximum. Reaching it without a match fails
+    /// with `project.run.tick-limit` or `project.run.frame-limit` and drives ordinary shutdown.
     #[must_use]
     pub fn stop_when(mut self, predicate: impl Fn(&O) -> bool + Send + 'static) -> Self {
         self.terminal_predicate = Some(Box::new(predicate));
@@ -1161,7 +1209,7 @@ where
         let PreparedStart {
             mut host,
             mut attempt,
-            fixed_ticks,
+            drive,
             terminal_predicate,
             plan_diagnostics,
             startup_content_closure,
@@ -1187,8 +1235,12 @@ where
         }
 
         let mut terminal_outcome = None;
-        for _ in 0..fixed_ticks.get() {
-            let app_exit = match host.drive_one_fixed_tick() {
+        for _ in 0..drive.count() {
+            let driven = match drive {
+                HeadlessDrive::ExactTicks(_) => host.drive_one_fixed_tick(),
+                HeadlessDrive::Frames { real_delta, .. } => host.drive_one_frame(real_delta),
+            };
+            let app_exit = match driven {
                 Ok(app_exit) => app_exit,
                 Err(fault) => {
                     self.diagnostics.extend(fault.diagnostics);
@@ -1226,10 +1278,7 @@ where
         let outcome = if let Some(outcome) = terminal_outcome {
             outcome
         } else if terminal_predicate.is_some() {
-            self.diagnostics.extend(single_error(
-                "project.run.tick-limit",
-                "Headless project run reached its fixed-tick limit",
-            ));
+            self.diagnostics.extend(drive.limit_report());
             if let Err(fault) = host.stop_running() {
                 self.diagnostics.extend(fault.diagnostics);
             }
@@ -1292,7 +1341,7 @@ struct HeadlessRunInputs<O> {
 struct PreparedStart<O> {
     host: ProjectHost,
     attempt: RuntimeStartAttempt,
-    fixed_ticks: NonZeroU32,
+    drive: HeadlessDrive,
     terminal_predicate: Option<TerminalPredicate<O>>,
     plan_diagnostics: DiagnosticReport,
     startup_content_closure: StartupContentClosureReceipt,
@@ -1369,7 +1418,7 @@ fn prepare_start<O>(
     } = inputs;
     let HeadlessRunIntent {
         profile,
-        fixed_ticks,
+        drive,
         cleanup_policy,
         recipe,
         terminal_predicate,
@@ -1386,7 +1435,7 @@ fn prepare_start<O>(
     Ok(PreparedStart {
         host: prepared.host,
         attempt: prepared.attempt,
-        fixed_ticks,
+        drive,
         terminal_predicate,
         plan_diagnostics: prepared.plan_diagnostics,
         startup_content_closure: prepared.startup_content_closure,

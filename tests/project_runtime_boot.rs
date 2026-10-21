@@ -997,6 +997,139 @@ fn product_action_stops_on_the_first_terminal_snapshot() {
     assert!(!report.diagnostics().has_errors());
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq, Resource)]
+struct FrameStages(Vec<&'static str>);
+
+#[derive(Debug, Default)]
+struct FrameStagesPlugin;
+
+impl Plugin for FrameStagesPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        const DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("nara.test.headless-frame-stages"),
+            PluginCategory::Runtime,
+        );
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.insert_resource(FrameStages::default())?
+            .add_systems(CoreStage::TaskUpdate, |mut stages: ResMut<FrameStages>| {
+                stages.0.push("task")
+            })?
+            .add_systems(CoreStage::PreUpdate, |mut stages: ResMut<FrameStages>| {
+                stages.0.push("pre")
+            })?
+            .add_systems(CoreStage::FixedUpdate, |mut stages: ResMut<FrameStages>| {
+                stages.0.push("fixed")
+            })?
+            .add_systems(CoreStage::Update, |mut stages: ResMut<FrameStages>| {
+                stages.0.push("update")
+            })?
+            .add_systems(CoreStage::Last, |mut stages: ResMut<FrameStages>| {
+                stages.0.push("last")
+            })?;
+        Ok(())
+    }
+}
+
+#[test]
+fn product_action_distinguishes_complete_frames_from_exact_fixed_ticks() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    for (intent, expected) in [
+        (
+            HeadlessRunIntent::new(NonZeroU32::new(2).unwrap()),
+            vec!["task", "last", "fixed", "fixed"],
+        ),
+        (
+            HeadlessRunIntent::frames(NonZeroU32::new(2).unwrap(), Duration::ZERO),
+            vec![
+                "task", "pre", "update", "last", "task", "pre", "update", "last",
+            ],
+        ),
+        (
+            HeadlessRunIntent::frames(NonZeroU32::new(1).unwrap(), Duration::from_millis(20)),
+            vec!["task", "pre", "fixed", "update", "last"],
+        ),
+    ] {
+        let recipe = ProductRecipe::new()
+            .add_plugin::<FrameStagesPlugin>()
+            .unwrap();
+        let mut run = HeadlessRun::<FrameStages>::new(
+            project.root_capability(),
+            intent.with_recipe(recipe),
+            Vec::new(),
+        );
+        let report = execute_to_terminal(&mut run);
+        assert_eq!(
+            report.outcome(),
+            &HeadlessRunOutcome::Completed(FrameStages(expected)),
+            "{report:#?}"
+        );
+    }
+}
+
+#[test]
+fn product_frame_action_observes_the_complete_terminal_frame() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let recipe = ProductRecipe::new()
+        .add_plugin::<FrameStagesPlugin>()
+        .unwrap();
+    let intent = HeadlessRunIntent::frames(NonZeroU32::new(4).unwrap(), Duration::ZERO)
+        .with_recipe(recipe)
+        .stop_when(|stages: &FrameStages| stages.0.len() >= 4);
+    let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
+    let report = execute_to_terminal(&mut run);
+    assert_eq!(
+        report.outcome(),
+        &HeadlessRunOutcome::Completed(FrameStages(vec!["task", "pre", "update", "last"]))
+    );
+}
+
+#[test]
+fn product_frame_action_preserves_zero_time_scale_while_advancing_frame_services() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let path = project.path().join("nara.toml");
+    let manifest = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        manifest.replace("[runtime]", "[runtime]\ntime_scale = 0.0"),
+    )
+    .unwrap();
+    let recipe = ProductRecipe::new()
+        .add_plugin::<FrameStagesPlugin>()
+        .unwrap();
+    let intent = HeadlessRunIntent::frames(NonZeroU32::new(1).unwrap(), Duration::from_secs(1))
+        .with_recipe(recipe);
+    let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
+    let report = execute_to_terminal(&mut run);
+    assert_eq!(
+        report.outcome(),
+        &HeadlessRunOutcome::Completed(FrameStages(vec!["task", "pre", "update", "last"]))
+    );
+}
+
+#[test]
+fn product_frame_action_reports_its_own_bound_without_a_terminal_match() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let intent = HeadlessRunIntent::frames(NonZeroU32::new(2).unwrap(), Duration::ZERO)
+        .with_recipe(boot_recipe())
+        .stop_when(|_: &BootOutcome| false);
+    let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
+    let report = execute_to_terminal(&mut run);
+    assert_eq!(report.outcome(), &HeadlessRunOutcome::Failed);
+    assert!(
+        report
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code().as_str() == "project.run.frame-limit")
+    );
+}
+
 #[test]
 fn product_action_propagates_an_app_exit_from_the_completed_fixed_tick() {
     let project = TestProject::with_prefab_startup();

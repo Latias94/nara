@@ -817,6 +817,30 @@ impl ProjectHost {
         self.install_start_cleanup(epoch, CleanupOwner::Candidate(runtime.begin_retirement()));
     }
 
+    fn drive_one_frame(&mut self, real_delta: Duration) -> Result<Option<AppExit>, HostFault> {
+        let ProjectHostSlot::Running(published) = &mut self.slot else {
+            return Err(HostFault::new(single_error(
+                "project.run.runtime-unavailable",
+                "Project runtime is not available for a frame",
+            )));
+        };
+        let expected = published._plan.schema_validation().snapshot().clone();
+        verify_published_runtime_registry(published.runtime().world(), &expected)?;
+        let outcome = published
+            .runtime_mut()
+            .drive(real_delta)
+            .map_err(|error| HostFault::new(runtime_scope_failure_report(error.fault())))?;
+        let frame = outcome.frame().ok_or_else(|| {
+            HostFault::new(single_error(
+                "project.run.frame-unavailable",
+                "Project runtime did not execute a managed frame",
+            ))
+        })?;
+        let exit = frame.exit;
+        verify_published_runtime_registry(published.runtime().world(), &expected)?;
+        Ok(exit)
+    }
+
     fn drive_one_fixed_tick(&mut self) -> Result<Option<AppExit>, HostFault> {
         let ProjectHostSlot::Running(published) = &mut self.slot else {
             return Err(HostFault::new(single_error(

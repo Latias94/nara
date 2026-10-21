@@ -7,6 +7,7 @@ lineages, capability-derived local dependency relations, parent-owned cross-proc
 creation terminality, build-input freshness and startup-closure ownership
 **Amended**: 2026-10-16 by the First 2D Author Workflow for repository-external local projects
 **Amended**: 2026-10-21 by finite declared Scene delivery for the persistent two-level consumer
+**Amended**: 2026-10-21 by explicit complete-frame headless execution
 **Owner**: root product workflow, `nara_project`, `nara_fs`, project content and Runtime Hosts
 **Refines**: [ADR 0020](0020-project-layout-and-package-format.md),
 [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
@@ -175,6 +176,21 @@ flowchart LR
   not claim strong compare-and-swap against non-cooperating writers.
 - A fresh authoritative check follows manifest publication. If the project no longer matches the
   prepared Scene/closure facts, the result is published-but-not-repaired, not a success receipt.
+
+### Headless execution
+
+Headless product actions select exact fixed transactions or complete managed frames explicitly.
+`HeadlessRunIntent::new` retains exact stepping: entering that mode performs paused maintenance,
+then each step executes one fixed transaction. It does not collect ordinary local gameplay input
+or run normal frame updates. `HeadlessRunIntent::frames` drives the existing Runtime/App frame
+transaction with a supplied real delta, including TaskUpdate and PreUpdate. App-owned time scale,
+clamping, debt and catch-up policy remain authoritative; a frame may contain zero or multiple fixed
+ticks. A zero delta still permits frame maintenance. Async Scene consumers use complete frames.
+
+The selected tick/frame count bounds scheduled iterations, not wall-clock execution or filesystem
+latency. Terminal predicates and exit requests are observed after a completed iteration; reaching
+the bound without a required terminal match reports the corresponding tick/frame limit and uses
+the same retained cleanup owner. This does not change Editor exact-step semantics in ADR 0039.
 
 ### Evidence authority
 

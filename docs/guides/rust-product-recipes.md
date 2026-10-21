@@ -144,6 +144,13 @@ instance. Validate game-owned checkpoint references and prepare owned runtime va
 project/schema authority, loader budget and CPU residency transaction; gameplay does not resolve a
 second RuntimePlan or construct direct sources to bypass resource ownership.
 
+For headless games that collect local semantic commands or prepare Scenes in the background, use
+`HeadlessRunIntent::frames(count, real_delta)` with `HeadlessRun::new`. It runs complete managed
+frames, including TaskUpdate and PreUpdate. App time settings determine fixed ticks per frame.
+`HeadlessRunIntent::new(fixed_ticks)` and `HeadlessRun::from_recipe` retain exact fixed stepping for
+fixed-transaction consumers; ordinary frame producers do not run on each exact step. The selected
+count is an iteration bound, not a wall-clock timeout. Observe terminal outcomes with `stop_when`.
+
 Preparation never commits automatically. A cancelled running request stays `Cancelling` until its
 worker physically returns. Inspect `diagnostics(id)` for a rejected request's safe report and
 `acknowledge(id)` after a terminal result before requesting another Scene. A wrong or obsolete ID
