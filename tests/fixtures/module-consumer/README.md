@@ -16,7 +16,10 @@ The [asset-domain consumer](asset-domain-consumer/README.md) contributes a text 
 public product composition. It checks exact auxiliary-source receipts, reads typed products during
 headless Play, and qualifies Scene replacement and retained-generation behavior. Source Export
 publication is verified separately in the owning engine tests with synthetic build observations;
-this fixture makes no exported desktop-executable claim.
+the [compiled CLI trajectory](../../project_workflow_cli.rs) additionally builds this package into
+a generated product and qualifies real executable delivery. Its
+[Windows execution record](../../../docs/verification/2026-10-21-compiled-asset-domain-export.md)
+retains the narrower Export startup scope, separate from full native presentation/input.
 
 Run from the repository root, using the shared `target` directory through `CARGO_TARGET_DIR`:
 

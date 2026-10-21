@@ -77,3 +77,21 @@ hooks still do not run during Check. An Editor importer alone does not install t
 Image and TileSet retain their concrete typed stores and GPU/native publication rules. Editor
 import adapters, cross-domain products, cooking, source-free export, watchers and dynamic plugin
 loading need their own concrete consumers. See [ADR 0103](../architecture/adr/0103-concrete-domain-owned-asset-import-execution.md).
+
+## Executable Delivery
+
+Declare the domain package in the game's own Cargo dependencies and register it in the product
+recipe shared by the tooling, headless and desktop targets. A recipe supplied only by a test or
+development Host does not install the domain in a separately compiled product. Export carries
+the admitted primary source, metadata and auxiliary members; domain code is compiled into the
+product executables through Cargo.
+
+The [compiled CLI trajectory](../../tests/project_workflow_cli.rs) adds the independent text package
+to a generated product, references its source from a persistent Caption, and observes the parsed
+text in gameplay. It follows the ordinary Check/Play/Repair/Export path, then runs the exported
+headless executable from an unrelated directory after detaching the development project path.
+Its missing-auxiliary-source check requires rejection before gameplay. The separate
+[source Export tests](../../src/project_workflow/export/source_tests.rs) retain their synthetic
+build observations for focused source-change and publication checks. The
+[Windows qualification record](../verification/2026-10-21-compiled-asset-domain-export.md) captures
+the actual execution and its platform limits.

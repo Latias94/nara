@@ -15,13 +15,17 @@ use std::{
 
 static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
 
+#[path = "support/project_tooling_caption_game.rs"]
+mod caption_game;
 #[path = "support/project_content_fixture.rs"]
 mod content_fixture;
 #[path = "support/project_tooling_game.rs"]
 mod custom_game;
+#[path = "fixtures/module-consumer/asset-domain-consumer/src/lib.rs"]
+mod text_domain;
 
 #[test]
-#[ignore = "runs nested Cargo builds and a real custom-schema starter Check/Run/Repair/Export trajectory"]
+#[ignore = "runs nested Cargo builds and a real custom-schema/external-domain Check/Run/Repair/Export trajectory"]
 fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_gameplay() {
     use nara::{
         fs::RelativePath,
@@ -50,22 +54,35 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
     let library = project.join("src/lib.rs");
     let source = fs::read_to_string(&library).unwrap().replace(
         "    nara::ProductRecipe::new()",
-        "    custom_recipe().expect(\"the project's contribution is valid\")",
+        "    caption_game::with_caption(custom_recipe().expect(\"the project's contribution is valid\")).expect(\"the external resource contribution is valid\")",
     );
     fs::write(
         &library,
         format!(
-            "{source}\n{}",
-            include_str!("support/project_tooling_game.rs")
+            "{source}\nuse nara_asset_domain_consumer as text_domain;\n{}\nmod caption_game {{\n{}\n}}\n",
+            include_str!("support/project_tooling_game.rs"),
+            include_str!("support/project_tooling_caption_game.rs"),
         ),
     )
     .unwrap();
+    let cargo_path = project.join("Cargo.toml");
+    let mut cargo: toml::Value = toml::from_str(&fs::read_to_string(&cargo_path).unwrap()).unwrap();
+    let domain_path = checkout.join("tests/fixtures/module-consumer/asset-domain-consumer");
+    cargo["dependencies"].as_table_mut().unwrap().insert(
+        "nara-asset-domain-consumer".to_owned(),
+        toml::Value::Table(toml::map::Map::from_iter([(
+            "path".to_owned(),
+            toml::Value::String(domain_path.to_str().unwrap().to_owned()),
+        )])),
+    );
+    fs::write(&cargo_path, toml::to_string_pretty(&cargo).unwrap()).unwrap();
     let root = nara::project_tooling::host_fs::readable_directory(&project).unwrap();
     let manifest = root
         .open_file(&RelativePath::new("nara.toml").unwrap())
         .unwrap();
     let candidate = ingest_project_manifest(&manifest, None).unwrap();
-    let plan = resolve_product_recipe(&candidate, custom_game::custom_recipe().unwrap()).unwrap();
+    let recipe = || caption_game::with_caption(custom_game::custom_recipe().unwrap()).unwrap();
+    let plan = resolve_product_recipe(&candidate, recipe()).unwrap();
     fs::write(
         project.join("schema/authoring.bundle.json"),
         plan.schema_validation()
@@ -84,6 +101,7 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
         .as_array_mut()
         .unwrap()
         .push(serde_json::json!("pulse"));
+    install_caption_source(&project, &mut scene);
     fs::write(
         project.join("scenes/startup.scene.json"),
         serde_json::to_vec_pretty(&scene).unwrap(),
@@ -91,6 +109,7 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
     .unwrap();
     let expected_second_scene = install_declared_second_scene(&project);
     let marker = parent.path().join("gameplay.txt");
+    let text_marker = parent.path().join("domain-gameplay.txt");
     assert!(!project.join("Cargo.lock").exists());
     let checked = Command::new(env!("CARGO_BIN_EXE_nara"))
         .arg("check")
@@ -98,6 +117,7 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
         .env("CARGO_TARGET_DIR", checkout.join("target"))
         .env("CARGO_BUILD_JOBS", "1")
         .env("NARA_TEST_PULSE_MARKER", &marker)
+        .env("NARA_TEST_TEXT_MARKER", &text_marker)
         .output()
         .unwrap();
     assert!(
@@ -108,6 +128,10 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
     );
     assert!(project.join("Cargo.lock").is_file());
     assert!(!marker.exists(), "Check must not execute startup systems");
+    assert!(
+        !text_marker.exists(),
+        "Check must not execute domain consumers"
+    );
     let renamed = fs::read_to_string(&library)
         .unwrap()
         .replace("RenamedPulse", "AnotherNativePulseName");
@@ -119,6 +143,7 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
         .env("CARGO_TARGET_DIR", checkout.join("target"))
         .env("CARGO_BUILD_JOBS", "1")
         .env("NARA_TEST_PULSE_MARKER", &marker)
+        .env("NARA_TEST_TEXT_MARKER", &text_marker)
         .output()
         .unwrap();
     assert!(
@@ -128,7 +153,9 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
         String::from_utf8_lossy(&run.stderr)
     );
     assert_eq!(fs::read_to_string(&marker).unwrap(), "migrated-pulse=42\n");
+    assert_eq!(fs::read_to_string(&text_marker).unwrap(), "Hello world\n");
     fs::remove_file(&marker).unwrap();
+    fs::remove_file(&text_marker).unwrap();
     fs::rename(
         project.join("scenes/startup.scene.json"),
         project.join("scenes/recovered.scene.json"),
@@ -141,6 +168,7 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
         .env("CARGO_TARGET_DIR", checkout.join("target"))
         .env("CARGO_BUILD_JOBS", "1")
         .env("NARA_TEST_PULSE_MARKER", &marker)
+        .env("NARA_TEST_TEXT_MARKER", &text_marker)
         .output()
         .unwrap();
     assert!(
@@ -150,6 +178,10 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
         String::from_utf8_lossy(&repaired.stderr)
     );
     assert!(!marker.exists(), "Repair must not execute startup systems");
+    assert!(
+        !text_marker.exists(),
+        "Repair must not execute domain consumers"
+    );
     let exported = Command::new(env!("CARGO_BIN_EXE_nara"))
         .arg("export")
         .arg(&project)
@@ -159,6 +191,7 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
         .env("CARGO_TARGET_DIR", checkout.join("target"))
         .env("CARGO_BUILD_JOBS", "1")
         .env("NARA_TEST_PULSE_MARKER", &marker)
+        .env("NARA_TEST_TEXT_MARKER", &text_marker)
         .output()
         .unwrap();
     assert!(
@@ -169,7 +202,18 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
     );
     assert!(String::from_utf8_lossy(&exported.stdout).contains("2 exact product observations"));
     assert_eq!(fs::read_to_string(&marker).unwrap(), "migrated-pulse=42\n");
+    assert_eq!(fs::read_to_string(&text_marker).unwrap(), "Hello world\n");
     let candidate = parent.path().join("custom-candidate");
+    for path in [
+        "captions/greeting.txt",
+        "captions/greeting.txt.meta",
+        "captions/suffix.txt",
+    ] {
+        assert_eq!(
+            fs::read(candidate.join("project/assets").join(path)).unwrap(),
+            fs::read(project.join("assets").join(path)).unwrap(),
+        );
+    }
     assert!(
         candidate
             .join("project/scenes/recovered.scene.json")
@@ -198,7 +242,7 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
         .open_file(&RelativePath::new("nara.toml").unwrap())
         .unwrap();
     let settings = ingest_project_manifest(&manifest, None).unwrap();
-    let plan = resolve_product_recipe(&settings, custom_game::custom_recipe().unwrap()).unwrap();
+    let plan = resolve_product_recipe(&settings, recipe()).unwrap();
     let loader = ProjectContentLoader::new(published_root).unwrap();
     let second = loader
         .load_scene(
@@ -241,6 +285,20 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
             .iter()
             .any(|member| member.path().as_str() == "assets/textures/second.png.meta")
     );
+    for path in [
+        "assets/captions/greeting.txt",
+        "assets/captions/greeting.txt.meta",
+        "assets/captions/suffix.txt",
+    ] {
+        assert_eq!(
+            delivery
+                .members()
+                .iter()
+                .filter(|member| member.path().as_str() == path)
+                .count(),
+            1,
+        );
+    }
     assert!(
         !published_project
             .join("scenes/undeclared.scene.json")
@@ -249,9 +307,11 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
 
     let unrelated = TestRoot::new("exported-second-scene-cwd");
     let published_marker = parent.path().join("published-gameplay.txt");
+    let published_text_marker = parent.path().join("published-domain-gameplay.txt");
     let run = Command::new(candidate.join(format!("bin/headless{}", std::env::consts::EXE_SUFFIX)))
         .current_dir(unrelated.path())
         .env("NARA_TEST_PULSE_MARKER", &published_marker)
+        .env("NARA_TEST_TEXT_MARKER", &published_text_marker)
         .output()
         .unwrap();
     assert!(
@@ -261,9 +321,74 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
         String::from_utf8_lossy(&run.stderr)
     );
     assert_eq!(
-        fs::read_to_string(published_marker).unwrap(),
+        fs::read_to_string(&published_marker).unwrap(),
         "migrated-pulse=42\n"
     );
+    assert_eq!(
+        fs::read_to_string(&published_text_marker).unwrap(),
+        "Hello world\n"
+    );
+
+    fs::remove_file(&published_marker).unwrap();
+    fs::remove_file(&published_text_marker).unwrap();
+    fs::remove_file(published_project.join("assets/captions/suffix.txt")).unwrap();
+    let rejected =
+        Command::new(candidate.join(format!("bin/headless{}", std::env::consts::EXE_SUFFIX)))
+            .current_dir(unrelated.path())
+            .env("NARA_TEST_PULSE_MARKER", &published_marker)
+            .env("NARA_TEST_TEXT_MARKER", &published_text_marker)
+            .output()
+            .unwrap();
+    assert!(
+        !rejected.status.success(),
+        "a required published dependency is missing"
+    );
+    assert!(!published_marker.exists());
+    assert!(!published_text_marker.exists());
+}
+
+fn install_caption_source(project: &Path, scene: &mut serde_json::Value) {
+    use nara::{
+        asset::{
+            AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, StableAssetId,
+        },
+        reflect::PersistentComponentProvider,
+    };
+    fs::create_dir_all(project.join("assets/captions")).unwrap();
+    fs::write(
+        project.join("assets/captions/greeting.txt"),
+        b"captions/suffix.txt\nHello",
+    )
+    .unwrap();
+    fs::write(project.join("assets/captions/suffix.txt"), b" world").unwrap();
+    let metadata = AssetMeta::new(
+        AssetMetaIdentity::new(
+            StableAssetId::parse_str("a8149311-df08-47aa-84c2-3a77e47c77ef").unwrap(),
+            AssetPath::new("captions/greeting.txt").unwrap(),
+            AssetSourceKind::Other("consumer.text".to_owned()),
+        ),
+        text_domain::TextSettings { max_characters: 64 },
+    );
+    fs::write(
+        project.join("assets/captions/greeting.txt.meta"),
+        metadata.to_json_string().unwrap(),
+    )
+    .unwrap();
+    let caption = caption_game::Caption {
+        text: AssetRef::path("captions/greeting.txt").unwrap(),
+    };
+    scene["payload"]["entities"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "id":"caption", "children":[], "components":{"studio.caption.Caption":{
+                "version":1, "value":caption.__encode_persistent_component().unwrap()
+            }}
+        }));
+    scene["payload"]["roots"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!("caption"));
 }
 
 fn install_declared_second_scene(project: &Path) -> nara::scene::SceneDocument {

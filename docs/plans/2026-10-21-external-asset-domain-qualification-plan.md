@@ -67,3 +67,9 @@ The external package uses public interfaces only. The Export owner uses its exis
 build observations to verify exact source publication and changed/missing dependency rejection.
 This does not qualify an actual Cargo-built exported executable containing the external domain,
 native desktop presentation, Editor Import/Reimport, hot reload, cooking or platform support.
+
+## Follow-up
+
+The subsequent [compiled executable qualification](../verification/2026-10-21-compiled-asset-domain-export.md)
+closes the real Cargo-built exported-executable gap for its recorded Windows trajectory. It does
+not change the source-only scope of the observations above.
