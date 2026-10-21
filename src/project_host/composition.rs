@@ -416,6 +416,8 @@ pub struct RuntimePlan {
     required: ProductCapabilitySet,
     plugin_plan: PluginPlan,
     schema_validation: SchemaValidationInput,
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) asset_domains: crate::project_content::ProjectAssetDomains,
 }
 
 impl fmt::Debug for RuntimePlan {
@@ -792,6 +794,8 @@ pub fn resolve_runtime_plan(
     }
 
     let recipe_providers = request.recipe.schema_providers().collect::<Vec<_>>();
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    let asset_domains = request.recipe.asset_domains.clone();
     let snapshot_cell = Arc::new(OnceLock::new());
     let request = request.configure(preloaded_component_registry_plugin(Arc::clone(
         &snapshot_cell,
@@ -831,6 +835,8 @@ pub fn resolve_runtime_plan(
         required,
         plugin_plan,
         schema_validation,
+        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        asset_domains,
     })
 }
 

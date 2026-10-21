@@ -1,0 +1,25 @@
+# External Source Domain Consumer
+
+This independently declared workspace member adds `consumer.text` through public
+`ProductRecipe::add_asset_domain`. The library owns typed metadata settings, UTF-8 parsing and
+one auxiliary source dependency. It imports no Nara-private interfaces.
+
+The public integration tests qualify Check receipts, headless Play, actionable domain failures,
+missing contributions, shared dependency reads, parser reservations, panic diagnostics, retained
+generation budgets and explicit Scene transitions. Preparation and commit failures preserve the
+current products; successful replacement changes the collection; an empty Scene retires it.
+
+```text
+cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml -p nara-asset-domain-consumer --locked --test-threads=1
+```
+
+Use the shared repository `target` with `CARGO_BUILD_JOBS=1` and `CARGO_TARGET_DIR`, and run Cargo
+commands serially. The parent consumer workspace owns the independent lockfile. No root workspace
+dependencies or features are inherited.
+
+Export source publication and digest-revalidation tests live in the Export owner's
+`src/project_workflow/export/source_tests.rs`, which can construct its existing adapter-only build
+receipts. Those tests use synthetic executable observations and make no desktop/Cargo-artifact
+acceptance claim. This external package proves the public Check/Play/source-receipt boundary;
+it does not bypass the build receipt through `__private`. Native desktop export, Editor import,
+hot reload, cooked products and platform qualification remain separate.

@@ -38,12 +38,13 @@ pub use persistence::EditorPersistenceReceipt;
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub use crate::project_content::{
+    ProjectAssetCollection, ProjectAssetDomain, ProjectAssetLimits, ProjectAssetSource,
     ProjectContentBudgetError, ProjectContentBudgetHost, ProjectContentBudgetKind,
     ProjectContentBudgetSnapshot, ProjectContentClosureReceipt, ProjectContentDeliveryReceipt,
     ProjectContentError, ProjectContentErrorKind, ProjectContentLimits, ProjectContentLoader,
     ProjectContentMemberKind, ProjectContentMemberReceipt, ProjectContentRevision,
-    ProjectContentSnapshot, ProjectImageContent, ProjectPrefabContent, ProjectTileSetContent,
-    StartupContentClosureReceipt,
+    ProjectContentSnapshot, ProjectDomainAssets, ProjectImageContent, ProjectPrefabContent,
+    ProjectTileSetContent, StartupContentClosureReceipt,
 };
 pub use composition::{
     CompiledProductCapabilities, CompositionError, ProjectSettingsCandidate,

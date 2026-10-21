@@ -5,7 +5,7 @@ external callers of Nara's public APIs; they are not engine modules or user-faci
 
 | Project | Purpose |
 |---|---|
-| [Module consumers](module-consumer/README.md) | Direct Scene, schema, filesystem, material and Editor panel use, plus the public project-workflow facade. |
+| [Module consumers](module-consumer/README.md) | Direct Scene, schema, filesystem, material and Editor panel use, plus the public project-workflow facade and compiled source asset domains. |
 | [UI module consumer](ui-module-consumer/README.md) | Text, UI compilation and widgets without the engine's ECS, Scene, window or renderer graph. |
 | [Product slices](product-slices/) | Focused root-facade feature combinations. |
 

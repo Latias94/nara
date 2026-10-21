@@ -5,6 +5,11 @@ does not open project files, create an `App`, acquire a window or GPU, start a r
 runner. Build it in ordinary game code, inspect it in tests or tools, then pass the same value to a
 direct `App` or a product Host.
 
+Compiled source domains use `add_asset_domain::<D>()` alongside runtime plugins and schema
+contributions. See [Project Asset Domains](project-asset-domains.md) for typed products, scoped
+dependency reads and the Check/Play/source-Export boundary. Domain registration selects project
+content preparation; runtime systems consume the published collection through a normal plugin.
+
 ## Runtime-only plugins
 
 Use `add_plugin` for a stateless plugin that implements `Default`:

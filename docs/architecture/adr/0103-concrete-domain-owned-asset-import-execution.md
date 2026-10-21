@@ -75,6 +75,52 @@ flowchart LR
   publication and a concrete Editor image store do not make either path a second asset domain and
   do not satisfy the shared-executor trigger.
 
+### Source-backed project domains (2026-10-21 refinement)
+
+The compiled product may select a `ProjectAssetDomain` through
+`ProductRecipe::add_asset_domain`. This is an executing Check/Play source-content contract in the
+project Host, distinct from Editor Import/Reimport and the generic importer executor rejected
+above. It returns one typed CPU product per referenced source. Domain-specific parsing, settings,
+semantic validation and conservative parser/product memory bounds remain domain-owned.
+
+- Persisted `AssetSourceKind::Other` selects the exact domain. Extensions and registration order
+  do not select an owner. Duplicate kind claims reject during recipe construction. Built-in Image
+  and TileSet remain concrete adapters with their existing publication contracts.
+- The project Host admits metadata identity, bounded immutable primary bytes and scoped auxiliary
+  reads under the original Assets capability. A domain admits its own typed metadata settings.
+  Every auxiliary read contributes an exact source member; repeated paths share one observation
+  within the source-domain load. Edges and global file/byte/work/retention limits remain Host-owned.
+- The Host reserves declared work and product storage before preparation. Trusted domain code must
+  honor those bounds, read every required source through the scoped context, and avoid external
+  effects. CPU products and their destructors must be effect-free and must not panic. This is a
+  trusted native-code contract, not allocation interception or a sandbox.
+- Check executes the selected source-domain preparation, but does not run ordinary runtime plugin
+  hooks. Expected failures retain the domain's bounded diagnostic. Preparation panics reject the
+  candidate with a Host-authored diagnostic; panic payloads are not public diagnostic facts.
+- `ProjectDomainAssets::collection::<D>()` exposes typed, immutable collections by Rust domain
+  type. Heterogeneous storage is private. Consumers that retain shared product allocations retain
+  the owning collection resource as well. No public erased resource store or mutable World callback
+  is introduced.
+- Content candidates bind the selected domain composition as well as project/schema authority.
+  The Host installs the collection before gameplay startup, replaces it only after successful Scene
+  commit, and publishes an empty collection when the next Scene uses no source domains. A failed
+  preparation or rejected Scene transaction preserves the current collection. Clones retain their
+  generation and budget until their last owner drops.
+- Export consumes the existing exact source-delivery receipt and revalidates every member. Domains
+  do not construct build receipts or gain directory-publication authority. Export does not execute
+  the parser again to discover a different closure.
+
+This refinement admits compiled, stateless source preparation and raw auxiliary source dependencies.
+It does not admit Editor import contributions, mutable native/GPU products, cross-domain prepared
+product dependencies, cook artifacts, file watchers, or dynamic loading. An import-only package
+has no source-backed Play support merely because it supplies an importer. The broader multi-product
+graph and shared import executor triggers above remain unchanged.
+
+See the [qualification plan](../../plans/2026-10-21-external-asset-domain-qualification-plan.md),
+[public guide](../../guides/project-asset-domains.md),
+[independent consumer](../../../tests/fixtures/module-consumer/asset-domain-consumer/README.md)
+and [source-export tests](../../../src/project_workflow/export/source_tests.rs).
+
 ## Alternatives Considered
 
 ### Option 1: Keep the generic registry as a future-facing placeholder

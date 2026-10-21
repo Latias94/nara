@@ -237,12 +237,18 @@ impl LoadContext<'_> {
         prefabs: &BTreeMap<AssetPath, Arc<PrefabDocument>>,
         images: &[ProjectImageContent],
         tilesets: &[ProjectTileSetContent],
+        domains: &[Box<dyn domains::ErasedCollection>],
     ) -> Result<ProjectAssetDatabase, ProjectContentError> {
         let paths = || {
             prefabs
                 .keys()
                 .chain(images.iter().map(ProjectImageContent::path))
                 .chain(tilesets.iter().map(ProjectTileSetContent::path))
+                .chain(
+                    domains
+                        .iter()
+                        .flat_map(|domain| domain.records().iter().map(AssetRecord::path)),
+                )
         };
         let mut bytes = size_of::<ProjectContentAssets>() + ARC_CONTROL_BLOCK_BYTES;
         for path in paths() {

@@ -81,6 +81,12 @@ pub struct PreparedProjectSceneView<'a> {
 }
 
 impl PreparedProjectSceneView<'_> {
+    /// Typed CPU data prepared for the target Scene, before its explicit commit.
+    #[must_use]
+    pub fn domain_assets(&self) -> &crate::project_host::ProjectDomainAssets {
+        self.snapshot.domain_assets()
+    }
+
     /// Expanded target document, matching the document that becomes `CurrentScene::source`.
     #[must_use]
     pub fn scene(&self) -> &SceneDocument {
@@ -291,6 +297,7 @@ where
             || snapshot.selected_scene_path() != &admission.path
             || !snapshot
                 .shares_schema_snapshot(admission.context.plan.schema_validation().snapshot())
+            || !snapshot.matches_asset_domains(&admission.context.plan)
         {
             rejected(
                 "project.scene.prepared-input-mismatch",

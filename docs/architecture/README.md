@@ -80,6 +80,14 @@ CPU, memory, build size or frame P99.
 
 ## Background Designs
 
+The [asset extension Host interface design](asset-extension-host-interface-design.md) compares
+pinned Bevy/Godot and Unity resource-import seams, then proposes operation-specific typed domain
+contributions coordinated by Nara's Check, Play, and source-carrying Export Hosts. ADR 0103 now
+adopts the narrower compiled source-domain slice, documented in the
+[public guide](../guides/project-asset-domains.md) and
+[qualification plan](../plans/2026-10-21-external-asset-domain-qualification-plan.md). The remaining
+design, ADRs 0087/0088 and package distribution questions remain open.
+
 The [Rust authoring, reload, and ECS direction study](../research/2026-10-21-rust-authoring-reload-and-ecs-direction.md)
 compares pinned Bevy/Godot mechanisms, other mature engines, and the supplied `hotcode` article.
 It recommends a complete Rust path, the existing ECS substrate, measured rebuild/resume, and a

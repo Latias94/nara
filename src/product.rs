@@ -215,15 +215,19 @@ impl<P: Plugin> SchemaContribution<P> {
 pub struct ProductRecipe {
     entries: BTreeMap<PluginId, ProductRecipeEntry>,
     defaults: default_settings::ProductDefaultSettings,
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) asset_domains: crate::project_content::ProjectAssetDomains,
 }
 
 impl fmt::Debug for ProductRecipe {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ProductRecipe")
+        let mut debug = formatter.debug_struct("ProductRecipe");
+        debug
             .field("entries", &self.entries.values().collect::<Vec<_>>())
-            .field("defaults", &self.defaults)
-            .finish()
+            .field("defaults", &self.defaults);
+        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        debug.field("asset_domains", &self.asset_domains);
+        debug.finish()
     }
 }
 
@@ -233,6 +237,8 @@ impl ProductRecipe {
         Self {
             entries: BTreeMap::new(),
             defaults: default_settings::ProductDefaultSettings::new(),
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            asset_domains: crate::project_content::ProjectAssetDomains::new(),
         }
     }
 
@@ -244,7 +250,19 @@ impl ProductRecipe {
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty() && self.defaults.is_empty()
+        let empty = self.entries.is_empty() && self.defaults.is_empty();
+        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        let empty = empty && self.asset_domains.is_empty();
+        empty
+    }
+
+    /// Selects one compiled source domain for file-backed Check and Play. Settings live in metadata.
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub fn add_asset_domain<D: crate::project_content::ProjectAssetDomain>(
+        mut self,
+    ) -> Result<Self, ProductRecipeError> {
+        self.asset_domains.add::<D>()?;
+        Ok(self)
     }
 
     pub fn entries(&self) -> impl ExactSizeIterator<Item = &ProductRecipeEntry> {
@@ -437,6 +455,10 @@ impl PluginGroup for ProductRecipe {
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ProductRecipeError {
+    #[error("asset domain identity {kind} is empty or reserved by the product")]
+    ReservedAssetDomain { kind: &'static str },
+    #[error("asset domain {kind} appears more than once in the product recipe")]
+    DuplicateAssetDomain { kind: &'static str },
     #[error("default plugin {plugin} is configured more than once in the product recipe")]
     DuplicateDefaultConfiguration { plugin: PluginId },
     #[error("plugin declaration for {plugin_type} panicked")]

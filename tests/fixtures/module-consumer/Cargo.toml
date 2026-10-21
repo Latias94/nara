@@ -8,8 +8,8 @@ publish = false
 
 [workspace]
 resolver = "3"
-members = ["fs-consumer", "project-workflow-consumer", "material-consumer", "editor-panel-consumer"]
-default-members = [".", "fs-consumer", "project-workflow-consumer", "material-consumer", "editor-panel-consumer"]
+members = ["fs-consumer", "project-workflow-consumer", "material-consumer", "editor-panel-consumer", "asset-domain-consumer"]
+default-members = [".", "fs-consumer", "project-workflow-consumer", "material-consumer", "editor-panel-consumer", "asset-domain-consumer"]
 
 [dependencies]
 nara_reflect = { path = "../../../crates/nara_reflect" }

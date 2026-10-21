@@ -129,6 +129,7 @@ impl ProjectContentLoader {
         })?;
         let content = snapshot.content_closure();
         if !snapshot.shares_schema_snapshot(plan.schema_validation().snapshot())
+            || !snapshot.matches_asset_domains(plan)
             || !snapshot.has_runtime_schema_agreement()
             || content.settings_lineage() != candidate.lineage()
             || content.project_root_identity() != self.root.identity()

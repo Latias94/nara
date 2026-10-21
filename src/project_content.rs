@@ -4,6 +4,7 @@ mod budget;
 mod catalogue;
 mod closure;
 mod delivery;
+mod domains;
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -69,6 +70,11 @@ pub use closure::{
     StartupContentClosureReceipt,
 };
 pub use delivery::ProjectContentDeliveryReceipt;
+pub(crate) use domains::ProjectAssetDomains;
+pub use domains::{
+    ProjectAssetCollection, ProjectAssetDomain, ProjectAssetLimits, ProjectAssetSource,
+    ProjectDomainAssets,
+};
 
 /// Computes the canonical Runtime startup-content digest from already admitted logical members.
 ///
@@ -207,6 +213,7 @@ pub struct ProjectContentSnapshot {
 
 struct ProjectContentSnapshotInner {
     schema_authority: ComponentRegistrySnapshotWitness,
+    domain_authority: ProjectAssetDomains,
     content_closure: ProjectContentClosureReceipt,
     source_upgrade_required: bool,
     scene: Arc<SceneDocument>,
@@ -214,6 +221,7 @@ struct ProjectContentSnapshotInner {
     prefabs: Box<[ProjectPrefabContent]>,
     images: Box<[ProjectImageContent]>,
     tilesets: Box<[ProjectTileSetContent]>,
+    domain_assets: ProjectDomainAssets,
     assets: Arc<ProjectContentAssets>,
     _generation_lease: ProjectContentGenerationLease,
     _runtime_lease: ProjectContentLease,
@@ -239,6 +247,10 @@ impl ProjectContentAssets {
 }
 
 impl ProjectContentSnapshot {
+    pub(crate) fn matches_asset_domains(&self, plan: &RuntimePlan) -> bool {
+        self.inner.domain_authority.matches(&plan.asset_domains)
+    }
+
     #[must_use]
     pub fn lineage(&self) -> ProjectSettingsLineage {
         self.inner.content_closure.settings_lineage()
@@ -330,6 +342,11 @@ impl ProjectContentSnapshot {
     #[must_use]
     pub fn tilesets(&self) -> &[ProjectTileSetContent] {
         &self.inner.tilesets
+    }
+
+    #[must_use]
+    pub fn domain_assets(&self) -> &ProjectDomainAssets {
+        &self.inner.domain_assets
     }
 
     pub(crate) fn asset_database(&self) -> &ProjectAssetDatabase {
@@ -498,6 +515,7 @@ pub enum ProjectContentErrorKind {
     AssetMeta,
     AssetMetaMismatch,
     UnsupportedAssetKind,
+    AssetDomain,
     ImageImport,
     AllocationFailed,
     UnsupportedHierarchySemantics,
@@ -512,6 +530,14 @@ pub struct ProjectContentError {
 }
 
 impl ProjectContentError {
+    /// Preserves a domain-authored diagnostic without reinterpreting its format or settings.
+    #[must_use]
+    pub fn asset_domain(diagnostic: Diagnostic) -> Self {
+        let mut report = DiagnosticReport::default();
+        report.push(diagnostic);
+        Self::with_report(ProjectContentErrorKind::AssetDomain, report)
+    }
+
     #[must_use]
     pub const fn kind(&self) -> ProjectContentErrorKind {
         self.kind
@@ -703,6 +729,7 @@ impl Display for ProjectContentError {
             ProjectContentErrorKind::UnsupportedAssetKind => {
                 "project Scene content references an unsupported asset kind"
             }
+            ProjectContentErrorKind::AssetDomain => "project asset domain preparation failed",
             ProjectContentErrorKind::ImageImport => "project image import failed",
             ProjectContentErrorKind::AllocationFailed => {
                 "project content allocation failed after budget admission"
@@ -870,6 +897,7 @@ impl ProjectContentLoader {
         let mut context = LoadContext::new(
             self,
             validation,
+            &plan.asset_domains,
             expected_startup_scene_digest,
             expected_prefab,
             candidate.manifest_digest(),
@@ -940,9 +968,17 @@ impl fmt::Debug for ProjectContentLoader {
     }
 }
 
+#[derive(Default)]
+struct SourceCandidates {
+    images: BTreeSet<AssetPath>,
+    tilesets: BTreeSet<AssetPath>,
+    domains: BTreeSet<AssetPath>,
+}
+
 struct LoadContext<'a> {
     loader: &'a ProjectContentLoader,
     validation: &'a SchemaValidationInput,
+    domains: &'a ProjectAssetDomains,
     budget: Option<BudgetTicket>,
     source_upgrade_required: bool,
     expected_startup_scene_digest: Option<ContentDigest>,
@@ -972,6 +1008,7 @@ impl<'a> LoadContext<'a> {
     fn new(
         loader: &'a ProjectContentLoader,
         validation: &'a SchemaValidationInput,
+        domains: &'a ProjectAssetDomains,
         expected_startup_scene_digest: Option<ContentDigest>,
         expected_prefab: Option<ExpectedPrefabSource>,
         manifest_digest: ContentDigest,
@@ -988,6 +1025,7 @@ impl<'a> LoadContext<'a> {
         Ok(Self {
             loader,
             validation,
+            domains,
             budget: Some(budget),
             source_upgrade_required: false,
             expected_startup_scene_digest,
@@ -1116,10 +1154,12 @@ impl<'a> LoadContext<'a> {
             )?;
         }
 
-        let (image_paths, tileset_paths) = self.collect_source_candidates(&expanded, &assets)?;
+        let sources = self.collect_source_candidates(expanded, &assets)?;
+        let domain_collections =
+            self.load_domains(&assets, &settings.paths.assets, sources.domains)?;
         let (tilesets, tileset_work) =
-            self.load_tilesets(&assets, &settings.paths.assets, tileset_paths)?;
-        let mut image_paths = image_paths;
+            self.load_tilesets(&assets, &settings.paths.assets, sources.tilesets)?;
+        let mut image_paths = sources.images;
         for tileset in &tilesets {
             if image_paths.insert(tileset.image_path.clone()) {
                 self.add_budget(ProjectContentBudgetKind::QueuedJobs, 1)?;
@@ -1138,7 +1178,12 @@ impl<'a> LoadContext<'a> {
             ));
         }
         self.commit_work_as_retained(tileset_work, tileset_work.reserved)?;
-        let database = self.retain_loaded_asset_identities(&loaded_prefabs, &images, &tilesets)?;
+        let database = self.retain_loaded_asset_identities(
+            &loaded_prefabs,
+            &images,
+            &tilesets,
+            &domain_collections,
+        )?;
         self.release_catalogue_work();
         drop((scenes, prefabs, assets));
         let open_handles = self.budget_value(ProjectContentBudgetKind::OpenHandles);
@@ -1264,6 +1309,7 @@ impl<'a> LoadContext<'a> {
         Ok(ProjectContentSnapshot {
             inner: Arc::new(ProjectContentSnapshotInner {
                 schema_authority: component_registry_snapshot_witness(self.validation.snapshot()),
+                domain_authority: self.domains.clone(),
                 content_closure,
                 source_upgrade_required: self.source_upgrade_required,
                 scene,
@@ -1271,6 +1317,11 @@ impl<'a> LoadContext<'a> {
                 prefabs,
                 images,
                 tilesets,
+                domain_assets: ProjectDomainAssets::new(
+                    domain_collections,
+                    runtime_lease.clone(),
+                    generation_lease.clone(),
+                ),
                 assets,
                 _generation_lease: generation_lease,
                 _runtime_lease: runtime_lease,
@@ -1641,9 +1692,8 @@ impl<'a> LoadContext<'a> {
         &mut self,
         document: &SceneDocument,
         assets: &DirectoryCapability,
-    ) -> Result<(BTreeSet<AssetPath>, BTreeSet<AssetPath>), ProjectContentError> {
-        let mut image_paths = BTreeSet::new();
-        let mut tileset_paths = BTreeSet::new();
+    ) -> Result<SourceCandidates, ProjectContentError> {
+        let mut sources = SourceCandidates::default();
         for entity in &document.entities {
             for (component, record) in &entity.components {
                 let references = collect_declared_asset_references(
@@ -1659,8 +1709,9 @@ impl<'a> LoadContext<'a> {
                     let path = source.path();
                     self.observe_path(path.as_str())?;
                     let paths = match source.source_kind() {
-                        AssetSourceKind::Image => &mut image_paths,
-                        AssetSourceKind::Other(kind) if kind == "tileset" => &mut tileset_paths,
+                        AssetSourceKind::Image => &mut sources.images,
+                        AssetSourceKind::Other(kind) if kind == "tileset" => &mut sources.tilesets,
+                        kind if self.domains.supports(kind) => &mut sources.domains,
                         _ => {
                             return Err(ProjectContentError::with_identifier(
                                 ProjectContentErrorKind::UnsupportedAssetKind,
@@ -1678,7 +1729,7 @@ impl<'a> LoadContext<'a> {
                 }
             }
         }
-        Ok((image_paths, tileset_paths))
+        Ok(sources)
     }
 
     fn prepare_component_asset_references(

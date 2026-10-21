@@ -157,6 +157,7 @@ impl RuntimeStartStamp {
             && self.schema_fingerprint == snapshot.schema_fingerprint()
             && self.schema_fingerprint == plan.schema_validation().composition_fingerprint()
             && snapshot.shares_schema_snapshot(plan.schema_validation().snapshot())
+            && snapshot.matches_asset_domains(plan)
     }
 }
 
@@ -583,6 +584,7 @@ impl ProjectHost {
         }
         if snapshot.schema_fingerprint() != plan.schema_validation().composition_fingerprint()
             || !snapshot.shares_schema_snapshot(plan.schema_validation().snapshot())
+            || !snapshot.matches_asset_domains(&plan)
         {
             return Err(HostFault::new(single_error(
                 "project.run.schema-mismatch",

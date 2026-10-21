@@ -118,6 +118,7 @@ pub(super) fn publish_startup(
         tilesets.push(receipt);
     }
     world.insert_resource(catalog.database);
+    world.insert_resource(snapshot.domain_assets().clone());
     world.insert_resource(ProjectSceneResidency {
         lineage: snapshot.lineage(),
         images,
@@ -264,6 +265,7 @@ where
     }
     if nara_ecs::__private::validate_resource_scope::<ProjectSceneResidency>(world).is_err()
         || nara_ecs::__private::validate_resource_scope::<ProjectAssetDatabase>(world).is_err()
+        || nara_ecs::__private::validate_resource_scope::<crate::project_content::ProjectDomainAssets>(world).is_err()
     {
         return rejected(failure(
             "project.scene.residency-lifecycle-unsupported",
@@ -408,6 +410,7 @@ where
         prepared.commit(&server, &images, &mut values, &mut states, &mut events)
     });
     world.insert_resource(catalog.database);
+    world.insert_resource(snapshot.domain_assets().clone());
     world.resource_mut::<CurrentSceneOwner>().commit_source(
         snapshot.scene_source(),
         report.instance.as_ref().unwrap().clone(),

@@ -22,6 +22,188 @@ use super::{
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+#[derive(nara_ecs::Component, nara_reflect::PersistentComponent)]
+#[nara(
+    id = "test.export.SourceText",
+    version = 1,
+    alias = "Source text",
+    component_capabilities(scene),
+    field_capabilities(scene)
+)]
+pub struct SourceText {
+    #[nara(id = "source", alias = "Source", capabilities(scene, asset_ref))]
+    pub source: nara_asset::AssetRef,
+}
+
+nara_reflect::persistent_components! { pub mod source_text_components = [SourceText]; }
+
+#[derive(Default)]
+struct SourceTextPlugin;
+
+const SOURCE_TEXT_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
+    nara_reflect::ComponentSchemaProviderDefinition::new(
+        nara_reflect::ComponentSchemaOwnerId::new("test.export.source-text"),
+        nara_app::PluginSchemaProviderId::new("test.export.source-text.schema"),
+        nara_reflect::ComponentSchemaProviderBindingId::new("test.export.source-text.native", 1),
+        source_text_components::initial_catalog,
+        source_text_components::register,
+    );
+
+impl nara_app::Plugin for SourceTextPlugin {
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        static DECLARATION: nara_app::PluginDeclaration = nara_app::PluginDeclaration::new(
+            nara_app::PluginId::new("test.export.source-text"),
+            nara_app::PluginCategory::Runtime,
+        )
+        .provides_schema(&[SOURCE_TEXT_PROVIDER.id()]);
+        &DECLARATION
+    }
+    fn build(&self, _: &mut nara_app::App) -> Result<(), nara_app::PluginError> {
+        Ok(())
+    }
+}
+
+struct SourceTextDomain;
+
+impl crate::project_host::ProjectAssetDomain for SourceTextDomain {
+    type Product = Vec<u8>;
+    const SOURCE_KIND: &'static str = "test.export.text";
+    fn limits() -> crate::project_host::ProjectAssetLimits {
+        let bytes = nara_core::ByteLimit::new(1024).unwrap();
+        crate::project_host::ProjectAssetLimits::new(bytes, bytes, bytes)
+    }
+    fn prepare(
+        source: &mut crate::project_host::ProjectAssetSource<'_>,
+    ) -> Result<Self::Product, crate::project_host::ProjectContentError> {
+        source.metadata().admit::<()>().unwrap();
+        Ok(source
+            .read_dependency(
+                &nara_asset::AssetPath::new("suffix.txt").unwrap(),
+                nara_core::ByteLimit::new(1024).unwrap(),
+            )?
+            .to_vec())
+    }
+}
+
+fn source_text_recipe() -> ProductRecipe {
+    ProductRecipe::new()
+        .add_contribution(
+            crate::SchemaContribution::<SourceTextPlugin>::for_default([SOURCE_TEXT_PROVIDER])
+                .unwrap(),
+        )
+        .unwrap()
+        .add_asset_domain::<SourceTextDomain>()
+        .unwrap()
+}
+
+#[test]
+fn domain_sources_export_exact_members_and_reject_changed_or_missing_dependencies() {
+    use nara_reflect::PersistentComponentProvider;
+    let project = SourceProject::new();
+    let root = host_fs::readable_directory(&project.root).unwrap();
+    let metadata = nara_asset::AssetMeta::new(
+        nara_asset::AssetMetaIdentity::new(
+            nara_asset::StableAssetId::parse_str("4bc478ea-9882-49e8-91f1-62a2d5e9dc07").unwrap(),
+            nara_asset::AssetPath::new("text.txt").unwrap(),
+            nara_asset::AssetSourceKind::Other("test.export.text".to_owned()),
+        ),
+        (),
+    );
+    fs::write(
+        project.root.join("assets/text.txt.meta"),
+        metadata.to_json_string().unwrap(),
+    )
+    .unwrap();
+    fs::write(project.root.join("assets/text.txt"), b"main source").unwrap();
+    fs::write(project.root.join("assets/suffix.txt"), b"original").unwrap();
+    let component = SourceText {
+        source: nara_asset::AssetRef::path("text.txt").unwrap(),
+    };
+    let scene = SceneDocument::from_ordered_roots([nara_scene::SceneEntityRecord::new(
+        nara_identity::SceneEntityId::new("text").unwrap(),
+    )
+    .with_component(
+        nara_reflect::ComponentTypeId::new("test.export.SourceText"),
+        nara_scene::SceneComponentRecord::new(
+            nara_reflect::ComponentSchemaVersion::ONE,
+            component.__encode_persistent_component().unwrap(),
+        ),
+    )]);
+    fs::write(
+        project.root.join("scenes/a.scene.json"),
+        scene.to_json_string().unwrap(),
+    )
+    .unwrap();
+    let manifest = root
+        .open_file(&RelativePath::new("nara.toml").unwrap())
+        .unwrap();
+    let candidate = ingest_project_manifest(&manifest, None).unwrap();
+    let plan = resolve_product_recipe(&candidate, source_text_recipe()).unwrap();
+    fs::write(
+        project.root.join("schema/authoring.bundle.json"),
+        plan.schema_validation()
+            .authoring_schema_bundle()
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    let check =
+        || check_project(ProjectCheckRequest::new(root.share(), source_text_recipe())).unwrap();
+    let delivery = check();
+    assert_eq!(
+        delivery
+            .members()
+            .iter()
+            .filter(|member| member.path().as_str() == "assets/suffix.txt")
+            .count(),
+        1
+    );
+    let prepare = |name: &str| {
+        let build = project
+            .synthetic_build(
+                delivery.startup_content(),
+                &delivery.schema_fingerprint().to_string(),
+            )
+            .unwrap();
+        prepare_project_export(ProjectExportRequest::new(
+            host_fs::writable_directory(&project.root).unwrap(),
+            RelativeComponent::new(name).unwrap(),
+            delivery.clone(),
+            build,
+        ))
+    };
+    let original = prepare("published").unwrap().publish();
+    assert!(matches!(
+        original,
+        super::ProjectExportOutcome::Published(_)
+    ));
+    assert_eq!(
+        fs::read(project.root.join("published/project/assets/suffix.txt")).unwrap(),
+        b"original"
+    );
+    let prepared = prepare("changed").unwrap();
+    fs::write(project.root.join("assets/suffix.txt"), b"modified").unwrap();
+    assert!(matches!(
+        prepared.publish(),
+        super::ProjectExportOutcome::Rejected(_)
+    ));
+    assert!(!project.root.join("changed").exists());
+    assert!(matches!(
+        prepare("changed-before-prepare"),
+        Err(ProjectExportPlanError::ContentChanged { .. })
+    ));
+    fs::remove_file(project.root.join("assets/suffix.txt")).unwrap();
+    assert!(matches!(
+        prepare("missing"),
+        Err(ProjectExportPlanError::ContentChanged { .. })
+    ));
+    assert!(!project.root.join("missing").exists());
+    assert_eq!(
+        fs::read(project.root.join("published/project/assets/suffix.txt")).unwrap(),
+        b"original"
+    );
+}
+
 #[test]
 fn export_revalidation_rejects_a_changed_nonstartup_delivery_scene_before_staging() {
     let project = SourceProject::new();

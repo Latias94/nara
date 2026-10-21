@@ -156,6 +156,16 @@ flowchart LR
   afterward. A published candidate that fails acceptance remains present and is reported as
   published-but-unaccepted; no rollback or in-place acceptance retry is claimed.
 
+### Compiled source-domain members
+
+ADR 0103's source-domain refinement lets the same compiled recipe prepare typed CPU content for
+Check and Play. The project Host records primary sources, metadata and domain-reported auxiliary
+sources in the existing closure receipt. Delivery union and Export digest revalidation consume
+these members without a new exporter registry, domain parser invocation during Export, or weaker
+build agreement. A source-domain extension does not gain authority to construct build receipts.
+See the [public guide](../../guides/project-asset-domains.md) and
+[qualification](../../plans/2026-10-21-external-asset-domain-qualification-plan.md).
+
 ### Explicit repair authority
 
 - The first repair operation handles only a stale `startup.default_scene` selection after the

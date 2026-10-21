@@ -9,8 +9,14 @@ direct dependencies, accidental workspace inheritance and unsupported facade sho
 The root fixture library depends directly on `nara_reflect` and `nara_scene`. Its integration tests
 declare their domain dependencies separately; a dev-only renamed root facade, `nara_engine`,
 verifies one component recipe across native composition, Editor authoring and strict project Check.
-The filesystem, project-workflow, material and editor-panel members exercise their own declared
+The filesystem, project-workflow, asset-domain, material and editor-panel members exercise their own declared
 public surfaces. The project-workflow member consumes that workflow through the root facade.
+
+The [asset-domain consumer](asset-domain-consumer/README.md) contributes a text resource through
+public product composition. It checks exact auxiliary-source receipts, reads typed products during
+headless Play, and qualifies Scene replacement and retained-generation behavior. Source Export
+publication is verified separately in the owning engine tests with synthetic build observations;
+this fixture makes no exported desktop-executable claim.
 
 Run from the repository root, using the shared `target` directory through `CARGO_TARGET_DIR`:
 
