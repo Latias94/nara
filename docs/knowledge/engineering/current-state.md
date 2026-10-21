@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "53807a67a0c148cd83412715ee8ec1b17940b91359d87e5d216d11666416af0e"
+source_fingerprint: "a63a4633b6bfe5f8f64c2c0c7a4dffb7fe57e39787f982cd5c83c13ebd9a2f62"
 ---
 
 # Current State
@@ -12,9 +12,9 @@ source_fingerprint: "53807a67a0c148cd83412715ee8ec1b17940b91359d87e5d216d1166641
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `53807a67a0c148cd83412715ee8ec1b17940b91359d87e5d216d11666416af0e`
-- Immutable records: 823
-- Active lane heads: 2
+- Source fingerprint: `a63a4633b6bfe5f8f64c2c0c7a4dffb7fe57e39787f982cd5c83c13ebd9a2f62`
+- Immutable records: 825
+- Active lane heads: 1
 
 # Active Registrations
 
@@ -61,11 +61,12 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Scalar preparation locality completed](registry/2026-10/2026-10-20T090441Z-scalar-preparation-locality-codex-root-598f1d3571a64d4c9dd5897e55337e37.md): `completed` (scalar-preparation-locality-codex-root; producer `codex-root`)
 - [Standalone Generic Editor: SGE complete; no successor active](registry/2026-08/2026-08-19T111039Z-standalone-generic-editor-open-recovery-codex-root-931591fb6d2b4bcbad3151922814d8e6.md): `completed` (standalone-generic-editor-open-recovery-codex-root; producer `codex-root`)
 - [Standalone Supervised Play transferred to 2D foundation refactor](registry/2026-10/2026-10-15T091614Z-standalone-supervised-play-v1-codex-root-d7cca2f42c6d4e07b762475aced7eb44.md): `closed` (standalone-supervised-play-v1-codex-root; producer `codex-root`)
-- [Task execution baseline recorded; owner workload attribution next](registry/2026-10/2026-10-21T032635Z-task-execution-budget-codex-root-6ac0fffb15f5499b8c2a042b7f248f6d.md): `active` (task-execution-budget-codex-root; producer `codex-root`)
+- [Editor authoring task budget qualified; Bevy feature trial retained](registry/2026-10/2026-10-21T072031Z-task-execution-budget-codex-root-48f320b6ea934d86a72aa39f42652a45.md): `complete` (task-execution-budget-codex-root; producer `codex-root`)
 - [Local CI contract and Linux Play corrections qualified](registry/2026-10/2026-10-20T153200Z-tile-locality-ci-portability-codex-root-0e48eb6544e04458a9d668699ed2ebd2.md): `active` (tile-locality-ci-portability-codex-root; producer `codex-root`)
 
 # Recent Evidence
 
+- **Verification Evidence**: [Editor authoring task budget and Bevy feature qualification](verification/2026-10/2026-10-21T071613Z-editor-authoring-task-budget-and-bevy-feature-qualification-b9b5f36f37fd4db8858dfec9a08a3e33.md) - Scoped authoring pool correction, before/after workload evidence, custody tests and Bevy ECS feature trial.
 - **Session Handoff**: [Checkpoint consumer qualified; task execution budget is the next investigation](sessions/2026-10/2026-10-21T032454Z-checkpoint-consumer-qualified-task-execution-budget-is-the-next-investigation-8f7f1c5d412d4b25b72aeb16bd3bab9a.md) - Session Handoff for Checkpoint consumer qualified; task execution budget is the next investigation.
 - **Verification Evidence**: [Atomic API rename under MSRV and portable wasm](verification/2026-10/2026-10-21T032015Z-atomic-api-rename-under-msrv-and-portable-wasm-284fef97fc6c4a208f370262189bdc6b.md) - Verification Evidence for Atomic API rename under MSRV and portable wasm.
 - **Verification Evidence**: [Two-level checkpoint consumer and complete-frame headless qualification](verification/2026-10/2026-10-21T025657Z-two-level-checkpoint-consumer-and-complete-frame-headless-qualification-72c5ef2705f0461e90916bb60e1bb345.md) - Verification Evidence for Two-level checkpoint consumer and complete-frame headless qualification.
@@ -77,7 +78,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Reflection declaration checks and Linux supervised Play storage corrections](verification/2026-10/2026-10-20T152924Z-reflection-declaration-checks-and-linux-supervised-play-storage-corrections-efc879a2a8974c989725df994b86e5db.md) - Local target reuse, eager float proofs, bounded Play failure facts and real Linux cache publication; complete successor hosted qualification remains pending.
 - **Verification Evidence**: [Hosted CI contract corrections and signed Linux process groups](verification/2026-10/2026-10-20T115517Z-hosted-ci-contract-corrections-and-signed-linux-process-groups-b976e5720228491691361ab578614f12.md) - Observed hosted failures, signed process groups, native local-workspace policy and deterministic contract fixtures; full successor CI pending.
 - **Verification Evidence**: [Rust Play attribution and Windows Cargo input qualification](verification/2026-10/2026-10-20T112401Z-rust-play-attribution-and-windows-cargo-input-qualification-2abb1db859f04d848d88a1706ad167be.md) - Public Play/Restart, private native Cargo attribution, exact CLI cache interoperability and compiler failure recovery at the corrected Windows path boundary.
-- **Verification Evidence**: [CI portability and Tile locality qualification in progress](verification/2026-10/2026-10-20T102441Z-ci-portability-and-tile-locality-qualification-in-progress-b85485ff744b4ccf8d02562d94d50ce6.md) - Confirmed hosted failures, Linux capability enumeration, portable wasm compilation and measured per-view queue correction; final hosted and timing evidence pending.
 
 # Integration Notes
 
