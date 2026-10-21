@@ -62,7 +62,7 @@ impl EditorFrameClock {
     #[must_use]
     pub fn new() -> Self {
         let previous = NEXT_EDITOR_FRAME_SOURCE
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(1)
             })
             .expect("editor frame source identity space is exhausted");

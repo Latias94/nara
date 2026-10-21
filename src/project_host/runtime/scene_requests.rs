@@ -140,7 +140,7 @@ impl RequestOwner {
             return Err(ProjectSceneRequestError::UndeclaredScene);
         }
         let sequence = NEXT_REQUEST
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
                 next.checked_add(1)
             })
             .map_err(|_| ProjectSceneRequestError::IdExhausted)?;

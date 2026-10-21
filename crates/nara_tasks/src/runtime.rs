@@ -1569,7 +1569,7 @@ impl TaskPools {
 
     fn allocate_task_id(&self) -> Option<TaskId> {
         self.next_id
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
                 next.checked_add(1)
             })
             .ok()

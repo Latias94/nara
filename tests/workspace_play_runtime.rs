@@ -119,7 +119,7 @@ struct RuntimeServiceSessionId {
 
 fn publish_runtime_service_session_id(world: &mut nara::ecs::World) {
     let id = NEXT_RUNTIME_SERVICE_SESSION_ID
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             current.checked_add(1)
         })
         .expect("test runtime service-session identities are exhausted");

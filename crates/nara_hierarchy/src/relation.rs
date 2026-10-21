@@ -6,7 +6,7 @@ static NEXT_ROOT_EPOCH: AtomicU64 = AtomicU64::new(1);
 
 fn next_root_epoch() -> u64 {
     NEXT_ROOT_EPOCH
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |epoch| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |epoch| {
             epoch.checked_add(1)
         })
         .expect("hierarchy root epoch space exhausted")

@@ -362,7 +362,7 @@ impl AssetWatchQueueShared {
 
     fn reserve(counter: &AtomicUsize, amount: usize, maximum: usize) -> Result<usize, usize> {
         counter
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 current
                     .checked_add(amount)
                     .filter(|requested| *requested <= maximum)
@@ -372,7 +372,7 @@ impl AssetWatchQueueShared {
     }
 
     fn release(counter: &AtomicUsize, amount: usize) {
-        let _ = counter.fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+        let _ = counter.try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
             Some(current.saturating_sub(amount))
         });
     }
@@ -804,7 +804,7 @@ impl Debug for AssetWatchEventQueue {
 }
 
 fn saturating_increment(counter: &AtomicU64, amount: u64) {
-    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+    let _ = counter.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
         Some(current.saturating_add(amount))
     });
 }

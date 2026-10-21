@@ -3475,7 +3475,7 @@ fn record_reaped_runtime_owner() {
         std::process::abort();
     }
     if QUARANTINED_RUNTIME_OWNER_COUNT
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
             current.checked_sub(1)
         })
         .is_err()
@@ -3487,7 +3487,7 @@ fn record_reaped_runtime_owner() {
 
 fn reserve_process_quarantine_slot() -> bool {
     QUARANTINED_RUNTIME_OWNER_COUNT
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
             (current < MAX_QUARANTINED_RUNTIME_OWNERS_PER_PROCESS).then_some(current + 1)
         })
         .is_ok()
@@ -3495,7 +3495,7 @@ fn reserve_process_quarantine_slot() -> bool {
 
 fn increment_atomic_u64(counter: &AtomicU64) {
     if counter
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
             current.checked_add(1)
         })
         .is_err()
@@ -3506,7 +3506,7 @@ fn increment_atomic_u64(counter: &AtomicU64) {
 
 fn allocate_generation() -> Result<RuntimeGeneration, RuntimeAdmissionError> {
     NEXT_RUNTIME_GENERATION
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             current.checked_add(1)
         })
         .map(RuntimeGeneration)

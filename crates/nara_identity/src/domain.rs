@@ -2216,7 +2216,7 @@ pub(crate) fn allocate_runtime_entity_incarnation_from(
     allocator: &AtomicU64,
 ) -> Result<RuntimeEntityIncarnation, IdentityDomainError> {
     let raw = allocator
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             (current != 0).then(|| current.checked_add(1).unwrap_or(0))
         })
         .map_err(|_| IdentityDomainError::RuntimeEntityIncarnationExhausted)?;
@@ -2229,7 +2229,7 @@ pub(crate) fn allocate_world_identity_domain_id_from(
     allocator: &AtomicU64,
 ) -> Result<WorldIdentityDomainId, IdentityDomainError> {
     let raw = allocator
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             if current == 0 {
                 None
             } else {

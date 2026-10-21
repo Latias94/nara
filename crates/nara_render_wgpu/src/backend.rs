@@ -78,7 +78,7 @@ struct WgpuBackendInstanceId(u64);
 impl Default for WgpuBackendInstanceId {
     fn default() -> Self {
         let id = NEXT_WGPU_BACKEND_INSTANCE_ID
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(1)
             })
             .unwrap_or_else(|_| std::process::abort());

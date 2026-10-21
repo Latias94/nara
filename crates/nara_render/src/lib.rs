@@ -86,7 +86,7 @@ pub mod __private {
     impl EditorRenderGeneration {
         pub fn try_acquire() -> Option<Self> {
             NEXT_EDITOR_RENDER_GENERATION
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                     current.checked_add(1)
                 })
                 .ok()

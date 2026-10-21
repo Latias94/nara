@@ -112,7 +112,7 @@ struct StartupPermit {
 impl StartupPermit {
     fn acquire(active: &Arc<AtomicUsize>) -> Option<Self> {
         active
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
                 (count < STARTUP_CAPTURE_LIMIT).then_some(count + 1)
             })
             .ok()?;

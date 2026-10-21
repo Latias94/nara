@@ -52,7 +52,7 @@ pub struct WinitAccessibilityPublisherId(u64);
 impl WinitAccessibilityPublisherId {
     fn allocate() -> Result<Self, WinitAccessibilityError> {
         NEXT_PUBLISHER_ID
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(1)
             })
             .map(Self)

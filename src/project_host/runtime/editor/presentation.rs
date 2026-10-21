@@ -104,7 +104,7 @@ impl EditorPreviewPresentation {
     ) -> Result<(EditorAcceptedPreview, RenderFramePacket, SpriteBatches), EditorPresentationError>
     {
         let id = NEXT_PRESENTATION_ID
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(1)
             })
             .map_err(|_| EditorPresentationError::IdentityExhausted)?;
@@ -181,7 +181,7 @@ impl EditorPreviewPresentation {
             return Err(EditorPresentationError::ImageMismatch);
         }
         let id = NEXT_PRESENTATION_ID
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(1)
             })
             .map_err(|_| EditorPresentationError::IdentityExhausted)?;
