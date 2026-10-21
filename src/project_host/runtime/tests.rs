@@ -1456,6 +1456,9 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
 
     let frame = editor.current_frame();
     let import_basis_generation = editor.project_source_index_snapshot().unwrap().generation();
+    let tasks_before_import = editor
+        .test_authoring_task_stats()
+        .for_kind(TaskPoolKind::Io);
     let started = editor.request_editor_image_import(
         frame.revision(),
         "assets/textures/imported.png",
@@ -1480,8 +1483,20 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
         ),
         "a concurrent request returned {concurrent:?}"
     );
+    let tasks_after_admission = editor
+        .test_authoring_task_stats()
+        .for_kind(TaskPoolKind::Io);
+    assert_eq!(
+        tasks_after_admission.admitted,
+        tasks_before_import.admitted + 1
+    );
 
     let first_state = drive_image_import_to_terminal(&mut editor);
+    let tasks_after_completion = editor
+        .test_authoring_task_stats()
+        .for_kind(TaskPoolKind::Io);
+    assert!(tasks_after_completion.completed > tasks_after_admission.completed);
+    assert!(tasks_after_completion.taken > tasks_after_admission.taken);
     let (stable_id, first_version) = match first_state {
         super::editor::EditorImageImportState::Succeeded {
             stable_id, version, ..
@@ -2642,6 +2657,13 @@ fn editor_project_close_retries_timed_out_image_task_owner_before_releasing_sess
             .task_shutdown()
             .for_kind(TaskPoolKind::Io)
             .joined_workers
+            > 0
+    );
+    assert!(
+        complete
+            .task_shutdown()
+            .for_kind(TaskPoolKind::Io)
+            .cancellation_requests
             > 0
     );
     assert_eq!(budget.snapshot().active_reservations(), 1);

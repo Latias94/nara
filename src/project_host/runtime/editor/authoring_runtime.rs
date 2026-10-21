@@ -12,6 +12,7 @@ use nara_asset::{
     AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, AssetVersion, Assets,
     Handle,
 };
+use nara_core::ItemLimit;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Mut, Resource, World};
 use nara_fs::{ContentDigest, DirectoryCapability, FileCapability, FileIdentity, RelativePath};
@@ -23,8 +24,8 @@ use nara_reflect::{ComponentRegistryPlugin, ComponentRegistrySnapshot};
 #[cfg(feature = "presentation-2d")]
 use nara_scene::SceneAuthoringRevision;
 use nara_tasks::{
-    TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskShutdownReport, TaskSpawnRequest,
-    TaskTerminal,
+    TaskDomainKey, TaskHandle, TaskKindConfig, TaskPoolConfig, TaskPoolKind, TaskPools,
+    TaskShutdownReport, TaskSpawnRequest, TaskTerminal,
 };
 use nara_tilemap::TileSetAssetPlugin;
 
@@ -575,13 +576,18 @@ fn map_image_import_error(error: &ImageImportError) -> EditorImageRuntimeFailure
 }
 
 fn build_authoring_app() -> Result<App, DiagnosticReport> {
+    let task_config = authoring_task_pool_config()
+        .ok_or_else(|| runtime_error("project.editor.authoring-task-config-invalid"))?;
     let mut app = App::new();
     app.add_plugins((
         ComponentRegistryPlugin,
         nara_hierarchy::HierarchyPlugin,
         nara_scene::SceneComponentsPlugin,
         nara_diagnostic::DiagnosticsPlugin::default(),
-        nara_tasks::TaskPlugin::default(),
+        // The fixed authoring composition currently submits only I/O-class work. The task API
+        // requires each class to retain at least one worker; reassess this allocation when adding
+        // a non-I/O authoring consumer.
+        nara_tasks::TaskPlugin::new(task_config),
         nara_asset::AssetPlugin,
         nara_transform::TransformPlugin,
         nara_render::RenderComponentsPlugin,
@@ -618,6 +624,76 @@ fn build_authoring_app() -> Result<App, DiagnosticReport> {
     ))
     .map_err(|_| runtime_error("project.editor.preview-plugin-install-failed"))?;
     Ok(app)
+}
+
+fn authoring_task_pool_config() -> Option<TaskPoolConfig> {
+    let defaults = TaskPoolConfig::default();
+    let io = TaskKindConfig::new(
+        ItemLimit::new(2)?,
+        defaults.kind(TaskPoolKind::Io).pending(),
+    );
+    let compute = TaskKindConfig::new(
+        ItemLimit::ONE,
+        defaults.kind(TaskPoolKind::Compute).pending(),
+    );
+    let async_compute = TaskKindConfig::new(
+        ItemLimit::ONE,
+        defaults.kind(TaskPoolKind::AsyncCompute).pending(),
+    );
+    TaskPoolConfig::new(io, compute, async_compute, defaults.shutdown_policy()).ok()
+}
+
+#[cfg(test)]
+mod task_config_tests {
+    use super::*;
+
+    #[test]
+    fn authoring_task_pool_config_is_bounded_and_preserves_default_queue_policy() {
+        let defaults = TaskPoolConfig::default();
+        let config = authoring_task_pool_config().expect("the fixed authoring config is valid");
+
+        assert_eq!(
+            config.kind(TaskPoolKind::Io).workers(),
+            ItemLimit::new(2).expect("two is a non-zero worker count")
+        );
+        assert_eq!(config.kind(TaskPoolKind::Compute).workers(), ItemLimit::ONE);
+        assert_eq!(
+            config.kind(TaskPoolKind::AsyncCompute).workers(),
+            ItemLimit::ONE
+        );
+        for kind in TaskPoolKind::ALL {
+            assert_eq!(config.kind(kind).pending(), defaults.kind(kind).pending());
+        }
+        assert_eq!(config.shutdown_policy(), defaults.shutdown_policy());
+    }
+
+    #[test]
+    fn authoring_app_installs_its_bounded_task_pool_config() {
+        let app = build_authoring_app().expect("the authoring app composition is valid");
+        let expected = authoring_task_pool_config().expect("the fixed authoring config is valid");
+        let installed = app
+            .world()
+            .get_resource::<TaskPools>()
+            .expect("the authoring app installs its task pools");
+        assert_eq!(installed.config(), &expected);
+
+        let mut runtime = RuntimeInstance::start(app).expect("the authoring runtime starts");
+        assert!(matches!(
+            runtime.request_control(RuntimeControl::Stop),
+            nara_app::RuntimeControlRequestResult::Accepted(_)
+        ));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while runtime.state() != RuntimeState::Stopped {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the authoring runtime must stop"
+            );
+            runtime
+                .drive(Duration::ZERO)
+                .expect("the authoring runtime remains healthy while stopping");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
 }
 
 struct EditorImageImportAdmission {

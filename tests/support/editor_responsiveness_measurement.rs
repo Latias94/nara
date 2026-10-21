@@ -158,13 +158,15 @@ fn measure_editor_owner_thread_work() {
                 population,
             );
             // Finish the tiny source-index fixture before persistence timings.
-            for _ in 0..32 {
-                if !editor.current_frame().project_browser().has_pending_work() {
-                    break;
-                }
+            let source_index_deadline = Instant::now() + ASYNC_DRIVER_TIMEOUT;
+            while editor.current_frame().project_browser().has_pending_work() {
+                assert!(
+                    Instant::now() < source_index_deadline,
+                    "Project Browser source indexing did not complete within the measurement deadline"
+                );
+                thread::sleep(ASYNC_POLL_INTERVAL);
                 editor.drive_editor_frame(Duration::ZERO);
             }
-            assert!(!editor.current_frame().project_browser().has_pending_work());
             let started = Instant::now();
             editor.drive_editor_frame(Duration::ZERO);
             let idle = started.elapsed();

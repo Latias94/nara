@@ -2322,6 +2322,11 @@ impl EditorProjectSession {
     }
 
     #[cfg(test)]
+    pub(super) fn test_authoring_task_stats(&self) -> nara_tasks::TaskStats {
+        self.authoring_runtime.persistence_tasks().stats()
+    }
+
+    #[cfg(test)]
     pub(super) fn test_image_import_budget_host(&self) -> nara_image::ImageImportBudgetHost {
         self.authoring_runtime.image_import_budget_host()
     }
