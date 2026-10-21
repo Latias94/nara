@@ -13,6 +13,7 @@ exclude = [
     "tests/fixtures/module-consumer",
     "tests/fixtures/ui-module-consumer",
     "samples/collect-game",
+    "samples/two-level-game",
 ]
 members = [
     "crates/nara_app",

@@ -68,13 +68,19 @@ decision authority.
 ## OQ-006: Save-Game Snapshot and Restore Contract
 
 - **Status**: open
-- **Owner**: future save/persistence domain
+- **Owner**: concrete game persistence consumers; future shared save domain
 - **Trigger**: A real game requires save/restore across process restart or scene travel and can name
   persistent entities, eligible state, service reconstruction, compatibility, and failure behavior.
 - **Related ADRs**: 0027, 0043, 0045, 0051, 0058, 0084, 0089
 - **Question**: Which snapshot/baseline, component/resource records, runtime-created identity,
   tombstone, migration, service reconstruction, and transactional restore rules form the first save
   format without serializing an ambient `World` or backend-native state?
+- **First answer**: ADR 0027's two-level consumer owns bounded versioned checkpoint DTOs, logical
+  level-instance/object identities, precommit source validation and explicit transient rebuilding.
+  Its independent save/fresh-process restore/export qualification is recorded in the
+  [consumer evidence](../knowledge/engineering/verification/2026-10/2026-10-21T025657Z-two-level-checkpoint-consumer-and-complete-frame-headless-qualification-72c5ef2705f0461e90916bb60e1bb345.md).
+  General shared snapshot APIs, arbitrary-tick state and native service restoration remain open
+  only when another concrete consumer requires those contracts.
 
 ## OQ-007: Optional Gameplay-Language Adapter Contract
 

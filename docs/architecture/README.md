@@ -83,6 +83,9 @@ The [persistent two-level consumer](../plans/2026-10-20-persistent-two-level-gam
 selected Scene loading and finite declared delivery before current-level ownership, travel and
 game-owned checkpoint persistence. ADR 0110 distinguishes delivery source facts from executable
 startup agreement; Proposed ADR 0089 does not grant a general scene manager or native rollback.
+Its [Windows consumer qualification](../knowledge/engineering/verification/2026-10/2026-10-21T025657Z-two-level-checkpoint-consumer-and-complete-frame-headless-qualification-72c5ef2705f0461e90916bb60e1bb345.md)
+records full-frame headless execution, actual travel/save/fresh-process restore and release export,
+with native presentation and other-platform limits kept explicit.
 
 The [ordinary authoring workflow](../plans/2026-10-20-ordinary-authoring-workflow-plan.md)
 implements the first structural consumer from that review: stable-ID reparent/reorder, closed

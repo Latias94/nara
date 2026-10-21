@@ -51,6 +51,9 @@ cargo run --manifest-path reference-game/Cargo.toml --locked --features desktop 
 See [`reference-game/README.md`](reference-game/README.md) for the gameplay controls, project data,
 and standalone candidate layout.
 
+For cross-level travel and game-owned checkpoint saves, see the independent
+[`samples/two-level-game`](samples/two-level-game/README.md) consumer.
+
 ## Repository Layout
 
 - `crates/`: engine modules and native adapters

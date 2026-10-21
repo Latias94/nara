@@ -1,0 +1,48 @@
+schema_version = 1
+
+[project]
+name = "two-level-game"
+stable_id = "two-level-game"
+version = "0.1.0"
+
+[paths]
+assets = "assets"
+scenes = "scenes"
+prefabs = "prefabs"
+
+[authoring]
+schema_bundle = "schema/authoring.bundle.json"
+
+[startup]
+default_scene = "meadow.scene.json"
+
+[content]
+scenes = ["cavern.scene.json"]
+
+[runtime]
+preset = "local-headless"
+fixed_timestep_seconds = 0.02
+
+[window]
+enabled = false
+
+[capabilities]
+requested = ["runtime-2d"]
+
+[profiles.desktop.capabilities]
+requested = ["runtime-2d", "presentation-2d", "desktop-winit", "render-wgpu"]
+
+[profiles.desktop.execution]
+contract = "desktop-supervised-play/v1"
+
+[profiles.desktop.window]
+enabled = true
+title = "Meadow / Cavern | WASD move | E travel | Q instance | M marker | K save | L load | R retry"
+width = 960
+height = 540
+present_mode = "fifo"
+resizable = true
+
+[profiles.desktop.render.world_canvas]
+width = 320
+height = 180
