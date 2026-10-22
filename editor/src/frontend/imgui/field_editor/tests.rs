@@ -74,7 +74,15 @@ fn actual_candidate_conversion_admits_only_canonical_asset_references() {
             .value(&ComponentValueShape::AssetRef)
             .is_err()
     );
-    assert!(!value_draft::supported(&ComponentValueShape::EntityRef));
+    assert!(value_draft::supported(&ComponentValueShape::EntityRef));
+    assert_eq!(
+        Candidate::Text("scene-local:target".into())
+            .value(&ComponentValueShape::EntityRef)
+            .unwrap(),
+        ComponentValue::EntityReference(nara::identity::EntityReference::SceneLocal {
+            entity: SceneEntityId::new("target").unwrap(),
+        })
+    );
 }
 
 fn test_basis(index: usize) -> FieldBasis {

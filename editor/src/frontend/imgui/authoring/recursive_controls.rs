@@ -1,7 +1,7 @@
 use dear_imgui_rs::Ui;
 use nara::{
     reflect::{ComponentValue, ComponentValueShape},
-    tooling::EditorFieldTarget,
+    tooling::{EditorFieldTarget, SceneInspectorEntityRow},
 };
 
 use super::{
@@ -12,6 +12,7 @@ use super::{
 pub(in crate::frontend::imgui) fn show_root(
     ui: &Ui,
     target: &EditorFieldTarget,
+    entities: &[SceneInspectorEntityRow],
     shape: &ComponentValueShape,
     source: Option<&ComponentValue>,
     draft: &mut RootDraft,
@@ -28,7 +29,7 @@ pub(in crate::frontend::imgui) fn show_root(
     }
     ui.with_disabled_if(!editable, || {
         if let Some(node) = &mut draft.node {
-            show_node(ui, target, "root", shape, node, text_owner);
+            show_node(ui, target, entities, "root", shape, node, text_owner);
         }
     });
     let apply = button(ui, target, "root", "Apply value", editable && can_submit);
@@ -42,6 +43,7 @@ pub(in crate::frontend::imgui) fn show_root(
 fn show_node(
     ui: &Ui,
     target: &EditorFieldTarget,
+    entities: &[SceneInspectorEntityRow],
     path: &str,
     shape: &ComponentValueShape,
     draft: &mut ValueDraft,
@@ -60,6 +62,11 @@ fn show_node(
             ui.same_line();
             if button(ui, target, path, "false", true) {
                 *value = Some(false);
+            }
+        }
+        (ValueDraft::Text { text, entered }, ComponentValueShape::EntityRef) => {
+            if super::super::field_editor::entity_reference::show(ui, entities, text) {
+                *entered = true;
             }
         }
         (ValueDraft::Text { text, entered }, _) => {
@@ -99,6 +106,7 @@ fn show_node(
                 show_node(
                     ui,
                     target,
+                    entities,
                     &format!("{path}.{name}"),
                     &member.shape,
                     draft,
@@ -137,6 +145,7 @@ fn show_node(
                 show_node(
                     ui,
                     target,
+                    entities,
                     &format!("{path}.some"),
                     shape,
                     child,
@@ -148,7 +157,15 @@ fn show_node(
                 let _child_id = ui.push_id("new-some");
                 ui.text("New Some value (unconfirmed)");
                 ui.indent();
-                show_node(ui, target, &format!("{path}.new"), shape, child, text_owner);
+                show_node(
+                    ui,
+                    target,
+                    entities,
+                    &format!("{path}.new"),
+                    shape,
+                    child,
+                    text_owner,
+                );
                 ui.unindent();
                 let admission = child.value(shape);
                 if let Err(error) = &admission {
@@ -177,7 +194,15 @@ fn show_node(
                 let _row_id = ui.push_id(&child.id.to_string());
                 let path = format!("{path}[{index}]");
                 ui.text(format!("Item {index}"));
-                show_node(ui, target, &path, item, &mut child.node, text_owner);
+                show_node(
+                    ui,
+                    target,
+                    entities,
+                    &path,
+                    item,
+                    &mut child.node,
+                    text_owner,
+                );
                 if button(ui, target, &path, "Remove item", true) {
                     remove = Some(index);
                 }
@@ -197,6 +222,7 @@ fn show_node(
                 show_node(
                     ui,
                     target,
+                    entities,
                     &format!("{path}.new"),
                     item,
                     &mut child.node,
@@ -229,7 +255,15 @@ fn show_node(
                 let _row_id = ui.push_id(&child.id.to_string());
                 let path = format!("{path}[{key:?}]");
                 ui.text(key);
-                show_node(ui, target, &path, shape, &mut child.node, text_owner);
+                show_node(
+                    ui,
+                    target,
+                    entities,
+                    &path,
+                    shape,
+                    &mut child.node,
+                    text_owner,
+                );
                 if button(ui, target, &path, "Remove entry", true) {
                     remove = Some(key.clone());
                 }
@@ -261,6 +295,7 @@ fn show_node(
                 show_node(
                     ui,
                     target,
+                    entities,
                     &format!("{path}.new"),
                     shape,
                     &mut child.node,

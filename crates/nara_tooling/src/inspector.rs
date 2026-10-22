@@ -262,6 +262,7 @@ pub struct SceneComponentCompositionCapability {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SceneInspectorEntityRow {
     pub id: SceneEntityId,
+    pub name: Option<String>,
     pub parent: Option<SceneEntityId>,
     pub depth: usize,
     pub inspectable_component_count: usize,
@@ -644,6 +645,12 @@ fn build_inspector_model(
             }
             SceneInspectorEntityRow {
                 id: entity.id.clone(),
+                name: entity
+                    .components
+                    .get(&ComponentTypeId::new("nara.scene.Name"))
+                    .filter(|record| record.version == ComponentSchemaVersion::ONE)
+                    .and_then(|record| record.value.as_str())
+                    .map(str::to_owned),
                 parent: parent.cloned(),
                 depth,
                 inspectable_component_count: inspectable_component_count(
@@ -1185,6 +1192,7 @@ fn inspector_authoring_component_error_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nara_identity::EntityReference;
     use nara_scene::SceneEntityRecord;
 
     fn scene_id(value: &str) -> SceneEntityId {
@@ -1355,6 +1363,136 @@ mod tests {
         assert_eq!(session.revision(), revision);
         assert_eq!(session.history_status(), history);
         assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+    }
+
+    #[test]
+    fn source_local_entity_reference_inspector_edit_exposes_shape_and_history() {
+        use nara_reflect::{
+            AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldPath,
+            ComponentFieldSchema, ComponentSchemaCatalog, PersistentComponentSchemaOwnerId,
+        };
+        use nara_scene::{AuthoringDocumentSource, SceneDocumentCandidate};
+
+        let owner = PersistentComponentSchemaOwnerId::try_new("studio.links").unwrap();
+        let component = ComponentTypeId::new("studio.Link");
+        let schema = ComponentSchema::new(component.clone(), "Link", ComponentSchemaVersion::ONE)
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+            .with_fields([ComponentFieldSchema::required(
+                ComponentFieldId::new("target"),
+                "Target",
+                ComponentFieldPath::from_fields(["target"]),
+                ComponentValueShape::EntityRef,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+            .with_capability(ComponentCapability::EntityRef)]);
+        let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+            owner.clone(),
+            ComponentSchemaCatalog {
+                components: vec![schema],
+                ..Default::default()
+            },
+            None,
+        )])
+        .unwrap();
+        let adapter = nara_scene::__private::AuthoringAdapterReceipt::from_schema_owner(
+            &bundle.owners()[0],
+            &Default::default(),
+        )
+        .unwrap();
+        let source = scene_id("source");
+        let target = scene_id("target");
+        let other = scene_id("other");
+        let document = SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(source.clone()).with_component(
+                component.clone(),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::map([(
+                        "target",
+                        ComponentValue::EntityReference(EntityReference::SceneLocal {
+                            entity: target.clone(),
+                        }),
+                    )]),
+                )
+                .with_owner(owner),
+            ),
+            SceneEntityRecord::new(target.clone()),
+            SceneEntityRecord::new(other.clone()),
+        ]);
+        let published = SceneDocumentCandidate::decode_json_bytes(
+            document.to_json_string().unwrap().as_bytes(),
+        )
+        .unwrap()
+        .admit_authoring(
+            AuthoringDocumentSource::new(AssetRef::path("scenes/links.scene.json").unwrap()),
+            &bundle,
+            &[adapter],
+        )
+        .unwrap()
+        .publish();
+        let mut session = SceneAuthoringSession::from_published_authoring_document(published);
+        let inspector = SceneInspectorState::new();
+        let model = inspector.authoring_model_with_selection(&session, Some(&source));
+        let field = &model
+            .selected_entity_view
+            .as_ref()
+            .unwrap()
+            .components
+            .iter()
+            .find(|candidate| candidate.component == component)
+            .unwrap()
+            .fields[0];
+        assert_eq!(field.shape, ComponentValueShape::EntityRef);
+        assert!(field.capabilities.contains(&ComponentCapability::Edit));
+
+        let command = SceneInspectorCommand::SetField {
+            entity: source.clone(),
+            component: component.clone(),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("target"),
+            value: ComponentValue::EntityReference(EntityReference::SceneLocal { entity: other }),
+        };
+        let original = session.document().clone();
+        let revision = session.revision();
+        let applied = inspector.apply_authoring_command(&mut session, command);
+        assert!(applied.applied, "{:#?}", applied.diagnostics);
+        assert_ne!(session.revision(), revision);
+        assert_eq!(session.history_status().undo_depth, 1);
+        assert_ne!(session.document(), &original);
+        assert!(session.undo_authoring().applied);
+        assert_eq!(session.document(), &original);
+        assert_eq!(session.history_status().redo_depth, 1);
+        assert!(session.redo_authoring().applied);
+
+        let before = (
+            session.document().clone(),
+            session.revision(),
+            session.history_status(),
+        );
+        let rejected = inspector.apply_authoring_command(
+            &mut session,
+            SceneInspectorCommand::SetField {
+                entity: source,
+                component,
+                component_version: ComponentSchemaVersion::ONE,
+                field: ComponentFieldId::new("target"),
+                value: ComponentValue::EntityReference(EntityReference::SceneLocal {
+                    entity: scene_id("missing"),
+                }),
+            },
+        );
+        assert!(!rejected.applied);
+        assert!(rejected.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.authoring-local-reference-invalid"
+        }));
+        assert_eq!(
+            (
+                session.document().clone(),
+                session.revision(),
+                session.history_status(),
+            ),
+            before
+        );
     }
 
     #[test]

@@ -1,5 +1,7 @@
 //! The Dear ImGui adapter's private field controllers. Application projections remain read-only.
 
+pub(super) mod entity_reference;
+
 use std::collections::{HashMap, HashSet};
 
 use dear_imgui_rs::{Key, Ui};
@@ -113,9 +115,9 @@ impl Candidate {
                 kind: ComponentValueKind::Null,
                 ..
             } => Self::Structured(RootDraft::default()),
-            ComponentValueShape::Scalar { .. } | ComponentValueShape::AssetRef => {
-                Self::Text(authoring::field_source_text(field))
-            }
+            ComponentValueShape::Scalar { .. }
+            | ComponentValueShape::EntityRef
+            | ComponentValueShape::AssetRef => Self::Text(authoring::field_source_text(field)),
             _ => Self::Structured(RootDraft::default()),
         }
     }
@@ -375,11 +377,23 @@ impl FieldEditors {
             let before = draft.candidate.clone();
             match &mut draft.candidate {
                 Candidate::Text(text) => {
-                    let enter = ui.with_disabled_if(!controls_enabled, || {
-                        ui.input_text("##value", text)
-                            .enter_returns_true(true)
-                            .build()
-                    });
+                    let enter = if field.shape == ComponentValueShape::EntityRef {
+                        ui.with_disabled_if(!controls_enabled, || {
+                            entity_reference::show(ui, &scene.editor.inspector.entities, text);
+                        });
+                        false
+                    } else {
+                        let enter = ui.with_disabled_if(!controls_enabled, || {
+                            ui.input_text("##value", text)
+                                .enter_returns_true(true)
+                                .build()
+                        });
+                        observe_text_owner(ui, text_owner);
+                        if ui.is_item_active() && ui.is_key_pressed(Key::Escape) && !pending {
+                            discard = true;
+                        }
+                        enter
+                    };
                     record(
                         ui,
                         format!(
@@ -388,10 +402,6 @@ impl FieldEditors {
                             field.id.as_str()
                         ),
                     );
-                    observe_text_owner(ui, text_owner);
-                    if ui.is_item_active() && ui.is_key_pressed(Key::Escape) && !pending {
-                        discard = true;
-                    }
                     ui.same_line();
                     apply = (button(ui, &key, "Apply", controls_enabled && !draft.conflict)
                         || enter)
@@ -419,6 +429,7 @@ impl FieldEditors {
                     apply = recursive_controls::show_root(
                         ui,
                         &basis.target,
+                        &scene.editor.inspector.entities,
                         &field.shape,
                         source(field),
                         root,

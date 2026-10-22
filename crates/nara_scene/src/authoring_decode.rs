@@ -2473,8 +2473,16 @@ fn prepare_field_edit(
     if !authoring_field_change_is_preservation_safe(field, edit.value.as_ref()) {
         return Err(field_edit_rejection(
             edit,
-            "scene.authoring-field-edit-not-preservation-safe",
-            "Authoring field edit is outside the preservation-safe value whitelist",
+            if field.has_capability(ComponentCapability::EntityRef) {
+                "scene.authoring-entity-reference-edit-unavailable"
+            } else {
+                "scene.authoring-field-edit-not-preservation-safe"
+            },
+            if field.has_capability(ComponentCapability::EntityRef) {
+                "Entity reference edits require source-local targets in the current document"
+            } else {
+                "Authoring field edit is outside the preservation-safe value whitelist"
+            },
         ));
     }
     let previous = match &edit.value {
@@ -2488,6 +2496,15 @@ fn prepare_field_edit(
             "Authoring field edit path cannot be changed in the component value",
         )
     })?;
+    if field.has_capability(ComponentCapability::EntityRef)
+        && !authoring_field_change_is_preservation_safe(field, previous.as_ref())
+    {
+        return Err(field_edit_rejection(
+            edit,
+            "scene.authoring-entity-reference-edit-unavailable",
+            "Entity reference edits require a source-local inverse value",
+        ));
+    }
     let inverse = match previous {
         Some(value) => ScenePatchOperation::SetField {
             entity: edit.entity.clone(),
@@ -2511,20 +2528,46 @@ fn authoring_field_change_is_preservation_safe(
     value: Option<&ComponentValue>,
 ) -> bool {
     field.has_capability(ComponentCapability::Edit)
-        && !field.has_capability(ComponentCapability::EntityRef)
         && supports_data_shape(field.shape())
         && match value {
             // The complete candidate is validated by classification before publication. Keep
             // value failures there so the shared validator retains its safe code and root field.
-            Some(_) => true,
+            Some(value) => {
+                !field.has_capability(ComponentCapability::EntityRef)
+                    || contains_only_source_local_entity_references(value)
+            }
             None => {
                 (!field.required || field.default_value.is_some())
+                    && (!field.has_capability(ComponentCapability::EntityRef)
+                        || field
+                            .default_value
+                            .as_ref()
+                            .is_none_or(contains_only_source_local_entity_references))
                     && matches!(
                         field.path().segments().last(),
                         Some(ComponentFieldPathSegment::Field(_))
                     )
             }
         }
+}
+
+fn contains_only_source_local_entity_references(value: &ComponentValue) -> bool {
+    match value {
+        ComponentValue::EntityReference(EntityReference::SceneLocal { .. }) => true,
+        ComponentValue::EntityReference(EntityReference::Persistent { .. }) => false,
+        ComponentValue::List(values) => values
+            .iter()
+            .all(contains_only_source_local_entity_references),
+        ComponentValue::Map(values) => values
+            .values()
+            .all(contains_only_source_local_entity_references),
+        ComponentValue::Null
+        | ComponentValue::Bool(_)
+        | ComponentValue::I64(_)
+        | ComponentValue::U64(_)
+        | ComponentValue::F64(_)
+        | ComponentValue::String(_) => true,
+    }
 }
 
 fn field_edit_rejection(

@@ -1,5 +1,8 @@
 use super::*;
 use crate::{PrefabAuthoringSession, SceneAuthoringHistoryLimits, SceneAuthoringSession};
+use nara_identity::{
+    PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
+};
 use nara_reflect::{
     ComponentFieldPath, ComponentFieldSchema, ComponentNumericDomain, ComponentSchemaCatalog,
     ComponentValueKind,
@@ -55,6 +58,7 @@ fn fixture(kind: AuthoringDocumentKind, degraded: bool) -> (SceneDocument, Autho
     .with_capabilities([
         ComponentCapability::Scene,
         ComponentCapability::Inspect,
+        ComponentCapability::Edit,
         ComponentCapability::EntityRef,
     ]);
     let mut default_number = field("reset", ComponentValueKind::U64);
@@ -211,6 +215,152 @@ fn field_candidate_matches_full_classification_for_both_kinds_and_preservation_s
             assert_same(&restored.classify().unwrap(), &state);
         }
     }
+}
+
+#[test]
+fn source_local_entity_reference_field_edit_is_atomic_and_round_trips_history_and_reopen() {
+    let (document, state) = fixture(AuthoringDocumentKind::Scene, false);
+    let mut scene =
+        SceneAuthoringSession::from_published_authoring_document(PublishedAuthoringSceneDocument {
+            document,
+            state,
+        });
+    let original = scene.document().clone();
+    let baseline_revision = scene.revision();
+    let baseline_history = scene.history_status();
+
+    let missing = AuthoringFieldEdit::single(
+        id("z"),
+        component(),
+        ComponentSchemaVersion::ONE,
+        ComponentFieldId::new("link"),
+        reference("missing"),
+    )
+    .unwrap();
+    let missing_report = scene.apply_authoring_field_edit(missing);
+    assert!(!missing_report.applied);
+    assert!(
+        missing_report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code().as_str()
+                == "scene.authoring-local-reference-invalid")
+    );
+    assert_eq!(scene.document(), &original);
+    assert_eq!(scene.revision(), baseline_revision);
+    assert_eq!(scene.history_status(), baseline_history);
+
+    let persistent = ComponentValue::EntityReference(nara_identity::EntityReference::Persistent {
+        entity: PersistentRuntimeReference::new(
+            PersistentRuntimeNamespaceId::new("test.world").unwrap(),
+            PersistentRuntimeId::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+        ),
+    });
+    let persistent_edit = AuthoringFieldEdit::single(
+        id("z"),
+        component(),
+        ComponentSchemaVersion::ONE,
+        ComponentFieldId::new("link"),
+        persistent,
+    )
+    .unwrap();
+    let persistent_report = scene.apply_authoring_field_edit(persistent_edit);
+    assert!(!persistent_report.applied);
+    assert!(persistent_report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.authoring-entity-reference-edit-unavailable"
+    }));
+    assert_eq!(scene.document(), &original);
+    assert_eq!(scene.revision(), baseline_revision);
+    assert_eq!(scene.history_status(), baseline_history);
+
+    let accepted = AuthoringFieldEdit::single(
+        id("z"),
+        component(),
+        ComponentSchemaVersion::ONE,
+        ComponentFieldId::new("link"),
+        reference("target"),
+    )
+    .unwrap();
+    let accepted_report = scene.apply_authoring_field_edit(accepted);
+    assert!(
+        accepted_report.applied,
+        "{:#?}",
+        accepted_report.diagnostics
+    );
+    assert_eq!(scene.history_status().undo_depth, 1);
+    assert_eq!(
+        scene
+            .document()
+            .entities
+            .iter()
+            .find(|entity| entity.id == id("z"))
+            .unwrap()
+            .components[&component()]
+            .value
+            .get("link")
+            .unwrap(),
+        &reference("target")
+    );
+    assert!(scene.undo_authoring().applied);
+    assert_eq!(scene.document(), &original);
+    assert!(scene.redo_authoring().applied);
+    assert_ne!(scene.document(), &original);
+
+    let reopened_candidate = SceneDocumentCandidate::decode_json_bytes(
+        scene.document().to_json_string().unwrap().as_bytes(),
+    )
+    .unwrap();
+    let reopened = scene
+        .try_reopen_authoring_candidate(reopened_candidate)
+        .unwrap();
+    assert_eq!(reopened.document(), scene.document());
+    assert_eq!(reopened.history_status().undo_depth, 0);
+}
+
+#[test]
+fn source_local_reference_edit_does_not_publish_a_persistent_inverse() {
+    let (mut document, state) = fixture(AuthoringDocumentKind::Scene, false);
+    let persistent = ComponentValue::EntityReference(EntityReference::Persistent {
+        entity: PersistentRuntimeReference::new(
+            PersistentRuntimeNamespaceId::new("test.world").unwrap(),
+            PersistentRuntimeId::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+        ),
+    });
+    document
+        .entities
+        .iter_mut()
+        .find(|entity| entity.id == id("z"))
+        .unwrap()
+        .components
+        .get_mut(&component())
+        .unwrap()
+        .value
+        .set_path(&ComponentFieldPath::from_fields(["link"]), persistent)
+        .unwrap();
+    let state = full(&document, &state).unwrap();
+    let mut scene =
+        SceneAuthoringSession::from_published_authoring_document(PublishedAuthoringSceneDocument {
+            document: document.clone(),
+            state,
+        });
+    let revision = scene.revision();
+    let report = scene.apply_authoring_field_edit(
+        AuthoringFieldEdit::single(
+            id("z"),
+            component(),
+            ComponentSchemaVersion::ONE,
+            ComponentFieldId::new("link"),
+            reference("target"),
+        )
+        .unwrap(),
+    );
+    assert!(!report.applied);
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.authoring-entity-reference-edit-unavailable"
+    }));
+    assert_eq!(scene.document(), &document);
+    assert_eq!(scene.revision(), revision);
+    assert_eq!(scene.history_status().undo_depth, 0);
 }
 
 #[test]

@@ -5,7 +5,9 @@ use std::{
 
 use nara::{
     asset::AssetRef,
+    identity::EntityReference,
     reflect::{ComponentValue, ComponentValueKind, ComponentValueShape},
+    scene::SceneEntityId,
 };
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -125,7 +127,9 @@ impl ValueDraft {
                 kind: ComponentValueKind::Bool,
                 ..
             } => Self::Bool(source.and_then(ComponentValue::as_bool)),
-            ComponentValueShape::Scalar { .. } | ComponentValueShape::AssetRef => Self::Text {
+            ComponentValueShape::Scalar { .. }
+            | ComponentValueShape::EntityRef
+            | ComponentValueShape::AssetRef => Self::Text {
                 text: source.map_or_else(String::new, |value| scalar_text(shape, value)),
                 entered: source.is_some(),
             },
@@ -178,7 +182,7 @@ impl ValueDraft {
                 pending: None,
                 confirmed: source.is_some(),
             },
-            ComponentValueShape::EntityRef | ComponentValueShape::Opaque { .. } => {
+            ComponentValueShape::Opaque { .. } => {
                 unreachable!("unsupported shapes never open a draft")
             }
         }
@@ -290,20 +294,24 @@ impl ValueDraft {
 
 pub(in crate::frontend::imgui) fn supported(shape: &ComponentValueShape) -> bool {
     match shape {
-        ComponentValueShape::Scalar { .. } | ComponentValueShape::AssetRef => true,
+        ComponentValueShape::Scalar { .. }
+        | ComponentValueShape::EntityRef
+        | ComponentValueShape::AssetRef => true,
         ComponentValueShape::Optional { value } => supported(value),
         ComponentValueShape::Record { members } => {
             members.iter().all(|member| supported(&member.shape))
         }
         ComponentValueShape::List { item } => scalar_item(item),
         ComponentValueShape::Map { value } => scalar_item(value),
-        ComponentValueShape::EntityRef | ComponentValueShape::Opaque { .. } => false,
+        ComponentValueShape::Opaque { .. } => false,
     }
 }
 
 fn scalar_item(shape: &ComponentValueShape) -> bool {
     match shape {
-        ComponentValueShape::Scalar { .. } | ComponentValueShape::AssetRef => true,
+        ComponentValueShape::Scalar { .. }
+        | ComponentValueShape::EntityRef
+        | ComponentValueShape::AssetRef => true,
         ComponentValueShape::Optional { value } => scalar_item(value),
         _ => false,
     }
@@ -320,6 +328,17 @@ fn scalar_text(shape: &ComponentValueShape, value: &ComponentValue) -> String {
             format!("stable_id:{value}")
         } else {
             value.to_owned()
+        };
+    }
+    if matches!(shape, ComponentValueShape::EntityRef) {
+        return match value {
+            ComponentValue::EntityReference(EntityReference::SceneLocal { entity }) => {
+                format!("scene-local:{entity}")
+            }
+            ComponentValue::EntityReference(EntityReference::Persistent { .. }) => {
+                "<persistent reference>".to_owned()
+            }
+            _ => String::new(),
         };
     }
     match value {
@@ -349,6 +368,14 @@ pub(in crate::frontend::imgui) fn parse_scalar(
             ("kind", ComponentValue::String(kind.to_owned())),
             ("value", ComponentValue::String(value)),
         ]));
+    }
+    if matches!(shape, ComponentValueShape::EntityRef) {
+        let id = text.strip_prefix("scene-local:").unwrap_or(text);
+        let entity =
+            SceneEntityId::new(id.trim()).map_err(|_| "Expected a valid source-local entity ID")?;
+        return Ok(ComponentValue::EntityReference(
+            EntityReference::SceneLocal { entity },
+        ));
     }
     match shape.value_kind() {
         ComponentValueKind::I64 => text
@@ -417,14 +444,27 @@ mod tests {
     }
 
     #[test]
-    fn reference_and_opaque_descendants_cannot_gain_generic_write_controls() {
-        for child in [
-            ComponentValueShape::EntityRef,
-            ComponentValueShape::opaque(ComponentValueKind::Map),
-        ] {
-            assert!(!supported(&ComponentValueShape::optional(
-                ComponentValueShape::record([("child".into(), child)])
-            )));
-        }
+    fn source_local_reference_descendants_are_supported_and_opaque_descendants_are_not() {
+        assert!(supported(&ComponentValueShape::optional(
+            ComponentValueShape::record([("child".into(), ComponentValueShape::EntityRef)])
+        )));
+        assert!(!supported(&ComponentValueShape::optional(
+            ComponentValueShape::record([(
+                "child".into(),
+                ComponentValueShape::opaque(ComponentValueKind::Map),
+            )])
+        )));
+    }
+
+    #[test]
+    fn entity_reference_draft_uses_source_local_text() {
+        let shape = ComponentValueShape::EntityRef;
+        let value = ComponentValue::EntityReference(EntityReference::SceneLocal {
+            entity: SceneEntityId::new("target").unwrap(),
+        });
+        assert_eq!(scalar_text(&shape, &value), "scene-local:target");
+        assert_eq!(parse_scalar(&shape, "scene-local:target").unwrap(), value);
+        assert_eq!(parse_scalar(&shape, "target").unwrap(), value);
+        assert!(parse_scalar(&shape, "scene-local:bad id").is_err());
     }
 }

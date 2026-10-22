@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-13
 **Accepted**: 2026-08-18
-**Last Revised**: 2026-10-20 (operation-relative structural preservation and closed Delete policy)
+**Last Revised**: 2026-10-22 (source-local reference editing and document-bound target choices)
 **Owner**: `nara_reflect`, `nara_scene`, `nara_tooling`, and persistent document owners
 **Admission Trigger**: Scene/prefab fixtures with a missing provider, known schema without its
 required native or Adapter-specific runtime binding, missing migration, and future component schema
@@ -70,9 +70,19 @@ so source classification does not interpret them against the outer document. Unk
 unbound records retain their preservation boundary rather than acquiring typed remap authority.
 
 Generic field writes accept editable closed shapes through the same bounded transaction
-port. Entity-reference-containing field writes remain denied until the complete target and
-remap closure is admitted. Reading declared references and native Prefab remapping use the
-shared recursive visitor; their availability does not authorize reference-closure mutation.
+port. A field marked `EntityRef` may be changed when the candidate contains only durable
+source-local references and the complete source-document namespace validates the target
+closure. The inverse value must meet the same source-local policy so every admitted edit
+can be undone. Persistent references, cross-source targets, and unresolved local targets remain
+denied in this generic port; Prefab instance/projection remapping still requires its own
+workflow contract. Reading declared references and native Prefab remapping use the shared
+recursive visitor, and that visitor remains the authority for reference-closure validation.
+
+The generic Inspector offers source-local targets from the current document projection, with
+authored names, hierarchy paths and exact source IDs to distinguish equal names. Choosing a target
+changes a field draft; Apply uses its captured document revision and the ordinary history port.
+Escape cancels the choice. Optional shapes offer Null through their existing controls; required
+references do not acquire a synthetic empty target. Nested closed shapes use the same choices.
 
 The same port admits removing an authored map-member field when it is editable and either
 optional or backed by a declared missing-field default. Reset removes the override rather than
