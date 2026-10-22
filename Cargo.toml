@@ -167,6 +167,7 @@ nara_ui = { workspace = true, optional = true }
 nara_ui_render = { workspace = true, optional = true }
 nara_window = { workspace = true, optional = true }
 nara_winit = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
@@ -254,6 +255,8 @@ asset-watch = ["runtime-core", "dep:nara_asset_watch"]
 desktop-winit = ["runtime-core", "dep:nara_winit"]
 render-wgpu = ["runtime-core", "dep:nara_render", "dep:nara_render_wgpu"]
 serde = [
+    "dep:serde",
+    "dep:serde_json",
     "nara_asset?/serde",
     "nara_core?/serde",
     "nara_diagnostic?/serde",

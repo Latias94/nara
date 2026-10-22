@@ -88,6 +88,9 @@ semantic validation and conservative parser/product memory bounds remain domain-
   and TileSet remain concrete adapters with their existing publication contracts.
 - The project Host admits metadata identity, bounded immutable primary bytes and scoped auxiliary
   reads under the original Assets capability. A domain admits its own typed metadata settings.
+  Its associated `Settings` type states the one settings contract shared with optional Editor
+  adapters. Admission and semantic diagnostics remain domain-owned; source-only settings do not
+  acquire Editor serialization or default-value requirements.
   Every auxiliary read contributes an exact source member; repeated paths share one observation
   within the source-domain load. Edges and global file/byte/work/retention limits remain Host-owned.
 - The Host reserves declared work and product storage before preparation. Trusted domain code must
@@ -111,7 +114,7 @@ semantic validation and conservative parser/product memory bounds remain domain-
   the parser again to discover a different closure.
 
 This refinement admits compiled, stateless source preparation and raw auxiliary source dependencies.
-It does not admit Editor import contributions, mutable native/GPU products, cross-domain prepared
+It does not by itself admit Editor import contributions, mutable native/GPU products, cross-domain prepared
 product dependencies, cook artifacts, file watchers, or dynamic loading. An import-only package
 has no source-backed Play support merely because it supplies an importer. The broader multi-product
 graph and shared import executor triggers above remain unchanged.
@@ -120,6 +123,52 @@ See the [qualification plan](../../plans/2026-10-21-external-asset-domain-qualif
 [public guide](../../guides/project-asset-domains.md),
 [independent consumer](../../../tests/fixtures/module-consumer/asset-domain-consumer/README.md)
 and [source-export tests](../../../src/project_workflow/export/source_tests.rs).
+
+### Explicit Editor source metadata import (2026-10-21 refinement)
+
+A trusted source-built Editor may explicitly select an `EditorSourceAssetDomain`. This is a
+metadata-authoring facet of the source-backed domain, not a generic imported-product executor.
+The facet names its associated `Domain` and uses that domain's settings type and
+`ProjectAssetDomain::prepare` implementation
+to validate immutable primary and auxiliary sources. The Host discards the temporary CPU product
+after validation; `MetadataPublished` means canonical desired metadata was published, not that
+an Editor preview, GPU object or runtime collection was installed.
+
+- Editor executable composition selects the facet and its panel before an operation starts.
+  A project manifest, schema bundle, source kind or installed Cargo crate cannot activate code.
+  Ordinary project Open remains data-only and does not load game Rust. The compiled Editor
+  composition survives project replacement; each session owns fresh operation state.
+  Complete composition construction transfers Host facets and panel factories together. A
+  panel-only late installation rejects Host contributions instead of silently discarding them;
+  the explicitly trusted compiled lane retains the same selection for replacement sessions.
+  Selection does not create missing Host capabilities: its initial lane has no generic source
+  index and does not offer metadata Import. A later ordinary authoring session uses that selection.
+- A displayed-frame action names the selected source, exact domain and encoded settings. The
+  contributor admits typed settings; the Host supplies only bounded source observations. A stale
+  frame, unavailable owner or conflicting/invalid existing metadata rejects without overwriting
+  it. Import creates canonical identity; Reimport preserves the accepted stable identity.
+- This facet validates first and publishes metadata only after source preparation succeeds.
+  Failure preserves the prior metadata. This is deliberately distinct from Image's durable
+  desired-settings and last-good-pixel contract in ADR 0115.
+- The Host reuses the existing bounded metadata scan and its identity/conflict snapshot. Facets
+  do not add full-project scans or read the filesystem during frame projection. Preparation
+  records one exact primary/auxiliary closure; publication revalidates those observations and
+  the metadata target binding. It does not promise a project-wide atomic filesystem snapshot.
+- Preparation uses the existing Editor task owner. The metadata writer enters existing runtime
+  custody before any write, and close retains physical task/temporary-file cleanup. Explicit
+  source and Image imports share admission to the user-action lane. Successful publication
+  invalidates old metadata admission and requests one successor Browser/catalog refresh through
+  the existing coalescing source index and metadata refresh owner. Retaining an old Browser
+  snapshot during refresh does not authorize another import against its old sidecar binding.
+- The panel retains its own settings draft, consumes immutable frames and submits ordinary
+  semantic actions. Dispatch acceptance and terminal metadata publication are distinct facts.
+  Neither panels nor domain callbacks receive project-directory write authority or a mutable
+  Editor session/World.
+
+This adds no durable cooked artifact, typed Editor resource cache, watcher, dynamic ABI or prepared
+product graph. Image's concrete typed stores and resource-publication rules remain unchanged.
+The [Editor qualification plan](../../plans/2026-10-21-editor-source-domain-import-plan.md) names
+the external text consumer and required evidence.
 
 ## Alternatives Considered
 

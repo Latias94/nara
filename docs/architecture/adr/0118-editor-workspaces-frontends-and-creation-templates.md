@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-20 (ordinary structure, operation-relative preservation and local-workspace filesystem policy)
+**Last Revised**: 2026-10-22 (complete compiled composition and observed replacement handoff)
 **Owner**: Private Editor product, tooling, reflection and Scene/Prefab document owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -71,6 +71,16 @@ admission failure cannot leave a partial contribution installed. Frontend state 
 panel instance. Close, hide, target/resolved-document change, project replacement and layout reset
 retire its drafts; moving/docking the panel preserves them. GPU reconstruction moves the retained
 frontend, including its factories and instance state, instead of reinstalling contributions.
+
+The source-built composition is consumed once to construct the application and frontend with
+their complete selected Host facets. Ordinary native execution reuses that construction; the
+explicit trusted compiled lane retains that selection for replacement sessions; its initial
+source-index capability remains unavailable, so selection does not enable metadata authoring there.
+The separate late-panel installation operation preserves its atomic workspace admission and
+rejects selected Host facets before mutation. It cannot silently discard an executable's Host
+configuration. See the [extension ergonomics plan](../../plans/2026-10-22-public-extension-ergonomics-plan.md).
+Completed project replacement requests presentation even when no action or persistence result
+changed during its final poll. Waiting on unchanged owners alone remains quiet.
 
 ### Complete field edits through exact owner results
 

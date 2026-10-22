@@ -113,6 +113,8 @@ impl EditorFrameClock {
             field_feedback,
             image_import: None,
             image_import_work_pending: false,
+            source_asset_import: None,
+            source_asset_import_work_pending: false,
             document_open: Default::default(),
         }
     }
@@ -276,10 +278,34 @@ pub struct EditorFrameModel {
     field_feedback: Option<EditorFieldFeedback>,
     image_import: Option<EditorImageImportView>,
     image_import_work_pending: bool,
+    source_asset_import: Option<crate::EditorSourceAssetImportView>,
+    source_asset_import_work_pending: bool,
     document_open: crate::EditorDocumentOpenView,
 }
 
 impl EditorFrameModel {
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_source_asset_import(
+        mut self,
+        view: Option<crate::EditorSourceAssetImportView>,
+        work_pending: bool,
+    ) -> Self {
+        self.source_asset_import = view;
+        self.source_asset_import_work_pending = work_pending;
+        self
+    }
+
+    #[must_use]
+    pub const fn source_asset_import(&self) -> Option<&crate::EditorSourceAssetImportView> {
+        self.source_asset_import.as_ref()
+    }
+
+    #[must_use]
+    pub const fn source_asset_import_work_pending(&self) -> bool {
+        self.source_asset_import_work_pending
+    }
+
     /// Installs the exact project-global pending Open and terminal result.
     #[doc(hidden)]
     #[must_use]
@@ -563,6 +589,7 @@ pub enum EditorAction {
     Persistence(EditorPersistenceAction),
     ProjectBrowser(EditorProjectBrowserAction),
     ImageImport(EditorImageImportAction),
+    SourceAssetImport(crate::EditorSourceAssetImportAction),
     ProjectContent(crate::EditorProjectContentAction),
     WorkspaceIntent(EditorWorkspaceIntentAction),
     Play(EditorPlayAction),
@@ -589,6 +616,7 @@ impl EditorAction {
         match self {
             Self::Navigate(_)
             | Self::ImageImport(_)
+            | Self::SourceAssetImport(_)
             | Self::RuntimeEdit { .. }
             | Self::ApplyChanges { .. }
             | Self::Gesture(_) => true,
@@ -762,6 +790,7 @@ pub enum EditorActionOutcome {
     Persistence(EditorPersistenceRequestResult),
     ProjectBrowser(EditorProjectBrowserActionOutcome),
     ImageImport(EditorImageImportActionOutcome),
+    SourceAssetImport(crate::EditorSourceAssetImportActionOutcome),
     ProjectContent(crate::EditorProjectContentRefreshRequestResult),
     WorkspaceIntent(EditorWorkspaceIntentRequestResult),
     Play(EditorPlayRequestResult),

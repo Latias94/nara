@@ -1,5 +1,7 @@
 //! A trusted source-built Editor contribution, independently compiled from the product module.
 
+pub mod text_import;
+
 use nara_editor::{
     EditorLaunchOptions, EditorNativeComposition, EditorRunError, ImguiEditorPanel,
     ImguiEditorPanelContext, PanelActionDispatch, PanelSubmissionId,

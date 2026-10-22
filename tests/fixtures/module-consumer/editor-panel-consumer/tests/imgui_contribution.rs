@@ -90,7 +90,7 @@ fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selecti
             move || ClearSelected(Rc::clone(&shared_evidence)),
         )
         .unwrap();
-    let mut frontend = composition.install(&mut application).unwrap();
+    let mut frontend = composition.install_panels(&mut application).unwrap();
     let instance_id = application
         .panel_workspace()
         .layout()
@@ -382,7 +382,7 @@ fn an_external_field_tool_observes_acceptance_and_same_basis_conflict_separately
             },
         )
         .unwrap();
-    let mut frontend = composition.install(&mut application).unwrap();
+    let mut frontend = composition.install_panels(&mut application).unwrap();
     let frame = application.current_frame().unwrap();
     let document = frame.workspace().active_document.unwrap();
     application.submit_and_drive(

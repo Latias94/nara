@@ -66,6 +66,7 @@ impl nara_app::Plugin for SourceTextPlugin {
 struct SourceTextDomain;
 
 impl crate::project_host::ProjectAssetDomain for SourceTextDomain {
+    type Settings = ();
     type Product = Vec<u8>;
     const SOURCE_KIND: &'static str = "test.export.text";
     fn limits() -> crate::project_host::ProjectAssetLimits {
@@ -75,7 +76,7 @@ impl crate::project_host::ProjectAssetDomain for SourceTextDomain {
     fn prepare(
         source: &mut crate::project_host::ProjectAssetSource<'_>,
     ) -> Result<Self::Product, crate::project_host::ProjectContentError> {
-        source.metadata().admit::<()>().unwrap();
+        source.metadata().admit::<Self::Settings>().unwrap();
         Ok(source
             .read_dependency(
                 &nara_asset::AssetPath::new("suffix.txt").unwrap(),

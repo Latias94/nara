@@ -46,6 +46,7 @@ impl EditorProjectSession {
         };
         scan_work_observed |= self.advance_document_open();
         self.advance_editor_image_import();
+        self.advance_source_asset_import();
         if self.trusted_compiled().is_some() {
             self.resume_content_refresh_after_runtime_retirement();
             self.advance_project_content_refresh();
@@ -69,6 +70,23 @@ impl EditorProjectSession {
     ) -> Arc<EditorFrameModel> {
         let source_index = self.synchronize_project_browser(scan_work_observed);
         let project_browser = self.project_browser.view();
+        let source_target = project_browser
+            .selected_entry()
+            .map(|entry| entry.relative_path())
+            .or_else(|| self.source_asset_import.target())
+            .map(Arc::<str>::from);
+        let source_asset_import = source_index.as_ref().and_then(|index| {
+            let super::EditorExecutionLane::Authoring(project) = &self.execution else {
+                return None;
+            };
+            let metadata = self.image_import.metadata_snapshot(index)?;
+            self.source_asset_import.projection(
+                project,
+                index,
+                &metadata,
+                source_target.as_deref()?,
+            )
+        });
         let image_import = source_index.as_ref().and_then(|source_index| {
             let selected = project_browser.selected_entry()?;
             self.image_import.projection_for(
@@ -116,6 +134,10 @@ impl EditorProjectSession {
                     self.field_feedback.clone(),
                 )
                 .with_image_import(image_import_view, image_import_work_pending)
+                .with_source_asset_import(
+                    source_asset_import,
+                    self.source_asset_import.has_pending_work(),
+                )
                 .with_document_open(self.document_open_view()),
         );
         #[cfg(feature = "runtime-ui")]

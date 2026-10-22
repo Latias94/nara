@@ -19,6 +19,8 @@ mod owned_reopen;
 #[cfg(feature = "tooling")]
 mod owned_save;
 mod project_scene_requests;
+#[cfg(feature = "tooling")]
+mod source_import_refresh;
 
 use std::{
     error::Error,
@@ -2722,7 +2724,14 @@ fn drive_image_import_host_until_idle(editor: &mut super::editor::EditorProjectS
 fn open_generic_editor_with_ready_index(
     project: &TestProject,
 ) -> super::editor::EditorProjectSession {
-    let mut host = super::editor::EditorProjectOpenHost::new();
+    open_generic_editor_with_host(project, super::editor::EditorProjectOpenHost::new())
+}
+
+#[cfg(feature = "tooling")]
+fn open_generic_editor_with_host(
+    project: &TestProject,
+    mut host: super::editor::EditorProjectOpenHost,
+) -> super::editor::EditorProjectSession {
     let mut attempt = host.begin(project.writable_capability(), None);
     let open_deadline = Instant::now() + Duration::from_secs(5);
     let mut editor = loop {

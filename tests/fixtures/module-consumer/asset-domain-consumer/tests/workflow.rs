@@ -254,6 +254,7 @@ fn retained_domain_owner_keeps_its_generation_and_budget_alive() {
 
 struct OversizedDomain;
 impl nara::project_host::ProjectAssetDomain for OversizedDomain {
+    type Settings = TextSettings;
     type Product = ();
     const SOURCE_KIND: &'static str = "consumer.text";
     fn limits() -> nara::project_host::ProjectAssetLimits {
@@ -272,6 +273,7 @@ impl nara::project_host::ProjectAssetDomain for OversizedDomain {
 
 struct PanickingDomain;
 impl nara::project_host::ProjectAssetDomain for PanickingDomain {
+    type Settings = TextSettings;
     type Product = ();
     const SOURCE_KIND: &'static str = "consumer.text";
     fn limits() -> nara::project_host::ProjectAssetLimits {

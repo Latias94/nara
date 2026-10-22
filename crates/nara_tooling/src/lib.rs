@@ -10,6 +10,7 @@ mod persistence;
 mod play;
 mod project_browser;
 mod snapshot;
+mod source_asset_import;
 mod workspace;
 
 pub use composition::{
@@ -84,6 +85,11 @@ pub use project_browser::{
     EditorProjectSourceOpenCapability,
 };
 pub use snapshot::{DEFAULT_WORLD_IDENTITY_SNAPSHOT_LOCATOR_LIMIT, WorldIdentitySnapshot};
+pub use source_asset_import::{
+    EditorSourceAssetDomainView, EditorSourceAssetImportAction,
+    EditorSourceAssetImportActionOutcome, EditorSourceAssetImportAttempt,
+    EditorSourceAssetImportRejection, EditorSourceAssetImportView, EditorSourceAssetMetadataView,
+};
 pub use workspace::{
     EditorDocumentDigest, EditorDocumentId, EditorDocumentKind, EditorDocumentSourceBinding,
     EditorDocumentTabModel, EditorExternalReloadState, EditorPrefabSessionPublicationError,

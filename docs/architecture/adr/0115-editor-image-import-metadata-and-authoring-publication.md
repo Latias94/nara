@@ -235,6 +235,13 @@ publication authority, and leaves generalization evidence-gated.
 
 ## Consequences
 
+The [source metadata facet in ADR 0103](0103-concrete-domain-owned-asset-import-execution.md#explicit-editor-source-metadata-import-2026-10-21-refinement)
+adds a separate trusted compiled Editor consumer. It reuses the Host-private metadata identity
+snapshot, file-publication custody and explicit action lane, while its domain validates source
+data before publishing metadata. It neither installs pixels nor changes this decision's Image
+settings, desired-metadata, last-good, hydration or authoring-generation semantics. It does not
+admit a shared native/GPU import executor or a multi-product artifact graph.
+
 - The unreleased flat `asset_meta` version-1 shape is a breaking deletion. Repository metadata
   fixtures and all consumers move atomically to the nested typed shape.
 - Durable desired metadata may temporarily be newer than accepted session pixels. Tooling must

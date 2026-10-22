@@ -40,8 +40,11 @@ fn run(options: EditorLaunchOptions) -> Result<(), EditorRunError> {
 
 The factory creates a separate object for each painted panel instance. Empty identities,
 duplicate identities and attempts to replace built-in panel kinds are rejected. Embedded shells
-can call `composition.install(&mut application)` to receive the same configured frontend; the
-native runner uses this admission path. A failed admission preserves the workspace.
+consume `composition.build(options)` to receive the fully configured `(application, frontend)`;
+the native runner uses this construction. For panel-only attachment to an existing application,
+use `composition.install_panels(&mut application)`. It rejects selected Host contributions,
+which require complete construction, before changing the workspace. A panel admission failure
+also preserves the complete workspace.
 
 The UI thread owns factories and panel objects, so they do not require `Send` or `Sync`. A panel
 receives read-only document/selection projections. Keeping a draft in a panel does not dirty a

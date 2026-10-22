@@ -71,6 +71,9 @@ pub use closure::{
 };
 pub use delivery::ProjectContentDeliveryReceipt;
 pub(crate) use domains::ProjectAssetDomains;
+pub(crate) use domains::validate_asset_domain_kind;
+#[cfg(feature = "tooling")]
+pub(crate) use domains::{EditorSourceValidation, validate_editor_source};
 pub use domains::{
     ProjectAssetCollection, ProjectAssetDomain, ProjectAssetLimits, ProjectAssetSource,
     ProjectDomainAssets,

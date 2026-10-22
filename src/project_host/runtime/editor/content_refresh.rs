@@ -406,6 +406,7 @@ impl EditorProjectSession {
             | ProjectContentErrorKind::PrefabExpansion
             | ProjectContentErrorKind::AssetReference
             | ProjectContentErrorKind::AssetMeta
+            | ProjectContentErrorKind::AssetDomain
             | ProjectContentErrorKind::AssetMetaMismatch
             | ProjectContentErrorKind::UnsupportedAssetKind
             | ProjectContentErrorKind::ImageImport

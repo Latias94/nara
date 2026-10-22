@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, fmt, sync::Arc, time::Duration};
 
 mod actions;
+mod asset_metadata;
 #[cfg(feature = "runtime-ui")]
 mod authoring_images;
 #[cfg(any(feature = "presentation-2d", feature = "runtime-ui"))]
@@ -21,6 +22,7 @@ mod presentation;
 #[cfg(feature = "presentation-2d")]
 mod preview;
 mod project_browser;
+mod source_asset_import;
 mod trusted_play;
 #[cfg(feature = "runtime-ui")]
 mod ui_authoring;
@@ -63,6 +65,7 @@ pub use presentation::{
 };
 #[cfg(feature = "presentation-2d")]
 pub use preview::{EditorPreviewCandidate, EditorPreviewContentStamp, EditorPreviewHit};
+pub use source_asset_import::{EditorSourceAssetDomain, EditorSourceAssetImporters};
 #[cfg(feature = "runtime-ui")]
 use ui_authoring::EditorUiAuthoringProjectionCache;
 #[cfg(feature = "runtime-ui")]
@@ -745,6 +748,7 @@ pub struct EditorProjectSession {
     next_document_open_gate: Option<document_open::preparation::OpenTestGate>,
     project_browser: project_browser::EditorProjectBrowserHost,
     image_import: image_import::EditorImageImportHost,
+    source_asset_import: source_asset_import::EditorSourceAssetImportHost,
     authoring_prefab_source_observations:
         BTreeMap<nara_asset::AssetPath, AuthoringPrefabSourceObservation>,
     #[cfg(test)]
@@ -841,6 +845,7 @@ impl Drop for EditorProjectSession {
             project.cancel_source_index();
         }
         self.image_import.cancel_pending();
+        self.source_asset_import.cancel();
         self.cancel_pending_document_open();
     }
 }
@@ -868,6 +873,7 @@ impl EditorProjectSession {
             };
         }
         self.image_import.cancel_pending();
+        self.source_asset_import.cancel();
         let mut files_closed = self.image_import.retry_publication_cleanup();
         files_closed &= self.authoring_runtime.host_custody().retry_cleanup();
         match self.authoring_runtime.shutdown_tasks() {
@@ -1348,6 +1354,7 @@ impl EditorProjectSession {
             next_document_open_gate: None,
             project_browser: project_browser::EditorProjectBrowserHost::new(),
             image_import,
+            source_asset_import: source_asset_import::EditorSourceAssetImportHost::default(),
             authoring_prefab_source_observations: BTreeMap::new(),
             #[cfg(test)]
             reject_next_prefab_source_binding: false,
@@ -1580,6 +1587,7 @@ impl EditorProjectSession {
             next_document_open_gate: None,
             project_browser: project_browser::EditorProjectBrowserHost::new(),
             image_import: image_import::EditorImageImportHost::default(),
+            source_asset_import: source_asset_import::EditorSourceAssetImportHost::default(),
             authoring_prefab_source_observations: BTreeMap::new(),
             #[cfg(test)]
             reject_next_prefab_source_binding: false,

@@ -58,6 +58,8 @@ mod desktop_verification;
 
 #[cfg(feature = "tooling")]
 mod editor;
+#[cfg(feature = "tooling")]
+pub use editor::{EditorSourceAssetDomain, EditorSourceAssetImporters};
 
 mod plugin_diagnostics;
 

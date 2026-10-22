@@ -15,6 +15,9 @@ use crate::project_host::authoring::{
     AuthoringProjectSessionSnapshot, ProjectSourceIndexEntry, ProjectSourceIndexSnapshot,
     ProjectSourceKind,
 };
+use crate::project_host::runtime::editor::asset_metadata::{
+    AdmittedAssetMetadata, EditorAssetMetadataSnapshot,
+};
 
 const MAX_CATALOG_MEMBERS: usize = 4_096;
 use crate::project_host::authoring::MAX_AUTHORING_IMAGE_IDENTITY_PATH_BYTES as MAX_RETAINED_PATH_BYTES;
@@ -120,27 +123,19 @@ impl EditorImageCatalogEntry {
 
 pub(super) struct EditorImageCatalogSnapshot {
     root_identity: FileIdentity,
-    source_index: Arc<ProjectSourceIndexSnapshot>,
     entries: Box<[EditorImageCatalogEntry]>,
-    known_stable_ids: BTreeSet<StableAssetId>,
-    admitted_identities: BTreeMap<AssetPath, AdmittedAssetIdentity>,
+    pub(super) metadata: Arc<EditorAssetMetadataSnapshot>,
 }
 
 impl EditorImageCatalogSnapshot {
+    pub(super) fn metadata_snapshot(&self) -> &EditorAssetMetadataSnapshot {
+        &self.metadata
+    }
     pub(super) fn asset_identity(
         &self,
         path: &AssetPath,
     ) -> Option<(AssetRecord, FileIdentity, ContentDigest)> {
-        let admitted = self.admitted_identities.get(path)?;
-        Some((
-            AssetRecord::new(
-                admitted.stable_id,
-                path.clone(),
-                admitted.source_kind.clone(),
-            ),
-            admitted.identity,
-            admitted.digest,
-        ))
+        self.metadata.asset_identity(path)
     }
 
     pub(super) fn image_entry(&self, reference: &AssetRef) -> Option<&EditorImageCatalogEntry> {
@@ -165,7 +160,7 @@ impl EditorImageCatalogSnapshot {
         &self,
         source_index: &Arc<ProjectSourceIndexSnapshot>,
     ) -> bool {
-        Arc::ptr_eq(&self.source_index, source_index)
+        self.metadata.matches_source_index(source_index)
     }
 
     #[must_use]
@@ -178,7 +173,7 @@ impl EditorImageCatalogSnapshot {
 
     #[must_use]
     pub(super) fn contains_stable_id(&self, stable_id: StableAssetId) -> bool {
-        self.known_stable_ids.contains(&stable_id)
+        self.metadata.contains_stable_id(stable_id)
     }
 
     #[must_use]
@@ -269,20 +264,13 @@ struct AdmittedMetadataIdentity {
     settings: Result<ImageImportSettings, EditorImageMetadataInvalidity>,
 }
 
-struct AdmittedAssetIdentity {
-    stable_id: StableAssetId,
-    source_kind: AssetSourceKind,
-    identity: FileIdentity,
-    digest: ContentDigest,
-}
-
 pub(super) struct EditorImageCatalogAttempt {
     project_root: DirectoryCapability,
     source_index: Option<Arc<ProjectSourceIndexSnapshot>>,
     assets_root: Arc<str>,
     limits: EditorImageCatalogLimits,
     sources: BTreeMap<AssetPath, IndexedImageSource>,
-    metadata_identities: BTreeMap<AssetPath, AdmittedAssetIdentity>,
+    metadata_identities: BTreeMap<AssetPath, AdmittedAssetMetadata>,
     metadata: BTreeMap<AssetPath, AdmittedMetadataIdentity>,
     metadata_invalid: BTreeMap<AssetPath, EditorImageMetadataInvalidity>,
     work: Vec<CatalogWork>,
@@ -603,13 +591,13 @@ impl EditorImageCatalogAttempt {
             return Ok(());
         }
 
+        let candidate = Arc::new(candidate);
         let stable_id = candidate.identity().stable_id();
-        let source_kind = candidate.identity().source_kind().clone();
+        let source_kind = candidate.identity().source_kind();
         self.metadata_identities.insert(
             asset_path.clone(),
-            AdmittedAssetIdentity {
-                stable_id,
-                source_kind: source_kind.clone(),
+            AdmittedAssetMetadata {
+                candidate: Arc::clone(&candidate),
                 identity: expected_identity,
                 digest,
             },
@@ -617,7 +605,7 @@ impl EditorImageCatalogAttempt {
         if !image_candidate {
             return Ok(());
         }
-        if source_kind != AssetSourceKind::Image {
+        if source_kind != &AssetSourceKind::Image {
             self.metadata_invalid.insert(
                 asset_path,
                 EditorImageMetadataInvalidity::MetadataSourceKindMismatch,
@@ -679,13 +667,12 @@ impl EditorImageCatalogAttempt {
     fn publish(&mut self) -> Result<EditorImageCatalogSnapshot, EditorImageCatalogBuildError> {
         let metadata = mem::take(&mut self.metadata);
         let metadata_invalid = mem::take(&mut self.metadata_invalid);
-        let (conflicts, known_stable_ids) = find_identity_conflicts(
-            self.metadata_identities
-                .iter()
-                .map(|(path, identity)| (path, identity.stable_id, &identity.source_kind)),
-        )?;
-        let mut admitted_identities = mem::take(&mut self.metadata_identities);
-        admitted_identities.retain(|path, _| !conflicts.contains_key(path));
+        let (conflicts, known_stable_ids) =
+            find_identity_conflicts(self.metadata_identities.iter().map(|(path, metadata)| {
+                let identity = metadata.candidate.identity();
+                (path, identity.stable_id(), identity.source_kind())
+            }))?;
+        let admitted_identities = mem::take(&mut self.metadata_identities);
         let sources = mem::take(&mut self.sources);
         let mut entries = Vec::new();
         entries
@@ -741,10 +728,13 @@ impl EditorImageCatalogAttempt {
             .ok_or(EditorImageCatalogBuildError::AlreadyCompleted)?;
         Ok(EditorImageCatalogSnapshot {
             root_identity: source_index.root_identity(),
-            source_index,
             entries: entries.into_boxed_slice(),
-            known_stable_ids,
-            admitted_identities,
+            metadata: Arc::new(EditorAssetMetadataSnapshot::new(
+                source_index,
+                admitted_identities,
+                known_stable_ids,
+                conflicts,
+            )),
         })
     }
 }

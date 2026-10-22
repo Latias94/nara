@@ -16,8 +16,8 @@ use nara::{
         EditorGameInputBatch, EditorGameStartActivation, EditorGameStartRequest,
         EditorGameViewBridgeFailure, EditorGameViewCandidate, EditorGameViewCompletion,
         EditorPreviewCandidate, EditorProjectCloseProgress, EditorProjectOpenHost,
-        EditorProjectOpenProgress, EditorProjectSession, EditorUiAuthoringFrame,
-        EditorUiPreviewCandidate, TrustedCompiledEditorProjectIntent,
+        EditorProjectOpenProgress, EditorUiAuthoringFrame, EditorUiPreviewCandidate,
+        TrustedCompiledEditorProjectIntent,
     },
     render::Extent2d,
     scene::UnavailableRecordManifest,
@@ -264,6 +264,13 @@ impl EditorApplication {
     /// Constructs the native-independent product shell without touching the project filesystem.
     #[must_use]
     pub fn new(options: EditorLaunchOptions) -> Self {
+        Self::new_with_source_asset_importers(options, Default::default())
+    }
+
+    pub(crate) fn new_with_source_asset_importers(
+        options: EditorLaunchOptions,
+        importers: nara::project_host::EditorSourceAssetImporters,
+    ) -> Self {
         let initial_request = options
             .project_root
             .clone()
@@ -277,7 +284,7 @@ impl EditorApplication {
                 1,
                 suggested_request,
             )),
-            open_host: EditorProjectOpenHost::new(),
+            open_host: EditorProjectOpenHost::new().with_source_asset_importers(importers),
             initial_request,
             native_ready: false,
             next_entry_generation: 2,
@@ -294,13 +301,22 @@ impl EditorApplication {
         options: EditorLaunchOptions,
         intent: TrustedCompiledEditorProjectIntent,
     ) -> Result<Self, EditorApplicationOpenError> {
+        Self::open_trusted_compiled_with_source_asset_importers(options, intent, Default::default())
+    }
+
+    pub(crate) fn open_trusted_compiled_with_source_asset_importers(
+        options: EditorLaunchOptions,
+        intent: TrustedCompiledEditorProjectIntent,
+        importers: nara::project_host::EditorSourceAssetImporters,
+    ) -> Result<Self, EditorApplicationOpenError> {
         let project_root = options
             .project_root
             .clone()
             .ok_or(EditorApplicationOpenError::MissingProjectRoot)?;
         let request = EditorProjectRequest::new(project_root.clone(), options.profile.clone());
         let project_root = open_project_root(&project_root)?;
-        let session = EditorProjectSession::open_trusted_compiled(project_root, intent)?;
+        let open_host = EditorProjectOpenHost::new().with_source_asset_importers(importers);
+        let session = open_host.open_trusted_compiled(project_root, intent)?;
         let supervised_play_wake = SupervisedPlayWake::default();
         Ok(Self {
             panel_workspace: crate::workspace::EditorPanelWorkspace::default(),
@@ -310,7 +326,7 @@ impl EditorApplication {
                 session,
                 supervised_play_wake.clone(),
             )),
-            open_host: EditorProjectOpenHost::new(),
+            open_host,
             initial_request: None,
             native_ready: false,
             next_entry_generation: 2,
@@ -692,7 +708,7 @@ impl EditorApplication {
     }
 
     #[must_use]
-    pub(crate) fn apply_project_browser_local_action(
+    pub fn apply_project_browser_local_action(
         &mut self,
         action: EditorProjectBrowserLocalAction,
     ) -> bool {
@@ -796,16 +812,16 @@ impl EditorApplication {
         }) = &mut self.state
         {
             let external_observed = drive_supervised_play_owner(retained, now);
-            let persistence_observed = drive_project_frame(retained, real_delta, drive_runtime);
+            let frame_observed = drive_project_frame(retained, real_delta, drive_runtime);
             return self.finish_replacement_handoff(
-                actions_observed || external_observed || persistence_observed,
+                actions_observed || external_observed || frame_observed,
             );
         }
         match &mut self.state {
             EditorProductState::AuthoringReady(project)
             | EditorProductState::AuthoringDegraded(project) => {
                 let external_observed = drive_supervised_play_owner(project, now);
-                let persistence_observed = drive_project_frame(project, real_delta, drive_runtime);
+                let frame_observed = drive_project_frame(project, real_delta, drive_runtime);
                 let intent = project.session.current_frame().workspace_intent();
                 if self.session_retirement.is_none()
                     && (intent.intent() == Some(EditorWorkspaceIntent::Exit)
@@ -821,13 +837,11 @@ impl EditorApplication {
                 }
                 if self.session_retirement.is_some() {
                     self.finish_session_retirement(
-                        actions_observed || external_observed || persistence_observed,
+                        actions_observed || external_observed || frame_observed,
                     )
                 } else {
                     EditorApplicationUpdate {
-                        actions_observed: actions_observed
-                            || external_observed
-                            || persistence_observed,
+                        actions_observed: actions_observed || external_observed || frame_observed,
                         exit_ready: false,
                     }
                 }
@@ -1463,7 +1477,10 @@ impl EditorApplication {
         }
     }
 
-    fn finish_replacement_handoff(&mut self, actions_observed: bool) -> EditorApplicationUpdate {
+    fn finish_replacement_handoff(
+        &mut self,
+        mut actions_observed: bool,
+    ) -> EditorApplicationUpdate {
         if self.session_close_retry_deferred() {
             return EditorApplicationUpdate {
                 actions_observed,
@@ -1543,6 +1560,7 @@ impl EditorApplication {
                     EditorProjectCloseProgress::Complete(_) => {
                         self.session_close_retry_at = None;
                         self.state = EditorProductState::from_published(candidate);
+                        actions_observed = true;
                     }
                 }
             }
@@ -1557,10 +1575,12 @@ impl EditorApplication {
             ) => {
                 self.session_close_retry_at = None;
                 self.state = EditorProductState::from_published(retained);
+                actions_observed = true;
             }
             _ if persistence_save_failed && cancel_pending_exit(&mut retained) => {
                 self.session_close_retry_at = None;
                 self.state = EditorProductState::from_published(retained);
+                actions_observed = true;
             }
             _ if persistence_save_failed => {
                 self.state =
@@ -1917,12 +1937,14 @@ fn drive_project_frame(
     real_delta: Duration,
     drive_runtime: bool,
 ) -> bool {
-    let before = project.session.current_frame().persistence();
+    let before = project.session.current_frame();
     let after = project
         .session
-        .drive_editor_frame_with_runtime(real_delta, drive_runtime)
-        .persistence();
-    before != after
+        .drive_editor_frame_with_runtime(real_delta, drive_runtime);
+    before.persistence() != after.persistence()
+        || before.source_asset_import() != after.source_asset_import()
+        || before.source_asset_import_work_pending() != after.source_asset_import_work_pending()
+        || before.image_import_work_pending() != after.image_import_work_pending()
 }
 
 fn request_exit_on_project(project: &mut PublishedEditorProject) -> EditorApplicationUpdate {
@@ -1943,9 +1965,9 @@ fn request_exit_on_project(project: &mut PublishedEditorProject) -> EditorApplic
     } else {
         dispatch_project_actions(project, EditorActionBatch::new(frame.revision(), actions))
     };
-    let persistence_observed = drive_project_frame(project, Duration::ZERO, true);
+    let frame_observed = drive_project_frame(project, Duration::ZERO, true);
     EditorApplicationUpdate {
-        actions_observed: dispatch.actions_observed() || persistence_observed,
+        actions_observed: dispatch.actions_observed() || frame_observed,
         exit_ready: false,
     }
 }

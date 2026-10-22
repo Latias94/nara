@@ -31,6 +31,7 @@ use super::catalog::{
 use super::hydration::{EditorImageHydrationFailure, EditorImageHydrationHost};
 use super::metadata_byte_limit;
 use super::store::{EditorImageLastGood, EditorImageLastGoodStore, EditorImageSourceProof};
+use crate::project_host::runtime::editor::asset_metadata::EditorAssetMetadataSnapshot;
 #[cfg(feature = "runtime-ui")]
 use crate::project_host::runtime::editor::authoring_images;
 use crate::project_host::runtime::editor::authoring_runtime::{
@@ -41,8 +42,6 @@ use crate::project_host::runtime::editor::persistence::RetainedHost;
 
 mod publication;
 use publication::MetadataPublication;
-
-const MAX_STABLE_ID_ATTEMPTS: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct EditorImageImportGeneration(u64);
@@ -275,6 +274,20 @@ impl Default for EditorImageImportHost {
 }
 
 impl EditorImageImportHost {
+    #[must_use]
+    pub(crate) fn metadata_snapshot(
+        &self,
+        source_index: &Arc<ProjectSourceIndexSnapshot>,
+    ) -> Option<Arc<EditorAssetMetadataSnapshot>> {
+        if self.refresh.is_some() || self.reconciliation.is_some() {
+            return None;
+        }
+        self.catalog
+            .as_ref()
+            .filter(|catalog| catalog.matches_source_index(source_index))
+            .map(|catalog| Arc::clone(&catalog.metadata))
+    }
+
     #[must_use]
     pub(crate) fn frame_for(
         &self,
@@ -1059,7 +1072,7 @@ impl EditorImageImportHost {
         last_good.verify_source_index(source_index.generation());
     }
 
-    fn schedule_refresh(
+    pub(crate) fn schedule_refresh(
         &mut self,
         project: &mut AuthoringProjectSessionSnapshot,
     ) -> Option<ProjectSourceIndexGeneration> {
@@ -1232,9 +1245,7 @@ fn refresh_tile_set_source(
 }
 
 fn fresh_stable_id(catalog: &EditorImageCatalogSnapshot) -> Option<StableAssetId> {
-    (0..MAX_STABLE_ID_ATTEMPTS)
-        .filter_map(|_| StableAssetId::try_random().ok())
-        .find(|stable_id| !catalog.contains_stable_id(*stable_id))
+    catalog.metadata_snapshot().fresh_stable_id()
 }
 
 fn map_publication_rejection(_reason: FilePublicationRejection) -> EditorImageImportFailure {

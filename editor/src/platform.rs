@@ -19,7 +19,7 @@ use crate::{EditorApplicationOpenError, EditorLaunchOptions};
 mod composition;
 mod game_input;
 mod imgui;
-pub use composition::EditorNativeComposition;
+pub use composition::{EditorCompositionError, EditorNativeComposition};
 
 const EDITOR_TITLE: &str = "Nara Editor";
 const EDITOR_GPU_UNAVAILABLE_TITLE: &str = "Nara Editor - GPU unavailable";
@@ -40,7 +40,7 @@ pub enum EditorRunError {
     #[error("native Editor GPU execution failed: {0}")]
     Gpu(#[source] WgpuEditorExecutionError),
     #[error(transparent)]
-    PanelComposition(#[from] crate::workspace::EditorPanelRegistrationError),
+    Composition(#[from] EditorCompositionError),
 }
 
 impl EditorRunError {
@@ -57,12 +57,18 @@ impl EditorRunError {
             | Self::EventLoop(_)
             | Self::Platform(_)
             | Self::Gpu(_)
-            | Self::PanelComposition(_) => None,
+            | Self::Composition(_) => None,
         }
     }
 
     fn requires_gpu_replacement(&self) -> bool {
         matches!(self, Self::Gpu(error) if error.requires_owner_replacement())
+    }
+}
+
+impl From<crate::workspace::EditorPanelRegistrationError> for EditorRunError {
+    fn from(error: crate::workspace::EditorPanelRegistrationError) -> Self {
+        Self::Composition(error.into())
     }
 }
 

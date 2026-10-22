@@ -5,7 +5,7 @@ use winit::platform::windows::EventLoopBuilderExtWindows;
 
 use super::*;
 use crate::{
-    ImguiEditorPanel, ImguiEditorPanelContext,
+    EditorNativeComposition, ImguiEditorPanel, ImguiEditorPanelContext,
     frontend::imgui::UiProject,
     workspace::{
         EditorPanelDescriptor, EditorPanelInstanceId, EditorPanelMultiplicity,
@@ -174,7 +174,7 @@ fn run_native_panels(
     event_loop: &ActiveEventLoop,
     project: &std::path::Path,
 ) -> Result<NativePanelResult, String> {
-    let application = EditorApplication::open_trusted_compiled(
+    let mut application = EditorApplication::open_trusted_compiled(
         crate::EditorLaunchOptions::new(project).with_profile("desktop"),
         nara::project_host::TrustedCompiledEditorProjectIntent::new(),
     )
@@ -205,10 +205,10 @@ fn run_native_panels(
             },
         )
         .map_err(|error| error.to_string())?;
-    // This is the production constructor called by EditorNativeComposition::run and the trusted
-    // runner. It receives the descriptor/factory pair, rather than an installed test frontend.
-    let mut host = NativeEditorHost::new(application, SupervisedPlayWake::default(), composition)
+    let frontend = composition
+        .install_panels(&mut application)
         .map_err(|error| error.to_string())?;
+    let mut host = NativeEditorHost::new(application, SupervisedPlayWake::default(), frontend);
     host.window = Some(
         super::lifecycle_tests::hidden_window(event_loop, "Nara native composed panel proof")
             .map_err(|error| error.to_string())?,

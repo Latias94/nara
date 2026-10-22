@@ -1,6 +1,6 @@
 use nara_editor::{
-    EditorApplication, EditorLaunchOptions, EditorNativeComposition, ImguiEditorPanel,
-    ImguiEditorPanelContext,
+    EditorApplication, EditorCompositionError, EditorLaunchOptions, EditorNativeComposition,
+    ImguiEditorPanel, ImguiEditorPanelContext,
     workspace::{
         EditorPanelDescriptor, EditorPanelMultiplicity, EditorPanelPlacement,
         EditorPanelRegistrationError,
@@ -75,7 +75,7 @@ fn native_composition_admits_descriptor_and_factory_together() {
             "sample.draft".to_owned()
         ))
     );
-    let _frontend = composition.install(&mut application).unwrap();
+    let _frontend = composition.install_panels(&mut application).unwrap();
     let workspace = application.panel_workspace();
     assert!(workspace.registry().descriptor("sample.draft").is_some());
     assert_eq!(
@@ -105,7 +105,7 @@ fn conflicting_embedded_composition_preserves_the_complete_workspace() {
         .register_panel(descriptor("sample.z-conflict"), || EmptyPanel)
         .unwrap();
     assert!(
-        matches!(composition.install(&mut application), Err(EditorPanelRegistrationError::Duplicate(kind)) if kind == "sample.z-conflict")
+        matches!(composition.install_panels(&mut application), Err(EditorCompositionError::Panel(EditorPanelRegistrationError::Duplicate(kind))) if kind == "sample.z-conflict")
     );
     assert!(
         application

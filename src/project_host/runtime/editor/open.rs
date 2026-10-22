@@ -89,12 +89,35 @@ impl EditorProjectOpenFailure {
 pub struct EditorProjectOpenHost {
     admission: AuthoringProjectAdmissionHost,
     preparation: StartupPreparationHost,
+    source_asset_importers: super::EditorSourceAssetImporters,
 }
 
 impl EditorProjectOpenHost {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Selects only trusted code compiled into the Editor; project files cannot add contributors.
+    #[must_use]
+    pub fn with_source_asset_importers(
+        mut self,
+        importers: super::EditorSourceAssetImporters,
+    ) -> Self {
+        self.source_asset_importers = importers;
+        self
+    }
+
+    /// Opens the explicitly trusted compiled lane with this Host's selected contributions.
+    #[doc(hidden)]
+    pub fn open_trusted_compiled(
+        &self,
+        project_root: DirectoryCapability,
+        intent: super::TrustedCompiledEditorProjectIntent,
+    ) -> Result<EditorProjectSession, super::EditorProjectOpenError> {
+        let mut session = EditorProjectSession::open_trusted_compiled(project_root, intent)?;
+        session.source_asset_import.importers = self.source_asset_importers.clone();
+        Ok(session)
     }
 
     pub fn begin(
@@ -178,7 +201,10 @@ impl EditorProjectOpenHost {
             }
             EditorProjectOpenAttemptState::SessionPublication(receipt) => {
                 match EditorProjectSession::open(receipt) {
-                    Ok(session) => EditorProjectOpenProgress::Opened(session),
+                    Ok(mut session) => {
+                        session.source_asset_import.importers = self.source_asset_importers.clone();
+                        EditorProjectOpenProgress::Opened(session)
+                    }
                     Err(error) => EditorProjectOpenProgress::Rejected(session_failure(error)),
                 }
             }

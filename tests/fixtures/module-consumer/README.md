@@ -37,6 +37,17 @@ document, selection and history across panel close and reopen, with independent 
 This is static trusted source composition, not a dynamic plugin ABI or project-time code loader.
 Only this Editor consumer selects GUI dependencies; runtime and headless module consumers do not.
 
+The same member adapts `consumer.text` through an explicitly compiled
+`EditorSourceAssetDomain` and a typed Import/Reimport panel. The adapter names the independent
+source domain; `EditorNativeComposition::build` creates the configured application/frontend pair. Its
+`source_import` tests check real metadata publication, stable identity, failed-source preservation,
+stale actions, identity conflicts, close during preparation, trusted-to-authoring replacement,
+rejected late Host installation, and subsequent Check/Play. The
+ignored `native_text_import` test runs the same contribution through the public Windows/DX12
+native runner. See the [Editor import execution record](../../../docs/verification/2026-10-21-editor-source-domain-import.md)
+for its precise scope. This facet validates source-backed CPU data and publishes metadata;
+native/GPU product publication remains domain-owned.
+
 ## Persistent configuration and native reconciliation
 
 The plugin registers a plain persistent `Configuration` component and ordinary startup/update

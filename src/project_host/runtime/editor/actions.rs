@@ -97,6 +97,9 @@ impl EditorProjectSession {
             EditorAction::ImageImport(action) => {
                 self.dispatch_image_import(frame, image_import, action)
             }
+            EditorAction::SourceAssetImport(action) => EditorActionOutcome::SourceAssetImport(
+                self.dispatch_source_asset_import(source_index, action),
+            ),
             EditorAction::ProjectContent(action) => {
                 EditorActionOutcome::ProjectContent(self.request_project_content_refresh(action))
             }
@@ -146,6 +149,11 @@ impl EditorProjectSession {
         image_frame: Option<&super::image_import::EditorImageImportFrame>,
         action: EditorImageImportAction,
     ) -> EditorActionOutcome {
+        if self.source_asset_import.has_pending_work() {
+            return EditorActionOutcome::ImageImport(EditorImageImportActionOutcome::Rejected(
+                EditorImageImportActionRejection::Busy,
+            ));
+        }
         let EditorImageImportAction::Submit {
             relative_path,
             expected_detail_revision,
@@ -321,6 +329,7 @@ impl EditorProjectSession {
             EditorActionOutcome::Persistence(_)
             | EditorActionOutcome::ProjectBrowser(_)
             | EditorActionOutcome::ImageImport(_)
+            | EditorActionOutcome::SourceAssetImport(_)
             | EditorActionOutcome::ProjectContent(_)
             | EditorActionOutcome::WorkspaceIntent(_)
             | EditorActionOutcome::Play(_)

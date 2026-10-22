@@ -32,7 +32,7 @@ use winit::{
 };
 
 use crate::frontend::imgui::{ImguiEditorFrontend, ImguiViewImage};
-use crate::{EditorApplication, EditorNativeComposition, supervised_play::SupervisedPlayWake};
+use crate::{EditorApplication, supervised_play::SupervisedPlayWake};
 
 use super::{
     EditorGpuRecovery, EditorRunError, earliest_deadline, editor_window_packet,
@@ -77,7 +77,7 @@ use scene::ImguiScenePresenter;
 
 pub(super) fn run_application(
     mut application: EditorApplication,
-    composition: EditorNativeComposition,
+    frontend: ImguiEditorFrontend,
 ) -> Result<(), EditorRunError> {
     if let Some(preferences) = crate::workspace::EditorWorkspacePreferences::user_default() {
         application
@@ -95,7 +95,7 @@ pub(super) fn run_application(
             .is_ok()
     });
     application.install_supervised_play_wake(supervised_play_wake.clone());
-    let mut host = NativeEditorHost::new(application, supervised_play_wake, composition)?;
+    let mut host = NativeEditorHost::new(application, supervised_play_wake, frontend);
     if let Err(error) = event_loop.run_app(&mut host) {
         host.error
             .get_or_insert_with(|| EditorRunError::EventLoop(error.to_string()));
@@ -1368,12 +1368,11 @@ impl NativeImgui {
 
 impl NativeEditorHost {
     fn new(
-        mut application: EditorApplication,
+        application: EditorApplication,
         supervised_play_wake: SupervisedPlayWake,
-        composition: EditorNativeComposition,
-    ) -> Result<Self, EditorRunError> {
-        let frontend = composition.install(&mut application)?;
-        Ok(Self {
+        frontend: ImguiEditorFrontend,
+    ) -> Self {
+        Self {
             application,
             supervised_play_wake,
             native: None,
@@ -1383,7 +1382,7 @@ impl NativeEditorHost {
             error: None,
             last_drive: None,
             repaint_deadline: None,
-        })
+        }
     }
 
     fn install_native(&mut self, event_loop: &ActiveEventLoop) -> Result<(), EditorRunError> {
@@ -1812,7 +1811,10 @@ fn imgui_next_presentation_deadline(
         }
         deadline = earliest_deadline(
             deadline,
-            image_import_poll_deadline(now, frame.image_import_work_pending()),
+            image_import_poll_deadline(
+                now,
+                frame.image_import_work_pending() || frame.source_asset_import_work_pending(),
+            ),
         );
     }
     if application.game_step_requires_runtime_drive() {

@@ -155,7 +155,7 @@ fn public_layout_reset_and_restore_retire_objects_before_reusing_instance_ids() 
             )
             .unwrap();
     }
-    let mut frontend = composition.install(&mut application).unwrap();
+    let mut frontend = composition.install_panels(&mut application).unwrap();
     let mut context = super::imgui::context();
     for _ in 0..4 {
         draw(&mut context, &mut frontend, &mut application);
@@ -294,7 +294,7 @@ fn contributed_drafts_follow_instance_target_document_and_project_lifetimes() {
             },
         )
         .unwrap();
-    let mut frontend = composition.install(&mut application).unwrap();
+    let mut frontend = composition.install_panels(&mut application).unwrap();
     let first = application
         .panel_workspace()
         .layout()

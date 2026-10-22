@@ -18,7 +18,7 @@ are complete examples outside root workspace inheritance.
 
 ## Domain Contract
 
-Implement `ProjectAssetDomain` with a stable `SOURCE_KIND`, an associated `Product`, conservative
+Implement `ProjectAssetDomain` with a stable `SOURCE_KIND`, associated `Settings` and `Product`, conservative
 `ProjectAssetLimits`, and `prepare`. Persist `AssetSourceKind::Other(SOURCE_KIND)` in the source's
 canonical `.meta` identity. The Host routes declared persistent `AssetRef` fields by that identity.
 It does not infer a handler from file extensions or crate presence. Two selected owners of the
@@ -26,7 +26,9 @@ same kind reject; a referenced kind without an owner fails Check/Play. Unreferen
 handler and are not rewritten.
 
 `ProjectAssetSource::metadata()` returns an identity-first candidate. Admit the package's settings
-with `admit::<Settings>()` and validate only domain invariants. `bytes()` provides the bounded
+with `admit::<Self::Settings>()` and validate only domain invariants. Source-only settings need
+deserialization; serialization and editable defaults belong to the optional Editor facet.
+`bytes()` provides the bounded
 primary source. `read_dependency(path, limit)` reads a raw auxiliary source under the same Assets
 capability and records its exact digest. Paths are Assets-relative; no ambient filesystem or
 project-root handle is exposed. Auxiliary files have no implied metadata or decoder. This is not
@@ -75,8 +77,66 @@ Normal runtime shutdown releases the runtime owner; escaped collection clones re
 This source preparation runs during Check and during source-backed Play. Ordinary runtime plugin
 hooks still do not run during Check. An Editor importer alone does not install this capability.
 Image and TileSet retain their concrete typed stores and GPU/native publication rules. Editor
-import adapters, cross-domain products, cooking, source-free export, watchers and dynamic plugin
-loading need their own concrete consumers. See [ADR 0103](../architecture/adr/0103-concrete-domain-owned-asset-import-execution.md).
+native/GPU import adapters, cross-domain products, cooking, source-free export, watchers and dynamic plugin
+loading need their own concrete consumers. The metadata-only Editor facet below is a narrower
+source-backed workflow. See [ADR 0103](../architecture/adr/0103-concrete-domain-owned-asset-import-execution.md).
+
+## Editor Metadata Import
+
+A trusted compiled Editor package can implement `EditorSourceAssetDomain` with `type Domain`
+naming its source domain. The adapter can live in a separate crate without forwarding the
+domain's parser, limits or identity. The domain's one `Settings` type owns typed admission;
+the Editor facet additionally requires serialization, and `default_settings` seeds a panel-local
+draft. The facet reuses `ProjectAssetDomain::prepare` to validate primary and
+auxiliary sources. The Host discards that temporary CPU value and publishes canonical `.meta`
+only when validation succeeds. It does not create a cooked artifact or install a preview resource.
+
+The [external text adapter and panel](../../tests/fixtures/module-consumer/editor-panel-consumer/src/text_import.rs)
+show the complete typed contribution. Select the contributor in the Editor executable:
+
+```rust,ignore
+let mut composition = nara_editor::EditorNativeComposition::new();
+composition.register_source_asset_domain::<text_editor::TextImportDomain>()?;
+text_editor::install_panel(&mut composition)?;
+composition.run(options)?;
+```
+
+For an embedded shell, consume `composition.build(options)` to obtain the fully configured
+`(application, frontend)` pair. This is the same construction used by `run`; it transfers both
+Host facets and panels together. The explicit advanced `build_trusted_compiled` and native
+trusted runner preserve the same selection for project replacement. Their initial compiled
+execution lane has no generic source index, so metadata Import remains unavailable there;
+replacing it with an ordinary authoring session enables the selected facet.
+`install_panels` attaches only frontend contributions to an existing shell and rejects a
+composition with selected Host facets before changing its workspace.
+The compiled selection persists across project replacement; operation
+state belongs to each fresh session. Ordinary Open remains data-only and never loads game Rust.
+The game independently selects its source domain through `ProductRecipe` for Check and Play.
+
+Panels read `EditorFrameModel::source_asset_import`, retain their typed draft and submit
+`EditorAction::SourceAssetImport`. Use the facet's `import_action(path, &settings)` to derive the
+exact domain kind and encode that domain's settings without repeating transport details.
+Encoding failure remains local feedback; the Host still admits the resulting dynamic action.
+The action uses its current frame and indexed source authority; extensions and registration order
+do not choose a format. Dispatch `Started` is not terminal success. Later frames report preparation,
+`MetadataPublished`, actionable failure or a reconciliation requirement. The view follows the
+Browser selection, or the latest operation target when nothing is selected.
+
+Import creates a stable identity. Reimport preserves it and changes only the requested metadata
+settings after validating the same bounded source closure. Invalid/conflicting existing metadata
+is never overwritten implicitly. Failure preserves its exact prior bytes. No metadata is written
+on Open, selecting a source or editing a draft. The Host reuses the existing metadata identity scan,
+task runtime, file-publication receipts and cleanup custody; the panel receives no directory writer.
+After publication, the previous metadata detail is unavailable until its successor catalog is
+ready. A newer frame containing a retained Browser snapshot cannot start another operation against
+the old sidecar binding. The existing metadata-refresh owner supplies native maintenance and
+settles failed discovery without a second source-import refresh loop.
+The Shell observes import-view and pending-state changes for presentation; unchanged idle polls
+do not request another redraw.
+
+This validate-before-publish policy differs from Image's desired-settings/last-good-pixel workflow.
+Editor native/GPU publication, arbitrary import-only products, automatic reimport, durable caches
+and dynamic project plugin loading remain separate contracts.
 
 ## Executable Delivery
 

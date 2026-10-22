@@ -67,6 +67,8 @@ their completion conditions do not automatically apply to later tasks.
 | Workspace/frontend boundaries, creation templates, panels and native views | [ADR 0118](adr/0118-editor-workspaces-frontends-and-creation-templates.md); [native qualification procedure](../verification/native-editor-qualification.md) |
 | Source-built stateful native panel composition | [Editor panel guide](../guides/editor-panels.md) |
 | Image import and authoring publication | [ADR 0115](adr/0115-editor-image-import-metadata-and-authoring-publication.md) |
+| Compiled source domains and Editor metadata import | [ADR 0103](adr/0103-concrete-domain-owned-asset-import-execution.md); [source-domain guide](../guides/project-asset-domains.md) |
+| Public extension ergonomics and complete compiled Editor construction | [Bevy comparison](../research/2026-10-22-bevy-public-extension-ergonomics.md); [implementation plan](../plans/2026-10-22-public-extension-ergonomics-plan.md) |
 | Supervised external Play and saved-source admission | [ADR 0116](adr/0116-standalone-supervised-editor-play.md) |
 | Historical plan and verification lineage | [Engineering memory](../knowledge/engineering/index.md) and [UI plan history](../plans/ui-program-roadmap.md) |
 | Foundation audit corrections and follow-up triggers | [Foundation correction plan](../plans/2026-10-19-1335-refactor-foundation-correction-plan.md) maps A01-A09, B01-B14 and M01-M04 to ordered units and consumer/measurement gates |

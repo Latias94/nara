@@ -16,7 +16,6 @@ pub(crate) use projection::EditorImageImportProjection;
 pub(super) use projection::{domain_settings, project_request_outcome};
 #[cfg(test)]
 pub(crate) use store::EditorImageLastGood;
-#[cfg(test)]
 pub(crate) use transaction::EditorImageImportState;
 pub(crate) use transaction::{
     EditorImageImportFailure, EditorImageImportFrame, EditorImageImportHost,

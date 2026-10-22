@@ -12,6 +12,11 @@ use nara_ecs::Resource;
 
 use super::*;
 
+#[cfg(feature = "tooling")]
+mod editor;
+#[cfg(feature = "tooling")]
+pub(crate) use editor::{EditorSourceValidation, validate_editor_source};
+
 /// Conservative per-source reservations made before a trusted domain prepares its product.
 ///
 /// `work_bytes` covers parser scratch allocations and `retained_bytes` covers allocations owned
@@ -53,6 +58,8 @@ impl ProjectAssetLimits {
 /// and dependencies on another domain's prepared products are separate contracts. Product
 /// destructors must be effect-free and must not panic, including during failed preparation.
 pub trait ProjectAssetDomain: Send + Sync + 'static {
+    /// Metadata settings admitted by the domain during preparation, with its own diagnostics.
+    type Settings: serde::de::DeserializeOwned;
     type Product: Send + Sync + 'static;
 
     const SOURCE_KIND: &'static str;
@@ -234,20 +241,12 @@ impl ProjectAssetDomains {
     }
 
     pub(crate) fn add<D: ProjectAssetDomain>(&mut self) -> Result<(), crate::ProductRecipeError> {
-        if D::SOURCE_KIND.is_empty() || D::SOURCE_KIND == "tileset" {
-            return Err(crate::ProductRecipeError::ReservedAssetDomain {
-                kind: D::SOURCE_KIND,
-            });
-        }
-        if self
-            .providers
-            .iter()
-            .any(|provider| provider.source_kind() == D::SOURCE_KIND)
-        {
-            return Err(crate::ProductRecipeError::DuplicateAssetDomain {
-                kind: D::SOURCE_KIND,
-            });
-        }
+        validate_asset_domain_kind(
+            D::SOURCE_KIND,
+            self.providers
+                .iter()
+                .any(|provider| provider.source_kind() == D::SOURCE_KIND),
+        )?;
         self.providers.push(Arc::new(TypedDomain::<D>(PhantomData)));
         Ok(())
     }
@@ -255,6 +254,19 @@ impl ProjectAssetDomains {
     pub(super) fn supports(&self, kind: &AssetSourceKind) -> bool {
         matches!(kind, AssetSourceKind::Other(kind) if self.providers.iter().any(|provider| provider.source_kind() == kind))
     }
+}
+
+pub(crate) fn validate_asset_domain_kind(
+    kind: &'static str,
+    duplicate: bool,
+) -> Result<(), crate::ProductRecipeError> {
+    if kind.is_empty() || kind == "tileset" {
+        return Err(crate::ProductRecipeError::ReservedAssetDomain { kind });
+    }
+    if duplicate {
+        return Err(crate::ProductRecipeError::DuplicateAssetDomain { kind });
+    }
+    Ok(())
 }
 
 trait DomainProvider: Send + Sync {

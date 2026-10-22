@@ -38,3 +38,10 @@ This explicit test runs nested Cargo builds serially and uses the Export owner's
 observations. The [Windows qualification record](../../../../docs/verification/2026-10-21-compiled-asset-domain-export.md)
 records actual execution and platform limits. Full native presentation/input, Editor import,
 hot reload and cooked products remain separate.
+
+The peer [Editor adapter](../editor-panel-consumer/src/text_import.rs) wraps this same domain
+with typed default settings and a real Import/Reimport panel. The wrapper keeps this package
+independent of GUI dependencies and selects the Editor facet separately from the game's recipe.
+Its [qualification record](../../../../docs/verification/2026-10-21-editor-source-domain-import.md)
+covers canonical metadata publication followed by Check/Play; it does not install a native or
+GPU product in the Editor.

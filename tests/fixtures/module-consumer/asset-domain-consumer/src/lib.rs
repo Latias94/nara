@@ -24,6 +24,7 @@ pub struct TextResource {
 }
 
 impl ProjectAssetDomain for TextDomain {
+    type Settings = TextSettings;
     type Product = TextResource;
     const SOURCE_KIND: &'static str = "consumer.text";
 
@@ -39,7 +40,7 @@ impl ProjectAssetDomain for TextDomain {
     fn prepare(source: &mut ProjectAssetSource<'_>) -> Result<TextResource, ProjectContentError> {
         let metadata = source
             .metadata()
-            .admit::<TextSettings>()
+            .admit::<Self::Settings>()
             .map_err(|_| invalid_settings())?;
         let maximum = metadata.into_meta().settings().max_characters;
         if maximum == 0 || maximum > 4096 {

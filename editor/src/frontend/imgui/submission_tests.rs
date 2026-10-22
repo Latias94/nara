@@ -100,7 +100,7 @@ impl Harness {
                 .unwrap();
             evidence.push((kind, shared));
         }
-        let frontend = composition.install(&mut application).unwrap();
+        let frontend = composition.install_panels(&mut application).unwrap();
         let panels = evidence
             .into_iter()
             .map(|(kind, evidence)| {
