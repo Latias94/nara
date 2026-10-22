@@ -1382,6 +1382,156 @@ fn build_button_app() -> (UiTestApp, Entity) {
 }
 
 #[test]
+fn nonmodal_content_miss_reaches_gameplay_and_releases_over_a_button() {
+    let (mut app, _) = build_unstarted_button_app();
+    install_gameplay_capture(&mut app);
+    app.update().unwrap();
+    let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    assert!(!frame.blocks_unhandled_input());
+    app.present_frame(frame, 1).unwrap();
+    let cursor = app
+        .register_consumer(UiActionConsumerId::new("content-miss-test").unwrap())
+        .unwrap();
+    {
+        let mut timeline = app.timeline();
+        timeline
+            .admit_pointer(
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                PointerDriverInput::Moved(Vec2::new(150.0, 75.0)),
+            )
+            .unwrap();
+        timeline
+            .admit_mouse_button(
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                ButtonDriverInput::Press(MouseButton::Left),
+            )
+            .unwrap();
+    }
+    app.update().unwrap();
+    let pressed = app.world().resource::<CapturedGameplayPhases>().0.clone();
+    app.clear_gameplay_capture();
+    {
+        let mut timeline = app.timeline();
+        timeline
+            .admit_pointer(
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                PointerDriverInput::Moved(Vec2::new(10.0, 10.0)),
+            )
+            .unwrap();
+        timeline
+            .admit_mouse_button(
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                ButtonDriverInput::Release(MouseButton::Left),
+            )
+            .unwrap();
+    }
+    app.update().unwrap();
+    let released = app.world().resource::<CapturedGameplayPhases>().0.clone();
+    let actions = app
+        .world()
+        .resource::<UiActionJournal>()
+        .pending(&cursor)
+        .unwrap()
+        .len();
+    drop(app);
+
+    assert_eq!(pressed, [ActionPhase::Started]);
+    assert_eq!(released, [ActionPhase::Released]);
+    assert_eq!(actions, 0);
+}
+
+#[test]
+fn nonmodal_unsupported_pointer_button_reaches_gameplay() {
+    let (mut app, _) = build_unstarted_button_app();
+    install_gameplay_capture(&mut app);
+    app.configuration_world()
+        .resource_mut::<ActionMap>()
+        .bind_mouse(ActionId::new("inspect").unwrap(), MouseButton::Right);
+    app.update().unwrap();
+    let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    app.present_frame(frame, 1).unwrap();
+    let cursor = app
+        .register_consumer(UiActionConsumerId::new("unsupported-button-test").unwrap())
+        .unwrap();
+    app.timeline()
+        .admit_pointer(
+            InputWindowId::new(11),
+            InputSeatId::PRIMARY,
+            InputPointerId::PRIMARY,
+            PointerDriverInput::Moved(Vec2::new(10.0, 10.0)),
+        )
+        .unwrap();
+    for input in [
+        ButtonDriverInput::Press(MouseButton::Right),
+        ButtonDriverInput::Release(MouseButton::Right),
+    ] {
+        app.timeline()
+            .admit_mouse_button(
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                input,
+            )
+            .unwrap();
+        app.update().unwrap();
+    }
+    let phases = app.world().resource::<CapturedGameplayPhases>().0.clone();
+    let actions = app
+        .world()
+        .resource::<UiActionJournal>()
+        .pending(&cursor)
+        .unwrap()
+        .len();
+    drop(app);
+
+    assert_eq!(phases, [ActionPhase::Started, ActionPhase::Released]);
+    assert_eq!(actions, 0);
+}
+
+#[test]
+fn nonmodal_unfocused_activation_reaches_gameplay() {
+    let (mut app, _) = build_unstarted_button_app();
+    install_gameplay_capture(&mut app);
+    app.configuration_world()
+        .resource_mut::<ActionMap>()
+        .bind_key(ActionId::new("interact").unwrap(), KeyCode::Enter);
+    app.update().unwrap();
+    let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    app.present_frame(frame, 1).unwrap();
+    let cursor = app
+        .register_consumer(UiActionConsumerId::new("unfocused-activation-test").unwrap())
+        .unwrap();
+    for input in [
+        ButtonDriverInput::Press(KeyCode::Enter),
+        ButtonDriverInput::Release(KeyCode::Enter),
+    ] {
+        app.timeline()
+            .admit_keyboard(InputWindowId::new(11), InputSeatId::PRIMARY, input)
+            .unwrap();
+        app.update().unwrap();
+    }
+    let phases = app.world().resource::<CapturedGameplayPhases>().0.clone();
+    let actions = app
+        .world()
+        .resource::<UiActionJournal>()
+        .pending(&cursor)
+        .unwrap()
+        .len();
+    drop(app);
+
+    assert_eq!(phases, [ActionPhase::Started, ActionPhase::Released]);
+    assert_eq!(actions, 0);
+}
+
+#[test]
 fn initial_modal_presentation_commits_focus_for_the_surface_owner_seat() {
     let (mut app, _) = build_unstarted_button_app_with_layer(UiLayer::Modal);
     app.update().expect("initial modal frame should compile");

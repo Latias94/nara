@@ -4,7 +4,8 @@ use nara_ecs::{Mut, Resource, World};
 use nara_input::{InputTimeline, InputUiCursorError, InputUiDisposition};
 use nara_ui_kernel::{
     UiButtonPhase, UiDispatchBatch, UiDispatchError, UiDispatchOutcome, UiInputEvent,
-    UiInteractionSession, UiJournalError, UiKey, UiNonActivation, UiRouteStamp, UiSurfaceId,
+    UiInteractionSession, UiJournalError, UiKey, UiNonActivation, UiPointerButton, UiRouteStamp,
+    UiSurfaceId,
 };
 use nara_ui_widgets::{UiButtonState, UiIntent};
 use thiserror::Error;
@@ -30,7 +31,8 @@ pub(crate) fn execute(
                 input,
                 input_sequence,
             ) {
-                Ok(transaction) => transaction,
+                Ok(Some(transaction)) => transaction,
+                Ok(None) => return UiRouteDisposition::PassThrough,
                 Err(rejection) => {
                     let rejection = input_sequence.map_or(rejection.clone(), |sequence| {
                         reject_timeline_entry(world, sequence, rejection)
@@ -197,7 +199,7 @@ impl UiInteractionTransaction {
         route: UiRouteStamp,
         input: UiInputEvent,
         input_sequence: Option<u64>,
-    ) -> Result<Self, UiRouteRejection> {
+    ) -> Result<Option<Self>, UiRouteRejection> {
         let surface_id = route.surface_id();
         let release_must_commit = matches!(
             &input,
@@ -226,6 +228,27 @@ impl UiInteractionTransaction {
         let presented = surface
             .resolve_presented(route)
             .map_err(map_adapter_error)?;
+        // Only an ordinary miss may bypass UI. Kernel reconciliation and capture cleanup still
+        // produce a consumed transaction and must commit even for otherwise unhandled input.
+        let unhandled_rejection = if presented.blocks_unhandled_input() {
+            None
+        } else {
+            match &input {
+                UiInputEvent::PointerButton { button, .. }
+                    if *button != UiPointerButton::Primary =>
+                {
+                    Some(UiNonActivation::UnsupportedPointerButton)
+                }
+                UiInputEvent::PointerButton {
+                    phase: UiButtonPhase::Pressed,
+                    ..
+                } => Some(UiNonActivation::NoPointerTarget),
+                UiInputEvent::Navigate { .. } | UiInputEvent::ActivateFocused { .. } => {
+                    Some(UiNonActivation::NoFocusTarget)
+                }
+                _ => None,
+            }
+        };
         let mut interaction = surface.interaction().clone();
         let dispatch = match interaction.dispatch_resolved(
             presented.target(),
@@ -234,6 +257,11 @@ impl UiInteractionTransaction {
             input,
         )? {
             UiDispatchOutcome::Consumed(dispatch) => dispatch,
+            UiDispatchOutcome::Rejected(reason)
+                if unhandled_rejection.as_ref() == Some(&reason) =>
+            {
+                return Ok(None);
+            }
             UiDispatchOutcome::Rejected(reason) => {
                 return Err(UiRouteRejection::NonActivation(reason));
             }
@@ -276,14 +304,14 @@ impl UiInteractionTransaction {
             Err(error) => return Err(UiRouteRejection::IntentJournal(error)),
         };
 
-        Ok(Self {
+        Ok(Some(Self {
             surface_id,
             interaction,
             reducers,
             journal,
             dispatch,
             diagnostic,
-        })
+        }))
     }
 
     pub(crate) fn commit(
