@@ -74,6 +74,97 @@ fn bounded_queue_rejects_without_running_on_the_caller() {
 }
 
 #[test]
+fn ordinary_unpressured_admission_does_not_visit_queued_jobs() {
+    const TASKS: usize = 512;
+    let pools = inline_pools(TASKS);
+    let mut handles = (0..TASKS)
+        .map(|value| accepted(pools.spawn(TaskPoolKind::Compute, request(1), move |_| value)))
+        .collect::<Vec<_>>();
+    let admission_visits = pools.admission_queue_visits_for_tests(TaskPoolKind::Compute);
+    let before = pools.stats().for_kind(TaskPoolKind::Compute);
+    let executed = pools.run_pending_for_tests().executed;
+    let results = handles
+        .iter_mut()
+        .map(TaskHandle::try_take)
+        .collect::<Vec<_>>();
+
+    assert_eq!(before.queued, TASKS);
+    assert_eq!(executed, TASKS);
+    for (value, result) in results.into_iter().enumerate() {
+        assert!(matches!(result, Some(TaskTerminal::Completed(actual)) if actual == value));
+    }
+    assert_eq!(admission_visits, 0);
+}
+
+#[test]
+fn capacity_pressure_reclaims_cancelled_captures_and_preserves_live_order() {
+    struct Capture(Arc<AtomicUsize>);
+
+    impl Drop for Capture {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let pools = inline_pools(3);
+    let drops = Arc::new(AtomicUsize::new(0));
+    let capture = Capture(drops.clone());
+    let mut cancelled = accepted(pools.spawn(TaskPoolKind::Compute, request(1), move |_| {
+        let _capture = capture;
+        0_u32
+    }));
+    assert!(cancelled.cancel());
+    let execution_order = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut handles = Vec::new();
+    for value in 1..=2_u32 {
+        let order = execution_order.clone();
+        handles.push(accepted(pools.spawn(
+            TaskPoolKind::Compute,
+            request(1),
+            move |_| {
+                order.lock().unwrap().push(value);
+                value
+            },
+        )));
+    }
+    let unpressured_drops = drops.load(Ordering::SeqCst);
+    let unpressured_visits = pools.admission_queue_visits_for_tests(TaskPoolKind::Compute);
+    let order = execution_order.clone();
+    handles.push(accepted(pools.spawn(
+        TaskPoolKind::Compute,
+        request(1),
+        move |_| {
+            order.lock().unwrap().push(3);
+            3
+        },
+    )));
+    let pressure_drops = drops.load(Ordering::SeqCst);
+    let pressure_visits = pools.admission_queue_visits_for_tests(TaskPoolKind::Compute);
+    let executed = pools.run_pending_for_tests().executed;
+    let results = handles
+        .iter_mut()
+        .map(TaskHandle::try_take)
+        .collect::<Vec<_>>();
+
+    assert_eq!(unpressured_drops, 0);
+    assert_eq!(unpressured_visits, 0);
+    assert_eq!(pressure_drops, 1);
+    assert_eq!(pressure_visits, 3);
+    assert_eq!(executed, 3);
+    assert_eq!(*execution_order.lock().unwrap(), [1, 2, 3]);
+    for (value, result) in (1..=3_u32).zip(results) {
+        assert!(matches!(result, Some(TaskTerminal::Completed(actual)) if actual == value));
+    }
+    assert!(matches!(
+        cancelled.try_take(),
+        Some(TaskTerminal::Cancelled(TaskCancellation {
+            reason: TaskCancellationReason::Requested,
+            before_start: true,
+        }))
+    ));
+}
+
+#[test]
 fn coalescing_replaces_a_same_domain_pending_task_even_below_capacity() {
     let pools = inline_pools(2);
     let policy = TaskOverloadPolicy::CoalescePending(TaskCoalesceKey::new(55));
@@ -111,6 +202,55 @@ fn coalescing_replaces_a_same_domain_pending_task_even_below_capacity() {
     assert_eq!(stats.admitted, 2);
     assert_eq!(stats.coalesced, 1);
     assert_eq!(stats.cancelled, 1);
+}
+
+#[test]
+fn coalescing_skips_cancelled_nodes_and_replaces_the_live_same_key() {
+    let pools = inline_pools(4);
+    let policy = TaskOverloadPolicy::CoalescePending(TaskCoalesceKey::new(55));
+    let mut cancelled = accepted(pools.spawn(
+        TaskPoolKind::Io,
+        request(7).with_overload(policy),
+        |_| 1_u32,
+    ));
+    assert!(cancelled.cancel());
+    let mut live = match pools.spawn(TaskPoolKind::Io, request(7).with_overload(policy), |_| {
+        2_u32
+    }) {
+        TaskSpawnOutcome::Accepted(handle) => handle,
+        _ => panic!("an already cancelled node cannot be coalesced"),
+    };
+    let live_id = live.id();
+    let mut replacement =
+        match pools.spawn(TaskPoolKind::Io, request(7).with_overload(policy), |_| {
+            3_u32
+        }) {
+            TaskSpawnOutcome::Coalesced { handle, replaced } => {
+                assert_eq!(replaced, live_id);
+                handle
+            }
+            _ => panic!("coalescing must find the live node after a cancelled node"),
+        };
+
+    assert_eq!(pools.run_pending_for_tests().executed, 1);
+    assert!(matches!(
+        cancelled.try_take(),
+        Some(TaskTerminal::Cancelled(TaskCancellation {
+            reason: TaskCancellationReason::Requested,
+            before_start: true,
+        }))
+    ));
+    assert!(matches!(
+        live.try_take(),
+        Some(TaskTerminal::Cancelled(TaskCancellation {
+            reason: TaskCancellationReason::Coalesced { replacement: id },
+            before_start: true,
+        })) if id == replacement.id()
+    ));
+    assert!(matches!(
+        replacement.try_take(),
+        Some(TaskTerminal::Completed(3))
+    ));
 }
 
 #[test]

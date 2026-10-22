@@ -1590,6 +1590,14 @@ impl TaskPools {
     }
 
     #[cfg(test)]
+    pub(crate) fn admission_queue_visits_for_tests(&self, kind: TaskPoolKind) -> usize {
+        self.executor(kind)
+            .shared
+            .admission_queue_visits
+            .load(Ordering::Relaxed)
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_before_coalesce_cancel_hook_for_tests(
         &self,
         kind: TaskPoolKind,
@@ -1795,6 +1803,8 @@ struct ExecutorShared {
     changed: Condvar,
     counters: SharedTaskCounters,
     #[cfg(test)]
+    admission_queue_visits: AtomicUsize,
+    #[cfg(test)]
     before_coalesce_cancel_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
@@ -1805,6 +1815,8 @@ impl ExecutorShared {
             queue: Mutex::new(QueueState::new(live_workers)),
             changed: Condvar::new(),
             counters: Arc::new(Mutex::new(TaskCounters::default())),
+            #[cfg(test)]
+            admission_queue_visits: AtomicUsize::new(0),
             #[cfg(test)]
             before_coalesce_cancel_hook: Mutex::new(None),
         }
@@ -2040,15 +2052,21 @@ impl TaskPoolExecutor {
         let decision;
         {
             let mut queue = lock_unpoisoned(&self.shared.queue);
-            let mut retained = VecDeque::with_capacity(queue.pending.len());
-            while let Some(queued) = queue.pending.pop_front() {
-                if queued.control.state.is_terminal() {
-                    discarded.push(queued);
-                } else {
-                    retained.push_back(queued);
+            if queue.pending.len() >= self.shared.pending_capacity {
+                let mut retained = VecDeque::with_capacity(queue.pending.len());
+                while let Some(queued) = queue.pending.pop_front() {
+                    #[cfg(test)]
+                    self.shared
+                        .admission_queue_visits
+                        .fetch_add(1, Ordering::Relaxed);
+                    if queued.control.state.is_terminal() {
+                        discarded.push(queued);
+                    } else {
+                        retained.push_back(queued);
+                    }
                 }
+                queue.pending = retained;
             }
-            queue.pending = retained;
 
             if queue.lifecycle != QueueLifecycle::Open {
                 decision = AdmissionDecision::Rejected(TaskRejectReason::PoolClosed);
@@ -2057,7 +2075,12 @@ impl TaskPoolExecutor {
                     let domain_key = new_job.descriptor.order_key().domain_key();
                     new_job.coalesce_key.and_then(|coalesce_key| {
                         queue.pending.iter().position(|queued| {
-                            queued.descriptor.order_key().domain_key() == domain_key
+                            #[cfg(test)]
+                            self.shared
+                                .admission_queue_visits
+                                .fetch_add(1, Ordering::Relaxed);
+                            !queued.control.state.is_terminal()
+                                && queued.descriptor.order_key().domain_key() == domain_key
                                 && queued.coalesce_key == Some(coalesce_key)
                         })
                     })
