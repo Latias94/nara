@@ -179,7 +179,7 @@ fn recursive_root_transactions_keep_shape_revision_and_reference_authority_in_do
             &mut app,
             "reference",
             ComponentValue::EntityReference(nara::reflect::EntityReference::SceneLocal {
-                entity: SceneEntityId::new("editable").unwrap(),
+                entity: SceneEntityId::new("missing-target").unwrap(),
             }),
             None,
         );

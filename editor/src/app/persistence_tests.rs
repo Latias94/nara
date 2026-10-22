@@ -248,27 +248,36 @@ fn persistence_completion_is_observed_without_repainting_unchanged_polls() {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut saw_completion = false;
     while Instant::now() < deadline {
-        let before = application.current_frame().unwrap().persistence();
+        let before = application.current_frame().unwrap();
         let update = application.drive_editor_frame(Duration::ZERO, false, false);
-        let after = application.current_frame().unwrap().persistence();
-        assert_eq!(update.actions_observed(), before != after);
-        if after.operation() == EditorPersistenceOperation::Idle {
+        let after = application.current_frame().unwrap();
+        // Save refresh can complete image preparation independently of its persistence receipt.
+        let changed = before.persistence() != after.persistence()
+            || before.source_asset_import() != after.source_asset_import()
+            || before.source_asset_import_work_pending() != after.source_asset_import_work_pending()
+            || before.image_import_work_pending() != after.image_import_work_pending();
+        assert_eq!(update.actions_observed(), changed);
+        if after.persistence().operation() == EditorPersistenceOperation::Idle {
             assert!(matches!(
-                after.result(),
+                after.persistence().result(),
                 Some(EditorPersistenceResult::Saved { .. })
             ));
             saw_completion = true;
-            break;
+            if !after.image_import_work_pending() && !after.source_asset_import_work_pending() {
+                break;
+            }
         }
         std::thread::sleep(Duration::from_millis(1));
     }
     assert!(saw_completion);
-    assert!(
-        !application
-            .drive_editor_frame(Duration::ZERO, false, false)
-            .actions_observed()
-    );
+    let before = application.current_frame().unwrap();
+    let observed = application
+        .drive_editor_frame(Duration::ZERO, false, false)
+        .actions_observed();
+    let after = application.current_frame().unwrap();
     close(&mut application);
+    assert_eq!(before.persistence(), after.persistence());
+    assert!(!observed);
 }
 
 fn queue_save(application: &mut EditorApplication) {
