@@ -8,8 +8,8 @@
 pub use nara_ecs_derive::{Bundle, Component, Resource, ScheduleLabel, SystemSet};
 
 pub use bevy_ecs::{
-    change_detection, component, entity, error, event, hierarchy, lifecycle, message, name, observer,
-    query, relationship, resource, schedule, world,
+    change_detection, component, entity, error, event, hierarchy, lifecycle, message, name,
+    observer, query, relationship, resource, schedule, world,
 };
 
 pub use bevy_ecs::prelude::*;

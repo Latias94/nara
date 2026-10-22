@@ -1795,9 +1795,11 @@ mod tests {
             return Ok(());
         }
         if trajectory.deferred_failure {
-            commands.queue(|_world: &mut World| -> Result<(), nara_ecs::error::BevyError> {
-                Err(nara_ecs::error::BevyError::error(ConsumerFailure))
-            });
+            commands.queue(
+                |_world: &mut World| -> Result<(), nara_ecs::error::BevyError> {
+                    Err(nara_ecs::error::BevyError::error(ConsumerFailure))
+                },
+            );
             Ok(())
         } else {
             Err(nara_ecs::error::BevyError::error(ConsumerFailure))
@@ -1868,7 +1870,10 @@ mod tests {
                     }
                 );
                 let trajectory = runtime.world().resource::<FailureTrajectory>();
-                assert_eq!(trajectory.later_consumers, (1..=fail_tick).collect::<Vec<_>>());
+                assert_eq!(
+                    trajectory.later_consumers,
+                    (1..=fail_tick).collect::<Vec<_>>()
+                );
                 assert_eq!(trajectory.captures, (1..fail_tick).collect::<Vec<_>>());
                 assert!(runtime.world().iter_entities().any(|entity| {
                     entity
@@ -1882,7 +1887,12 @@ mod tests {
                 assert_eq!(stats.closed_through_tick, fail_tick);
                 assert_eq!(stats.retained_commands, (4 - fail_tick) as usize);
                 assert_eq!(stats.quarantined_commands, 1);
-                assert!(runtime.world().resource::<GameplayCommandBatch>().is_empty());
+                assert!(
+                    runtime
+                        .world()
+                        .resource::<GameplayCommandBatch>()
+                        .is_empty()
+                );
                 assert_eq!(runtime.drive(Duration::ZERO).unwrap_err(), failure);
                 let nara_app::RuntimeControlRequestResult::Accepted(stop) =
                     runtime.request_control(nara_app::RuntimeControl::Stop)
@@ -2028,7 +2038,11 @@ mod tests {
             let failure = runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap_err();
             assert_eq!(failure.fault().kind(), RuntimeFaultKind::System);
             assert!(
-                runtime.world().resource::<FailureTrajectory>().captures.is_empty()
+                runtime
+                    .world()
+                    .resource::<FailureTrajectory>()
+                    .captures
+                    .is_empty()
             );
             let queue = runtime.world().resource::<GameplayCommandQueue>();
             assert_eq!(queue.stats().acknowledged_ticks, 0);

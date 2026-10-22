@@ -88,10 +88,10 @@ impl GlobalTransform2d {
 /// mutation and finalization. Product systems use this semantic entry point instead of depending
 /// on that private schedule topology.
 /// Finalize/Capture systems read [`FixedSpatialSnapshot2d`] directly without using this helper.
-pub fn add_fixed_transform_projection_systems<'a, M>(
-    app: &'a mut App,
+pub fn add_fixed_transform_projection_systems<M>(
+    app: &mut App,
     systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
-) -> Result<&'a mut App, PluginError> {
+) -> Result<&mut App, PluginError> {
     app.add_systems(
         CoreStage::FixedUpdate,
         systems
@@ -101,10 +101,10 @@ pub fn add_fixed_transform_projection_systems<'a, M>(
 }
 
 /// Registers Extract readers after this frame's presentation snapshot is complete.
-pub fn add_presented_transform_projection_systems<'a, M>(
-    app: &'a mut App,
+pub fn add_presented_transform_projection_systems<M>(
+    app: &mut App,
     systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
-) -> Result<&'a mut App, PluginError> {
+) -> Result<&mut App, PluginError> {
     app.add_systems(
         CoreStage::Extract,
         systems.after(__private::TransformSet::Present),

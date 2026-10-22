@@ -23,10 +23,10 @@ use crate::{
     IdentityDomainError, IdentityRemapError, MonotonicNonZeroU64Allocator, PersistentRuntimeId,
     PersistentRuntimeNamespaceId, PersistentRuntimeReference, RuntimeEntityIncarnation,
     RuntimeEntityReference, SceneEntityId, SceneInstanceId, TombstoneCause, WorldEntityLocator,
-    WorldEntityToken, WorldIdentityDomain, WorldIdentityDomainSettings,
-    adopt_identity_entity, allocate_world_identity_domain_id_from, register_persistent_identity,
-    register_scene_instance, resolve_in_world, retire_identity_entity,
-    retire_identity_entity_with_disposition, spawn_identity_entity,
+    WorldEntityToken, WorldIdentityDomain, WorldIdentityDomainSettings, adopt_identity_entity,
+    allocate_world_identity_domain_id_from, register_persistent_identity, register_scene_instance,
+    resolve_in_world, retire_identity_entity, retire_identity_entity_with_disposition,
+    spawn_identity_entity,
 };
 
 fn scene_id(value: &str) -> SceneEntityId {
@@ -1081,7 +1081,10 @@ fn world_identity_operations_preserve_custody_and_retirement_incarnations() {
         retire_identity_entity(&mut world, token, TombstoneCause::Despawned),
         Err(IdentityDomainError::StaleRegistration)
     );
-    assert_eq!(world.resource::<WorldIdentityDomain>().stats(), current_stats);
+    assert_eq!(
+        world.resource::<WorldIdentityDomain>().stats(),
+        current_stats
+    );
     assert_eq!(
         resolve_in_world(&world, &current),
         EntityLookup::Resolved(entity)

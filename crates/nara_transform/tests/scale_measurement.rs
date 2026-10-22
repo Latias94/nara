@@ -314,7 +314,6 @@ pub(crate) fn check_globals(
             historical_spatial_snapshot(world)
                 .unwrap()
                 .global(entity)
-                .ok()
                 .expect("global transform should be complete")
                 .translation(),
             global[index],

@@ -2243,7 +2243,10 @@ pub fn adopt_identity_entity(
     adopt_entity_in_domain(world, domain, entity)
 }
 
-fn validate_identity_adoption(world: &mut World, entity: Entity) -> Result<(), IdentityDomainError> {
+fn validate_identity_adoption(
+    world: &mut World,
+    entity: Entity,
+) -> Result<(), IdentityDomainError> {
     validate_identity_support_topology(world, [entity]).map_err(|error| match error {
         IdentitySupportTopologyError::TargetMissing => IdentityDomainError::EntityTokenNotAlive,
         IdentitySupportTopologyError::LifecycleConflict => IdentityDomainError::LifecycleConflict,
@@ -2263,7 +2266,10 @@ fn adopt_entity_in_domain(
         marker.incarnation
     } else {
         let incarnation = allocate_runtime_entity_incarnation()?;
-        target.insert(IdentityEntityMarker { domain, incarnation });
+        target.insert(IdentityEntityMarker {
+            domain,
+            incarnation,
+        });
         incarnation
     };
     Ok(WorldEntityToken {
