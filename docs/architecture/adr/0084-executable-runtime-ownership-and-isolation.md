@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-10-20 (synchronize ADR 0117 ordinary managed startup)
+**Last Revised**: 2026-10-22 (separate physical close completion from final failure evidence)
 **Owner**: `nara_app` and concrete executable hosts
 **Refined By**: [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): 2D Foundation Ownership and Authoring Contracts
 **Admission Trigger**: RGD-U2 through RGD-U6 replaced the plan/World behavior split, removed
@@ -300,7 +300,7 @@ stateDiagram-v2
     Paused --> Stopping: stop, exit, or host close
     Faulted --> Stopping: dispose requested
     Stopping --> Stopped: plugin shutdown attempted and every close participant completes
-    Stopping --> CloseIncomplete: unfinished participant, participant error, or deadline
+    Stopping --> CloseIncomplete: live participant, incomplete error, or deadline
     CloseIncomplete --> Stopping: drive remaining close
     Stopped --> [*]
 ```
@@ -314,10 +314,23 @@ once-only plugin shutdown hook or already-attempted owner a second time; an unre
 may remain incomplete until process authority is torn down.
 
 A once-only plugin shutdown hook failure is terminal teardown evidence rather than an unfinished
-close participant. If every separately registered close obligation completes, the runtime reaches
-the `Stopped` ownership state, while the active Stop/RetryClose ticket records
-`Failed(CloseFailed)` and a platform Host returns a distinct teardown error. `Stopped` therefore
-proves ownership terminality, not that every teardown hook succeeded.
+close participant. A participant can likewise return `CompleteWithError` after ending all physical
+responsibility. Both outcomes retain final error evidence while permitting the `Stopped` ownership
+state once every close obligation completes. The active Stop/RetryClose ticket then records
+`Failed(CloseFailed)`, consuming `finish` returns the physically retired owner with its evidence,
+and a platform Host reports a distinct teardown error. `Stopped` proves ownership terminality.
+
+An error return from a participant retains its unfinished physical responsibility. A retryable
+error permits later progress; a terminal error prevents further participant calls and remains
+incomplete. Historical retryable errors and exceeded deadlines remain observable after recovery
+without turning a successful close into final failure. `RuntimeCloseEvidence::has_terminal_failure`
+owns that distinction for runtime and product Hosts. A startup/build failure remains primary startup
+evidence and does not mark successful shutdown as failed.
+
+Close evidence separately projects the current unfinished participants and their Begin/Poll
+phase. Pending without error remains identifiable when a deadline expires. Completed participants
+leave this projection even when their terminal error remains in historical causes. Hosts report
+current blockers alongside historical failures without inventing error codes for pending work.
 
 Control has two observable layers:
 
@@ -373,9 +386,9 @@ operation result: Pending | Applied | Failed
 - Waiting services expose pollable, deadline-bound close participants. The host can continue
   pumping allowed real-time/platform work while close progresses.
 - Only completion of every registered close participant permits `Stopped`. A timeout, unfinished
-  worker owner, live native lease, or participant failure remains `CloseIncomplete` and prevents a
-  conflicting replacement. A terminal plugin hook failure remains separately observable after
-  ownership reaches `Stopped`. Abnormal Drop may transfer an unfinished owner to process-owned
+  worker owner, live native lease, or error with unfinished responsibility remains `CloseIncomplete`
+  and prevents a conflicting replacement. Final errors from completed participants and plugin hooks
+  remain separately observable after ownership reaches `Stopped`. Abnormal Drop may transfer an unfinished owner to process-owned
   quarantine, but that fallback is never clean-stop evidence.
 - `Drop` is best effort and cannot be used as product evidence that a runtime stopped cleanly.
 - Editor Close Scene, external reload, Restart, a second Start Play, and editor exit all obey

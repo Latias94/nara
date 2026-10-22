@@ -3,8 +3,8 @@ use nara_app::{
     __RuntimeDriverPort, App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
     PluginShutdownContext, RuntimeAdmissionReservation, RuntimeCandidateRetirementState,
     RuntimeCloseCause, RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
-    RuntimeCloseParticipantId, RuntimeClosePolicy, RuntimeCloseProgress, RuntimeDriverScope,
-    RuntimeFaultKind, RuntimeObligationLedger,
+    RuntimeCloseParticipantId, RuntimeCloseParticipantPhase, RuntimeClosePolicy,
+    RuntimeCloseProgress, RuntimeDriverScope, RuntimeFaultKind, RuntimeObligationLedger,
 };
 use nara_ecs::Resource;
 use nara_gameplay::{
@@ -179,6 +179,31 @@ fn start_runtime(app: App) -> RuntimeInstance {
 struct PendingCloseParticipant {
     released: Arc<std::sync::atomic::AtomicBool>,
     polls: Arc<AtomicUsize>,
+}
+
+struct CompletedCloseErrorParticipant(RuntimeCloseParticipantPhase);
+
+impl RuntimeCloseParticipant for CompletedCloseErrorParticipant {
+    fn begin_close(
+        &mut self,
+        _context: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+        Ok(match self.0 {
+            RuntimeCloseParticipantPhase::Begin => RuntimeCloseProgress::CompleteWithError {
+                code: "nara.test.winit-completed-close-error",
+            },
+            RuntimeCloseParticipantPhase::Poll => RuntimeCloseProgress::Pending,
+        })
+    }
+
+    fn poll_close(
+        &mut self,
+        _context: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+        Ok(RuntimeCloseProgress::CompleteWithError {
+            code: "nara.test.winit-completed-close-error",
+        })
+    }
 }
 
 impl RuntimeCloseParticipant for PendingCloseParticipant {
@@ -905,7 +930,7 @@ fn shutdown_failure_does_not_block_safe_target_retirement() {
     let close_failure = state.poll_runtime_close().unwrap_err();
     assert_eq!(
         close_failure,
-        AppRunError::runner("managed runtime plugin shutdown failed")
+        AppRunError::runner("managed runtime close failed")
     );
     state.record_runtime_close_failure(close_failure.clone());
     assert_eq!(state.runtime.state(), RuntimeState::Stopped);
@@ -921,6 +946,53 @@ fn shutdown_failure_does_not_block_safe_target_retirement() {
     drop(state);
 
     assert_eq!(runtime.state(), RuntimeState::Stopped);
+}
+
+#[test]
+fn completed_participant_error_fails_runner_after_physical_close() {
+    for phase in [
+        RuntimeCloseParticipantPhase::Begin,
+        RuntimeCloseParticipantPhase::Poll,
+    ] {
+        let mut app = App::new();
+        app.add_plugin(WindowPlugin::default()).unwrap();
+        let mut obligations = RuntimeObligationLedger::new();
+        obligations
+            .register(
+                RuntimeCloseParticipantId::new("nara.test.winit-completed-close-error"),
+                CompletedCloseErrorParticipant(phase),
+            )
+            .unwrap();
+        let mut runtime =
+            RuntimeInstance::start_with_options(app, obligations, RuntimeClosePolicy::default())
+                .unwrap();
+        let mut state = WinitApp::new(&mut runtime).unwrap();
+        let now = Instant::now();
+        assert!(matches!(
+            state.begin_shutdown_transition(now),
+            EventLoopDirective::WaitUntil(_)
+        ));
+        assert_eq!(state.runtime.state(), RuntimeState::Stopping);
+        assert_eq!(
+            state.poll_native_shutdown_once(Instant::now()),
+            EventLoopDirective::Exit
+        );
+        assert_eq!(state.runtime.state(), RuntimeState::Stopped);
+        assert_eq!(state.shutdown, WinitShutdownState::Complete);
+        assert!(!state.runtime.close_evidence().plugin_shutdown_failed());
+        assert!(state.runtime.close_evidence().has_terminal_failure());
+        assert!(
+            state
+                .runtime
+                .close_evidence()
+                .pending_participants()
+                .is_empty()
+        );
+        assert_eq!(
+            state.take_failure(),
+            Some(AppRunError::runner("managed runtime close failed"))
+        );
+    }
 }
 
 #[test]

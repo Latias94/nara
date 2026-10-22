@@ -996,10 +996,8 @@ impl<'runtime> WinitApp<'runtime> {
     }
 
     fn runtime_close_result(&self) -> Result<(), AppRunError> {
-        if self.runtime.close_evidence().plugin_shutdown_failed() {
-            Err(AppRunError::runner(
-                "managed runtime plugin shutdown failed",
-            ))
+        if self.runtime.close_evidence().has_terminal_failure() {
+            Err(AppRunError::runner("managed runtime close failed"))
         } else {
             Ok(())
         }

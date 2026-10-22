@@ -5,7 +5,7 @@ use bevy_ecs::error::{BevyError, ErrorContext, ErrorHandler, Severity, match_sev
 use super::{RuntimeExecutionError, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter};
 
 pub(super) const RUNTIME_FAULT_ROUTE_CAPACITY: usize =
-    super::MAX_QUARANTINED_RUNTIME_OWNERS_PER_PROCESS + 3;
+    super::owner::MAX_QUARANTINED_RUNTIME_OWNERS_PER_PROCESS + 3;
 
 static RUNTIME_FAULT_ROUTES: OnceLock<[FaultRouteSlot; RUNTIME_FAULT_ROUTE_CAPACITY]> =
     OnceLock::new();
@@ -366,7 +366,7 @@ mod tests {
     fn capacity_covers_quarantine_overlap_and_one_pending_reservation() {
         assert_eq!(
             RUNTIME_FAULT_ROUTE_CAPACITY,
-            super::super::MAX_QUARANTINED_RUNTIME_OWNERS_PER_PROCESS + 2 + 1
+            super::super::owner::MAX_QUARANTINED_RUNTIME_OWNERS_PER_PROCESS + 2 + 1
         );
         assert_eq!(RUNTIME_ERROR_HANDLERS.len(), RUNTIME_FAULT_ROUTE_CAPACITY);
     }
