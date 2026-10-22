@@ -1,5 +1,7 @@
 //! Canonical scene, prefab, and standalone patch file boundaries.
 
+#[cfg(test)]
+mod diagnostic_tests;
 mod publication_shape;
 #[cfg(test)]
 mod publication_shape_tests;
@@ -382,6 +384,97 @@ impl Error for SceneFormatError {
             Self::EncodedBytesExceeded { .. }
             | Self::EmbeddedPatchFormatVersion { .. }
             | Self::LegacyPlacementShape { .. } => None,
+        }
+    }
+}
+
+impl SceneFormatError {
+    /// Returns a safe parser location without exposing parser messages or document contents.
+    #[must_use]
+    pub fn parser_location(&self) -> Option<(usize, usize)> {
+        let mut source = self.parser_error();
+        while let Some(error) = source {
+            if let Some(error) = error.downcast_ref::<serde_json::Error>() {
+                return Some((error.line(), error.column()));
+            }
+            if let Some(error) = error.downcast_ref::<ron::error::SpannedError>() {
+                return Some((error.position.line, error.position.col));
+            }
+            source = error.source();
+        }
+        None
+    }
+
+    /// Returns whether a structural/header/payload parser failure was a syntax error.
+    #[must_use]
+    pub fn is_syntax_error(&self) -> bool {
+        let mut source = self.parser_error();
+        while let Some(error) = source {
+            if error
+                .downcast_ref::<serde_json::Error>()
+                .is_some_and(|error| error.is_syntax() || error.is_eof())
+                || error
+                    .downcast_ref::<ron::error::SpannedError>()
+                    .is_some_and(|error| {
+                        // RON also wraps Serde data errors in SpannedError. Only lexical and delimiter
+                        // failures establish invalid syntax; type/field errors retain their decode stage.
+                        matches!(
+                            error.code,
+                            ron::error::Error::Eof
+                                | ron::error::Error::ExpectedArrayEnd
+                                | ron::error::Error::ExpectedAttribute
+                                | ron::error::Error::ExpectedAttributeEnd
+                                | ron::error::Error::ExpectedChar
+                                | ron::error::Error::ExpectedComma
+                                | ron::error::Error::FloatUnderscore
+                                | ron::error::Error::ExpectedOptionEnd
+                                | ron::error::Error::ExpectedMapColon
+                                | ron::error::Error::ExpectedMapEnd
+                                | ron::error::Error::ExpectedStructLikeEnd
+                                | ron::error::Error::ExpectedStringEnd
+                                | ron::error::Error::InvalidEscape(_)
+                                | ron::error::Error::UnclosedBlockComment
+                                | ron::error::Error::UnderscoreAtBeginning
+                                | ron::error::Error::UnexpectedByte(_)
+                                | ron::error::Error::Utf8Error(_)
+                                | ron::error::Error::TrailingCharacters
+                                | ron::error::Error::InvalidIdentifier(_)
+                                | ron::error::Error::SuggestRawIdentifier(_)
+                        )
+                    })
+            {
+                return true;
+            }
+            source = error.source();
+        }
+        false
+    }
+
+    /// Returns a typed structural budget failure, if one caused parsing to stop.
+    #[must_use]
+    pub fn shape_error(&self) -> Option<&nara_core::SerdeShapeError> {
+        let mut source = self.parser_error();
+        while let Some(error) = source {
+            if let Some(shape) = error.downcast_ref::<nara_core::SerdeShapeError>() {
+                return Some(shape);
+            }
+            source = error.source();
+        }
+        None
+    }
+
+    fn parser_error(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Shape { source, .. }
+            | Self::Header { source, .. }
+            | Self::Payload { source, .. } => Some(source.as_ref()),
+            Self::EncodedBytesExceeded { .. }
+            | Self::Contract(_)
+            | Self::EmbeddedPatchFormatVersion { .. }
+            | Self::LegacyPlacementShape { .. }
+            | Self::Budget(_)
+            | Self::Encode { .. }
+            | Self::Metadata(_) => None,
         }
     }
 }
@@ -1218,7 +1311,12 @@ fn decode_ron<T: SceneFilePayload>(
         |bytes| {
             let mut deserializer =
                 ron::de::Deserializer::from_bytes(bytes).map_err(RonDecodeError::Syntax)?;
-            preflight_serde_shape(&mut deserializer, limits.shape()).map_err(RonDecodeError::Shape)
+            preflight_serde_shape(&mut deserializer, limits.shape()).map_err(|error| match error {
+                nara_core::SerdeShapePreflightError::Shape(error) => RonDecodeError::Shape(error),
+                nara_core::SerdeShapePreflightError::Parse(error) => {
+                    RonDecodeError::Syntax(deserializer.span_error(error))
+                }
+            })
         },
         |bytes| ron::de::from_bytes::<PersistentFileHeader>(bytes).map_err(RonDecodeError::Syntax),
         |bytes| {
@@ -1256,7 +1354,7 @@ impl Error for JsonDecodeError {
 
 #[derive(Debug)]
 enum RonDecodeError {
-    Shape(nara_core::SerdeShapePreflightError<ron::Error>),
+    Shape(nara_core::SerdeShapeError),
     Syntax(ron::error::SpannedError),
 }
 

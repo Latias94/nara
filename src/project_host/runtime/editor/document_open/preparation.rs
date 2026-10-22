@@ -6,14 +6,42 @@ use std::sync::{
 };
 
 use super::*;
-use crate::project_host::authoring::OwnedAuthoringDocumentRequest;
+use crate::project_host::authoring::{
+    AuthoringDocumentAdmissionError, OwnedAuthoringDocumentRequest,
+};
+use crate::project_host::runtime::{diagnostic_code, safe_summary};
+use nara_diagnostic::Diagnostic;
 use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest, TaskTerminal,
 };
 
 pub(in crate::project_host::runtime::editor) struct DocumentOpenPreparation {
-    task: Option<TaskHandle<Result<PreparedAuthoringDocumentOpen, &'static str>>>,
+    task: Option<TaskHandle<Result<PreparedAuthoringDocumentOpen, DocumentOpenFailure>>>,
     returned: Arc<AtomicBool>,
+}
+
+pub(super) struct DocumentOpenFailure {
+    pub(super) code: &'static str,
+    pub(super) diagnostic: Diagnostic,
+}
+
+impl DocumentOpenFailure {
+    pub(super) fn from_code(code: &'static str) -> Self {
+        Self {
+            code,
+            diagnostic: Diagnostic::error(
+                diagnostic_code(code),
+                safe_summary("Editor document could not be opened"),
+            ),
+        }
+    }
+
+    pub(super) fn from_admission(error: AuthoringDocumentAdmissionError) -> Self {
+        Self {
+            code: error.code(),
+            diagnostic: error.diagnostic(),
+        }
+    }
 }
 
 impl DocumentOpenPreparation {
@@ -39,21 +67,30 @@ impl DocumentOpenPreparation {
                     #[cfg(test)]
                     wait_at(&mut gate, OpenTestPhase::BeforeRead);
                     if cancellation.is_cancelled() {
-                        return Err("project.editor.document-open-cancelled");
+                        return Err(DocumentOpenFailure::from_code(
+                            "project.editor.document-open-cancelled",
+                        ));
                     }
                     let request = input.request.take().expect("Open prepares once");
                     let root = request.project_root();
-                    let admitted = request.prepare().map_err(|error| error.code())?;
+                    let admitted = request
+                        .prepare()
+                        .map_err(DocumentOpenFailure::from_admission)?;
                     #[cfg(test)]
                     wait_at(&mut gate, OpenTestPhase::BeforeBinding);
                     if cancellation.is_cancelled() {
-                        return Err("project.editor.document-open-cancelled");
+                        return Err(DocumentOpenFailure::from_code(
+                            "project.editor.document-open-cancelled",
+                        ));
                     }
-                    let prepared = bind_document_open(&root, &input.custody, admitted)?;
+                    let prepared = bind_document_open(&root, &input.custody, admitted)
+                        .map_err(DocumentOpenFailure::from_code)?;
                     #[cfg(test)]
                     wait_at(&mut gate, OpenTestPhase::AfterPreparation);
                     if cancellation.is_cancelled() {
-                        return Err("project.editor.document-open-cancelled");
+                        return Err(DocumentOpenFailure::from_code(
+                            "project.editor.document-open-cancelled",
+                        ));
                     }
                     Ok(prepared)
                 },
@@ -63,16 +100,22 @@ impl DocumentOpenPreparation {
         Self { task, returned }
     }
 
-    pub(super) fn poll(&mut self) -> Option<Result<PreparedAuthoringDocumentOpen, &'static str>> {
+    pub(super) fn poll(
+        &mut self,
+    ) -> Option<Result<PreparedAuthoringDocumentOpen, DocumentOpenFailure>> {
         if !self.returned.load(Ordering::Acquire) {
             return None;
         }
         Some(match self.task.as_mut() {
-            None => Err("project.editor.document-open-preparation-unavailable"),
+            None => Err(DocumentOpenFailure::from_code(
+                "project.editor.document-open-preparation-unavailable",
+            )),
             Some(task) => match task.try_take()? {
                 TaskTerminal::Completed(result) => result,
                 TaskTerminal::Cancelled(_) | TaskTerminal::Failed(_) => {
-                    Err("project.editor.document-open-preparation-unavailable")
+                    Err(DocumentOpenFailure::from_code(
+                        "project.editor.document-open-preparation-unavailable",
+                    ))
                 }
             },
         })

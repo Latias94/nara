@@ -5,14 +5,79 @@ use nara_fs::{DirectoryEnumerationLimits, FileKind};
 
 use super::*;
 
-#[derive(Default)]
+#[cfg(all(test, feature = "project-workflow"))]
+mod measurement_tests;
+
+#[derive(Default, Clone)]
 pub(super) struct ReferenceCatalogue {
     metadata: BTreeMap<AssetPath, (usize, ContentDigest)>,
-    work_bytes: usize,
+    pub(super) work_bytes: usize,
     complete: bool,
 }
 
+pub(crate) struct DeliveryCatalogue {
+    pub(super) roots: [nara_project::ProjectPath; 2],
+    pub(super) catalogue: ReferenceCatalogue,
+    pub(super) asset_database: ProjectAssetDatabase,
+    pub(super) asset_database_work_bytes: usize,
+    _budget: BudgetTicket,
+}
+
 impl LoadContext<'_> {
+    pub(super) fn take_delivery_catalogue(&mut self) -> Option<DeliveryCatalogue> {
+        self.completed_delivery_catalogue.take()
+    }
+
+    fn capture_delivery_catalogue(&mut self) -> Result<(), ProjectContentError> {
+        if !self.capture_delivery_catalogue
+            || self.completed_delivery_catalogue.is_some()
+            || !self
+                .catalogue
+                .as_ref()
+                .is_some_and(|catalogue| catalogue.complete)
+        {
+            return Ok(());
+        }
+        let roots = self
+            .catalogue_roots
+            .as_ref()
+            .expect("content loading binds the manifest directories before decoding");
+        let catalogue = self
+            .catalogue
+            .as_ref()
+            .expect("complete catalogue remains available during delivery capture");
+        let roots_work = roots.iter().try_fold(0usize, |bytes, root| {
+            checked_plan_sum(
+                ProjectContentBudgetKind::WorkBytes,
+                [bytes, string_retained_bytes(root.as_str())?],
+            )
+        })?;
+        let mut budget = self.loader.budget_host.reserve();
+        budget
+            .set(
+                ProjectContentBudgetKind::WorkBytes,
+                checked_plan_sum(
+                    ProjectContentBudgetKind::WorkBytes,
+                    [
+                        size_of::<DeliveryCatalogue>(),
+                        roots_work,
+                        catalogue.work_bytes,
+                        self.asset_database_work_bytes,
+                    ],
+                )?,
+            )
+            .map_err(ProjectContentError::budget)?;
+        self.completed_delivery_catalogue = Some(DeliveryCatalogue {
+            roots: roots.clone(),
+            catalogue: catalogue.clone(),
+            asset_database: self.asset_database.clone(),
+            asset_database_work_bytes: self.asset_database_work_bytes,
+            _budget: budget,
+        });
+        self.capture_delivery_catalogue = false;
+        Ok(())
+    }
+
     pub(super) fn ensure_reference_catalogue(&mut self) -> Result<(), ProjectContentError> {
         if self
             .catalogue
@@ -28,6 +93,8 @@ impl LoadContext<'_> {
             .clone();
         self.catalogue
             .get_or_insert_with(ReferenceCatalogue::default);
+        #[cfg(all(test, feature = "project-workflow"))]
+        measurement_tests::record(|counts| counts.catalogue_builds += 1);
         for (root_index, path) in roots.iter().enumerate() {
             let directory = self.open_directory(path)?;
             let result = self.scan_metadata_directory(&directory, root_index);
@@ -39,6 +106,7 @@ impl LoadContext<'_> {
             .as_mut()
             .expect("catalogue was initialized")
             .complete = true;
+        self.capture_delivery_catalogue()?;
         Ok(())
     }
 
@@ -76,6 +144,8 @@ impl LoadContext<'_> {
             let mut enumeration = directory
                 .begin_child_enumeration(limits)
                 .map_err(map_fs_error)?;
+            #[cfg(all(test, feature = "project-workflow"))]
+            measurement_tests::record(|counts| counts.directory_enumerations += 1);
             loop {
                 let batch_memory = BATCH_ENTRIES
                     * (MAX_NAME_BYTES
@@ -85,6 +155,11 @@ impl LoadContext<'_> {
                 let batch = enumeration
                     .next_batch(BATCH_ENTRIES)
                     .map_err(map_fs_error)?;
+                #[cfg(all(test, feature = "project-workflow"))]
+                measurement_tests::record(|counts| {
+                    counts.directory_entries +=
+                        batch.entries().len() + batch.rejected_entry_facts().len();
+                });
                 self.add_budget(
                     ProjectContentBudgetKind::DirectoryEntries,
                     batch.entries().len() + batch.rejected_entry_facts().len(),
@@ -157,6 +232,8 @@ impl LoadContext<'_> {
         let path = AssetPath::new(source).map_err(|_| invalid_path(source))?;
         let ceiling = AssetMetaFileLimits::default().encoded_bytes().get();
         let (bytes, digest) = self.read_file(root, meta_path, ceiling)?;
+        #[cfg(all(test, feature = "project-workflow"))]
+        measurement_tests::record(|counts| counts.identity_metadata_reads += 1);
         let reservation = self.reserve_work(ceiling)?;
         let identity =
             AssetMetaIdentityCandidate::decode_json_bytes_owned(bytes.into_boxed_slice())
@@ -334,6 +411,8 @@ impl LoadContext<'_> {
             .as_ref()
             .and_then(|catalogue| catalogue.metadata.get(path))
         {
+            #[cfg(all(test, feature = "project-workflow"))]
+            measurement_tests::record(|counts| counts.metadata_revalidations += 1);
             let roots = self
                 .catalogue_roots
                 .as_ref()

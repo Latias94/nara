@@ -4,6 +4,10 @@
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
+#[cfg(feature = "project-workflow")]
+#[path = "project_content_boundary/format_diagnostics.rs"]
+mod format_diagnostics;
+
 #[cfg(all(feature = "serde", feature = "runtime-2d"))]
 use nara::{
     asset::{AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, StableAssetId},
@@ -432,6 +436,86 @@ fn hostile_scene_and_image_inputs_publish_no_snapshot_or_residency() {
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
 }
 
+#[cfg(feature = "project-workflow")]
+#[test]
+fn ordinary_check_preserves_safe_scene_and_prefab_format_reasons() {
+    for prefab in [false, true] {
+        for reason in [
+            "syntax-invalid",
+            "format-version-unsupported",
+            "budget-exceeded",
+        ] {
+            let project = TestProject::with_prefab_startup();
+            let relative = if prefab {
+                "prefabs/enemy.prefab.json"
+            } else {
+                "scenes/startup.scene.json"
+            };
+            let original = std::fs::read(project.path().join(relative)).unwrap();
+            let bytes = match reason {
+                "syntax-invalid" => br#"{"private-document-sentinel":"unclosed"#.to_vec(),
+                "format-version-unsupported" => {
+                    let mut value: serde_json::Value = serde_json::from_slice(&original).unwrap();
+                    value["format_version"] = serde_json::json!(999);
+                    serde_json::to_vec(&value).unwrap()
+                }
+                _ => {
+                    let mut value: serde_json::Value = serde_json::from_slice(&original).unwrap();
+                    value["private-document-sentinel"] =
+                        serde_json::Value::String("x".repeat(1024 * 1024 + 1));
+                    serde_json::to_vec(&value).unwrap()
+                }
+            };
+            std::fs::write(project.path().join(relative), bytes).unwrap();
+            let error = nara::project_workflow::check_project(
+                nara::project_workflow::ProjectCheckRequest::new(
+                    project.root_capability(),
+                    nara::ProductRecipe::new(),
+                ),
+            )
+            .unwrap_err();
+            let diagnostic = error
+                .content_error()
+                .unwrap()
+                .diagnostics()
+                .iter()
+                .next()
+                .unwrap();
+            assert_eq!(
+                diagnostic.code().as_str(),
+                if prefab {
+                    "project.content.prefab-format-invalid"
+                } else {
+                    "project.content.scene-format-invalid"
+                }
+            );
+            assert!(
+                diagnostic.fields().iter().any(|field| {
+                    field.key().as_str() == "reason"
+                        && field.value() == DiagnosticValueRef::Identifier(reason)
+                }),
+                "{reason}: {diagnostic:?}"
+            );
+            for key in match reason {
+                "syntax-invalid" => ["line", "column"].as_slice(),
+                "format-version-unsupported" => {
+                    ["observed_version", "supported_version"].as_slice()
+                }
+                _ => ["budget", "maximum"].as_slice(),
+            } {
+                assert!(
+                    diagnostic
+                        .fields()
+                        .iter()
+                        .any(|field| field.key().as_str() == *key),
+                    "missing {key}: {diagnostic:?}"
+                );
+            }
+            assert!(!format!("{diagnostic:?}").contains("private-document-sentinel"));
+        }
+    }
+}
+
 #[test]
 fn legacy_scene_parent_shape_reports_an_actionable_bounded_diagnostic() {
     let project = TestProject::with_prefab_startup();
@@ -510,7 +594,12 @@ fn assert_legacy_placement_diagnostic(
     let diagnostic = error.diagnostics().iter().next().unwrap();
     assert_eq!(diagnostic.code().as_str(), code);
     assert_eq!(diagnostic.summary().as_str(), summary);
-    assert_eq!(diagnostic.fields().len(), 2);
+    assert_eq!(diagnostic.fields().len(), 3);
+    assert!(diagnostic.fields().iter().any(|field| {
+        field.key().as_str() == "reason"
+            && field.class() == DiagnosticFieldClass::Public
+            && field.value() == DiagnosticValueRef::Identifier("legacy-placement-shape")
+    }));
     assert!(diagnostic.fields().iter().any(|field| {
         field.key().as_str() == source_key
             && field.class() == DiagnosticFieldClass::Public

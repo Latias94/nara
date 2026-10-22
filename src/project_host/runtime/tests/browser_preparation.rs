@@ -12,6 +12,79 @@ const SCENE: &str = "scenes/external.scene.json";
 const PREFAB: &str = "prefabs/external.prefab.json";
 
 #[test]
+fn browser_open_preserves_safe_scene_and_prefab_format_reasons() {
+    for path in [SCENE, PREFAB] {
+        for reason in [
+            "syntax-invalid",
+            "format-version-unsupported",
+            "budget-exceeded",
+        ] {
+            let project = project("browser-open-format-reason");
+            let mut session = open_generic_editor_with_ready_index(&project);
+            let before = session.drive_editor_frame(Duration::ZERO);
+            let original = fs::read(project.root.join(path)).unwrap();
+            let bytes = match reason {
+                "syntax-invalid" => br#"{"private-document-sentinel":"unclosed"#.to_vec(),
+                "format-version-unsupported" => {
+                    let mut value: serde_json::Value = serde_json::from_slice(&original).unwrap();
+                    value["format_version"] = serde_json::json!(999);
+                    serde_json::to_vec(&value).unwrap()
+                }
+                _ => {
+                    let mut value: serde_json::Value = serde_json::from_slice(&original).unwrap();
+                    value["private-document-sentinel"] =
+                        serde_json::Value::String("x".repeat(1024 * 1024 + 1));
+                    serde_json::to_vec(&value).unwrap()
+                }
+            };
+            fs::write(project.root.join(path), bytes).unwrap();
+            let request = begin_open(&mut session, path);
+            let completed = wait_open(&mut session, request);
+            // Retire the Editor before assertions so a failing regression does not retain custody.
+            close(&mut session);
+            assert_eq!(
+                completed.document_open().result(),
+                Some(EditorDocumentOpenResult::Rejected {
+                    request,
+                    code: "project.editor.document-source-format-invalid",
+                })
+            );
+            assert_eq!(completed.workspace(), before.workspace());
+            let diagnostic = completed
+                .diagnostics()
+                .iter()
+                .find(|diagnostic| {
+                    diagnostic.code().as_str() == "project.editor.document-source-format-invalid"
+                })
+                .expect("ordinary Open must retain its structured failure in the frame");
+            assert!(
+                diagnostic.fields().iter().any(|field| {
+                    field.key().as_str() == "reason"
+                        && field.value() == DiagnosticValueRef::Identifier(reason)
+                }),
+                "{reason}: {diagnostic:?}"
+            );
+            for key in match reason {
+                "syntax-invalid" => ["line", "column"].as_slice(),
+                "format-version-unsupported" => {
+                    ["observed_version", "supported_version"].as_slice()
+                }
+                _ => ["budget", "maximum"].as_slice(),
+            } {
+                assert!(
+                    diagnostic
+                        .fields()
+                        .iter()
+                        .any(|field| field.key().as_str() == *key),
+                    "missing {key}: {diagnostic:?}"
+                );
+            }
+            assert!(!format!("{diagnostic:?}").contains("private-document-sentinel"));
+        }
+    }
+}
+
+#[test]
 fn prepared_browser_open_rejects_a_later_edit_without_losing_working_history() {
     let project = project("browser-open-later-edit");
     let mut editor = open_generic_editor_with_ready_index(&project);

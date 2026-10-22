@@ -260,11 +260,8 @@ pub fn check_project(
         check_project_source(project_root, profile.as_deref(), recipe).map_err(|error| {
             ProjectCheckError::from_source(error, issue_project_root, issue_profile, issue_recipe)
         })?;
-    let (candidate, plan, snapshot, loader) = checked.into_delivery_parts();
-    loader
-        .load_delivery_with_startup(&candidate, &plan, snapshot)
-        .map_err(|error| ProjectCheckError {
-            inner: ProjectCheckErrorInner::Content(error),
-            startup_scene_issue: None,
-        })
+    checked.into_delivery().map_err(|error| ProjectCheckError {
+        inner: ProjectCheckErrorInner::Content(error),
+        startup_scene_issue: None,
+    })
 }

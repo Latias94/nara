@@ -1,6 +1,10 @@
 use std::{error::Error, fmt, sync::Arc};
 
 use nara_asset::{AssetPath, AssetPathError, AssetRef};
+use nara_diagnostic::{
+    Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
+    SafeSummary,
+};
 use nara_fs::{
     ContentDigest, DirectoryCapability, FileIdentity, FsError, PathValidationError, RelativePath,
 };
@@ -258,7 +262,9 @@ fn admit_indexed_document(
     let bytes = capability
         .read_to_end_bounded(u64::try_from(limits.encoded_bytes().get()).unwrap_or(u64::MAX))
         .map_err(|error| match error {
-            FsError::ByteLimitExceeded { .. } => AuthoringDocumentAdmissionError::SourceTooLarge,
+            FsError::ByteLimitExceeded { limit } => {
+                AuthoringDocumentAdmissionError::SourceTooLarge { maximum: limit }
+            }
             error => AuthoringDocumentAdmissionError::ReadSource(error),
         })?;
     let source = AuthoringDocumentSourceFact {
@@ -349,12 +355,61 @@ pub(crate) enum AuthoringDocumentAdmissionError {
     RelativePath(PathValidationError),
     OpenSource(FsError),
     SourceIdentityChanged,
-    SourceTooLarge,
+    SourceTooLarge { maximum: u64 },
     ReadSource(FsError),
     Document(AuthoringDocumentDataError),
 }
 
 impl AuthoringDocumentAdmissionError {
+    pub(crate) fn diagnostic(&self) -> Diagnostic {
+        if let Self::Document(AuthoringDocumentDataError::Format(error)) = self {
+            let summary = match error {
+                SceneFormatError::LegacyPlacementShape {
+                    entity_index: Some(_),
+                } => {
+                    "Rewrite the legacy document with ordered roots and parent-owned children; remove record-owned parent fields because sibling order cannot be inferred"
+                }
+                SceneFormatError::LegacyPlacementShape { entity_index: None } => {
+                    "Rewrite the legacy document with ordered roots and parent-owned children; add the missing ordered roots because sibling order cannot be inferred"
+                }
+                _ => "Editor document source format is invalid",
+            };
+            return crate::project_content::format_diagnostic::scene_format_diagnostic(
+                self.code(),
+                summary,
+                error,
+            );
+        }
+        let diagnostic = Diagnostic::error(
+            DiagnosticCode::new(self.code()).expect("document error codes are engine-owned"),
+            SafeSummary::new("Editor document source could not be admitted")
+                .expect("document error summaries are engine-owned"),
+        );
+        if let Self::SourceTooLarge { maximum } = self {
+            return diagnostic
+                .try_with_field(DiagnosticField::public_identifier(
+                    DiagnosticFieldKey::new("reason").expect("field key is engine-owned"),
+                    PublicDiagnosticIdentifier::new("budget-exceeded")
+                        .expect("reason is engine-owned"),
+                ))
+                .and_then(|diagnostic| {
+                    diagnostic.try_with_field(DiagnosticField::public_identifier(
+                        DiagnosticFieldKey::new("budget").expect("field key is engine-owned"),
+                        PublicDiagnosticIdentifier::new("encoded-bytes")
+                            .expect("budget is engine-owned"),
+                    ))
+                })
+                .and_then(|diagnostic| {
+                    diagnostic.try_with_field(DiagnosticField::public_u64(
+                        DiagnosticFieldKey::new("maximum").expect("field key is engine-owned"),
+                        *maximum,
+                    ))
+                })
+                .expect("document diagnostics have unique bounded fields");
+        }
+        diagnostic
+    }
+
     #[must_use]
     pub(crate) const fn code(&self) -> &'static str {
         match self {
@@ -367,7 +422,7 @@ impl AuthoringDocumentAdmissionError {
             }
             Self::OpenSource(_) => "project.editor.document-source-open-failed",
             Self::SourceIdentityChanged => "project.editor.document-source-identity-changed",
-            Self::SourceTooLarge => "project.editor.document-source-too-large",
+            Self::SourceTooLarge { .. } => "project.editor.document-source-too-large",
             Self::ReadSource(_) => "project.editor.document-source-read-failed",
             Self::Document(AuthoringDocumentDataError::UnsupportedEncoding) => {
                 "project.editor.document-source-encoding-unsupported"

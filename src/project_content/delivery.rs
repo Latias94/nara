@@ -4,6 +4,7 @@ use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity};
 use nara_project::ProjectPath;
 use nara_reflect::SchemaCompositionFingerprint;
 
+use super::catalogue::DeliveryCatalogue;
 use super::{
     ARC_CONTROL_BLOCK_BYTES, BTREE_ENTRY_OVERHEAD, ProjectContentBudgetKind,
     ProjectContentClosureReceipt, ProjectContentError, ProjectContentErrorKind,
@@ -101,6 +102,8 @@ impl ProjectContentLoader {
     /// Decoded snapshots retire between roots. The resulting source union is independently
     /// budgeted and grants no runtime residency. A missing or invalid declared root rejects the
     /// complete delivery plan; undeclared files are not automatically included.
+    /// Stable identities use one lazily captured catalogue for this operation. Referenced
+    /// metadata is revalidated on use; unrelated additions are discovered by the next operation.
     pub fn load_delivery(
         &self,
         candidate: &ProjectSettingsCandidate,
@@ -110,15 +113,17 @@ impl ProjectContentLoader {
         let agreement = crate::project_host::runtime_agreement::prepare_runtime_schema_agreement(
             &self.root, candidate, plan,
         )?;
-        let startup = self.load_with_runtime_agreement(candidate, plan, agreement)?;
-        self.load_delivery_with_startup(candidate, plan, startup)
+        let (startup, catalogue) =
+            self.load_startup_for_delivery(candidate, plan, None, agreement)?;
+        self.load_delivery_with_startup_and_catalogue(candidate, plan, startup, catalogue)
     }
 
-    pub(crate) fn load_delivery_with_startup(
+    pub(crate) fn load_delivery_with_startup_and_catalogue(
         &self,
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
         snapshot: ProjectContentSnapshot,
+        mut catalogue: Option<DeliveryCatalogue>,
     ) -> Result<ProjectContentDeliveryReceipt, ProjectContentError> {
         self.validate_inputs(candidate, plan)?;
         let startup = snapshot.startup_content_closure().ok_or_else(|| {
@@ -189,7 +194,14 @@ impl ProjectContentLoader {
             if root == startup.content_closure().selected_scene_path() {
                 continue;
             }
-            let snapshot = self.load_scene(candidate, plan, root)?;
+            let (snapshot, next_catalogue) = self.load_scene_for_delivery(
+                candidate,
+                plan,
+                root,
+                catalogue.as_ref(),
+                catalogue.is_none(),
+            )?;
+            catalogue = next_catalogue.or(catalogue);
             self.merge_delivery_members(
                 &mut members,
                 &snapshot.content_closure(),

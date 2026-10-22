@@ -5,6 +5,7 @@ mod catalogue;
 mod closure;
 mod delivery;
 mod domains;
+pub(crate) mod format_diagnostic;
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -62,6 +63,7 @@ pub use budget::{
     ProjectContentBudgetSnapshot, ProjectContentLimits,
 };
 pub(crate) use budget::{ProjectContentGenerationLease, ProjectContentLease};
+pub(crate) use catalogue::DeliveryCatalogue;
 use catalogue::ReferenceCatalogue;
 pub(crate) use catalogue::asset_record_retained_bytes;
 use closure::{ProjectContentClosureBuilder, ProjectContentClosureDraft};
@@ -608,37 +610,6 @@ impl ProjectContentError {
         Self::with_report(kind, diagnostics)
     }
 
-    fn legacy_placement_shape(
-        code: &'static str,
-        summary: &'static str,
-        key: &'static str,
-        value: &str,
-        entity_index: Option<usize>,
-    ) -> Self {
-        let diagnostic = PublicDiagnosticIdentifier::new(value).map_or_else(
-            |_| with_sensitive(diagnostic(code, summary), key),
-            |value| {
-                attach_field(
-                    diagnostic(code, summary),
-                    DiagnosticField::public_identifier(field_key(key), value),
-                )
-            },
-        );
-        let diagnostic = match entity_index {
-            Some(entity_index) => attach_field(
-                diagnostic,
-                DiagnosticField::public_u64(
-                    field_key("entity_index"),
-                    u64::try_from(entity_index).unwrap_or(u64::MAX),
-                ),
-            ),
-            None => diagnostic,
-        };
-        let mut diagnostics = DiagnosticReport::default();
-        diagnostics.push(diagnostic);
-        Self::with_report(ProjectContentErrorKind::SceneFormat, diagnostics)
-    }
-
     fn budget(error: ProjectContentBudgetError) -> Self {
         let diagnostic = attach_field(
             attach_field(
@@ -887,7 +858,84 @@ impl ProjectContentLoader {
         expected_prefab: Option<ExpectedPrefabSource>,
         runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
+        self.load_inner_with_delivery_catalogue(
+            candidate,
+            plan,
+            selected_scene,
+            expected_startup_scene_digest,
+            expected_prefab,
+            runtime_agreement,
+            None,
+            false,
+        )
+        .map(|(snapshot, _)| snapshot)
+    }
+
+    pub(crate) fn load_startup_for_delivery(
+        &self,
+        candidate: &ProjectSettingsCandidate,
+        plan: &RuntimePlan,
+        expected_startup_scene_digest: Option<ContentDigest>,
+        agreement: PreparedRuntimeSchemaAgreement,
+    ) -> Result<(ProjectContentSnapshot, Option<DeliveryCatalogue>), ProjectContentError> {
+        self.load_inner_with_delivery_catalogue(
+            candidate,
+            plan,
+            None,
+            expected_startup_scene_digest,
+            None,
+            Some(agreement),
+            None,
+            true,
+        )
+    }
+
+    fn load_scene_for_delivery(
+        &self,
+        candidate: &ProjectSettingsCandidate,
+        plan: &RuntimePlan,
+        scene: &nara_project::ProjectPath,
+        catalogue: Option<&DeliveryCatalogue>,
+        capture_catalogue: bool,
+    ) -> Result<(ProjectContentSnapshot, Option<DeliveryCatalogue>), ProjectContentError> {
+        self.load_inner_with_delivery_catalogue(
+            candidate,
+            plan,
+            Some(scene),
+            None,
+            None,
+            None,
+            catalogue,
+            capture_catalogue,
+        )
+    }
+
+    fn load_inner_with_delivery_catalogue(
+        &self,
+        candidate: &ProjectSettingsCandidate,
+        plan: &RuntimePlan,
+        selected_scene: Option<&nara_project::ProjectPath>,
+        expected_startup_scene_digest: Option<ContentDigest>,
+        expected_prefab: Option<ExpectedPrefabSource>,
+        runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
+        delivery_catalogue: Option<&DeliveryCatalogue>,
+        capture_delivery_catalogue: bool,
+    ) -> Result<(ProjectContentSnapshot, Option<DeliveryCatalogue>), ProjectContentError> {
         self.validate_inputs(candidate, plan)?;
+        let settings = candidate.settings();
+        if delivery_catalogue.is_some_and(|catalogue| {
+            catalogue.roots
+                != [
+                    settings.paths.assets.clone(),
+                    settings.paths.prefabs.clone(),
+                ]
+        }) {
+            return Err(ProjectContentError::single(
+                ProjectContentErrorKind::HostAuthorityRejected,
+                "project.delivery.catalogue-authority-mismatch",
+                "Delivery catalogue does not match the admitted asset roots",
+            ));
+        }
         if runtime_agreement.as_ref().is_some_and(|agreement| {
             !agreement.matches_inputs(self.root.identity(), candidate, plan)
         }) {
@@ -905,8 +953,11 @@ impl ProjectContentLoader {
             expected_prefab,
             candidate.manifest_digest(),
             runtime_agreement,
+            delivery_catalogue,
+            capture_delivery_catalogue,
         )?;
-        context.load(candidate, selected_scene)
+        let snapshot = context.load(candidate, selected_scene)?;
+        Ok((snapshot, context.take_delivery_catalogue()))
     }
 
     fn validate_inputs(
@@ -993,6 +1044,8 @@ struct LoadContext<'a> {
     asset_database_work_bytes: usize,
     catalogue: Option<ReferenceCatalogue>,
     catalogue_roots: Option<[nara_project::ProjectPath; 2]>,
+    capture_delivery_catalogue: bool,
+    completed_delivery_catalogue: Option<DeliveryCatalogue>,
 }
 
 struct ExpectedPrefabSource {
@@ -1016,13 +1069,22 @@ impl<'a> LoadContext<'a> {
         expected_prefab: Option<ExpectedPrefabSource>,
         manifest_digest: ContentDigest,
         runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
+        delivery_catalogue: Option<&DeliveryCatalogue>,
+        capture_delivery_catalogue: bool,
     ) -> Result<Self, ProjectContentError> {
         let content_closure_work_bytes = content_closure_entry_work_bytes("nara.toml".len())?;
+        let catalogue_work_bytes =
+            delivery_catalogue.map_or(0, |catalogue| catalogue.catalogue.work_bytes);
+        let asset_database_work_bytes =
+            delivery_catalogue.map_or(0, |catalogue| catalogue.asset_database_work_bytes);
         let mut budget = loader.budget_host.reserve();
         budget
             .add(
                 ProjectContentBudgetKind::WorkBytes,
-                content_closure_work_bytes,
+                content_closure_work_bytes
+                    .checked_add(catalogue_work_bytes)
+                    .and_then(|bytes| bytes.checked_add(asset_database_work_bytes))
+                    .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?,
             )
             .map_err(ProjectContentError::budget)?;
         Ok(Self {
@@ -1036,10 +1098,15 @@ impl<'a> LoadContext<'a> {
             runtime_agreement,
             content_closure: Some(ProjectContentClosureBuilder::new(manifest_digest)?),
             content_closure_work_bytes,
-            asset_database: ProjectAssetDatabase::default(),
-            asset_database_work_bytes: 0,
-            catalogue: None,
+            asset_database: delivery_catalogue
+                .map_or_else(ProjectAssetDatabase::default, |catalogue| {
+                    catalogue.asset_database.clone()
+                }),
+            asset_database_work_bytes,
+            catalogue: delivery_catalogue.map(|catalogue| catalogue.catalogue.clone()),
             catalogue_roots: None,
+            capture_delivery_catalogue,
+            completed_delivery_catalogue: None,
         })
     }
 
@@ -2330,45 +2397,49 @@ fn decode_prefab_candidate(
 }
 
 fn map_scene_format_error(path: &str, error: SceneFormatError) -> ProjectContentError {
-    match error {
-        SceneFormatError::LegacyPlacementShape { entity_index } => {
-            ProjectContentError::legacy_placement_shape(
-                "project.content.scene-legacy-placement-shape",
-                "Rewrite the legacy scene with ordered roots and parent-owned children; sibling order cannot be inferred",
-                "scene",
-                path,
-                entity_index,
-            )
-        }
-        _ => ProjectContentError::with_identifier(
-            ProjectContentErrorKind::SceneFormat,
+    let (code, summary) = match &error {
+        SceneFormatError::LegacyPlacementShape { .. } => (
+            "project.content.scene-legacy-placement-shape",
+            "Rewrite the legacy scene with ordered roots and parent-owned children; sibling order cannot be inferred",
+        ),
+        _ => (
             "project.content.scene-format-invalid",
             "Project scene format is invalid",
-            "scene",
-            path,
         ),
-    }
+    };
+    map_format_error(path, "scene", code, summary, &error)
 }
 
 fn map_prefab_format_error(path: &str, error: SceneFormatError) -> ProjectContentError {
-    match error {
-        SceneFormatError::LegacyPlacementShape { entity_index } => {
-            ProjectContentError::legacy_placement_shape(
-                "project.content.prefab-legacy-placement-shape",
-                "Rewrite the legacy prefab with ordered roots and parent-owned children; sibling order cannot be inferred",
-                "prefab",
-                path,
-                entity_index,
-            )
-        }
-        _ => ProjectContentError::with_identifier(
-            ProjectContentErrorKind::SceneFormat,
+    let (code, summary) = match &error {
+        SceneFormatError::LegacyPlacementShape { .. } => (
+            "project.content.prefab-legacy-placement-shape",
+            "Rewrite the legacy prefab with ordered roots and parent-owned children; sibling order cannot be inferred",
+        ),
+        _ => (
             "project.content.prefab-format-invalid",
             "Project prefab format is invalid",
-            "prefab",
-            path,
         ),
-    }
+    };
+    map_format_error(path, "prefab", code, summary, &error)
+}
+
+fn map_format_error(
+    path: &str,
+    source_key: &'static str,
+    code: &'static str,
+    summary: &'static str,
+    error: &SceneFormatError,
+) -> ProjectContentError {
+    let diagnostic = format_diagnostic::scene_format_diagnostic(code, summary, error);
+    let source = PublicDiagnosticIdentifier::new(path).map_or_else(
+        |_| DiagnosticField::sensitive(field_key(source_key)),
+        |value| DiagnosticField::public_identifier(field_key(source_key), value),
+    );
+    ProjectContentError::with_report(
+        ProjectContentErrorKind::SceneFormat,
+        single_report(attach_field(diagnostic, source)),
+    )
 }
 
 fn map_scene_publication_error(

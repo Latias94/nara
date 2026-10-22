@@ -15,7 +15,7 @@ use super::{
     ingest_project_manifest_with_expected_digest,
     runtime_agreement::prepare_runtime_schema_agreement,
 };
-use crate::ProductRecipe;
+use crate::{ProductRecipe, project_content::DeliveryCatalogue};
 
 const PROJECT_MANIFEST: &str = "nara.toml";
 
@@ -25,6 +25,7 @@ struct ProjectSourceCheckOptions {
     host_policy: Option<RuntimeHostPolicyContribution>,
     manifest_digest: Option<ContentDigest>,
     startup_scene_digest: Option<ContentDigest>,
+    delivery: bool,
 }
 
 pub(crate) struct CheckedProjectSource {
@@ -32,9 +33,21 @@ pub(crate) struct CheckedProjectSource {
     loader: ProjectContentLoader,
     plan: RuntimePlan,
     snapshot: ProjectContentSnapshot,
+    delivery_catalogue: Option<DeliveryCatalogue>,
 }
 
 impl CheckedProjectSource {
+    pub(crate) fn into_delivery(
+        self,
+    ) -> Result<crate::project_content::ProjectContentDeliveryReceipt, ProjectContentError> {
+        self.loader.load_delivery_with_startup_and_catalogue(
+            &self.candidate,
+            &self.plan,
+            self.snapshot,
+            self.delivery_catalogue,
+        )
+    }
+
     pub(crate) fn into_parts(self) -> (RuntimePlan, ProjectContentSnapshot) {
         (self.plan, self.snapshot)
     }
@@ -113,7 +126,10 @@ pub(crate) fn check_project_source(
         project_root,
         profile,
         recipe,
-        ProjectSourceCheckOptions::default(),
+        ProjectSourceCheckOptions {
+            delivery: true,
+            ..ProjectSourceCheckOptions::default()
+        },
     )
 }
 
@@ -244,14 +260,24 @@ fn load_checked_candidate(
             missing_startup_scene: None,
         }
     })?;
-    let snapshot = match options.startup_scene_digest {
-        Some(expected) => loader.load_with_expected_startup_scene_digest_and_runtime_agreement(
+    let (snapshot, delivery_catalogue) = if options.delivery {
+        loader.load_startup_for_delivery(
             &candidate,
             &plan,
-            expected,
+            options.startup_scene_digest,
             runtime_agreement,
-        ),
-        None => loader.load_with_runtime_agreement(&candidate, &plan, runtime_agreement),
+        )
+    } else {
+        match options.startup_scene_digest {
+            Some(expected) => loader.load_with_expected_startup_scene_digest_and_runtime_agreement(
+                &candidate,
+                &plan,
+                expected,
+                runtime_agreement,
+            ),
+            None => loader.load_with_runtime_agreement(&candidate, &plan, runtime_agreement),
+        }
+        .map(|snapshot| (snapshot, None))
     }
     .map_err(|error| startup_content_failure(error, &candidate, manifest_identity))?;
 
@@ -260,6 +286,7 @@ fn load_checked_candidate(
         loader,
         plan,
         snapshot,
+        delivery_catalogue,
     })
 }
 

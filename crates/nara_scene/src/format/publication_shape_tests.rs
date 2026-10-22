@@ -1,6 +1,7 @@
 use super::*;
 use crate::{ScenePlacement, ScenePlacementOwner};
 use nara_asset::AssetRef;
+use nara_core::SerdeShapeError;
 use nara_identity::EntityReference;
 use nara_reflect::{
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, PersistentComponentSchemaOwnerId,
@@ -30,6 +31,45 @@ fn certified<T: SceneFilePayload>(payload: &T, limits: SceneFileLimits) -> bool 
         .is_some_and(|(roots, entities)| {
             publication_shape::certifies_entity_document(&envelope, roots, entities, limits.shape())
         })
+}
+
+#[test]
+fn json_format_error_accessors_expose_only_safe_parser_facts() {
+    let syntax =
+        SceneDocumentCandidate::decode_json_bytes(b"{\"private-document-sentinel\":").unwrap_err();
+    assert!(syntax.is_syntax_error());
+    assert!(matches!(syntax.parser_location(), Some((1, column)) if column > 1));
+    assert!(syntax.shape_error().is_none());
+
+    let limits = SceneFileLimits::default().with_shape(SerdeShapeLimits::new(
+        nara_core::DepthLimit::new(64).unwrap(),
+        nara_core::ItemLimit::new(100).unwrap(),
+        nara_core::ItemLimit::new(100).unwrap(),
+        nara_core::ByteLimit::new(8).unwrap(),
+        nara_core::ByteLimit::new(64).unwrap(),
+    ));
+    let shaped = SceneDocumentCandidate::decode_json_bytes_with_limits(
+        br#"{"kind":"scene","format_version":1,"engine_min_version":"0.1.0","generator":{"name":"test","version":"0.1.0"},"payload":{"roots":[],"entities":[],"private-document-sentinel":"xxxxxxxxx"}}"#,
+        limits,
+    ).unwrap_err();
+    assert!(!shaped.is_syntax_error());
+    assert!(matches!(
+        shaped.shape_error(),
+        Some(SerdeShapeError::StringLimitExceeded { .. })
+    ));
+    assert!(!format!("{shaped}").contains("private-document-sentinel"));
+}
+
+#[test]
+fn ron_syntax_accessor_exposes_location_without_parser_text() {
+    let syntax = SceneDocumentCandidate::decode_ron_bytes(
+        br#"(kind: "scene", private_document_sentinel: "unterminated)"#,
+    )
+    .unwrap_err();
+
+    assert!(syntax.is_syntax_error());
+    assert!(matches!(syntax.parser_location(), Some((1, column)) if column > 1));
+    assert!(syntax.shape_error().is_none());
 }
 
 #[test]
