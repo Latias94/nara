@@ -142,6 +142,8 @@ impl<E: Error + 'static> Error for SerdeShapePreflightError<E> {
 ///
 /// This enforces only format-neutral structure. Domain-specific limits, migrations, and semantic
 /// validation remain the responsibility of the owning loader.
+/// Nara checks map-key budgets before copying borrowed keys. Allocations already performed by the
+/// syntax adapter (for example, decoding escaped strings) remain outside this preflight's control.
 pub fn preflight_serde_shape<'de, D>(
     deserializer: D,
     limits: SerdeShapeLimits,
@@ -455,28 +457,28 @@ impl<'de> DeserializeSeed<'de> for MapKeySeed<'_> {
             self.tracker.record_failure(error);
             return Err(D::Error::custom(error));
         }
-        let key = deserializer.deserialize_any(MapKeyVisitor)?;
-        if let Err(error) = self.tracker.observe_string(&key) {
-            self.tracker.record_failure(error);
-            return Err(D::Error::custom(error));
-        }
-        Ok(key)
+        deserializer.deserialize_any(MapKeyVisitor {
+            tracker: self.tracker,
+        })
     }
 }
 
-struct MapKeyVisitor;
+struct MapKeyVisitor<'a> {
+    tracker: &'a mut ShapeTracker,
+}
 
-impl<'de> Visitor<'de> for MapKeyVisitor {
+impl<'de> Visitor<'de> for MapKeyVisitor<'_> {
     type Value = String;
 
     fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str("a persistent map or struct field identifier")
     }
 
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    fn visit_str<E>(mut self, value: &str) -> Result<Self::Value, E>
     where
         E: DeError,
     {
+        self.observe_string::<E>(value)?;
         Ok(value.to_owned())
     }
 
@@ -484,13 +486,23 @@ impl<'de> Visitor<'de> for MapKeyVisitor {
     where
         E: DeError,
     {
-        Ok(value.to_owned())
+        self.visit_str(value)
     }
 
-    fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+    fn visit_string<E>(mut self, value: String) -> Result<Self::Value, E>
     where
         E: DeError,
     {
+        self.observe_string::<E>(&value)?;
         Ok(value)
+    }
+}
+
+impl MapKeyVisitor<'_> {
+    fn observe_string<E: DeError>(&mut self, value: &str) -> Result<(), E> {
+        self.tracker.observe_string(value).map_err(|error| {
+            self.tracker.record_failure(error);
+            E::custom(error)
+        })
     }
 }

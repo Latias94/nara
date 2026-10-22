@@ -183,12 +183,80 @@ fn interpolate(previous: Transform2d, current: Transform2d, alpha: f32) -> Trans
     if alpha <= 0.0 {
         return previous;
     }
-    let rotation = (current.rotation - previous.rotation + std::f32::consts::PI)
-        .rem_euclid(std::f32::consts::TAU)
-        - std::f32::consts::PI;
+    let rotation = if previous.rotation == current.rotation {
+        previous.rotation
+    } else {
+        // Reduce through the same trigonometric domain as the endpoint matrices. Taking the
+        // remainder of a huge angle by an approximate TAU loses its actual orientation.
+        let (previous_sin, previous_cos) = previous.rotation.sin_cos();
+        let (current_sin, current_cos) = current.rotation.sin_cos();
+        let previous_angle = f64::from(previous_sin).atan2(f64::from(previous_cos));
+        let current_angle = f64::from(current_sin).atan2(f64::from(current_cos));
+        let delta = (current_angle - previous_angle + std::f64::consts::PI)
+            .rem_euclid(std::f64::consts::TAU)
+            - std::f64::consts::PI;
+        (previous_angle + delta * f64::from(alpha)) as f32
+    };
     Transform2d {
         translation: previous.translation.lerp(current.translation, alpha),
-        rotation: previous.rotation + rotation * alpha,
+        rotation,
         scale: previous.scale.lerp(current.scale, alpha),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finite_rotation_extremes_keep_interpolated_matrices_finite() {
+        for (from, to) in [
+            (-f32::MAX, f32::MAX),
+            (f32::MAX, -f32::MAX),
+            (f32::MAX, f32::MAX),
+            (0.0, f32::MAX),
+        ] {
+            let previous = Transform2d {
+                rotation: from,
+                ..Transform2d::IDENTITY
+            };
+            let current = Transform2d {
+                rotation: to,
+                ..Transform2d::IDENTITY
+            };
+            assert!(previous.matrix().is_finite());
+            assert!(current.matrix().is_finite());
+            assert_eq!(interpolate(previous, current, 0.0), previous);
+            assert_eq!(interpolate(previous, current, 1.0), current);
+            for alpha in [0.25, 0.5, 0.75] {
+                assert!(
+                    interpolate(previous, current, alpha).matrix().is_finite(),
+                    "from {from} to {to}, alpha {alpha}"
+                );
+            }
+            let previous_direction = previous.matrix().transform_vector2(nara_core::Vec2::X);
+            let current_direction = current.matrix().transform_vector2(nara_core::Vec2::X);
+            let midpoint_direction = interpolate(previous, current, 0.5)
+                .matrix()
+                .transform_vector2(nara_core::Vec2::X);
+            let bisector = (previous_direction + current_direction).normalize();
+            assert!((midpoint_direction - bisector).length() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn rotation_interpolation_preserves_shortest_arc_and_equal_endpoints() {
+        let previous = Transform2d {
+            rotation: 170_f32.to_radians(),
+            ..Transform2d::IDENTITY
+        };
+        let current = Transform2d {
+            rotation: -170_f32.to_radians(),
+            ..Transform2d::IDENTITY
+        };
+        let midpoint = interpolate(previous, current, 0.5);
+        let direction = midpoint.matrix().transform_vector2(nara_core::Vec2::X);
+        assert!((direction - nara_core::Vec2::NEG_X).length() < 1e-5);
+        assert_eq!(interpolate(previous, previous, 0.5), previous);
     }
 }

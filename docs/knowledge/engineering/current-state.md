@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "93c79f7e1348e2958e6ff10bf77475f14bd8ddd23a424fd7b6673fc2e8ad3aff"
+source_fingerprint: "eef3cc0a56d0842e8e82c0c573307bb9f97d9d808d5cd4e7108c45ac4b166270"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "93c79f7e1348e2958e6ff10bf77475f14bd8ddd23a424fd7b6673fc2e8a
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `93c79f7e1348e2958e6ff10bf77475f14bd8ddd23a424fd7b6673fc2e8ad3aff`
-- Immutable records: 835
+- Source fingerprint: `eef3cc0a56d0842e8e82c0c573307bb9f97d9d808d5cd4e7108c45ac4b166270`
+- Immutable records: 836
 - Active lane heads: 2
 
 # Active Registrations
@@ -68,6 +68,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [U9 key allocation admission and finite shortest-arc interpolation](verification/2026-10/2026-10-22T183934Z-u9-key-allocation-admission-and-finite-shortest-arc-interpolation-144afcea6c9846dab566ddcfe1eec9a5.md) - Original allocation and numeric regressions reproduced; shared key visitor and endpoint-oriented interpolation repaired.
 - **Verification Evidence**: [U2 task return and physical running accounting](verification/2026-10/2026-10-22T181737Z-u2-task-return-and-physical-running-accounting-ce30f14820ee4350931de3355bb0c955.md) - Executor return observer replaces local preparation flags; gated disposal and panic regressions qualify its scope.
 - **Verification Evidence**: [U1 rejected close registration preserves runtime custody](verification/2026-10/2026-10-22T175315Z-u1-rejected-close-registration-preserves-runtime-custody-0b351d9e2f324d8fb56fa85b6d2da7fb.md) - Fresh failing custody regressions then 132 App tests pass; exact App ownership fix and ADR clarification.
 - **Work Progress**: [Low-level refactor plan reviewed and development Goal active](progress/2026-10/2026-10-22T174629Z-low-level-refactor-plan-reviewed-and-development-goal-active-e0bf96f51312477c95bfcddf4203b916.md) - Eleven implementation units authorized; five plan reviewers completed; Resolve/Capture temporal correction applied; U1 starts proof-first.
@@ -79,7 +80,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Session Handoff**: [Checkpoint consumer qualified; task execution budget is the next investigation](sessions/2026-10/2026-10-21T032454Z-checkpoint-consumer-qualified-task-execution-budget-is-the-next-investigation-8f7f1c5d412d4b25b72aeb16bd3bab9a.md) - Session Handoff for Checkpoint consumer qualified; task execution budget is the next investigation.
 - **Verification Evidence**: [Atomic API rename under MSRV and portable wasm](verification/2026-10/2026-10-21T032015Z-atomic-api-rename-under-msrv-and-portable-wasm-284fef97fc6c4a208f370262189bdc6b.md) - Verification Evidence for Atomic API rename under MSRV and portable wasm.
 - **Verification Evidence**: [Two-level checkpoint consumer and complete-frame headless qualification](verification/2026-10/2026-10-21T025657Z-two-level-checkpoint-consumer-and-complete-frame-headless-qualification-72c5ef2705f0461e90916bb60e1bb345.md) - Verification Evidence for Two-level checkpoint consumer and complete-frame headless qualification.
-- **Session Handoff**: [Hosted Scene committed and two-level consumer verification open](sessions/2026-10/2026-10-20T190703Z-hosted-scene-committed-and-two-level-consumer-verification-open-ac1d26bed07c4a4ba3ebb1fab17c5ac8.md) - Session Handoff for Hosted Scene committed and two-level consumer verification open.
 
 # Integration Notes
 

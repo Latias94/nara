@@ -42,6 +42,10 @@ Rules:
 - Budget failure is not a panic and must not partially mutate the target `World`, `AssetServer`, or project database.
 - AI/editor repair loops receive enough context to shrink or split the input, but diagnostics themselves are capped.
 - Runtime hot reload uses the same budgets as initial load unless a future profile explicitly chooses stricter reload limits.
+- Shared serde shape preflight checks borrowed map-key string and aggregate-byte budgets before
+  Nara copies the key for duplicate detection, and charges owned keys exactly once. Syntax-adapter
+  allocations already made before visiting (such as escaped-string decoding) remain outside this
+  guarantee; the owning loader still applies the encoded-byte limit before parsing.
 
 ### Implemented RGF-U1 Slice
 
