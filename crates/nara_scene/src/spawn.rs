@@ -1,10 +1,14 @@
 use std::{collections::BTreeMap, error::Error, fmt};
 
+mod publication;
+use publication::PreparedScenePublication;
+pub use publication::PreparedSceneReplacement;
+
 use nara_asset::ProjectAssetDatabase;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{
     __private::validate_registered_persistent_component_apply, Component, Entity,
-    LifecycleFreeInsertionPlan, Mut, World, prepare_lifecycle_free_despawn,
+    LifecycleFreeInsertionPlan, Mut, World, component::ComponentId, prepare_lifecycle_free_despawn,
 };
 use nara_hierarchy::{
     __private::{prepare_construction_batch, prepare_mutation_baseline},
@@ -43,6 +47,7 @@ use crate::{
     runtime_hierarchy::{
         PreparedSceneEntityRetirement, build_scene_hierarchy_operations,
         combine_scene_hierarchy_operations, prepare_scene_hierarchy_retirement,
+        validate_scene_entity_retirement_admission,
     },
     validation::{PreparedScene, preflight_scene_with_context},
 };
@@ -100,6 +105,47 @@ pub struct SceneSpawnReport {
     retired_entities: usize,
 }
 
+/// Runtime component identities explicitly owned by native domains during Scene retirement.
+///
+/// Claims are an admission fact for one bounded retirement attempt. They do not authorize a
+/// permanent lifecycle-hook whitelist: after domain owners have removed their components, the
+/// ordinary strict Scene retirement validation runs again before any identity or entity commit.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SceneNativeRetirementClaims {
+    component_ids: Vec<ComponentId>,
+}
+
+impl SceneNativeRetirementClaims {
+    /// Creates claims from exact component identities registered in the target World.
+    #[must_use]
+    pub fn from_component_ids(component_ids: impl IntoIterator<Item = ComponentId>) -> Self {
+        let mut claims = Self::default();
+        for component_id in component_ids {
+            claims.insert(component_id);
+        }
+        claims
+    }
+
+    /// Adds one exact runtime component identity, retaining first-registration order.
+    pub fn insert(&mut self, component_id: ComponentId) {
+        if !self.component_ids.contains(&component_id) {
+            self.component_ids.push(component_id);
+        }
+    }
+
+    /// Returns the exact claimed component identities.
+    #[must_use]
+    pub fn component_ids(&self) -> &[ComponentId] {
+        &self.component_ids
+    }
+
+    /// Returns whether this claim set contains the component identity.
+    #[must_use]
+    pub fn contains(&self, component_id: ComponentId) -> bool {
+        self.component_ids.contains(&component_id)
+    }
+}
+
 impl SceneSpawnReport {
     #[must_use]
     pub(crate) const fn retired_entities(&self) -> usize {
@@ -124,7 +170,7 @@ struct PendingSceneProductTransaction {
 
 struct PreparedSceneProductTransaction {
     overlay: PreparedSceneProductOverlay,
-    additional_retirements: Vec<Entity>,
+    additional_retirements: Vec<WorldEntityToken>,
 }
 
 enum PrepareSceneProductTransactionError {
@@ -352,6 +398,47 @@ impl SceneSpawner {
         product: Option<SceneProductTransactionInput<'_>>,
         bindings: SceneAssetBindings,
     ) -> SceneSpawnReport {
+        match self.prepare_with_asset_context_and_product_bindings(
+            world,
+            registry,
+            document,
+            provenance,
+            database,
+            commit,
+            product,
+            bindings,
+            &SceneNativeRetirementClaims::default(),
+        ) {
+            Ok(prepared) => match prepared.commit(world) {
+                Ok(report) => report,
+                Err((prepared, report)) => {
+                    if prepared.discard(world).is_err() {
+                        let mut report = report;
+                        report.diagnostics.push(diagnostic_error(
+                            "scene.candidate-cleanup-incomplete",
+                            "Rejected Scene candidate could not be safely discarded",
+                        ));
+                        return report;
+                    }
+                    report
+                }
+            },
+            Err(report) => report,
+        }
+    }
+
+    fn prepare_with_asset_context_and_product_bindings(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        document: &SceneDocument,
+        provenance: Option<&SceneEntityProvenanceMap>,
+        database: Option<&ProjectAssetDatabase>,
+        commit: SceneIdentityCommit<'_>,
+        product: Option<SceneProductTransactionInput<'_>>,
+        bindings: SceneAssetBindings,
+        claims: &SceneNativeRetirementClaims,
+    ) -> Result<PreparedScenePublication, SceneSpawnReport> {
         let mut component_batch = match bindings.into_batch(world) {
             Ok(batch) => batch,
             Err(error) => {
@@ -364,11 +451,11 @@ impl SceneSpawner {
                     &error,
                     None,
                 ));
-                return SceneSpawnReport {
+                return Err(SceneSpawnReport {
                     instance: None,
                     diagnostics,
                     retired_entities: 0,
-                };
+                });
             }
         };
         if provenance
@@ -379,21 +466,21 @@ impl SceneSpawner {
                 "scene.invalid-provenance",
                 "Expanded scene source provenance is inconsistent",
             ));
-            return SceneSpawnReport {
+            return Err(SceneSpawnReport {
                 instance: None,
                 diagnostics,
                 retired_entities: 0,
-            };
+            });
         }
         let mut preflight = component_batch.with_decode_context(database, |context| {
             preflight_scene_with_context(document, registry, context)
         });
         if preflight.diagnostics.has_errors() {
-            return SceneSpawnReport {
+            return Err(SceneSpawnReport {
                 instance: None,
                 diagnostics: preflight.diagnostics,
                 retired_entities: 0,
-            };
+            });
         }
 
         let mut diagnostics = std::mem::take(&mut preflight.diagnostics);
@@ -401,7 +488,7 @@ impl SceneSpawner {
             Some(product) => {
                 match prepare_scene_product_transaction(world, registry, &preflight, product) {
                     Ok(product) => Some(product),
-                    Err(error) => return scene_product_rejection(diagnostics, error),
+                    Err(error) => return Err(scene_product_rejection(diagnostics, error)),
                 }
             }
             None => None,
@@ -413,19 +500,78 @@ impl SceneSpawner {
                 "scene.hierarchy-invalid",
                 "The existing runtime hierarchy is invalid",
             ));
-            return SceneSpawnReport {
+            return Err(SceneSpawnReport {
                 instance: None,
                 diagnostics,
                 retired_entities: 0,
-            };
+            });
         }
         let prepared_product = match pending_product {
             Some(product) => match validate_scene_product_baseline(world, product) {
                 Ok(product) => Some(product),
-                Err(error) => return scene_product_rejection(diagnostics, error),
+                Err(error) => return Err(scene_product_rejection(diagnostics, error)),
             },
             None => None,
         };
+        // Admission for retiring the old membership precedes scratch entity allocation. A global
+        // despawn observer could also run while abandoning an otherwise empty candidate.
+        if let SceneIdentityCommit::Replace(current) = commit {
+            let retirement = match prepare_exact_scene_instance_retirement(
+                world,
+                current,
+                TombstoneCause::Replaced,
+            ) {
+                Ok(retirement) => retirement,
+                Err(error) => {
+                    diagnostics.push(crate::diagnostics::with_identity_error(
+                        diagnostic_error(
+                            "scene.identity-replacement-failed",
+                            "Scene identity replacement failed",
+                        ),
+                        &error,
+                    ));
+                    return Err(SceneSpawnReport {
+                        instance: None,
+                        diagnostics,
+                        retired_entities: 0,
+                    });
+                }
+            };
+            let old_entities = retirement.retiring_entities();
+            if let Err(error) = validate_existing_scene_persistent_apply(world, old_entities) {
+                return Err(persistent_apply_rejection(diagnostics, &error));
+            }
+            let mut all_entities = old_entities.to_vec();
+            if let Some(product) = &prepared_product {
+                all_entities.extend(
+                    product
+                        .additional_retirements
+                        .iter()
+                        .map(|token| token.entity()),
+                );
+            }
+            let eligible =
+                prepare_scene_hierarchy_retirement(world, &all_entities).is_ok_and(|hierarchy| {
+                    validate_scene_entity_retirement_admission(
+                        world,
+                        old_entities,
+                        &hierarchy,
+                        claims.component_ids(),
+                    )
+                    .is_ok()
+                });
+            if !eligible {
+                diagnostics.push(diagnostic_error(
+                    "scene.identity-replacement-ineligible",
+                    "Scene replacement would run unsupported lifecycle work",
+                ));
+                return Err(SceneSpawnReport {
+                    instance: None,
+                    diagnostics,
+                    retired_entities: 0,
+                });
+            }
+        }
         let has_targets = !preflight.entities.is_empty();
         let has_persistent_components = preflight
             .entities
@@ -437,7 +583,7 @@ impl SceneSpawner {
             has_targets,
             has_persistent_components,
         ) {
-            return persistent_apply_rejection(diagnostics, &error);
+            return Err(persistent_apply_rejection(diagnostics, &error));
         }
         if let Err(error) = validate_scene_identity_support(world, &[]) {
             diagnostics.push(crate::diagnostics::with_identity_support_error(
@@ -447,14 +593,14 @@ impl SceneSpawner {
                 ),
                 &error,
             ));
-            return SceneSpawnReport {
+            return Err(SceneSpawnReport {
                 instance: None,
                 diagnostics,
                 retired_entities: 0,
-            };
+            });
         }
         if let Err(error) = validate_scene_persistent_apply(world, &preflight, None) {
-            return persistent_apply_rejection(diagnostics, &error);
+            return Err(persistent_apply_rejection(diagnostics, &error));
         }
         if let Err(error) = component_batch.validate_commit(world) {
             diagnostics.push(with_codec_error(
@@ -465,11 +611,11 @@ impl SceneSpawner {
                 &error,
                 None,
             ));
-            return SceneSpawnReport {
+            return Err(SceneSpawnReport {
                 instance: None,
                 diagnostics,
                 retired_entities: 0,
-            };
+            });
         }
         let new_identity_domain =
             match prepare_scene_identity(world, preflight.entities.len(), commit) {
@@ -488,11 +634,11 @@ impl SceneSpawner {
                         },
                         &error,
                     ));
-                    return SceneSpawnReport {
+                    return Err(SceneSpawnReport {
                         instance: None,
                         diagnostics,
                         retired_entities: 0,
-                    };
+                    });
                 }
             };
         let mut spawned_by_id = BTreeMap::new();
@@ -518,11 +664,11 @@ impl SceneSpawner {
 
         if diagnostics.has_errors() {
             rollback_spawn_transaction(world, &spawned_entities);
-            return SceneSpawnReport {
+            return Err(SceneSpawnReport {
                 instance: None,
                 diagnostics,
                 retired_entities: 0,
-            };
+            });
         }
 
         let new_hierarchy_operations =
@@ -538,11 +684,11 @@ impl SceneSpawner {
                         entity_id.as_str(),
                     ));
                     rollback_spawn_transaction(world, &spawned_entities);
-                    return SceneSpawnReport {
+                    return Err(SceneSpawnReport {
                         instance: None,
                         diagnostics,
                         retired_entities: 0,
-                    };
+                    });
                 }
             };
         let (product_insertion, product_resources, additional_retirements) = match prepared_product
@@ -553,6 +699,10 @@ impl SceneSpawner {
             }
             None => (LifecycleFreeInsertionPlan::new(), None, Vec::new()),
         };
+        let additional_retirement_entities = additional_retirements
+            .iter()
+            .map(|token| token.entity())
+            .collect::<Vec<_>>();
 
         for entity in preflight.entities {
             let Some(runtime_entity) = spawned_by_id.get(&entity.id).copied() else {
@@ -589,11 +739,11 @@ impl SceneSpawner {
                             registry.schema(&component_id),
                         ));
                         rollback_spawn_transaction(world, &spawned_entities);
-                        return SceneSpawnReport {
+                        return Err(SceneSpawnReport {
                             instance: None,
                             diagnostics,
                             retired_entities: 0,
-                        };
+                        });
                     }
                 };
             }
@@ -601,11 +751,11 @@ impl SceneSpawner {
 
         if diagnostics.has_errors() {
             rollback_spawn_transaction(world, &spawned_entities);
-            return SceneSpawnReport {
+            return Err(SceneSpawnReport {
                 instance: None,
                 diagnostics,
                 retired_entities: 0,
-            };
+            });
         }
 
         if let Err(error) = component_batch.validate_commit(world) {
@@ -618,11 +768,11 @@ impl SceneSpawner {
                 None,
             ));
             rollback_spawn_transaction(world, &spawned_entities);
-            return SceneSpawnReport {
+            return Err(SceneSpawnReport {
                 instance: None,
                 diagnostics,
                 retired_entities: 0,
-            };
+            });
         }
 
         if let Err(error) =
@@ -637,11 +787,11 @@ impl SceneSpawner {
                 None,
             ));
             rollback_spawn_transaction(world, &spawned_entities);
-            return SceneSpawnReport {
+            return Err(SceneSpawnReport {
                 instance: None,
                 diagnostics,
                 retired_entities: 0,
-            };
+            });
         }
         let identity_tokens = match prepare_scene_identity_tokens(
             world,
@@ -664,11 +814,11 @@ impl SceneSpawner {
                     &error,
                 ));
                 rollback_spawn_transaction(world, &spawned_entities);
-                return SceneSpawnReport {
+                return Err(SceneSpawnReport {
                     instance: None,
                     diagnostics,
                     retired_entities: 0,
-                };
+                });
             }
         };
 
@@ -694,17 +844,17 @@ impl SceneSpawner {
                     &error,
                 ));
                 rollback_spawn_transaction(world, &spawned_entities);
-                return SceneSpawnReport {
+                return Err(SceneSpawnReport {
                     instance: None,
                     diagnostics,
                     retired_entities: 0,
-                };
+                });
             }
         };
 
         let scene_retirements = prepared_identity.retiring_entities().to_vec();
         let mut retired_entities = scene_retirements.clone();
-        retired_entities.extend(additional_retirements.iter().copied());
+        retired_entities.extend(additional_retirements.iter().map(|token| token.entity()));
         let prepared_hierarchy_retirement = match &prepared_identity {
             PreparedSceneIdentityCommit::Register { .. } => None,
             PreparedSceneIdentityCommit::Replace { .. } => {
@@ -716,11 +866,11 @@ impl SceneSpawner {
                             "Scene hierarchy could not be prepared for exact retirement",
                         ));
                         rollback_spawn_transaction(world, &spawned_entities);
-                        return SceneSpawnReport {
+                        return Err(SceneSpawnReport {
                             instance: None,
                             diagnostics,
                             retired_entities: 0,
-                        };
+                        });
                     }
                 }
             }
@@ -739,7 +889,7 @@ impl SceneSpawner {
         if !additional_retirements.is_empty()
             && PreparedSceneEntityRetirement::prepare(
                 world,
-                &additional_retirements,
+                &additional_retirement_entities,
                 prepared_hierarchy_retirement
                     .as_ref()
                     .expect("product replacement requires hierarchy retirement"),
@@ -751,11 +901,11 @@ impl SceneSpawner {
                 "Scene product retirement would run unsupported lifecycle work",
             ));
             rollback_spawn_transaction(world, &spawned_entities);
-            return SceneSpawnReport {
+            return Err(SceneSpawnReport {
                 instance: None,
                 diagnostics,
                 retired_entities: 0,
-            };
+            });
         }
         if let Err(error) = validate_scene_identity_support(world, &retired_entities) {
             diagnostics.push(crate::diagnostics::with_identity_support_error(
@@ -766,16 +916,16 @@ impl SceneSpawner {
                 &error,
             ));
             rollback_spawn_transaction(world, &spawned_entities);
-            return SceneSpawnReport {
+            return Err(SceneSpawnReport {
                 instance: None,
                 diagnostics,
                 retired_entities: 0,
-            };
+            });
         }
         if let Err(error) = validate_existing_scene_persistent_apply(world, &scene_retirements) {
             let report = persistent_apply_rejection(diagnostics, &error);
             rollback_spawn_transaction(world, &spawned_entities);
-            return report;
+            return Err(report);
         }
 
         if validate_scene_source_support(world, &spawned_entities).is_err() {
@@ -784,39 +934,37 @@ impl SceneSpawner {
                 "Scene runtime projections would run unsupported lifecycle work",
             ));
             rollback_spawn_transaction(world, &spawned_entities);
-            return SceneSpawnReport {
+            return Err(SceneSpawnReport {
                 instance: None,
                 diagnostics,
                 retired_entities: 0,
-            };
+            });
         }
 
-        let prepared_retirement = match &prepared_identity {
-            PreparedSceneIdentityCommit::Replace { replacement: _ } => {
-                match PreparedSceneEntityRetirement::prepare(
-                    world,
-                    &retired_entities,
-                    prepared_hierarchy_retirement
-                        .as_ref()
-                        .expect("prepared scene replacement requires hierarchy retirement"),
-                ) {
-                    Ok(retirement) => Some(retirement),
-                    Err(_) => {
-                        diagnostics.push(diagnostic_error(
-                            "scene.identity-replacement-ineligible",
-                            "Scene replacement would run unsupported lifecycle work",
-                        ));
-                        rollback_spawn_transaction(world, &spawned_entities);
-                        return SceneSpawnReport {
-                            instance: None,
-                            diagnostics,
-                            retired_entities: 0,
-                        };
-                    }
-                }
-            }
-            PreparedSceneIdentityCommit::Register { .. } => None,
-        };
+        if matches!(
+            &prepared_identity,
+            PreparedSceneIdentityCommit::Replace { .. }
+        ) && validate_scene_entity_retirement_admission(
+            world,
+            &retired_entities,
+            prepared_hierarchy_retirement
+                .as_ref()
+                .expect("prepared scene replacement requires hierarchy retirement"),
+            claims.component_ids(),
+        )
+        .is_err()
+        {
+            diagnostics.push(diagnostic_error(
+                "scene.identity-replacement-ineligible",
+                "Scene replacement would run unsupported lifecycle work",
+            ));
+            rollback_spawn_transaction(world, &spawned_entities);
+            return Err(SceneSpawnReport {
+                instance: None,
+                diagnostics,
+                retired_entities: 0,
+            });
+        }
 
         let prepared_components = match component_batch.prepare(world) {
             Ok(prepared) => prepared,
@@ -830,15 +978,15 @@ impl SceneSpawner {
                     None,
                 ));
                 rollback_spawn_transaction(world, &spawned_entities);
-                return SceneSpawnReport {
+                return Err(SceneSpawnReport {
                     instance: None,
                     diagnostics,
                     retired_entities: 0,
-                };
+                });
             }
         };
 
-        let prepared_hierarchy = match prepare_construction_batch(world, &hierarchy_operations) {
+        let _prepared_hierarchy = match prepare_construction_batch(world, &hierarchy_operations) {
             Ok(prepared) => prepared,
             Err(error) => {
                 diagnostics.push(if error == nara_hierarchy::HierarchyError::LifecycleWork {
@@ -853,91 +1001,45 @@ impl SceneSpawner {
                     )
                 });
                 rollback_spawn_transaction(world, &spawned_entities);
-                return SceneSpawnReport {
+                return Err(SceneSpawnReport {
                     instance: None,
                     diagnostics,
                     retired_entities: 0,
-                };
+                });
             }
         };
 
-        let product_insertion = match product_insertion.prepare(world) {
-            Ok(prepared) => prepared,
-            Err(_) => {
-                diagnostics.push(diagnostic_error(
-                    "scene.product-overlay-lifecycle-ineligible",
-                    "Scene product overlay would run unsupported lifecycle work",
-                ));
-                rollback_spawn_transaction(world, &spawned_entities);
-                return SceneSpawnReport {
-                    instance: None,
-                    diagnostics,
-                    retired_entities: 0,
-                };
-            }
-        };
-
-        let world = product_insertion.commit();
-        prepared_components.commit(world);
-        let instance_id = prepared_identity.instance_id();
-        for (entity_id, runtime_entity) in &spawned_by_id {
-            let source = provenance.map(|sources| {
-                sources
-                    .get(entity_id)
-                    .expect("preflight admits complete source coverage")
-            });
-            world.entity_mut(*runtime_entity).insert(SceneEntitySource {
-                instance_id,
-                entity_id: entity_id.clone(),
-                source_entity_id: source.map_or_else(
-                    || entity_id.clone(),
-                    |source| source.source_entity_id().clone(),
-                ),
-                projection_path: source.and_then(|source| source.projection_path().cloned()),
+        if product_insertion.validate(world).is_err() {
+            diagnostics.push(diagnostic_error(
+                "scene.product-overlay-lifecycle-ineligible",
+                "Scene product overlay would run unsupported lifecycle work",
+            ));
+            rollback_spawn_transaction(world, &spawned_entities);
+            return Err(SceneSpawnReport {
+                instance: None,
+                diagnostics,
+                retired_entities: 0,
             });
         }
-
-        prepared_hierarchy.commit(world);
-        world.flush();
-
-        let instance = match prepared_identity {
-            PreparedSceneIdentityCommit::Register {
-                domain,
-                registration,
-            } => match domain {
-                Some(mut domain) => {
-                    let instance = registration.commit(&mut domain);
-                    world.insert_resource(domain);
-                    instance
-                }
-                None => world.resource_scope(|_world, mut domain: Mut<WorldIdentityDomain>| {
-                    registration.commit(&mut domain)
-                }),
+        Ok(PreparedScenePublication {
+            prepared_identity,
+            identity_tokens,
+            expected: match commit {
+                SceneIdentityCommit::Register => None,
+                SceneIdentityCommit::Replace(current) => Some(current.clone()),
             },
-            PreparedSceneIdentityCommit::Replace { replacement } => {
-                let mut domain = world
-                    .remove_resource::<WorldIdentityDomain>()
-                    .expect("prepared scene replacement requires its identity domain");
-                let (instance, retired_scene_entities) = replacement.commit(&mut domain);
-                debug_assert_eq!(retired_scene_entities, scene_retirements);
-                prepared_retirement
-                    .expect("prepared scene replacement requires exact retirement")
-                    .commit(world);
-                world.insert_resource(domain);
-                instance
-            }
-        };
-
-        if let Some(resources) = product_resources {
-            resources.commit(world);
-        }
-        let retired_entities = retired_entities.len();
-
-        SceneSpawnReport {
-            instance: Some(instance),
-            diagnostics,
+            prepared_components,
+            product_insertion,
+            product_resources,
+            hierarchy_operations,
+            scene_retirements,
+            additional_retirement_tokens: additional_retirements,
             retired_entities,
-        }
+            spawned_by_id,
+            provenance: provenance.cloned(),
+            claims: claims.clone(),
+            diagnostics,
+        })
     }
 
     fn spawn_prefab_expansion(
@@ -1166,6 +1268,43 @@ where
     )
 }
 
+/// Prepares every data and product write before a concrete native-domain owner retires handles.
+/// No codec or product callback is retained across the preparation boundary.
+#[doc(hidden)]
+pub fn prepare_expanded_scene_replacement_with_claims<F>(
+    world: &mut World,
+    registry: &ComponentRegistry,
+    candidate: &ExpandedSceneCandidate,
+    database: Option<&ProjectAssetDatabase>,
+    current: &SpawnedSceneInstance,
+    bindings: SceneAssetBindings,
+    claims: &SceneNativeRetirementClaims,
+    limits: SceneProductTransactionLimits,
+    additional_retirements: &[WorldEntityToken],
+    configure: F,
+) -> Result<PreparedSceneReplacement, SceneSpawnReport>
+where
+    F: FnOnce(&mut SceneProductOverlayWriter<'_>),
+{
+    SceneSpawner::new()
+        .prepare_with_asset_context_and_product_bindings(
+            world,
+            registry,
+            candidate.document(),
+            Some(candidate.provenance()),
+            database,
+            SceneIdentityCommit::Replace(current),
+            Some(SceneProductTransactionInput {
+                limits,
+                additional_retirements,
+                configure: Box::new(configure),
+            }),
+            bindings,
+            claims,
+        )
+        .map(PreparedSceneReplacement)
+}
+
 fn prepare_scene_product_transaction(
     world: &World,
     registry: &ComponentRegistry,
@@ -1205,14 +1344,8 @@ fn validate_scene_product_baseline(
         product.additional_retirements.iter().copied(),
     )
     .map_err(PrepareSceneProductTransactionError::Identity)?;
-    let additional_retirements = product
-        .additional_retirements
-        .iter()
-        .copied()
-        .map(WorldEntityToken::entity)
-        .collect::<Vec<_>>();
-    for entity in additional_retirements.iter().copied() {
-        if world.get::<SceneEntitySource>(entity).is_some() {
+    for token in &product.additional_retirements {
+        if world.get::<SceneEntitySource>(token.entity()).is_some() {
             return Err(PrepareSceneProductTransactionError::SceneOwnedRetirement);
         }
     }
@@ -1223,7 +1356,7 @@ fn validate_scene_product_baseline(
 
     Ok(PreparedSceneProductTransaction {
         overlay: product.overlay,
-        additional_retirements,
+        additional_retirements: product.additional_retirements,
     })
 }
 
@@ -1777,7 +1910,20 @@ mod provenance_admission_tests {
     use super::*;
     use crate::{SceneEntityProvenance, SceneEntityRecord};
     use nara_core::ItemLimit;
+    use nara_ecs::Component;
     use nara_identity::EntityLookup;
+
+    #[derive(Component)]
+    struct ClaimedRuntimeState;
+
+    #[test]
+    fn native_retirement_claims_are_exact_and_deduplicated() {
+        let mut world = World::new();
+        let component_id = world.register_component::<ClaimedRuntimeState>();
+        let claims = SceneNativeRetirementClaims::from_component_ids([component_id, component_id]);
+        assert_eq!(claims.component_ids(), &[component_id]);
+        assert!(claims.contains(component_id));
+    }
 
     fn id(value: &str) -> SceneEntityId {
         SceneEntityId::new(value).unwrap()

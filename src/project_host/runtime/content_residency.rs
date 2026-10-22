@@ -2,6 +2,8 @@
 
 mod catalog;
 mod images;
+mod replacement;
+pub(super) use replacement::PreparedProjectSceneReplacement;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -12,14 +14,16 @@ use nara_asset::{
     AssetEvents, AssetRecord, AssetRef, AssetServer, AssetSourceKind, AssetStates, Assets,
     ProjectAssetDatabase, SourceHash,
 };
+use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
 use nara_ecs::{Mut, Res, ResMut, Resource, World, system::SystemState};
 use nara_identity::{SpawnedSceneInstance, WorldEntityToken};
 use nara_image::ImageAsset;
 use nara_scene::{
     SceneSpawnReport,
     advanced::{
-        SceneAssetBindings, SceneProductOverlayWriter, SceneProductTransactionLimits,
-        replace_expanded_scene_with_product_and_bindings,
+        PreparedSceneReplacement, SceneAssetBindings, SceneNativeRetirementClaims,
+        SceneProductOverlayWriter, SceneProductTransactionLimits,
+        prepare_expanded_scene_replacement_with_claims,
     },
 };
 use nara_tilemap::{
@@ -239,8 +243,8 @@ impl PreparedResidency {
     }
 }
 
-/// The owned Host preparation entry is the only caller of this crate-private operation. It must
-/// deliver an admitted snapshot from its original loader; no public project-source bypass exists.
+/// The admitted Host owns this synchronous convenience wrapper. Managed travel retains the same
+/// preparation token while independent native domains retire and reconcile their state.
 pub(super) fn replace_project_scene<F>(
     world: &mut World,
     expected: &SpawnedSceneInstance,
@@ -252,179 +256,34 @@ pub(super) fn replace_project_scene<F>(
 where
     F: FnOnce(&mut SceneProductOverlayWriter<'_>),
 {
-    nara_hierarchy::__private::prepare_mutation_baseline(world);
-    let registry = match current_scene_registry(world, expected) {
-        Ok(registry) => registry,
-        Err(report) => return report,
-    };
-    if !world.resource::<CurrentSceneOwner>().is_project_backed()
-        || !world.contains_resource::<ProjectSceneResidency>()
-        || !world.contains_resource::<ProjectAssetDatabase>()
-    {
-        return rejected(resources_missing());
-    }
-    if nara_ecs::__private::validate_resource_scope::<ProjectSceneResidency>(world).is_err()
-        || nara_ecs::__private::validate_resource_scope::<ProjectAssetDatabase>(world).is_err()
-        || nara_ecs::__private::validate_resource_scope::<crate::project_content::ProjectDomainAssets>(world).is_err()
-    {
-        return rejected(failure(
-            "project.scene.residency-lifecycle-unsupported",
-            "Scene residency owners cannot run lifecycle effects during commit",
-        ));
-    }
-    let uses_tilesets = !snapshot.tilesets().is_empty()
-        || !world
-            .resource::<ProjectSceneResidency>()
-            .tilesets
-            .is_empty();
-    if uses_tilesets
-        && nara_ecs::__private::validate_resource_scope::<TileSetAssets>(world).is_err()
-    {
-        return rejected(failure(
-            "project.scene.residency-lifecycle-unsupported",
-            "Scene residency owners cannot run lifecycle effects during commit",
-        ));
-    }
-    if !snapshot.shares_schema_snapshot(&registry.snapshot().expect("current registry is frozen")) {
-        return rejected(failure(
-            "project.scene.schema-mismatch",
-            "Prepared Scene uses another schema authority",
-        ));
-    }
-    world.resource_scope(|world, mut current: Mut<ProjectSceneResidency>| {
-        let mut prepared = match PreparedResidency::prepare(world, snapshot, &current) {
-            Ok(prepared) => prepared,
-            Err(error) => return rejected(error),
-        };
-        if prepared.inputs.is_empty() && prepared.retirements.is_empty() {
-            return commit(
-                world,
-                &mut current,
-                prepared,
-                None,
-                expected,
-                snapshot,
-                limits,
-                additional_retirements,
-                configure,
-            );
-        }
-        if !world.contains_resource::<TileSetAssets>()
-            || !world.contains_resource::<Assets<TileSet>>()
-            || !world.contains_resource::<AssetStates>()
-        {
-            return rejected(resources_missing());
-        }
-        world.resource_scope(|world, mut owner: Mut<TileSetAssets>| {
-            let tilesets = match owner.prepare_publications(
-                std::mem::take(&mut prepared.inputs),
-                &prepared.retirements,
-                prepared.bindings.staged_server(),
-                &prepared.catalog.database,
-                world.resource::<Assets<TileSet>>(),
-                world.resource::<AssetStates>(),
-            ) {
-                Ok(tilesets) => tilesets,
-                Err(error) => return rejected(tileset_failure(error)),
-            };
-            commit(
-                world,
-                &mut current,
-                prepared,
-                Some(tilesets),
-                expected,
-                snapshot,
-                limits,
-                additional_retirements,
-                configure,
-            )
-        })
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-fn commit<F>(
-    world: &mut World,
-    current: &mut ProjectSceneResidency,
-    prepared: PreparedResidency,
-    tilesets: Option<PreparedTileSetPublications<'_>>,
-    expected: &SpawnedSceneInstance,
-    snapshot: &ProjectContentSnapshot,
-    limits: SceneProductTransactionLimits,
-    additional_retirements: &[WorldEntityToken],
-    configure: F,
-) -> SceneSpawnReport
-where
-    F: FnOnce(&mut SceneProductOverlayWriter<'_>),
-{
-    let registry = match current_scene_registry(world, expected) {
-        Ok(registry) => registry,
-        Err(report) => return report,
-    };
-    let PreparedResidency {
-        bindings,
-        images,
-        catalog,
-        lease,
-        ..
-    } = prepared;
-    let report = replace_expanded_scene_with_product_and_bindings(
+    match PreparedProjectSceneReplacement::prepare(
         world,
-        &registry,
-        snapshot.expanded_candidate(),
-        Some(snapshot.asset_database()),
         expected,
-        bindings,
+        snapshot,
+        &SceneNativeRetirementClaims::default(),
         limits,
         additional_retirements,
         configure,
-    );
-    if report.diagnostics.has_errors() || report.instance.is_none() {
-        return report;
+    ) {
+        Ok(prepared) => match prepared.commit(world) {
+            Ok(report) => report,
+            Err((prepared, report)) => match prepared.discard(world) {
+                Ok(()) => report,
+                Err(_prepared) => {
+                    let mut report = report;
+                    report.diagnostics.push(Diagnostic::error(
+                        DiagnosticCode::new("project.scene.candidate-cleanup-incomplete")
+                            .expect("engine diagnostic code is valid"),
+                        SafeSummary::new("Rejected Scene candidate could not be safely discarded")
+                            .expect("static summary"),
+                    ));
+                    report
+                }
+            },
+        },
+        Err(report) => report,
     }
-    let images = if images.is_empty() {
-        Vec::new()
-    } else {
-        let mut access = SystemState::<(
-            Res<AssetServer>,
-            ResMut<Assets<ImageAsset>>,
-            ResMut<AssetStates>,
-            ResMut<AssetEvents>,
-        )>::new(world);
-        let (server, mut values, mut states, mut events) = access
-            .get_mut(world)
-            .expect("Scene residency resources passed preflight");
-        images.commit(&server, &mut values, &mut states, &mut events)
-    };
-    let tilesets = tilesets.map_or_else(Vec::new, |prepared| {
-        let mut access = SystemState::<(
-            Res<AssetServer>,
-            Res<Assets<ImageAsset>>,
-            ResMut<Assets<TileSet>>,
-            ResMut<AssetStates>,
-            ResMut<AssetEvents>,
-        )>::new(world);
-        let (server, images, mut values, mut states, mut events) = access
-            .get_mut(world)
-            .expect("TileSet residency resources passed preflight");
-        prepared.commit(&server, &images, &mut values, &mut states, &mut events)
-    });
-    world.insert_resource(catalog.database);
-    world.insert_resource(snapshot.domain_assets().clone());
-    world.resource_mut::<CurrentSceneOwner>().commit_source(
-        snapshot.scene_source(),
-        report.instance.as_ref().unwrap().clone(),
-    );
-    *current = ProjectSceneResidency {
-        lineage: snapshot.lineage(),
-        images,
-        tilesets,
-        catalog: catalog.owned,
-        _lease: lease,
-    };
-    report
 }
-
 fn reserve_metadata(
     snapshot: &ProjectContentSnapshot,
     catalog: &CatalogChange,

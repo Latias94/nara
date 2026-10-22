@@ -42,6 +42,20 @@ pub struct TileSetPublicationInput {
 }
 
 impl TileSetPublicationInput {
+    /// Shares the same immutable candidate pixels for a retained owner-thread preparation.
+    #[doc(hidden)]
+    pub fn share_retained(&self) -> Option<Self> {
+        Some(Self {
+            handle: self.handle,
+            record: self.record.clone(),
+            source: self.source.clone(),
+            source_hash: self.source_hash,
+            image_handle: self.image_handle,
+            image: self.image.share_retained()?,
+            owned_source: self.owned_source.clone(),
+        })
+    }
+
     #[must_use]
     pub fn new(
         handle: Handle<TileSet>,

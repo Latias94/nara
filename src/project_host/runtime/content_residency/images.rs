@@ -198,6 +198,28 @@ impl ImagePublications {
         })
     }
 
+    pub(super) fn validate(
+        &self,
+        images: &Assets<ImageAsset>,
+        states: &AssetStates,
+    ) -> Result<(), HostFault> {
+        for item in self.publish.values() {
+            if images.slot_revision(item.handle) != item.slot
+                || states.state_revision(item.handle.id()) != item.state
+            {
+                return Err(superseded());
+            }
+        }
+        for (handle, slot, state) in &self.retire {
+            if images.slot_revision(*handle) != *slot
+                || states.state_revision(handle.id()) != *state
+            {
+                return Err(superseded());
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn commit(
         self,
         server: &AssetServer,

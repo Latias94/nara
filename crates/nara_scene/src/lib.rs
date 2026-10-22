@@ -85,8 +85,9 @@ pub mod advanced {
         SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
     };
     pub use crate::spawn::{
-        replace_expanded_scene_with_product, replace_expanded_scene_with_product_and_bindings,
-        replace_scene_with_product,
+        PreparedSceneReplacement, SceneNativeRetirementClaims,
+        prepare_expanded_scene_replacement_with_claims, replace_expanded_scene_with_product,
+        replace_expanded_scene_with_product_and_bindings, replace_scene_with_product,
     };
 }
 pub use scene_components::{

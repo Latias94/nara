@@ -1,6 +1,64 @@
 #[path = "support/domain_reconciliation.rs"]
 mod support;
 
+#[path = "support/domain_reconciliation/hosted.rs"]
+mod hosted;
+
+#[test]
+fn managed_project_travel_retries_only_unfinished_independent_domains() {
+    let effects = hosted::run(hosted::Scenario::Recover);
+    assert!(effects.paused_frames >= 4);
+    assert_eq!(effects.configured, 1);
+}
+
+#[test]
+fn managed_project_travel_preflight_preserves_old_native_state() {
+    hosted::run(hosted::Scenario::InvalidPreparation);
+    hosted::run(hosted::Scenario::Unclaimed);
+}
+
+#[test]
+fn managed_project_travel_can_cancel_before_retirement() {
+    hosted::run(hosted::Scenario::CancelBeforeRetirement);
+}
+
+#[test]
+fn managed_project_travel_retains_candidate_when_global_despawn_observer_blocks_cleanup() {
+    hosted::run(hosted::Scenario::GlobalDespawnObserver);
+    hosted::run(hosted::Scenario::CancelWithGlobalDespawnObserver);
+}
+
+#[test]
+fn managed_project_travel_rejects_changed_baseline_before_retirement_and_resumes_simulation() {
+    hosted::run(hosted::Scenario::BaselineChangedBeforeRetirement);
+}
+
+#[test]
+fn managed_project_travel_keeps_native_claims_within_scene_membership() {
+    hosted::run(hosted::Scenario::AdditionalRetirementClaimDrift);
+}
+
+#[test]
+fn managed_project_travel_disposes_remaining_candidates_after_deferred_despawn() {
+    hosted::run(hosted::Scenario::MissingCandidateBeforeRetirement);
+}
+
+#[test]
+fn managed_project_travel_cleanup_retry_preserves_original_rejection_diagnostics() {
+    hosted::run(hosted::Scenario::CleanupRetryDiagnostics);
+}
+
+#[test]
+fn managed_project_travel_flushes_deferred_domain_world_writes_before_publication() {
+    hosted::run(hosted::Scenario::DeferredAssetMutation);
+}
+
+#[test]
+fn stop_retains_partial_retirement_and_reconciliation_until_native_shutdown() {
+    hosted::run(hosted::Scenario::StopDuringRetirement);
+    hosted::run(hosted::Scenario::StopDuringReconcile);
+}
+
 use std::{
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     time::Duration,

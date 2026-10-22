@@ -37,6 +37,7 @@ pub mod __private {
         writer::{
             hierarchy_retirement_operations, prepare_hierarchy_batch,
             validate_hierarchy_retirement_despawn,
+            validate_hierarchy_retirement_despawn_with_claimed_components,
         },
     };
 
@@ -116,6 +117,22 @@ pub mod __private {
         affected_entities: &[nara_ecs::Entity],
     ) -> Result<(), nara_ecs::LifecycleFreeDespawnError> {
         validate_hierarchy_retirement_despawn(world, entities, affected_entities)
+    }
+
+    /// Validates exact entity retirement while admitting component lifecycle effects explicitly
+    /// claimed by a managed native domain. The claim is only valid until the final strict check.
+    pub fn validate_retirement_despawn_with_claimed_components(
+        world: &World,
+        entities: &[nara_ecs::Entity],
+        affected_entities: &[nara_ecs::Entity],
+        claimed_component_ids: &[nara_ecs::component::ComponentId],
+    ) -> Result<(), nara_ecs::LifecycleFreeDespawnError> {
+        validate_hierarchy_retirement_despawn_with_claimed_components(
+            world,
+            entities,
+            affected_entities,
+            claimed_component_ids,
+        )
     }
 }
 

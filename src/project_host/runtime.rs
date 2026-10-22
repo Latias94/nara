@@ -44,13 +44,18 @@ const PROJECT_MANIFEST: &str = "nara.toml";
 mod action;
 mod content_residency;
 mod scene_requests;
+pub use scene_requests::domains::{
+    ManagedSceneDomain, ManagedSceneDomainAttempt, ManagedSceneDomainError, ManagedSceneDomainId,
+    ManagedSceneDomainPhase, ManagedSceneDomainPreparation, ManagedSceneDomains,
+};
 pub(crate) use scene_requests::{
     PROJECT_SCENE_REQUEST_CLOSE_OBLIGATION, poll_project_scene_requests,
     register_close_participant as register_project_scene_close_participant,
 };
 pub use scene_requests::{
     PreparedProjectSceneView, ProjectSceneRequestError, ProjectSceneRequestId,
-    ProjectSceneRequestState, ProjectScenes, commit_prepared_project_scene,
+    ProjectSceneRequestState, ProjectScenes, begin_prepared_project_scene_travel,
+    commit_prepared_project_scene,
 };
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]

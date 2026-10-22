@@ -96,6 +96,33 @@ require exact-ID acknowledgement. Runtime close revokes publication interest and
 retain physical worker custody. A later selected closure is not another executable startup
 agreement: its records decode against the already admitted frozen native schema authority.
 
+Managed Scene travel captures one owned attempt from each registered native domain before any
+retirement begins. Each domain returns the exact runtime component types whose lifecycle effects it
+owns together with the matching attempt prepared against the immutable target plus current World.
+Preparation may fail without changing the current Scene or native owners. The Scene owner validates
+the complete persistent and content candidate before advancing any attempt, then retains that candidate and the participants'
+attempts in the request slot. The interface is intentionally limited to retirement and
+reconciliation; it is not a shared event bus, general transaction framework, or rollback promise.
+Callbacks run synchronously on the runtime owner thread and must be nonblocking; asynchronous
+pending work is outside this protocol. `Send + Sync` permits Bevy Resource storage, not background
+execution. Because TaskUpdate begins on a later frame, the owner revalidates mutable admission
+facts immediately before the first native call. Failure at that point discards the unpublished
+candidate and rejects the request with the old Scene intact. Queued cancellation also discards the
+candidate before any native call. Both release the simulation gate on the next frame once disposal
+finishes. If intervening lifecycle registration prevents safe owner access or candidate disposal,
+the request reports a degraded result and retains its candidate, attempts, and cleanup intent.
+Explicit retry advances only that retained operation; Stop remains available. An unsafe cleanup
+never destroys the request's custody or reports a completed cancellation.
+
+Retirement and reconciliation report completion independently per participant. A failed phase keeps
+its attempt and partial native state in custody; explicit retry advances only unfinished phases.
+Once retirement has started, stale admission checks cannot discard that custody. The App holds
+simulation stages and virtual time for the whole frame whenever managed travel is queued or active;
+owner maintenance, task progress, cleanup, and rendering remain available. Retry does not imply
+restoring retired native state. During Stop, domain plugin shutdown owns native handle cleanup, and
+the request retains unfinished attempts until the World is destroyed. Unclaimed lifecycle hooks
+remain ineligible for Scene replacement admission.
+
 Decoded project snapshots, retained Scene sources and escaped immutable Images share an acyclic
 generation lease. Source-only closure and delivery receipts retain source facts independently.
 The existing decoded-generation ceiling follows the last real decoded owner, including prepared

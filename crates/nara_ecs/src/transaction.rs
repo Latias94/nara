@@ -139,7 +139,7 @@ impl Error for LifecycleFreeInsertionError {}
 struct PlannedComponentInsertion {
     target: Entity,
     component_id: fn(&World) -> Option<ComponentId>,
-    apply: Box<dyn FnOnce(&mut World)>,
+    apply: Box<dyn FnOnce(&mut World) + Send + Sync>,
 }
 
 /// Owned component values validated together before any insertion is applied.
@@ -186,6 +186,16 @@ impl LifecycleFreeInsertionPlan {
         // Deferred work belongs to the pre-transaction baseline. It may register a component or
         // install lifecycle behavior, so every lookup and proof must observe the flushed World.
         world.flush();
+        self.validate(world)?;
+        Ok(LifecycleFreeInsertion {
+            world,
+            insertions: self.insertions,
+        })
+    }
+
+    /// Revalidates an owned plan without consuming its component values.
+    #[doc(hidden)]
+    pub fn validate(&self, world: &World) -> Result<(), LifecycleFreeInsertionError> {
         let mut identities = Vec::with_capacity(self.insertions.len());
         let mut unique = BTreeSet::new();
         for insertion in &self.insertions {
@@ -207,10 +217,7 @@ impl LifecycleFreeInsertionPlan {
                 .map_err(|_| LifecycleFreeInsertionError::LifecycleWork)?;
         }
 
-        Ok(LifecycleFreeInsertion {
-            world,
-            insertions: self.insertions,
-        })
+        Ok(())
     }
 }
 

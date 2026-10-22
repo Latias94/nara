@@ -81,9 +81,9 @@ struct PendingResourceWrite {
     commit: Box<CommitResourceWrite>,
 }
 
-type LowerComponentWrite = dyn FnOnce(Entity, &mut LifecycleFreeInsertionPlan);
-type ValidateResourceWrite = dyn Fn(&World) -> bool;
-type CommitResourceWrite = dyn FnOnce(&mut World);
+type LowerComponentWrite = dyn FnOnce(Entity, &mut LifecycleFreeInsertionPlan) + Send + Sync;
+type ValidateResourceWrite = dyn Fn(&World) -> bool + Send + Sync;
+type CommitResourceWrite = dyn FnOnce(&mut World) + Send + Sync;
 
 /// Scoped writer for runtime-only values attached to a replacement scene candidate.
 ///
@@ -281,6 +281,14 @@ pub(crate) struct PreparedSceneProductResources {
 }
 
 impl PreparedSceneProductResources {
+    pub(crate) fn validate(&self, world: &World) -> Result<(), SceneProductOverlayError> {
+        if self.writes.iter().all(|write| (write.validate)(world)) {
+            Ok(())
+        } else {
+            Err(SceneProductOverlayError::ResourceMissing)
+        }
+    }
+
     pub(crate) fn commit(self, world: &mut World) {
         for write in self.writes {
             (write.commit)(world);

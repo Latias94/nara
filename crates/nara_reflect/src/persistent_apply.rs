@@ -128,7 +128,7 @@ impl ComponentApplyContext {
     }
 }
 
-trait PreparedComponentValue: Send {
+trait PreparedComponentValue: Send + Sync {
     fn insert(self: Box<Self>, world: &mut World, entity: Entity);
 }
 
@@ -599,7 +599,8 @@ impl ComponentApplyBatch {
 impl PreparedComponentApplyBatch {
     /// Publishes the prepared batch without a recoverable failure path.
     pub fn commit(self, world: &mut World) {
-        self.assert_commit_invariants(world);
+        self.validate_commit(world)
+            .expect("prepared component apply facts must remain eligible through commit");
 
         for component in self.components {
             component.value.insert(world, component.entity);
@@ -614,51 +615,45 @@ impl PreparedComponentApplyBatch {
         record_persistent_apply_receipts(world, self.receipts);
     }
 
-    fn assert_commit_invariants(&self, world: &World) {
+    /// Revalidates the owned batch before an exclusive publication tail.
+    pub fn validate_commit(&self, world: &World) -> Result<(), ComponentCodecError> {
         validate_component_apply_world(
             world,
             self.world_id,
             self.origin_asset_server.as_ref(),
             self.context.asset_server_touched,
             &self.components,
-        )
-        .expect("prepared component apply World state must remain unchanged through commit");
+        )?;
 
         for component in &self.components {
-            component
-                .binding
-                .validate(world, Some(component.entity))
-                .expect(
-                    "prepared persistent component topology must remain eligible through commit",
-                );
+            component.binding.validate(world, Some(component.entity))?;
         }
         for target in &self.receipt_targets {
             let entity = world
                 .get_entity(*target)
-                .expect("prepared persistent apply target must remain alive through commit");
+                .map_err(|_| ComponentCodecError::EntityMissing)?;
             if !entity.contains::<PersistentApplyReceipts>() {
-                validate_support_component::<PersistentApplyReceipts>(world, Some(*target)).expect(
-                    "prepared persistent receipt topology must remain eligible through commit",
-                );
+                validate_support_component::<PersistentApplyReceipts>(world, Some(*target))?;
             }
         }
-        if !self.components.is_empty() {
-            assert_eq!(
-                world.contains_resource::<PersistentWorldBindings>(),
-                !self.needs_binding_resource,
-                "prepared persistent binding resource state must remain unchanged through commit",
-            );
+        if !self.components.is_empty()
+            && world.contains_resource::<PersistentWorldBindings>() == self.needs_binding_resource
+        {
+            return Err(ComponentCodecError::Message(String::from(
+                "prepared persistent binding resource state changed",
+            )));
         }
         if self.needs_binding_resource {
-            validate_support_resource_insertion::<PersistentWorldBindings>(world)
-                .expect("prepared persistent binding topology must remain eligible through commit");
+            validate_support_resource_insertion::<PersistentWorldBindings>(world)?;
         }
         if self.needs_asset_server {
-            validate_support_resource_insertion::<AssetServer>(world)
-                .expect("prepared asset-server topology must remain eligible through commit");
+            validate_support_resource_insertion::<AssetServer>(world)?;
         }
-        validate_persistent_apply_receipts(world, self.receipts.iter().map(|(_, receipt)| receipt))
-            .expect("prepared persistent receipts must remain conflict-free through commit");
+        validate_persistent_apply_receipts(
+            world,
+            self.receipts.iter().map(|(_, receipt)| receipt),
+        )?;
+        Ok(())
     }
 }
 

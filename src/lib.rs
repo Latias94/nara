@@ -263,7 +263,11 @@ pub mod prelude {
 pub mod advanced_prelude {
     pub use crate::prelude::*;
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-    pub use crate::project_host::advanced::commit_prepared_project_scene;
+    pub use crate::project_host::advanced::{
+        ManagedSceneDomain, ManagedSceneDomainAttempt, ManagedSceneDomainError,
+        ManagedSceneDomainId, ManagedSceneDomainPhase, ManagedSceneDomainPreparation,
+        ManagedSceneDomains, begin_prepared_project_scene_travel, commit_prepared_project_scene,
+    };
     pub use nara_app::{
         AppExitRequests, AppFrameOutcome, EditedPluginGroup, FixedTimeError, PluginCategory,
         PluginCommitError, PluginConfigurationFingerprint, PluginDeclaration, PluginDefinition,

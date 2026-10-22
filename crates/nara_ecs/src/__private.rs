@@ -196,6 +196,28 @@ pub fn validate_entity_despawn_with_allowed_component_hooks(
     validate_entity_despawn_observers(world, target, component_ids)
 }
 
+/// Validates a future despawn while treating explicitly claimed components as being removed by
+/// their owning runtime domain before the Scene retirement. The claim is admission-only: callers
+/// must run [`validate_entity_despawn`] again after the domain has removed its components.
+///
+/// Components outside `claimed_component_ids` keep the ordinary lifecycle and observer checks.
+/// Global and entity observers remain rejected for the entire retirement because a domain claim
+/// cannot prove that an unrelated observer will not observe the Scene transaction.
+pub fn validate_entity_despawn_with_claimed_component_hooks(
+    world: &World,
+    target: Entity,
+    component_ids: &[ComponentId],
+    claimed_component_ids: &[ComponentId],
+) -> Result<(), PersistentComponentMetadataError> {
+    validate_entity_despawn_observers(world, target, &[])?;
+    let remaining = component_ids
+        .iter()
+        .copied()
+        .filter(|component_id| !claimed_component_ids.contains(component_id))
+        .collect::<Vec<_>>();
+    validate_entity_despawn(world, target, &remaining)
+}
+
 /// Validates a despawn while allowing only the intrinsic hooks of one known non-linked
 /// relationship pair.
 ///
