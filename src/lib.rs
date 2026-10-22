@@ -287,14 +287,15 @@ pub mod advanced_prelude {
     pub use nara_asset::{
         ArtifactFormatVersion, ArtifactLabel, AssetDatabaseError, AssetDependencyGraph, AssetError,
         AssetEvent, AssetEventKind, AssetEvents, AssetLoadGeneration, AssetLoadGenerations,
-        AssetMeta, AssetMetaIdentity, AssetPathError, AssetRecord, AssetRefError,
-        AssetRefExportPolicy, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestId,
-        AssetReloadRequestKind, AssetReloadRequests, AssetSourceChange, AssetSourceChangeKind,
-        AssetSourceChanges, AssetSourceKind, AssetSourceRoot, AssetState, AssetStateError,
-        AssetStates, AssetTaskUpdateSet, AssetVersion, DigestParseError, ImportArtifactDigest,
-        ImportArtifactKey, ImportArtifactPath, ImportArtifactRecord, ImportDependency,
-        ImportDependencyDigest, ImportDependencyRole, ImportProfile, ImportSettingsHash,
-        ImporterId, LoadState, ProjectAssetDatabase, SourceHash, StableAssetIdGenerationError,
+        AssetMeta, AssetMetaIdentity, AssetMutationBaseline, AssetPathError, AssetRecord,
+        AssetRefError, AssetRefExportPolicy, AssetReloadDiagnostics, AssetReloadRequest,
+        AssetReloadRequestId, AssetReloadRequestKind, AssetReloadRequests, AssetSourceChange,
+        AssetSourceChangeKind, AssetSourceChanges, AssetSourceKind, AssetSourceRoot, AssetState,
+        AssetStateError, AssetStates, AssetTaskUpdateSet, AssetVersion, DigestParseError,
+        ImportArtifactDigest, ImportArtifactKey, ImportArtifactPath, ImportArtifactRecord,
+        ImportDependency, ImportDependencyDigest, ImportDependencyRole, ImportProfile,
+        ImportSettingsHash, ImporterId, LoadState, ProjectAssetDatabase, SourceHash,
+        StableAssetIdGenerationError,
     };
     pub use nara_core::{ByteLimit, DepthLimit, ItemLimit, TimeLimit};
     pub use nara_diagnostic::{

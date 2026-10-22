@@ -10,10 +10,10 @@ fn source_changes_coalesce_duplicate_frame_events() {
 
     let coalesced = changes.drain_coalesced();
 
-    assert_eq!(
-        coalesced,
-        vec![AssetSourceChange::new(path, AssetSourceChangeKind::Removed)]
-    );
+    assert_eq!(coalesced.len(), 1);
+    assert_eq!(coalesced[0].path(), &path);
+    assert_eq!(coalesced[0].kind(), AssetSourceChangeKind::Removed);
+    assert!(coalesced[0].metadata_dirty());
     assert!(changes.is_empty());
 }
 
@@ -26,13 +26,10 @@ fn source_changes_keep_last_semantic_event_for_atomic_save_sequences() {
 
     let coalesced = changes.drain_coalesced();
 
-    assert_eq!(
-        coalesced,
-        vec![AssetSourceChange::new(
-            path,
-            AssetSourceChangeKind::Modified
-        )]
-    );
+    assert_eq!(coalesced.len(), 1);
+    assert_eq!(coalesced[0].path(), &path);
+    assert_eq!(coalesced[0].kind(), AssetSourceChangeKind::Modified);
+    assert!(!coalesced[0].metadata_dirty());
 }
 
 #[test]
@@ -63,14 +60,15 @@ fn source_changes_preserve_metadata_dirtiness_across_source_events_and_batches()
                     changes.push(change).unwrap();
                 }
             }
+            let coalesced = changes.drain_coalesced();
+            assert_eq!(coalesced.len(), 1);
+            assert_eq!(coalesced[0].path(), &path);
             assert_eq!(
-                changes.drain_coalesced(),
-                vec![AssetSourceChange::new(
-                    path.clone(),
-                    AssetSourceChangeKind::MetaModified,
-                )],
+                coalesced[0].kind(),
+                AssetSourceChangeKind::MetaModified,
                 "source and metadata facts must survive {kinds:?}, batch={batch}"
             );
+            assert!(coalesced[0].metadata_dirty());
         }
     }
 }
@@ -87,13 +85,91 @@ fn source_changes_metadata_does_not_resurrect_a_removed_source() {
         } else {
             changes.push(metadata).unwrap();
         }
-        assert_eq!(
-            changes.drain_coalesced(),
-            vec![AssetSourceChange::new(
-                path.clone(),
-                AssetSourceChangeKind::Removed,
-            )]
-        );
+        let coalesced = changes.drain_coalesced();
+        assert_eq!(coalesced.len(), 1);
+        assert_eq!(coalesced[0].path(), &path);
+        assert_eq!(coalesced[0].kind(), AssetSourceChangeKind::Removed);
+        assert!(coalesced[0].metadata_dirty());
+    }
+}
+
+#[test]
+fn source_changes_preserve_metadata_removal_order_across_batches_and_roundtrips() {
+    let path = AssetPath::new("textures/player.png").unwrap();
+    let kinds = [
+        AssetSourceChangeKind::Modified,
+        AssetSourceChangeKind::MetaModified,
+        AssetSourceChangeKind::Removed,
+    ];
+    for first in kinds {
+        for second in kinds {
+            for third in kinds {
+                let sequence = [first, second, third];
+                let last_source = sequence
+                    .iter()
+                    .rfind(|kind| **kind != AssetSourceChangeKind::MetaModified);
+                let metadata = sequence.contains(&AssetSourceChangeKind::MetaModified);
+                let last_invalidation = sequence
+                    .iter()
+                    .rfind(|kind| **kind != AssetSourceChangeKind::Modified);
+                let expected_kind = match last_source {
+                    Some(AssetSourceChangeKind::Removed) => AssetSourceChangeKind::Removed,
+                    _ if metadata => AssetSourceChangeKind::MetaModified,
+                    _ => AssetSourceChangeKind::Modified,
+                };
+                let mut direct = AssetSourceChanges::new();
+                for kind in sequence {
+                    direct
+                        .push(AssetSourceChange::new(path.clone(), kind))
+                        .unwrap();
+                }
+                let expected = direct.drain_coalesced();
+                assert_eq!(expected[0].kind(), expected_kind, "{sequence:?}");
+                assert_eq!(expected[0].metadata_dirty(), metadata, "{sequence:?}");
+                assert_eq!(
+                    expected[0].metadata_after_removal(),
+                    last_invalidation == Some(&AssetSourceChangeKind::MetaModified),
+                    "{sequence:?}"
+                );
+                let mut batch = AssetSourceChanges::new();
+                batch
+                    .try_extend(sequence.map(|kind| AssetSourceChange::new(path.clone(), kind)))
+                    .unwrap();
+                assert_eq!(batch.drain_coalesced(), expected, "one batch: {sequence:?}");
+                for split in 1..3 {
+                    for use_batch in [false, true] {
+                        let mut prefix = AssetSourceChanges::new();
+                        prefix
+                            .try_extend(
+                                sequence[..split]
+                                    .iter()
+                                    .map(|kind| AssetSourceChange::new(path.clone(), *kind)),
+                            )
+                            .unwrap();
+                        let mut roundtrip = AssetSourceChanges::new();
+                        for change in prefix.drain_coalesced() {
+                            if use_batch {
+                                roundtrip.try_extend([change]).unwrap();
+                            } else {
+                                roundtrip.push(change).unwrap();
+                            }
+                        }
+                        roundtrip
+                            .try_extend(
+                                sequence[split..]
+                                    .iter()
+                                    .map(|kind| AssetSourceChange::new(path.clone(), *kind)),
+                            )
+                            .unwrap();
+                        assert_eq!(
+                            roundtrip.drain_coalesced(),
+                            expected,
+                            "split={split}, batch={use_batch}: {sequence:?}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt::{self, Display, Formatter},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use nara_core::ItemLimit;
@@ -158,6 +158,9 @@ pub struct AssetStates {
     state_revisions: BTreeMap<AssetId, RevisionCounter>,
     publication_revisions: BTreeMap<AssetId, RevisionCounter>,
     published_slots: BTreeMap<AssetId, AssetSlotRevision>,
+    managed_slots: Mutex<BTreeMap<AssetId, AssetSlotRevision>>,
+    metadata_dirty: BTreeMap<AssetId, AssetStateRevision>,
+    removed_sources: BTreeMap<AssetId, Option<AssetStateRevision>>,
 }
 
 impl Default for AssetStates {
@@ -168,11 +171,21 @@ impl Default for AssetStates {
             state_revisions: BTreeMap::new(),
             publication_revisions: BTreeMap::new(),
             published_slots: BTreeMap::new(),
+            managed_slots: Mutex::new(BTreeMap::new()),
+            metadata_dirty: BTreeMap::new(),
+            removed_sources: BTreeMap::new(),
         }
     }
 }
 
 impl AssetStates {
+    #[cfg(test)]
+    pub(crate) fn managed_slots_empty_for_tests(&self) -> bool {
+        self.managed_slots.lock().unwrap().is_empty()
+    }
+    pub(crate) fn store_identity(&self) -> Arc<()> {
+        Arc::clone(&self.store_revision)
+    }
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -181,6 +194,61 @@ impl AssetStates {
     #[must_use]
     pub fn state(&self, id: AssetId) -> Option<&AssetState> {
         self.states.get(&id)
+    }
+
+    /// Retains an unresolved metadata observation independently of queue or task admission.
+    pub fn observe_metadata_change(&mut self, id: AssetId) {
+        self.advance_state_revision(id);
+        self.metadata_dirty.insert(id, self.state_revision(id));
+    }
+
+    #[must_use]
+    pub fn metadata_change_pending(&self, id: AssetId) -> bool {
+        self.metadata_dirty.contains_key(&id)
+    }
+
+    /// Returns the state revision captured at the latest unresolved metadata observation.
+    ///
+    /// Loading and failure transitions preserve this observation. A new observation invalidates
+    /// previously prepared mutations even when no reload request can be admitted.
+    #[must_use]
+    pub fn metadata_change_revision(&self, id: AssetId) -> Option<&AssetStateRevision> {
+        self.metadata_dirty.get(&id)
+    }
+
+    /// Whether an observed source removal still requires explicit source re-admission.
+    #[must_use]
+    pub fn source_removal_pending(&self, id: AssetId) -> bool {
+        self.removed_sources.contains_key(&id)
+    }
+
+    /// Whether unresolved metadata was observed after the latest source removal.
+    ///
+    /// This permits a concrete owner to revalidate recreated source metadata; the observation
+    /// alone does not establish matching identity or authorize publication.
+    #[must_use]
+    pub fn metadata_change_after_source_removal(&self, id: AssetId) -> bool {
+        self.removed_sources.get(&id).is_some_and(|at_removal| {
+            self.metadata_change_revision(id)
+                .is_some_and(|current| Some(current) != at_removal.as_ref())
+        })
+    }
+
+    pub(crate) fn observe_source_removal(&mut self, id: AssetId) {
+        self.removed_sources
+            .insert(id, self.metadata_change_revision(id).cloned());
+        self.published_slots.remove(&id);
+        if let Some(current) = self.states.get_mut(&id) {
+            current.published_available = false;
+        }
+        // Source retirement is an observation even if no usable publication exists yet.
+        self.advance_state_revision(id);
+        self.advance_publication_revision(id);
+    }
+
+    /// A concrete owner calls this only after publishing the current desired recipe.
+    pub fn acknowledge_metadata_publication(&mut self, id: AssetId) {
+        self.metadata_dirty.remove(&id);
     }
 
     /// Iterates every authoritative runtime asset state, including removed and failed assets.
@@ -222,7 +290,42 @@ impl AssetStates {
     }
 
     pub(crate) fn bind_published_slot(&mut self, id: AssetId, slot: AssetSlotRevision) {
+        self.bind_managed_slot(id, slot.clone());
         self.published_slots.insert(id, slot);
+    }
+
+    pub(crate) fn admit_managed_slot(
+        &self,
+        id: AssetId,
+        slot: AssetSlotRevision,
+        fresh: bool,
+        owner_replacement: bool,
+        publish_reverse: impl FnOnce(),
+    ) -> bool {
+        let mut slots = self
+            .managed_slots
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let valid = match slots.get(&id) {
+            Some(expected) => {
+                expected == &slot || (owner_replacement && expected.same_store(&slot))
+            }
+            None if fresh => true,
+            None => false,
+        };
+        if valid {
+            // Both association locks stay held until both sides publish. Rejection writes neither.
+            publish_reverse();
+            slots.entry(id).or_insert(slot);
+        }
+        valid
+    }
+
+    pub(crate) fn bind_managed_slot(&mut self, id: AssetId, slot: AssetSlotRevision) {
+        self.managed_slots
+            .get_mut()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(id, slot);
     }
 
     #[must_use]
@@ -264,6 +367,7 @@ impl AssetStates {
         source_hash: Option<SourceHash>,
         import_hash: Option<ImportArtifactDigest>,
     ) {
+        self.removed_sources.remove(&id);
         self.published_slots.remove(&id);
         self.insert_state(
             id,
@@ -352,6 +456,15 @@ impl AssetStates {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssetStateError {
+    StorageMismatch {
+        id: AssetId,
+    },
+    SlotSuperseded {
+        id: AssetId,
+    },
+    MutationSuperseded {
+        id: AssetId,
+    },
     UnknownAsset {
         id: AssetId,
     },
@@ -369,6 +482,16 @@ pub enum AssetStateError {
 impl Display for AssetStateError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::StorageMismatch { id } => write!(
+                formatter,
+                "asset {id:?} value/state stores are not associated"
+            ),
+            Self::SlotSuperseded { id } => {
+                write!(formatter, "asset {id:?} value slot was superseded")
+            }
+            Self::MutationSuperseded { id } => {
+                write!(formatter, "asset {id:?} managed mutation was superseded")
+            }
             Self::UnknownAsset { id } => write!(formatter, "asset {:?} has no state", id),
             Self::VersionExhausted { id, current } => write!(
                 formatter,
@@ -705,6 +828,71 @@ mod tests {
         let second = AssetStates::default();
 
         assert_ne!(first.state_revision(id), second.state_revision(id));
+    }
+
+    #[test]
+    fn metadata_observation_outlives_attempts_and_repeated_observation_revokes_old_mutation() {
+        let handle = handle();
+        let mut assets = Assets::<String>::default();
+        let mut states = AssetStates::default();
+        let mut events = AssetEvents::default();
+        states.observe_metadata_change(handle.id());
+        let first = states
+            .metadata_change_revision(handle.id())
+            .unwrap()
+            .clone();
+        states.set_loading(handle.id());
+        assets
+            .record_load_failure(handle, &mut states, &mut events, "decode failed")
+            .unwrap();
+        assert_eq!(states.metadata_change_revision(handle.id()), Some(&first));
+        states.set_loading(handle.id());
+        let baseline = assets.mutation_baseline(handle, &states).unwrap();
+        states.observe_metadata_change(handle.id());
+        assert_ne!(states.metadata_change_revision(handle.id()), Some(&first));
+        assert!(baseline.validate(&assets, &states).is_err());
+        assert!(states.metadata_change_pending(handle.id()));
+    }
+
+    #[test]
+    fn source_removal_advances_revocation_even_before_a_usable_publication() {
+        let handle = handle();
+        let mut states = AssetStates::default();
+        let initial = states.publication_revision(handle.id());
+        states.observe_source_removal(handle.id());
+        let first = states.publication_revision(handle.id());
+        assert_ne!(first, initial);
+        assert!(states.source_removal_pending(handle.id()));
+        states.set_loading(handle.id());
+        states
+            .set_failed(handle.id(), "decode failed".to_owned())
+            .unwrap();
+        assert!(states.source_removal_pending(handle.id()));
+        states.observe_source_removal(handle.id());
+        assert_ne!(states.publication_revision(handle.id()), first);
+        states.set_loaded_at(handle.id(), AssetVersion::from_raw(1), None, None);
+        assert!(!states.source_removal_pending(handle.id()));
+    }
+
+    #[test]
+    fn metadata_readmission_requires_an_observation_after_the_latest_removal() {
+        let handle = handle();
+        let mut states = AssetStates::default();
+        states.observe_metadata_change(handle.id());
+        states.observe_source_removal(handle.id());
+        assert!(states.metadata_change_pending(handle.id()));
+        assert!(!states.metadata_change_after_source_removal(handle.id()));
+        states.observe_metadata_change(handle.id());
+        assert!(states.metadata_change_after_source_removal(handle.id()));
+        states.set_loading(handle.id());
+        states
+            .set_failed(handle.id(), "queue rejected".to_owned())
+            .unwrap();
+        assert!(states.metadata_change_after_source_removal(handle.id()));
+        states.observe_source_removal(handle.id());
+        assert!(!states.metadata_change_after_source_removal(handle.id()));
+        states.observe_metadata_change(handle.id());
+        assert!(states.metadata_change_after_source_removal(handle.id()));
     }
 
     #[test]

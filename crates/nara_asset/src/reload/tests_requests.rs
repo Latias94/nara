@@ -558,11 +558,18 @@ fn reload_request_byte_limit_rejects_work_without_retention() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .modified(record.path().clone())
+        .meta_modified(record.path().clone())
         .unwrap();
 
     let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
     runtime.drive(std::time::Duration::ZERO).unwrap();
+
+    assert!(
+        runtime
+            .world()
+            .resource::<AssetStates>()
+            .metadata_change_pending(asset_id)
+    );
 
     assert!(
         runtime
@@ -591,6 +598,78 @@ fn reload_request_byte_limit_rejects_work_without_retention() {
             .map(|diagnostic| diagnostic.code().as_str())
             .collect::<Vec<_>>(),
         vec!["asset.reload-request-byte-limit-exceeded"]
+    );
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn request_rejection_retains_metadata_for_the_next_source_only_change() {
+    let mut app = App::new();
+    app.insert_resource(AssetReloadRequests::with_limits(
+        AssetReloadRequestLimits::new(ItemLimit::ONE, ByteLimit::ONE),
+    ))
+    .unwrap();
+    install_asset_plugin(&mut app);
+    install_test_reload_consumer(&mut app);
+    let record = image_record("textures/desired.png", stable_id());
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<ProjectAssetDatabase>()
+        .insert(record.clone())
+        .unwrap();
+    let asset_id = app
+        .world_mut()
+        .unwrap()
+        .resource_mut::<AssetServer>()
+        .reserve_record_id(&record)
+        .unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetSourceChanges>()
+        .meta_modified(record.path().clone())
+        .unwrap();
+    let path = record.path().clone();
+    let mut frame = 0;
+    app.add_systems(
+        CoreStage::TaskUpdate,
+        (move |mut requests: ResMut<AssetReloadRequests>,
+               mut changes: ResMut<AssetSourceChanges>| {
+            if frame == 1 {
+                *requests = AssetReloadRequests::default();
+                changes.modified(path.clone()).unwrap();
+            }
+            frame += 1;
+        })
+        .before(AssetTaskUpdateSet::ResolveSourceChanges),
+    )
+    .unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
+    assert!(
+        runtime
+            .world()
+            .resource::<CapturedReloadRequests>()
+            .0
+            .is_empty()
+    );
+    assert!(
+        runtime
+            .world()
+            .resource::<AssetStates>()
+            .metadata_change_pending(asset_id)
+    );
+    runtime.drive(std::time::Duration::ZERO).unwrap();
+    let requests = &runtime.world().resource::<CapturedReloadRequests>().0;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].source_change_kind(),
+        AssetSourceChangeKind::Modified
+    );
+    assert!(
+        runtime
+            .world()
+            .resource::<AssetStates>()
+            .metadata_change_pending(asset_id)
     );
     runtime.finish().unwrap();
 }

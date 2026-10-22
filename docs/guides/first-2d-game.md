@@ -168,7 +168,11 @@ field's wire kind requires an explicit schema version and authored-content updat
    game and consumes the saved radius. Unsupported records remain protected.
 3. In the Project sidebar, select `textures/token.png` under assets. Import it
    with sRGB, then explicitly Reimport after changing its import recipe. Invalid
-   image input reports failure while retaining the last accepted image.
+   image input reports failure while retaining eligible last-good pixels. Desired import settings
+   remain separate from the running attempt and those pixels: after a rejected, failed or
+   superseded metadata reload, a later source edit uses the current desired recipe or re-admits
+   unresolved metadata rather than reverting to the old pixels' settings. Correct invalid metadata
+   before retrying; source removal or identity mismatch revokes its authority.
 4. A Sprite image field accepts `textures/token.png` or `stable_id:<UUID>` and
    applies through the same document revision transaction. The initial player
    Prefab is supplied as source; this walkthrough does not require a visual Prefab

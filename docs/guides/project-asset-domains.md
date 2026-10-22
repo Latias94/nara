@@ -134,7 +134,13 @@ settles failed discovery without a second source-import refresh loop.
 The Shell observes import-view and pending-state changes for presentation; unchanged idle polls
 do not request another redraw.
 
-This validate-before-publish policy differs from Image's desired-settings/last-good-pixel workflow.
+This validate-before-publish policy differs from Image's separate desired settings, in-flight
+attempt and last-good pixel publication. Image retains unresolved metadata observations across
+rejection, failure and supersession until the current recipe publishes; old pixels do not choose
+the settings for a later source-only edit. See
+[publication and recovery](file-backed-tilesets.md#publication-and-recovery) for Image/TileSet
+admission and stale-result handling. This source-domain facet still validates before changing
+metadata bytes.
 Editor native/GPU publication, arbitrary import-only products, automatic reimport, durable caches
 and dynamic project plugin loading remain separate contracts.
 

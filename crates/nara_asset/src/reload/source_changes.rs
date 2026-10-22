@@ -54,13 +54,16 @@ pub enum AssetSourceChangeKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetSourceChange {
     path: AssetPath,
-    kind: AssetSourceChangeKind,
+    observation: PendingSourceChange,
 }
 
 impl AssetSourceChange {
     #[must_use]
     pub const fn new(path: AssetPath, kind: AssetSourceChangeKind) -> Self {
-        Self { path, kind }
+        Self {
+            path,
+            observation: PendingSourceChange::new(kind),
+        }
     }
 
     #[must_use]
@@ -70,7 +73,20 @@ impl AssetSourceChange {
 
     #[must_use]
     pub const fn kind(&self) -> AssetSourceChangeKind {
-        self.kind
+        self.observation.kind()
+    }
+
+    /// Metadata dirtiness survives a coalesced removal without implying source existence.
+    #[must_use]
+    pub const fn metadata_dirty(&self) -> bool {
+        self.observation.metadata_dirty
+    }
+
+    pub(crate) const fn metadata_after_removal(&self) -> bool {
+        matches!(
+            self.observation.last_invalidation,
+            Some(SourceInvalidation::Metadata)
+        )
     }
 }
 
@@ -185,7 +201,8 @@ fn checked_source_change_limit(
 ///
 /// Watch adapters and explicit authoring tools are producers. Every staged input batch and the
 /// retained set share the item and owned-path byte ceilings. Duplicate paths coalesce at admission
-/// with the latest source existence and all metadata dirtiness preserved; distinct paths retain
+/// with the latest source existence, metadata dirtiness, and relative metadata/removal order
+/// preserved; distinct paths retain
 /// their owned logical-path capacity
 /// until the next resolve stage drains the complete map. This authoring request intent is not
 /// replay-recordable gameplay state.
@@ -196,10 +213,18 @@ pub struct AssetSourceChanges {
     changes: BTreeMap<AssetPath, PendingSourceChange>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SourceInvalidation {
+    Metadata,
+    Removal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PendingSourceChange {
     removed: Option<bool>,
     metadata_dirty: bool,
+    // The rightmost relevant observation survives source-only edits and regrouped batches.
+    last_invalidation: Option<SourceInvalidation>,
 }
 
 impl PendingSourceChange {
@@ -211,6 +236,11 @@ impl PendingSourceChange {
                 AssetSourceChangeKind::MetaModified => None,
             },
             metadata_dirty: matches!(kind, AssetSourceChangeKind::MetaModified),
+            last_invalidation: match kind {
+                AssetSourceChangeKind::MetaModified => Some(SourceInvalidation::Metadata),
+                AssetSourceChangeKind::Removed => Some(SourceInvalidation::Removal),
+                AssetSourceChangeKind::Modified => None,
+            },
         }
     }
 
@@ -219,6 +249,9 @@ impl PendingSourceChange {
             self.removed = incoming.removed;
         }
         self.metadata_dirty |= incoming.metadata_dirty;
+        if incoming.last_invalidation.is_some() {
+            self.last_invalidation = incoming.last_invalidation;
+        }
     }
 
     const fn kind(self) -> AssetSourceChangeKind {
@@ -257,8 +290,10 @@ impl AssetSourceChanges {
         &mut self,
         change: AssetSourceChange,
     ) -> Result<(), AssetSourceChangeAdmissionError> {
-        let AssetSourceChange { path, kind } = change;
-        let change = PendingSourceChange::new(kind);
+        let AssetSourceChange {
+            path,
+            observation: change,
+        } = change;
         let retained_items = self.changes.len();
         match self.changes.entry(path) {
             Entry::Occupied(mut entry) => {
@@ -314,7 +349,11 @@ impl AssetSourceChanges {
         let mut input_payload_bytes = 0_usize;
         let mut retained_items = self.changes.len();
         let mut retained_payload_bytes = self.retained_payload_bytes;
-        for AssetSourceChange { path, kind } in changes {
+        for AssetSourceChange {
+            path,
+            observation: pending,
+        } in changes
+        {
             input_items = checked_source_change_limit(
                 input_items,
                 1,
@@ -324,7 +363,7 @@ impl AssetSourceChanges {
 
             match incoming.entry(path) {
                 Entry::Occupied(mut entry) => {
-                    entry.get_mut().merge(PendingSourceChange::new(kind));
+                    entry.get_mut().merge(pending);
                 }
                 Entry::Vacant(entry) => {
                     input_payload_bytes = checked_source_change_limit(
@@ -347,7 +386,7 @@ impl AssetSourceChanges {
                             AssetSourceChangeLimitKind::RetainedBytes,
                         )?;
                     }
-                    entry.insert(PendingSourceChange::new(kind));
+                    entry.insert(pending);
                 }
             }
         }
@@ -388,7 +427,7 @@ impl AssetSourceChanges {
         self.retained_payload_bytes = 0;
         std::mem::take(&mut self.changes)
             .into_iter()
-            .map(|(path, change)| AssetSourceChange::new(path, change.kind()))
+            .map(|(path, observation)| AssetSourceChange { path, observation })
             .collect()
     }
 }

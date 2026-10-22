@@ -19,10 +19,10 @@ use nara_app::{App, CoreStage, Plugin, PluginError, RealTime};
 use nara_asset::AssetMetaIdentityCandidate;
 use nara_asset::{
     AssetEvents, AssetId, AssetLoadGeneration, AssetLoadGenerations, AssetPath,
-    AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestKind, AssetReloadRequests,
-    AssetServer, AssetSourceChangeKind, AssetStateError, AssetStates, AssetTaskUpdateSet, Assets,
-    Handle, ImageReloadConsumer, ImageReloadDrainError, ImageReloadRegistrationError,
-    register_image_reload_consumer,
+    AssetPublicationRevision, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestKind,
+    AssetReloadRequests, AssetServer, AssetSlotRevision, AssetSourceChangeKind, AssetStateError,
+    AssetStateRevision, AssetStates, AssetTaskUpdateSet, Assets, Handle, ImageReloadConsumer,
+    ImageReloadDrainError, ImageReloadRegistrationError, register_image_reload_consumer,
 };
 use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
@@ -312,21 +312,21 @@ impl ImageReloadAttempt {
         handle: Handle<ImageAsset>,
         images: &Assets<ImageAsset>,
         states: &AssetStates,
-    ) -> Self {
+    ) -> Result<Self, ImagePublicationFailureKind> {
         let (publication, settings) = ImagePublicationSnapshot::capture_with_settings(
             &request.record(),
             handle,
             request.expected_version(),
             images,
             states,
-        );
-        Self {
+        )?;
+        Ok(Self {
             request,
             handle,
             publication,
             settings,
             recovering_removed: false,
-        }
+        })
     }
 
     fn is_current(
@@ -384,6 +384,47 @@ struct ReadyImageJobs {
 #[derive(Default, Resource)]
 struct RemovedImageRecoveries {
     images: BTreeMap<AssetId, ImagePublicationSnapshot>,
+}
+
+#[derive(Default, Resource)]
+struct DesiredImageSettings {
+    images: BTreeMap<AssetId, DesiredImageRecipe>,
+    revoked: BTreeMap<AssetId, (AssetSlotRevision, Option<AssetStateRevision>)>,
+}
+
+struct DesiredImageRecipe {
+    settings: ImageImportSettings,
+    publication: AssetPublicationRevision,
+    // A successful publication satisfies this intent; later requests seed from its Image instead.
+    slot: AssetSlotRevision,
+    metadata_observation: Option<AssetStateRevision>,
+}
+
+impl DesiredImageRecipe {
+    fn capture(
+        settings: ImageImportSettings,
+        handle: Handle<ImageAsset>,
+        images: &Assets<ImageAsset>,
+        states: &AssetStates,
+    ) -> Self {
+        Self {
+            settings,
+            publication: states.publication_revision(handle.id()),
+            slot: images.slot_revision(handle),
+            metadata_observation: states.metadata_change_revision(handle.id()).cloned(),
+        }
+    }
+
+    fn is_current(
+        &self,
+        handle: Handle<ImageAsset>,
+        images: &Assets<ImageAsset>,
+        states: &AssetStates,
+    ) -> bool {
+        self.publication == states.publication_revision(handle.id())
+            && self.slot == images.slot_revision(handle)
+            && self.metadata_observation.as_ref() == states.metadata_change_revision(handle.id())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
@@ -478,6 +519,7 @@ impl Plugin for ImagePlugin {
         app.init_resource::<PendingImageJobs>()?;
         app.init_resource::<ReadyImageJobs>()?;
         app.init_resource::<RemovedImageRecoveries>()?;
+        app.init_resource::<DesiredImageSettings>()?;
         app.insert_resource(self.importer.clone())?;
         let reload_consumer = register_image_reload_consumer::<ImageAsset>(app)
             .map_err(image_reload_registration_plugin_error)?;
@@ -499,6 +541,7 @@ impl Plugin for ImagePlugin {
                    pending: ResMut<PendingImageJobs>,
                    ready: ResMut<ReadyImageJobs>,
                    recoveries: ResMut<RemovedImageRecoveries>,
+                   desired: ResMut<DesiredImageSettings>,
                    diagnostics: ResMut<AssetReloadDiagnostics>,
                    stats: ResMut<ImageReloadStats>| {
                 spawn_image_reload_jobs(
@@ -515,6 +558,7 @@ impl Plugin for ImagePlugin {
                     pending,
                     ready,
                     recoveries,
+                    desired,
                     diagnostics,
                     stats,
                 )
@@ -557,6 +601,7 @@ fn spawn_image_reload_jobs(
     mut pending: ResMut<PendingImageJobs>,
     mut ready: ResMut<ReadyImageJobs>,
     mut recoveries: ResMut<RemovedImageRecoveries>,
+    mut desired: ResMut<DesiredImageSettings>,
     mut diagnostics: ResMut<AssetReloadDiagnostics>,
     mut stats: ResMut<ImageReloadStats>,
 ) -> Result<(), ImageReloadDrainError> {
@@ -591,7 +636,34 @@ fn spawn_image_reload_jobs(
                 request.previous_state_revision(),
             )
         });
-        let mut attempt = ImageReloadAttempt::capture(request, handle, &images, &states);
+        let mut attempt = match ImageReloadAttempt::capture(request, handle, &images, &states) {
+            Ok(attempt) => attempt,
+            Err(_) => {
+                stats.stale = stats.stale.saturating_add(1);
+                continue;
+            }
+        };
+        if attempt.request.request_kind() == AssetReloadRequestKind::Remove
+            || desired
+                .images
+                .get(&handle.id())
+                .is_some_and(|recipe| !recipe.is_current(handle, &images, &states))
+        {
+            desired.images.remove(&handle.id());
+        }
+        if desired
+            .revoked
+            .get(&handle.id())
+            .is_some_and(|(slot, observation)| {
+                slot != &images.slot_revision(handle)
+                    || observation.as_ref() != states.metadata_change_revision(handle.id())
+            })
+        {
+            desired.revoked.remove(&handle.id());
+        }
+        if let Some(recipe) = desired.images.get(&handle.id()) {
+            attempt.settings = Some(recipe.settings);
+        }
         attempt.recovering_removed = recovering_removed;
         if recovering_removed {
             recoveries
@@ -603,7 +675,39 @@ fn spawn_image_reload_jobs(
             AssetReloadRequestKind::LoadOrReload => {
                 let record = attempt.request.record();
                 let asset_id = attempt.request.asset_id();
-                let settings = accepted_reload_settings(&attempt, source_directory, &record);
+                let source_only =
+                    attempt.request.source_change_kind() == AssetSourceChangeKind::Modified;
+                let settings = if source_only
+                    && (desired.revoked.contains_key(&asset_id)
+                        || (states.source_removal_pending(asset_id)
+                            && !recovering_removed
+                            && !desired.images.contains_key(&asset_id)
+                            && !states.metadata_change_after_source_removal(asset_id)))
+                {
+                    Err(ImageReloadError::MissingImportSettings)
+                } else if source_only
+                    && states.metadata_change_pending(asset_id)
+                    && !desired.images.contains_key(&asset_id)
+                {
+                    admit_metadata_reload_settings(source_directory, &record)
+                } else {
+                    accepted_reload_settings(&attempt, source_directory, &record)
+                };
+                if let Ok(settings) = settings.as_ref() {
+                    desired.images.insert(
+                        asset_id,
+                        DesiredImageRecipe::capture(*settings, handle, &images, &states),
+                    );
+                    desired.revoked.remove(&asset_id);
+                } else if matches!(&settings, Err(ImageReloadError::MetadataIdentityMismatch)) {
+                    desired.revoked.insert(
+                        asset_id,
+                        (
+                            images.slot_revision(handle),
+                            states.metadata_change_revision(asset_id).cloned(),
+                        ),
+                    );
+                }
                 let admitted = source_directory
                     .ok_or(ImageReloadError::MissingSourceDirectory)
                     .and_then(|source_directory| {
@@ -789,7 +893,14 @@ fn apply_image_reload_results(
                     image.source().stable_id() == request.stable_id()
                         && image.source().path() == request.path()
                 }));
-        match images.remove_with_state(attempt.handle, &mut states, &mut events) {
+        match attempt
+            .publication
+            .mutation(&images, &states)
+            .and_then(|baseline| {
+                baseline
+                    .remove(&mut images, &mut states, &mut events)
+                    .map_err(|_| ImagePublicationFailureKind::StateChanged)
+            }) {
             Ok(_) => {
                 stats.removed = stats.removed.saturating_add(1);
                 if restore_eligible
@@ -803,7 +914,8 @@ fn apply_image_reload_results(
                             removed_version,
                             &images,
                             &states,
-                        ),
+                        )
+                        .expect("successful removal retains its admitted value/state association"),
                     );
                 }
             }
@@ -901,7 +1013,8 @@ fn apply_image_reload_results(
                         expected_version,
                         &images,
                         &states,
-                    ),
+                    )
+                    .expect("recorded failure retains its admitted value/state association"),
                 );
             }
         }
@@ -962,10 +1075,12 @@ pub(super) fn record_image_reload_failure(
         return false;
     }
     diagnostics.push(image_reload_diagnostic(request.path(), &error));
-    let result = if images.get(handle).is_some() {
-        images.record_reload_failure(handle, states, events, error.stable_code())
-    } else {
-        images.record_load_failure(handle, states, events, error.stable_code())
+    let result = match attempt.publication.mutation(images, states) {
+        Ok(baseline) => baseline.record_failure(images, states, events, error.stable_code()),
+        Err(_) => {
+            stats.stale = stats.stale.saturating_add(1);
+            return false;
+        }
     };
     if result.is_ok() && matches!(error, ImageReloadError::MetadataIdentityMismatch) {
         states.invalidate_publication(handle.id());

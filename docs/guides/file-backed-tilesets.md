@@ -61,6 +61,22 @@ First requests and dependency changes may use an authorized published Image even
 reload is pending or has failed. Only a cold Loading dependency without published content waits.
 Identity, publication and exact storage-slot checks still reject revoked or directly replaced data.
 
+Both Image and TileSet managed publication use `Assets<T>::mutation_baseline(handle, &states)`.
+It admits the actual typed store/state association, including a fresh empty initial slot, before
+capturing an owned `AssetMutationBaseline<T>`. A delayed owner consumes that same baseline through `commit_loaded`,
+`record_failure` or `remove`; all three reject a superseded state or slot before publishing their
+outcome. Capturing a new baseline cannot legitimize a mismatched resource pair or raw slot write.
+Source identity, dependency authority and load generation remain the concrete domain's checks.
+Use the domain's normal publication path for file-backed content; raw storage remains the advanced
+code-first path described below.
+
+Image reload also separates latest desired settings, the in-flight attempt and last-good usable
+pixels. An observed metadata change remains unresolved until its current recipe publishes, even
+if a queue rejects it or an attempt fails or is superseded. A later source-only edit uses the
+retained desired recipe, or re-admits unresolved metadata; it cannot silently restore the settings
+of old pixels. Eligible old pixels may remain usable while recovery is pending. Source removal or
+metadata identity mismatch revokes the corresponding authority.
+
 The managed Editor refreshes known TileSet sources through its source catalogue and processes
 at most two source files per advance. Missing Image metadata retains a semantic dependency demand;
 after a source-index refresh admits that metadata and source, existing serial Image hydration can

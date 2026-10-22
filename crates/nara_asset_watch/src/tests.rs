@@ -14,7 +14,7 @@ use notify::{Event, EventKind, event::ModifyKind, event::RenameMode};
 use std::{
     fs,
     panic::{AssertUnwindSafe, catch_unwind},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 fn temp_root() -> PathBuf {
@@ -65,6 +65,43 @@ fn watch_pressure_value(world: &nara_ecs::World, metric: &str) -> Option<u64> {
         })
 }
 
+fn rescan_sender(world: &nara_ecs::World) -> AssetWatchEventSender {
+    world
+        .resource::<ActiveWatchRescan>()
+        .0
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .queue
+        .sender()
+}
+
+fn rescan_callback_lifetime(world: &nara_ecs::World) -> std::sync::Weak<()> {
+    world
+        .resource::<ActiveWatchRescan>()
+        .0
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .watcher
+        .callback_lifetime()
+}
+
+fn assert_callback_retired(lifetime: std::sync::Weak<()>) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    // Some notify backends finish callback destruction on their own native worker.
+    while lifetime.strong_count() != 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(
+        lifetime.strong_count(),
+        0,
+        "the exact native callback must be released"
+    );
+}
+
 #[test]
 fn source_modify_translates_to_modified_change() {
     let root = temp_root();
@@ -112,6 +149,309 @@ fn meta_modify_maps_to_source_meta_change() {
             AssetSourceChangeKind::MetaModified
         )]
     );
+    remove_temp_root(&root);
+}
+
+#[test]
+fn notify_directory_unknown_and_rename_scope_remains_sticky_until_host_reconciliation() {
+    use notify::event::{CreateKind, RemoveKind};
+    for kind in [
+        EventKind::Remove(RemoveKind::Folder),
+        EventKind::Remove(RemoveKind::Any),
+        EventKind::Create(CreateKind::Folder),
+        EventKind::Modify(ModifyKind::Any),
+        EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+        EventKind::Any,
+        EventKind::Other,
+    ] {
+        let mut queue = AssetWatchEventQueue::new();
+        let sender = queue.sender();
+        admit_notify_event(
+            &sender,
+            Event::new(kind)
+                .add_path(PathBuf::from("textures"))
+                .add_path(PathBuf::from("renamed")),
+        );
+        assert!(queue.drain().rescan_required(), "{kind:?}");
+        assert!(
+            queue.drain().rescan_required(),
+            "draining is not reconciliation: {kind:?}"
+        );
+        assert_eq!(
+            sender.try_send(AssetWatchEvent::modified("textures/child.png")),
+            Err(AssetWatchQueueSendError::RescanRequired)
+        );
+    }
+}
+
+#[test]
+fn root_and_explicit_subtree_observations_require_complete_coverage() {
+    let root = temp_root();
+    fs::create_dir_all(&root).unwrap();
+    let source_root = AssetSourceRoot::new(&root);
+    for event in [
+        AssetWatchEvent::modified(&root),
+        AssetWatchEvent::subtree(root.join("already-removed")),
+    ] {
+        assert_eq!(
+            AssetWatchTranslator.translate_event(&source_root, &event),
+            Err(AssetWatchError::RescanRequired)
+        );
+    }
+    remove_temp_root(&root);
+}
+
+#[test]
+fn bounded_overflow_does_not_clear_when_accepted_prefix_is_drained() {
+    let mut queue = AssetWatchEventQueue::with_limits(AssetWatchQueueLimits::new(
+        ItemLimit::ONE,
+        ByteLimit::new(4096).unwrap(),
+    ));
+    let sender = queue.sender();
+    sender
+        .try_send(AssetWatchEvent::modified("textures/a.png"))
+        .unwrap();
+    assert!(
+        sender
+            .try_send(AssetWatchEvent::modified("textures/b.png"))
+            .is_err()
+    );
+    assert!(queue.drain().rescan_required());
+    assert!(queue.is_empty());
+    assert!(queue.drain().rescan_required());
+}
+
+#[test]
+fn owned_rescan_keeps_old_obligation_until_completed_acknowledgement() {
+    let root = temp_root();
+    fs::create_dir_all(&root).unwrap();
+    let mut world = nara_ecs::World::new();
+    world.insert_resource(AssetSourceRoot::new(&root));
+    let queue = AssetWatchEventQueue::new();
+    queue.sender().record_backend_failure();
+    world.insert_resource(queue.observer());
+    world.insert_resource(queue);
+    world.insert_resource(AssetSourceChanges::default());
+    world.insert_resource(AssetWatchRuntimeStatus::default());
+    world.insert_resource(RuntimeDiagnostics::default());
+    world.insert_resource(RuntimePressureSnapshots::default());
+    let mut schedule = nara_ecs::schedule::Schedule::default();
+    schedule.add_systems(drain_asset_watch_events);
+    schedule.run(&mut world);
+    let abandoned = AssetWatchRescan::begin(&mut world, AssetWatchQueueLimits::default()).unwrap();
+    drop(abandoned);
+    assert!(
+        world
+            .resource::<AssetWatchRuntimeStatus>()
+            .requires_rescan()
+    );
+    let superseded = AssetWatchRescan::begin(&mut world, AssetWatchQueueLimits::default()).unwrap();
+    let completed = AssetWatchRescan::begin(&mut world, AssetWatchQueueLimits::default()).unwrap();
+    assert!(superseded.complete(&mut world).is_err());
+    assert!(
+        world
+            .resource::<AssetWatchRuntimeStatus>()
+            .requires_rescan()
+    );
+    let mut foreign = nara_ecs::World::new();
+    foreign.insert_resource(AssetSourceRoot::new(&root));
+    // A receipt cannot complete a different runtime, even if its source path is equal.
+    let foreign_receipt =
+        AssetWatchRescan::begin(&mut world, AssetWatchQueueLimits::default()).unwrap();
+    assert!(foreign_receipt.complete(&mut foreign).is_err());
+    assert!(completed.complete(&mut world).is_err());
+    let overflowed = AssetWatchRescan::begin(
+        &mut world,
+        AssetWatchQueueLimits::new(ItemLimit::ONE, ByteLimit::new(4096).unwrap()),
+    )
+    .unwrap();
+    let sender = rescan_sender(&world);
+    sender
+        .try_send(AssetWatchEvent::modified("textures/a.png"))
+        .unwrap();
+    assert!(
+        sender
+            .try_send(AssetWatchEvent::modified("textures/b.png"))
+            .is_err()
+    );
+    assert!(overflowed.complete(&mut world).is_err());
+    assert!(
+        world
+            .resource::<AssetWatchRuntimeStatus>()
+            .requires_rescan()
+    );
+    let completed = AssetWatchRescan::begin(&mut world, AssetWatchQueueLimits::default()).unwrap();
+    rescan_sender(&world)
+        .try_send(AssetWatchEvent::modified("textures/during-scan.png"))
+        .unwrap();
+    completed.complete(&mut world).unwrap();
+    assert!(
+        !world
+            .resource::<AssetWatchRuntimeStatus>()
+            .requires_rescan()
+    );
+    assert!(world.resource::<AssetWatcher>().is_running());
+    assert_eq!(
+        world
+            .resource_mut::<AssetWatchEventQueue>()
+            .drain()
+            .events(),
+        [AssetWatchEvent::modified("textures/during-scan.png")]
+    );
+    world.remove_resource::<AssetWatcher>();
+    remove_temp_root(&root);
+}
+
+#[test]
+fn rescan_supersession_and_abandonment_retire_only_the_exact_native_watcher() {
+    let root = temp_root();
+    fs::create_dir_all(&root).unwrap();
+    let mut app = App::new();
+    install_asset_prerequisites(&mut app);
+    app.add_plugin(AssetWatchPlugin::new(&root)).unwrap();
+    let world = app.world_mut().unwrap();
+    world
+        .resource::<AssetWatchEventQueue>()
+        .sender()
+        .record_backend_failure();
+    let mut poll = nara_ecs::schedule::Schedule::default();
+    poll.add_systems(drain_asset_watch_events);
+    poll.run(world);
+
+    let superseded = AssetWatchRescan::begin(world, AssetWatchQueueLimits::default()).unwrap();
+    let old_callback = rescan_callback_lifetime(world);
+    let old_sender = rescan_sender(world);
+    assert_ne!(old_callback.strong_count(), 0);
+    let abandoned = AssetWatchRescan::begin(world, AssetWatchQueueLimits::default()).unwrap();
+    let replacement_callback = rescan_callback_lifetime(world);
+    let replacement_sender = rescan_sender(world);
+    assert_callback_retired(old_callback);
+    assert_eq!(
+        old_sender.try_send(AssetWatchEvent::modified("old.png")),
+        Err(AssetWatchQueueSendError::Disconnected)
+    );
+    assert!(superseded.complete(world).is_err());
+    assert_ne!(replacement_callback.strong_count(), 0);
+    replacement_sender
+        .try_send(AssetWatchEvent::modified("during-scan.png"))
+        .unwrap();
+    assert!(
+        world
+            .resource::<AssetWatchRuntimeStatus>()
+            .requires_rescan()
+    );
+
+    drop(abandoned);
+    assert_callback_retired(replacement_callback);
+    assert_eq!(
+        replacement_sender.try_send(AssetWatchEvent::modified("abandoned.png")),
+        Err(AssetWatchQueueSendError::Disconnected)
+    );
+    assert!(
+        world
+            .resource::<ActiveWatchRescan>()
+            .0
+            .lock()
+            .unwrap()
+            .is_none()
+    );
+    poll.run(world);
+    assert!(
+        world
+            .resource::<AssetWatchRuntimeStatus>()
+            .requires_rescan()
+    );
+
+    let completed = AssetWatchRescan::begin(world, AssetWatchQueueLimits::default()).unwrap();
+    let completed_callback = rescan_callback_lifetime(world);
+    let completed_sender = rescan_sender(world);
+    completed_sender
+        .try_send(AssetWatchEvent::modified("retained.png"))
+        .unwrap();
+    completed.complete(world).unwrap();
+    assert_ne!(
+        completed_callback.strong_count(),
+        0,
+        "consuming the receipt must transfer, not retire, its watcher"
+    );
+    assert!(
+        !world
+            .resource::<AssetWatchRuntimeStatus>()
+            .requires_rescan()
+    );
+    assert_eq!(
+        world
+            .resource_mut::<AssetWatchEventQueue>()
+            .drain()
+            .events(),
+        [AssetWatchEvent::modified("retained.png")]
+    );
+    nara_app::RuntimeInstance::start(app)
+        .unwrap()
+        .finish()
+        .unwrap();
+    assert_callback_retired(completed_callback);
+    remove_temp_root(&root);
+}
+
+#[test]
+fn held_rescan_receipt_cannot_keep_native_watching_alive_after_runtime_stop() {
+    let root = temp_root();
+    fs::create_dir_all(&root).unwrap();
+    let mut app = App::new();
+    install_asset_prerequisites(&mut app);
+    app.add_plugin(AssetWatchPlugin::new(&root)).unwrap();
+    app.world()
+        .resource::<AssetWatchEventQueue>()
+        .sender()
+        .record_backend_failure();
+    let host_receipt = Arc::new(Mutex::new(None));
+    let receipt_sink = Arc::clone(&host_receipt);
+    app.add_systems(CoreStage::Update, move |world: &mut nara_ecs::World| {
+        let mut receipt = receipt_sink.lock().unwrap();
+        if receipt.is_none() {
+            *receipt =
+                Some(AssetWatchRescan::begin(world, AssetWatchQueueLimits::default()).unwrap());
+        }
+    })
+    .unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let callback = rescan_callback_lifetime(runtime.world());
+    let sender = rescan_sender(runtime.world());
+    assert_ne!(callback.strong_count(), 0);
+    assert!(host_receipt.lock().unwrap().is_some());
+    assert!(
+        runtime
+            .world()
+            .resource::<AssetWatchRuntimeStatus>()
+            .requires_rescan()
+    );
+
+    assert!(matches!(
+        runtime.request_control(nara_app::RuntimeControl::Stop),
+        nara_app::RuntimeControlRequestResult::Accepted(_)
+    ));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while runtime.state() != nara_app::RuntimeState::Stopped && Instant::now() < deadline {
+        runtime.drive(Duration::ZERO).unwrap();
+        // Tasks shutdown is pollable; worker return is not guaranteed after two owner drives.
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(runtime.state(), nara_app::RuntimeState::Stopped);
+    assert!(
+        host_receipt.lock().unwrap().is_some(),
+        "the Host still holds its receipt while the stopped World remains alive"
+    );
+    assert!(!runtime.world().contains_resource::<ActiveWatchRescan>());
+    assert!(!runtime.world().contains_resource::<AssetWatcher>());
+    assert_callback_retired(callback);
+    assert_eq!(
+        sender.try_send(AssetWatchEvent::modified("after-stop.png")),
+        Err(AssetWatchQueueSendError::Disconnected)
+    );
+    drop(host_receipt.lock().unwrap().take());
+    runtime.finish().unwrap();
     remove_temp_root(&root);
 }
 

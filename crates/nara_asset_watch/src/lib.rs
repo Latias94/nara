@@ -4,6 +4,7 @@ use std::{
     error::Error,
     fmt::{self, Debug, Display, Formatter},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, Weak},
 };
 
 use nara_app::{App, CoreStage, Plugin, PluginError};
@@ -40,10 +41,12 @@ pub struct AssetWatchEvent {
     kind: AssetWatchEventKind,
     path: PathBuf,
     to_path: Option<PathBuf>,
+    broad_scope: bool,
 }
 
 impl AssetWatchEvent {
     #[must_use]
+    /// Constructs an exact-file observation. Use `subtree` when file scope is not proven.
     pub fn modified(path: impl Into<PathBuf>) -> Self {
         let mut path = path.into();
         path.shrink_to_fit();
@@ -51,10 +54,12 @@ impl AssetWatchEvent {
             kind: AssetWatchEventKind::Modified,
             path,
             to_path: None,
+            broad_scope: false,
         }
     }
 
     #[must_use]
+    /// Constructs an exact-file removal; this does not infer the type of a missing path.
     pub fn removed(path: impl Into<PathBuf>) -> Self {
         let mut path = path.into();
         path.shrink_to_fit();
@@ -62,10 +67,12 @@ impl AssetWatchEvent {
             kind: AssetWatchEventKind::Removed,
             path,
             to_path: None,
+            broad_scope: false,
         }
     }
 
     #[must_use]
+    /// Constructs a rename whose two sides are already known to be exact files.
     pub fn renamed(from: impl Into<PathBuf>, to: impl Into<PathBuf>) -> Self {
         let mut path = from.into();
         path.shrink_to_fit();
@@ -75,12 +82,22 @@ impl AssetWatchEvent {
             kind: AssetWatchEventKind::Renamed,
             path,
             to_path: Some(to_path),
+            broad_scope: false,
         }
     }
 
     #[must_use]
     pub const fn kind(&self) -> AssetWatchEventKind {
         self.kind
+    }
+
+    /// Retains unproven subtree coverage until the Host completes a full reconciliation.
+    #[must_use]
+    pub fn subtree(path: impl Into<PathBuf>) -> Self {
+        Self {
+            broad_scope: true,
+            ..Self::modified(path)
+        }
     }
 
     #[must_use]
@@ -108,6 +125,7 @@ pub enum AssetWatchError {
     MissingRenameTarget(PathBuf),
     Filesystem(String),
     Notify(String),
+    RescanRequired,
 }
 
 impl Display for AssetWatchError {
@@ -134,6 +152,9 @@ impl Display for AssetWatchError {
             ),
             Self::Filesystem(error) => write!(formatter, "asset watch filesystem error: {error}"),
             Self::Notify(error) => write!(formatter, "asset watch error: {error}"),
+            Self::RescanRequired => {
+                formatter.write_str("asset watch scope requires a complete source rescan")
+            }
         }
     }
 }
@@ -149,6 +170,12 @@ impl AssetWatchTranslator {
         root: &AssetSourceRoot,
         event: &AssetWatchEvent,
     ) -> Result<Vec<AssetSourceChange>, AssetWatchError> {
+        if event.broad_scope
+            || same_lexical_path(root.root(), event.path())?
+            || event.path().is_dir()
+        {
+            return Err(AssetWatchError::RescanRequired);
+        }
         match event.kind() {
             AssetWatchEventKind::Modified => self
                 .translate_path(root, event.path(), AssetSourceChangeKind::Modified)
@@ -219,6 +246,138 @@ impl AssetWatchTranslator {
         };
         Ok(AssetSourceChange::new(logical, kind))
     }
+}
+
+/// A receipt for a runtime-owned watcher started before Host source-tree reconciliation.
+///
+/// Dropping this receipt cancels its exact replacement watcher and leaves the rescan obligation
+/// intact. The receipt cannot keep native watching alive after runtime shutdown or supersession.
+/// Call `complete` only after reconciliation; the runtime retains events collected during it.
+#[must_use]
+pub struct AssetWatchRescan {
+    world: nara_ecs::world::WorldId,
+    root: PathBuf,
+    session: Weak<Mutex<Option<PendingWatchRescan>>>,
+}
+
+struct PendingWatchRescan {
+    queue: AssetWatchEventQueue,
+    watcher: AssetWatcher,
+}
+
+#[derive(nara_ecs::Resource)]
+struct ActiveWatchRescan(Arc<Mutex<Option<PendingWatchRescan>>>);
+
+impl Drop for ActiveWatchRescan {
+    fn drop(&mut self) {
+        retire_watch_rescan(&self.0);
+    }
+}
+
+impl Drop for AssetWatchRescan {
+    fn drop(&mut self) {
+        if let Some(session) = self.session.upgrade() {
+            retire_watch_rescan(&session);
+        }
+    }
+}
+
+fn retire_watch_rescan(session: &Mutex<Option<PendingWatchRescan>>) {
+    let pending = session
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take();
+    // Release native state outside the session lock, including when the receipt is abandoned.
+    drop(pending);
+}
+
+impl AssetWatchRescan {
+    pub fn begin(
+        world: &mut nara_ecs::World,
+        limits: AssetWatchQueueLimits,
+    ) -> Result<Self, AssetWatchError> {
+        if !world
+            .get_resource::<AssetWatchRuntimeStatus>()
+            .is_some_and(|status| status.requires_rescan())
+        {
+            return Err(AssetWatchError::RescanRequired);
+        }
+        validate_watch_replacement(world)?;
+        world.register_component::<ActiveWatchRescan>();
+        let admission = if world.contains_resource::<ActiveWatchRescan>() {
+            nara_ecs::__private::validate_resource_scope::<ActiveWatchRescan>(world)
+        } else {
+            nara_ecs::__private::validate_resource_insertion::<ActiveWatchRescan>(world)
+        };
+        admission.map_err(|_| AssetWatchError::RescanRequired)?;
+        let root = world
+            .get_resource::<AssetSourceRoot>()
+            .ok_or(AssetWatchError::RescanRequired)?
+            .root()
+            .to_path_buf();
+        let queue = AssetWatchEventQueue::with_limits(limits);
+        let watcher = AssetWatcher::watch_recursive(&root, queue.sender())?;
+        let session = Arc::new(Mutex::new(Some(PendingWatchRescan { queue, watcher })));
+        world.insert_resource(ActiveWatchRescan(Arc::clone(&session)));
+        Ok(Self {
+            world: world.id(),
+            root,
+            session: Arc::downgrade(&session),
+        })
+    }
+
+    /// Acknowledges the Host's completed reconciliation and installs its retained incremental tail.
+    pub fn complete(self, world: &mut nara_ecs::World) -> Result<(), AssetWatchError> {
+        if world.id() != self.world
+            || !world
+                .get_resource::<AssetSourceRoot>()
+                .is_some_and(|root| root.root() == self.root)
+            || !world
+                .get_resource::<AssetWatchRuntimeStatus>()
+                .is_some_and(|status| status.requires_rescan())
+            || !world
+                .get_resource::<ActiveWatchRescan>()
+                .is_some_and(|active| Weak::ptr_eq(&Arc::downgrade(&active.0), &self.session))
+        {
+            return Err(AssetWatchError::RescanRequired);
+        }
+        validate_watch_replacement(world)?;
+        let session = self
+            .session
+            .upgrade()
+            .ok_or(AssetWatchError::RescanRequired)?;
+        let pending = {
+            let mut pending = session
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let replacement = pending.as_ref().ok_or(AssetWatchError::RescanRequired)?;
+            if replacement.queue.stats().rescan_required() {
+                return Err(AssetWatchError::RescanRequired);
+            }
+            pending.take().ok_or(AssetWatchError::RescanRequired)?
+        };
+        world.insert_resource(pending.queue.observer());
+        world.insert_resource(pending.queue);
+        world.insert_resource(pending.watcher);
+        world.insert_resource(AssetWatchRuntimeStatus::default());
+        Ok(())
+    }
+}
+
+fn validate_watch_replacement(world: &mut nara_ecs::World) -> Result<(), AssetWatchError> {
+    fn admit<R: nara_ecs::Resource>(world: &mut nara_ecs::World) -> Result<(), AssetWatchError> {
+        world.register_component::<R>();
+        let result = if world.contains_resource::<R>() {
+            nara_ecs::__private::validate_resource_scope::<R>(world)
+        } else {
+            nara_ecs::__private::validate_resource_insertion::<R>(world)
+        };
+        result.map_err(|_| AssetWatchError::RescanRequired)
+    }
+    admit::<AssetWatchEventQueue>(world)?;
+    admit::<queue::AssetWatchQueueObserver>(world)?;
+    admit::<AssetWatcher>(world)?;
+    admit::<AssetWatchRuntimeStatus>(world)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -315,6 +474,7 @@ impl Plugin for AssetWatchPlugin {
         &self,
         context: &mut nara_app::PluginShutdownContext<'_>,
     ) -> Result<(), PluginError> {
+        context.world_mut().remove_resource::<ActiveWatchRescan>();
         context.world_mut().remove_resource::<AssetWatcher>();
         Ok(())
     }

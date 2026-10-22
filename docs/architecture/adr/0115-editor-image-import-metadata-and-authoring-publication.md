@@ -138,6 +138,13 @@ successor pixels. A successful metadata receipt makes the desired recipe durable
 decode or commit fails; in that case the exact prior accepted pixels remain last-good and
 availability reports the divergence rather than claiming freshness.
 
+The runtime Image owner applies the same separation to watcher/manual reloads. Unresolved metadata
+is retained before the request queue can reject work, while admitted desired settings outlive an
+individual task. Last-good settings are not the desired recipe after a newer metadata observation.
+Prepared Image publication admits the actual value/state association before decode and applies the
+same owned baseline to success, failure, and removal. Replacing either resource or recapturing a
+raw-modified slot does not turn mismatched state into an admitted publication.
+
 Every metadata publication latches one required successor catalog refresh. If a scan is already
 active, the Host retains one coalesced follow-up refresh and runs it after the active scan; the
 in-flight scan cannot consume or erase the publication's refresh obligation.

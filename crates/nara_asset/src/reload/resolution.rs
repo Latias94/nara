@@ -166,7 +166,12 @@ impl AssetReloadResolutionContext<'_> {
             };
 
             dependency_roots.insert(record.stable_id(), record.path().clone());
-            self.resolve_record(record, change.kind());
+            self.resolve_record_observed(
+                record,
+                change.kind(),
+                change.metadata_dirty(),
+                change.metadata_after_removal(),
+            );
         }
 
         for (dependent, source) in
@@ -192,7 +197,19 @@ impl AssetReloadResolutionContext<'_> {
     }
 
     fn resolve_record(&mut self, record: AssetRecord, change_kind: AssetSourceChangeKind) {
-        if let Err(error) = self.enqueue_record(record, change_kind) {
+        self.resolve_record_observed(record, change_kind, false, false);
+    }
+
+    fn resolve_record_observed(
+        &mut self,
+        record: AssetRecord,
+        change_kind: AssetSourceChangeKind,
+        metadata_dirty: bool,
+        metadata_after_removal: bool,
+    ) {
+        if let Err(error) =
+            self.enqueue_record(record, change_kind, metadata_dirty, metadata_after_removal)
+        {
             self.diagnostics
                 .push(source_change_resolution_failure_diagnostic(&error));
         }
@@ -202,6 +219,8 @@ impl AssetReloadResolutionContext<'_> {
         &mut self,
         record: AssetRecord,
         change_kind: AssetSourceChangeKind,
+        metadata_dirty: bool,
+        metadata_after_removal: bool,
     ) -> Result<(), AssetReloadResolutionError> {
         let known_ids = [
             self.asset_server.id_for_path(record.path()),
@@ -252,10 +271,18 @@ impl AssetReloadResolutionContext<'_> {
                 .state(asset_id)
                 .and_then(|state| state.usable_version()),
         );
+        let metadata_dirty = metadata_dirty || change_kind == AssetSourceChangeKind::MetaModified;
+        let removed = change_kind == AssetSourceChangeKind::Removed;
+        if removed && metadata_after_removal {
+            self.states.observe_source_removal(asset_id);
+        }
+        if metadata_dirty {
+            self.states.observe_metadata_change(asset_id);
+        }
         let generation = self.generations.begin_request(asset_id);
-        if change_kind == AssetSourceChangeKind::Removed {
+        if removed && !metadata_after_removal {
             // Source removal revokes derivation authority before optional cleanup is admitted.
-            self.states.invalidate_publication(asset_id);
+            self.states.observe_source_removal(asset_id);
         }
         let image_authority = match (record.source_kind(), self.image_registration) {
             (AssetSourceKind::Image, Some(registration)) => Arc::clone(&registration.authority),

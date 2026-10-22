@@ -63,6 +63,10 @@ Rules:
   not GPU handles.
 - Hot reload updates asset versions and dependency graph state behind stable handles. Render
   backends invalidate and rebuild their GPU resource cache from the prepared asset/resource data.
+- Managed mutation admission binds the actual typed value store and state store before issuing an
+  owned baseline. Success, failure, and removal revalidate that same baseline; unchanged but
+  mismatched resources do not establish publication authority. Raw code-first writes revoke prior
+  managed derivation authority while remaining eligible for their explicit rendering path.
 - Phase 1 can keep file IO and importing synchronous internally, but public load states and exact
   prepare snapshot identity must leave room for async task-pool integration.
 
@@ -177,9 +181,11 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
   loads and failed reloads update asset state without inventing a replacement backend resource.
 - `nara_asset_watch` is the optional desktop filesystem adapter. It owns `notify` and converts raw
   watcher events into `AssetSourceChange` values; asset/import code remains watcher-agnostic.
-- `AssetWatchPlugin` must use the same root as `AssetSourceRoot`. Cross-root rename events preserve
-  the in-root side instead of dropping the whole event, and `.meta` removal maps to source removal
-  rather than ordinary metadata modification.
+- `AssetWatchPlugin` must use the same root as `AssetSourceRoot`. A semantic rename whose file
+  scope is already proven preserves its in-root side across roots. Native notify rename or
+  ambiguous subtree observations retain a full rescan obligation under ADR 0037 instead of
+  claiming complete incremental coverage. `.meta` removal maps to source removal rather than
+  ordinary metadata modification.
 - `nara_sprite_render` resolves sprite/tilemap material data into `SpriteMaterialKey` values
   containing image resource key, sampler, alpha mode, and tint. Sorting and batching use these
   material keys rather than image-resource-only keys.

@@ -34,6 +34,14 @@ Asset import execution belongs to each concrete asset domain. `nara_asset` suppl
 source-change, task-ordering, and stale-publication primitives, but it does not own a generic
 importer registry or erased decoder executor.
 
+Image owns three distinct facts: latest desired settings (or unresolved metadata requirement), the
+current in-flight attempt, and last-good usable pixels. Accepting metadata precedes task admission;
+supersession or task rejection does not discard that desired recipe. Source-only changes continue
+to require current metadata until its successor publication succeeds. Shared asset mutation
+baselines own only store/state association and revision checks. Image retains source identity,
+recipe validation, pixel overlap accounting, and generation policy; TileSet retains dependency and
+layout policy. These common checks do not introduce an importer execution framework.
+
 ```mermaid
 flowchart LR
     Host[Host-authorized immutable source snapshot]

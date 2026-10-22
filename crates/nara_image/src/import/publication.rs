@@ -1,7 +1,7 @@
 use std::fmt::{self, Debug, Formatter};
 
 use nara_asset::{
-    AssetEvents, AssetPath, AssetRecord, AssetServer, AssetSlotRevision, AssetStateError,
+    AssetEvents, AssetMutationBaseline, AssetPath, AssetRecord, AssetServer, AssetStateError,
     AssetStateRevision, AssetStates, AssetVersion, Assets, Handle, ImportArtifactRecord,
     StableAssetId,
 };
@@ -15,63 +15,27 @@ use super::{ImageImportError, ImageImportStage, ImagePublicationFailureKind};
 
 #[derive(Debug, Clone)]
 enum PreviousImageSlot {
-    Vacant(AssetSlotRevision),
+    Vacant,
     Occupied {
-        revision: AssetSlotRevision,
         rgba_bytes: usize,
         retained_pixels: Option<ImageImportPixelLease>,
     },
 }
 
 impl PreviousImageSlot {
-    fn capture_observed(
-        handle: Handle<ImageAsset>,
-        previous: Option<&ImageAsset>,
-        images: &Assets<ImageAsset>,
-    ) -> Self {
-        let revision = images.slot_revision(handle);
+    fn capture_observed(previous: Option<&ImageAsset>) -> Self {
         match previous {
             Some(image) => Self::Occupied {
-                revision,
                 rgba_bytes: image.pixels().len(),
                 retained_pixels: image.shared_import_pixel_lease(),
             },
-            None => Self::Vacant(revision),
+            None => Self::Vacant,
         }
-    }
-
-    fn validate(
-        &self,
-        handle: Handle<ImageAsset>,
-        images: &Assets<ImageAsset>,
-    ) -> Result<(), ImagePublicationFailureKind> {
-        match self {
-            Self::Vacant(expected_revision) => {
-                if images.get(handle).is_some() {
-                    return Err(ImagePublicationFailureKind::AlreadyLoaded);
-                }
-                if &images.slot_revision(handle) != expected_revision {
-                    return Err(ImagePublicationFailureKind::SlotChanged);
-                }
-            }
-            Self::Occupied {
-                revision: expected_revision,
-                ..
-            } => {
-                if images.get(handle).is_none() {
-                    return Err(ImagePublicationFailureKind::ReloadValueMissing);
-                }
-                if &images.slot_revision(handle) != expected_revision {
-                    return Err(ImagePublicationFailureKind::ReloadValueChanged);
-                }
-            }
-        }
-        Ok(())
     }
 
     fn publication_overlap_bytes(&self, budget_host: &ImageImportBudgetHost) -> usize {
         match self {
-            Self::Vacant(_) => 0,
+            Self::Vacant => 0,
             Self::Occupied {
                 rgba_bytes,
                 retained_pixels,
@@ -102,6 +66,7 @@ pub(crate) struct ImagePublicationSnapshot {
     expected_version: AssetVersion,
     expected_state_revision: AssetStateRevision,
     previous_slot: PreviousImageSlot,
+    baseline: AssetMutationBaseline<ImageAsset>,
 }
 
 impl ImagePublicationSnapshot {
@@ -111,7 +76,7 @@ impl ImagePublicationSnapshot {
         expected_version: AssetVersion,
         images: &Assets<ImageAsset>,
         states: &AssetStates,
-    ) -> Self {
+    ) -> Result<Self, ImagePublicationFailureKind> {
         Self::capture_observed(
             source,
             handle,
@@ -129,15 +94,22 @@ impl ImagePublicationSnapshot {
         previous: Option<&ImageAsset>,
         images: &Assets<ImageAsset>,
         states: &AssetStates,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ImagePublicationFailureKind> {
+        if states.version(handle.id()).unwrap_or(AssetVersion::ZERO) != expected_version {
+            return Err(ImagePublicationFailureKind::Stale);
+        }
+        let baseline = images
+            .mutation_baseline(handle, states)
+            .map_err(map_asset_state_error)?;
+        Ok(Self {
             handle,
             source_stable_id: source.stable_id(),
             source_path: source.path().clone(),
             expected_version,
             expected_state_revision: states.state_revision(handle.id()),
-            previous_slot: PreviousImageSlot::capture_observed(handle, previous, images),
-        }
+            previous_slot: PreviousImageSlot::capture_observed(previous),
+            baseline,
+        })
     }
 
     pub(crate) fn capture_with_settings(
@@ -146,7 +118,7 @@ impl ImagePublicationSnapshot {
         expected_version: AssetVersion,
         images: &Assets<ImageAsset>,
         states: &AssetStates,
-    ) -> (Self, Option<ImageImportSettings>) {
+    ) -> Result<(Self, Option<ImageImportSettings>), ImagePublicationFailureKind> {
         let previous = images.get(handle);
         let settings = states
             .state(handle.id())
@@ -154,8 +126,8 @@ impl ImagePublicationSnapshot {
             .and(previous)
             .map(|image| image.source().settings());
         let snapshot =
-            Self::capture_observed(source, handle, expected_version, previous, images, states);
-        (snapshot, settings)
+            Self::capture_observed(source, handle, expected_version, previous, images, states)?;
+        Ok((snapshot, settings))
     }
 
     pub(super) fn admit(
@@ -175,8 +147,7 @@ impl ImagePublicationSnapshot {
             .map_err(ImageImportError::Publication)?;
         self.validate_state(states)
             .map_err(ImageImportError::Publication)?;
-        self.previous_slot
-            .validate(self.handle, images)
+        self.validate_baseline(images, states)
             .map_err(ImageImportError::Publication)?;
         let reserved_overlap_bytes = budget_host.publication_overlap_limit().get();
         let observed = self.previous_slot.publication_overlap_bytes(budget_host);
@@ -225,10 +196,42 @@ impl ImagePublicationSnapshot {
         if current_version != self.expected_version {
             return Err(ImagePublicationFailureKind::Stale);
         }
-        if states.state_revision(self.handle.id()) != self.expected_state_revision {
-            return Err(ImagePublicationFailureKind::StateChanged);
-        }
         Ok(())
+    }
+
+    fn baseline_error(&self, error: AssetStateError) -> ImagePublicationFailureKind {
+        match error {
+            AssetStateError::SlotSuperseded { .. } if self.previous_slot.is_occupied() => {
+                ImagePublicationFailureKind::ReloadValueChanged
+            }
+            AssetStateError::SlotSuperseded { .. } => ImagePublicationFailureKind::SlotChanged,
+            error => map_asset_state_error(error),
+        }
+    }
+
+    fn validate_baseline(
+        &self,
+        images: &Assets<ImageAsset>,
+        states: &AssetStates,
+    ) -> Result<(), ImagePublicationFailureKind> {
+        if self.previous_slot.is_occupied() && images.get(self.handle).is_none() {
+            return Err(ImagePublicationFailureKind::ReloadValueMissing);
+        }
+        if !self.previous_slot.is_occupied() && images.get(self.handle).is_some() {
+            return Err(ImagePublicationFailureKind::AlreadyLoaded);
+        }
+        self.baseline
+            .validate(images, states)
+            .map_err(|error| self.baseline_error(error))
+    }
+
+    pub(crate) fn mutation(
+        &self,
+        images: &Assets<ImageAsset>,
+        states: &AssetStates,
+    ) -> Result<AssetMutationBaseline<ImageAsset>, ImagePublicationFailureKind> {
+        self.validate_baseline(images, states)?;
+        Ok(self.baseline.clone())
     }
 
     pub(crate) fn is_current(
@@ -239,7 +242,7 @@ impl ImagePublicationSnapshot {
     ) -> bool {
         self.validate_binding(asset_server).is_ok()
             && self.validate_state(states).is_ok()
-            && self.previous_slot.validate(self.handle, images).is_ok()
+            && self.validate_baseline(images, states).is_ok()
     }
 
     pub(crate) fn matches_previous_state(
@@ -252,7 +255,7 @@ impl ImagePublicationSnapshot {
         self.validate_binding(asset_server).is_ok()
             && self.expected_version == expected_version
             && previous_state_revision == Some(&self.expected_state_revision)
-            && self.previous_slot.validate(self.handle, images).is_ok()
+            && self.baseline.slot_matches(images)
     }
 }
 
@@ -403,36 +406,23 @@ fn commit_published_image(
         return Err(ImagePublicationFailureKind::TargetMismatch);
     }
     snapshot.validate_state(states)?;
-    snapshot.previous_slot.validate(snapshot.handle, images)?;
+    snapshot.validate_baseline(images, states)?;
 
-    let handle = snapshot.handle;
-    let expected_version = snapshot.expected_version;
     let source_hash = image.source().source_hash();
     let artifact_hash = image.source().artifact().key().digest();
-    if snapshot.previous_slot.is_occupied() {
-        images
-            .commit_reload(
-                handle,
-                expected_version,
-                image,
-                states,
-                events,
-                Some(source_hash),
-                Some(artifact_hash),
-            )
-            .map_err(map_asset_state_error)
-    } else {
-        images
-            .commit_loaded(
-                handle,
-                image,
-                states,
-                events,
-                Some(source_hash),
-                Some(artifact_hash),
-            )
-            .map_err(map_asset_state_error)
-    }
+    let version = snapshot
+        .mutation(images, states)?
+        .commit_loaded(
+            image,
+            images,
+            states,
+            events,
+            Some(source_hash),
+            Some(artifact_hash),
+        )
+        .map_err(map_asset_state_error)?;
+    states.acknowledge_metadata_publication(snapshot.handle.id());
+    Ok(version)
 }
 
 impl Debug for ImageImportedAsset {
@@ -455,5 +445,8 @@ fn map_asset_state_error(error: AssetStateError) -> ImagePublicationFailureKind 
         AssetStateError::UnknownAsset { .. } => ImagePublicationFailureKind::UnknownAsset,
         AssetStateError::VersionExhausted { .. } => ImagePublicationFailureKind::VersionExhausted,
         AssetStateError::StaleReload { .. } => ImagePublicationFailureKind::Stale,
+        AssetStateError::StorageMismatch { .. } => ImagePublicationFailureKind::TargetMismatch,
+        AssetStateError::SlotSuperseded { .. } => ImagePublicationFailureKind::SlotChanged,
+        AssetStateError::MutationSuperseded { .. } => ImagePublicationFailureKind::StateChanged,
     }
 }

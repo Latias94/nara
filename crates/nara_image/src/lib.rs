@@ -1,8 +1,6 @@
 //! Backend-neutral image assets and PNG-first importing.
 
 // Bevy derives resolve this path; Nara's ECS facade remains the actual dependency.
-extern crate nara_ecs as bevy_ecs;
-
 mod asset;
 mod budget;
 mod content;

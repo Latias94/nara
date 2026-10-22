@@ -737,7 +737,8 @@ impl ImageImporter {
             expected_version,
             images,
             states,
-        );
+        )
+        .map_err(ImageImportError::Publication)?;
         self.admit_file_with_snapshot(request, publication, asset_server, images, states)
     }
 
@@ -793,6 +794,7 @@ impl ImageImporter {
         check_encoded_limit(self.limits, source_bytes.len())?;
         let publication =
             ImagePublicationSnapshot::capture(&source, handle, expected_version, images, states)
+                .map_err(ImageImportError::Publication)?
                 .admit(&source, asset_server, images, states, &self.budget_host)?;
         let charge = ImageImportCharge::admission(
             source_bytes.len(),

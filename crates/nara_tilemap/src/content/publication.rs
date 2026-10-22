@@ -4,8 +4,8 @@ use std::{
 };
 
 use nara_asset::{
-    Asset, AssetEvents, AssetRecord, AssetServer, AssetSlotRevision, AssetStateRevision,
-    AssetStates, AssetVersion, Assets, Handle, ProjectAssetDatabase, SourceHash,
+    Asset, AssetEvents, AssetMutationBaseline, AssetRecord, AssetServer, AssetStates, AssetVersion,
+    Assets, Handle, ProjectAssetDatabase, SourceHash,
 };
 use nara_image::{ImageAsset, ImageContentSnapshot};
 
@@ -83,10 +83,9 @@ impl TileSetPublicationInput {
     }
 }
 
-struct SlotGuard<T> {
+struct SlotGuard<T: Asset> {
     handle: Handle<T>,
-    slot: AssetSlotRevision,
-    state: AssetStateRevision,
+    baseline: AssetMutationBaseline<T>,
     next_version: AssetVersion,
 }
 
@@ -98,8 +97,9 @@ impl<T: Asset> SlotGuard<T> {
     ) -> Result<Self, TileSetAssetError> {
         Ok(Self {
             handle,
-            slot: assets.slot_revision(handle),
-            state: states.state_revision(handle.id()),
+            baseline: assets
+                .mutation_baseline(handle, states)
+                .map_err(TileSetAssetError::State)?,
             next_version: states
                 .next_version(handle.id())
                 .map_err(TileSetAssetError::State)?,
@@ -107,16 +107,9 @@ impl<T: Asset> SlotGuard<T> {
     }
 
     fn assert_current(&self, assets: &Assets<T>, states: &AssetStates) {
-        assert_eq!(
-            assets.slot_revision(self.handle),
-            self.slot,
-            "prepared TileSet storage changed"
-        );
-        assert_eq!(
-            states.state_revision(self.handle.id()),
-            self.state,
-            "prepared TileSet state changed"
-        );
+        self.baseline
+            .validate(assets, states)
+            .expect("prepared TileSet value/state association changed");
         assert_eq!(
             states
                 .next_version(self.handle.id())
@@ -379,8 +372,9 @@ impl PreparedTileSetPublications<'_> {
             .collect::<Vec<_>>();
         // Explicit, source-scoped unload removes the desired entry, so TaskUpdate cannot revive it.
         for retirement in self.retirements {
-            tilesets
-                .remove_with_state(retirement.handle, states, events)
+            retirement
+                .baseline
+                .remove(tilesets, states, events)
                 .expect("prepared TileSet retirement version remains available");
             self.owner.entries.remove(&retirement.handle.id());
         }
@@ -410,8 +404,10 @@ impl PreparedTileSetPublications<'_> {
                 .into_tileset(image_handle)
                 .expect("prepared TileSet source remains valid")
                 .with_image_content(image.clone());
-            tilesets
-                .commit_loaded(handle, tileset, states, events, Some(source_hash), None)
+            prepared
+                .guard
+                .baseline
+                .commit_loaded(tileset, tilesets, states, events, Some(source_hash), None)
                 .expect("prepared TileSet publication version remains available");
             let observation = DependencyObservation {
                 record: Some(nara_asset::AssetRecord::new(

@@ -51,7 +51,9 @@ pub use state::{
     AssetEvents, AssetPublicationRevision, AssetState, AssetStateError, AssetStateRevision,
     AssetStates, AssetVersion, LoadState,
 };
-pub use storage::{Asset, AssetSlotRevision, Assets, Handle, allocate_anonymous_handle};
+pub use storage::{
+    Asset, AssetMutationBaseline, AssetSlotRevision, Assets, Handle, allocate_anonymous_handle,
+};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum AssetRefExportPolicy {

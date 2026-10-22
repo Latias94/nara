@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Amended**: 2026-10-23 for managed mutation baselines, retained desired observations and owned rescan
 **Refines**: ADR 0033: Asset Import and Render Resource Preparation Seam
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0050: Asset Root,
 Symlink, Junction, and Package Trust Policy; ADR 0051: Persistent File Envelope, Migration, and
@@ -62,6 +63,28 @@ The first lifetime policy is:
   removal without losing an earlier metadata change.
 - Each reload request carries expected asset version and load generation. Domain apply systems must
   reject stale results.
+- Metadata observations remain unresolved in the owning state until current desired metadata has
+  published successfully. Retention precedes request queue admission, so rejection, supersession,
+  decode failure, and a later source-only edit cannot silently restore last-good settings.
+  Retained Image recipes bind the publication, value slot and latest metadata observation from
+  which they were admitted. A later successful public importer publication supersedes that recipe;
+  a new metadata observation invalidates an older task even before another request is admitted.
+  Source-removal revocation is retained before request admission, including when no usable pixels
+  exist yet. A rejected cleanup request cannot let stale desired settings reauthorize a source-only
+  recreation; recovery requires the existing exact receipt or explicit current metadata admission.
+  A metadata observation after the latest removal is retained even if its request is rejected;
+  a later source-only request may retry full metadata identity/settings admission. Observations
+  preceding that removal do not grant this recovery path. Loading/failure transitions preserve
+  the relative observation fact without treating it as publication authority.
+  Source-event coalescing retains the latest metadata/removal order as well as latest existence
+  and metadata dirtiness. Same-frame batching and individual admission preserve the same fact;
+  collapsing both orders to a single dirty boolean is insufficient.
+- `Assets<T>::mutation_baseline` admits the actual value/state association, including a fresh empty
+  initial slot, before capturing state and slot revisions. Both resources retain their association;
+  replacing either resource, empty-slot ABA, or a raw slot write requires an explicit owner
+  re-admission rather than a new baseline that legitimizes the mismatch. The owned baseline is
+  consumed by success, failure, or removal. Synchronous `Assets<T>` owner operations remain explicit
+  current writes; they cannot validate a delayed predecessor merely by checking its numeric version.
 - Image reload registration supplies its Rust type check and first claim to source routing. An incompatible
   principal claim produces a bounded diagnostic before generation, state or event mutation.
   Routing secures the claim before publishing Loading; requests still carry identity only.
@@ -81,6 +104,14 @@ The first lifetime policy is:
   using a verified mounted artifact even when no authoring tree is present.
 - Source-change translation or scheduling failures produce structured diagnostics; they must not be
   silently dropped.
+- Notify directory, unknown, ambiguous rename, and overflow observations create a sticky rescan
+  obligation. Draining or reporting `RescanRequired` does not complete it. `AssetWatchRescan` starts
+  a replacement watcher before Host reconciliation. A private runtime resource owns that watcher
+  and its incremental tail; the Host holds only a weak confirmation/cancellation receipt. Dropping
+  the receipt, superseding its session, or plugin shutdown retires that exact replacement watcher.
+  A retained Host receipt cannot keep it alive after shutdown. Only the current World-bound receipt
+  may acknowledge completed reconciliation and install the new queue; abandonment or overflow
+  during reconciliation leaves the obligation outstanding. No scan executes in a watcher callback.
 - Prepared render resources are backend-neutral cache entries. Backend-native GPU objects remain in
   backend caches and are invalidated from prepared resource identity/version changes.
 

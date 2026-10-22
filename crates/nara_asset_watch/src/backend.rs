@@ -5,8 +5,9 @@ use std::{
 
 use nara_ecs::Resource;
 use notify::{
-    Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher, event::ModifyKind,
-    event::RenameMode,
+    Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
+    event::ModifyKind,
+    event::{CreateKind, RemoveKind},
 };
 
 use crate::{AssetWatchError, AssetWatchEvent, queue::AssetWatchEventSender};
@@ -14,6 +15,8 @@ use crate::{AssetWatchError, AssetWatchEvent, queue::AssetWatchEventSender};
 #[derive(Resource)]
 pub struct AssetWatcher {
     watcher: Option<RecommendedWatcher>,
+    #[cfg(test)]
+    callback_lifetime: std::sync::Weak<()>,
 }
 
 impl AssetWatcher {
@@ -21,9 +24,17 @@ impl AssetWatcher {
         root: impl AsRef<Path>,
         sender: AssetWatchEventSender,
     ) -> Result<Self, AssetWatchError> {
-        let mut watcher = notify::recommended_watcher(move |result| match result {
-            Ok(event) => admit_notify_event(&sender, event),
-            Err(_) => sender.record_backend_failure(),
+        #[cfg(test)]
+        let callback_lifetime = std::sync::Arc::new(());
+        #[cfg(test)]
+        let callback_observer = std::sync::Arc::downgrade(&callback_lifetime);
+        let mut watcher = notify::recommended_watcher(move |result| {
+            #[cfg(test)]
+            let _callback_lifetime = &callback_lifetime;
+            match result {
+                Ok(event) => admit_notify_event(&sender, event),
+                Err(_) => sender.record_backend_failure(),
+            }
         })
         .map_err(|error| AssetWatchError::Notify(error.to_string()))?;
         watcher
@@ -31,6 +42,8 @@ impl AssetWatcher {
             .map_err(|error| AssetWatchError::Notify(error.to_string()))?;
         Ok(Self {
             watcher: Some(watcher),
+            #[cfg(test)]
+            callback_lifetime: callback_observer,
         })
     }
 
@@ -41,6 +54,11 @@ impl AssetWatcher {
     #[must_use]
     pub fn is_running(&self) -> bool {
         self.watcher.is_some()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn callback_lifetime(&self) -> std::sync::Weak<()> {
+        self.callback_lifetime.clone()
     }
 }
 
@@ -58,37 +76,25 @@ pub(crate) fn watch_events_from_notify(event: Event) -> Result<Vec<AssetWatchEve
         return Err(());
     }
     match event.kind {
-        EventKind::Remove(_) if !event.paths.is_empty() => Ok(event
+        EventKind::Remove(RemoveKind::File) if !event.paths.is_empty() => Ok(event
             .paths
             .into_iter()
             .map(AssetWatchEvent::removed)
             .collect()),
-        EventKind::Modify(ModifyKind::Name(RenameMode::Both)) if event.paths.len() == 2 => {
-            Ok(vec![AssetWatchEvent::renamed(
-                event.paths[0].clone(),
-                event.paths[1].clone(),
-            )])
-        }
-        EventKind::Modify(ModifyKind::Name(RenameMode::From)) if !event.paths.is_empty() => {
+        // Notify rename events do not prove file scope. A removed directory cannot be statted.
+        EventKind::Modify(ModifyKind::Name(_)) => Err(()),
+        EventKind::Create(CreateKind::File) | EventKind::Modify(ModifyKind::Data(_))
+            if !event.paths.is_empty() =>
+        {
             Ok(event
                 .paths
                 .into_iter()
-                .map(AssetWatchEvent::removed)
+                .map(AssetWatchEvent::modified)
                 .collect())
         }
-        EventKind::Modify(ModifyKind::Name(RenameMode::To)) if !event.paths.is_empty() => Ok(event
-            .paths
-            .into_iter()
-            .map(AssetWatchEvent::modified)
-            .collect()),
-        EventKind::Modify(ModifyKind::Name(_)) => Err(()),
-        EventKind::Create(_) | EventKind::Modify(_) if !event.paths.is_empty() => Ok(event
-            .paths
-            .into_iter()
-            .map(AssetWatchEvent::modified)
-            .collect()),
         EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => Err(()),
-        _ => Ok(Vec::new()),
+        EventKind::Access(_) => Ok(Vec::new()),
+        EventKind::Any | EventKind::Other => Err(()),
     }
 }
 
