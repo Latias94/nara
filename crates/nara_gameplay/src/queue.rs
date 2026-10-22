@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, num::NonZeroU64};
 
+use nara_app::{RuntimeFaultReporter, RuntimeGeneration};
 use nara_core::{ByteLimit, ItemLimit};
 use nara_ecs::Resource;
 use thiserror::Error;
@@ -199,6 +200,8 @@ pub enum GameplayCommandLifecycleError {
     BatchAlreadyActive,
     #[error("the gameplay command batch does not match the active tick")]
     BatchTickMismatch,
+    #[error("the gameplay command batch did not complete successful execution")]
+    BatchExecutionFailed,
     #[error("gameplay command retained accounting is inconsistent")]
     AccountingInvariant,
     #[error("the next gameplay command lifecycle tick cannot be represented")]
@@ -239,6 +242,14 @@ pub struct GameplayCommandBatch {
     active_tick: Option<GameplayCommandTick>,
     commands: Vec<GameplayCommandEnvelope>,
     logical_bytes: usize,
+    execution: Option<BatchExecution>,
+}
+
+#[derive(Debug)]
+struct BatchExecution {
+    generation: RuntimeGeneration,
+    faults: RuntimeFaultReporter,
+    consumption_completed: bool,
 }
 
 impl GameplayCommandBatch {
@@ -247,6 +258,7 @@ impl GameplayCommandBatch {
             active_tick: None,
             commands: Vec::new(),
             logical_bytes: 0,
+            execution: None,
         }
     }
 
@@ -279,6 +291,53 @@ impl GameplayCommandBatch {
         self.logical_bytes
     }
 
+    pub(crate) fn bind_execution(
+        &mut self,
+        generation: RuntimeGeneration,
+        faults: RuntimeFaultReporter,
+    ) {
+        self.execution = Some(BatchExecution {
+            generation,
+            faults,
+            consumption_completed: false,
+        });
+    }
+
+    pub(crate) fn execution_is_current(
+        &self,
+        generation: RuntimeGeneration,
+        tick: u64,
+        world_reporter: Option<&RuntimeFaultReporter>,
+    ) -> bool {
+        self.active_tick.is_some_and(|active| active.get() == tick)
+            && self.execution.as_ref().is_some_and(|execution| {
+                execution.generation == generation
+                    && execution
+                        .faults
+                        .__validate_world_reporter(world_reporter)
+                        .is_ok()
+            })
+    }
+
+    pub(crate) fn complete_consumption(&mut self) {
+        if let Some(execution) = &mut self.execution {
+            execution.consumption_completed = true;
+        }
+    }
+
+    pub(crate) fn consumption_succeeded(
+        &self,
+        generation: RuntimeGeneration,
+        tick: u64,
+        world_reporter: Option<&RuntimeFaultReporter>,
+    ) -> bool {
+        self.execution_is_current(generation, tick, world_reporter)
+            && self
+                .execution
+                .as_ref()
+                .is_some_and(|execution| execution.consumption_completed)
+    }
+
     fn activate(
         &mut self,
         tick: GameplayCommandTick,
@@ -288,16 +347,19 @@ impl GameplayCommandBatch {
         self.active_tick = Some(tick);
         self.commands = commands;
         self.logical_bytes = logical_bytes;
+        self.execution = None;
     }
 
     fn retire(&mut self) {
         self.active_tick = None;
         self.commands.clear();
         self.logical_bytes = 0;
+        self.execution = None;
     }
 
     fn quarantine(&mut self) -> (Vec<GameplayCommandEnvelope>, usize) {
         self.active_tick = None;
+        self.execution = None;
         let commands = std::mem::take(&mut self.commands);
         let logical_bytes = std::mem::replace(&mut self.logical_bytes, 0);
         (commands, logical_bytes)
@@ -335,7 +397,8 @@ struct GameplayCommandCounters {
 /// Producers submit local semantic actions in `PreUpdate` or explicit replay/AI/external commands
 /// before the engine-owned admission stage. The queue retains accepted intent across zero-tick
 /// frames.
-/// `Admit` moves one tick into `GameplayCommandBatch`; `Acknowledge` retires it after replay capture.
+/// `Admit` moves one tick into `GameplayCommandBatch`; `Acknowledge` retires it after successful
+/// consumption and replay capture. Managed execution failure quarantines the unacknowledged batch.
 /// A lifecycle fault terminally poisons ingress, hides the public batch, and moves any admitted
 /// envelopes into a queue-owned quarantine for inspection. Rejections and numeric statistics are
 /// observable without logging. U31 owns the optional bridge into runtime diagnostics and pressure
@@ -734,6 +797,11 @@ impl GameplayCommandQueue {
             return self.invalidate_batch(batch, GameplayCommandLifecycleError::ZeroTick);
         };
         self.acknowledge_tick(tick, batch)
+    }
+
+    pub(crate) fn fail_batch_execution(&mut self, batch: &mut GameplayCommandBatch) {
+        let _: Result<(), _> =
+            self.invalidate_batch(batch, GameplayCommandLifecycleError::BatchExecutionFailed);
     }
 
     fn reject<T>(

@@ -390,6 +390,13 @@ operation result: Pending | Applied | Failed
   runtime to `Faulted`; they are not discarded or represented only by logs.
 - A system or service fault may occur after partial runtime mutation. Nara does not claim in-place
   rollback. The failed generation is observed and discarded through normal close.
+- Managed system errors are recorded synchronously, but the returning error handler does not abort
+  the active schedule. Eligible later systems and deferred commands can still produce visible
+  effects before the managed schedule boundary returns failure. Success-sensitive domain effects
+  require their own exact operation check. ADR 0057 binds Gameplay consumption completion to one
+  admitted generation/tick and gates Capture and acknowledgement after the relevant deferred
+  boundaries; failure retains unacknowledged commands and requires explicit close/reconstruction,
+  with no rollback or automatic replay.
 - Panic recovery is not part of this decision. A future panic-containment contract must state
   unwind, process-abort, thread, native callback, and invariant consequences explicitly.
 - Logs and tracing may mirror runtime faults but are not the queryable source of truth.

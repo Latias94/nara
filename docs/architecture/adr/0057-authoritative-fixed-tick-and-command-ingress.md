@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-10
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-10-23
 **Refines**: ADR 0023: Event, Message, and Command Model; ADR 0024: Determinism,
 Fixed Update, and Replay Policy; ADR 0036: Event, Message, and Resource Queue Lifetime;
 ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0056: Headless Runtime
@@ -50,9 +50,10 @@ sequenceDiagram
     Note over Queue: Fixed Prepare(T) closes admission through T
     Queue->>Batch: move commands for T in canonical key order
     Batch->>Simulation: immutable view in Consume
-    Batch->>Replay: immutable view in Capture
-    Replay-->>Queue: Capture stage completes
-    Queue->>Batch: acknowledge and retire T
+    Note over Simulation,Replay: Join consumption and its deferred effects; require exact batch success
+    Batch->>Replay: immutable view in Capture, only after consumption succeeds
+    Replay-->>Queue: Capture and its deferred effects complete without fault
+    Queue->>Batch: acknowledge and retire T only on success
     Note over Queue,Batch: count/byte reservation is released only now
 ```
 
@@ -108,7 +109,7 @@ The public fixed sets are ordered as follows:
 PreUpdate: ResolveActions -> MapLocalActions (target closed_through + 1)
 Fixed Prepare: Admit
 Fixed Simulate: Consume
-Fixed Finalize: Capture -> Acknowledge
+Fixed Finalize: CompleteConsumption -> Capture -> Acknowledge
 Update / Last: no gameplay command cleanup
 ```
 
@@ -128,6 +129,48 @@ consumer can observe it. `Consume` and `Capture` are gated on a current healthy 
 not execute after admission failure or against a stale batch. Pending and quarantined commands stay
 retained and budgeted; there is no in-place recovery or acknowledgement path. The owning runtime
 must be discarded and rebuilt from a known-good boundary.
+
+### Successful execution and finalization
+
+Tick membership alone is not completion evidence. Admission binds the active batch to its managed
+`RuntimeGeneration`, exact authoritative tick and a retained `RuntimeFaultReporter` captured from
+the App when the plugin configures its lifecycle systems, before schedule execution can replace
+the World resource.
+Every activation clears the preceding batch's consumption-completion state; retirement and
+quarantine clear it as well. A report from an older generation or completion of an older batch
+cannot authorize a successor. Retaining the admission's reporter also prevents a later replacement
+of the World resource from hiding faults already routed to that reporter. Success gates also
+validate the current World reporter's identity against that retained owner. Missing or replaced
+reporters reject success even if the replacement has no fault or reports directly and returns
+normally; the retained owner records the authority fault. App continues to own complete fault-bridge
+and mutation-epoch validation at managed boundaries.
+
+An engine-owned `CompleteConsumption` operation begins in Finalize after all Simulate systems and
+their ordinary deferred commands have completed. It requires the matching admitted generation and
+tick, plus no earlier fault on that admission's reporter, before recording successful consumption.
+`Capture` requires that exact completion and a still-healthy reporter. A member's declared run
+condition may skip work without failing the batch; success is defined for the configured eligible
+work, not as proof that every possible business handler ran.
+
+`Acknowledge` runs after Capture and its ordinary deferred commands and rechecks the same batch
+completion and reporter before retiring commands. A consumer system, its run condition or its
+deferred command failing at error severity therefore prevents Capture and acknowledgement. An
+error during Capture prevents acknowledgement but cannot undo capture side effects already made.
+Warnings and intentional skips follow the ordinary managed schedule policy and do not become
+batch failures.
+
+An execution failure terminally poisons the queue with `BatchExecutionFailed`, quarantines the
+unacknowledged active commands and retains pending commands and all their budget reservations.
+The original structured runtime fault stays primary. No later drive automatically repeats the
+partially executed batch. Stop remains available; resuming gameplay requires the existing explicit
+Host close/restart/reconstruction policy from ADR 0084.
+
+This is domain finalization, not an intra-schedule abort or a transaction over World/native state.
+The managed error handler returns to the executor: later consumers, other eligible systems and
+deferred effects may still execute after an error, and their effects remain visible. Gameplay joins
+those effects before its success checks; it does not roll them back. Capture peers are similarly
+not aborted when another Capture member fails. An unrelated fault after acknowledgement does not
+retroactively reverse an already completed batch.
 
 `GameplayCommandPlugin` bridges engine-owned action-mapping loss and Admit/Acknowledge lifecycle
 failure into the current App-owned `RuntimeFaultReporter` before a managed frame or exact step can
@@ -191,7 +234,7 @@ must collect and sort a bounded batch before calling ingress.
 | Resource | Producer | Consumer | Retention and cleanup | Replay/diagnostic role |
 |---|---|---|---|---|
 | `GameplayCommandQueue` | Engine-owned local action mapper and explicit test/replay/AI/external adapters | `Admit` system | Accepted intent remains until its target tick is acknowledged; overload rejects rather than evicts; terminal poison retains pending plus quarantined work until runtime disposal | Typed rejection, lifecycle-fault, quarantine, and numeric stats are the U4 observation surface; U31 bridges them to runtime diagnostics/pressure |
-| `GameplayCommandBatch` | `Admit` at fixed Prepare | Simulation in current-gated `Consume`, replay/debug taps in current-gated `Capture` | Exactly one healthy active tick, including an empty batch; engine-owned `Acknowledge` retires after Capture; poison hides and quarantines the batch | Canonical replay capture point; not a frame event and not read after fixed Finalize |
+| `GameplayCommandBatch` | `Admit` at fixed Prepare | Simulation in current-gated `Consume`, replay/debug taps in success-gated `Capture` | Exactly one admitted generation/tick, including an empty batch; `Acknowledge` retires only after successful consumption and Capture/deferred completion; poison hides and quarantines the batch | Canonical replay capture point; not a frame event and not read after fixed Finalize |
 
 ## Alternatives Considered
 
@@ -237,8 +280,8 @@ transport requirement that justifies the complexity.
 ## Consequences
 
 - Fixed gameplay consumers must join `GameplayCommandSet::Consume`; replay/debug taps join
-  `GameplayCommandSet::Capture`. Both sets execute only while the batch belongs to the current
-  healthy tick.
+  `GameplayCommandSet::Capture`. Consume requires current healthy admission; Capture additionally
+  requires successful consumption of that exact batch, including the Simulate deferred boundary.
 - `CoreStage::Last` no longer owns gameplay command cleanup.
 - Public producers use `GameplayCommandIngressSource`; they cannot impersonate the reserved local
   action stream. `ActionCommandMap::bind` and `bind_action` are fallible at the binding limit.
@@ -264,6 +307,7 @@ transport requirement that justifies the complexity.
 | Invalid ingress | Zero tick/sequence, invalid IDs/targets, NaN/Inf, late, future, and duplicate submissions are rejected without partial retention | Constructor, serde, and queue tests |
 | Lifecycle ownership | Capture observes a current healthy batch before Ack; a fault is sticky, quarantines active work, and gates consumers; no command cleanup system exists in `CoreStage::Last` | Schedule, poison, and stale-contract checks |
 | Runtime fault bridge | Engine-owned mapping/Admit/Acknowledge failure faults the current generation before success, while producer-visible validation/policy rejection does not | Managed runtime integration tests |
+| Success-dependent finalization | Consumer/deferred failure leaves later effects visible while skipping Capture and Ack; Capture failure prevents Ack; successful batches acknowledge once and old completion cannot authorize a successor; Stop remains reachable | Gameplay failure-trajectory and renamed-root schedule extension tests |
 
 ## Risks and Mitigations
 

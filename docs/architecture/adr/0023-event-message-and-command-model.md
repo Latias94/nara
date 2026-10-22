@@ -22,6 +22,10 @@ Rules:
 - Use `bevy_ecs` message/event mechanisms as the substrate where possible.
 - Events/messages are transient frame or fixed-step data, not persistent scene state.
 - Commands mutate the ECS world at explicit schedule boundaries.
+- Schedule ordering and deferred application do not prove that an operation succeeded. A managed
+  system error records a sticky fault but can leave later systems and queued commands eligible to
+  run. Success-sensitive domain publication and acknowledgement must check that exact operation;
+  ADR 0057 owns this policy for the authoritative gameplay batch.
 - Editor and tooling operations should compile down to validated command/patch operations, not direct private storage mutation.
 - Asset/scene/physics/input subsystems publish typed messages with documented lifetime.
 - Persistent intent belongs in components/resources; transient observations belong in events/messages.

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "fd47d0f13d5180a63b96a90cb738b05a2f811bf9179f78a2ee93717548a3a981"
+source_fingerprint: "d8c48d1cd8d9abe610f1560bd0550d82903322ae7b6a226bf1319af6e9e56b15"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "fd47d0f13d5180a63b96a90cb738b05a2f811bf9179f78a2ee93717548a
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `fd47d0f13d5180a63b96a90cb738b05a2f811bf9179f78a2ee93717548a3a981`
-- Immutable records: 840
+- Source fingerprint: `d8c48d1cd8d9abe610f1560bd0550d82903322ae7b6a226bf1319af6e9e56b15`
+- Immutable records: 841
 - Active lane heads: 2
 
 # Active Registrations
@@ -68,6 +68,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [U10 exact gameplay batch success and reporter identity](verification/2026-10/2026-10-22T193136Z-u10-exact-gameplay-batch-success-and-reporter-identity-380c336814b2450abe14023d43cf6253.md) - Success-dependent Capture and Ack join exact generation/tick execution and reporter authority after deferred effects.
 - **Verification Evidence**: [U3 owned file lock capabilities on Windows and Linux](verification/2026-10/2026-10-22T192527Z-u3-owned-file-lock-capabilities-on-windows-and-linux-3ffaeab4142942bd9e4761ce4cf19af4.md) - Unique release owner and borrowed positional readers pass native FS suites plus root persistence and repair consumers.
 - **Verification Evidence**: [U6 typed codec and U8 identity consumer qualification](verification/2026-10/2026-10-22T191516Z-u6-typed-codec-and-u8-identity-consumer-qualification-0c76d56bc4b040118283f1024fe2b788.md) - Typed registry closure and installed identity operations pass owning suites and the independent durable workflow.
 - **Work Progress**: [Low-level implementation integration checkpoint](progress/2026-10/2026-10-22T190500Z-low-level-implementation-integration-checkpoint-536737a5326142e5b1376e520fb0fe30.md) - U1 U2 U7 U9 committed; owned locks identity typed codecs and spatial/gameplay implementations are being qualified serially.
@@ -79,7 +80,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Low-level contract redesign research and independent challenge](progress/2026-10/2026-10-22T165457Z-low-level-contract-redesign-research-and-independent-challenge-ea78e11f9cd34f21a77c8eda0239f9ac.md) - Proposed owner-preserving transfers, phase spatial snapshots, owned locks, asset intent and typed codecs; source-confirmed gaps and consumer migrations.
 - **Verification Evidence**: [Engine workflow refactor final integration](verification/2026-10/2026-10-22T130424Z-engine-workflow-refactor-final-integration-ac0a299fafd64a6dba6179531a1f5cff.md) - Final U1-U9 owner, public-consumer, Editor and compilation evidence with bounded review outcomes.
 - **Verification Evidence**: [Workflow refactor recovery and review corrections](verification/2026-10/2026-10-22T114555Z-workflow-refactor-recovery-and-review-corrections-43dfe5955a684108a8a65dab7aee5ed3.md) - Host cleanup regression verified; independent review corrections and remaining acceptance.
-- **Verification Evidence**: [Engine workflow refactor first cohort and remaining work](verification/2026-10/2026-10-22T044816Z-engine-workflow-refactor-first-cohort-and-remaining-work-758750f01ab241ceab2128c8d24183b2.md) - U1 U2 U3 U4 U9 implementation evidence before native Scene and authoring extensions.
 
 # Integration Notes
 

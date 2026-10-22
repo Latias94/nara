@@ -474,6 +474,23 @@ impl RuntimeFaultReporter {
         Arc::ptr_eq(&self.cell, &reporter.cell)
     }
 
+    /// Checks the current World reporter against a domain's retained admission reporter.
+    ///
+    /// Missing or replaced reporters record an authority fault on the retained reporter, even
+    /// when the replacement has no fault. This checks reporter identity and sticky fault state;
+    /// App still owns validation of the complete fault bridge and its mutation epoch.
+    #[doc(hidden)]
+    pub fn __validate_world_reporter(&self, current: Option<&Self>) -> Result<(), RuntimeFault> {
+        if let Some(fault) = self.fault() {
+            return Err(fault);
+        }
+        if current.is_some_and(|reporter| self.has_authority(reporter)) {
+            Ok(())
+        } else {
+            Err(record_runtime_fault_bridge_authority_fault(self))
+        }
+    }
+
     /// Records the first fault and returns whether this call won that race.
     pub fn report(&self, fault: RuntimeFault) -> bool {
         let _state = lock_unpoisoned(&self.cell.state);

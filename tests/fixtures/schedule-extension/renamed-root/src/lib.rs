@@ -10,8 +10,9 @@ mod tests {
 
     use engine::{
         app::{
-            App, CoreStage, FixedTime, FixedUpdateSet, RuntimeFaultKind, RuntimeFaultReporter,
-            RuntimeInstance, RuntimeScheduleError, RealTime,
+            App, CoreStage, FixedTime, FixedUpdateSet, RealTime, RuntimeControl,
+            RuntimeControlRequestResult, RuntimeControlStatus, RuntimeFaultKind, RuntimeFaultReporter,
+            RuntimeInstance, RuntimeScheduleError, RuntimeState,
         },
         ecs::{
             Commands, Component, Query, Res, ResMut, Resource, ScheduleLabel, SystemSet,
@@ -311,6 +312,102 @@ mod tests {
         assert_eq!(failure.fault().kind(), RuntimeFaultKind::System);
         assert_eq!(APP_POLICY_ERRORS.load(Ordering::SeqCst), 0);
         assert_eq!(app.fault(), Some(failure.fault()));
+    }
+
+    #[derive(Debug, Default, Resource)]
+    struct ConsumerFaultEffects {
+        consumers: Vec<u64>,
+        captures: Vec<u64>,
+    }
+
+    fn fail_second_consume(fixed: Res<FixedTime>) -> Result<(), BevyError> {
+        if fixed.tick() == 2 {
+            Err(BevyError::error(FixtureSystemError))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn record_later_consume(
+        fixed: Res<FixedTime>,
+        mut effects: ResMut<ConsumerFaultEffects>,
+        mut commands: Commands,
+    ) {
+        effects.consumers.push(fixed.tick());
+        commands.spawn(ConsumeDeferred);
+    }
+
+    fn record_successful_capture(fixed: Res<FixedTime>, mut effects: ResMut<ConsumerFaultEffects>) {
+        effects.captures.push(fixed.tick());
+    }
+
+    #[test]
+    fn consumer_failure_keeps_later_deferred_effects_without_success_capture_or_acknowledgement() {
+        let mut app = App::new();
+        app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.init_resource::<ConsumerFaultEffects>().unwrap();
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            (fail_second_consume, record_later_consume)
+                .chain()
+                .in_set(GameplayCommandSet::Consume),
+        )
+        .unwrap()
+        .add_systems(
+            CoreStage::FixedUpdate,
+            record_successful_capture.in_set(GameplayCommandSet::Capture),
+        )
+        .unwrap();
+        for tick in 1..=3 {
+            app.world_mut()
+                .unwrap()
+                .resource_mut::<GameplayCommandQueue>()
+                .submit(submission(tick))
+                .unwrap();
+        }
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        runtime.drive(std::time::Duration::ZERO).unwrap();
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let failure = runtime.drive(FixedTime::DEFAULT_TIMESTEP * 2).unwrap_err();
+        assert_eq!(failure.fault().kind(), RuntimeFaultKind::System);
+        let effects = runtime.world().resource::<ConsumerFaultEffects>();
+        assert_eq!(effects.consumers, [1, 2]);
+        assert_eq!(effects.captures, [1]);
+        assert_eq!(
+            runtime
+                .world()
+                .iter_entities()
+                .filter(|entity| entity.contains::<ConsumeDeferred>())
+                .count(),
+            2
+        );
+        let queue = runtime.world().resource::<GameplayCommandQueue>();
+        let stats = queue.stats();
+        assert_eq!(stats.acknowledged_ticks, 1);
+        assert_eq!(stats.acknowledged, 1);
+        assert_eq!(stats.acknowledged_through_tick, 1);
+        assert_eq!(stats.closed_through_tick, 2);
+        assert_eq!(stats.quarantined_commands, 1);
+        assert_eq!(stats.pending_commands, 1);
+        assert_eq!(stats.retained_commands, 2);
+        assert_eq!(
+            queue.last_lifecycle_error(),
+            Some(&GameplayCommandLifecycleError::BatchExecutionFailed)
+        );
+        assert_eq!(
+            runtime.world().resource::<GameplayCommandBatch>().active_tick(),
+            None
+        );
+        assert_eq!(runtime.drive(std::time::Duration::ZERO).unwrap_err(), failure);
+        let RuntimeControlRequestResult::Accepted(stop) = runtime.request_control(RuntimeControl::Stop)
+        else {
+            panic!("faulted gameplay must still accept Stop");
+        };
+        runtime.drive(std::time::Duration::ZERO).unwrap();
+        runtime.drive(std::time::Duration::ZERO).unwrap();
+        assert_eq!(runtime.control_status(stop), Some(RuntimeControlStatus::Applied));
+        assert_eq!(runtime.state(), RuntimeState::Stopped);
+        runtime.finish().unwrap();
     }
 
     #[derive(Debug, Default, Resource)]

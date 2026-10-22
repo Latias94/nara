@@ -26,6 +26,10 @@ Rules:
 - Randomness used by deterministic systems should come from explicit seeded RNG resources.
 - Background async tasks do not mutate simulation state directly; they apply results at scheduled boundaries.
 - Replay support is a future feature, but input/events/state capture should not be made impossible by early design.
+- Gameplay replay capture and acknowledgement require successful consumption of the exact admitted
+  runtime generation and tick (ADR 0057). An earlier successful tick does not authorize a successor.
+  An execution fault can leave partial effects, including deferred commands; the generation must be
+  closed and explicitly reconstructed rather than replaying its unacknowledged batch in place.
 
 ```text
 Frame:

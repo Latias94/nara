@@ -32,7 +32,7 @@ pub use schedule::GameplayCommandSet;
 
 use nara_app::{
     __RuntimeDriverPort, App, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginError,
-    RuntimeDriverScope, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter,
+    RuntimeDriverScope, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter, RuntimeGeneration,
     RuntimeWorldAccessError,
 };
 use nara_ecs::{Res, ResMut, schedule::IntoScheduleConfigs, system::ScheduleSystem};
@@ -120,6 +120,9 @@ impl Plugin for GameplayCommandPlugin {
         if !app.world().contains_resource::<LocalGameplayCommands>() {
             app.insert_resource(LocalGameplayCommands::default())?;
         }
+        let admission_faults = app.world().resource::<RuntimeFaultReporter>().clone();
+        let consumption_faults = admission_faults.clone();
+        let acknowledgement_faults = admission_faults.clone();
         app.configure_sets(
             CoreStage::PreUpdate,
             (
@@ -136,9 +139,10 @@ impl Plugin for GameplayCommandPlugin {
                 GameplayCommandSet::Consume
                     .in_set(FixedUpdateSet::Simulate)
                     .run_if(gameplay_command_batch_is_current),
+                GameplayCommandInternalSet::CompleteConsumption.in_set(FixedUpdateSet::Finalize),
                 GameplayCommandSet::Capture
                     .in_set(FixedUpdateSet::Finalize)
-                    .run_if(gameplay_command_batch_is_current),
+                    .run_if(gameplay_command_consumption_succeeded),
                 GameplayCommandInternalSet::Acknowledge.in_set(FixedUpdateSet::Finalize),
             )
                 .chain(),
@@ -151,11 +155,55 @@ impl Plugin for GameplayCommandPlugin {
         )?
         .add_systems(
             CoreStage::FixedUpdate,
-            admit_gameplay_commands.in_set(GameplayCommandInternalSet::Admit),
+            (move |fixed_time: Res<FixedTime>,
+                   generation: Res<RuntimeGeneration>,
+                   mut queue: ResMut<GameplayCommandQueue>,
+                   mut batch: ResMut<GameplayCommandBatch>| {
+                admit_gameplay_commands(
+                    fixed_time.tick(),
+                    *generation,
+                    &mut queue,
+                    &mut batch,
+                    &admission_faults,
+                );
+            })
+            .in_set(GameplayCommandInternalSet::Admit),
         )?
         .add_systems(
             CoreStage::FixedUpdate,
-            acknowledge_gameplay_commands.in_set(GameplayCommandInternalSet::Acknowledge),
+            (move |fixed_time: Res<FixedTime>,
+                   generation: Res<RuntimeGeneration>,
+                   world_reporter: Option<Res<RuntimeFaultReporter>>,
+                   mut queue: ResMut<GameplayCommandQueue>,
+                   mut batch: ResMut<GameplayCommandBatch>| {
+                complete_gameplay_consumption(
+                    fixed_time.tick(),
+                    *generation,
+                    &mut queue,
+                    &mut batch,
+                    &consumption_faults,
+                    world_reporter.as_deref(),
+                );
+            })
+            .in_set(GameplayCommandInternalSet::CompleteConsumption),
+        )?
+        .add_systems(
+            CoreStage::FixedUpdate,
+            (move |fixed_time: Res<FixedTime>,
+                   generation: Res<RuntimeGeneration>,
+                   world_reporter: Option<Res<RuntimeFaultReporter>>,
+                   mut queue: ResMut<GameplayCommandQueue>,
+                   mut batch: ResMut<GameplayCommandBatch>| {
+                acknowledge_gameplay_commands(
+                    fixed_time.tick(),
+                    *generation,
+                    &mut queue,
+                    &mut batch,
+                    &acknowledgement_faults,
+                    world_reporter.as_deref(),
+                );
+            })
+            .in_set(GameplayCommandInternalSet::Acknowledge),
         )?;
         Ok(())
     }
@@ -196,41 +244,84 @@ fn submit_local_command(
 }
 
 fn admit_gameplay_commands(
-    fixed_time: Res<FixedTime>,
-    mut queue: ResMut<GameplayCommandQueue>,
-    mut batch: ResMut<GameplayCommandBatch>,
-    faults: Res<RuntimeFaultReporter>,
+    tick: u64,
+    generation: RuntimeGeneration,
+    queue: &mut GameplayCommandQueue,
+    batch: &mut GameplayCommandBatch,
+    faults: &RuntimeFaultReporter,
 ) {
-    if queue
-        .admit_fixed_tick(fixed_time.tick(), &mut batch)
-        .is_err()
-    {
+    if queue.admit_fixed_tick(tick, batch).is_err() {
         faults.report(RuntimeFault::engine(
             RuntimeFaultKind::GameplayLifecycle,
             "nara.gameplay.fixed-admit",
         ));
+    } else {
+        batch.bind_execution(generation, faults.clone());
     }
 }
 
 fn gameplay_command_batch_is_current(
     fixed_time: Res<FixedTime>,
+    generation: Res<RuntimeGeneration>,
     batch: Res<GameplayCommandBatch>,
+    world_reporter: Option<Res<RuntimeFaultReporter>>,
 ) -> bool {
-    batch
-        .active_tick()
-        .is_some_and(|tick| tick.get() == fixed_time.tick())
+    batch.execution_is_current(*generation, fixed_time.tick(), world_reporter.as_deref())
+}
+
+fn complete_gameplay_consumption(
+    tick: u64,
+    generation: RuntimeGeneration,
+    queue: &mut GameplayCommandQueue,
+    batch: &mut GameplayCommandBatch,
+    faults: &RuntimeFaultReporter,
+    world_reporter: Option<&RuntimeFaultReporter>,
+) {
+    // The Finalize boundary has joined all Simulate systems and their ordinary deferred commands.
+    // The current World reporter must still be the retained admission reporter before success.
+    if batch.active_tick().is_none() {
+        return;
+    }
+    if batch.execution_is_current(generation, tick, world_reporter) {
+        batch.complete_consumption();
+    } else {
+        queue.fail_batch_execution(batch);
+        faults.report(RuntimeFault::engine(
+            RuntimeFaultKind::GameplayLifecycle,
+            "nara.gameplay.fixed-consume",
+        ));
+    }
+}
+
+fn gameplay_command_consumption_succeeded(
+    fixed_time: Res<FixedTime>,
+    generation: Res<RuntimeGeneration>,
+    batch: Res<GameplayCommandBatch>,
+    world_reporter: Option<Res<RuntimeFaultReporter>>,
+) -> bool {
+    batch.consumption_succeeded(*generation, fixed_time.tick(), world_reporter.as_deref())
 }
 
 fn acknowledge_gameplay_commands(
-    fixed_time: Res<FixedTime>,
-    mut queue: ResMut<GameplayCommandQueue>,
-    mut batch: ResMut<GameplayCommandBatch>,
-    faults: Res<RuntimeFaultReporter>,
+    tick: u64,
+    generation: RuntimeGeneration,
+    queue: &mut GameplayCommandQueue,
+    batch: &mut GameplayCommandBatch,
+    faults: &RuntimeFaultReporter,
+    world_reporter: Option<&RuntimeFaultReporter>,
 ) {
-    if queue
-        .acknowledge_fixed_tick(fixed_time.tick(), &mut batch)
-        .is_err()
-    {
+    if batch.active_tick().is_none() {
+        return;
+    }
+    if !batch.consumption_succeeded(generation, tick, world_reporter) {
+        queue.fail_batch_execution(batch);
+        faults.report(RuntimeFault::engine(
+            RuntimeFaultKind::GameplayLifecycle,
+            "nara.gameplay.fixed-acknowledge",
+        ));
+        return;
+    }
+    if queue.acknowledge_fixed_tick(tick, batch).is_err() {
         faults.report(RuntimeFault::engine(
             RuntimeFaultKind::GameplayLifecycle,
             "nara.gameplay.fixed-acknowledge",
@@ -471,6 +562,10 @@ mod tests {
         assert!(observed[1].1.is_empty());
         assert!(observed[2].1.is_empty());
         assert!(runtime.world().resource::<GameplayCommandQueue>().is_idle());
+        let stats = runtime.world().resource::<GameplayCommandQueue>().stats();
+        assert_eq!(stats.acknowledged, 1);
+        assert_eq!(stats.acknowledged_ticks, 3);
+        assert_eq!(stats.acknowledged_through_tick, 3);
         assert_eq!(
             runtime
                 .world()
@@ -1603,7 +1698,7 @@ mod tests {
         assert_eq!(stats.active_commands, 0);
         assert_eq!(stats.quarantined_commands, 1);
         assert_eq!(stats.retained_commands, 1);
-        assert_eq!(stats.lifecycle_faults, 2);
+        assert_eq!(stats.lifecycle_faults, 1);
         assert_eq!(
             runtime
                 .world()
@@ -1674,6 +1769,414 @@ mod tests {
             ]
         );
         runtime.finish().unwrap();
+    }
+
+    #[derive(Debug, Default, Resource)]
+    struct FailureTrajectory {
+        fail_tick: u64,
+        deferred_failure: bool,
+        later_consumers: Vec<u64>,
+        captures: Vec<u64>,
+    }
+
+    #[derive(nara_ecs::Component)]
+    struct ConsumerDeferred(u64);
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("injected gameplay consumer failure")]
+    struct ConsumerFailure;
+
+    fn fail_consumer(
+        fixed: Res<FixedTime>,
+        trajectory: Res<FailureTrajectory>,
+        mut commands: nara_ecs::Commands,
+    ) -> Result<(), nara_ecs::error::BevyError> {
+        if fixed.tick() != trajectory.fail_tick {
+            return Ok(());
+        }
+        if trajectory.deferred_failure {
+            commands.queue(|_world: &mut World| -> Result<(), nara_ecs::error::BevyError> {
+                Err(nara_ecs::error::BevyError::error(ConsumerFailure))
+            });
+            Ok(())
+        } else {
+            Err(nara_ecs::error::BevyError::error(ConsumerFailure))
+        }
+    }
+
+    fn later_consumer(
+        fixed: Res<FixedTime>,
+        mut trajectory: ResMut<FailureTrajectory>,
+        mut commands: nara_ecs::Commands,
+    ) {
+        trajectory.later_consumers.push(fixed.tick());
+        commands.spawn(ConsumerDeferred(fixed.tick()));
+    }
+
+    fn capture_success(fixed: Res<FixedTime>, mut trajectory: ResMut<FailureTrajectory>) {
+        trajectory.captures.push(fixed.tick());
+    }
+
+    #[test]
+    fn failed_consumption_keeps_later_effects_but_never_captures_or_acknowledges() {
+        for deferred_failure in [false, true] {
+            for fail_tick in [1, 2] {
+                let mut app = App::new();
+                app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+                app.insert_resource(FailureTrajectory {
+                    fail_tick,
+                    deferred_failure,
+                    ..Default::default()
+                })
+                .unwrap();
+                app.add_systems(
+                    CoreStage::FixedUpdate,
+                    (fail_consumer, later_consumer)
+                        .chain()
+                        .in_set(GameplayCommandSet::Consume),
+                )
+                .unwrap()
+                .add_systems(
+                    CoreStage::FixedUpdate,
+                    capture_success.in_set(GameplayCommandSet::Capture),
+                )
+                .unwrap();
+                for target in 1..=3 {
+                    app.world_mut()
+                        .unwrap()
+                        .resource_mut::<GameplayCommandQueue>()
+                        .submit(submission(
+                            target,
+                            GameplayCommandIngressSource::replay("trajectory").unwrap(),
+                            1,
+                            "trajectory.command",
+                        ))
+                        .unwrap();
+                }
+                let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+                runtime.drive(Duration::ZERO).unwrap();
+                if fail_tick == 2 {
+                    runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+                }
+                let failure = runtime.drive(FixedTime::DEFAULT_TIMESTEP * 3).unwrap_err();
+                assert_eq!(
+                    failure.fault().kind(),
+                    if deferred_failure {
+                        RuntimeFaultKind::Command
+                    } else {
+                        RuntimeFaultKind::System
+                    }
+                );
+                let trajectory = runtime.world().resource::<FailureTrajectory>();
+                assert_eq!(trajectory.later_consumers, (1..=fail_tick).collect::<Vec<_>>());
+                assert_eq!(trajectory.captures, (1..fail_tick).collect::<Vec<_>>());
+                assert!(runtime.world().iter_entities().any(|entity| {
+                    entity
+                        .get::<ConsumerDeferred>()
+                        .is_some_and(|effect| effect.0 == fail_tick)
+                }));
+                let stats = runtime.world().resource::<GameplayCommandQueue>().stats();
+                assert_eq!(stats.acknowledged_ticks, fail_tick - 1);
+                assert_eq!(stats.acknowledged, fail_tick - 1);
+                assert_eq!(stats.acknowledged_through_tick, fail_tick - 1);
+                assert_eq!(stats.closed_through_tick, fail_tick);
+                assert_eq!(stats.retained_commands, (4 - fail_tick) as usize);
+                assert_eq!(stats.quarantined_commands, 1);
+                assert!(runtime.world().resource::<GameplayCommandBatch>().is_empty());
+                assert_eq!(runtime.drive(Duration::ZERO).unwrap_err(), failure);
+                let nara_app::RuntimeControlRequestResult::Accepted(stop) =
+                    runtime.request_control(nara_app::RuntimeControl::Stop)
+                else {
+                    panic!("Stop must remain reachable after a consumer fault");
+                };
+                runtime.drive(Duration::ZERO).unwrap();
+                runtime.drive(Duration::ZERO).unwrap();
+                assert_eq!(runtime.state(), nara_app::RuntimeState::Stopped);
+                assert_eq!(
+                    runtime.control_status(stop),
+                    Some(nara_app::RuntimeControlStatus::Applied)
+                );
+                runtime.finish().unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn capture_error_retains_prior_effects_without_acknowledging_the_batch() {
+        for deferred_failure in [false, true] {
+            let mut app = App::new();
+            app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+            app.insert_resource(FailureTrajectory {
+                fail_tick: 1,
+                deferred_failure,
+                ..Default::default()
+            })
+            .unwrap();
+            app.add_systems(
+                CoreStage::FixedUpdate,
+                later_consumer.in_set(GameplayCommandSet::Consume),
+            )
+            .unwrap()
+            .add_systems(
+                CoreStage::FixedUpdate,
+                (capture_success, fail_consumer)
+                    .chain()
+                    .in_set(GameplayCommandSet::Capture),
+            )
+            .unwrap();
+            app.world_mut()
+                .unwrap()
+                .resource_mut::<GameplayCommandQueue>()
+                .submit(submission(
+                    1,
+                    GameplayCommandIngressSource::test("capture-failure").unwrap(),
+                    1,
+                    "capture.command",
+                ))
+                .unwrap();
+            let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+            let failure = runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap_err();
+            assert_eq!(
+                failure.fault().kind(),
+                if deferred_failure {
+                    RuntimeFaultKind::Command
+                } else {
+                    RuntimeFaultKind::System
+                }
+            );
+            let trajectory = runtime.world().resource::<FailureTrajectory>();
+            assert_eq!(trajectory.later_consumers, [1]);
+            assert_eq!(trajectory.captures, [1]);
+            let queue = runtime.world().resource::<GameplayCommandQueue>();
+            assert_eq!(queue.stats().acknowledged_ticks, 0);
+            assert_eq!(queue.stats().retained_commands, 1);
+            assert_eq!(queue.stats().quarantined_commands, 1);
+            assert_eq!(
+                queue.last_lifecycle_error(),
+                Some(&GameplayCommandLifecycleError::BatchExecutionFailed)
+            );
+            runtime.finish().unwrap();
+        }
+    }
+
+    #[test]
+    fn completed_consumption_does_not_authorize_another_tick_or_generation() {
+        let first = nara_app::RuntimeInstance::start(App::new()).unwrap();
+        let second = nara_app::RuntimeInstance::start(App::new()).unwrap();
+        let mut queue = GameplayCommandQueue::default();
+        let mut batch = GameplayCommandBatch::new();
+        let faults = first.fault_reporter();
+        queue.admit_fixed_tick(1, &mut batch).unwrap();
+        batch.bind_execution(first.generation(), faults.clone());
+        batch.complete_consumption();
+        assert!(batch.consumption_succeeded(first.generation(), 1, Some(&faults)));
+        assert!(!batch.consumption_succeeded(first.generation(), 2, Some(&faults)));
+        assert!(!batch.consumption_succeeded(second.generation(), 1, Some(&faults)));
+        queue.acknowledge_fixed_tick(1, &mut batch).unwrap();
+        assert!(!batch.consumption_succeeded(first.generation(), 1, Some(&faults)));
+        queue.admit_fixed_tick(2, &mut batch).unwrap();
+        batch.bind_execution(first.generation(), faults.clone());
+        assert!(!batch.consumption_succeeded(first.generation(), 2, Some(&faults)));
+        first.finish().unwrap();
+        second.finish().unwrap();
+    }
+
+    #[test]
+    fn fixed_system_cannot_hide_its_failure_by_replacing_the_world_reporter() {
+        fn replace_reporter_and_fail(
+            mut faults: ResMut<RuntimeFaultReporter>,
+        ) -> Result<(), nara_ecs::error::BevyError> {
+            *faults = RuntimeFaultReporter::new();
+            Err(nara_ecs::error::BevyError::error(ConsumerFailure))
+        }
+
+        for before_admission in [false, true] {
+            let mut app = App::new();
+            app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+            app.insert_resource(FailureTrajectory::default()).unwrap();
+            if before_admission {
+                app.add_systems(
+                    CoreStage::FixedUpdate,
+                    replace_reporter_and_fail
+                        .in_set(FixedUpdateSet::Prepare)
+                        .before(GameplayCommandInternalSet::Admit),
+                )
+                .unwrap();
+            } else {
+                app.add_systems(
+                    CoreStage::FixedUpdate,
+                    replace_reporter_and_fail.in_set(GameplayCommandSet::Consume),
+                )
+                .unwrap();
+            }
+            app.add_systems(
+                CoreStage::FixedUpdate,
+                capture_success.in_set(GameplayCommandSet::Capture),
+            )
+            .unwrap();
+            app.world_mut()
+                .unwrap()
+                .resource_mut::<GameplayCommandQueue>()
+                .submit(submission(
+                    1,
+                    GameplayCommandIngressSource::test("reporter-replacement").unwrap(),
+                    1,
+                    "replacement.command",
+                ))
+                .unwrap();
+            let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+            let failure = runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap_err();
+            assert_eq!(failure.fault().kind(), RuntimeFaultKind::System);
+            assert!(
+                runtime.world().resource::<FailureTrajectory>().captures.is_empty()
+            );
+            let queue = runtime.world().resource::<GameplayCommandQueue>();
+            assert_eq!(queue.stats().acknowledged_ticks, 0);
+            assert_eq!(queue.stats().quarantined_commands, 1);
+            assert_eq!(queue.stats().retained_commands, 1);
+            runtime.finish().unwrap();
+        }
+    }
+
+    #[test]
+    fn reporter_replacement_with_direct_fault_and_unit_return_blocks_batch_success() {
+        assert_reporter_replacement_blocks_batch_success(true);
+    }
+
+    #[test]
+    fn reporter_replacement_without_fault_blocks_batch_success() {
+        assert_reporter_replacement_blocks_batch_success(false);
+    }
+
+    fn assert_reporter_replacement_blocks_batch_success(report_fault: bool) {
+        for phase in 0..3 {
+            for deferred in [false, true] {
+                let mut app = App::new();
+                app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+                app.init_resource::<FailureTrajectory>().unwrap();
+                let replace_reporter =
+                    move |mut faults: ResMut<RuntimeFaultReporter>,
+                          mut commands: nara_ecs::Commands| {
+                        if deferred {
+                            commands.queue(move |world: &mut World| {
+                                world.insert_resource(RuntimeFaultReporter::new());
+                                if report_fault {
+                                    world.resource::<RuntimeFaultReporter>().report(
+                                        RuntimeFault::engine(
+                                            RuntimeFaultKind::System,
+                                            "nara.test.replacement-reporter",
+                                        ),
+                                    );
+                                }
+                            });
+                        } else {
+                            *faults = RuntimeFaultReporter::new();
+                            if report_fault {
+                                faults.report(RuntimeFault::engine(
+                                    RuntimeFaultKind::System,
+                                    "nara.test.replacement-reporter",
+                                ));
+                            }
+                        }
+                    };
+                match phase {
+                    0 => app.add_systems(
+                        CoreStage::FixedUpdate,
+                        replace_reporter.in_set(GameplayCommandSet::Consume),
+                    ),
+                    1 => app.add_systems(
+                        CoreStage::FixedUpdate,
+                        replace_reporter
+                            .after(GameplayCommandInternalSet::CompleteConsumption)
+                            .before(GameplayCommandSet::Capture),
+                    ),
+                    _ => app.add_systems(
+                        CoreStage::FixedUpdate,
+                        replace_reporter.in_set(GameplayCommandSet::Capture),
+                    ),
+                }
+                .unwrap();
+                app.add_systems(
+                    CoreStage::FixedUpdate,
+                    capture_success.in_set(GameplayCommandSet::Capture),
+                )
+                .unwrap();
+                for target in 1..=2 {
+                    app.world_mut()
+                        .unwrap()
+                        .resource_mut::<GameplayCommandQueue>()
+                        .submit(submission(
+                            target,
+                            GameplayCommandIngressSource::test("reporter-replacement").unwrap(),
+                            1,
+                            "replacement.command",
+                        ))
+                        .unwrap();
+                }
+                let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+                let retained_bytes = runtime
+                    .world()
+                    .resource::<GameplayCommandQueue>()
+                    .stats()
+                    .retained_bytes;
+                let canonical = runtime.fault_reporter();
+                let failure = runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap_err();
+                assert_eq!(
+                    failure.fault().kind(),
+                    RuntimeFaultKind::FaultReporterAuthority
+                );
+                assert_eq!(canonical.fault().as_ref(), Some(failure.fault()));
+                assert_eq!(
+                    runtime
+                        .world()
+                        .resource::<RuntimeFaultReporter>()
+                        .fault()
+                        .is_some(),
+                    report_fault
+                );
+                if phase < 2 {
+                    assert!(
+                        runtime
+                            .world()
+                            .resource::<FailureTrajectory>()
+                            .captures
+                            .is_empty()
+                    );
+                }
+                let queue = runtime.world().resource::<GameplayCommandQueue>();
+                assert_eq!(queue.stats().acknowledged_ticks, 0);
+                assert_eq!(queue.stats().acknowledged, 0);
+                assert_eq!(queue.stats().quarantined_commands, 1);
+                assert_eq!(queue.stats().pending_commands, 1);
+                assert_eq!(queue.stats().retained_commands, 2);
+                assert_eq!(queue.stats().retained_bytes, retained_bytes);
+                assert_eq!(
+                    queue.last_lifecycle_error(),
+                    Some(&GameplayCommandLifecycleError::BatchExecutionFailed)
+                );
+                assert!(
+                    runtime
+                        .world()
+                        .resource::<GameplayCommandBatch>()
+                        .active_tick()
+                        .is_none()
+                );
+                assert_eq!(runtime.drive(Duration::ZERO).unwrap_err(), failure);
+                let nara_app::RuntimeControlRequestResult::Accepted(stop) =
+                    runtime.request_control(nara_app::RuntimeControl::Stop)
+                else {
+                    panic!("Stop must remain reachable after reporter replacement");
+                };
+                runtime.drive(Duration::ZERO).unwrap();
+                runtime.drive(Duration::ZERO).unwrap();
+                assert_eq!(runtime.state(), nara_app::RuntimeState::Stopped);
+                assert_eq!(
+                    runtime.control_status(stop),
+                    Some(nara_app::RuntimeControlStatus::Applied)
+                );
+                runtime.finish().unwrap();
+            }
+        }
     }
 
     #[test]

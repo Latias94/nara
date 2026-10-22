@@ -304,6 +304,10 @@ fn fault_route_authority_fault() -> RuntimeFault {
     )
 }
 
+/// Reports a fault synchronously before returning control to the executor. This is not a request
+/// to abort the current schedule: eligible later systems and queued commands may still run. Domains
+/// with success-dependent publication must join their work and deferred effects, then check their
+/// exact admitted operation and its retained reporter before publishing or acknowledging success.
 fn route_error<const SLOT: usize>(error: BevyError, context: ErrorContext) {
     let severity = error.severity();
     let Some(handler) = enter_handler(SLOT) else {
