@@ -1,10 +1,14 @@
 //! Shared engine primitives that are independent from ECS and rendering.
 
+pub mod document;
 pub mod format;
 pub mod limits;
 #[cfg(feature = "serde")]
 pub mod serde_shape;
 
+pub use document::{
+    DocumentContentState, DocumentHistoryStatus, DocumentRevision, DocumentSourceId,
+};
 pub use format::{
     EngineVersion, EngineVersionParseError, FormatGenerator, FormatGeneratorError, FormatKind,
     FormatKindError, FormatVersion, PersistentFileContract, PersistentFileContractError,

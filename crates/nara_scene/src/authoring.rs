@@ -2,7 +2,6 @@ use std::{
     collections::VecDeque,
     error::Error,
     fmt::{self, Display, Formatter},
-    sync::atomic::{AtomicU64, Ordering},
 };
 
 use nara_asset::ProjectAssetDatabase;
@@ -19,27 +18,11 @@ use crate::{
     spawn::{SceneInstanceRetirementTransactionError, retire_scene_instance_exact},
 };
 
-static NEXT_AUTHORING_SOURCE_ID: AtomicU64 = AtomicU64::new(1);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SceneAuthoringSourceId(u64);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SceneAuthoringRevision {
-    source_id: SceneAuthoringSourceId,
-    generation: u64,
-}
-
-/// Opaque identity for one committed authoring content state.
-///
-/// Revisions remain monotonic across every accepted transition. Content-state identities instead
-/// follow Undo and Redo so callers can recognize that the document has returned to an earlier
-/// saved state without hashing the document again.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SceneAuthoringContentState {
-    source_id: SceneAuthoringSourceId,
-    generation: u64,
-}
+pub use nara_core::{
+    DocumentContentState as SceneAuthoringContentState,
+    DocumentHistoryStatus as SceneAuthoringHistoryStatus,
+    DocumentRevision as SceneAuthoringRevision, DocumentSourceId as SceneAuthoringSourceId,
+};
 
 /// Fixed limits for the combined Undo and Redo history of one authoring session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,34 +138,6 @@ pub struct SceneAuthoringHistoryUsage {
     pub logical_bytes: usize,
 }
 
-impl SceneAuthoringRevision {
-    /// Owner-assigned source incarnation, retained across edits and Save checkpoints.
-    /// Replacing or reopening the source starts a different incarnation.
-    #[must_use]
-    pub const fn source_id(self) -> SceneAuthoringSourceId {
-        self.source_id
-    }
-
-    #[must_use]
-    pub const fn generation(self) -> u64 {
-        self.generation
-    }
-
-    #[must_use]
-    const fn next(self) -> Self {
-        Self {
-            source_id: self.source_id,
-            generation: self.generation + 1,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct SceneAuthoringHistoryStatus {
-    pub undo_depth: usize,
-    pub redo_depth: usize,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct SceneAuthoringHistoryCost {
     operations: usize,
@@ -258,16 +213,10 @@ struct AuthoringHistory {
 
 impl AuthoringHistory {
     fn new(limits: SceneAuthoringHistoryLimits) -> Self {
-        let revision = SceneAuthoringRevision {
-            source_id: next_authoring_source_id(),
-            generation: 0,
-        };
+        let revision = SceneAuthoringRevision::initial();
         Self {
             revision,
-            content_state: SceneAuthoringContentState {
-                source_id: revision.source_id,
-                generation: revision.generation,
-            },
+            content_state: revision.content_state(),
             limits,
             cost: SceneAuthoringHistoryCost::default(),
             undo_stack: VecDeque::new(),
@@ -276,15 +225,8 @@ impl AuthoringHistory {
     }
 
     fn replace_source(&mut self) {
-        let source_id = next_authoring_source_id();
-        self.revision = SceneAuthoringRevision {
-            source_id,
-            generation: 0,
-        };
-        self.content_state = SceneAuthoringContentState {
-            source_id,
-            generation: 0,
-        };
+        self.revision = SceneAuthoringRevision::initial();
+        self.content_state = self.revision.content_state();
         self.clear();
     }
 
@@ -297,7 +239,7 @@ impl AuthoringHistory {
     }
 
     fn owns_content_state(&self, state: SceneAuthoringContentState) -> bool {
-        self.revision.source_id == state.source_id
+        self.revision.source_id() == state.source_id()
     }
 
     const fn limits(&self) -> SceneAuthoringHistoryLimits {
@@ -477,10 +419,7 @@ impl AuthoringHistory {
     }
 
     fn content_state_for_current_revision(&self) -> SceneAuthoringContentState {
-        SceneAuthoringContentState {
-            source_id: self.revision.source_id,
-            generation: self.revision.generation,
-        }
+        self.revision.content_state()
     }
 
     fn advance_revision(&mut self) {
@@ -1856,10 +1795,6 @@ impl HistoryDirection {
             Self::Redo => "redo history is empty",
         }
     }
-}
-
-fn next_authoring_source_id() -> SceneAuthoringSourceId {
-    SceneAuthoringSourceId(NEXT_AUTHORING_SOURCE_ID.fetch_add(1, Ordering::Relaxed))
 }
 
 fn history_miss_report(code: &'static str, summary: &'static str) -> ScenePatchReport {
