@@ -1,12 +1,11 @@
 use std::{error::Error, fmt};
 
-use nara::ecs as bevy_ecs;
 use nara::{
     app::RuntimeFaultReporter,
     ecs::{Entity, With, error::BevyError, system::SystemParam},
     prelude::{FixedTime, Query, Res, ResMut, Resource, Transform2d, Vec2},
     scene::{SceneEntitySource, advanced::SceneProductResource},
-    transform::GlobalTransform2d,
+    transform::FixedSpatialSnapshot2d,
 };
 
 use crate::{
@@ -88,24 +87,14 @@ impl WaveSnapshot {
 
 #[derive(SystemParam)]
 pub(crate) struct WaveSnapshotQueries<'w, 's> {
-    players: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static SceneEntitySource,
-            &'static GlobalTransform2d,
-            &'static Health,
-        ),
-        With<PlayerRole>,
-    >,
+    spatial: FixedSpatialSnapshot2d<'w>,
+    players: Query<'w, 's, (Entity, &'static SceneEntitySource, &'static Health), With<PlayerRole>>,
     enemies: Query<
         'w,
         's,
         (
             Entity,
             &'static SceneEntitySource,
-            &'static GlobalTransform2d,
             &'static Health,
             &'static WaveSpawn,
         ),
@@ -119,6 +108,7 @@ pub(crate) struct WaveSnapshotQueries<'w, 's> {
             &'static Transform2d,
             &'static Velocity2d,
             &'static ProjectileLifetime,
+            &'static crate::systems::ProjectileSpawnTick,
         ),
         With<ProjectileRole>,
     >,
@@ -138,10 +128,11 @@ pub(crate) fn capture_wave_snapshot(
     }
 
     let mut player = None;
-    for (entity, source, global, health) in &queries.players {
+    for (entity, source, health) in &queries.players {
         if !owner.owns_scene_entity(entity, source) {
             continue;
         }
+        let global = queries.spatial.global(entity).map_err(BevyError::error)?;
         if player.replace((source, global, health)).is_some() {
             return Err(BevyError::error(WaveSnapshotError::DuplicatePlayer));
         }
@@ -156,16 +147,22 @@ pub(crate) fn capture_wave_snapshot(
     let mut enemy_values = queries
         .enemies
         .iter()
-        .filter(|(entity, source, _, _, _)| owner.owns_scene_entity(*entity, source))
-        .map(|(_, source, global, health, spawn)| EnemySnapshot {
-            id: source.entity_id.as_str().to_owned(),
-            position: global.translation(),
-            hit_points: health.current,
-            spawn_tick: spawn.tick,
-            active: spawn.tick <= run_tick,
+        .filter(|(entity, source, _, _)| owner.owns_scene_entity(*entity, source))
+        .map(|(entity, source, health, spawn)| {
+            Ok(EnemySnapshot {
+                id: source.entity_id.as_str().to_owned(),
+                position: queries
+                    .spatial
+                    .global(entity)
+                    .map_err(BevyError::error)?
+                    .translation(),
+                hit_points: health.current,
+                spawn_tick: spawn.tick,
+                active: spawn.tick <= run_tick,
+            })
         })
         .take(MAX_WAVE_ENEMIES + 1)
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, BevyError>>()?;
     if enemy_values.len() > MAX_WAVE_ENEMIES {
         return Err(BevyError::error(WaveSnapshotError::TooManyEnemies));
     }
@@ -176,18 +173,28 @@ pub(crate) fn capture_wave_snapshot(
         .iter()
         .copied()
         .map(|token| {
-            queries
+            let (id, transform, velocity, lifetime, spawn_tick) = queries
                 .projectiles
                 .get(token.entity())
-                .map(|(id, transform, velocity, lifetime)| ProjectileSnapshot {
-                    id: id.get(),
-                    position: transform.translation,
-                    velocity: velocity.value,
-                    ttl_ticks: lifetime.remaining_ticks,
-                })
-                .map_err(|_| BevyError::error(WaveSnapshotError::InvalidProjectileOwnership))
+                .map_err(|_| BevyError::error(WaveSnapshotError::InvalidProjectileOwnership))?;
+            // A root projectile born during Resolve has no entry in this tick's earlier cut.
+            let position = if spawn_tick.0 == fixed_time.tick() {
+                transform.translation
+            } else {
+                queries
+                    .spatial
+                    .global(token.entity())
+                    .map_err(BevyError::error)?
+                    .translation()
+            };
+            Ok(ProjectileSnapshot {
+                id: id.get(),
+                position,
+                velocity: velocity.value,
+                ttl_ticks: lifetime.remaining_ticks,
+            })
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, BevyError>>()?;
     if projectile_values.len() > MAX_WAVE_PROJECTILES {
         return Err(BevyError::error(WaveSnapshotError::TooManyProjectiles));
     }

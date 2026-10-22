@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-15
+**Amended**: 2026-10-23 for explicit phase spatial cuts and common asset mutation admission
 **Owner**: game composition, managed execution, content, domain plugins, rendering, and tooling
 **Implementation Plan**: [2D foundation contracts](../../plans/2026-10-15-1636-refactor-2d-foundation-contracts-plan.md)
 
@@ -140,6 +141,13 @@ Preparation consumes the published revision even if a later attempt failed. Remo
 invalidation, or successful replacement invalidates the corresponding derivation. Async completions
 still validate their owner/revision at publication. This clarifies ADRs 0033/0037/0115.
 
+Managed Asset mutation admits the actual typed value/state pairing before capturing one owned
+baseline. Success, failure and removal validate that same baseline before effects; resource
+replacement or empty-slot ABA cannot be legitimized by capturing a new unrelated pair. Image
+retains desired metadata independently of in-flight work and last-good pixels, with publication,
+slot and metadata-observation binding. Removal revocation precedes request admission. ADR 0037
+owns relative metadata/removal recovery and runtime-owned watcher rescan custody.
+
 File-backed TileSets publish their validated atlas together with the exact immutable Image content
 that passed extent admission. A later valid Image publication may advance a Sprite independently;
 an incompatible TileSet successor retains its coherent eligible last-good atlas and pixels. An
@@ -184,6 +192,15 @@ share a semantic baseline with no intervening external flush. Every admitted hie
 including a childless root, participates in lifetime invalidation. Raw ECS escapes invalidate
 completion rather than act as an equivalent second writer. Ordered structural transactions,
 hierarchy/lifetime separation, and completed transform projection in ADRs 0097/0100/0101 remain binding.
+
+Transform completion publishes bounded private immutable cuts rather than Global ECS components or
+caller-joined completion tokens. Historical simulation reads retain their original stamp during
+mutation; Fixed Resolve and Finalize/Capture read the completed tick cut, and Extract uses a separate
+presentation cut. Each carries World/runtime identity, full entity generations, phase/time and
+captured structural order. Local edits or entity retirement after reading a cut belong to the next
+publication. Non-spatial direct parents terminate inheritance; effective parent frames come from the
+same cut. Missing/failed publication rejects without a live-local fallback. ADR 0100 owns these
+read roles, publication checks and the explicit deferred boundary.
 
 ### 2D order, views, and presentation
 

@@ -1,7 +1,5 @@
 //! Shared sampling and alpha semantics, plus one bounded 2D fragment-material extension.
 
-extern crate nara_ecs as bevy_ecs;
-
 use nara_asset::Handle;
 use nara_ecs::{Component, Resource};
 use nara_image::ImageAsset;

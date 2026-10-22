@@ -146,6 +146,11 @@ The [low-level contract implementation plan](../plans/2026-10-23-0135-refactor-l
 turns D1-D8 and the confirmed findings into owner slices with ADR corrections, real consumer
 migrations and fresh verification. Execution evidence and Goal continuity belong in engineering
 memory; the plan itself does not claim implementation completion.
+The [implementation review follow-ups](../audits/2026-10-23-low-level-refactor-review-followups.md)
+retain concrete new counterexamples and their owner corrections, including slot restoration,
+metadata/removal observation ordering and retained native watcher custody. The
+[spatial cost comparison](../benchmarks/2026-10-23-low-level-spatial-cuts.md) records residual
+source-scan cost separately from native consumer qualification.
 
 The [post-publication architecture review](../audits/2026-10-19-post-publication-architecture-review.md)
 records the TileSet/Image corrections and the remaining concrete module-interface refactor order.

@@ -26,9 +26,10 @@ Every implementation unit that changes a public API, persistent shape, cache con
 
 | Migration ID | Unit | Commit | Kind | Affected contract | Required action |
 |---|---|---|---|---|---|
-| LLC-U5 | Low-level U5 | Asset intent and association refactor | `rust-api/behavior` | Managed asset mutation and watcher reconciliation | Capture `Assets<T>::mutation_baseline` before delayed effects; consume it for success, failure or removal. Retain desired settings independently of last-good values. Complete an owned watcher rescan only after Host reconciliation; draining a rescan error does not acknowledge coverage. |
-| LLC-U10 | Low-level U10 | Exact-batch success refactor | `behavior` | Gameplay Capture and acknowledgement | Keep command consumers in Consume and success-dependent snapshots in Capture. Managed consumer/Simulate/deferred failure skips Capture and Ack; Capture failure skips Ack. Observe the fault and close/reconstruct explicitly; do not assume rollback, schedule abort, or automatic replay. |
-| LLC-U3 | Low-level U3 | Owned-lock refactor | `rust-api/behavior` | File lock and reader lifetimes | Move the file into `try_lock`, retain its `LockedFileCapability`, and recover the file or locked owner from rejected acquisition/release. Readers borrow the owner; keep source files alive through copying. Remove FileLock guards and forgotten-lock workarounds. |
+| LLC-U4 | Low-level U4 | Phase spatial snapshot refactor | `rust-api/behavior` | World-space spatial consumption | Replace Global Component queries and completion-token joins with Historical, Fixed or Presented snapshot readers. Resolve uses the fixed helper; Gameplay Capture reads Fixed directly in Finalize. A non-spatial direct parent ends inheritance. |
+| LLC-U5 | Low-level U5 | `fb6af18` | `rust-api/behavior` | Managed asset mutation and watcher reconciliation | Capture `Assets<T>::mutation_baseline` before delayed effects; consume it for success, failure or removal. Retain desired settings independently of last-good values. Complete an owned watcher rescan only after Host reconciliation; draining a rescan error does not acknowledge coverage. |
+| LLC-U10 | Low-level U10 | `cfde813` | `behavior` | Gameplay Capture and acknowledgement | Keep command consumers in Consume and success-dependent snapshots in Capture. Managed consumer/Simulate/deferred failure skips Capture and Ack; Capture failure skips Ack. Observe the fault and close/reconstruct explicitly; do not assume rollback, schedule abort, or automatic replay. |
+| LLC-U3 | Low-level U3 | `b57008d` | `rust-api/behavior` | File lock and reader lifetimes | Move the file into `try_lock`, retain its `LockedFileCapability`, and recover the file or locked owner from rejected acquisition/release. Readers borrow the owner; keep source files alive through copying. Remove FileLock guards and forgotten-lock workarounds. |
 | LLC-U6 | Low-level U6 | `6ca126f` | `rust-api` | Manual persistent component codecs | Return `PreparedComponentCandidate<T>` for the registered T. Encode `&T` to `ComponentValue`; context encoders additionally receive read-only World/context. Remove manual missing-component selection and runtime type-mismatch handling. |
 | LLC-U8 | Low-level U8 | `6ca126f` | `rust-api/behavior` | Installed identity operations | Use `adopt_identity_entity`, `register_scene_instance`, `register_persistent_identity` and `retire_identity_entity[_with_disposition]` with the World. Do not extract/reinsert the installed domain to satisfy borrowing. First marker insertion and retirement reject conflicting lifecycle observers before effects. |
 | LLC-U7 | Low-level U7 | `8d3515c` | `rust-api` | Bundle/SystemParam facade paths | Derive through Nara root, ECS or prelude paths without a Bevy alias. Keep the ECS runtime and extracted macro helpers at the same exact released version. |
@@ -60,7 +61,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | PCC-U2-1 | PCC-U2 | `18ec878` | `cargo-feature/rust-api/behavior` | Native Winit accessibility activation | Compile support independently from activation; direct Rust products explicitly add `WinitUiAccessibilityContributionPlugin`, while file-backed desktop UI products receive it from the `desktop-winit + presentation-ui` request intersection. |
 | PCC-U3-1 | PCC-U3 | `864c151` | `rust-api/behavior` | Ordinary file-backed Host composition authority | Remove raw configure/disable/order/provider methods from ordinary Headless, Desktop, and Editor intents; put replayable plugins and schema contributions in one `ProductRecipe`, and use one `project_host::advanced::RuntimeProbe` only for non-replayable Host probes. |
 | RGS-U2-1 | RGS-U2 | `51b3fe4` | `rust-api/behavior` | Runtime hierarchy ownership, scene component composition, and parented spatial content admission | Import runtime relationships from `nara_hierarchy`, install `HierarchyPlugin` and `SceneComponentsPlugin` separately, and keep parented transform/visibility content fail-closed until RGS-U3. |
-| RGS-U3-1 | RGS-U3 | `fb4fdc7` | `rust-api/behavior` | Completed global 2D projection and world-space camera/sprite/tilemap extraction | Treat `GlobalTransform2d` as an opaque immutable derived component, give every world-space renderable an explicit `Transform2d`, and pass completed globals to extraction helpers without local/identity fallback. |
+| RGS-U3-1 | RGS-U3, superseded by LLC-U4 | `fb4fdc7` | `rust-api/behavior` | Completed global 2D projection and world-space camera/sprite/tilemap extraction | Keep explicit `Transform2d` participation and no local/identity fallback; LLC-U4 replaces the earlier Component/token representation with phase snapshots. |
 | SRT-U2-1 | SRT-U2 | `0b5beba` | `rust-api/behavior/safety` | Image construction, render prepare snapshot identity, and prepare invalidation | Handle fallible `ImageAsset` construction, capture `AssetSlotRevision` in each prepare snapshot, borrow non-`Copy` snapshots, and remove the unconsumed invalidation event log. |
 | SRT-U4-1 | SRT-U4 | `25e7f6c` | `rust-api/behavior` | Lifecycle-free insertion preparation and provisional product replacement retirement | Prepare lifecycle-free insertions before commit and authorize extra retirement with `WorldEntityToken` rather than bare `Entity`; complete hierarchy validation remains read-only. |
 | NUI-U1-1 | NUI-U1 | `NUI-U1` | `architecture-authority` | Ordered placement, renderer-neutral UI modules, concrete import execution, Host-owned Editor state, closed rendering, and content/presentation composition | Treat ADRs 0101 through 0106 and the ordered UI kernel correction plan as the accepted target. No source/API migration occurs until its owning NUI unit lands and adds a concrete entry below. |
@@ -486,8 +487,11 @@ overflow atomicity, Startup timing, fixed-set flush, removed-component, and trac
 authoritative tick, `GameplayCommandIngressSource`, and non-zero producer sequence, then handles the
 typed result from `GameplayCommandQueue::submit`. Admission creates immutable
 `GameplayCommandEnvelope` values ordered by `(tick, source rank/source ID, source sequence)`.
-Fixed Prepare closes the tick into `GameplayCommandBatch`; current-gated Consume and Capture observe
-it; engine-owned Ack retires it. Pending and active work share one retained budget. Any lifecycle
+Fixed Prepare closes the tick into `GameplayCommandBatch`; current-gated Consume observes it.
+LLC-U10 requires successful exact generation/tick/reporter completion after Simulate's deferred
+boundary before Capture, then rechecks after Capture before engine-owned Ack retires it. Execution
+failure retains visible effects and unacknowledged work without rollback or automatic replay.
+Pending and active work share one retained budget. Any lifecycle
 invariant failure is sticky and terminal, quarantines active work, gates consumers, and requires the
 runtime to be rebuilt. The old frame vector was deleted because it lost commands during zero-step
 frames and repeated them during catch-up frames.
@@ -2495,17 +2499,21 @@ the root facade.
 
 ## RGS-U3-1: Completed Global 2D Projection and Render Consumption
 
+**Superseded representation (LLC-U4, 2026-10-23)**: the earlier derived ECS Component and
+completion-token representation is removed. The example here describes the canonical replacement.
+`GlobalTransform2d` is now a copyable opaque affine value returned by a borrowed phase snapshot.
+
 **Removed contract**:
 
 - Public tuple construction and field access through `GlobalTransform2d(pub Mat3)`.
-- `Clone`, `Copy`, and `Default` construction of `GlobalTransform2d` by ordinary callers.
+- Arbitrary `Default` construction of `GlobalTransform2d` by ordinary callers.
 - Sprite and tilemap extraction from `Option<&Transform2d>` with implicit identity fallback.
 - Camera extraction from an optional local transform with implicit origin fallback.
 - The temporary rejection of parented `Transform2d` content after Scene/Prefab preflight.
 
 **Canonical replacement or deletion rationale**: `Transform2d` remains authored mutable local
-state. `GlobalTransform2d` is now an immutable, opaque runtime projection produced only by
-`nara_transform` after the current hierarchy generation completes. World-space camera, sprite, and
+state. `GlobalTransform2d` is an immutable, opaque affine value returned from the privately owned
+phase cut after hierarchy/transform completion. World-space camera, sprite, and
 tilemap consumers require both explicit local participation and the completed global projection;
 they do not walk parent chains or invent local/identity fallbacks. This creates one freshness and
 failure boundary across Direct App, managed runtimes, Project Host, paused Editor Play, and render
@@ -2522,27 +2530,31 @@ let extracted = extract_sprite(entity, &sprite, Some(&local), 0);
 **After**:
 
 ```rust
-let global = world
-    .get::<GlobalTransform2d>(entity)
-    .expect("transform completion must precede world-space consumption");
+let spatial = nara::transform::presented_spatial_snapshot(&world)?;
+let global = spatial.global(entity)?;
 let matrix = global.matrix();
-let extracted = extract_sprite(entity, &sprite, global, 0);
+let extracted = extract_sprite(entity, &sprite, matrix, 0);
 ```
 
-Ordinary systems read `GlobalTransform2d` only after their product's declared completion boundary.
-The internal completion set and generation token remain provisional first-party integration
-details, not a new general scheduling API.
+Ordinary systems use `HistoricalSpatialSnapshot2d` during mutation, `FixedSpatialSnapshot2d`
+after fixed propagation, and `PresentedSpatialSnapshot2d` after presentation. Matching shared-World
+functions serve exclusive readers. Fixed Resolve uses `add_fixed_transform_projection_systems`;
+Finalize/Capture reads Fixed directly without that helper. Extract readers use
+`add_presented_transform_projection_systems`. Readers validate the owner, role and time; copied
+stamps do not grant authority. Later edits or retirement leave the borrowed cut unchanged until
+the next publication. A non-spatial direct parent ends spatial inheritance.
 
 **Affected examples and fixtures**: camera setup, runtime UI fixtures, image/render tests, root
 Project Content and Editor Play tests, the reference game's desktop projection, and all sprite/
 tilemap extraction callers now install the hierarchy/transform plugins and provide explicit local
 transforms.
 
-**User action**: remove direct construction, mutation, cloning, or defaulting of
-`GlobalTransform2d`. Keep authored state in `Transform2d`, query the completed global by reference,
+**User action**: remove direct construction, mutation, defaulting, ECS insertion/query, and
+completion-token joins for `GlobalTransform2d`. Keep authored state in `Transform2d`, read the
+completed affine value from the appropriate phase snapshot,
 and call `.matrix()` or `.translation()` for read access. Add an explicit identity `Transform2d` to
 world-space cameras, sprites, and tilemaps that previously relied on absence. Update direct calls to
-`extract_sprite` and `extract_tile_cell` to pass `&GlobalTransform2d`.
+`extract_sprite` and `extract_tile_cell` to pass the captured matrix.
 
 **Source action**: `none`; canonical Scene/Prefab parent and Transform records retain their format
 and stable identities. Parented `Transform2d` now loads; inherited `Visibility` remains rejected
@@ -2563,6 +2575,8 @@ world-space consumer.
 `crates/nara_sprite_render/src/tests.rs`, `tests/project_content_boundary.rs`,
 `tests/workspace_play_runtime.rs`, `reference-game/tests/desktop_render.rs`, and
 `docs/knowledge/engineering/verification/2026-08/2026-08-02T084559Z-rgs-u3-completed-2d-global-transform-projection-1fa10428b5e240acbade0440cc25ae75.md`.
+The historical record qualifies its original Component representation; LLC-U4's fresh evidence
+qualifies its replacement, including same-change-tick edits and World-bound publication association.
 
 ## SRT-U2-1: Exact Image Revision and Snapshot-Owned Invalidation
 

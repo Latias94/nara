@@ -22,14 +22,17 @@ use nara_app::{
     PluginId, StartupStage,
 };
 use nara_ecs::{
-    Mut, Resource, World, error::BevyError, lifecycle::HookContext, schedule::IntoScheduleConfigs,
-    world::DeferredWorld,
+    Mut, Resource, World,
+    error::BevyError,
+    lifecycle::HookContext,
+    schedule::IntoScheduleConfigs,
+    world::{DeferredWorld, WorldId},
 };
 use validation::{HierarchyValidationScratch, validate_hierarchy_with_scratch};
 
 #[doc(hidden)]
 pub mod __private {
-    use nara_ecs::{Resource, SystemSet, World};
+    use nara_ecs::{Resource, SystemSet, World, world::WorldId};
 
     use super::{
         HierarchyError, HierarchyGenerationState, HierarchyOperation, HierarchyOrder,
@@ -52,11 +55,22 @@ pub mod __private {
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
     pub struct CompletedHierarchyProjection {
         generation: u64,
+        publication: Option<HierarchyPublication>,
+    }
+
+    /// Owner-created identity for one exact validated order, including its source World.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct HierarchyPublication {
+        pub(super) world: WorldId,
+        pub(super) sequence: u64,
     }
 
     impl CompletedHierarchyProjection {
-        pub(super) const fn new(generation: u64) -> Self {
-            Self { generation }
+        pub(super) const fn new(generation: u64, publication: HierarchyPublication) -> Self {
+            Self {
+                generation,
+                publication: Some(publication),
+            }
         }
 
         /// Returns the validated runtime hierarchy generation.
@@ -78,18 +92,34 @@ pub mod __private {
     /// is deliberately outside the ordinary hierarchy API.
     #[must_use]
     pub fn completed_topology_generation(world: &World) -> Option<u64> {
+        completed_topology_publication(world)?;
+        Some(
+            world
+                .get_resource::<CompletedHierarchyProjection>()?
+                .generation(),
+        )
+    }
+
+    /// Returns an exact owner publication after validating all of its associated projections.
+    #[must_use]
+    pub fn completed_topology_publication(world: &World) -> Option<HierarchyPublication> {
         let completed = *world.get_resource::<CompletedHierarchyProjection>()?;
+        let publication = completed.publication?;
         let state = world.get_resource::<HierarchyGenerationState>()?;
         let order = world.get_resource::<HierarchyOrder>()?;
         let roots = world.get_resource::<HierarchyRoots>()?;
-        (state.completed_generation == Some(completed.generation())
+        (publication.world == world.id()
+            && state.baseline_world == Some(world.id())
+            && state.completed_publication == Some(publication)
+            && order.publication() == Some(publication)
+            && state.completed_generation == Some(completed.generation())
             && state.topology_generation == completed.generation()
             && state.baseline_root_epoch == Some(roots.epoch())
             && order.root_epoch() == Some(roots.epoch()))
         .then_some(())
         .filter(|_| order.generation() == completed.generation())
         .filter(|_| order.roots() == roots.as_slice())
-        .map(|()| completed.generation())
+        .map(|()| publication)
     }
 
     /// Prepares construction edges against the enclosing owner's already materialized baseline.
@@ -144,6 +174,8 @@ struct HierarchyGenerationState {
     completed_generation: Option<u64>,
     baseline_valid: bool,
     baseline_root_epoch: Option<u64>,
+    baseline_world: Option<WorldId>,
+    completed_publication: Option<__private::HierarchyPublication>,
     #[cfg(test)]
     validation_scans: u64,
 }
@@ -155,6 +187,8 @@ impl Default for HierarchyGenerationState {
             completed_generation: None,
             baseline_valid: false,
             baseline_root_epoch: None,
+            baseline_world: None,
+            completed_publication: None,
             #[cfg(test)]
             validation_scans: 0,
         }
@@ -168,6 +202,7 @@ impl HierarchyGenerationState {
     fn mark_dirty(&mut self) {
         self.topology_generation = self.topology_generation.saturating_add(1);
         self.completed_generation = None;
+        self.completed_publication = None;
         self.baseline_valid = false;
     }
 
@@ -181,18 +216,21 @@ pub(crate) fn hierarchy_baseline_is_valid(world: &World) -> bool {
         return false;
     };
     state.baseline_valid
+        && state.baseline_world == Some(world.id())
         && world
             .get_resource::<HierarchyRoots>()
             .is_some_and(|roots| Some(roots.epoch()) == state.baseline_root_epoch)
 }
 
 pub(crate) fn mark_hierarchy_baseline_valid(world: &mut World) {
+    let world_id = world.id();
     let root_epoch = world
         .get_resource::<HierarchyRoots>()
         .map(HierarchyRoots::epoch);
     let mut state = world.get_resource_or_init::<HierarchyGenerationState>();
     state.baseline_valid = true;
     state.baseline_root_epoch = root_epoch;
+    state.baseline_world = Some(world_id);
 }
 
 pub const HIERARCHY_PLUGIN_ID: PluginId = PluginId::new("nara.hierarchy");
@@ -264,12 +302,16 @@ fn validate_dirty_hierarchy(world: &mut World) -> Result<(), BevyError> {
     let order_epoch = world
         .get_resource::<HierarchyOrder>()
         .and_then(HierarchyOrder::root_epoch);
+    let publication_valid = __private::completed_topology_publication(world).is_some();
+    let world_id = world.id();
     {
         let mut state = world.resource_mut::<HierarchyGenerationState>();
-        if state.baseline_valid && state.baseline_root_epoch != root_epoch {
+        if state.baseline_valid
+            && (state.baseline_root_epoch != root_epoch || state.baseline_world != Some(world_id))
+        {
             state.mark_dirty();
         } else if state.completed_generation == Some(state.topology_generation)
-            && order_epoch != root_epoch
+            && (order_epoch != root_epoch || !publication_valid)
         {
             state.mark_dirty();
         }
@@ -282,6 +324,8 @@ fn validate_dirty_hierarchy(world: &mut World) -> Result<(), BevyError> {
         }
         state.topology_generation
     };
+    // A failed validation must not leave the previous completion fact observable.
+    world.remove_resource::<__private::CompletedHierarchyProjection>();
 
     #[cfg(test)]
     {
@@ -300,6 +344,17 @@ fn validate_dirty_hierarchy(world: &mut World) -> Result<(), BevyError> {
     world.init_resource::<HierarchyOrder>();
     let root_epoch = world.resource::<HierarchyRoots>().epoch();
     let roots = world.resource::<HierarchyRoots>().as_slice().to_vec();
+    static NEXT_PUBLICATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let publication = __private::HierarchyPublication {
+        world: world_id,
+        sequence: NEXT_PUBLICATION
+            .try_update(
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+                |sequence| sequence.checked_add(1),
+            )
+            .expect("hierarchy publication identity space exhausted"),
+    };
     let mut entities = Vec::new();
     let mut pending = roots.iter().rev().copied().collect::<Vec<_>>();
     while let Some(entity) = pending.pop() {
@@ -309,13 +364,18 @@ fn validate_dirty_hierarchy(world: &mut World) -> Result<(), BevyError> {
         }
     }
     world.resource_scope(|_world, mut order: Mut<HierarchyOrder>| {
-        order.replace(generation, Some(root_epoch), roots, entities);
+        order.replace(generation, Some(root_epoch), roots, entities, publication);
     });
-    world
-        .resource_mut::<HierarchyGenerationState>()
-        .completed_generation = Some(generation);
+    {
+        let mut state = world.resource_mut::<HierarchyGenerationState>();
+        state.completed_generation = Some(generation);
+        state.completed_publication = Some(publication);
+    }
     mark_hierarchy_baseline_valid(world);
-    world.insert_resource(__private::CompletedHierarchyProjection::new(generation));
+    world.insert_resource(__private::CompletedHierarchyProjection::new(
+        generation,
+        publication,
+    ));
     Ok(())
 }
 

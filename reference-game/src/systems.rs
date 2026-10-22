@@ -1,6 +1,5 @@
 use std::{collections::BTreeMap, error::Error, fmt};
 
-use nara::ecs as bevy_ecs;
 use nara::{
     advanced_prelude::{
         CurrentScene, SceneProductOverlayWriter, SceneProductTransactionLimits,
@@ -19,11 +18,11 @@ use nara::{
     },
     identity::{EntityLookup, SpawnedSceneInstance, spawn_identity_entity},
     prelude::{
-        Commands, ComponentSchema, ComponentTypeId, FixedTime, PersistentComponentProvider, Query,
-        Res, ResMut, SceneEntityId, Transform2d, Vec2, World,
+        Commands, Component, ComponentSchema, ComponentTypeId, FixedTime,
+        PersistentComponentProvider, Query, Res, ResMut, SceneEntityId, Transform2d, Vec2, World,
     },
     scene::{SceneDocument, SceneEntityRecord, SceneEntitySource, retire_and_despawn_scene_entity},
-    transform::GlobalTransform2d,
+    transform::{FixedSpatialSnapshot2d, HistoricalSpatialSnapshot2d, fixed_spatial_snapshot},
 };
 
 use crate::{
@@ -64,6 +63,9 @@ enum RunPublication {
         ui_action_sequence: Option<u64>,
     },
 }
+
+#[derive(Component)]
+pub(crate) struct ProjectileSpawnTick(pub u64);
 
 impl PreparedReferenceRun {
     fn write_overlay(&self, writer: &mut SceneProductOverlayWriter<'_>) {
@@ -608,7 +610,6 @@ pub(crate) struct WaveTopologyQueries<'w, 's> {
             Option<&'static Health>,
             Option<&'static Velocity2d>,
             Option<&'static Transform2d>,
-            Option<&'static GlobalTransform2d>,
         ),
         With<EnemyRole>,
     >,
@@ -621,7 +622,6 @@ pub(crate) struct WaveTopologyQueries<'w, 's> {
             Option<&'static Health>,
             Option<&'static Velocity2d>,
             Option<&'static Transform2d>,
-            Option<&'static GlobalTransform2d>,
         ),
         With<PlayerRole>,
     >,
@@ -646,6 +646,7 @@ pub(crate) struct WaveTopologyQueries<'w, 's> {
             &'static Velocity2d,
             &'static ProjectileDamage,
             &'static ProjectileLifetime,
+            &'static ProjectileSpawnTick,
             &'static Transform2d,
         ),
         Without<SceneEntitySource>,
@@ -656,6 +657,7 @@ pub(crate) fn validate_wave_topology(
     faults: Res<RuntimeFaultReporter>,
     owner: Res<WaveRunOwner>,
     mut state: ResMut<WaveState>,
+    spatial: HistoricalSpatialSnapshot2d<'_>,
     queries: WaveTopologyQueries<'_, '_>,
 ) -> Result<(), BevyError> {
     if !state.is_running() {
@@ -672,20 +674,17 @@ pub(crate) fn validate_wave_topology(
     let result = (|| {
         let (enemy_count, player_entity) = {
             let mut enemy_count = 0_usize;
-            for (entity, source, spawn, health, velocity, transform, global) in &queries.enemies {
+            for (entity, source, spawn, health, velocity, transform) in &queries.enemies {
                 if !owner.owns_scene_entity(entity, source) {
                     continue;
                 }
-                if spawn.is_none()
-                    || health.is_none()
-                    || velocity.is_none()
-                    || transform.is_none()
-                    || global.is_none()
+                if spawn.is_none() || health.is_none() || velocity.is_none() || transform.is_none()
                 {
                     return Err(BevyError::error(
                         ReferenceSimulationError::InvalidAuthoredConfiguration,
                     ));
                 }
+                spatial.global(entity).map_err(BevyError::error)?;
                 enemy_count = enemy_count
                     .checked_add(1)
                     .ok_or_else(|| BevyError::error(ReferenceSimulationError::TooManyEnemies))?;
@@ -698,16 +697,16 @@ pub(crate) fn validate_wave_topology(
             }
 
             let mut player = None;
-            for (entity, source, health, velocity, transform, global) in &queries.players {
+            for (entity, source, health, velocity, transform) in &queries.players {
                 if !owner.owns_scene_entity(entity, source) {
                     continue;
                 }
-                if health.is_none() || velocity.is_none() || transform.is_none() || global.is_none()
-                {
+                if health.is_none() || velocity.is_none() || transform.is_none() {
                     return Err(BevyError::error(
                         ReferenceSimulationError::InvalidAuthoredConfiguration,
                     ));
                 }
+                spatial.global(entity).map_err(BevyError::error)?;
                 if player.replace(entity).is_some() {
                     return Err(BevyError::error(ReferenceSimulationError::DuplicatePlayer));
                 }
@@ -800,24 +799,19 @@ pub(crate) fn pursue_scene_players(
     run: Res<WaveRunGeneration>,
     owner: Res<WaveRunOwner>,
     mut state: ResMut<WaveState>,
-    players: Query<
-        (Entity, &SceneEntitySource, &GlobalTransform2d),
-        (With<PlayerRole>, Without<EnemyRole>),
-    >,
+    spatial: HistoricalSpatialSnapshot2d<'_>,
+    players: Query<(Entity, &SceneEntitySource), (With<PlayerRole>, Without<EnemyRole>)>,
     mut enemies: Query<
         (
             Entity,
             &SceneEntitySource,
             &WaveSpawn,
             &Health,
-            Option<&Parent>,
-            &GlobalTransform2d,
             &mut Velocity2d,
             &mut Transform2d,
         ),
         (With<EnemyRole>, Without<PlayerRole>),
     >,
-    globals: Query<&GlobalTransform2d>,
 ) -> Result<(), BevyError> {
     if !state.can_simulate() {
         return Ok(());
@@ -827,16 +821,7 @@ pub(crate) fn pursue_scene_players(
         .ok_or_else(|| BevyError::error(ReferenceSimulationError::InvalidRunTick))?;
 
     let result = (|| {
-        for (
-            enemy_entity,
-            enemy_source,
-            spawn,
-            health,
-            parent,
-            enemy_global,
-            mut velocity,
-            mut transform,
-        ) in &mut enemies
+        for (enemy_entity, enemy_source, spawn, health, mut velocity, mut transform) in &mut enemies
         {
             if !owner.owns_scene_entity(enemy_entity, enemy_source)
                 || health.current <= 0
@@ -845,12 +830,17 @@ pub(crate) fn pursue_scene_players(
                 continue;
             }
             let mut target_position = None;
-            for (player_entity, source, player_global) in &players {
+            for (player_entity, source) in &players {
                 if !owner.owns_scene_entity(player_entity, source) {
                     continue;
                 }
                 if target_position
-                    .replace(player_global.translation())
+                    .replace(
+                        spatial
+                            .global(player_entity)
+                            .map_err(BevyError::error)?
+                            .translation(),
+                    )
                     .is_some()
                 {
                     return Err(BevyError::error(
@@ -863,16 +853,15 @@ pub(crate) fn pursue_scene_players(
                     ReferenceSimulationError::MissingEnemyTarget,
                 ));
             };
+            let enemy_global = spatial.global(enemy_entity).map_err(BevyError::error)?;
             let offset = target_position - enemy_global.translation();
             let world_velocity =
                 Vec2::new(axis_velocity(offset.x, 0.5), axis_velocity(offset.y, 0.5));
-            let local_velocity = if let Some(parent) = parent {
-                let parent_matrix = globals
-                    .get(parent.parent())
-                    .map_err(|_| {
-                        BevyError::error(ReferenceSimulationError::InvalidSpatialHierarchy)
-                    })?
-                    .matrix();
+            let local_velocity = if let Some(parent_global) = spatial
+                .effective_parent(enemy_entity)
+                .map_err(BevyError::error)?
+            {
+                let parent_matrix = parent_global.matrix();
                 let determinant = parent_matrix.determinant();
                 if !determinant.is_finite() || determinant.abs() <= f32::EPSILON {
                     return Err(BevyError::error(
@@ -912,16 +901,19 @@ fn fire_automatic_weapons_inner(world: &mut World) -> Result<(), BevyError> {
 
     world.resource_scope(|world, mut owner: Mut<WaveRunOwner>| {
         let player = {
-            let mut players = world.query_filtered::<
-            (Entity, &SceneEntitySource, &GlobalTransform2d),
-            With<PlayerRole>,
-        >();
+            let mut players =
+                world.query_filtered::<(Entity, &SceneEntitySource), With<PlayerRole>>();
+            let spatial = fixed_spatial_snapshot(world).map_err(BevyError::error)?;
             let mut player = None;
-            for (entity, source, global) in players.iter(world) {
+            for (entity, source) in players.iter(world) {
                 if !owner.owns_scene_entity(entity, source) {
                     continue;
                 }
-                if player.replace((entity, global.translation())).is_some() {
+                let position = spatial
+                    .global(entity)
+                    .map_err(BevyError::error)?
+                    .translation();
+                if player.replace((entity, position)).is_some() {
                     return Err(BevyError::error(ReferenceSimulationError::DuplicatePlayer));
                 }
             }
@@ -968,11 +960,11 @@ fn fire_automatic_weapons_inner(world: &mut World) -> Result<(), BevyError> {
                 &SceneEntitySource,
                 &WaveSpawn,
                 &Health,
-                &GlobalTransform2d,
             ), With<EnemyRole>>();
+            let spatial = fixed_spatial_snapshot(world).map_err(BevyError::error)?;
             let mut target: Option<(f32, &str, Vec2)> = None;
             let mut target_count = 0_usize;
-            for (entity, source, spawn, health, global) in enemies.iter(world) {
+            for (entity, source, spawn, health) in enemies.iter(world) {
                 if !owner.owns_scene_entity(entity, source)
                     || health.current <= 0
                     || spawn.tick > run_tick
@@ -985,10 +977,14 @@ fn fire_automatic_weapons_inner(world: &mut World) -> Result<(), BevyError> {
                 if target_count > MAX_WAVE_ENEMIES {
                     return Err(BevyError::error(ReferenceSimulationError::TooManyEnemies));
                 }
+                let position = spatial
+                    .global(entity)
+                    .map_err(BevyError::error)?
+                    .translation();
                 let candidate = (
-                    distance_squared(player.1, global.translation()),
+                    distance_squared(player.1, position),
                     source.entity_id.as_str(),
-                    global.translation(),
+                    position,
                 );
                 if target.as_ref().is_none_or(|best| {
                     candidate
@@ -1033,9 +1029,11 @@ fn fire_automatic_weapons_inner(world: &mut World) -> Result<(), BevyError> {
                 placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
             })
             .map_err(|_| BevyError::error(ReferenceSimulationError::InvalidSpatialHierarchy))?;
+        let spawn_tick = ProjectileSpawnTick(world.resource::<FixedTime>().tick());
         world.entity_mut(token.entity()).insert((
             ProjectileRole,
             projectile_id,
+            spawn_tick,
             Transform2d {
                 translation: player.1,
                 rotation: velocity.y.atan2(velocity.x),
@@ -1108,24 +1106,27 @@ fn resolve_wave_projectile_hits_inner(world: &mut World) -> Result<(), BevyError
                 &SceneEntitySource,
                 &WaveSpawn,
                 &Health,
-                &GlobalTransform2d,
             ), With<EnemyRole>>();
+            let spatial = fixed_spatial_snapshot(world).map_err(BevyError::error)?;
             enemies
                 .iter(world)
-                .filter(|(entity, source, spawn, health, _)| {
+                .filter(|(entity, source, spawn, health)| {
                     owner.owns_scene_entity(*entity, source)
                         && health.current > 0
                         && spawn.tick <= run_tick
                 })
-                .map(|(entity, source, _, _, global)| {
-                    (
+                .map(|(entity, source, _, _)| {
+                    Ok((
                         source.entity_id.as_str().to_owned(),
                         entity,
-                        global.translation(),
-                    )
+                        spatial
+                            .global(entity)
+                            .map_err(BevyError::error)?
+                            .translation(),
+                    ))
                 })
                 .take(MAX_WAVE_ENEMIES + 1)
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>, BevyError>>()?
         };
         if target_order.len() > MAX_WAVE_ENEMIES {
             return Err(BevyError::error(ReferenceSimulationError::TooManyEnemies));
@@ -1161,12 +1162,27 @@ fn resolve_wave_projectile_hits_inner(world: &mut World) -> Result<(), BevyError
                 .ok_or_else(|| {
                     BevyError::error(ReferenceSimulationError::ProjectileOwnershipMismatch)
                 })?;
-            let position = world
-                .get::<Transform2d>(token.entity())
-                .map(|transform| transform.translation)
+            let spawn_tick = world
+                .get::<ProjectileSpawnTick>(token.entity())
                 .ok_or_else(|| {
                     BevyError::error(ReferenceSimulationError::ProjectileOwnershipMismatch)
                 })?;
+            // Resolve creates root projectiles after propagation; only their birth tick uses
+            // the authored spawn position. Existing projectiles consume the completed cut.
+            let position = if spawn_tick.0 == world.resource::<FixedTime>().tick() {
+                world
+                    .get::<Transform2d>(token.entity())
+                    .ok_or_else(|| {
+                        BevyError::error(ReferenceSimulationError::ProjectileOwnershipMismatch)
+                    })?
+                    .translation
+            } else {
+                fixed_spatial_snapshot(world)
+                    .map_err(BevyError::error)?
+                    .global(token.entity())
+                    .map_err(BevyError::error)?
+                    .translation()
+            };
             if damage.amount <= 0 || lifetime.remaining_ticks == 0 {
                 continue;
             }
@@ -1204,18 +1220,13 @@ pub(crate) fn resolve_enemy_contacts(
     run: Res<WaveRunGeneration>,
     owner: Res<WaveRunOwner>,
     mut state: ResMut<WaveState>,
+    spatial: FixedSpatialSnapshot2d<'_>,
     enemies: Query<
-        (
-            Entity,
-            &SceneEntitySource,
-            &Health,
-            &GlobalTransform2d,
-            &WaveSpawn,
-        ),
+        (Entity, &SceneEntitySource, &Health, &WaveSpawn),
         (With<EnemyRole>, Without<PlayerRole>),
     >,
     mut players: Query<
-        (Entity, &SceneEntitySource, &GlobalTransform2d, &mut Health),
+        (Entity, &SceneEntitySource, &mut Health),
         (With<PlayerRole>, Without<EnemyRole>),
     >,
 ) -> Result<(), BevyError> {
@@ -1228,22 +1239,32 @@ pub(crate) fn resolve_enemy_contacts(
 
     let result = (|| {
         let mut player = None;
-        for (entity, source, global, health) in &mut players {
+        for (entity, source, health) in &mut players {
             if !owner.owns_scene_entity(entity, source) {
                 continue;
             }
-            if player.replace((global.translation(), health)).is_some() {
+            let position = spatial
+                .global(entity)
+                .map_err(BevyError::error)?
+                .translation();
+            if player.replace((position, health)).is_some() {
                 return Err(BevyError::error(ReferenceSimulationError::DuplicatePlayer));
             }
         }
         let Some((player_position, mut player_health)) = player else {
             return Err(BevyError::error(ReferenceSimulationError::MissingPlayer));
         };
-        for (entity, source, enemy_health, enemy_global, spawn) in &enemies {
+        for (entity, source, enemy_health, spawn) in &enemies {
             if owner.owns_scene_entity(entity, source)
                 && enemy_health.current > 0
                 && spawn.tick <= run_tick
-                && distance_squared(player_position, enemy_global.translation()) <= 1.0
+                && distance_squared(
+                    player_position,
+                    spatial
+                        .global(entity)
+                        .map_err(BevyError::error)?
+                        .translation(),
+                ) <= 1.0
             {
                 player_health.current = player_health.current.saturating_sub(ENEMY_CONTACT_DAMAGE);
             }
@@ -1483,24 +1504,13 @@ pub(crate) fn observe_project_commands(
 
 #[derive(SystemParam)]
 pub(crate) struct ProjectSnapshotQueries<'w, 's> {
-    players: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static SceneEntitySource,
-            &'static GlobalTransform2d,
-            &'static Health,
-        ),
-        With<PlayerRole>,
-    >,
+    players: Query<'w, 's, (Entity, &'static SceneEntitySource, &'static Health), With<PlayerRole>>,
     enemies: Query<
         'w,
         's,
         (
             Entity,
             &'static SceneEntitySource,
-            &'static GlobalTransform2d,
             &'static Health,
             &'static WaveSpawn,
         ),
@@ -1526,14 +1536,16 @@ pub(crate) struct ProjectSnapshotQueries<'w, 's> {
 pub(crate) fn capture_project_snapshot(
     fixed_time: Res<FixedTime>,
     owner: Res<WaveRunOwner>,
+    spatial: FixedSpatialSnapshot2d<'_>,
     queries: ProjectSnapshotQueries,
     mut snapshot: ResMut<ReferenceProjectSnapshot>,
 ) -> Result<(), BevyError> {
     let mut player = None;
-    for (entity, source, global, health) in &queries.players {
+    for (entity, source, health) in &queries.players {
         if !owner.owns_scene_entity(entity, source) {
             continue;
         }
+        let global = spatial.global(entity).map_err(BevyError::error)?;
         if player.replace((entity, global, health)).is_some() {
             return Err(BevyError::error(ProjectSnapshotError::DuplicatePlayer));
         }
@@ -1545,15 +1557,16 @@ pub(crate) fn capture_project_snapshot(
     let earliest_spawn = queries
         .enemies
         .iter()
-        .filter(|(entity, source, _, _, _)| owner.owns_scene_entity(*entity, source))
-        .map(|(_, _, _, _, spawn)| spawn.tick)
+        .filter(|(entity, source, _, _)| owner.owns_scene_entity(*entity, source))
+        .map(|(_, _, _, spawn)| spawn.tick)
         .min()
         .ok_or_else(|| BevyError::error(ProjectSnapshotError::MissingEnemy))?;
     let mut enemy = None;
-    for (entity, source, global, health, spawn) in &queries.enemies {
+    for (entity, source, health, spawn) in &queries.enemies {
         if !owner.owns_scene_entity(entity, source) || spawn.tick != earliest_spawn {
             continue;
         }
+        let global = spatial.global(entity).map_err(BevyError::error)?;
         if enemy.replace((global, health)).is_some() {
             return Err(BevyError::error(ProjectSnapshotError::DuplicateEnemy));
         }

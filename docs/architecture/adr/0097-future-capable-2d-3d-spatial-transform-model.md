@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-22
+**Amended**: 2026-10-23 for private phase spatial snapshots and direct-parent domain boundaries
 **Refines**: [ADR 0005](0005-dimension-aware-runtime-with-2d-first-authoring.md),
 [ADR 0018](0018-coordinate-units-and-time.md), and
 [ADR 0022](0022-3d-coordinate-system.md)
@@ -97,6 +98,9 @@ flowchart TD
 - `GlobalTransform2d` and `GlobalTransform3d` are opaque, non-persistent affine value types. They
   offer read-only transformation, inverse-if-valid, and matrix conversion operations; callers do
   not mutate or serialize their backing representation.
+- The implemented 2D `GlobalTransform2d` is a copyable ordinary value, not an ECS Component or
+  publication capability. ADR 0100 owns private phase snapshots and their read-only access; this
+  refinement selects no future 3D storage mechanism.
 
 `Transform2d` and `Transform3d` are mutually exclusive persistent spatial roles on one entity. A
 2.5D game uses the 2D domain plus explicit render layer/sort data. A 3D billboard, 2D surface in a
@@ -147,6 +151,13 @@ Consumers requiring current values join after the owning completion barrier. A c
 an immediate-read promise after arbitrary mutation. Exact authoring transactions may calculate the
 affected chain privately against one validated revision, but render extraction, physics, picking,
 and ordinary systems consume only the declared completed projection.
+
+For the current 2D implementation, completion publishes an immutable cut with its own World,
+runtime generation, phase, tick/frame and publication identity. Historical mutation, completed
+fixed-tick and presentation reads have explicit roles. Source changes after publication belong to
+the next cut; they do not change the meaning of a prior cut. Readers obtain the effective direct
+parent frame from the same cut. In particular, a valid non-spatial structural grouping entity
+terminates inheritance instead of rejecting the child or searching for a spatial ancestor.
 
 ### Reparenting and Persistence
 

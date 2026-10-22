@@ -1,8 +1,6 @@
 //! Resource-complete backend-neutral paint packets for immutable UI frames.
 
 // Bevy derives resolve this path; Nara's ECS facade remains the actual dependency.
-extern crate nara_ecs as bevy_ecs;
-
 mod atlas;
 mod integration;
 mod limits;

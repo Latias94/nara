@@ -93,6 +93,73 @@ let recipe = ProductRecipe::new()
 The recipe rejects duplicate plugin IDs and mismatched provider declarations before any `App` or
 runtime is created.
 
+## Read spatial data at its owning phase
+
+Keep authored and simulated local values in `Transform2d`. Use the public `nara::transform`
+readers for world-space data; `GlobalTransform2d` is a copyable affine value returned by a
+snapshot and cannot be inserted or queried as an ECS Component.
+
+| Reader SystemParam | Shared-World function | Intended read |
+| --- | --- | --- |
+| `HistoricalSpatialSnapshot2d` | `historical_spatial_snapshot(&world)` | Most recent simulation cut, seeded at startup, retaining its original phase/time; use during mutation such as pursuit |
+| `FixedSpatialSnapshot2d` | `fixed_spatial_snapshot(&world)` | This tick's completed fixed cut for Resolve and Finalize/Capture |
+| `PresentedSpatialSnapshot2d` | `presented_spatial_snapshot(&world)` | This frame's completed presentation cut for Extract consumers |
+
+Register fixed Resolve systems through `add_fixed_transform_projection_systems(app, systems)`.
+It places readers after hierarchy/Transform completion and materialized deferred commands, before
+Finalize. Register success-dependent snapshots in `GameplayCommandSet::Capture` with ordinary
+`app.add_systems(CoreStage::FixedUpdate, ...)` and read `FixedSpatialSnapshot2d` there directly.
+Do not apply the before-Finalize helper to Capture systems. Extract readers use
+`add_presented_transform_projection_systems(app, systems)` with `PresentedSpatialSnapshot2d`.
+PostUpdate and Extract replace the simulation slot with their own phase-stamped cuts; a Fixed
+reader requires the current fixed phase/time rather than accepting an arbitrary later cut.
+
+Read `global(entity)`, `effective_parent(entity)`, `order()` and `structural_index(entity)` from
+the same cut. A non-spatial direct parent ends inheritance; it does not forward an earlier
+ancestor's frame. Later source edits, spawns and retirements do not rewrite the published cut.
+New entities enter a later publication, and full Entity generations distinguish reused slots.
+The readers validate World/runtime and their phase/time role and return `SpatialSnapshotError`
+for unavailable or mismatched data. Failed publication exposes no last-good/local fallback.
+`stamp()` describes the cut; callers do not compare separate completion tokens to authorize it.
+
+The [Reference Game systems](../../reference-game/src/systems.rs) show historical pursuit followed
+by fixed Resolve operations, including spawning and retirement. Its
+[snapshot capture](../../reference-game/src/snapshot.rs) reads the completed fixed cut in Capture.
+
+## Mutate identity through the World
+
+For an installed `WorldIdentityDomain`, use `nara::identity::spawn_identity_entity` or
+`adopt_identity_entity` to obtain a `WorldEntityToken`, then `register_scene_instance` or
+`register_persistent_identity` to register semantic axes. These operations take the World and
+keep the domain installed while preparing and publishing indexes. Callers need no manual
+resource removal/reinsertion or `resource_scope` borrowing protocol. First marker insertion and
+retirement admit lifecycle behavior before changing markers or indexes.
+
+`retire_identity_entity` revokes the token and semantic axes while leaving the runtime entity
+alive; its default persistent disposition is Unload. Use
+`retire_identity_entity_with_disposition` when the persistence owner explicitly requires logical
+deletion. For Scene-owned despawn, retain Scene's exact membership/placement owner operations.
+Detached domain methods remain advanced APIs for owners that deliberately hold the domain
+separately. See the [independent identity workflow](../../tests/fixtures/module-consumer/tests/durable_identity.rs).
+
+## Capture successful gameplay batches
+
+Consume the immutable `GameplayCommandBatch` in `GameplayCommandSet::Consume`. Put
+success-dependent observations in `GameplayCommandSet::Capture`. The engine checks this batch's
+runtime generation, authoritative tick and retained fault reporter after Simulate and its ordinary
+deferred effects before enabling Capture. It checks successful consumption and reporter identity
+again after Capture and its deferred effects before acknowledging commands. Old completion or a
+replacement reporter cannot authorize the current batch. Intentional run-condition skips and
+warnings follow the ordinary managed schedule policy.
+
+A managed consumer/Simulate/deferred error prevents Capture and acknowledgement. A Capture error
+prevents acknowledgement but cannot undo earlier capture effects. The returning error handler may
+allow later eligible systems or deferred commands to run; those effects remain visible. Failure
+quarantines the active commands and retains pending work and budgets. Observe the runtime fault
+and use the Host's explicit close/reconstruction path; a later drive does not automatically replay
+the partially executed batch. Stop remains available. Zero-step frames retain commands, while each
+successful fixed tick, including an empty batch, is acknowledged once.
+
 ## Report Expected Plugin Failures
 
 Return checked static facts for an expected domain failure. The framework records the actual

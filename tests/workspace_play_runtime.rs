@@ -25,7 +25,7 @@ use nara::{
         StartupStage,
     },
     diagnostic::{DiagnosticReport, DiagnosticValueRef},
-    ecs::{Commands, Query, Res, Resource, schedule::IntoScheduleConfigs},
+    ecs::{Commands, Entity, Query, Res, Resource, schedule::IntoScheduleConfigs},
     project_host::{
         EditorGameViewBridgeFailure, EditorGameViewCompletion, EditorProjectSession,
         TrustedCompiledEditorProjectIntent,
@@ -44,7 +44,7 @@ use nara::{
         EditorPlayRequestResult, EditorPlayState, EditorWorkspaceIntent,
         EditorWorkspaceIntentRequestResult,
     },
-    transform::{GlobalTransform2d, Transform2d},
+    transform::{PresentedSpatialSnapshot2d, Transform2d},
 };
 use project_content_fixture::TestProject;
 
@@ -157,10 +157,10 @@ impl Plugin for SpatialObservationPlugin {
         app.insert_resource(SpatialObservation {
             target: self.target.clone(),
             observations: self.observations.clone(),
-        })?
-        .add_systems(
-            CoreStage::Extract,
-            observe_spatial_projection.after(nara::transform::__private::TransformSet::Propagate),
+        })?;
+        nara::transform::add_presented_transform_projection_systems(
+            app,
+            observe_spatial_projection,
         )?;
         Ok(())
     }
@@ -174,15 +174,21 @@ struct SpatialObservation {
 
 fn observe_spatial_projection(
     observation: Res<SpatialObservation>,
-    transforms: Query<(&SceneEntitySource, &GlobalTransform2d)>,
+    transforms: Query<(Entity, &SceneEntitySource)>,
+    spatial: PresentedSpatialSnapshot2d,
 ) {
-    let global = transforms
+    let entity = transforms
         .iter()
-        .find_map(|(source, global)| (source.entity_id == observation.target).then_some(global))
+        .find_map(|(entity, source)| (source.entity_id == observation.target).then_some(entity))
         .expect("the spatial probe target remains in the active scene");
     observation
         .observations
-        .try_send(global.translation())
+        .try_send(
+            spatial
+                .global(entity)
+                .expect("target belongs to the presented cut")
+                .translation(),
+        )
         .expect("the bounded spatial observation channel remains within its test budget");
 }
 

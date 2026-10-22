@@ -26,7 +26,7 @@ use nara_render::{
 };
 use nara_sprite::{Sprite, TextureRegion};
 use nara_tilemap::{TileAtlasLayout, TileCell, TileCoord, TileIndex, TileSet, Tilemap};
-use nara_transform::{GlobalTransform2d, Transform2d, TransformPlugin};
+use nara_transform::{Transform2d, TransformPlugin};
 
 mod visibility;
 
@@ -421,7 +421,12 @@ fn parented_sprite_uses_the_completed_global_affine() {
             .world_y_axis
             .abs_diff_eq(expected.transform_vector2(Vec2::new(0.0, 1.0)), 0.000_001)
     );
-    assert!(runtime.world().get::<GlobalTransform2d>(parent).is_some());
+    assert!(
+        nara_transform::historical_spatial_snapshot(runtime.world())
+            .unwrap()
+            .global(parent)
+            .is_ok()
+    );
     runtime.finish().unwrap();
 }
 
@@ -511,6 +516,36 @@ fn parented_tilemap_uses_the_completed_global_affine() {
 }
 
 #[test]
+fn unplaced_renderable_rejects_without_silently_omitting_it() {
+    for tile in [false, true] {
+        let mut app = sprite_app();
+        let prior = placeholder_extracted_sprite();
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<ExtractedSprites>()
+            .push(prior.clone());
+        let world = app.world_mut().unwrap();
+        if tile {
+            world.spawn((Tilemap::default(), Transform2d::default()));
+        } else {
+            world.spawn((
+                Sprite::from_color(Vec2::ONE, Color::WHITE),
+                Transform2d::default(),
+            ));
+        }
+        let mut runtime = start_runtime(app);
+        runtime
+            .drive(Duration::ZERO)
+            .expect_err("renderables must belong to the captured structural order");
+        assert_eq!(
+            runtime.world().resource::<ExtractedSprites>().as_slice(),
+            &[prior]
+        );
+        retire_runtime(runtime);
+    }
+}
+
+#[test]
 fn missing_sprite_local_transform_preserves_the_prior_extraction() {
     let mut app = sprite_app();
     let prior = placeholder_extracted_sprite();
@@ -538,7 +573,7 @@ fn missing_sprite_local_transform_preserves_the_prior_extraction() {
 }
 
 #[test]
-fn missing_tilemap_global_transform_preserves_the_prior_extraction() {
+fn tilemap_spawn_after_spatial_cut_preserves_the_prior_extraction() {
     let mut app = sprite_app();
     let prior = placeholder_extracted_sprite();
     app.world_mut()
@@ -551,11 +586,12 @@ fn missing_tilemap_global_transform_preserves_the_prior_extraction() {
         .spawn((Tilemap::default(), Transform2d::default()))
         .id();
     place_roots(app.world_mut().unwrap(), &[tilemap]);
-    app.insert_resource(RemoveCompletedGlobal(tilemap)).unwrap();
+    app.insert_resource(SpawnTilemapAfterSpatialCut(tilemap))
+        .unwrap();
     app.add_systems(
         CoreStage::Extract,
-        remove_completed_global
-            .after(nara_transform::__private::TransformSet::Propagate)
+        spawn_tilemap_after_spatial_cut
+            .after(nara_transform::__private::TransformSet::Present)
             .before(nara_render::__private::RenderExtractSet::Views),
     )
     .unwrap();
@@ -1374,11 +1410,12 @@ fn dirty_tile_chunks_can_clear_without_losing_authored_cells() {
 }
 
 #[derive(Resource)]
-struct RemoveCompletedGlobal(Entity);
+struct SpawnTilemapAfterSpatialCut(Entity);
 
-fn remove_completed_global(world: &mut World) {
-    let entity = world.resource::<RemoveCompletedGlobal>().0;
-    world.entity_mut(entity).remove::<GlobalTransform2d>();
+fn spawn_tilemap_after_spatial_cut(world: &mut World) {
+    let entity = world.resource::<SpawnTilemapAfterSpatialCut>().0;
+    assert!(world.get::<Tilemap>(entity).is_some());
+    world.spawn((Tilemap::default(), Transform2d::default()));
 }
 
 fn placeholder_extracted_sprite() -> ExtractedSprite {

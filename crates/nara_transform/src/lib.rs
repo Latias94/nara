@@ -2,8 +2,16 @@
 
 mod presentation;
 mod propagation;
+mod snapshot;
+#[cfg(test)]
+mod snapshot_tests;
 
 pub use presentation::FixedTransformInterpolation;
+pub use snapshot::{
+    FixedSpatialSnapshot2d, HistoricalSpatialSnapshot2d, PresentedSpatialSnapshot2d,
+    SpatialSnapshot2d, SpatialSnapshotError, SpatialSnapshotPhase, SpatialSnapshotStamp,
+    fixed_spatial_snapshot, historical_spatial_snapshot, presented_spatial_snapshot,
+};
 
 use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext};
 use nara_core::{Mat3, Vec2};
@@ -47,8 +55,15 @@ impl Default for Transform2d {
     }
 }
 
-#[derive(Debug, PartialEq, Component)]
-#[component(immutable)]
+/// An ordinary affine value read from a spatial snapshot, with no publication authority.
+///
+/// ```compile_fail
+/// # use nara_ecs::World;
+/// # use nara_transform::GlobalTransform2d;
+/// # let mut world = World::new();
+/// world.query::<&GlobalTransform2d>();
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GlobalTransform2d(Mat3);
 
 impl GlobalTransform2d {
@@ -72,57 +87,37 @@ impl GlobalTransform2d {
 /// The transform module owns the concrete propagation set and its placement between simulation
 /// mutation and finalization. Product systems use this semantic entry point instead of depending
 /// on that private schedule topology.
+/// Finalize/Capture systems read [`FixedSpatialSnapshot2d`] directly without using this helper.
 pub fn add_fixed_transform_projection_systems<'a, M>(
     app: &'a mut App,
     systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
 ) -> Result<&'a mut App, PluginError> {
     app.add_systems(
         CoreStage::FixedUpdate,
-        systems.after(__private::TransformSet::Propagate),
+        systems
+            .after(__private::TransformSet::Propagate)
+            .before(nara_app::FixedUpdateSet::Finalize),
+    )
+}
+
+/// Registers Extract readers after this frame's presentation snapshot is complete.
+pub fn add_presented_transform_projection_systems<'a, M>(
+    app: &'a mut App,
+    systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+) -> Result<&'a mut App, PluginError> {
+    app.add_systems(
+        CoreStage::Extract,
+        systems.after(__private::TransformSet::Present),
     )
 }
 
 #[doc(hidden)]
 pub mod __private {
-    use nara_ecs::{Resource, SystemSet};
-
-    pub use crate::presentation::RenderTransformProjection;
+    use nara_ecs::SystemSet;
 
     /// Installs the transform owner's optional fixed-history presentation projection.
     pub fn install_render_projection(app: &mut nara_app::App) -> Result<(), nara_app::PluginError> {
         crate::presentation::install(app)
-    }
-
-    /// Capability token proving that the current runtime 2D projection completed successfully.
-    ///
-    /// First-party consumers require this token before publishing world-space output. The
-    /// transform owner removes it before a dirty completion attempt and restores it only after the
-    /// complete candidate projection has been committed.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Resource)]
-    pub struct CompletedTransformProjection {
-        generation: u64,
-        hierarchy_generation: u64,
-    }
-
-    impl CompletedTransformProjection {
-        pub(super) const fn new(generation: u64, hierarchy_generation: u64) -> Self {
-            Self {
-                generation,
-                hierarchy_generation,
-            }
-        }
-
-        /// Returns the private transform completion generation.
-        #[must_use]
-        pub const fn generation(self) -> u64 {
-            self.generation
-        }
-
-        /// Returns the hierarchy generation consumed by this projection.
-        #[must_use]
-        pub const fn hierarchy_generation(self) -> u64 {
-            self.hierarchy_generation
-        }
     }
 
     /// Provisional first-party boundary after the runtime 2D projection is complete.
@@ -191,7 +186,8 @@ impl Plugin for TransformPlugin {
             component_id.as_str(),
             &TRANSFORM_SCHEMA_PROVIDER,
         )?;
-        propagation::install(app)
+        propagation::install(app)?;
+        presentation::install(app)
     }
 }
 
@@ -340,7 +336,14 @@ fn vec2_value(value: Vec2) -> Result<ComponentValue, ComponentCodecError> {
 }
 
 pub mod prelude {
-    pub use crate::{GlobalTransform2d, Transform2d, TransformPlugin};
+    pub use crate::{
+        FixedSpatialSnapshot2d, FixedTransformInterpolation, GlobalTransform2d,
+        HistoricalSpatialSnapshot2d, PresentedSpatialSnapshot2d, SpatialSnapshot2d,
+        SpatialSnapshotError, SpatialSnapshotPhase, SpatialSnapshotStamp, Transform2d,
+        TransformPlugin, add_fixed_transform_projection_systems,
+        add_presented_transform_projection_systems, fixed_spatial_snapshot,
+        historical_spatial_snapshot, presented_spatial_snapshot,
+    };
 }
 
 #[cfg(test)]
@@ -360,6 +363,20 @@ mod tests {
         Children, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
     };
     use nara_reflect::ComponentRegistryPlugin;
+
+    trait SnapshotTestRead {
+        fn snapshot_global(&self, entity: Entity) -> Option<GlobalTransform2d>;
+        fn snapshot_available(&self) -> bool;
+    }
+
+    impl SnapshotTestRead for nara_ecs::World {
+        fn snapshot_global(&self, entity: Entity) -> Option<GlobalTransform2d> {
+            historical_spatial_snapshot(self).ok()?.global(entity).ok()
+        }
+        fn snapshot_available(&self) -> bool {
+            historical_spatial_snapshot(self).is_ok()
+        }
+    }
 
     #[test]
     fn creation_template_preserves_wire_lineage_and_decodes_to_identity_transform() {
@@ -597,13 +614,9 @@ mod tests {
     }
 
     #[test]
-    fn global_transform_is_an_immutable_derived_component() {
-        fn assert_immutable_component<
-            T: nara_ecs::Component<Mutability = nara_ecs::component::Immutable>,
-        >() {
-        }
-
-        assert_immutable_component::<GlobalTransform2d>();
+    fn global_transform_is_an_ordinary_copyable_affine_value() {
+        fn assert_copy<T: Copy>() {}
+        assert_copy::<GlobalTransform2d>();
     }
 
     #[test]
@@ -635,21 +648,21 @@ mod tests {
         let world = runtime.world();
         assert_eq!(
             world
-                .get::<GlobalTransform2d>(root)
+                .snapshot_global(root)
                 .expect("the root should receive derived global state")
                 .translation(),
             Vec2::new(10.0, 20.0)
         );
         assert_eq!(
             world
-                .get::<GlobalTransform2d>(child)
+                .snapshot_global(child)
                 .expect("the child should receive derived global state")
                 .translation(),
             Vec2::new(13.0, 24.0)
         );
         assert_eq!(
             world
-                .get::<GlobalTransform2d>(grandchild)
+                .snapshot_global(grandchild)
                 .expect("the grandchild should receive derived global state")
                 .translation(),
             Vec2::new(11.0, 29.0)
@@ -658,7 +671,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_completion_withholds_token_and_preserves_previous_projection() {
+    fn failed_completion_withholds_the_snapshot_and_preserves_previous_payload() {
         let mut app = spatial_app();
         let (root, child) = {
             let world = app.world_mut().unwrap();
@@ -674,16 +687,8 @@ mod tests {
         let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
         runtime.drive(Duration::ZERO).unwrap();
 
-        let previous = runtime
-            .world()
-            .get::<GlobalTransform2d>(child)
-            .unwrap()
-            .matrix();
-        assert!(
-            runtime
-                .world()
-                .contains_resource::<__private::CompletedTransformProjection>()
-        );
+        let previous = runtime.world().snapshot_global(child).unwrap().matrix();
+        assert!(runtime.world().snapshot_available());
 
         let error = runtime
             .with_driver_scope(|scope| {
@@ -701,19 +706,19 @@ mod tests {
             error,
             TransformCompletionError::NonFiniteLocal { entity: root }
         );
-        assert!(
-            !runtime
-                .world()
-                .contains_resource::<__private::CompletedTransformProjection>()
+        assert!(!runtime.world().snapshot_available());
+        assert_eq!(
+            historical_spatial_snapshot(runtime.world()).err(),
+            Some(SpatialSnapshotError::Unavailable),
         );
         assert_eq!(
             runtime
                 .world()
-                .get::<GlobalTransform2d>(child)
-                .unwrap()
+                .resource::<snapshot::SimulationSnapshot>()
+                .payload
+                .globals[&child]
                 .matrix(),
-            previous,
-            "a failed candidate must not partially replace the prior projection"
+            previous
         );
 
         runtime
@@ -728,16 +733,12 @@ mod tests {
             .unwrap()
             .expect("a corrected generation should republish the projection");
 
-        assert!(
-            runtime
-                .world()
-                .contains_resource::<__private::CompletedTransformProjection>()
-        );
+        assert!(runtime.world().snapshot_available());
         runtime.finish().unwrap();
     }
 
     #[test]
-    fn failed_hierarchy_completion_invalidates_the_prior_transform_token() {
+    fn failed_hierarchy_completion_invalidates_the_spatial_publication() {
         let mut app = spatial_app();
         let (root, child) = spawn_parented_pair(&mut app);
         let corrupt_child = app.world_mut().unwrap().spawn(Transform2d::default()).id();
@@ -762,16 +763,8 @@ mod tests {
             )
             .unwrap();
         let mut runtime = candidate.complete_startup().unwrap().promote();
-        let previous = runtime
-            .world()
-            .get::<GlobalTransform2d>(child)
-            .unwrap()
-            .matrix();
-        assert!(
-            runtime
-                .world()
-                .contains_resource::<__private::CompletedTransformProjection>()
-        );
+        let previous = runtime.world().snapshot_global(child).unwrap().matrix();
+        assert!(runtime.world().snapshot_available());
 
         runtime
             .drive(Duration::ZERO)
@@ -783,20 +776,19 @@ mod tests {
                 .contains_resource::<nara_hierarchy::__private::CompletedHierarchyProjection>(),
             "a dirty hierarchy must revoke its completion fact before validation"
         );
+        assert!(historical_spatial_snapshot(runtime.world()).is_err());
         assert_eq!(
             runtime
                 .world()
-                .get::<GlobalTransform2d>(child)
-                .unwrap()
+                .resource::<snapshot::SimulationSnapshot>()
+                .payload
+                .globals[&child]
                 .matrix(),
-            previous,
-            "failure may retain the old opaque projection, but it must be unusable without a token"
+            previous
         );
         assert!(
-            !runtime
-                .world()
-                .contains_resource::<__private::CompletedTransformProjection>(),
-            "the transform completion point must revoke the stale transform token"
+            !runtime.world().snapshot_available(),
+            "the transform completion point must withhold a failed publication"
         );
 
         let mut retirement = runtime.begin_retirement();
@@ -835,7 +827,7 @@ mod tests {
             .id();
         let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
         runtime.drive(Duration::ZERO).unwrap();
-        assert!(runtime.world().get::<GlobalTransform2d>(entity).is_some());
+        assert!(runtime.world().snapshot_global(entity).is_some());
 
         runtime
             .with_driver_scope(|scope| {
@@ -846,65 +838,34 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert!(runtime.world().get::<GlobalTransform2d>(entity).is_none());
-        assert!(
-            runtime
-                .world()
-                .contains_resource::<__private::CompletedTransformProjection>()
-        );
+        assert!(runtime.world().snapshot_global(entity).is_none());
+        assert!(runtime.world().snapshot_available());
         runtime.finish().unwrap();
     }
 
     #[test]
-    fn parent_transform_removal_rejects_continuity_without_partial_publish() {
+    fn parent_transform_removal_starts_a_new_spatial_domain() {
         let mut app = spatial_app();
-        let (root, child) = {
-            let world = app.world_mut().unwrap();
-            let root = world
-                .spawn(Transform2d::from_translation(Vec2::new(5.0, 7.0)))
-                .id();
-            let child = world
-                .spawn(Transform2d::from_translation(Vec2::new(2.0, 3.0)))
-                .id();
-            place_ordered_hierarchy(world, &[root], &[(child, root)]);
-            (root, child)
-        };
+        let (root, child) = spawn_parented_pair(&mut app);
         let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
         runtime.drive(Duration::ZERO).unwrap();
-        let previous = runtime
-            .world()
-            .get::<GlobalTransform2d>(child)
-            .unwrap()
-            .matrix();
-
-        let error = runtime
+        runtime
             .with_driver_scope(|scope| {
                 scope
                     .__apply_port::<ProjectionEditPort>(ProjectionEdit::RemoveTransform(root))
                     .unwrap()
             })
             .unwrap()
-            .expect_err("a transform chain may not skip its structural parent");
-
+            .unwrap();
+        let snapshot = historical_spatial_snapshot(runtime.world()).unwrap();
         assert_eq!(
-            error,
-            TransformCompletionError::MissingParentTransform {
-                child,
-                parent: root,
-            }
+            snapshot.global(child).unwrap().translation(),
+            Vec2::new(3.0, 4.0)
         );
-        assert!(
-            !runtime
-                .world()
-                .contains_resource::<__private::CompletedTransformProjection>()
-        );
+        assert_eq!(snapshot.effective_parent(child).unwrap(), None);
         assert_eq!(
-            runtime
-                .world()
-                .get::<GlobalTransform2d>(child)
-                .unwrap()
-                .matrix(),
-            previous
+            snapshot.global(root),
+            Err(SpatialSnapshotError::MissingEntity { entity: root })
         );
         runtime.finish().unwrap();
     }
@@ -932,7 +893,7 @@ mod tests {
         assert_eq!(
             (second.0 - first.0, second.1 - first.1),
             (2, 4),
-            "each unchanged PostUpdate/Extract completion point should perform one participant change-tick scan only"
+            "each unchanged PostUpdate/Extract publication should perform one participant value scan only"
         );
         runtime.finish().unwrap();
     }
@@ -969,7 +930,7 @@ mod tests {
         assert_eq!(
             runtime
                 .world()
-                .get::<GlobalTransform2d>(deep_leaf)
+                .snapshot_global(deep_leaf)
                 .unwrap()
                 .translation(),
             Vec2::new(DEPTH as f32, 0.0)
@@ -989,7 +950,7 @@ mod tests {
     }
 
     #[test]
-    fn transform_propagation_does_not_scan_non_transform_children() {
+    fn nonspatial_order_entries_do_not_become_transform_participants() {
         const NON_TRANSFORM_CHILDREN: usize = 4_096;
 
         let mut app = spatial_app();
@@ -1011,7 +972,7 @@ mod tests {
         assert_eq!(
             (stats.2, stats.3, stats.4),
             (1, 1, 0),
-            "transform completion must scale with transform participants and transform edges"
+            "nonspatial structural entries must not add affine evaluations or spatial edges"
         );
         runtime.finish().unwrap();
     }
@@ -1063,7 +1024,7 @@ mod tests {
         assert_eq!(
             runtime
                 .world()
-                .get::<GlobalTransform2d>(child)
+                .snapshot_global(child)
                 .unwrap()
                 .translation(),
             Vec2::new(13.0, 24.0)
@@ -1091,7 +1052,7 @@ mod tests {
         assert_eq!(
             runtime
                 .world()
-                .get::<GlobalTransform2d>(child)
+                .snapshot_global(child)
                 .unwrap()
                 .translation(),
             Vec2::new(3.0, 4.0)
@@ -1152,7 +1113,7 @@ mod tests {
             .unwrap();
         app.add_systems(
             CoreStage::Extract,
-            observe_extract_child.after(__private::TransformSet::Propagate),
+            observe_extract_child.after(__private::TransformSet::Present),
         )
         .unwrap();
 
@@ -1168,7 +1129,7 @@ mod tests {
         assert_eq!(
             runtime
                 .world()
-                .get::<GlobalTransform2d>(child)
+                .snapshot_global(child)
                 .unwrap()
                 .translation(),
             Vec2::new(3.0, 4.0),
@@ -1239,9 +1200,9 @@ mod tests {
 
     fn observe_post_update_child(
         mut probe: ResMut<PostUpdateSpatialProbe>,
-        globals: Query<&GlobalTransform2d>,
+        globals: HistoricalSpatialSnapshot2d,
     ) {
-        probe.observed = Some(globals.get(probe.child).unwrap().translation());
+        probe.observed = Some(globals.global(probe.child).unwrap().translation());
     }
 
     #[derive(Resource)]
@@ -1278,9 +1239,9 @@ mod tests {
 
     fn observe_extract_child(
         mut probe: ResMut<ExtractSpatialProbe>,
-        globals: Query<&GlobalTransform2d>,
+        globals: PresentedSpatialSnapshot2d,
     ) {
-        probe.observed = Some(globals.get(probe.child).unwrap().translation());
+        probe.observed = Some(globals.global(probe.child).unwrap().translation());
         probe.samples = probe.samples.saturating_add(1);
     }
 
@@ -1338,10 +1299,7 @@ mod tests {
             .insert(Transform2d::from_translation(Vec2::new(10.0, 20.0)));
     }
 
-    fn observe_child_global(
-        mut probe: ResMut<FixedSpatialProbe>,
-        globals: Query<&GlobalTransform2d>,
-    ) {
-        probe.observed = Some(globals.get(probe.child).unwrap().translation());
+    fn observe_child_global(mut probe: ResMut<FixedSpatialProbe>, globals: FixedSpatialSnapshot2d) {
+        probe.observed = Some(globals.global(probe.child).unwrap().translation());
     }
 }

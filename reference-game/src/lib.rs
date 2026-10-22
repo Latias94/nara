@@ -138,6 +138,7 @@ impl Plugin for ReferenceGamePlugin {
             world.register_component::<ProjectileDamage>();
             world.register_component::<ProjectileLifetime>();
             world.register_component::<ProjectileId>();
+            world.register_component::<systems::ProjectileSpawnTick>();
         }
         app.insert_resource(resources::WaveState::default())?
             .insert_resource(resources::MovementIntent::default())?
@@ -151,7 +152,7 @@ impl Plugin for ReferenceGamePlugin {
                 ReferenceSpatialSet::Mutate.in_set(FixedUpdateSet::Simulate),
                 ReferenceSpatialSet::Resolve
                     .after(ReferenceSpatialSet::Mutate)
-                    .before(GameplayCommandSet::Capture),
+                    .before(FixedUpdateSet::Finalize),
             ),
         )?;
         Ok(())

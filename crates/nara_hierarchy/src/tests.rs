@@ -1107,6 +1107,143 @@ fn foreign_completed_order_cannot_replace_the_worlds_structural_order() {
 }
 
 #[test]
+fn shared_root_epoch_and_generation_cannot_admit_a_foreign_sibling_order() {
+    let mut original = World::new();
+    let mut foreign = World::new();
+    let original_entities = (0..3)
+        .map(|_| original.spawn_empty().id())
+        .collect::<Vec<_>>();
+    let foreign_entities = (0..3)
+        .map(|_| foreign.spawn_empty().id())
+        .collect::<Vec<_>>();
+    assert_eq!(original_entities, foreign_entities);
+    for (world, entities, children) in [
+        (&mut original, &original_entities, [1, 2]),
+        (&mut foreign, &foreign_entities, [2, 1]),
+    ] {
+        HierarchyWriter::new(world)
+            .apply_batch(&[
+                HierarchyOperation::Place {
+                    entity: entities[0],
+                    placement: root_last(),
+                },
+                HierarchyOperation::Place {
+                    entity: entities[children[0]],
+                    placement: child_last(entities[0]),
+                },
+                HierarchyOperation::Place {
+                    entity: entities[children[1]],
+                    placement: child_last(entities[0]),
+                },
+            ])
+            .unwrap();
+    }
+    // Recreate an order through safe resource removal so the original and transferred-root
+    // Worlds reach the same generation without modifying their private completion state.
+    validate_dirty_hierarchy(&mut original).unwrap();
+    let initial_order = original.remove_resource::<HierarchyOrder>().unwrap();
+    validate_dirty_hierarchy(&mut original).unwrap();
+    let generation = __private::completed_topology_generation(&original).unwrap();
+    let original_publication = __private::completed_topology_publication(&original).unwrap();
+    let original_root_epoch = original.resource::<HierarchyOrder>().root_epoch();
+    let original_order = original.resource::<HierarchyOrder>().as_slice().to_vec();
+    assert_eq!(initial_order.generation() + 1, generation);
+    let roots = original.remove_resource::<HierarchyRoots>().unwrap();
+    foreign.insert_resource(roots);
+    validate_dirty_hierarchy(&mut foreign).unwrap();
+    let foreign_order = foreign.remove_resource::<HierarchyOrder>().unwrap();
+    assert_eq!(foreign_order.generation(), generation);
+    assert_eq!(foreign_order.root_epoch(), original_root_epoch);
+    assert_eq!(
+        foreign_order.roots(),
+        original.resource::<HierarchyOrder>().roots()
+    );
+    assert_ne!(foreign_order.as_slice(), original_order);
+    assert_eq!(
+        foreign_order.as_slice(),
+        &[
+            original_entities[0],
+            original_entities[2],
+            original_entities[1]
+        ]
+    );
+    original.insert_resource(foreign.remove_resource::<HierarchyRoots>().unwrap());
+    original.insert_resource(foreign_order);
+    assert_eq!(
+        original.resource::<HierarchyOrder>().generation(),
+        generation
+    );
+    assert_eq!(
+        original.resource::<HierarchyOrder>().root_epoch(),
+        original_root_epoch
+    );
+    assert_eq!(__private::completed_topology_publication(&original), None);
+    assert_eq!(__private::completed_topology_generation(&original), None);
+    validate_dirty_hierarchy(&mut original).unwrap();
+    assert_eq!(
+        original.resource::<HierarchyOrder>().as_slice(),
+        original_entities
+    );
+    assert_ne!(
+        __private::completed_topology_publication(&original),
+        Some(original_publication)
+    );
+    assert!(__private::completed_topology_generation(&original).is_some());
+    assert_eq!(
+        original
+            .resource::<HierarchyOrder>()
+            .index(original_entities[1]),
+        Some(1)
+    );
+    assert_eq!(
+        original
+            .resource::<HierarchyOrder>()
+            .index(original_entities[2]),
+        Some(2)
+    );
+}
+
+#[test]
+fn prior_same_world_order_is_not_the_current_publication_even_with_identical_roots() {
+    let mut world = World::new();
+    let root = world.spawn_empty().id();
+    let first = world.spawn_empty().id();
+    let second = world.spawn_empty().id();
+    HierarchyWriter::new(&mut world)
+        .apply_batch(&[
+            HierarchyOperation::Place {
+                entity: root,
+                placement: root_last(),
+            },
+            HierarchyOperation::Place {
+                entity: first,
+                placement: child_last(root),
+            },
+            HierarchyOperation::Place {
+                entity: second,
+                placement: child_last(root),
+            },
+        ])
+        .unwrap();
+    validate_dirty_hierarchy(&mut world).unwrap();
+    let old_order = world.remove_resource::<HierarchyOrder>().unwrap();
+    // Republishing unchanged topology still creates a distinct completion/order association.
+    validate_dirty_hierarchy(&mut world).unwrap();
+    let new_publication = __private::completed_topology_publication(&world).unwrap();
+    world.insert_resource(old_order);
+    assert_eq!(__private::completed_topology_publication(&world), None);
+    validate_dirty_hierarchy(&mut world).unwrap();
+    assert_ne!(
+        __private::completed_topology_publication(&world),
+        Some(new_publication)
+    );
+    assert_eq!(
+        world.resource::<HierarchyOrder>().as_slice(),
+        &[root, first, second]
+    );
+}
+
+#[test]
 fn despawning_childless_root_invalidates_completion_immediately() {
     let mut world = World::new();
     let root = world.spawn_empty().id();

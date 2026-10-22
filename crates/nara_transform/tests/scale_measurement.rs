@@ -19,8 +19,8 @@ use nara_hierarchy::{
 };
 use nara_reflect::ComponentRegistryPlugin;
 use nara_transform::{
-    __private::{RenderTransformProjection, install_render_projection},
-    FixedTransformInterpolation, GlobalTransform2d, Transform2d, TransformPlugin,
+    FixedTransformInterpolation, Transform2d, TransformPlugin, historical_spatial_snapshot,
+    presented_spatial_snapshot,
 };
 
 pub(crate) const WARMUP_SAMPLES: usize = 120;
@@ -139,7 +139,6 @@ pub(crate) fn spatial_app(interpolation: bool) -> App {
     if interpolation {
         app.insert_resource(FixedTransformInterpolation)
             .expect("interpolation policy should install");
-        install_render_projection(&mut app).expect("render projection should install");
     }
     app
 }
@@ -312,8 +311,10 @@ pub(crate) fn check_globals(
             .map(|parent| global[parent] + local[index])
             .unwrap_or(local[index]);
         assert_eq!(
-            world
-                .get::<GlobalTransform2d>(entity)
+            historical_spatial_snapshot(world)
+                .unwrap()
+                .global(entity)
+                .ok()
                 .expect("global transform should be complete")
                 .translation(),
             global[index],
@@ -458,17 +459,11 @@ fn run_timed_row(
     }
     check_globals(&runtime, &fixture, &local);
     if interpolation {
-        let global = runtime
-            .world()
-            .get::<GlobalTransform2d>(actor)
-            .expect("interpolation actor should have a current global")
-            .matrix();
         assert!(
-            runtime
-                .world()
-                .resource::<RenderTransformProjection>()
-                .matrix(actor, global)
-                .is_some()
+            presented_spatial_snapshot(runtime.world())
+                .unwrap()
+                .global(actor)
+                .is_ok()
         );
     }
 
@@ -515,19 +510,11 @@ fn run_timed_row(
             let alpha = runtime.world().resource::<RenderTime>().interpolation_alpha;
             assert!((alpha - 0.5).abs() <= f32::EPSILON);
             let expected = previous_actor + delta * alpha;
-            let projected = runtime
-                .world()
-                .resource::<RenderTransformProjection>()
-                .matrix(
-                    actor,
-                    runtime
-                        .world()
-                        .get::<GlobalTransform2d>(actor)
-                        .expect("interpolation actor should have current global")
-                        .matrix(),
-                )
-                .expect("interpolation projection should contain actor")
-                .transform_point2(Vec2::ZERO);
+            let projected = presented_spatial_snapshot(runtime.world())
+                .unwrap()
+                .global(actor)
+                .expect("presentation should contain actor")
+                .translation();
             assert!((projected - expected).abs().max_element() <= 0.0001);
         }
         write_row(

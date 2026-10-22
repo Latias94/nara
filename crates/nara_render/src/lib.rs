@@ -1,7 +1,5 @@
 //! Renderer-facing data and backend seam.
 
-extern crate nara_ecs as bevy_ecs;
-
 mod canvas;
 mod frame;
 mod prepare;
@@ -51,7 +49,9 @@ use nara_reflect::{
     ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
-use nara_transform::{GlobalTransform2d, Transform2d};
+use nara_transform::PresentedSpatialSnapshot2d;
+#[cfg(test)]
+use nara_transform::Transform2d;
 use nara_window::{PrimaryWindowId, Window, WindowId};
 
 pub use prepare::{
@@ -177,12 +177,6 @@ struct ExtractedViewScratch(Vec<ExtractedView>);
 /// Failure to publish the world-space camera projection for one frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum RenderViewExtractionError {
-    #[error("the completed 2D transform projection is unavailable")]
-    ProjectionIncomplete,
-    #[error("camera entity {entity:?} is missing its authored Transform2d")]
-    MissingLocalTransform { entity: Entity },
-    #[error("camera entity {entity:?} is missing its completed GlobalTransform2d")]
-    MissingGlobalTransform { entity: Entity },
     #[error("camera entity {entity:?} has a non-finite completed transform")]
     NonFiniteTransform { entity: Entity },
     #[error("camera entity {entity:?} has a singular completed linear transform")]
@@ -745,45 +739,19 @@ fn extract_views(
     mut extracted_views: ResMut<ExtractedViews>,
     mut scratch: ResMut<ExtractedViewScratch>,
     clear_color: Res<ClearColor>,
-    completed_projection: Option<Res<nara_transform::__private::CompletedTransformProjection>>,
-    completed_hierarchy: Option<Res<nara_hierarchy::__private::CompletedHierarchyProjection>>,
-    presentation: Res<nara_transform::__private::RenderTransformProjection>,
+    spatial: PresentedSpatialSnapshot2d,
     primary_window_id: Option<Res<PrimaryWindowId>>,
     windows: Query<&Window>,
     canvas: Option<Res<WorldCanvas>>,
-    cameras: Query<(
-        Entity,
-        &Camera2d,
-        Option<&Transform2d>,
-        Option<&GlobalTransform2d>,
-    )>,
+    cameras: Query<(Entity, &Camera2d)>,
 ) -> Result<(), BevyError> {
-    let completed_projection = completed_projection
-        .ok_or(RenderViewExtractionError::ProjectionIncomplete)
-        .map_err(BevyError::error)?;
-    let completed_hierarchy = completed_hierarchy
-        .ok_or(RenderViewExtractionError::ProjectionIncomplete)
-        .map_err(BevyError::error)?;
-    if completed_projection.hierarchy_generation() != completed_hierarchy.generation() {
-        return Err(BevyError::error(
-            RenderViewExtractionError::ProjectionIncomplete,
-        ));
-    }
+    spatial.stamp().map_err(BevyError::error)?;
     scratch.0.clear();
 
     let primary_window_id = primary_window_id.map(|resource| resource.0);
 
-    for (camera_entity, camera, local, global) in cameras.iter() {
-        local
-            .ok_or(RenderViewExtractionError::MissingLocalTransform {
-                entity: camera_entity,
-            })
-            .map_err(BevyError::error)?;
-        let global = global
-            .ok_or(RenderViewExtractionError::MissingGlobalTransform {
-                entity: camera_entity,
-            })
-            .map_err(BevyError::error)?;
+    for (camera_entity, camera) in cameras.iter() {
+        let global = spatial.global(camera_entity).map_err(BevyError::error)?;
         let Some(viewport) = camera.viewport.or_else(|| {
             viewport_for_target(
                 camera.target,
@@ -795,12 +763,13 @@ fn extract_views(
             continue;
         };
 
-        let matrix = presentation
-            .matrix(camera_entity, global.matrix())
-            .ok_or(RenderViewExtractionError::ProjectionIncomplete)
-            .map_err(BevyError::error)?;
-        let mapping = camera_mapping(camera_entity, matrix, camera.viewport_height, viewport)
-            .map_err(BevyError::error)?;
+        let mapping = camera_mapping(
+            camera_entity,
+            global.matrix(),
+            camera.viewport_height,
+            viewport,
+        )
+        .map_err(BevyError::error)?;
         scratch.0.push(ExtractedView {
             camera_entity,
             target: camera.target,
@@ -1274,9 +1243,9 @@ mod tests {
         let mut runtime = start_runtime(app);
         runtime.drive(Duration::ZERO).unwrap();
         let view = runtime.world().resource::<ExtractedViews>().as_slice()[0];
-        let camera_matrix = runtime
-            .world()
-            .get::<GlobalTransform2d>(camera)
+        let camera_matrix = nara_transform::historical_spatial_snapshot(runtime.world())
+            .unwrap()
+            .global(camera)
             .unwrap()
             .matrix();
         let world_point = camera_matrix.transform_point2(Vec2::new(80.0, 45.0));
@@ -1493,7 +1462,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_camera_global_transform_faults_without_replacing_prior_views() {
+    fn camera_spawn_after_spatial_cut_faults_without_replacing_prior_views() {
         let mut app = render_app(false);
         let prior = test_extracted_view();
         app.world_mut()
@@ -1512,11 +1481,12 @@ mod tests {
                 Transform2d::default(),
             ))
             .id();
-        app.insert_resource(RemoveCameraGlobal(camera)).unwrap();
+        app.insert_resource(SpawnCameraAfterSpatialCut(camera))
+            .unwrap();
         app.add_systems(
             CoreStage::Extract,
-            remove_camera_global
-                .after(nara_transform::__private::TransformSet::Propagate)
+            spawn_camera_after_spatial_cut
+                .after(nara_transform::__private::TransformSet::Present)
                 .before(__private::RenderExtractSet::Views),
         )
         .unwrap();
@@ -1534,11 +1504,12 @@ mod tests {
     }
 
     #[derive(Resource)]
-    struct RemoveCameraGlobal(Entity);
+    struct SpawnCameraAfterSpatialCut(Entity);
 
-    fn remove_camera_global(world: &mut World) {
-        let camera = world.resource::<RemoveCameraGlobal>().0;
-        world.entity_mut(camera).remove::<GlobalTransform2d>();
+    fn spawn_camera_after_spatial_cut(world: &mut World) {
+        let camera = world.resource::<SpawnCameraAfterSpatialCut>().0;
+        let config = world.get::<Camera2d>(camera).unwrap().clone();
+        world.spawn((config, Transform2d::default()));
     }
 
     #[test]

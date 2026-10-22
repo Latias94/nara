@@ -4,6 +4,8 @@ mod current_scene;
 mod project_content_fixture;
 #[path = "support/reference_project_copy.rs"]
 mod reference_project_copy;
+#[path = "first_wave/spatial.rs"]
+mod spatial;
 
 use std::{
     collections::BTreeMap,
@@ -1031,6 +1033,10 @@ fn same_tick_player_and_final_enemy_death_resolves_to_defeat() {
     assert_eq!(snapshot.planned_enemies, 3);
     assert_eq!(snapshot.defeated_enemies, 3);
     assert!(snapshot.enemies.is_empty());
+    assert!(
+        snapshot.projectiles.is_empty(),
+        "the projectile born after propagation must hit and retire before same-tick Capture"
+    );
 }
 
 #[test]
@@ -1721,6 +1727,14 @@ fn admit_adapter_candidate(
     plan: nara::project_host::RuntimePlan,
     source: SceneSource,
 ) -> nara::app::RuntimeCandidate {
+    admit_adapter_candidate_with_edit(plan, source, |_| {})
+}
+
+fn admit_adapter_candidate_with_edit(
+    plan: nara::project_host::RuntimePlan,
+    source: SceneSource,
+    edit: impl FnOnce(&mut World) + Send + Sync + 'static,
+) -> nara::app::RuntimeCandidate {
     let runtime_time = plan.settings().runtime.runtime_time_settings();
     let fixed_time = plan.settings().runtime.fixed_time();
     let sealed = plan.plugin_plan().instantiate().unwrap();
@@ -1740,6 +1754,7 @@ fn admit_adapter_candidate(
                 let report = materialize_startup_scene(world, source)
                     .expect("the retained startup scene should materialize");
                 assert!(!report.has_errors(), "{report:#?}");
+                edit(world);
             });
         })
         .unwrap();

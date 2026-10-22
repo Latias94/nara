@@ -1,8 +1,6 @@
 //! Sprite authoring data for 2D scenes.
 
 // Bevy derives resolve this path; Nara's ECS facade remains the actual dependency.
-extern crate nara_ecs as bevy_ecs;
-
 use nara_app::{App, Plugin, PluginError, PluginPreflightContext};
 use nara_asset::{AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle};
 use nara_core::{Color, Vec2};

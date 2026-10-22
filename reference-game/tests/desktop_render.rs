@@ -24,7 +24,7 @@ use nara::{
     project_host::ProjectContentLoader,
     scene::SceneEntitySource,
     sprite_render::__private::{ExtractedSprites, TextureUvRect},
-    transform::{GlobalTransform2d, Transform2d},
+    transform::{Transform2d, historical_spatial_snapshot, presented_spatial_snapshot},
     ui::{UiLayer, UiSurfaceId, latest_ui_frame},
 };
 use nara_reference_game::{
@@ -112,15 +112,17 @@ fn desktop_first_frame_projects_exact_atlas_regions_before_a_fixed_tick() {
     let atlas_tile_size = Vec2::new(1.0 / 12.0, 1.0 / 11.0);
 
     assert_eq!(
-        world
-            .get::<GlobalTransform2d>(player_entity)
+        presented_spatial_snapshot(world)
+            .unwrap()
+            .global(player_entity)
             .expect("startup must complete the player transform")
             .translation(),
         player_position,
     );
     assert_eq!(
-        world
-            .get::<GlobalTransform2d>(enemy_entity)
+        presented_spatial_snapshot(world)
+            .unwrap()
+            .global(enemy_entity)
             .expect("startup must complete the expanded enemy transform")
             .translation(),
         enemy_position,
@@ -221,9 +223,9 @@ fn parented_enemy_gameplay_and_snapshot_use_completed_world_space() {
         .expect("the enemy should retain its authored local transform")
         .translation;
 
-    let world_before = runtime
-        .world()
-        .get::<GlobalTransform2d>(enemy)
+    let world_before = historical_spatial_snapshot(runtime.world())
+        .unwrap()
+        .global(enemy)
         .expect("startup should complete the edited anchor transform")
         .translation();
     assert_vec2_close(world_before, enemy_local_before + Vec2::new(-10.0, 0.0));
@@ -237,9 +239,9 @@ fn parented_enemy_gameplay_and_snapshot_use_completed_world_space() {
         .get::<Transform2d>(enemy)
         .expect("the enemy should retain a local transform after pursuit")
         .translation;
-    let world_after = runtime
-        .world()
-        .get::<GlobalTransform2d>(enemy)
+    let world_after = historical_spatial_snapshot(runtime.world())
+        .unwrap()
+        .global(enemy)
         .expect("the fixed tick should publish the pursued enemy global")
         .translation();
     assert_vec2_close(enemy_local_after, enemy_local_before + Vec2::new(0.5, 0.0));
@@ -300,8 +302,9 @@ fn desktop_weapon_keeps_its_local_offset_and_follows_the_player_in_same_tick_ext
             weapon_local_before,
             Transform2d::from_translation(Vec2::new(1.2, 0.0)),
         );
-        let weapon_global_before = world
-            .get::<GlobalTransform2d>(weapon_entity)
+        let weapon_global_before = presented_spatial_snapshot(world)
+            .unwrap()
+            .global(weapon_entity)
             .expect("Startup must project the weapon hierarchy")
             .translation();
         let weapon_extracted_before = assert_extracted_sprite_matches_global(world, weapon_entity);
@@ -337,8 +340,9 @@ fn desktop_weapon_keeps_its_local_offset_and_follows_the_player_in_same_tick_ext
     assert_eq!(weapon_local_after, weapon_local_before);
     let player_delta = player_after - player_before;
     assert!(player_delta.x < 0.0 && player_delta.y == 0.0);
-    let weapon_global_after = world
-        .get::<GlobalTransform2d>(weapon_entity)
+    let weapon_global_after = presented_spatial_snapshot(world)
+        .unwrap()
+        .global(weapon_entity)
         .expect("the fixed-step completion must refresh the weapon global")
         .translation();
     assert_vec2_close(weapon_global_after - weapon_global_before, player_delta);
@@ -438,8 +442,9 @@ fn render_terminal(outcome: WaveOutcome) -> RenderObservation {
         .expect("the player must be extracted as a sprite");
     assert_eq!(
         player_sprite.world_center,
-        world
-            .get::<GlobalTransform2d>(player_entity)
+        presented_spatial_snapshot(world)
+            .unwrap()
+            .global(player_entity)
             .expect("same-frame extraction requires the completed player global")
             .translation(),
         "same-frame extraction must consume the transform projected after gameplay mutation",
@@ -579,8 +584,9 @@ fn assert_extracted_sprite_matches_global(world: &World, entity: Entity) -> Vec2
     let sprite = world
         .get::<Sprite>(entity)
         .expect("the observed scene entity must be a sprite");
-    let global = world
-        .get::<GlobalTransform2d>(entity)
+    let global = presented_spatial_snapshot(world)
+        .unwrap()
+        .global(entity)
         .expect("sprite extraction requires a completed global transform");
     let extracted = world
         .resource::<ExtractedSprites>()

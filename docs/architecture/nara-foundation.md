@@ -88,7 +88,7 @@ flowchart TD
     App --> Tasks[nara_tasks: task pools + handles]
     Facade --> Core[nara_core: color + math primitives]
     Facade --> FS[nara_fs: host-issued filesystem capabilities]
-    Facade --> Transform[nara_transform: spatial components]
+    Facade --> Transform[nara_transform: authored locals and phase snapshots]
     Facade --> Reflect[nara_reflect: component schema + value codec registry]
     Facade --> Diagnostic[nara_diagnostic: classified diagnostics + pressure snapshots]
     Facade --> Identity[nara_identity: world-scoped identity + remaps]
@@ -119,12 +119,22 @@ flowchart TD
     Tooling --> DebugUi[future dear-imgui / nara UI adapters]
 ```
 
-RGS-U2 implements the ADR 0100 runtime ownership boundary: `nara_hierarchy` owns the non-linked
-runtime relation and completion validation, while scene, transform, and UI consume it without
-gaining lifecycle authority. RGS-U3 adds the immutable completed 2D global projection and migrates
-camera, sprite, and tilemap extraction to consume it without fallback. SRT-U5 proves that a real
-reference product can keep `Transform2d` as its only authored local position and consume completed
-globals for world-space gameplay, snapshots, and extraction, including non-identity ancestors.
+Under ADR 0100, `nara_hierarchy` owns the non-linked runtime relation and completion validation,
+while scene, transform, and UI consume it without gaining lifecycle authority. `nara_transform`
+publishes immutable simulation and presentation cuts. Gameplay selects Historical or Fixed reads;
+camera, sprite, and tilemap extraction consume the same Presented cut without fallback.
+`Transform2d` remains the authored local position, and `GlobalTransform2d` is a copyable affine
+value returned by a snapshot, with no ECS Component identity. Spatial inheritance follows only
+continuous direct-parent 2D chains; a non-spatial parent starts a new spatial domain.
+Startup seeds Historical reads. Fixed Resolve uses `add_fixed_transform_projection_systems`
+after propagation and before Finalize; Gameplay Capture reads `FixedSpatialSnapshot2d` directly
+without joining that helper. Extract readers use `add_presented_transform_projection_systems`
+and `PresentedSpatialSnapshot2d`. Matching shared-World functions expose the same roles.
+Each cut carries World/runtime, phase/time, full Entity identity and captured structural order.
+Reading its globals and `effective_parent` uses one captured frame. Later source edits, spawns and
+retirements leave that cut unchanged; a subsequent failed publication makes it unavailable rather
+than exposing old data as current. Stamps are observation metadata, not completion authority.
+See the [runtime workflow guide](../guides/rust-product-recipes.md#read-spatial-data-at-its-owning-phase).
 SRT-U6 proves that an admitted Editor edit survives Play and Retry, persists through Save/Reopen,
 and reaches the ordinary desktop product entry while startup/replacement mechanics remain advanced
 or private. ADR 0089 remains Proposed; the implementation ledger is the authority for slice status.
@@ -136,30 +146,30 @@ or private. ADR 0089 remains Proposed; the implementation ledger is the authorit
 | `nara` | Facade, layered preludes, authorized project ingest/composition, immutable startup-content publication, provisional read-only startup activation, and concrete `HeadlessRun`/`DesktopRun` product actions | Gameplay-first backend-free root prelude; advanced, backend, and tooling preludes for lower-level APIs; root-owned content loading plus a private `ProjectHost` start/publication/retirement state machine over opaque filesystem authority; a private owner retains the exact startup source, receipt, and content lease; Winit remains the selected desktop parent rather than a universal Host Interface |
 | `nara_app` | Gameplay configuration through `App`, typed Plugin contributions and frozen definitions, schedules and time; managed `RuntimeInstance` with typed control/fault/close values | One managed execution owner for startup, safe-point driving, exact fixed ticks, sticky faults and retryable physical close; private candidate preparation and reverse once-only shutdown; atomic frame planning, explicit discard/preserve debt and Bevy tracker boundary; raw App execution has been removed |
 | `nara_project` | `ProjectManifest`, profile overlays, validated `EffectiveProjectSettings`, project path validation, runtime/task/window/input/diagnostic value lowering | Side-effect-free `nara.toml` authority with fallible duration/limit conversion, nested bounded task settings, and enforced headless/server/editor/dev/release profile invariants |
-| `nara_tasks` | Bounded `TaskPools`, `TaskPoolConfig`, `TaskSpawnOutcome`, typed `TaskHandle<T>` terminals, `TaskOrderKey`, `OrderedTaskResults<T>`, shutdown reports and stats | Threaded std worker facades with move-only worker owners, pending-only coalescing, panic isolation, first-terminal cancellation, pollable/retryable finite drain/cancel/join, process-retained abnormal Drop quarantine, standalone `shutdown_blocking`, and an explicitly test-only inline driver |
+| `nara_tasks` | Bounded `TaskPools`, `TaskPoolConfig`, `TaskSpawnOutcome`, typed `TaskHandle<T>` terminals, independent `TaskReturnObserver`, `TaskOrderKey`, `OrderedTaskResults<T>`, shutdown reports and stats | Threaded std worker facades with move-only worker owners, pending-only coalescing, panic isolation, first-terminal cancellation distinct from executor-owned disposal and physical running observation, pollable/retryable finite drain/cancel/join, process-retained abnormal Drop quarantine, standalone `shutdown_blocking`, and an explicitly test-only inline driver |
 | `nara_core` | `Color`, math re-exports, non-zero item/byte/depth/time limit scalars, persistent envelope metadata, serde shape preflight | Core primitives and unit-safe values that do not own domain overload policy or file-kind semantics |
-| `nara_fs` | Host-issued `DirectoryCapability`/`FileCapability`, checked `limit + 1` bounded reads, validated relative components, scoped live-object identity, digest/lock/temp/replace/sync primitives and non-cloneable typed guarantee receipts | Windows handle-relative NT opens/rename, Linux `openat2`, fail-closed proof tiers, and no authorization-bearing raw paths; replacement evidence distinguishes bytes written through the temporary capability from identity-bound bytes observed after publication; unsupported platform primitives remain explicit |
-| `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule`, `ScheduleLabel`, and `SystemSet`; advanced lifecycle-free insertion/despawn preparation | Product-facing ECS conventions over `bevy_ecs`, facade-safe derive exports for root-only and renamed dependencies, and private/version-coupled hook/observer plus non-linked relationship probes used only to reject transactions that cannot remain atomic |
-| `nara_ecs_derive` | `Component`, `Resource`, `ScheduleLabel`, and `SystemSet` derives behind the `nara_ecs` and root facade exports | Proc-macro dependency isolation, Bevy-compatible expansion, declaration diagnostics, and renamed-package path resolution |
-| `nara_identity` | `WorldIdentityDomain`, `WorldIdentityDomainId`, `SceneInstanceId`, `PersistentRuntimeId`, structured entity references, tombstones, and remaps | World-scoped runtime claims/indexes, atomic spawn/fork/restore identity transactions, lookup validation, retirement, stable non-`Entity` observation vocabulary, and workspace-internal prepared Scene transactions excluded from the root facade |
-| `nara_hierarchy` | One Nara-owned non-linked runtime parent relation, relationship-maintained read-only reverse projection, query-oriented access, construction-only writers, and a semantic completion boundary | Bevy relationship maintenance, dirty-generation validation with retained scratch, and provisional construction internals; no persistent schema, lifecycle ownership, UI layout, transform math, sibling order, reparent API, or general provider Interface |
-| `nara_transform` | Authored mutable `Transform2d`, opaque immutable `GlobalTransform2d`, and semantic startup/fixed/PostUpdate/Extract completion for the current hierarchy generation; accepted ADR 0097 ceiling: separate 2D/3D base TRS, optional typed post-affine residuals, and opaque derived global affines | Retained Transform-only adjacency and candidate globals; one allocation-free participant change-tick scan at each completion point, O(T + Et) propagation only when dirty, and atomic generation-token publication; later post-affine, exact reparent lowering, 3D propagation, and domain admission remain evidence-gated |
+| `nara_fs` | Host-issued `DirectoryCapability`/`FileCapability`, checked `limit + 1` bounded reads, validated relative components, scoped live-object identity, digest/temp/replace/sync primitives, owned `LockedFileCapability` with ownership-returning acquisition/release failures and non-cloneable typed guarantee receipts | Windows handle-relative NT opens/rename, Linux `openat2`, fail-closed proof tiers, borrowed positional readers with no duplicate release authority, and no authorization-bearing raw paths; replacement evidence distinguishes bytes written through the temporary capability from identity-bound bytes observed after publication; unsupported platform primitives remain explicit |
+| `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `SystemParam`, `Commands`, `Query`, `Schedule`, `ScheduleLabel`, and `SystemSet`; advanced lifecycle-free insertion/despawn preparation | Product-facing ECS conventions over `bevy_ecs`, facade-aware derives through direct/root/renamed dependencies and `bundle`/`system` module paths without a caller Bevy alias, and private/version-coupled lifecycle probes for transaction admission |
+| `nara_ecs_derive` | `Component`, `Resource`, `Bundle`, `SystemParam`, `ScheduleLabel`, and `SystemSet` derives behind the `nara_ecs` and root facade exports | Proc-macro dependency isolation, renamed-package path resolution and declaration diagnostics; Bundle/SystemParam use a bounded path-parameterized adaptation of released Bevy 0.20.0 expansion with retained provenance/licenses and exact runtime coupling |
+| `nara_identity` | `WorldIdentityDomain`, structured references, tombstones and remaps; World-oriented spawn/adopt, Scene registration, persistent registration and entity retirement | World-scoped claims/indexes, shared preparation and short index publication with the domain installed, lifecycle admission before marker effects, atomic fork/restore transactions, validated lookup, and workspace-internal prepared Scene transactions excluded from the root facade |
+| `nara_hierarchy` | One Nara-owned non-linked parent relation, read-only ordered reverse projection, `HierarchyWriter` placement operations, roots and completed depth-first structural order | Immutable private relation fields and manual owner maintenance; dirty validation with retained scratch, sparse writer candidates and exact World-bound publication association. No Bevy linked-lifetime relationship authority, persistent schema, UI layout, transform math or general provider interface |
+| `nara_transform` | Authored mutable `Transform2d`, ordinary affine `GlobalTransform2d` values, and read-only Historical/Fixed/Presented spatial snapshots with World/runtime, phase/time, full Entity and captured structural order | Bounded private simulation/presentation slots and candidate/history buffers; finite source-value/membership comparison at publication, linear rebuild over spatial participants and structural order when changed, same-cut effective parent frames and explicit deferred boundaries. Non-spatial direct parents terminate inheritance. Failed publication is unavailable; no Global Component mirror or caller token join. Later post-affine, exact reparent lowering and 3D remain evidence-gated. |
 | `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`/`ComponentFieldId`, explicit `ComponentSchemaOwnerId`, owner-local `ComponentSchemaCatalog` lineage, typed semantic/executable composition fingerprints, schema versions, `ComponentValue`, field capability metadata, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext`, declared asset-reference traversal | Split value/path/schema/codec/migration/registry/format modules, separate native bindings, private failure-atomic owner candidates, known inactive-owner claim reservation, atomic Building-to-Frozen publication, exact direct/managed snapshot authority, asset-aware scene preflight, schema/capability export, and migrations |
 | `nara_reflect_derive` | `PersistentComponent` derive and generated native `PersistentComponentProvider` | Proc-macro dependency isolation, schema/codec declaration diagnostics, and direct/renamed dependency resolution |
 | `nara_diagnostic` | Privacy-safe `Diagnostic`, sticky bounded `DiagnosticReport`, `RuntimeDiagnostics`, and `RuntimePressureSnapshots` | Static engine-owned identities and summaries, classified fields, deterministic count/byte retention, O(1) runtime dedupe indexes, output-only snapshots, and explicit incremental tracing sinks without producer overload policy |
-| `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetStateRevision`, `AssetSlotRevision`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, strict canonical `.meta` candidates, stable artifact identity/records, bounded `AssetSourceChanges`, bounded `AssetReloadRequests`, and bounded `AssetEvents` | Deterministic artifact keys, O(1) state and persistent slot revisions, dependency-aware reload generations, private concrete-domain consumer authority, same-frame terminal rejection, and sticky full-rescan observation recovery; no generic decoder registry or erased importer executor |
+| `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetMutationBaseline<T>`, state/slot revisions, `AssetRef`, `ProjectAssetDatabase`, strict canonical `.meta` candidates, artifact records and bounded source-change/request/event queues | Managed value/state association admitted before baseline capture; shared stale-success/failure/removal rejection, retained metadata/removal observations before request admission, dependency-aware generations, private concrete-domain consumer authority and sticky rescan recovery; no generic importer executor |
 | `nara_asset_watch` | Optional `AssetWatchPlugin`, bounded semantic watch event queue, runtime status/diagnostics, source-change translator, and downstream admission observation | All `notify` integration and desktop filesystem watcher details behind the root `asset-watch` feature |
 | `nara_scene` | Bounded `SceneDocument`/`PrefabDocument` candidates, one canonical ordered roots-and-children placement closure, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, `Name`/`Visibility` schemas, scene materialization/export, and documented direct use with caller-owned `nara_reflect::ComponentRegistry` and `bevy_ecs::World` | Asset-aware placement/component validation, exact anchor-based patch transactions, undo/redo, order-preserving Prefab expansion, one-way ordered lowering into `nara_hierarchy`, failure-atomic exact-membership replacement/unload, and rejection of runtime topology export |
-| `nara_render` | `Camera2d`, `ViewMapping2d`, `RenderTarget`, `ViewportRect`, completed-global `ExtractedView`, owned topology-only `RenderFramePacket`, `RenderFrame`, and `RenderBackendStatus` | Backend-neutral camera mapping and bounded ordered views for one exclusive physical target; invertible global affine drawing/picking, explicit image extent and clear/load policy; private content-before-UI assembly and backend lifetime/status; no public pass, phase, dependency, or graph construction |
-| `nara_image` | Non-`Clone` `ImageAsset` with shared immutable pixel storage, `ImageImporter`, owned byte/file import requests, `ImageImportLimits`, `ImageImportBudgetHost`, reservation-bearing imported candidates, `ImagePlugin`, prepared image resources, image reload stats | Audited static non-interlaced PNG preflight/decode, shared RAII peak accounting, async image reload jobs, candidate-owned publication, last-good reload preservation, and backend-neutral image content preparation; no arbitrary-codec, sampler, or material policy |
+| `nara_render` | `Camera2d`, `ViewMapping2d`, `RenderTarget`, `ViewportRect`, Presented-cut `ExtractedView`, owned topology-only `RenderFramePacket`, `RenderFrame`, and `RenderBackendStatus` | Backend-neutral camera mapping and bounded ordered views for one exclusive physical target; invertible global affine drawing/picking, explicit image extent and clear/load policy; private content-before-UI assembly and backend lifetime/status; no public pass, phase, dependency, or graph construction |
+| `nara_image` | Non-`Clone` `ImageAsset` with shared immutable pixel storage, `ImageImporter`, owned byte/file import requests, `ImageImportLimits`, `ImageImportBudgetHost`, reservation-bearing imported candidates, `ImagePlugin`, prepared image resources, image reload stats | Audited static non-interlaced PNG preflight/decode, shared RAII peak accounting, separate desired recipe/in-flight attempt/last-good publication, baseline-checked candidate publication and backend-neutral preparation; no arbitrary-codec, sampler, or material policy |
 | `nara_material` | `FilterMode`, `AddressMode`, `SamplerDescriptor`, `AlphaMode2d`, `Material2dDefinition`, `Material2dDefinitions`, `Material2dInstance` | Trusted Rust startup material definitions with one fragment-input contract, finite parameters and a second image binding; data selects admitted definitions without GPU authority; shader changes require restart |
 | `nara_sprite` | `Sprite`, `SpriteMaterial`, `TextureRegion`, `SpriteAnchor`, `Handle<ImageAsset>` material image binding | Sprite authoring component data with material-first image/sampler/alpha/tint; no backend handles |
 | `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileSetMaterial`, `TileAtlasLayout`, `TileLayer`, dirty chunk tracking | Tilemap authoring data with material-first tilesets that lower into textured quads now; later culling/cache mechanisms remain measurement-gated under ADR 0096 |
-| `nara_sprite_render` | `SpriteRenderPlugin`, `SpriteRenderStats`; a doc-hidden read-only backend bridge | Completed-global affine sprite/tile extraction; shared layer/group/Y/source order before adjacent compatible batching; resource-complete captured image/material inputs and private retained frame scratch |
+| `nara_sprite_render` | `SpriteRenderPlugin`, `SpriteRenderStats`; a doc-hidden read-only backend bridge | Same-Presented-cut affine and structural-order sprite/tile extraction; shared layer/group/Y/source order before adjacent compatible batching; resource-complete captured image/material inputs and private retained frame scratch |
 | `nara_ui` | `UiRoot`, `UiNode`, `UiPanel`, `UiPanelMaterial`, `ComputedUiLayouts`, `UiInteractionState`, `UiPointerRoute`, `UiInteractionTarget` | Runtime ECS UI authoring data, layout projection, and target/view-aware pointer hover/capture/focus state; no editor UI toolkit or backend handles |
 | `nara_ui_render` | `UiRenderPlugin` | Private backend-neutral UI panel extraction, image/color material queueing, clipping, sort, and batching; the doc-hidden read-only WGPU batch bridge is transitional until ADR 0105's resource-complete packet lands, and root consumers receive no technical pipeline DTOs |
 | `nara_input` | `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, bounded ordered `ButtonTransition`, `PointerState`, `ActionMap`, `ActionOutcomes`, `SemanticActions`, `InputSet` | Backend-normalized retained state, bounded edge admission, independent observation/action cursors, per-binding outcomes, aggregate held-action lifetimes, focus-loss release, contexts, UI routing and replay provenance |
-| `nara_gameplay` | `GameplayCommandDraft`, `GameplayCommandSubmission`, `GameplayCommandIngressSource`, `GameplayCommandEnvelope`, `GameplayCommandQueue`, `GameplayCommandBatch`, bounded `ActionCommandMap`, command schedule sets, settings and stats | Canonically ordered fixed-tick admission with reserved local-action authority, pending/active/quarantine accounting, terminal fail-closed lifecycle state, and action/replay/AI/test/external producer bridges without networking transports or runtime entity handles |
+| `nara_gameplay` | `GameplayCommandDraft`, `GameplayCommandSubmission`, `GameplayCommandIngressSource`, `GameplayCommandEnvelope`, `GameplayCommandQueue`, `GameplayCommandBatch`, bounded `ActionCommandMap`, command schedule sets, settings and stats | Canonical fixed-tick admission, exact generation/tick/reporter success checks before Capture and Ack, pending/active/quarantine accounting and terminal failure without rollback or automatic replay; action/replay/AI/test/external producer bridges without networking transports or runtime entity handles |
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events, owning backend handle providers, atomic non-cloneable surface bindings, target lifecycle authority, scoped retirement driver | Raw platform windows, winit event loop, backend surfaces |
 | `nara_winit` | `WinitRunner` and desktop event-loop integration | Top-level-selected desktop driver over `RuntimeInstance` that owns native windows, updates normalized input/window state through short driver scopes, invokes scoped renderer retirement only for its targets, joins registered runtime close with provider/native teardown, and preserves distinct primary-runner and teardown failures |
 | `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, `WgpuFrameTransactionStats`, surface policy helpers, `WgpuRenderTextureCacheStats` | wgpu device/surface lifecycle, safe owning surface creation, main-thread native execution, scoped surface-retirement driver, owned topology and sprite/UI batch capture, pre-acquire generation/topology rejection, at-most-once acquire/submit/present, clamped UI scissor, private opaque/blend pipelines, generation-aware image texture caches, material/sampler bind groups, grace-frame cache eviction, and `RenderBackendStatus` updates |
@@ -239,10 +249,11 @@ sequenceDiagram
         Image->>Tasks: SpawnJobs transfers the admitted reservation owner
         Image->>Asset: ApplyResults calls candidate.commit before releasing overlap
         Note over Tasks,Image: readiness after the poller snapshot waits for next frame
-        App->>ECS: PreUpdate / Update / PostUpdate
+        App->>ECS: PreUpdate / zero or more fixed ticks / Update / PostUpdate
         Image->>Render: prepare backend-neutral image resource snapshots
-        Render->>ECS: extract Camera2d views
-        SpriteRender->>ECS: extract Sprite / Tilemap / Transform2d data
+        App->>ECS: Extract completes one Presented spatial cut
+        Render->>ECS: extract Camera2d views from that cut
+        SpriteRender->>ECS: extract Sprite / Tilemap with same-cut affines and order
         SpriteRender->>SpriteRender: queue, sort, and batch material-keyed colored/textured quads
         Ui->>ECS: compute UI layouts and pointer interaction
         UiRender->>UiRender: extract, queue, sort, clip, and batch UI panels
@@ -441,7 +452,13 @@ second real adapter or stronger isolation pressure.
 - `nara_reflect` is split into narrow `value`, `path`, `schema`, `codec`, `migration`, and `registry` modules while preserving public re-exports.
 - `nara_identity` implements the world-scoped identity core, structured references, atomic
   fork/restore remaps, tombstone policy, root facade wiring, and scene/gameplay/reflect/tooling
-  integration. Those domains must not retain duplicate identity owners.
+  integration. Ordinary callers use `spawn_identity_entity`, `adopt_identity_entity`,
+  `register_scene_instance`, `register_persistent_identity`, and `retire_identity_entity` or its
+  explicit-disposition variant with the World. The domain remains installed during preparation
+  and marker admission; callers need no remove/reinsert or `resource_scope` borrowing protocol.
+  First marker insertion and retirement reject conflicting lifecycle observers before marker or
+  index effects. Identity retirement leaves the runtime entity alive; Scene owns its exact teardown
+  operations. Those domains must not retain duplicate identity owners.
 - `nara_reflect` separates an opaque-ID, alias, tombstone, version, default, and capability catalog
   from native Rust/Bevy bindings and migration functions. `ComponentFieldId` is the durable patch
   address; `ComponentFieldPath` is only the current value locator. A registry remains Building until
@@ -558,24 +575,60 @@ second real adapter or stronger isolation pressure.
   record-owned `parent` shape and documents without explicit roots are rejected without guessing
   sibling order or silently migrating source.
 - `nara_asset` owns typed importer contracts, bounded source-change coalescing, dependency-aware bounded reload-request scheduling, load generations, asset state transitions, and bounded asset observations. Source changes and requests are admitted by item and retained-byte ceilings; every admitted request either reaches its registered concrete consumer or becomes a diagnosed terminal rejection in the same task-update frame.
-- Asset reload scheduling coalesces same-frame source changes by last semantic event, walks each dependent source once, and combines generation checks with expected-version, state-revision, and slot-revision guards before domain apply systems mutate runtime asset state. The first concrete image consumer is registered through a private non-cloneable authority; unsupported kinds and missing consumers cannot remain queued or indefinitely `Loading`.
+- Asset reload scheduling coalesces source existence while retaining metadata dirtiness, walks each
+  dependent source once, and retains unresolved metadata/removal observations before request
+  admission. `Assets<T>::mutation_baseline` admits the actual typed value/state-store association
+  or a fresh empty initial slot before capturing state and slot revisions. Its owned
+  `AssetMutationBaseline<T>` checks the same cut for success, failure and removal; replacing a
+  store, raw writes or empty-slot ABA cannot legitimize a delayed predecessor through a fresh
+  baseline. Source identity and load-generation
+  checks remain with the concrete owner. Image and TileSet publication share this admission.
+  The first concrete image consumer is registered through a private non-cloneable authority;
+  unsupported kinds and missing consumers cannot remain queued or indefinitely `Loading`.
 - Asset source-change, request-admission, and terminal-resolution failures are structured diagnostics rather than discarded errors. `AssetEvents` is an observational bounded queue: overflow suppresses later deltas behind a sticky rescan marker until a consumer rebuilds from all `AssetStates` and explicitly completes the rescan. Asset reload policy preserves last-good typed values on failed reload, records failed first loads without inventing values, rejects stale removals after a same-frame replacement, and keeps GPU objects in backend caches rather than imported artifacts.
 - Scene/prefab authoring identity is provenance-aware. Scene-local entities patch the scene, prefab source entities patch the prefab source, prefab anchors patch the scene instance, and prefab-expanded projections must write back only through explicit override or convert-to-local flows.
-- `nara_image::ImagePlugin` is the first async asset domain plugin. It registers `ImageImporter`, admits bounded reload tasks, polls typed terminals, orders each asset stream across frames, sorts ready streams by task key, preserves last-good values on failure, and never leaves rejection/panic/cancellation silently loading. The current importer accepts a fixed-length `Box<[u8]>` request or opens through `ImageSourceDirectory` into a host-issued `FileCapability`. Before reading or scanning it privately captures the target stable binding, expected version, O(1) `AssetStateRevision`, and persistent `AssetSlotRevision`; it validates the prior image against the shared host overlap ceiling but charges only that captured slot's actual RGBA length. File admission reserves one encoded ceiling because the bounded `Vec` remains the decoder input. It performs a no-allocation signature/IHDR/chunk preflight, rejects Adam7 and unbounded `eXIf` metadata before decoder construction, rejects APNG during bounded decoder metadata inspection, and atomically resizes to the versioned modeled encoded/decoder-work/RGBA/publication peak before pixel decode. `ImageImportedAsset::commit` revalidates the admission and internally chooses initial load or reload before releasing the charge; initial failure publishes no value, while reload failure preserves the handle, value, source hash, and asset version. A valid `ImageAsset` owns one exact fixed-length RGBA allocation. Backend-neutral prepare snapshots include the current `AssetSlotRevision`, so both imported reload and direct slot replacement invalidate prepared/GPU content without a second event log. Importers share accounting only through an explicitly injected `ImageImportBudgetHost`, and importer version 2 invalidates version-1 artifacts. This is a static non-interlaced PNG-specific logical allocation contract, not an arbitrary-codec, allocator-capacity, fragmentation, heap, or OS/RSS guarantee. Sampler, alpha, and tint policy live in `nara_material`, not in image assets.
+- `nara_image::ImagePlugin` registers `ImageImporter`, admits bounded reload tasks, polls typed
+  terminals, orders each asset stream across frames, and sorts ready streams by task key. Desired
+  settings, in-flight attempts and last-good usable pixels have separate lifetimes. Metadata
+  observations survive request/task rejection, supersession and decode failure until the current
+  desired recipe publishes. A later source-only edit uses that admitted recipe, or re-admits still
+  unresolved metadata; old pixel settings cannot silently replace it. Source removal or metadata
+  identity mismatch revokes the corresponding authority. Failure preserves eligible last-good
+  pixels and never leaves rejection/panic/cancellation silently loading.
+  The importer accepts a fixed-length `Box<[u8]>` request or opens through `ImageSourceDirectory`
+  into a host-issued `FileCapability`. Before reading or scanning it captures the target stable
+  binding, expected version and shared mutation baseline; it validates the prior image against the
+  shared host overlap ceiling but charges only that captured slot's actual RGBA length. File
+  admission reserves one encoded ceiling because the bounded `Vec` remains the decoder input. It
+  performs a no-allocation signature/IHDR/chunk preflight, rejects Adam7 and unbounded `eXIf`
+  metadata before decoder construction, rejects APNG during bounded decoder metadata inspection,
+  and atomically resizes to the modeled encoded/decoder-work/RGBA/publication peak before decode.
+  `ImageImportedAsset::commit` revalidates admission and chooses initial load or reload before
+  releasing the charge; initial failure publishes no value, while reload failure preserves eligible
+  handle/value/source-hash/version data. A valid `ImageAsset` owns one exact fixed-length RGBA
+  allocation. Backend-neutral prepare includes `AssetSlotRevision`, so imported reload and direct
+  slot replacement invalidate prepared/GPU content without a second event log. Importers share
+  accounting only through an injected `ImageImportBudgetHost`; importer version 2 invalidates
+  version-1 artifacts. This is a static non-interlaced PNG logical allocation contract, not an
+  arbitrary-codec, allocator-capacity, fragmentation, heap or OS/RSS guarantee. Sampler, alpha and
+  tint policy live in `nara_material`.
 - Direct `ImageAsset::new`, serde construction, and raw image-storage mutation are advanced in-memory paths, not bounded file-ingest APIs; their callers own prior allocation policy. State and slot revisions still invalidate any in-flight official candidate across those mutations.
 - `nara_sprite_render` sorts by view, layer/group, optional Y anchor and stable source order;
   primitive or material kind never overrides authored depth. Only adjacent compatible materials
   batch. `nara_render_wgpu` caches textures by the exact prepared image snapshot and keeps GPU
   resource authority private.
 - `nara_asset_watch` is an optional desktop watcher adapter behind the root `asset-watch` feature.
-  It owns `notify`, validates its root against `AssetSourceRoot`, preserves in-root rename sides,
-  and translates raw filesystem events into semantic `AssetSourceChange` values without leaking
-  watcher types into `nara_asset`. Its callback admits whole batches through non-blocking event and
-  retained-byte limits; Poll drains only the prefix published at entry. Overflow, producer
-  contention, disconnect, backend/translation failure, downstream source-change admission failure,
+  It owns `notify`, validates its root against `AssetSourceRoot`, and translates proven file events
+  into semantic `AssetSourceChange` values without leaking watcher types into `nara_asset`.
+  Directory, root, unknown-scope and native rename events require full reconciliation; explicitly
+  known file renames preserve their in-root sides. Its callback admits whole batches through
+  non-blocking event and retained-byte limits; Poll drains only the prefix published at entry.
+  Overflow, producer contention, disconnect, backend/translation failure, downstream source-change admission failure,
   or queue unavailability publishes bounded counters, pressure, and a structured diagnostic, then
-  enters sticky `RescanRequired` and stops the watcher. Recovery requires a Host-authorized full
-  source rescan and watcher reconstruction.
+  enters sticky `RescanRequired` and stops the watcher. Recovery uses `AssetWatchRescan::begin`
+  before Host source-tree reconciliation and consumes its receipt with `complete` only afterward,
+  retaining the replacement watcher's incremental tail. Abandonment or replacement overflow leaves
+  the rescan obligation intact.
 - `nara_input` exposes normalized `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, and
   `PointerState`; `nara_winit` is the desktop adapter that updates those resources from winit
   events. Each button resource retains current state and a bounded, monotonically sequenced
@@ -595,9 +648,16 @@ second real adapter or stronger isolation pressure.
   the next open authoritative tick from `SemanticActions` through its reserved source stream;
   explicit producers submit a
   validated ingress source, tick, sequence, and draft. Fixed Prepare closes the tick and admits one
-  canonical batch, current-gated Consume and Capture observe it, and engine-owned Ack retires it
-  after Capture. Zero-step frames retain commands, there is no frame-cleanup clear, and lifecycle
-  failure is sticky: active work moves to queue-owned quarantine and the runtime must be rebuilt.
+  canonical batch. Consume requires current healthy admission. After Simulate and its ordinary
+  deferred effects, the owner records success for that exact runtime generation, tick, batch and
+  retained fault reporter. Capture requires that completion; Ack rechecks it and reporter identity
+  after Capture and its deferred effects before retiring commands. Consumer/Simulate/deferred
+  errors skip Capture and Ack; Capture errors prevent Ack. Intentional skips and warnings follow
+  managed schedule policy. Returning error handlers can leave later eligible systems and deferred
+  effects visible; there is no rollback or immediate schedule-abort guarantee. Zero-step frames
+  retain commands. Execution failure quarantines unacknowledged active commands, retains pending
+  work and its budgets, and requires explicit runtime close/reconstruction. Stop remains available;
+  later drives do not automatically replay a partially executed batch.
   Command data avoids networking transports and runtime `Entity` handles; concrete untrusted
   adapters apply ADR 0049 encoded parse budgets before serde.
 - `HeadlessRuntimePlugins` and `ServerPlugins` are concrete root facade bundles. `HeadlessRuntimePlugins` composes `MinimalPlugins` plus gameplay commands for local headless drivers; `ServerPlugins` installs bounded threaded tasks, preserve-debt fixed time, diagnostics, asset/scene/transform foundations, and gameplay commands without window/render/audio/editor/toolkit or raw input resources by default.

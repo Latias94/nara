@@ -9,7 +9,7 @@ use nara::{
     ProductRecipeError, SchemaContribution,
     advanced_prelude::add_startup_scene_activation_systems,
     app::{PluginCategory, PluginDeclaration, PluginError, PluginId, PluginSchemaProviderId},
-    ecs::{Entity, Or, With, schedule::IntoScheduleConfigs},
+    ecs::{Entity, Or, With, error::BevyError, schedule::IntoScheduleConfigs},
     gameplay::{
         GameplayCommandBatch, GameplayCommandDraft, GameplayCommandIngressSource,
         GameplayCommandPayload, GameplayCommandSet, GameplayCommandSourceSequence,
@@ -28,7 +28,7 @@ use nara::{
     },
     render::Camera2d,
     sprite::Sprite,
-    transform::GlobalTransform2d,
+    transform::FixedSpatialSnapshot2d,
 };
 
 const PLUGIN_ID: PluginId = PluginId::new("collect-game.gameplay");
@@ -267,18 +267,25 @@ fn move_player(
 
 fn collect_targets(
     mut state: ResMut<GameState>,
-    players: Query<&GlobalTransform2d, With<PlayerConfig>>,
-    mut targets: Query<(Entity, &Collectible, &GlobalTransform2d, &mut Sprite)>,
+    spatial: FixedSpatialSnapshot2d<'_>,
+    players: Query<Entity, With<PlayerConfig>>,
+    mut targets: Query<(Entity, &Collectible, &mut Sprite)>,
     mut cameras: Query<&mut Camera2d>,
-) {
+) -> Result<(), BevyError> {
     let Ok(player) = players.single() else {
-        return;
+        return Ok(());
     };
+    let player = spatial
+        .global(player)
+        .map_err(BevyError::error)?
+        .translation();
     let total = targets.iter().count();
-    for (entity, config, position, mut sprite) in &mut targets {
-        if !state.collected.contains(&entity)
-            && player.translation().distance(position.translation()) <= config.radius
-        {
+    for (entity, config, mut sprite) in &mut targets {
+        let position = spatial
+            .global(entity)
+            .map_err(BevyError::error)?
+            .translation();
+        if !state.collected.contains(&entity) && player.distance(position) <= config.radius {
             state.collected.insert(entity);
             sprite.material.tint.a = 0.0;
             println!("collect_game: collected={}/{total}", state.collected.len());
@@ -291,21 +298,28 @@ fn collect_targets(
         }
         println!("collect_game: victory! Press R to reset.");
     }
+    Ok(())
 }
 
 fn capture(
     time: Res<FixedTime>,
     state: Res<GameState>,
     mut snapshot: ResMut<GameSnapshot>,
-    players: Query<&GlobalTransform2d, With<PlayerConfig>>,
+    spatial: FixedSpatialSnapshot2d<'_>,
+    players: Query<Entity, With<PlayerConfig>>,
     targets: Query<&Sprite, With<Collectible>>,
     cameras: Query<&Camera2d>,
-) {
+) -> Result<(), BevyError> {
+    let player = match players.single() {
+        Ok(entity) => spatial
+            .global(entity)
+            .map_err(BevyError::error)?
+            .translation(),
+        Err(_) => Vec2::ZERO,
+    };
     *snapshot = GameSnapshot {
         tick: time.tick(),
-        player: players
-            .single()
-            .map_or(Vec2::ZERO, GlobalTransform2d::translation),
+        player,
         collected: state.collected.len(),
         target_count: targets.iter().count(),
         won: state.won,
@@ -318,6 +332,7 @@ fn capture(
             .iter()
             .any(|camera| camera.clear_color == Some(VICTORY)),
     };
+    Ok(())
 }
 
 /// The four semantic directions used by both keys and headless commands.

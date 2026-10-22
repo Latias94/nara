@@ -10,7 +10,7 @@ use nara_hierarchy::{
 use nara_render::{Camera2d, RenderImage2d, RenderTarget, ViewportRect};
 use nara_sprite::Sprite;
 use nara_sprite_render::{__private::ExtractedSprites, SpriteRenderPlugin};
-use nara_transform::{GlobalTransform2d, Transform2d, TransformPlugin};
+use nara_transform::{Transform2d, TransformPlugin};
 use std::time::Duration;
 
 #[derive(Component)]
@@ -87,9 +87,9 @@ fn fixed_motion_uses_half_tick_presentation_without_mutating_simulation() {
         .get::<Transform2d>(sprite)
         .unwrap()
         .translation;
-    let simulation_global = runtime
-        .world()
-        .get::<GlobalTransform2d>(sprite)
+    let simulation_global = nara_transform::historical_spatial_snapshot(runtime.world())
+        .unwrap()
+        .global(sprite)
         .unwrap()
         .translation();
     let tick = runtime.world().resource::<FixedTime>().tick();
@@ -252,9 +252,9 @@ fn parent_local_interpolation_composes_one_affine_projection_for_camera_sprite_a
         .as_slice()[0];
     let camera_origin = view.mapping.clip_to_world(Vec2::ZERO);
     let camera_point = view.mapping.clip_to_world(Vec2::new(0.5, -0.5));
-    let simulation = runtime
-        .world()
-        .get::<GlobalTransform2d>(sprite)
+    let simulation = nara_transform::historical_spatial_snapshot(runtime.world())
+        .unwrap()
+        .global(sprite)
         .unwrap()
         .matrix();
     runtime.finish().unwrap();

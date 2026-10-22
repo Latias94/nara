@@ -3,6 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-08-04
 **Amended**: 2026-08-15 to clarify the implemented Prefab-root projection order
+**Amended**: 2026-10-23 to bind spatial consumption to captured structural order
 **Owner**: Persistent Scene/Prefab/Patch documents, runtime hierarchy, authoring tools, and UI projection
 **Refines**: [ADR 0005](0005-dimension-aware-runtime-with-2d-first-authoring.md),
 [ADR 0006](0006-scene-and-prefab-data-model.md),
@@ -66,6 +67,15 @@ flowchart LR
   independent from lifecycle ownership, transform math, visibility, and UI state.
 - Runtime UI consumes this structural order. It does not add `UiNode::sibling_order` or any other
   persistent ordering authority.
+- Spatial snapshots capture this complete validated order, including non-spatial structural
+  participants, alongside their local/global cut. Render extraction consumes the captured order
+  rather than pairing earlier affine values with a newer live hierarchy. Spatial membership is
+  separate from structural membership: `global` rejects a non-spatial entity in that order, and a
+  non-spatial direct parent terminates transform inheritance under ADRs 0097/0100.
+  A captured structural index provides constant-time membership/order lookup. An unplaced spatial
+  entity may have a global affine value but has no structural index; render consumers that require
+  ordered membership reject it explicitly. Completion binds the order to the actual World and an
+  exact owner publication, not merely a generation/root-epoch equality test.
 - Nara is pre-1.0. First-party sources are rewritten to the corrected canonical
   `format_version = 1`; the experimental parent-owned shape is rejected rather than guessed or
   compatibility-decoded.

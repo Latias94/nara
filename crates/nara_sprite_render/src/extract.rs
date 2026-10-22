@@ -1,33 +1,15 @@
 use nara_asset::{AssetServer, AssetStates, Assets};
 use nara_core::{Color, Mat3, Vec2};
 use nara_ecs::{Entity, Query, Res, ResMut, Resource, error::BevyError};
-use nara_hierarchy::HierarchyOrder;
 use nara_material::Material2dInstance;
 use nara_sprite::Sprite;
 use nara_tilemap::{TileCoord, TileIndex, TileSet, Tilemap};
-use nara_transform::{GlobalTransform2d, Transform2d};
+use nara_transform::PresentedSpatialSnapshot2d;
 
 use crate::{
     ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
     SpriteRenderStats, TextureUvRect,
 };
-
-/// Failure to publish one complete sprite/tilemap world-space extraction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum SpriteExtractionError {
-    #[error("the completed 2D transform projection is unavailable")]
-    ProjectionIncomplete,
-    #[error("sprite entity {entity:?} is missing its authored Transform2d")]
-    MissingSpriteLocalTransform { entity: Entity },
-    #[error("sprite entity {entity:?} is missing its completed GlobalTransform2d")]
-    MissingSpriteGlobalTransform { entity: Entity },
-    #[error("tilemap entity {entity:?} is missing its authored Transform2d")]
-    MissingTilemapLocalTransform { entity: Entity },
-    #[error("tilemap entity {entity:?} is missing its completed GlobalTransform2d")]
-    MissingTilemapGlobalTransform { entity: Entity },
-    #[error("renderable entity {entity:?} is absent from the completed hierarchy order")]
-    MissingStructuralOrder { entity: Entity },
-}
 
 #[derive(Debug, Default, Resource)]
 pub(crate) struct ExtractedSpriteScratch {
@@ -39,97 +21,40 @@ pub(crate) fn extract_sprites(
     mut extracted: ResMut<ExtractedSprites>,
     mut stats: ResMut<SpriteRenderStats>,
     mut scratch: ResMut<ExtractedSpriteScratch>,
-    completed_projection: Option<Res<nara_transform::__private::CompletedTransformProjection>>,
-    completed_hierarchy: Option<Res<nara_hierarchy::__private::CompletedHierarchyProjection>>,
-    presentation: Res<nara_transform::__private::RenderTransformProjection>,
-    hierarchy_order: Option<Res<HierarchyOrder>>,
-    sprites: Query<(
-        Entity,
-        &Sprite,
-        Option<&Transform2d>,
-        Option<&GlobalTransform2d>,
-        Option<&Material2dInstance>,
-    )>,
-    tilemaps: Query<(
-        Entity,
-        &Tilemap,
-        Option<&Transform2d>,
-        Option<&GlobalTransform2d>,
-        Option<&Material2dInstance>,
-    )>,
+    spatial: PresentedSpatialSnapshot2d,
+    sprites: Query<(Entity, &Sprite, Option<&Material2dInstance>)>,
+    tilemaps: Query<(Entity, &Tilemap, Option<&Material2dInstance>)>,
     tilesets: Option<Res<Assets<TileSet>>>,
     server: Option<Res<AssetServer>>,
     states: Option<Res<AssetStates>>,
     images: Option<Res<Assets<nara_image::ImageAsset>>>,
 ) -> Result<(), BevyError> {
-    let completed_projection = completed_projection
-        .ok_or(SpriteExtractionError::ProjectionIncomplete)
-        .map_err(BevyError::error)?;
-    let completed_hierarchy = completed_hierarchy
-        .ok_or(SpriteExtractionError::ProjectionIncomplete)
-        .map_err(BevyError::error)?;
-    if completed_projection.hierarchy_generation() != completed_hierarchy.generation() {
-        return Err(BevyError::error(
-            SpriteExtractionError::ProjectionIncomplete,
-        ));
-    }
-    let hierarchy_order = hierarchy_order
-        .ok_or(SpriteExtractionError::ProjectionIncomplete)
-        .map_err(BevyError::error)?;
-    if hierarchy_order.generation() != completed_hierarchy.generation() {
-        return Err(BevyError::error(
-            SpriteExtractionError::ProjectionIncomplete,
-        ));
-    }
+    let hierarchy_order = spatial.order().map_err(BevyError::error)?;
     for (entity, ..) in sprites.iter() {
-        if hierarchy_order.index(entity).is_none() {
-            return Err(BevyError::error(
-                SpriteExtractionError::MissingStructuralOrder { entity },
-            ));
-        }
+        spatial.structural_index(entity).map_err(BevyError::error)?;
+        spatial.global(entity).map_err(BevyError::error)?;
     }
     for (entity, ..) in tilemaps.iter() {
-        if hierarchy_order.index(entity).is_none() {
-            return Err(BevyError::error(
-                SpriteExtractionError::MissingStructuralOrder { entity },
-            ));
-        }
+        spatial.structural_index(entity).map_err(BevyError::error)?;
+        spatial.global(entity).map_err(BevyError::error)?;
     }
     scratch.sprites.clear();
     scratch.stats = SpriteRenderStats::default();
 
-    for entity in hierarchy_order.as_slice().iter().copied() {
-        if let Ok((entity, sprite, local, global, material)) = sprites.get(entity) {
-            local
-                .ok_or(SpriteExtractionError::MissingSpriteLocalTransform { entity })
-                .map_err(BevyError::error)?;
-            let global = global
-                .ok_or(SpriteExtractionError::MissingSpriteGlobalTransform { entity })
-                .map_err(BevyError::error)?;
+    for entity in hierarchy_order.iter().copied() {
+        if let Ok((entity, sprite, material)) = sprites.get(entity) {
             let source_order = scratch.sprites.len() as u64;
-            let matrix = presentation
-                .matrix(entity, global.matrix())
-                .ok_or(SpriteExtractionError::ProjectionIncomplete)
-                .map_err(BevyError::error)?;
+            let matrix = spatial.global(entity).map_err(BevyError::error)?.matrix();
             let mut extracted = extract_sprite(entity, sprite, matrix, source_order);
             extracted.material_extension = material.copied();
             scratch.sprites.push(extracted);
             scratch.stats.extracted_sprites = scratch.stats.extracted_sprites.saturating_add(1);
         }
 
-        let Ok((entity, tilemap, local, global, material)) = tilemaps.get(entity) else {
+        let Ok((entity, tilemap, material)) = tilemaps.get(entity) else {
             continue;
         };
-        local
-            .ok_or(SpriteExtractionError::MissingTilemapLocalTransform { entity })
-            .map_err(BevyError::error)?;
-        let global = global
-            .ok_or(SpriteExtractionError::MissingTilemapGlobalTransform { entity })
-            .map_err(BevyError::error)?;
-        let matrix = presentation
-            .matrix(entity, global.matrix())
-            .ok_or(SpriteExtractionError::ProjectionIncomplete)
-            .map_err(BevyError::error)?;
+        let matrix = spatial.global(entity).map_err(BevyError::error)?.matrix();
         let tileset = tilemap.tileset.and_then(|handle| {
             tilesets
                 .as_deref()

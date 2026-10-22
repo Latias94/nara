@@ -1,8 +1,6 @@
 //! ECS and Scene authoring adapter for Nara's renderer-neutral UI kernel.
 
 // Bevy derives resolve this path; Nara's ECS facade remains the actual dependency.
-extern crate nara_ecs as bevy_ecs;
-
 mod authoring;
 mod authoring_composition;
 mod authoring_model;

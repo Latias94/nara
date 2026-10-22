@@ -3,6 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-08-01
 **Amended**: 2026-08-05 by NUI-U8 ordered runtime projection
+**Amended**: 2026-10-23 by U4 private phase spatial snapshots
 **Owner**: Runtime hierarchy, 2D transform projection, and consuming product hosts
 **Related**: ADR 0005, ADR 0006, and ADR 0018
 **Refines**: The current 2D completion slice of
@@ -63,11 +64,44 @@ flowchart LR
   candidate publication. Runtime relation state never writes topology back into a document or
   advances a saved revision.
 - `Transform2d` is the only authored and runtime-local 2D spatial authority. `GlobalTransform2d` is
-  an immutable, opaque, runtime-only derived component produced by the transform Module from a
-  continuous 2D transform chain. Ordinary ECS queries can read it but cannot obtain mutable access.
+  a copyable opaque affine value, with no Component identity. The transform Module privately owns
+  completed immutable simulation and presentation cuts. A continuous direct-parent 2D chain
+  composes affine values; a non-spatial direct parent starts a new spatial domain. Consumers never
+  skip that parent to inherit from an earlier ancestor.
 - Consumers that require current world-space data run only after a named semantic completion
   boundary. They do not independently walk parent chains or silently fall back to local or identity
   transforms.
+- Read-only `HistoricalSpatialSnapshot2d`, `FixedSpatialSnapshot2d` and
+  `PresentedSpatialSnapshot2d` SystemParams, and matching shared-World functions, expose
+  `global`, `effective_parent`, captured structural `order`, O(1) `structural_index`, and `stamp`. A stamp is metadata,
+  not transferable publication authority. Readers validate World, managed runtime generation and
+  their phase/time role without requiring callers to join separate completion resources.
+  Spatial publication identity is allocated independently from movable slots or rebuilt history
+  owners and does not repeat across simulation/presentation payloads. Restoring an old slot cannot
+  collide with the identity retained by source observations or a presentation source association.
+- Startup seeds the historical simulation cut. During fixed mutation Historical reads the last
+  completed simulation publication with its original stamp. Fixed Resolve runs after materialized
+  deferred commands, completed hierarchy and Transform propagation, and before Finalize. Finalize
+  Capture reads that same tick cut directly; it does not join the before-Finalize helper. PostUpdate
+  and Extract publish explicitly named later cuts. Extract completes presentation before consumers.
+- A source edit, spawn or retirement made after consuming a cut does not rewrite it. The next
+  publication observes full Entity identity, finite local values, membership and direct-parent
+  relation, including edits sharing one ECS change tick. Retained contiguous observation rows
+  compare full Entity/value tuples; query/archetype order changes conservatively rebuild the cut.
+  Candidate construction reuses this captured source data and the validated structural order rather
+  than reconstructing a second adjacency graph. Unchanged sources reuse the private
+  matrix payload. Changed sources build a complete linear candidate before atomic publication.
+  Failed completion makes the requested slot unavailable; retained candidate or last-good bytes
+  are not readable as a successful publication.
+- Presentation interpolates fixed history against one captured simulation/local/topology cut.
+  The fixed starting sample captures actual local/parent values after Prepare and its deferred
+  commands; edits made before simulation are the starting frame, not artificial motion from an
+  earlier publication. History and uncommitted starting samples retain World/runtime provenance;
+  foreign or mismatched history is discarded before it can authorize a local publication.
+  Paused and edited sources reset their history to the captured current value. Zero or multiple
+  fixed steps retain the established fixed-pair policy. Presentation never combines live locals
+  with earlier simulation matrices. New renderable entities absent from its cut have no spatial
+  value and cannot fall back to local or identity transforms.
 - Nara-owned placement and replacement paths validate the supported topology generation before
   derived publication. Immutable component insert/discard hooks invalidate completion immediately,
   including advanced raw component replacement or removal. A missing or divergent root resource
@@ -78,6 +112,10 @@ flowchart LR
   private root-resource epoch; raw escapes and diagnostic/private construction paths retain complete
   validation. The overlay is dropped before a prepared batch crosses its prepare/commit boundary.
   Prepared batches still require the enclosing owner's no-flush/no-hierarchy-mutation window.
+- Hierarchy completion associates its concrete order, private completion state and completion
+  fact with one World-bound publication identity. Equal generation, root IDs and root epoch in a
+  different World do not establish this association. Transform payload reuse includes that exact
+  identity, so an unchanged local/parent set cannot conceal a replaced structural order.
 - Structural ancestry never defines a retirement closure. Existing lifecycle owners must adapt
   their owned teardown paths to the hierarchy projection and continue retiring only their explicit
   memberships. This ADR does not accept a scene-session, scene-travel, candidate-initialization,
@@ -137,7 +175,7 @@ authoring and 3D decisions open.
 | Lifecycle separation | Parent loss detaches children; current Scene Instance replacement retires exact membership and never hierarchy closure | Scene replacement/unload fixtures |
 | Publication atomicity | Invalid stable-ID topology publishes no partial runtime instance | Scene/prefab hostile fixtures |
 | 2D projection correctness | Nested globals equal ordered affine composition before every declared fresh consumer | Transform and extraction tests |
-| Static-frame cost | No hierarchy validation, graph rebuild, parent/child traversal, or derived write when unchanged; one allocation-free `Transform2d` change-tick scan remains while ordinary mutable ECS authoring is supported | Focused scan/traversal instrumentation |
+| Static-frame cost | No hierarchy validation, graph rebuild, propagation or affine payload replacement when unchanged; one allocation-free local-value/membership comparison per publication remains while ordinary mutable ECS authoring is supported | Focused scan/traversal instrumentation and the before/after scale harness |
 | Product proof | One authored reference-game child follows its parent across headless, desktop, and editor paths | Reference-game product tests and bounded manual journey |
 
 ## Risks and Mitigations
@@ -149,3 +187,18 @@ authoring and 3D decisions open.
 | Global transforms are stale at startup, pause, or extraction | High | Medium | Provide bootstrap, frame, and pre-extraction completion points with a named freshness boundary. |
 | The first implementation freezes an unnecessary public API | High | Medium | Keep API names and placement provisional and classify them only after the product journey. |
 | The slice expands into the full ADR 0085 design | High | Medium | Keep ordering, reparenting, visibility, prefab transfer, UI details, physics, and 3D explicitly Proposed. |
+
+## 2026-10-23 Refinement
+
+This amendment replaces the transferable Global Component plus completion-token protocol. It does
+not retain that protocol behind a freshness facade. The Reference Game consumes a selected spatial
+cut and then spawns or retires entities; immutable phase publications describe that workflow without
+claiming that subsequent source mutations are already projected. Only bounded owner slots,
+candidate buffers and fixed interpolation samples are retained. Public arbitrary history and owned
+snapshot retention remain outside this contract. Native World access remains trusted; a missing or
+foreign private slot fails explicitly rather than creating an out-of-World service.
+
+`add_fixed_transform_projection_systems` supplies both ends of the Resolve interval.
+`add_presented_transform_projection_systems` orders Extract consumers after presentation.
+The implementation applies actual deferred command boundaries before capturing a cut; a call to
+`World::flush` alone is not a substitute for applying system-local command buffers.

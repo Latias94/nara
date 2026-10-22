@@ -1,4 +1,3 @@
-use nara::ecs as bevy_ecs;
 use nara::ecs::schedule::IntoScheduleConfigs;
 use nara::{
     app::{

@@ -107,6 +107,7 @@ pub struct HierarchyOrder {
     roots: Vec<Entity>,
     entities: Vec<Entity>,
     indices: EntityHashMap<usize>,
+    publication: Option<crate::__private::HierarchyPublication>,
 }
 
 impl HierarchyOrder {
@@ -116,11 +117,13 @@ impl HierarchyOrder {
         root_epoch: Option<u64>,
         roots: Vec<Entity>,
         entities: Vec<Entity>,
+        publication: crate::__private::HierarchyPublication,
     ) {
         self.generation = generation;
         self.root_epoch = root_epoch;
         self.roots = roots;
         self.entities = entities;
+        self.publication = Some(publication);
         self.indices.clear();
         self.indices.reserve(self.entities.len());
         self.indices.extend(
@@ -140,6 +143,10 @@ impl HierarchyOrder {
 
     pub(crate) const fn root_epoch(&self) -> Option<u64> {
         self.root_epoch
+    }
+
+    pub(crate) const fn publication(&self) -> Option<crate::__private::HierarchyPublication> {
+        self.publication
     }
 
     /// Returns registered roots in their validated order.

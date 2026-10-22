@@ -7,7 +7,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nara::ecs as bevy_ecs;
 use nara::{
     app::{
         AppExit, AppExitRequests, PluginCategory, PluginDeclaration, PluginDefinition,
