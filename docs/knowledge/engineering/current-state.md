@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "d8c48d1cd8d9abe610f1560bd0550d82903322ae7b6a226bf1319af6e9e56b15"
+source_fingerprint: "d05a8b7bbe1ae29e90df7d46662cda86dcf4c5cc9d26a8d88de54b188bf87e6c"
 ---
 
 # Current State
@@ -12,9 +12,9 @@ source_fingerprint: "d8c48d1cd8d9abe610f1560bd0550d82903322ae7b6a226bf1319af6e9e
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `d8c48d1cd8d9abe610f1560bd0550d82903322ae7b6a226bf1319af6e9e56b15`
-- Immutable records: 841
-- Active lane heads: 2
+- Source fingerprint: `d05a8b7bbe1ae29e90df7d46662cda86dcf4c5cc9d26a8d88de54b188bf87e6c`
+- Immutable records: 847
+- Active lane heads: 1
 
 # Active Registrations
 
@@ -42,7 +42,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Fixed world canvas qualified](registry/2026-10/2026-10-20T071017Z-fixed-world-canvas-codex-root-2c7ba6aade3b4998905de82e5455225a.md): `complete` (fixed-world-canvas-codex-root; producer `codex-root`)
 - [Foundation correctness closure](registry/2026-10/2026-10-17T123810Z-foundation-correctness-closure-codex-root-20261017-94169fb22505473c89504d4b41cab1de.md): `completed` (foundation-correctness-closure-codex-root-20261017; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
-- [Low-level fearless refactor development](registry/2026-10/2026-10-22T174032Z-low-level-contract-refactor-codex-root-20261023-e01cfc3f324049f0bb7355a822a7c379.md): `active` (low-level-contract-refactor-codex-root-20261023; producer `codex-root`)
+- [Low-level fearless refactor qualified](registry/2026-10/2026-10-22T203958Z-low-level-contract-refactor-codex-root-20261023-ad4959c965c747e6a005503f43da6847.md): `complete` (low-level-contract-refactor-codex-root-20261023; producer `codex-root`)
 - [Module and product-goal alignment review completed](registry/2026-10/2026-10-20T045244Z-module-goal-alignment-codex-root-16266656b5cb44cc836a760fd492fa8b.md): `completed` (module-goal-alignment-codex-root; producer `codex-root`)
 - [Foundation implementation committed with research archived](registry/2026-10/2026-10-16T011329Z-nara-2d-foundation-contracts-codex-root-13092df230454afc89ade9c8814ad3f6.md): `complete` (nara-2d-foundation-contracts-codex-root; producer `codex-root`)
 - [Custom component authoring complete with committed-source acceptance](registry/2026-10/2026-10-16T040919Z-nara-custom-component-authoring-codex-root-6aa104b8188c4f5285a0b6683a4d4672.md): `completed` (nara-custom-component-authoring-codex-root; producer `codex-root`)
@@ -68,6 +68,11 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Work Progress**: [Low-level refactor committed with final export trajectory running](progress/2026-10/2026-10-22T202949Z-low-level-refactor-committed-with-final-export-trajectory-running-b22809814890485c88d31cd3107d6623.md) - U4 U5 U10 and all earlier units committed; owner consumer native and cost evidence pass; actual CLI Export and final doc/fmt remain.
+- **Work Progress**: [Low-level final owner and native qualification checkpoint](progress/2026-10/2026-10-22T200735Z-low-level-final-owner-and-native-qualification-checkpoint-cf5df2d75d3446d6bfc48744fce22d6c.md) - U5 and U10 committed; all final owner and five native trajectories pass, U4 costs and integration closure remain.
+- **Verification Evidence**: [U4 immutable spatial cuts and exact hierarchy publication](verification/2026-10/2026-10-22T194451Z-u4-immutable-spatial-cuts-and-exact-hierarchy-publication-4023754775ba445a887c9056715584e0.md) - Phase readers replace transferable globals; real foreign hierarchy order, same-tick edits and measured costs are qualified.
+- **Verification Evidence**: [U5 asset association desired recipe and runtime-owned watch rescan](verification/2026-10/2026-10-22T193928Z-u5-asset-association-desired-recipe-and-runtime-owned-watch-rescan-e081ec487db94262b392fc8b7d7ff3ef.md) - Managed store pairing precedes baseline capture; retained image intent and runtime-owned rescan are independently qualified.
+- **Verification Evidence**: [U11 low-level refactor public and native consumer integration](verification/2026-10/2026-10-22T193724Z-u11-low-level-refactor-public-and-native-consumer-integration-ddb983fa80454657955de17ff65d1772.md) - Serial qualification of the real public games, independent modules and affected Windows Editor trajectories.
 - **Verification Evidence**: [U10 exact gameplay batch success and reporter identity](verification/2026-10/2026-10-22T193136Z-u10-exact-gameplay-batch-success-and-reporter-identity-380c336814b2450abe14023d43cf6253.md) - Success-dependent Capture and Ack join exact generation/tick execution and reporter authority after deferred effects.
 - **Verification Evidence**: [U3 owned file lock capabilities on Windows and Linux](verification/2026-10/2026-10-22T192527Z-u3-owned-file-lock-capabilities-on-windows-and-linux-3ffaeab4142942bd9e4761ce4cf19af4.md) - Unique release owner and borrowed positional readers pass native FS suites plus root persistence and repair consumers.
 - **Verification Evidence**: [U6 typed codec and U8 identity consumer qualification](verification/2026-10/2026-10-22T191516Z-u6-typed-codec-and-u8-identity-consumer-qualification-0c76d56bc4b040118283f1024fe2b788.md) - Typed registry closure and installed identity operations pass owning suites and the independent durable workflow.
@@ -75,11 +80,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [U7 facade-aware Bundle and SystemParam extraction](verification/2026-10/2026-10-22T190137Z-u7-facade-aware-bundle-and-systemparam-extraction-f14b220201744f71a90a123e476b1769.md) - Exact Bevy 0.20 extraction and executed renamed-root and renamed-ECS contracts with independent review.
 - **Verification Evidence**: [U9 key allocation admission and finite shortest-arc interpolation](verification/2026-10/2026-10-22T183934Z-u9-key-allocation-admission-and-finite-shortest-arc-interpolation-144afcea6c9846dab566ddcfe1eec9a5.md) - Original allocation and numeric regressions reproduced; shared key visitor and endpoint-oriented interpolation repaired.
 - **Verification Evidence**: [U2 task return and physical running accounting](verification/2026-10/2026-10-22T181737Z-u2-task-return-and-physical-running-accounting-ce30f14820ee4350931de3355bb0c955.md) - Executor return observer replaces local preparation flags; gated disposal and panic regressions qualify its scope.
-- **Verification Evidence**: [U1 rejected close registration preserves runtime custody](verification/2026-10/2026-10-22T175315Z-u1-rejected-close-registration-preserves-runtime-custody-0b351d9e2f324d8fb56fa85b6d2da7fb.md) - Fresh failing custody regressions then 132 App tests pass; exact App ownership fix and ADR clarification.
-- **Work Progress**: [Low-level refactor plan reviewed and development Goal active](progress/2026-10/2026-10-22T174629Z-low-level-refactor-plan-reviewed-and-development-goal-active-e0bf96f51312477c95bfcddf4203b916.md) - Eleven implementation units authorized; five plan reviewers completed; Resolve/Capture temporal correction applied; U1 starts proof-first.
-- **Work Progress**: [Low-level contract redesign research and independent challenge](progress/2026-10/2026-10-22T165457Z-low-level-contract-redesign-research-and-independent-challenge-ea78e11f9cd34f21a77c8eda0239f9ac.md) - Proposed owner-preserving transfers, phase spatial snapshots, owned locks, asset intent and typed codecs; source-confirmed gaps and consumer migrations.
-- **Verification Evidence**: [Engine workflow refactor final integration](verification/2026-10/2026-10-22T130424Z-engine-workflow-refactor-final-integration-ac0a299fafd64a6dba6179531a1f5cff.md) - Final U1-U9 owner, public-consumer, Editor and compilation evidence with bounded review outcomes.
-- **Verification Evidence**: [Workflow refactor recovery and review corrections](verification/2026-10/2026-10-22T114555Z-workflow-refactor-recovery-and-review-corrections-43dfe5955a684108a8a65dab7aee5ed3.md) - Host cleanup regression verified; independent review corrections and remaining acceptance.
 
 # Integration Notes
 

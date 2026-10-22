@@ -333,13 +333,25 @@ capabilities, versions, or tombstones.
 
 ## Dependency Renaming and Crate Overrides
 
-The derives resolve renamed direct dependencies such as
-`engine = { package = "nara", ... }` and
-`substrate = { package = "nara_ecs", ... }`. The root integration test
-`tests/derive_dependency_fixtures.rs` compiles both independent locked fixtures.
+`PersistentComponent` resolves a direct `nara` or `nara_reflect` dependency, including renamed
+packages. The ECS derives resolve a direct `nara` or `nara_ecs` dependency, such as
+`engine = { package = "nara", ... }` or `substrate = { package = "nara_ecs", ... }`.
+The supported ECS derives are `Component`, `Resource`, `Bundle`, `SystemParam`, `ScheduleLabel`
+and `SystemSet`. A root-only consumer can import Component/Resource/Bundle/SystemParam from
+`nara::prelude`; schedule labels and sets are available through `nara::ecs`. Direct `nara_ecs`
+consumers use its root or prelude. Module paths `nara::ecs::bundle::Bundle` and
+`nara::ecs::system::SystemParam` expose the same facade-aware derives. No direct Bevy dependency
+or `use nara::ecs as bevy_ecs` alias is required.
 
-Use `#[nara(crate = "path::to::reexport")]` only when a custom re-export prevents normal direct
-dependency discovery.
+The [renamed-root fixture](../../tests/fixtures/derive-dependencies/renamed-root/src/lib.rs) uses
+only the renamed root dependency. The shared
+[derive contract](../../tests/fixtures/derive-dependencies/facade_contract.rs) covers generic and
+nested bundles, parameter lifetimes, const generics, field attributes and deferred commands through
+both root and direct-ECS fixtures. `tests/derive_dependency_fixtures.rs` owns their independent
+locked compilation/execution checks. These selected derives do not promise full Bevy API compatibility.
+
+Use `#[nara(crate = "path::to::reexport")]` for `PersistentComponent` only when a custom
+re-export prevents normal direct dependency discovery; it is not an ECS derive path attribute.
 
 ## Catalog Lineage and Schema Evolution
 

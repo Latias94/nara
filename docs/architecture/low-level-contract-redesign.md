@@ -8,6 +8,13 @@
 [architecture reassessment](../audits/2026-10-23-low-level-architecture-reassessment.md),
 [pinned reference mechanisms](../research/2026-10-23-low-level-contract-mechanisms.md).
 
+**Adoption navigation (2026-10-23):** this proposal retains its original research scope. The
+[implementation plan](../plans/2026-10-23-0135-refactor-low-level-contracts-plan.md) adopted its
+bounded owner corrections through amended Accepted ADRs, including 0037, 0057, 0070, 0081,
+0084 and 0100. Use the [implementation ledger](adr/implementation-status.md) and
+[review follow-ups](../audits/2026-10-23-low-level-refactor-review-followups.md) for current evidence
+and limits. The sketches in this document are not a second current API specification.
+
 The user authorizes research, recording findings and pre-1.0 redesign. This document selects
 recommended directions and names the experiments needed to settle implementation details. It
 does not change product code, persistent formats, Accepted ADRs or implementation status. Proposed
