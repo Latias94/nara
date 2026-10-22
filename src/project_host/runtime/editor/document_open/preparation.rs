@@ -1,9 +1,6 @@
 //! Owned immutable reads and Host binding; no Workspace or predecessor-close authority.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::Arc;
 
 use super::*;
 use crate::project_host::authoring::{
@@ -12,12 +9,12 @@ use crate::project_host::authoring::{
 use crate::project_host::runtime::{diagnostic_code, safe_summary};
 use nara_diagnostic::Diagnostic;
 use nara_tasks::{
-    TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest, TaskTerminal,
+    TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskReturnState, TaskSpawnRequest,
+    TaskTerminal,
 };
 
 pub(in crate::project_host::runtime::editor) struct DocumentOpenPreparation {
     task: Option<TaskHandle<Result<PreparedAuthoringDocumentOpen, DocumentOpenFailure>>>,
-    returned: Arc<AtomicBool>,
 }
 
 pub(super) struct DocumentOpenFailure {
@@ -51,18 +48,15 @@ impl DocumentOpenPreparation {
         pools: &TaskPools,
         #[cfg(test)] mut gate: Option<OpenTestGate>,
     ) -> Self {
-        let returned = Arc::new(AtomicBool::new(false));
         let input = PreparationInput {
             request: Some(request),
             custody,
-            _returned: PhysicalReturn(Arc::clone(&returned)),
         };
         let task = pools
             .spawn(
                 TaskPoolKind::Io,
                 TaskSpawnRequest::new(0, TaskDomainKey::new(0x6272_6f77_7365_726f)),
                 move |cancellation| {
-                    // The complete request and its capabilities retire before the returned flag.
                     let mut input = input;
                     #[cfg(test)]
                     wait_at(&mut gate, OpenTestPhase::BeforeRead);
@@ -97,14 +91,23 @@ impl DocumentOpenPreparation {
             )
             .into_handle()
             .ok();
-        Self { task, returned }
+        Self { task }
     }
 
     pub(super) fn poll(
         &mut self,
     ) -> Option<Result<PreparedAuthoringDocumentOpen, DocumentOpenFailure>> {
-        if !self.returned.load(Ordering::Acquire) {
-            return None;
+        // Rejected spawn disposes its captures before returning, even without a task handle.
+        if let Some(task) = &self.task {
+            match task.return_observer().state() {
+                TaskReturnState::Pending => return None,
+                TaskReturnState::CleanupFailed => {
+                    return Some(Err(DocumentOpenFailure::from_code(
+                        "project.editor.document-open-preparation-unavailable",
+                    )));
+                }
+                TaskReturnState::Returned => {}
+            }
         }
         Some(match self.task.as_mut() {
             None => Err(DocumentOpenFailure::from_code(
@@ -134,17 +137,9 @@ impl Drop for DocumentOpenPreparation {
     }
 }
 
-struct PhysicalReturn(Arc<AtomicBool>);
-impl Drop for PhysicalReturn {
-    fn drop(&mut self) {
-        self.0.store(true, Ordering::Release);
-    }
-}
-
 struct PreparationInput {
     request: Option<OwnedAuthoringDocumentRequest>,
     custody: persistence::HostCustody,
-    _returned: PhysicalReturn,
 }
 
 fn bind_document_open(

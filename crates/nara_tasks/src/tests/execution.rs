@@ -174,6 +174,7 @@ fn coalescing_replaces_a_same_domain_pending_task_even_below_capacity() {
         }),
     );
     let old_id = old.id();
+    let old_returned = old.return_observer();
     let outcome = pools.spawn(TaskPoolKind::Io, request(7).with_overload(policy), |_| {
         2_u32
     });
@@ -186,6 +187,7 @@ fn coalescing_replaces_a_same_domain_pending_task_even_below_capacity() {
         _ => panic!("expected pending coalescence"),
     };
 
+    assert_eq!(old_returned.state(), TaskReturnState::Returned);
     assert!(matches!(
         old.try_take(),
         Some(TaskTerminal::Cancelled(TaskCancellation {
@@ -407,6 +409,7 @@ fn rejected_closure_drop_panics_are_contained() {
         spawn,
         Ok(TaskSpawnOutcome::Rejected(TaskRejection {
             reason: TaskRejectReason::QueueFull { capacity: 1 },
+            return_state: TaskReturnState::CleanupFailed,
             ..
         }))
     ));
@@ -426,6 +429,7 @@ fn cancelled_result_drop_panics_do_not_kill_the_worker() {
         release_rx.recv().unwrap();
         PanicOnDrop
     }));
+    let returned = cancelled.return_observer();
     started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
     assert!(cancelled.cancel());
     release_tx.send(()).unwrap();
@@ -441,6 +445,89 @@ fn cancelled_result_drop_panics_do_not_kill_the_worker() {
     ));
     assert!(matches!(next.try_take(), Some(TaskTerminal::Completed(4))));
     let _ = pools.shutdown_blocking().unwrap();
+    assert_eq!(returned.state(), TaskReturnState::CleanupFailed);
+}
+
+#[test]
+fn task_return_waits_for_cancelled_late_result_disposal() {
+    struct HeldResult {
+        entered: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+    }
+
+    impl Drop for HeldResult {
+        fn drop(&mut self) {
+            self.entered.send(()).unwrap();
+            self.release.recv_timeout(Duration::from_secs(10)).unwrap();
+        }
+    }
+
+    let pools = TaskPools::try_new(test_config(1)).unwrap();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (finish_tx, finish_rx) = mpsc::channel();
+    let (drop_tx, drop_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let handle = accepted(pools.spawn(TaskPoolKind::Io, request(1), move |_| {
+        started_tx.send(()).unwrap();
+        finish_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        HeldResult {
+            entered: drop_tx,
+            release: release_rx,
+        }
+    }));
+    let returned = handle.return_observer();
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert!(handle.cancel());
+    finish_tx.send(()).unwrap();
+    drop_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let during_disposal = returned.state();
+    release_tx.send(()).unwrap();
+    assert!(pools.shutdown_blocking().unwrap().is_complete());
+    assert!(handle.is_finished());
+    assert_eq!(during_disposal, TaskReturnState::Pending);
+    assert_eq!(returned.state(), TaskReturnState::Returned);
+}
+
+#[test]
+fn task_return_reports_capture_cleanup_panic_and_does_not_retain_delivered_output() {
+    let pools = inline_pools(2);
+    let captured = PanicOnDrop;
+    let cancelled = accepted(pools.spawn(TaskPoolKind::Compute, request(1), move |_| {
+        let _capture = &captured;
+    }));
+    let returned = cancelled.return_observer();
+    cancelled.cancel();
+    let _ = pools.run_pending_for_tests();
+    assert_eq!(returned.state(), TaskReturnState::CleanupFailed);
+
+    let captured = PanicOnDrop;
+    let ran = accepted(pools.spawn(TaskPoolKind::Compute, request(3), move |_| {
+        let _capture = &captured;
+    }));
+    let ran_returned = ran.return_observer();
+    let _ = pools.run_pending_for_tests();
+    assert_eq!(ran_returned.state(), TaskReturnState::CleanupFailed);
+
+    struct Counted(Arc<AtomicUsize>);
+    impl Drop for Counted {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    let drops = Arc::new(AtomicUsize::new(0));
+    let owned = Arc::clone(&drops);
+    let mut handle =
+        accepted(pools.spawn(TaskPoolKind::Compute, request(2), move |_| Counted(owned)));
+    let returned = handle.return_observer();
+    let _ = pools.run_pending_for_tests();
+    assert_eq!(returned.state(), TaskReturnState::Returned);
+    assert_eq!(drops.load(Ordering::SeqCst), 0);
+    let terminal = handle.try_take().unwrap();
+    drop(handle);
+    assert_eq!(drops.load(Ordering::SeqCst), 0);
+    drop(terminal);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+    assert_eq!(returned.state(), TaskReturnState::Returned);
 }
 
 #[test]
@@ -553,6 +640,46 @@ fn running_stats_track_physical_work_after_terminal_cancellation() {
 }
 
 #[test]
+fn running_stats_include_worker_owned_completed_output_disposal() {
+    struct HeldOutput {
+        entered: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+    }
+
+    impl Drop for HeldOutput {
+        fn drop(&mut self) {
+            self.entered.send(()).unwrap();
+            self.release.recv_timeout(Duration::from_secs(10)).unwrap();
+        }
+    }
+
+    let pools = TaskPools::try_new(test_config(1)).unwrap();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (finish_tx, finish_rx) = mpsc::channel();
+    let (drop_tx, drop_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let handle = accepted(pools.spawn(TaskPoolKind::Io, request(1), move |_| {
+        started_tx.send(()).unwrap();
+        finish_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        HeldOutput {
+            entered: drop_tx,
+            release: release_rx,
+        }
+    }));
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    drop(handle);
+    finish_tx.send(()).unwrap();
+    drop_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let during_disposal = pools.stats().for_kind(TaskPoolKind::Io);
+    release_tx.send(()).unwrap();
+    let shutdown = pools.shutdown_blocking().unwrap();
+
+    assert_eq!(during_disposal.running, 1);
+    assert!(during_disposal.oldest_running_age.is_some());
+    assert!(shutdown.is_complete());
+}
+
+#[test]
 fn task_ids_and_order_keys_are_monotonic_and_explicit() {
     let pools = inline_pools(2);
     let first = accepted(pools.spawn(TaskPoolKind::Io, request(80), |_| 1_u32));
@@ -586,10 +713,25 @@ fn task_id_exhaustion_rejects_without_running_the_closure() {
         TaskSpawnOutcome::Rejected(TaskRejection {
             task: None,
             reason: TaskRejectReason::TaskIdExhausted,
+            return_state: TaskReturnState::Returned,
             ..
         })
     ));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    let captured = PanicOnDrop;
+    let exhausted = pools.spawn(TaskPoolKind::Io, request(3), move |_| {
+        let _capture = &captured;
+    });
+    assert!(matches!(
+        exhausted,
+        TaskSpawnOutcome::Rejected(TaskRejection {
+            task: None,
+            reason: TaskRejectReason::TaskIdExhausted,
+            return_state: TaskReturnState::CleanupFailed,
+            ..
+        })
+    ));
 }
 
 #[test]

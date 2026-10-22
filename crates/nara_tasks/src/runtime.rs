@@ -6,7 +6,7 @@ use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
         Arc, Condvar, Mutex, MutexGuard,
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError, TrySendError},
     },
     thread::{self, JoinHandle},
@@ -603,6 +603,74 @@ pub struct TaskRejection {
     pub admission_tick: u64,
     pub domain_key: TaskDomainKey,
     pub reason: TaskRejectReason,
+    /// Capture disposal has completed before rejection returns; failure remains explicit.
+    pub return_state: TaskReturnState,
+}
+
+/// Physical return of executor-owned work, independent of its first terminal result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskReturnState {
+    /// Execution or executor-owned disposal is still in progress.
+    Pending,
+    /// Executor-owned disposal completed; transferred outputs retain their own owners.
+    Returned,
+    /// Executor-owned work returned, but a caught unwind prevents proving successful cleanup.
+    CleanupFailed,
+}
+
+const RETURN_PENDING: u8 = 0;
+const RETURN_COMPLETE: u8 = 1;
+const RETURN_FAILED: u8 = 2;
+const RETURN_DISPOSING_FAILED: u8 = 3;
+
+/// Observes closure/capture and rejected-result disposal without retaining task output storage.
+///
+/// Published or transferred outputs, escaped clones and nested work retain their own owners.
+/// This observation does not join a worker or prove native domain cleanup.
+#[derive(Debug, Clone)]
+pub struct TaskReturnObserver {
+    state: Arc<AtomicU8>,
+}
+
+impl TaskReturnObserver {
+    fn pending() -> Self {
+        Self {
+            state: Arc::new(AtomicU8::new(RETURN_PENDING)),
+        }
+    }
+
+    #[must_use]
+    pub fn state(&self) -> TaskReturnState {
+        match self.state.load(Ordering::Acquire) {
+            RETURN_PENDING | RETURN_DISPOSING_FAILED => TaskReturnState::Pending,
+            RETURN_COMPLETE => TaskReturnState::Returned,
+            _ => TaskReturnState::CleanupFailed,
+        }
+    }
+
+    fn cleanup_failed(&self) {
+        let _ = self.state.compare_exchange(
+            RETURN_PENDING,
+            RETURN_DISPOSING_FAILED,
+            Ordering::Release,
+            Ordering::Relaxed,
+        );
+    }
+
+    fn finish(&self) {
+        let _ = self.state.compare_exchange(
+            RETURN_PENDING,
+            RETURN_COMPLETE,
+            Ordering::Release,
+            Ordering::Relaxed,
+        );
+        let _ = self.state.compare_exchange(
+            RETURN_DISPOSING_FAILED,
+            RETURN_FAILED,
+            Ordering::Release,
+            Ordering::Relaxed,
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -728,6 +796,7 @@ struct TaskState<T> {
     token: TaskCancellationToken,
     counters: SharedTaskCounters,
     instance_token: Arc<TaskPoolInstanceToken>,
+    returned: TaskReturnObserver,
 }
 
 impl<T> TaskState<T> {
@@ -742,6 +811,7 @@ impl<T> TaskState<T> {
             token: TaskCancellationToken::new(),
             counters,
             instance_token,
+            returned: TaskReturnObserver::pending(),
         }
     }
 
@@ -764,7 +834,10 @@ impl<T> TaskState<T> {
         if inner.phase == TaskPhase::Terminal {
             drop(inner);
             drop(publication);
-            drop(value);
+            if let Err(payload) = catch_unwind(AssertUnwindSafe(|| drop(value))) {
+                self.returned.cleanup_failed();
+                let _ = catch_unwind(AssertUnwindSafe(|| drop(payload)));
+            }
             return false;
         }
         let completion_sequence = publication.next_sequence();
@@ -858,12 +931,16 @@ impl<T> Drop for TaskState<T> {
             .get_mut()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(terminal) = inner.terminal.take() {
-            let _ = catch_unwind(AssertUnwindSafe(|| drop(terminal)));
+            if let Err(payload) = catch_unwind(AssertUnwindSafe(|| drop(terminal))) {
+                self.returned.cleanup_failed();
+                let _ = catch_unwind(AssertUnwindSafe(|| drop(payload)));
+            }
         }
     }
 }
 
 trait ErasedTaskState: Send + Sync {
+    fn return_observer(&self) -> TaskReturnObserver;
     fn mark_running(&self) -> bool;
     fn cancel(&self, reason: TaskCancellationReason) -> bool;
     fn fail(&self, failure: TaskFailure) -> bool;
@@ -871,6 +948,10 @@ trait ErasedTaskState: Send + Sync {
 }
 
 impl<T: Send + 'static> ErasedTaskState for TaskState<T> {
+    fn return_observer(&self) -> TaskReturnObserver {
+        self.returned.clone()
+    }
+
     fn mark_running(&self) -> bool {
         TaskState::mark_running(self)
     }
@@ -942,6 +1023,11 @@ impl<T> TaskHandle<T> {
     #[must_use]
     pub fn cancellation_token(&self) -> TaskCancellationToken {
         self.state.token.clone()
+    }
+
+    #[must_use]
+    pub fn return_observer(&self) -> TaskReturnObserver {
+        self.state.returned.clone()
     }
 
     /// Publishes cancellation if no terminal result has already won.
@@ -1462,13 +1548,20 @@ impl TaskPools {
     {
         let Some(id) = self.allocate_task_id() else {
             self.executor(kind).record_rejected();
-            let _ = catch_unwind(AssertUnwindSafe(|| drop(function)));
+            let return_state = match catch_unwind(AssertUnwindSafe(|| drop(function))) {
+                Ok(()) => TaskReturnState::Returned,
+                Err(payload) => {
+                    let _ = catch_unwind(AssertUnwindSafe(|| drop(payload)));
+                    TaskReturnState::CleanupFailed
+                }
+            };
             return TaskSpawnOutcome::Rejected(TaskRejection {
                 task: None,
                 kind,
                 admission_tick: request.admission_tick(),
                 domain_key: request.domain_key(),
                 reason: TaskRejectReason::TaskIdExhausted,
+                return_state,
             });
         };
         let order_key = TaskOrderKey::new(request.admission_tick(), request.domain_key(), id);
@@ -1511,6 +1604,7 @@ impl TaskPools {
                 admission_tick: request.admission_tick(),
                 domain_key: request.domain_key(),
                 reason,
+                return_state: handle.return_observer().state(),
             }),
         }
     }
@@ -1768,7 +1862,7 @@ struct PendingJob {
 }
 
 struct RunningJob {
-    control: TaskControl,
+    control: Option<TaskControl>,
     started_at: Instant,
 }
 
@@ -1885,7 +1979,7 @@ impl ExecutorShared {
                     queue.running.insert(
                         pending.descriptor.id(),
                         RunningJob {
-                            control: pending.control.clone(),
+                            control: Some(pending.control.clone()),
                             started_at: Instant::now(),
                         },
                     );
@@ -1907,6 +2001,13 @@ impl ExecutorShared {
         let mut queue = lock_unpoisoned(&self.queue);
         queue.running.remove(&id);
         self.changed.notify_all();
+    }
+
+    fn release_running_control(&self, id: TaskId) -> Option<TaskControl> {
+        lock_unpoisoned(&self.queue)
+            .running
+            .get_mut(&id)
+            .and_then(|running| running.control.take())
     }
 
     fn worker_exited(&self) {
@@ -2342,7 +2443,7 @@ impl TaskPoolCloseOwner {
             let running = queue
                 .running
                 .values()
-                .map(|running| running.control.clone())
+                .filter_map(|running| running.control.clone())
                 .collect::<Vec<_>>();
             self.shared.changed.notify_all();
             running
@@ -2426,7 +2527,7 @@ impl TaskPoolCloseOwner {
             let running = queue
                 .running
                 .values()
-                .map(|running| running.control.clone())
+                .filter_map(|running| running.control.clone())
                 .collect::<Vec<_>>();
             self.shared.changed.notify_all();
             (pending, running)
@@ -2693,18 +2794,27 @@ fn execute_pending(shared: &ExecutorShared, mut pending: PendingJob) {
     match catch_unwind(AssertUnwindSafe(|| pending.job.run())) {
         Ok(()) => {}
         Err(payload) => {
+            // A closure body panic and capture destruction panic share this unwind boundary.
+            control.state.return_observer().cleanup_failed();
             control.state.fail(TaskFailure::Panicked);
             let _ = catch_unwind(AssertUnwindSafe(|| drop(payload)));
         }
     }
-    shared.finish_running(id);
+    // Retain physical running evidence while releasing references that may own a result.
+    // Destructors run outside the queue mutex so stats and close remain observable.
+    drop(shared.release_running_control(id));
+    drop(control);
     safe_drop_pending(pending);
+    shared.finish_running(id);
 }
 
 fn safe_drop_pending(pending: PendingJob) {
+    let returned = pending.control.state.return_observer();
     if let Err(payload) = catch_unwind(AssertUnwindSafe(|| drop(pending))) {
+        returned.cleanup_failed();
         let _ = catch_unwind(AssertUnwindSafe(|| drop(payload)));
     }
+    returned.finish();
 }
 
 fn update_counters(counters: &SharedTaskCounters, update: impl FnOnce(&mut TaskCounters)) {

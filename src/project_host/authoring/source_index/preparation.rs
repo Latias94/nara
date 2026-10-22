@@ -1,13 +1,10 @@
 //! One read-only source scan borrowed by the existing managed runtime's I/O pool.
 
-use std::sync::{
-    Arc, Mutex, TryLockError,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::{Arc, Mutex, TryLockError};
 
 use nara_tasks::{
-    TaskCancellationToken, TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest,
-    TaskTerminal,
+    TaskCancellationToken, TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskReturnState,
+    TaskSpawnRequest, TaskTerminal,
 };
 
 use super::{
@@ -23,7 +20,6 @@ pub(super) struct ScanPreparation {
     generation: ProjectSourceIndexGeneration,
     task: TaskHandle<Option<ScanResult>>,
     progress: Arc<Mutex<ProjectSourceIndexProgress>>,
-    returned: Arc<AtomicBool>,
 }
 
 pub(super) enum ScanPreparationPoll {
@@ -45,14 +41,10 @@ impl ScanPreparation {
             ProjectSourceIndexDiagnosticPhase::RootNormalization,
             ProjectSourceIndexBudgetUsage::default(),
         )));
-        let returned = Arc::new(AtomicBool::new(false));
-        // Construct before spawn: queued disposal or admission rejection must also drop this
-        // guard. A cancelled TaskHandle alone never proves captured capabilities have returned.
         let request = ScanRequest {
             basis: Some(basis),
             generation,
             limits,
-            _returned: PhysicalReturn(Arc::clone(&returned)),
         };
         let worker_progress = Arc::clone(&progress);
         let task = pools
@@ -74,7 +66,6 @@ impl ScanPreparation {
             generation,
             task,
             progress,
-            returned,
         })
     }
 
@@ -91,8 +82,10 @@ impl ScanPreparation {
     }
 
     pub(super) fn poll(&mut self) -> ScanPreparationPoll {
-        if !self.returned.load(Ordering::Acquire) {
-            return ScanPreparationPoll::Pending;
+        match self.task.return_observer().state() {
+            TaskReturnState::Pending => return ScanPreparationPoll::Pending,
+            TaskReturnState::CleanupFailed => return ScanPreparationPoll::Unavailable,
+            TaskReturnState::Returned => {}
         }
         match self.task.try_take() {
             None => ScanPreparationPoll::Pending,
@@ -121,19 +114,10 @@ impl Drop for ScanPreparation {
     }
 }
 
-struct PhysicalReturn(Arc<AtomicBool>);
-impl Drop for PhysicalReturn {
-    fn drop(&mut self) {
-        self.0.store(true, Ordering::Release);
-    }
-}
-
 struct ScanRequest {
     basis: Option<AuthoringSourceIndexBasis>,
     generation: ProjectSourceIndexGeneration,
     limits: ProjectSourceIndexLimits,
-    // Field order also keeps queued closure disposal truthful: capabilities drop first.
-    _returned: PhysicalReturn,
 }
 
 impl ScanRequest {

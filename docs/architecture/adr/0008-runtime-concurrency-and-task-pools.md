@@ -56,6 +56,10 @@ Core rules:
 
 - ECS world mutation happens on the main app schedule unless a system is explicitly scheduled by `bevy_ecs` for safe parallel execution.
 - Background tasks do not hold direct mutable references into the main `World`.
+- Task terminal publication and executor-owned physical return are separate observations.
+  Domains use the Tasks-owned return observer for closure/capture disposal and rejected late
+  results instead of implementing their own field-order return flags. Transferred results and
+  native domain cleanup retain separate owners; ADR 0052 defines the exact guarantee.
 - Asset loading and import work report results through asset state transitions/events.
 - The engine owns task pools; nara does not expose Tokio as the user-facing runtime contract.
 - Headless/server execution uses real bounded workers without blocking a simulation tick; domains

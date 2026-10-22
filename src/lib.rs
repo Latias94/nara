@@ -345,8 +345,8 @@ pub mod advanced_prelude {
         TaskHandle, TaskId, TaskInlineRunReport, TaskKindConfig, TaskOrderKey, TaskOverloadPolicy,
         TaskPlugin, TaskPoolConfig, TaskPoolError, TaskPoolKind, TaskPoolShutdownReport,
         TaskPoolStats, TaskPools, TaskReadySnapshotError, TaskRejectReason, TaskRejection,
-        TaskShutdownPolicy, TaskShutdownReport, TaskSpawnOutcome, TaskSpawnRequest, TaskStats,
-        TaskTerminal, TaskTerminalState,
+        TaskReturnObserver, TaskReturnState, TaskShutdownPolicy, TaskShutdownReport,
+        TaskSpawnOutcome, TaskSpawnRequest, TaskStats, TaskTerminal, TaskTerminalState,
     };
 
     #[cfg(feature = "runtime-core")]

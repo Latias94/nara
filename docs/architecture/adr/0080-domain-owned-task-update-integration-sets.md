@@ -74,6 +74,9 @@ sequenceDiagram
 - `nara_tasks::TaskPlugin` installs task pools and owns finite cleanup. It exposes typed terminal
   handles, cancellation, ordered integration helpers, and statistics without configuring asset or
   other domain sets.
+  Per-task physical-return observation also belongs to Tasks. A domain that must wait before
+  reusing a request slot consumes that observation while retaining its own result, publication,
+  cleanup-failure and acknowledgement policy. Return does not bypass the domain's Poll cutoff.
 - `nara_asset` exports `AssetTaskUpdateSet` and `AssetPlugin` configures its chain.
 - `nara_asset_watch` joins `AssetTaskUpdateSet::Poll` after translating platform events into typed
   asset source changes.

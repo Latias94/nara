@@ -71,6 +71,21 @@ flowchart TD
   closure exits, but physical `running` count and age remain until the worker actually releases it.
   `TaskHandle::is_finished` describes terminal publication, including after the result is consumed;
   it does not prove that captured values, the closure, or a worker have physically retired.
+- `TaskHandle::return_observer` observes executor-owned closure/capture disposal and any late result
+  rejected by first-terminal publication. Its independent shared state does not retain task output
+  storage. `Pending` lasts through disposal; `Returned` publishes successful disposal with
+  Release/Acquire ordering; `CleanupFailed` reports a caught unwind only after the
+  disposal path has returned. The execution boundary cannot distinguish a body panic from capture
+  destruction panic, so either prevents proving successful cleanup. Neither terminal return state
+  proves domain-native cleanup, worker joining, escaped Arc/child work or disposal of outputs
+  already transferred to a terminal owner.
+  A consumer must not interpret cleanup failure as successful resource cleanup.
+  Rejected spawn disposes captures synchronously before returning and carries its final return
+  state even when task-ID exhaustion prevented a handle. Queue/coalescing disposal may still block
+  the submitter; this observation does not add a nonblocking disposal executor.
+- Physical running count and age remain present while a worker disposes its pending task and
+  control references, including an untaken completed output when its handle has already gone.
+  The queue keeps only observation metadata during that disposal; destructors run outside its mutex.
 - Admission never executes a rejected closure as an inline fallback. It can still run capture
   destructors while discarding rejected, replaced, or already-terminal pending work on the
   submitting thread. Dropping the last owner of an untaken completed result can similarly run its

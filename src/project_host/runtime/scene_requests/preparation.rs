@@ -1,11 +1,9 @@
-use std::sync::{
-    Arc, Mutex, TryLockError,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::{Arc, Mutex, TryLockError};
 
 use nara_project::ProjectPath;
 use nara_tasks::{
-    TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest, TaskTerminal,
+    TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskReturnState, TaskSpawnRequest,
+    TaskTerminal,
 };
 
 use super::{
@@ -31,7 +29,6 @@ impl PreparationFailure {
 pub(super) struct Preparation {
     task: TaskHandle<()>,
     work: Arc<Mutex<Option<Work>>>,
-    returned: Arc<AtomicBool>,
 }
 
 impl Preparation {
@@ -44,7 +41,6 @@ impl Preparation {
         if !pools.is_threaded(TaskPoolKind::Io) {
             return Err(ProjectSceneRequestError::TaskUnavailable);
         }
-        let returned = Arc::new(AtomicBool::new(false));
         let work = Arc::new(Mutex::new(Some(Work {
             context,
             path,
@@ -54,7 +50,6 @@ impl Preparation {
         })));
         let input = Input {
             work: Arc::clone(&work),
-            _returned: PhysicalReturn(Arc::clone(&returned)),
         };
         let task = pools
             .spawn(
@@ -86,11 +81,7 @@ impl Preparation {
             )
             .into_handle()
             .map_err(|_| ProjectSceneRequestError::TaskUnavailable)?;
-        Ok(Self {
-            task,
-            work,
-            returned,
-        })
+        Ok(Self { task, work })
     }
 
     pub(super) fn cancel(&self) {
@@ -98,7 +89,8 @@ impl Preparation {
     }
 
     pub(super) fn poll(&mut self) -> Option<Result<ProjectContentSnapshot, PreparationFailure>> {
-        if !self.returned.load(Ordering::Acquire) {
+        let returned = self.task.return_observer().state();
+        if returned == TaskReturnState::Pending {
             return None;
         }
         if !self.task.is_finished() {
@@ -111,6 +103,9 @@ impl Preparation {
         };
         let terminal = self.task.try_take()?;
         let work = slot.take()?;
+        if returned == TaskReturnState::CleanupFailed {
+            return Some(Err(PreparationFailure::unavailable()));
+        }
         Some(match terminal {
             TaskTerminal::Completed(()) => work
                 .result
@@ -137,16 +132,9 @@ struct Work {
 }
 
 // Keep the potentially large result in Work, not the task terminal: cancellation cannot race an
-// unobserved result destructor after the slot has been released. Input retires before its flag.
+// unobserved result destructor after the slot has been released. Tasks observes capture disposal.
 struct Input {
     work: Arc<Mutex<Option<Work>>>,
-    _returned: PhysicalReturn,
-}
-struct PhysicalReturn(Arc<AtomicBool>);
-impl Drop for PhysicalReturn {
-    fn drop(&mut self) {
-        self.0.store(true, Ordering::Release);
-    }
 }
 
 #[cfg(test)]

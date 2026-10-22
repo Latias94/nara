@@ -315,6 +315,7 @@ fn pool_drop_cancels_all_pending_handles_before_blocked_capture_retirement() {
     }));
     let first_token = first.cancellation_token();
     let second_token = second.cancellation_token();
+    let first_returned = first.return_observer();
 
     drop(pools);
     started_rx
@@ -341,6 +342,7 @@ fn pool_drop_cancels_all_pending_handles_before_blocked_capture_retirement() {
         ));
     }
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(first_returned.state(), TaskReturnState::Pending);
     assert!(matches!(
         retired_rx.try_recv(),
         Err(mpsc::TryRecvError::Empty)
@@ -350,6 +352,11 @@ fn pool_drop_cancels_all_pending_handles_before_blocked_capture_retirement() {
     retired_rx
         .recv_timeout(Duration::from_secs(2))
         .expect("the released capture did not retire");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while first_returned.state() == TaskReturnState::Pending && Instant::now() < deadline {
+        thread::yield_now();
+    }
+    assert_eq!(first_returned.state(), TaskReturnState::Returned);
 }
 
 #[test]
