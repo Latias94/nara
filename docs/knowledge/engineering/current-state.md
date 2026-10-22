@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "47a44bcc405579951364db370e094c40677e830577c2886400e27d36b8d2aac0"
+source_fingerprint: "a95b5054d36f3bf6854f9dd71dedf95a889ef8877e8376aa3dbb74b6fcd48b3a"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "47a44bcc405579951364db370e094c40677e830577c2886400e27d36b8d
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `47a44bcc405579951364db370e094c40677e830577c2886400e27d36b8d2aac0`
-- Immutable records: 830
+- Source fingerprint: `a95b5054d36f3bf6854f9dd71dedf95a889ef8877e8376aa3dbb74b6fcd48b3a`
+- Immutable records: 831
 - Active lane heads: 1
 
 # Active Registrations
@@ -67,6 +67,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Work Progress**: [Low-level contract redesign research and independent challenge](progress/2026-10/2026-10-22T165457Z-low-level-contract-redesign-research-and-independent-challenge-ea78e11f9cd34f21a77c8eda0239f9ac.md) - Proposed owner-preserving transfers, phase spatial snapshots, owned locks, asset intent and typed codecs; source-confirmed gaps and consumer migrations.
 - **Verification Evidence**: [Engine workflow refactor final integration](verification/2026-10/2026-10-22T130424Z-engine-workflow-refactor-final-integration-ac0a299fafd64a6dba6179531a1f5cff.md) - Final U1-U9 owner, public-consumer, Editor and compilation evidence with bounded review outcomes.
 - **Verification Evidence**: [Workflow refactor recovery and review corrections](verification/2026-10/2026-10-22T114555Z-workflow-refactor-recovery-and-review-corrections-43dfe5955a684108a8a65dab7aee5ed3.md) - Host cleanup regression verified; independent review corrections and remaining acceptance.
 - **Verification Evidence**: [Engine workflow refactor first cohort and remaining work](verification/2026-10/2026-10-22T044816Z-engine-workflow-refactor-first-cohort-and-remaining-work-758750f01ab241ceab2128c8d24183b2.md) - U1 U2 U3 U4 U9 implementation evidence before native Scene and authoring extensions.
@@ -78,7 +79,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Hosted Scene residency and owned preparation qualification](verification/2026-10/2026-10-20T183137Z-hosted-scene-residency-and-owned-preparation-qualification-d8d63279f87c4b34bc83eeeccdc7550e.md) - Verification Evidence for Hosted Scene residency and owned preparation qualification.
 - **Verification Evidence**: [Current Scene ownership and decoded-generation custody qualification](verification/2026-10/2026-10-20T172653Z-current-scene-ownership-and-decoded-generation-custody-qualification-0bf781c53d9e4cc3950bfb77b98d2b8a.md) - Qualify the first P2 ownership slice and retain the concrete residency design limits.
 - **Verification Evidence**: [Selected Scene content and exact declared delivery qualification](verification/2026-10/2026-10-20T165833Z-selected-scene-content-and-exact-declared-delivery-qualification-714d8d9ea4f14a27ae83137124e24ae6.md) - Verification Evidence for Selected Scene content and exact declared delivery qualification.
-- **Verification Evidence**: [Linux default workspace suite requires the native display profile](verification/2026-10/2026-10-20T163530Z-linux-default-workspace-suite-requires-the-native-display-profile-799d137d781d4786abfa72505101cdc0.md) - Verification Evidence for Linux default workspace suite requires the native display profile.
 
 # Integration Notes
 

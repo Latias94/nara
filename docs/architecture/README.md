@@ -134,6 +134,14 @@ It separates reproduced ownership/admission/invalidation defects, source-confirm
 issues and caller-side interface debts. Its bounded cached-artifact probes are not fresh product
 qualification, and its repair order does not change Accepted ADRs.
 
+The [low-level architecture reassessment](../audits/2026-10-23-low-level-architecture-reassessment.md)
+maps every low-level finding and the six earlier follow-ups to its missing fact and owner. The
+[contract redesign](low-level-contract-redesign.md) proposes custody, spatial consumption, owned
+locks, desired asset state, typed codecs and success-dependent finalization, with alternatives,
+caller migrations and research gates. Its [pinned mechanism study](../research/2026-10-23-low-level-contract-mechanisms.md)
+compares Bevy/Godot implementations without claiming equivalent guarantees. These are research
+and Proposed design; they neither amend Accepted ADRs nor qualify implementation.
+
 The [post-publication architecture review](../audits/2026-10-19-post-publication-architecture-review.md)
 records the TileSet/Image corrections and the remaining concrete module-interface refactor order.
 Its implementation and verification limits remain separate from future tile authoring tools.
