@@ -116,6 +116,14 @@ source-local subtree deletion and exact history through ordinary Scene/Prefab au
 unsaved moves. Its [qualification record](../knowledge/engineering/verification/2026-10/2026-10-20T051819Z-ordinary-structural-authoring-and-captured-source-reopen-qualification-f9b317e0ceda49a6b37f9000c61af8d7.md)
 separates domain/public/native results from the still-separate presentation and measurement work.
 
+The [workflow boundary refactor](../plans/2026-10-22-1100-refactor-engine-workflow-boundaries-plan.md)
+repairs ordinary input/render/diagnostic behavior and deepens runtime close, hosted native Scene
+travel, local EntityRef editing, independent documents and ordinary product launch. Its
+[bounded ownership and ergonomics review](../audits/2026-10-22-post-refactor-ownership-and-ergonomics-review.md)
+retains those concrete owners and records six measured-work or consumer-driven follow-ups.
+The [integration evidence](../knowledge/engineering/verification/2026-10/2026-10-22T130424Z-engine-workflow-refactor-final-integration-ac0a299fafd64a6dba6179531a1f5cff.md)
+separates executed correctness/native scope from unmeasured performance and unsupported platforms.
+
 The [2026-10-18 foundation audit](../audits/2026-10-18-foundation-contract-audit.md) records
 confirmed ownership repairs and proposed refactor dependencies. Its standalone HTML deliverable
 is kept outside the repository. The audit does not change Accepted ADRs.

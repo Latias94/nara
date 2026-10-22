@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "a63a4633b6bfe5f8f64c2c0c7a4dffb7fe57e39787f982cd5c83c13ebd9a2f62"
+source_fingerprint: "47a44bcc405579951364db370e094c40677e830577c2886400e27d36b8d2aac0"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "a63a4633b6bfe5f8f64c2c0c7a4dffb7fe57e39787f982cd5c83c13ebd9
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `a63a4633b6bfe5f8f64c2c0c7a4dffb7fe57e39787f982cd5c83c13ebd9a2f62`
-- Immutable records: 825
+- Source fingerprint: `47a44bcc405579951364db370e094c40677e830577c2886400e27d36b8d2aac0`
+- Immutable records: 830
 - Active lane heads: 1
 
 # Active Registrations
@@ -38,6 +38,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor UI Prefab Authoring and Canvas v1 complete; no successor active](registry/2026-08/2026-08-17T233146Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fcbd471b11774b599cd190ead6827654.md): `completed` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Structural Composition v1 complete; no successor active](registry/2026-08/2026-08-18T072656Z-editor-ui-prefab-structural-composition-v1-codex-root-5edbf5a02be34aa8bdf7f88e45981dab.md): `completed` (editor-ui-prefab-structural-composition-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Engine workflow boundary refactor completed](registry/2026-10/2026-10-22T142414Z-engine-workflow-boundary-refactor-codex-root-189364de577b45418b60b8689e3c16bb.md): `complete` (engine-workflow-boundary-refactor-codex-root; producer `codex-root`)
 - [Fixed world canvas qualified](registry/2026-10/2026-10-20T071017Z-fixed-world-canvas-codex-root-2c7ba6aade3b4998905de82e5455225a.md): `complete` (fixed-world-canvas-codex-root; producer `codex-root`)
 - [Foundation correctness closure](registry/2026-10/2026-10-17T123810Z-foundation-correctness-closure-codex-root-20261017-94169fb22505473c89504d4b41cab1de.md): `completed` (foundation-correctness-closure-codex-root-20261017; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
@@ -66,6 +67,9 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Engine workflow refactor final integration](verification/2026-10/2026-10-22T130424Z-engine-workflow-refactor-final-integration-ac0a299fafd64a6dba6179531a1f5cff.md) - Final U1-U9 owner, public-consumer, Editor and compilation evidence with bounded review outcomes.
+- **Verification Evidence**: [Workflow refactor recovery and review corrections](verification/2026-10/2026-10-22T114555Z-workflow-refactor-recovery-and-review-corrections-43dfe5955a684108a8a65dab7aee5ed3.md) - Host cleanup regression verified; independent review corrections and remaining acceptance.
+- **Verification Evidence**: [Engine workflow refactor first cohort and remaining work](verification/2026-10/2026-10-22T044816Z-engine-workflow-refactor-first-cohort-and-remaining-work-758750f01ab241ceab2128c8d24183b2.md) - U1 U2 U3 U4 U9 implementation evidence before native Scene and authoring extensions.
 - **Verification Evidence**: [Editor authoring task budget and Bevy feature qualification](verification/2026-10/2026-10-21T071613Z-editor-authoring-task-budget-and-bevy-feature-qualification-b9b5f36f37fd4db8858dfec9a08a3e33.md) - Scoped authoring pool correction, before/after workload evidence, custody tests and Bevy ECS feature trial.
 - **Session Handoff**: [Checkpoint consumer qualified; task execution budget is the next investigation](sessions/2026-10/2026-10-21T032454Z-checkpoint-consumer-qualified-task-execution-budget-is-the-next-investigation-8f7f1c5d412d4b25b72aeb16bd3bab9a.md) - Session Handoff for Checkpoint consumer qualified; task execution budget is the next investigation.
 - **Verification Evidence**: [Atomic API rename under MSRV and portable wasm](verification/2026-10/2026-10-21T032015Z-atomic-api-rename-under-msrv-and-portable-wasm-284fef97fc6c4a208f370262189bdc6b.md) - Verification Evidence for Atomic API rename under MSRV and portable wasm.
@@ -75,9 +79,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Current Scene ownership and decoded-generation custody qualification](verification/2026-10/2026-10-20T172653Z-current-scene-ownership-and-decoded-generation-custody-qualification-0bf781c53d9e4cc3950bfb77b98d2b8a.md) - Qualify the first P2 ownership slice and retain the concrete residency design limits.
 - **Verification Evidence**: [Selected Scene content and exact declared delivery qualification](verification/2026-10/2026-10-20T165833Z-selected-scene-content-and-exact-declared-delivery-qualification-714d8d9ea4f14a27ae83137124e24ae6.md) - Verification Evidence for Selected Scene content and exact declared delivery qualification.
 - **Verification Evidence**: [Linux default workspace suite requires the native display profile](verification/2026-10/2026-10-20T163530Z-linux-default-workspace-suite-requires-the-native-display-profile-799d137d781d4786abfa72505101cdc0.md) - Verification Evidence for Linux default workspace suite requires the native display profile.
-- **Verification Evidence**: [Reflection declaration checks and Linux supervised Play storage corrections](verification/2026-10/2026-10-20T152924Z-reflection-declaration-checks-and-linux-supervised-play-storage-corrections-efc879a2a8974c989725df994b86e5db.md) - Local target reuse, eager float proofs, bounded Play failure facts and real Linux cache publication; complete successor hosted qualification remains pending.
-- **Verification Evidence**: [Hosted CI contract corrections and signed Linux process groups](verification/2026-10/2026-10-20T115517Z-hosted-ci-contract-corrections-and-signed-linux-process-groups-b976e5720228491691361ab578614f12.md) - Observed hosted failures, signed process groups, native local-workspace policy and deterministic contract fixtures; full successor CI pending.
-- **Verification Evidence**: [Rust Play attribution and Windows Cargo input qualification](verification/2026-10/2026-10-20T112401Z-rust-play-attribution-and-windows-cargo-input-qualification-2abb1db859f04d848d88a1706ad167be.md) - Public Play/Restart, private native Cargo attribution, exact CLI cache interoperability and compiler failure recovery at the corrected Windows path boundary.
 
 # Integration Notes
 

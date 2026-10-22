@@ -95,7 +95,7 @@ protocol's owner and why its validation is necessary.
   checks because they establish different facts.
 - KTD6. Native retirement is explicit and owned. Prove two independent domain participants through
   hosted travel; do not run arbitrary effects inside persistent-data rollback.
-  The first protocol supports bounded synchronous domain operations, not multi-frame pending native
+  The first protocol supports synchronous nonblocking domain operations, not multi-frame pending native
   work. The Scene request owner retains a finite travel attempt and per-participant progress after
   retirement begins. Gameplay cannot continue against a partially retired Scene. Failed retry
   advances only unfinished retirement or reconciliation; Stop retains the attempt's custody.
