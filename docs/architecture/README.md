@@ -142,6 +142,11 @@ caller migrations and research gates. Its [pinned mechanism study](../research/2
 compares Bevy/Godot implementations without claiming equivalent guarantees. These are research
 and Proposed design; they neither amend Accepted ADRs nor qualify implementation.
 
+The [low-level contract implementation plan](../plans/2026-10-23-0135-refactor-low-level-contracts-plan.md)
+turns D1-D8 and the confirmed findings into owner slices with ADR corrections, real consumer
+migrations and fresh verification. Execution evidence and Goal continuity belong in engineering
+memory; the plan itself does not claim implementation completion.
+
 The [post-publication architecture review](../audits/2026-10-19-post-publication-architecture-review.md)
 records the TileSet/Image corrections and the remaining concrete module-interface refactor order.
 Its implementation and verification limits remain separate from future tile authoring tools.

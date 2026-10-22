@@ -195,7 +195,9 @@ read role during the next mutation phase. Startup supplies its initial cut; subs
 their real publication stamp rather than relabelling it as this tick. This is required by
 [pursue_scene_players](../../reference-game/src/systems.rs#L798), which reads previous globals while
 writing new locals before propagation. Resolve/Capture use this tick's completed simulation cut;
-presentation has its own snapshot. Do not move pursue into the post-propagation window and silently
+only Resolve joins the helper bounded before Finalize. Finalize/Capture reads the same cut with
+its original stamp and does not inherit that scheduling constraint. Presentation has its own
+snapshot. Do not move pursue into the post-propagation window and silently
 delay its local writes until the next tick.
 
 The current Reference Game also processes newly spawned projectiles through explicit domain-local
