@@ -14,10 +14,12 @@ use nara_ecs::Resource;
 use nara_material::AlphaMode2d;
 #[cfg(test)]
 use nara_render::Color;
+#[cfg(any(test, not(any(feature = "sprite-submitter", feature = "ui-submitter"))))]
+use nara_render::RenderTarget;
 use nara_render::{
     Extent2d, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
-    RenderFrameSkipReason, RenderFrameSourceGeneration, RenderFrameTarget, RenderTarget,
-    RenderWindowPacket, ViewportRect,
+    RenderFrameSkipReason, RenderFrameSourceGeneration, RenderFrameTarget, RenderWindowPacket,
+    ViewportRect,
 };
 #[cfg(feature = "ui-submitter")]
 use nara_ui_render::{
@@ -1606,6 +1608,31 @@ impl WgpuRenderBackend {
         frame_index: u64,
         canvas_cache: &mut crate::canvas::WorldCanvasCache,
     ) -> Result<PreparedTargetDraw, WgpuRenderError> {
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        let lowered_views = packet
+            .views()
+            .iter()
+            .enumerate()
+            .map(|(index, view)| payload.lower_draw(view.target, view.viewport, Some(index)))
+            .collect::<Result<Vec<_>, _>>()?;
+        #[cfg(feature = "ui-submitter")]
+        let (ui_viewport, lowered_ui) = {
+            let viewport = ViewportRect::from_extent(packet.target().extent())
+                .expect("admitted target extent");
+            (
+                viewport,
+                payload.lower_draw(packet.views()[0].target, viewport, None)?,
+            )
+        };
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        {
+            let draws = lowered_views.iter();
+            #[cfg(feature = "ui-submitter")]
+            let draws = draws.chain(std::iter::once(&lowered_ui));
+            self.quad_textures
+                .preflight_image_residency(draws.flat_map(|draw| draw.batches.iter()))
+                .map_err(WgpuRenderError::from)?;
+        }
         let mut prepared = PreparedTargetDraw::default();
         let world_format = if let Some(canvas) = packet.world_canvas() {
             prepared.canvas = Some(
@@ -1626,6 +1653,13 @@ impl WgpuRenderBackend {
             canvas_cache.clear();
             format
         };
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        for (view, lowered_draw) in packet.views().iter().zip(lowered_views) {
+            let draw =
+                self.prepare_submitter_draw_lowered(world_format, lowered_draw, frame_index)?;
+            prepared.push(view.viewport, view.load, draw);
+        }
+        #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
         for (index, view) in packet.views().iter().enumerate() {
             let draw = self.prepare_submitter_draw(
                 world_format,
@@ -1639,17 +1673,8 @@ impl WgpuRenderBackend {
         }
         #[cfg(feature = "ui-submitter")]
         {
-            let viewport = ViewportRect::from_extent(packet.target().extent())
-                .expect("admitted target extent");
-            let draw = self.prepare_submitter_draw(
-                format,
-                packet.views()[0].target,
-                viewport,
-                None,
-                payload,
-                frame_index,
-            )?;
-            prepared.push(viewport, nara_render::ViewLoadOp::Load, draw);
+            let draw = self.prepare_submitter_draw_lowered(format, lowered_ui, frame_index)?;
+            prepared.push(ui_viewport, nara_render::ViewLoadOp::Load, draw);
         }
         Ok(prepared)
     }
@@ -1710,6 +1735,7 @@ impl WgpuRenderBackend {
         }
     }
 
+    #[cfg(any(test, not(any(feature = "sprite-submitter", feature = "ui-submitter"))))]
     pub(super) fn prepare_submitter_draw(
         &mut self,
         view_format: wgpu::TextureFormat,
@@ -1722,71 +1748,8 @@ impl WgpuRenderBackend {
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         {
             let lowered = payload.lower_draw(target, viewport, view_index)?;
-            #[cfg(test)]
-            let batches = crate::allocation::take_test_batches().unwrap_or(lowered.batches);
-            #[cfg(not(test))]
-            let batches = lowered.batches;
-            #[cfg(feature = "ui-submitter")]
-            let ui_packets = lowered.ui_packets;
-            let stats = quad_batch_draw_stats(&batches);
-            if batches.is_empty() {
-                return Ok(PreparedSubmitterDraw {
-                    #[cfg(feature = "ui-submitter")]
-                    ui_packets,
-                    ..PreparedSubmitterDraw::default()
-                });
-            }
-            let required_bytes = admit_quad_instance_buffers(&batches).map_err(|error| {
-                WgpuRenderError::ContentRejected {
-                    message: error.to_string(),
-                }
-            })?;
-            let instance_reservation =
-                self.instance_budget
-                    .reserve(required_bytes)
-                    .map_err(|error| WgpuRenderError::ContentRejected {
-                        message: error.to_string(),
-                    })?;
-            let pipeline_keys = crate::required_quad_pipeline_keys(&batches, view_format);
-            let texture_layout = self.ensure_quad_texture_bind_group_layout()?;
-            let material_layout = self.ensure_quad_material_bind_group_layout()?;
-            for key in &pipeline_keys {
-                self.ensure_quad_pipeline(*key)?;
-            }
-            let pipelines = self.quad_pipeline_draw_refs(&pipeline_keys)?;
-            let device = self
-                .device
-                .as_ref()
-                .ok_or(WgpuRenderError::BackendNotReady)?
-                .clone();
-            let queue = self
-                .queue
-                .as_ref()
-                .ok_or(WgpuRenderError::BackendNotReady)?
-                .clone();
-            let buffers = create_quad_batch_buffers(
-                &device,
-                &queue,
-                &batches,
-                &texture_layout,
-                &material_layout,
-                &mut self.quad_textures,
-                frame_index,
-            )
-            .map_err(WgpuRenderError::from)?;
-            Ok(PreparedSubmitterDraw {
-                pipelines,
-                buffers,
-                #[cfg(feature = "ui-submitter")]
-                ui_packets,
-                draw_calls: stats.draw_calls,
-                sprites: stats.sprites,
-                #[cfg(feature = "ui-submitter")]
-                image_sprites: stats.image_sprites,
-                instance_reservation: Some(instance_reservation),
-            })
+            self.prepare_submitter_draw_lowered(view_format, lowered, frame_index)
         }
-
         #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
         {
             let _ = (
@@ -1799,6 +1762,78 @@ impl WgpuRenderBackend {
             );
             Ok(PreparedSubmitterDraw::default())
         }
+    }
+
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    fn prepare_submitter_draw_lowered(
+        &mut self,
+        view_format: wgpu::TextureFormat,
+        lowered: crate::frame::WgpuLoweredFrameDraw,
+        frame_index: u64,
+    ) -> Result<PreparedSubmitterDraw, WgpuRenderError> {
+        #[cfg(test)]
+        let batches = crate::allocation::take_test_batches().unwrap_or(lowered.batches);
+        #[cfg(not(test))]
+        let batches = lowered.batches;
+        #[cfg(feature = "ui-submitter")]
+        let ui_packets = lowered.ui_packets;
+        let stats = quad_batch_draw_stats(&batches);
+        if batches.is_empty() {
+            return Ok(PreparedSubmitterDraw {
+                #[cfg(feature = "ui-submitter")]
+                ui_packets,
+                ..PreparedSubmitterDraw::default()
+            });
+        }
+        let required_bytes = admit_quad_instance_buffers(&batches).map_err(|error| {
+            WgpuRenderError::ContentRejected {
+                message: error.to_string(),
+            }
+        })?;
+        let instance_reservation =
+            self.instance_budget
+                .reserve(required_bytes)
+                .map_err(|error| WgpuRenderError::ContentRejected {
+                    message: error.to_string(),
+                })?;
+        let pipeline_keys = crate::required_quad_pipeline_keys(&batches, view_format);
+        let texture_layout = self.ensure_quad_texture_bind_group_layout()?;
+        let material_layout = self.ensure_quad_material_bind_group_layout()?;
+        for key in &pipeline_keys {
+            self.ensure_quad_pipeline(*key)?;
+        }
+        let pipelines = self.quad_pipeline_draw_refs(&pipeline_keys)?;
+        let device = self
+            .device
+            .as_ref()
+            .ok_or(WgpuRenderError::BackendNotReady)?
+            .clone();
+        let queue = self
+            .queue
+            .as_ref()
+            .ok_or(WgpuRenderError::BackendNotReady)?
+            .clone();
+        let buffers = create_quad_batch_buffers(
+            &device,
+            &queue,
+            &batches,
+            &texture_layout,
+            &material_layout,
+            &mut self.quad_textures,
+            frame_index,
+        )
+        .map_err(WgpuRenderError::from)?;
+        Ok(PreparedSubmitterDraw {
+            pipelines,
+            buffers,
+            #[cfg(feature = "ui-submitter")]
+            ui_packets,
+            draw_calls: stats.draw_calls,
+            sprites: stats.sprites,
+            #[cfg(feature = "ui-submitter")]
+            image_sprites: stats.image_sprites,
+            instance_reservation: Some(instance_reservation),
+        })
     }
 
     fn logical_texture_bytes(&self) -> u64 {
@@ -1963,6 +1998,8 @@ pub(super) fn render_backend_state(state: WgpuBackendState) -> RenderBackendStat
     }
 }
 
+#[cfg(all(test, feature = "sprite-submitter", feature = "ui-submitter"))]
+mod image_working_set;
 #[cfg(all(test, feature = "sprite-submitter", feature = "ui-submitter"))]
 mod runtime_measurement;
 

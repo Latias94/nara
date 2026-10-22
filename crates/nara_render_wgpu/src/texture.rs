@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::{
     allocation::checked_allocation,
-    quad::{WgpuQuadMaterialKey, WgpuQuadTexture, WgpuQuadTextureKey},
+    quad::{WgpuQuadBatch, WgpuQuadMaterialKey, WgpuQuadTexture, WgpuQuadTextureKey},
 };
 
 const RGBA8_BYTES_PER_PIXEL: u32 = 4;
@@ -40,6 +40,14 @@ pub(crate) struct WgpuSpriteTextureCache {
 }
 
 impl WgpuSpriteTextureCache {
+    #[cfg(test)]
+    pub(crate) fn with_image_residency_limits(versions: usize, bytes: u64) -> Self {
+        Self {
+            residency_limits: WgpuImageResidencyLimits { versions, bytes },
+            ..Default::default()
+        }
+    }
+
     #[must_use]
     pub(crate) fn image_count(&self) -> usize {
         self.resident_image_count() + {
@@ -214,6 +222,82 @@ impl WgpuSpriteTextureCache {
         })
     }
 
+    /// Admit the complete immutable target image working set before creating any GPU texture.
+    /// Exact snapshots are counted once across views and UI.
+    pub(crate) fn preflight_image_residency<'a>(
+        &self,
+        batches: impl IntoIterator<Item = &'a WgpuQuadBatch>,
+    ) -> Result<(), WgpuTextureError> {
+        let mut images = BTreeMap::<RenderResourceKey, Vec<&PreparedImageSnapshot>>::new();
+        for batch in batches
+            .into_iter()
+            .filter(|batch| !batch.instances.is_empty())
+        {
+            let primary = match &batch.texture {
+                WgpuQuadTexture::Image(snapshot) => Some(snapshot),
+                _ => None,
+            };
+            let extension = batch
+                .material_extension
+                .as_ref()
+                .map(|material| &material.texture);
+            for snapshot in [primary, extension].into_iter().flatten() {
+                let versions = images.entry(snapshot.identity().key()).or_default();
+                if !versions
+                    .iter()
+                    .any(|existing| existing.identity() == snapshot.identity())
+                {
+                    versions.push(snapshot);
+                }
+            }
+        }
+        let required = images.values().flatten().copied().collect::<Vec<_>>();
+        if required.is_empty() {
+            return Ok(());
+        }
+        let required_bytes = required.iter().fold(0_u64, |total, snapshot| {
+            total.saturating_add(snapshot.resource().pixels().len() as u64)
+        });
+        let key = required[0].identity().key();
+        if required.len() > self.residency_limits.versions
+            || required_bytes > self.residency_limits.bytes
+        {
+            return Err(WgpuTextureError::ImageWorkingSetRejected {
+                key,
+                required: required_bytes,
+                maximum_bytes: self.residency_limits.bytes,
+                required_versions: required.len(),
+                maximum_versions: self.residency_limits.versions,
+            });
+        }
+        let (missing_versions, missing_bytes) = required
+            .iter()
+            .filter(|snapshot| !self.has_exact_image(snapshot))
+            .fold((0_usize, 0_u64), |(versions, bytes), snapshot| {
+                (
+                    versions.saturating_add(1),
+                    bytes.saturating_add(snapshot.resource().pixels().len() as u64),
+                )
+            });
+        if missing_versions == 0 {
+            return Ok(());
+        }
+        let resident_bytes = self.resident_image_bytes();
+        if self.resident_image_count().saturating_add(missing_versions)
+            > self.residency_limits.versions
+            || resident_bytes.saturating_add(missing_bytes) > self.residency_limits.bytes
+        {
+            return Err(WgpuTextureError::ImageResidencyDeferred {
+                key,
+                required: missing_bytes,
+                resident_bytes,
+                maximum_bytes: self.residency_limits.bytes,
+                maximum_versions: self.residency_limits.versions,
+            });
+        }
+        Ok(())
+    }
+
     fn ensure_fallback(
         &mut self,
         device: &wgpu::Device,
@@ -341,18 +425,37 @@ impl WgpuSpriteTextureCache {
             .count()
     }
 
+    fn resident_image_bytes(&self) -> u64 {
+        self.resident_images
+            .iter()
+            .filter_map(|resident| resident.image.upgrade())
+            .fold(0_u64, |bytes, image| {
+                bytes.saturating_add(image.texture.logical_bytes)
+            })
+    }
+
+    fn has_exact_image(&self, snapshot: &PreparedImageSnapshot) -> bool {
+        self.images
+            .get(&snapshot.identity().key())
+            .is_some_and(|versions| {
+                versions
+                    .iter()
+                    .any(|entry| entry.image.identity == *snapshot.identity())
+            })
+            || self
+                .resident_images
+                .iter()
+                .filter(|resident| resident.reusable)
+                .filter_map(|resident| resident.image.upgrade())
+                .any(|image| image.identity == *snapshot.identity())
+    }
+
     fn admit_image_residency(
         &self,
         key: RenderResourceKey,
         required: u64,
     ) -> Result<(), WgpuTextureError> {
-        let resident_bytes = self
-            .resident_images
-            .iter()
-            .filter_map(|resident| resident.image.upgrade())
-            .fold(0_u64, |bytes, image| {
-                bytes.saturating_add(image.texture.logical_bytes)
-            });
+        let resident_bytes = self.resident_image_bytes();
         if self.resident_image_count() >= self.residency_limits.versions
             || resident_bytes.saturating_add(required) > self.residency_limits.bytes
         {
@@ -733,6 +836,16 @@ pub(crate) enum WgpuTextureError {
         required: u64,
         resident_bytes: u64,
         maximum_bytes: u64,
+        maximum_versions: usize,
+    },
+    #[error(
+        "image working set {required_versions} versions/{required} bytes exceeds limits of {maximum_versions} versions/{maximum_bytes} bytes"
+    )]
+    ImageWorkingSetRejected {
+        key: RenderResourceKey,
+        required: u64,
+        maximum_bytes: u64,
+        required_versions: usize,
         maximum_versions: usize,
     },
     #[error("glyph page {key:?} upload requires {required} bytes; per-frame maximum is {maximum}")]

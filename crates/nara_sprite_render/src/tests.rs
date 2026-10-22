@@ -1023,6 +1023,51 @@ fn transparent_material_changes_preserve_painter_order_and_split_adjacent_batche
 }
 
 #[test]
+fn adjacent_instance_tints_share_one_batch_and_preserve_colors_and_order() {
+    let colors = [
+        Color::rgba(1.0, 0.0, 0.0, 0.5),
+        Color::rgba(0.0, 0.0, 1.0, 0.5),
+    ];
+    let mut items = colors
+        .into_iter()
+        .enumerate()
+        .map(|(index, color)| QueuedSpriteItem {
+            material: SpriteMaterialKey::from_material(ExtractedSpriteMaterial::from_color(color)),
+            instance: SpriteInstance::axis_aligned(Vec2::new(index as f32, 0.0), Vec2::ONE, color),
+            ..queued_item(index as u32)
+        })
+        .collect::<Vec<_>>();
+    items.sort_by(compare_queued_sprite_items);
+
+    let batches = build_sprite_batches(&items);
+
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item.source_order)
+            .collect::<Vec<_>>(),
+        [0, 1]
+    );
+    assert_eq!(batches.len(), 1);
+    assert_eq!(
+        batches[0]
+            .instances
+            .iter()
+            .map(|instance| instance.color)
+            .collect::<Vec<_>>(),
+        colors
+    );
+    assert_eq!(
+        batches[0]
+            .instances
+            .iter()
+            .map(|instance| instance.center.x)
+            .collect::<Vec<_>>(),
+        [0.0, 1.0]
+    );
+}
+
+#[test]
 fn same_image_with_different_samplers_splits_batches() {
     let image = nara_asset::allocate_anonymous_handle().unwrap();
     let mut app = sprite_app();
@@ -1449,6 +1494,5 @@ fn material_key() -> SpriteMaterialKey {
     SpriteMaterialKey {
         sampler: SamplerDescriptor::default(),
         alpha_mode: AlphaMode2d::Blend,
-        tint: ColorKey::from_color(Color::WHITE),
     }
 }

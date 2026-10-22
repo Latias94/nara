@@ -17,17 +17,36 @@ pub(crate) fn two_image_versions() -> [nara_image::PreparedImageSnapshot; 2] {
 }
 
 pub(crate) fn image_versions(width: u32, height: u32) -> [nara_image::PreparedImageSnapshot; 2] {
+    use nara_asset::{AssetVersion, Assets};
+    use nara_image::{
+        PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash, image_resource_key,
+    };
+    let handle = nara_asset::allocate_anonymous_handle::<nara_image::ImageAsset>().unwrap();
+    let mut images = Assets::<nara_image::ImageAsset>::default();
+    image_assets(width, height).map(|image| {
+        images.insert(handle, image);
+        let image = images.get(handle).unwrap();
+        PreparedImageSnapshot::new(
+            nara_render::RenderResourceSnapshot::new(
+                image_resource_key(handle),
+                AssetVersion::from_raw(1),
+                images.slot_revision(handle),
+                image_descriptor_hash(image),
+            ),
+            PreparedImageResource::from_image(image),
+        )
+    })
+}
+
+pub(crate) fn image_assets(width: u32, height: u32) -> [nara_image::ImageAsset; 2] {
     use nara_asset::{
-        ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetVersion, Assets, ImportArtifactKey,
-        ImportArtifactRecord, ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId,
-        ImporterVersion, SourceHash, StableAssetId,
+        ArtifactFormatVersion, ArtifactLabel, AssetPath, ImportArtifactKey, ImportArtifactRecord,
+        ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId, ImporterVersion,
+        SourceHash, StableAssetId,
     };
     use nara_image::{
         ImageAsset, ImageExtent, ImageFormat, ImageImportSettings, ImageSourceMetadata,
-        PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash, image_resource_key,
     };
-    let handle = nara_asset::allocate_anonymous_handle::<ImageAsset>().unwrap();
-    let mut images = Assets::<ImageAsset>::default();
     [[255, 0, 0, 255], [0, 255, 0, 255]].map(|color| {
         let pixels = color.repeat((width * height) as usize);
         let settings = ImageImportSettings::default();
@@ -44,7 +63,7 @@ pub(crate) fn image_versions(width: u32, height: u32) -> [nara_image::PreparedIm
             ArtifactFormatVersion::new(1),
         ))
         .unwrap();
-        let image = ImageAsset::new(
+        ImageAsset::new(
             ImageSourceMetadata::new(
                 AssetPath::new("readback/versions.png").unwrap(),
                 settings,
@@ -55,18 +74,7 @@ pub(crate) fn image_versions(width: u32, height: u32) -> [nara_image::PreparedIm
             ImageFormat::Rgba8,
             pixels,
         )
-        .unwrap();
-        images.insert(handle, image);
-        let image = images.get(handle).unwrap();
-        PreparedImageSnapshot::new(
-            nara_render::RenderResourceSnapshot::new(
-                image_resource_key(handle),
-                AssetVersion::from_raw(1),
-                images.slot_revision(handle),
-                image_descriptor_hash(image),
-            ),
-            PreparedImageResource::from_image(image),
-        )
+        .unwrap()
     })
 }
 

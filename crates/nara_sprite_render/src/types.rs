@@ -202,7 +202,6 @@ pub struct PreparedMaterial2d {
 pub struct SpriteMaterialKey {
     pub sampler: SamplerDescriptor,
     pub alpha_mode: AlphaMode2d,
-    pub tint: ColorKey,
 }
 
 impl SpriteMaterialKey {
@@ -211,27 +210,6 @@ impl SpriteMaterialKey {
         Self {
             sampler: material.sampler,
             alpha_mode: material.alpha_mode,
-            tint: ColorKey::from_color(material.tint),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ColorKey {
-    pub r: u32,
-    pub g: u32,
-    pub b: u32,
-    pub a: u32,
-}
-
-impl ColorKey {
-    #[must_use]
-    pub const fn from_color(color: Color) -> Self {
-        Self {
-            r: color.r.to_bits(),
-            g: color.g.to_bits(),
-            b: color.b.to_bits(),
-            a: color.a.to_bits(),
         }
     }
 }

@@ -14,8 +14,6 @@ use crate::extract::extract_sprites;
 #[cfg(test)]
 use crate::queue::{build_sprite_batches, compare_queued_sprite_items, world_to_clip_instance};
 use crate::queue::{queue_sprites, sort_and_batch_sprites};
-#[cfg(test)]
-use crate::types::ColorKey;
 pub use crate::types::SpriteRenderStats;
 pub(crate) use crate::types::{
     ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
@@ -27,7 +25,7 @@ pub(crate) use crate::types::{
 #[doc(hidden)]
 pub mod __private {
     pub use crate::types::{
-        ColorKey, ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
+        ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
         PreparedMaterial2d, QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatchKind,
         SpriteBatches, SpriteInstance, SpriteMaterialKey, TextureUvRect,
     };

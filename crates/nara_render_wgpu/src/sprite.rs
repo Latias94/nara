@@ -67,9 +67,7 @@ mod tests {
     use nara_core::{Color, Vec2};
     use nara_material::{AlphaMode2d, SamplerDescriptor};
     use nara_render::RenderTarget;
-    use nara_sprite_render::__private::{
-        ColorKey, SpriteBatchKind, SpriteMaterialKey, TextureUvRect,
-    };
+    use nara_sprite_render::__private::{SpriteBatchKind, SpriteMaterialKey, TextureUvRect};
 
     #[test]
     fn sprite_adapter_preserves_material_and_instance_geometry() {
@@ -83,7 +81,6 @@ mod tests {
             material: SpriteMaterialKey {
                 sampler: SamplerDescriptor::default(),
                 alpha_mode: AlphaMode2d::Blend,
-                tint: ColorKey::from_color(Color::WHITE),
             },
             image: None,
             material_extension: None,
