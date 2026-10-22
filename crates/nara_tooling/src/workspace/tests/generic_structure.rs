@@ -62,6 +62,9 @@ fn generic_scene_and_prefab_structure_preserve_selection_history_and_exact_actio
                     .publish(),
                 )
                 .unwrap(),
+            EditorDocumentKind::Extension(_) => {
+                unreachable!("this fixture exercises Scene and Prefab structure")
+            }
         }
         .opened_document
         .unwrap();
@@ -210,6 +213,9 @@ fn command(
                 _ => unreachable!("this fixture exercises move and remove commands"),
             },
         },
+        EditorDocumentKind::Extension(_) => {
+            unreachable!("this fixture exercises Scene and Prefab structure")
+        }
     }
 }
 
@@ -217,5 +223,8 @@ fn document_value(workspace: &EditorWorkspace, document: EditorDocumentId) -> Sc
     match &workspace.documents[&document] {
         EditorDocumentSlot::Scene(slot) => slot.session.document().clone(),
         EditorDocumentSlot::Prefab(slot) => slot.session.document().instantiate(),
+        EditorDocumentSlot::Extension(_) => {
+            unreachable!("this fixture exercises Scene and Prefab structure")
+        }
     }
 }

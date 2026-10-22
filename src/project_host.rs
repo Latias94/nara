@@ -36,7 +36,9 @@ mod persistence;
 #[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
 pub use persistence::EditorPersistenceReceipt;
 #[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
-pub use runtime::{EditorSourceAssetDomain, EditorSourceAssetImporters};
+pub use runtime::{
+    EditorExtensionDocumentHostError, EditorSourceAssetDomain, EditorSourceAssetImporters,
+};
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub use crate::project_content::{

@@ -31,6 +31,8 @@ use crate::{
 
 const CUSTOM_COMPONENT: &str = "studio.interaction.Health";
 
+mod entity_references;
+mod extension_documents;
 mod field_drafts;
 mod field_overrides;
 mod ordinary_structure;
@@ -353,6 +355,9 @@ impl AuthoringWorkflow<'_> {
         let source = project.join(match kind {
             EditorDocumentKind::Scene => "worlds/entry.scene.json",
             EditorDocumentKind::Prefab => "blueprints/ordinary.prefab.json",
+            EditorDocumentKind::Extension(_) => {
+                unreachable!("extension documents are not fixture sources")
+            }
         });
         let original = read_source(&source)?;
         let frame = self.frame()?;

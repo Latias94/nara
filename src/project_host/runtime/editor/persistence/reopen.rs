@@ -28,11 +28,18 @@ pub(super) struct ReopenAdmission {
 enum ReopenRequest {
     Scene(SceneReopenRequest),
     Prefab(PrefabReopenRequest),
+    Extension(super::super::extension_documents::ExtensionReopenRequest),
 }
 
 pub(super) enum ReopenCompletion {
     Scene(PreparedSceneReopen),
     Prefab(PreparedPrefabReopen),
+    Extension(
+        Result<
+            super::super::extension_documents::PreparedExtensionReopen,
+            super::super::extension_documents::ExtensionReopenFailure,
+        >,
+    ),
     Unavailable,
 }
 
@@ -81,6 +88,9 @@ impl BackgroundReopen {
                         ReopenRequest::Scene(request) => ReopenCompletion::Scene(request.prepare()),
                         ReopenRequest::Prefab(request) => {
                             ReopenCompletion::Prefab(request.prepare())
+                        }
+                        ReopenRequest::Extension(request) => {
+                            ReopenCompletion::Extension(request.prepare())
                         }
                     });
                     #[cfg(test)]
@@ -192,6 +202,26 @@ impl EditorProjectSession {
                     ),
                 )
             }
+            EditorDocumentKind::Extension(_) => {
+                let lane = self
+                    .extension_documents
+                    .lane(document)
+                    .ok_or(EditorPersistenceRejection::SourceBindingMismatch)?;
+                (
+                    ReopenAdmission {
+                        document,
+                        kind,
+                        revision: self
+                            .workspace
+                            .document_revision(document)
+                            .ok_or(EditorPersistenceRejection::MissingDocument)?,
+                        binding: Some(lane.source.clone()),
+                        project_path: Arc::from(lane.source.locator()),
+                        schema: None,
+                    },
+                    ReopenRequest::Extension(lane.capture_reopen()?),
+                )
+            }
         };
         Ok(PendingReopen { admission, request })
     }
@@ -234,6 +264,13 @@ impl EditorProjectSession {
                     }),
                 )
             }
+            EditorDocumentKind::Extension(_) => (
+                self.workspace.document_source_binding(document).cloned(),
+                None,
+                self.extension_documents
+                    .lane(document)
+                    .is_some_and(|lane| lane.source.locator() == admission.project_path.as_ref()),
+            ),
         };
         if !lane_matches || binding != admission.binding || schema != admission.schema {
             return Err(EditorPersistenceRejection::SourceBindingMismatch);
@@ -285,6 +322,9 @@ impl EditorProjectSession {
                 )
             }
             ReopenCompletion::Unavailable => rejected(EditorPersistenceRejection::Busy),
+            ReopenCompletion::Extension(prepared) => {
+                self.publish_extension_reopen(admission.document, admission.revision, prepared)
+            }
         }
     }
 

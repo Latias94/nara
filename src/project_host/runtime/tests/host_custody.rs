@@ -369,6 +369,9 @@ fn edit_native_name(
             base_revision,
             patch,
         },
+        EditorDocumentKind::Extension(_) => {
+            unreachable!("fixture contains only Scene and Prefab documents")
+        }
     };
     let report = editor.apply_workspace_command(command);
     assert!(report.applied, "{:?}", report.diagnostics);
@@ -467,6 +470,9 @@ fn open_kind(
             ));
             (document, project.root.join("prefabs/first.prefab.json"))
         }
+        EditorDocumentKind::Extension(_) => {
+            unreachable!("fixture contains only Scene and Prefab sources")
+        }
     }
 }
 
@@ -486,6 +492,9 @@ fn successor(
             "prefabs/second.prefab.json",
             crate::project_host::authoring::AuthoringDocumentKind::Prefab,
         ),
+        EditorDocumentKind::Extension(_) => {
+            unreachable!("fixture contains only Scene and Prefab sources")
+        }
     }
 }
 
@@ -497,6 +506,9 @@ fn arm_failed_cleanup(
     match kind {
         EditorDocumentKind::Scene => editor.test_fail_next_save_after_write(),
         EditorDocumentKind::Prefab => editor.test_fail_next_prefab_save_after_write(),
+        EditorDocumentKind::Extension(_) => {
+            unreachable!("fixture contains only Scene and Prefab sources")
+        }
     }
 }
 

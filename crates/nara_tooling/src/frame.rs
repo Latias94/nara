@@ -586,6 +586,7 @@ pub enum EditorPlayAction {
 pub enum EditorAction {
     Navigate(EditorNavigationAction),
     Mutate(EditorDocumentMutation),
+    Extension(crate::EditorExtensionCommand),
     Persistence(EditorPersistenceAction),
     ProjectBrowser(EditorProjectBrowserAction),
     ImageImport(EditorImageImportAction),
@@ -626,6 +627,7 @@ impl EditorAction {
             ),
             Self::Play(action) => matches!(action, EditorPlayAction::Play { .. }),
             Self::Mutate(_)
+            | Self::Extension(_)
             | Self::Persistence(_)
             | Self::ProjectContent(_)
             | Self::WorkspaceIntent(_)

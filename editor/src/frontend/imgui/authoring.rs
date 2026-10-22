@@ -124,7 +124,7 @@ impl ImguiAuthoringPanels {
             let idle = !self.read_only
                 && frame.workspace_intent().intent().is_none()
                 && persistence.operation() == EditorPersistenceOperation::Idle
-                && (document.kind == EditorDocumentKind::Prefab
+                && (document.kind != EditorDocumentKind::Scene
                     || frame.play().state() == EditorPlayState::Empty
                     || matches!(
                         frame.runtime_availability(),

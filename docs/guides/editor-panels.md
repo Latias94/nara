@@ -50,6 +50,10 @@ The UI thread owns factories and panel objects, so they do not require `Send` or
 receives read-only document/selection projections. Keeping a draft in a panel does not dirty a
 document or publish an undo entry.
 
+For a domain-owned non-Scene document, use the [document extension guide](editor-documents.md).
+Its independent dialogue consumer uses the same panel retirement and action paths while the
+Host retains history/dirty projections, Save/Reopen and document close decisions.
+
 ## Edit A Persistent Field
 
 Use the default field editor when the panel should edit a field from the selected entity's

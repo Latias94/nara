@@ -90,6 +90,24 @@ impl EditorProjectSession {
         match action {
             EditorAction::Navigate(action) => self.dispatch_navigation(frame, action),
             EditorAction::Mutate(action) => self.dispatch_document_mutation(action),
+            EditorAction::Extension(action) => {
+                if let Err(rejection) =
+                    self.verify_document_revision(action.document(), action.base_revision())
+                {
+                    return EditorActionOutcome::Rejected(rejection);
+                }
+                if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
+                    return EditorActionOutcome::Workspace(
+                        super::editor_workspace_command_rejected(
+                            self.workspace.active_document(),
+                            "project.editor.workspace-intent-pending",
+                        ),
+                    );
+                }
+                let report = self.workspace.apply_extension_action(action);
+                let _ = self.diagnostics.extend(report.diagnostics.clone());
+                EditorActionOutcome::Workspace(report)
+            }
             EditorAction::Persistence(action) => self.dispatch_persistence(action),
             EditorAction::ProjectBrowser(action) => EditorActionOutcome::ProjectBrowser(
                 self.dispatch_project_browser_action(frame, source_index, action),

@@ -254,7 +254,8 @@ fn persistence_completion_is_observed_without_repainting_unchanged_polls() {
         // Save refresh can complete image preparation independently of its persistence receipt.
         let changed = before.persistence() != after.persistence()
             || before.source_asset_import() != after.source_asset_import()
-            || before.source_asset_import_work_pending() != after.source_asset_import_work_pending()
+            || before.source_asset_import_work_pending()
+                != after.source_asset_import_work_pending()
             || before.image_import_work_pending() != after.image_import_work_pending();
         assert_eq!(update.actions_observed(), changed);
         if after.persistence().operation() == EditorPersistenceOperation::Idle {

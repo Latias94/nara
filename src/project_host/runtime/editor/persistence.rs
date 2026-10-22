@@ -63,6 +63,7 @@ impl EditorProjectSession {
                             .unwrap_or(false);
                         (PersistenceLane::Prefab, refresh)
                     }
+                    SaveLane::Extension(lane) => (PersistenceLane::Extension(lane.document), false),
                 };
                 self.acknowledge_save(kind, document, refresh, outcome)
             }
@@ -96,6 +97,7 @@ impl EditorProjectSession {
         let document = match &save {
             PendingSave::Scene(save) => save.checkpoint.document(),
             PendingSave::Prefab(save) => save.checkpoint.document(),
+            PendingSave::Extension(checkpoint) => checkpoint.document(),
         };
         let failed = || EditorPersistenceResult::Rejected {
             request: EditorPersistenceRequestKind::Save,
@@ -122,6 +124,9 @@ impl EditorProjectSession {
                     return Err(failed());
                 }
                 SaveLane::Prefab(self.prefab_lane.as_ref().unwrap().clone())
+            }
+            PendingSave::Extension(_) => {
+                SaveLane::Extension(self.extension_documents.lane(document).ok_or_else(failed)?)
             }
         };
         Ok(BackgroundSave::start(
@@ -156,7 +161,25 @@ impl EditorProjectSession {
                 return editor_workspace_command_rejected(self.workspace.active_document(), code);
             }
         };
-        if let Some(document) = self.workspace.document_for_source_binding(&source_binding) {
+        let prefab_directory = match &self.execution {
+            EditorExecutionLane::Authoring(snapshot) => snapshot.settings().paths.prefabs.as_str(),
+            EditorExecutionLane::TrustedCompiled(lane) => {
+                lane.content_candidate.settings().paths.prefabs.as_str()
+            }
+        };
+        if self
+            .extension_documents
+            .has_source(&format!("{prefab_directory}/{}", source_binding.locator()))
+        {
+            return editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                "project.editor.document-source-already-open",
+            );
+        }
+        if let Some(document) = self
+            .workspace
+            .document_for_source_binding(EditorDocumentKind::Prefab, &source_binding)
+        {
             return self.workspace.activate_document(document);
         }
         if self.prefab_lane.is_some() {
@@ -620,7 +643,7 @@ impl EditorProjectSession {
 
         let runtime_blocks_reopen = self.scene_runtime_blocks_reopen();
         if matches!(command, EditorPersistenceCommand::Reopen { .. })
-            && self.workspace.document_kind(requested_document) != Some(EditorDocumentKind::Prefab)
+            && self.workspace.document_kind(requested_document) == Some(EditorDocumentKind::Scene)
             && runtime_blocks_reopen
         {
             self.persistence_result = Some(EditorPersistenceResult::Rejected {
@@ -673,6 +696,12 @@ impl EditorProjectSession {
                     );
                 };
                 let revision = checkpoint.revision();
+                if let Some(Err(error)) = checkpoint.extension_bytes() {
+                    self.diagnostics.push(nara_diagnostic::Diagnostic::error(
+                        error.code(),
+                        error.summary(),
+                    ));
+                }
                 let authoring = match kind {
                     EditorDocumentKind::Scene => self
                         .workspace
@@ -682,6 +711,7 @@ impl EditorProjectSession {
                         .workspace
                         .prefab(requested_document)
                         .and_then(|slot| slot.session().authoring_readmission()),
+                    EditorDocumentKind::Extension(_) => None,
                 };
                 self.pending_persistence = Some(PendingPersistence::Save {
                     candidate: match kind {
@@ -691,6 +721,7 @@ impl EditorProjectSession {
                         EditorDocumentKind::Prefab => {
                             PendingSave::Prefab(PrefabSaveCandidate { checkpoint })
                         }
+                        EditorDocumentKind::Extension(_) => PendingSave::Extension(checkpoint),
                     },
                     authoring,
                 });
@@ -845,6 +876,9 @@ impl EditorProjectSession {
                 if let Some(lane) = self.prefab_lane.as_mut() {
                     lane.host.try_with(|host| host.mark_uncertain());
                 }
+            }
+            PersistenceLane::Extension(document) => {
+                self.extension_documents.mark_uncertain(document)
             }
         }
     }

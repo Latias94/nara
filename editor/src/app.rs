@@ -37,6 +37,8 @@ const EDITOR_SESSION_CLOSE_RETRY_DELAY: Duration = Duration::from_millis(16);
 #[path = "shell.rs"]
 mod shell;
 
+mod extension_documents;
+
 use crate::supervised_play::SupervisedPlayWake;
 pub use shell::EditorApplicationState;
 use shell::{

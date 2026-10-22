@@ -5,6 +5,7 @@ use std::{
     sync::Arc,
 };
 
+use nara_core::{DocumentContentState, DocumentHistoryStatus, DocumentRevision};
 use nara_diagnostic::DiagnosticReport;
 use nara_fs::{
     FileIdentity, PublicationAtomicity, PublicationIdentityEvidence, ReplaceReceipt, StageStatus,
@@ -29,6 +30,13 @@ use crate::play::{SceneEditorModel, SceneEditorState};
 use crate::snapshot::WorldIdentitySnapshot;
 use crate::{EditorAtomicFieldEdit, EditorFieldTarget};
 
+mod extension;
+pub use extension::{
+    EditorExtensionCommand, EditorExtensionDocument, EditorExtensionDocumentCandidate,
+    EditorExtensionDocumentError, EditorExtensionDocumentView,
+};
+use extension::{ErasedExtensionDocument, TypedExtensionDocument};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EditorDocumentId(u64);
 
@@ -48,6 +56,7 @@ impl EditorDocumentId {
 pub enum EditorDocumentKind {
     Scene,
     Prefab,
+    Extension(&'static str),
 }
 
 /// Host-normalized source identity carried by a document slot.
@@ -127,6 +136,7 @@ pub struct EditorPersistenceCheckpoint {
 enum EditorPersistenceContent {
     Scene(SceneDocument),
     Prefab(PrefabDocument),
+    Extension(Result<Vec<u8>, EditorExtensionDocumentError>),
 }
 
 /// Linear proof that one captured revision was published with the required filesystem evidence.
@@ -172,6 +182,21 @@ impl EditorPersistenceCommit {
             digest: EditorDocumentDigest::new(content_digest.length(), *content_digest.as_bytes()),
         })
     }
+
+    #[must_use]
+    pub const fn document(&self) -> EditorDocumentId {
+        self.checkpoint.document
+    }
+
+    #[must_use]
+    pub const fn revision(&self) -> DocumentRevision {
+        self.checkpoint.revision
+    }
+
+    #[must_use]
+    pub const fn digest(&self) -> EditorDocumentDigest {
+        self.digest
+    }
 }
 
 impl EditorPersistenceCheckpoint {
@@ -205,7 +230,7 @@ impl EditorPersistenceCheckpoint {
     pub fn scene(&self) -> Option<&SceneDocument> {
         match &self.content {
             EditorPersistenceContent::Scene(scene) => Some(scene),
-            EditorPersistenceContent::Prefab(_) => None,
+            EditorPersistenceContent::Prefab(_) | EditorPersistenceContent::Extension(_) => None,
         }
     }
 
@@ -214,7 +239,18 @@ impl EditorPersistenceCheckpoint {
     pub fn prefab(&self) -> Option<&PrefabDocument> {
         match &self.content {
             EditorPersistenceContent::Prefab(prefab) => Some(prefab),
-            EditorPersistenceContent::Scene(_) => None,
+            EditorPersistenceContent::Scene(_) | EditorPersistenceContent::Extension(_) => None,
+        }
+    }
+
+    /// Captured domain-encoded bytes. No mutable document or filesystem authority is exposed.
+    #[must_use]
+    pub fn extension_bytes(&self) -> Option<Result<&[u8], EditorExtensionDocumentError>> {
+        match &self.content {
+            EditorPersistenceContent::Extension(bytes) => {
+                Some(bytes.as_deref().map_err(|error| *error))
+            }
+            _ => None,
         }
     }
 }
@@ -249,6 +285,29 @@ pub struct EditorWorkspace {
 enum EditorDocumentSlot {
     Scene(EditorSceneSlot),
     Prefab(EditorPrefabSlot),
+    Extension(EditorExtensionSlot),
+}
+
+struct EditorExtensionSlot {
+    owner: Box<dyn ErasedExtensionDocument>,
+    source_binding: EditorDocumentSourceBinding,
+    revision: DocumentRevision,
+    saved_revision: DocumentRevision,
+    saved_content_state: DocumentContentState,
+    saved_digest: Option<EditorDocumentDigest>,
+    external_reload: EditorExternalReloadState,
+    selection: EditorSelectionSet,
+}
+
+impl fmt::Debug for EditorExtensionSlot {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("EditorExtensionSlot")
+            .field("type_id", &self.owner.type_id())
+            .field("revision", &self.revision)
+            .field("source_binding", &self.source_binding)
+            .finish_non_exhaustive()
+    }
 }
 
 impl EditorDocumentSlot {
@@ -256,6 +315,7 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(_) => EditorDocumentKind::Scene,
             Self::Prefab(_) => EditorDocumentKind::Prefab,
+            Self::Extension(slot) => EditorDocumentKind::Extension(slot.owner.type_id()),
         }
     }
 
@@ -263,6 +323,7 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => slot.title(),
             Self::Prefab(slot) => slot.title(),
+            Self::Extension(slot) => slot.owner.title(),
         }
     }
 
@@ -270,6 +331,7 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => slot.revision(),
             Self::Prefab(slot) => slot.revision(),
+            Self::Extension(slot) => slot.revision,
         }
     }
 
@@ -277,6 +339,7 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => slot.saved_revision(),
             Self::Prefab(slot) => slot.saved_revision(),
+            Self::Extension(slot) => slot.saved_revision,
         }
     }
 
@@ -284,13 +347,15 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => slot.is_dirty(),
             Self::Prefab(slot) => slot.is_dirty(),
+            Self::Extension(slot) => slot.owner.content_state() != slot.saved_content_state,
         }
     }
 
-    fn history_status(&self) -> SceneAuthoringHistoryStatus {
+    fn history_status(&self) -> DocumentHistoryStatus {
         match self {
             Self::Scene(slot) => slot.session.history_status(),
             Self::Prefab(slot) => slot.session.history_status(),
+            Self::Extension(slot) => slot.owner.history_status(),
         }
     }
 
@@ -298,6 +363,7 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => slot.source_binding.as_ref(),
             Self::Prefab(slot) => Some(&slot.source_binding),
+            Self::Extension(slot) => Some(&slot.source_binding),
         }
     }
 
@@ -305,6 +371,7 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => slot.external_reload(),
             Self::Prefab(slot) => slot.external_reload(),
+            Self::Extension(slot) => slot.external_reload,
         }
     }
 
@@ -312,6 +379,7 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => slot.authoring_readiness(),
             Self::Prefab(slot) => slot.authoring_readiness(),
+            Self::Extension(_) => None,
         }
     }
 
@@ -319,6 +387,7 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => slot.session.authoring_schema_basis(),
             Self::Prefab(slot) => slot.session.authoring_schema_basis(),
+            Self::Extension(_) => None,
         }
     }
 
@@ -326,6 +395,7 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => &mut slot.selection,
             Self::Prefab(slot) => &mut slot.selection,
+            Self::Extension(slot) => &mut slot.selection,
         }
     }
 
@@ -333,6 +403,7 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => &slot.selection,
             Self::Prefab(slot) => &slot.selection,
+            Self::Extension(slot) => &slot.selection,
         }
     }
 
@@ -340,6 +411,7 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => document_has_entity(slot.session.document(), entity),
             Self::Prefab(slot) => prefab_has_entity(slot.session.document(), entity),
+            Self::Extension(_) => false,
         }
     }
 
@@ -349,6 +421,7 @@ impl EditorDocumentSlot {
             Self::Prefab(slot) => slot
                 .selection
                 .retain_existing_prefab(slot.session.document()),
+            Self::Extension(_) => {}
         }
     }
 
@@ -361,6 +434,7 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => slot.external_reload = state,
             Self::Prefab(slot) => slot.external_reload = state,
+            Self::Extension(slot) => slot.external_reload = state,
         }
     }
 
@@ -368,6 +442,7 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => slot.session().owns_content_state(state),
             Self::Prefab(slot) => slot.session().owns_content_state(state),
+            Self::Extension(slot) => slot.owner.content_state().source_id() == state.source_id(),
         }
     }
 
@@ -375,6 +450,7 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => slot.saved_digest = Some(digest),
             Self::Prefab(slot) => slot.saved_digest = Some(digest),
+            Self::Extension(slot) => slot.saved_digest = Some(digest),
         }
     }
 
@@ -388,6 +464,14 @@ impl EditorDocumentSlot {
             Self::Scene(slot) => slot.apply_persistence_checkpoint(revision, content_state, digest),
             Self::Prefab(slot) => {
                 slot.apply_persistence_checkpoint(revision, content_state, digest)
+            }
+            Self::Extension(slot) => {
+                slot.saved_revision = revision;
+                slot.saved_content_state = content_state;
+                slot.saved_digest = Some(digest);
+                if slot.external_reload != EditorExternalReloadState::Conflict {
+                    slot.external_reload = EditorExternalReloadState::Clean;
+                }
             }
         }
     }
@@ -442,7 +526,7 @@ impl EditorWorkspace {
     pub fn scene(&self, document: EditorDocumentId) -> Option<&EditorSceneSlot> {
         match self.documents.get(&document) {
             Some(EditorDocumentSlot::Scene(slot)) => Some(slot),
-            Some(EditorDocumentSlot::Prefab(_)) | None => None,
+            Some(EditorDocumentSlot::Prefab(_) | EditorDocumentSlot::Extension(_)) | None => None,
         }
     }
 
@@ -450,7 +534,7 @@ impl EditorWorkspace {
     pub fn prefab(&self, document: EditorDocumentId) -> Option<&EditorPrefabSlot> {
         match self.documents.get(&document) {
             Some(EditorDocumentSlot::Prefab(slot)) => Some(slot),
-            Some(EditorDocumentSlot::Scene(_)) | None => None,
+            Some(EditorDocumentSlot::Scene(_) | EditorDocumentSlot::Extension(_)) | None => None,
         }
     }
 
@@ -481,12 +565,137 @@ impl EditorWorkspace {
     }
 
     #[must_use]
+    pub fn document_source_binding(
+        &self,
+        document: EditorDocumentId,
+    ) -> Option<&EditorDocumentSourceBinding> {
+        self.documents
+            .get(&document)
+            .and_then(EditorDocumentSlot::source_binding)
+    }
+
+    /// Opens one independently owned non-Scene document in the same workspace lifecycle.
+    pub fn open_extension_document<D: EditorExtensionDocument>(
+        &mut self,
+        source_binding: EditorDocumentSourceBinding,
+        document: D,
+    ) -> Result<EditorDocumentId, EditorWorkspaceCommandReport> {
+        let context = WorkspaceDocumentContext::new(self.active_document, None);
+        if D::TYPE_ID.is_empty() {
+            return Err(workspace_error_report(
+                context,
+                "tooling.extension-document-type-empty",
+                "extension document type identity must not be empty",
+            ));
+        }
+        if self
+            .document_for_source_binding(EditorDocumentKind::Extension(D::TYPE_ID), &source_binding)
+            .is_some()
+        {
+            return Err(workspace_error_report(
+                context,
+                "tooling.extension-document-source-already-open",
+                "a document for this source is already open",
+            ));
+        }
+        let revision = DocumentRevision::initial();
+        let content_state = document.content_state();
+        let id = self.allocate_document_id();
+        self.documents.insert(
+            id,
+            EditorDocumentSlot::Extension(EditorExtensionSlot {
+                owner: Box::new(TypedExtensionDocument::new(document)),
+                source_binding,
+                revision,
+                saved_revision: revision,
+                saved_content_state: content_state,
+                saved_digest: None,
+                external_reload: EditorExternalReloadState::Clean,
+                selection: EditorSelectionSet::default(),
+            }),
+        );
+        self.active_document = Some(id);
+        Ok(id)
+    }
+
+    /// Applies a domain-typed command to the exact open document owner.
+    pub fn apply_extension_command<D: EditorExtensionDocument>(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: DocumentRevision,
+        command: D::Command,
+    ) -> EditorWorkspaceCommandReport {
+        self.apply_extension_action(EditorExtensionCommand::new::<D>(
+            document,
+            base_revision,
+            command,
+        ))
+    }
+
+    /// Applies the typed payload delivered through the ordinary Editor action path.
+    #[doc(hidden)]
+    pub fn apply_extension_action(
+        &mut self,
+        action: EditorExtensionCommand,
+    ) -> EditorWorkspaceCommandReport {
+        let document = action.document;
+        let base_revision = action.base_revision;
+        let active = self.active_document;
+        let context = WorkspaceDocumentContext::new(active, Some(document));
+        let Some(document_slot @ EditorDocumentSlot::Extension(_)) =
+            self.documents.get_mut(&document)
+        else {
+            return workspace_document_error_report(context, document);
+        };
+        let EditorDocumentSlot::Extension(slot) = document_slot else {
+            unreachable!()
+        };
+        if slot.owner.rust_type_id() != action.owner {
+            return workspace_error_report(
+                context,
+                "tooling.extension-document-owner-mismatch",
+                "extension operation does not match the open document owner",
+            );
+        }
+        if slot.revision != base_revision {
+            return workspace_revision_error_report(
+                context,
+                document,
+                base_revision,
+                slot.revision,
+            );
+        }
+        let result = slot.owner.apply(action.payload.as_ref());
+        match result {
+            Ok(()) => slot.revision = slot.revision.next(),
+            Err(error) => {
+                return extension_error_report(context, error);
+            }
+        }
+        report_for_document(document, active, document_slot)
+    }
+
+    #[must_use]
+    /// Finds a source within its document namespace. The Host must additionally reject aliases
+    /// between namespaces when their configured source roots overlap.
     pub fn document_for_source_binding(
         &self,
+        kind: EditorDocumentKind,
         source_binding: &EditorDocumentSourceBinding,
     ) -> Option<EditorDocumentId> {
         self.documents.iter().find_map(|(document, slot)| {
-            (slot.source_binding() == Some(source_binding)).then_some(*document)
+            // Scene and Prefab locators use their Host's source scope; extension locators share
+            // one scope even across distinct document owners.
+            let same_namespace = matches!(
+                (slot.kind(), kind),
+                (EditorDocumentKind::Scene, EditorDocumentKind::Scene)
+                    | (EditorDocumentKind::Prefab, EditorDocumentKind::Prefab)
+                    | (
+                        EditorDocumentKind::Extension(_),
+                        EditorDocumentKind::Extension(_)
+                    )
+            );
+            (same_namespace && slot.source_binding() == Some(source_binding)).then_some(*document)
         })
     }
 
@@ -886,6 +1095,7 @@ impl EditorWorkspace {
                         Some(slot.model(document, registry, edit_world_snapshot))
                     }
                     EditorDocumentSlot::Prefab(slot) => Some(slot.model(document, Some(registry))),
+                    EditorDocumentSlot::Extension(_) => None,
                 });
 
         self.model_with_active_scene(active_scene)
@@ -899,6 +1109,7 @@ impl EditorWorkspace {
                 .and_then(|document| match self.documents.get(&document)? {
                     EditorDocumentSlot::Scene(slot) => Some(slot.authoring_model(document)),
                     EditorDocumentSlot::Prefab(slot) => Some(slot.model(document, None)),
+                    EditorDocumentSlot::Extension(_) => None,
                 });
 
         self.model_with_active_scene(active_scene)
@@ -946,6 +1157,22 @@ impl EditorWorkspace {
                 })
                 .collect(),
             active_scene,
+            extension_documents: self
+                .documents
+                .iter()
+                .filter_map(|(document, slot)| {
+                    let EditorDocumentSlot::Extension(slot) = slot else {
+                        return None;
+                    };
+                    Some(EditorExtensionDocumentView {
+                        document: *document,
+                        type_id: slot.owner.type_id(),
+                        owner: slot.owner.rust_type_id(),
+                        revision: slot.revision,
+                        value: slot.owner.view(),
+                    })
+                })
+                .collect(),
             diagnostics: DiagnosticReport::default(),
         }
     }
@@ -1085,6 +1312,9 @@ impl EditorWorkspace {
                 });
                 report
             }
+            EditorDocumentSlot::Extension(_) => {
+                authoring_command_error_report(active_document, document)
+            }
         }
     }
 
@@ -1135,6 +1365,9 @@ impl EditorWorkspace {
                 let patch_report = slot.session.apply_authoring_patch(&patch);
                 report_for_prefab_patch_slot(document, active_document, slot, patch_report)
             }
+            EditorDocumentSlot::Extension(_) => {
+                authoring_command_error_report(active_document, document)
+            }
         }
     }
 
@@ -1184,6 +1417,9 @@ impl EditorWorkspace {
         let patch_report = match slot {
             EditorDocumentSlot::Scene(slot) => slot.session.apply_authoring_field_edit(edit),
             EditorDocumentSlot::Prefab(slot) => slot.session.apply_authoring_field_edit(edit),
+            EditorDocumentSlot::Extension(_) => {
+                return authoring_command_error_report(active_document, document);
+            }
         };
         report_for_document_patch(document, active_document, slot, patch_report)
     }
@@ -1206,6 +1442,9 @@ impl EditorWorkspace {
         let patch_report = match slot {
             EditorDocumentSlot::Scene(slot) => slot.session.apply_authoring_patch(&patch),
             EditorDocumentSlot::Prefab(slot) => slot.session.apply_authoring_patch(&patch),
+            EditorDocumentSlot::Extension(_) => {
+                return authoring_command_error_report(active_document, document);
+            }
         };
         report_for_document_patch(document, active_document, slot, patch_report)
     }
@@ -1215,6 +1454,12 @@ impl EditorWorkspace {
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
     ) -> EditorWorkspaceCommandReport {
+        if matches!(
+            self.document_kind(document),
+            Some(EditorDocumentKind::Extension(_))
+        ) {
+            return self.apply_extension_history_transition(document, base_revision, false);
+        }
         let (active_document, slot) =
             match self.resolve_exact_authoring_document_mutation_slot(document, base_revision) {
                 Ok(exact) => exact,
@@ -1223,6 +1468,9 @@ impl EditorWorkspace {
         let patch_report = match slot {
             EditorDocumentSlot::Scene(slot) => slot.session.undo_authoring(),
             EditorDocumentSlot::Prefab(slot) => slot.session.undo_authoring(),
+            EditorDocumentSlot::Extension(_) => {
+                return authoring_command_error_report(active_document, document);
+            }
         };
         report_for_document_patch(document, active_document, slot, patch_report)
     }
@@ -1232,6 +1480,12 @@ impl EditorWorkspace {
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
     ) -> EditorWorkspaceCommandReport {
+        if matches!(
+            self.document_kind(document),
+            Some(EditorDocumentKind::Extension(_))
+        ) {
+            return self.apply_extension_history_transition(document, base_revision, true);
+        }
         let (active_document, slot) =
             match self.resolve_exact_authoring_document_mutation_slot(document, base_revision) {
                 Ok(exact) => exact,
@@ -1240,6 +1494,9 @@ impl EditorWorkspace {
         let patch_report = match slot {
             EditorDocumentSlot::Scene(slot) => slot.session.redo_authoring(),
             EditorDocumentSlot::Prefab(slot) => slot.session.redo_authoring(),
+            EditorDocumentSlot::Extension(_) => {
+                return authoring_command_error_report(active_document, document);
+            }
         };
         report_for_document_patch(document, active_document, slot, patch_report)
     }
@@ -1276,6 +1533,9 @@ impl EditorWorkspace {
             let candidate = match slot {
                 EditorDocumentSlot::Scene(slot) => slot.next_entity_candidate(),
                 EditorDocumentSlot::Prefab(slot) => slot.next_entity_candidate(),
+                EditorDocumentSlot::Extension(_) => {
+                    return authoring_command_error_report(active_document, document);
+                }
             };
             match candidate {
                 Ok(candidate) => Some(candidate),
@@ -1296,6 +1556,9 @@ impl EditorWorkspace {
             EditorDocumentSlot::Prefab(slot) => {
                 GenericCompositionDocument::Prefab(slot.session.document())
             }
+            EditorDocumentSlot::Extension(_) => {
+                return authoring_command_error_report(active_document, document);
+            }
         };
         let prepared = prepare_generic_composition(
             source,
@@ -1309,6 +1572,7 @@ impl EditorWorkspace {
                 EditorDocumentSlot::Prefab(slot) => {
                     slot.session.authoring_initial_component(component)
                 }
+                EditorDocumentSlot::Extension(_) => None,
             },
         );
         let prepared = match prepared {
@@ -1324,6 +1588,9 @@ impl EditorWorkspace {
             EditorDocumentSlot::Scene(slot) => slot.session.apply_authoring_patch(prepared.patch()),
             EditorDocumentSlot::Prefab(slot) => {
                 slot.session.apply_authoring_patch(prepared.patch())
+            }
+            EditorDocumentSlot::Extension(_) => {
+                return authoring_command_error_report(active_document, document);
             }
         };
         let mut report = report_for_document_patch(document, active_document, slot, patch_report);
@@ -1368,6 +1635,9 @@ impl EditorWorkspace {
                 match slot {
                     EditorDocumentSlot::Scene(slot) => slot.next_entity_ordinal = next,
                     EditorDocumentSlot::Prefab(slot) => slot.next_entity_ordinal = next,
+                    EditorDocumentSlot::Extension(_) => {
+                        return authoring_command_error_report(active_document, document);
+                    }
                 }
             }
         }
@@ -1500,6 +1770,12 @@ impl EditorWorkspace {
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
     ) -> EditorWorkspaceCommandReport {
+        if matches!(
+            self.document_kind(document),
+            Some(EditorDocumentKind::Extension(_))
+        ) {
+            return self.apply_extension_history_transition(document, base_revision, false);
+        }
         let (active_document, slot) =
             match self.resolve_exact_document_mutation_slot(document, base_revision) {
                 Ok(exact) => exact,
@@ -1508,6 +1784,9 @@ impl EditorWorkspace {
         let patch_report = match slot {
             EditorDocumentSlot::Scene(slot) => slot.session.undo(registry),
             EditorDocumentSlot::Prefab(slot) => slot.session.undo(registry),
+            EditorDocumentSlot::Extension(_) => {
+                return authoring_command_error_report(active_document, document);
+            }
         };
         report_for_document_patch(document, active_document, slot, patch_report)
     }
@@ -1518,6 +1797,12 @@ impl EditorWorkspace {
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
     ) -> EditorWorkspaceCommandReport {
+        if matches!(
+            self.document_kind(document),
+            Some(EditorDocumentKind::Extension(_))
+        ) {
+            return self.apply_extension_history_transition(document, base_revision, true);
+        }
         let (active_document, slot) =
             match self.resolve_exact_document_mutation_slot(document, base_revision) {
                 Ok(exact) => exact,
@@ -1526,6 +1811,9 @@ impl EditorWorkspace {
         let patch_report = match slot {
             EditorDocumentSlot::Scene(slot) => slot.session.redo(registry),
             EditorDocumentSlot::Prefab(slot) => slot.session.redo(registry),
+            EditorDocumentSlot::Extension(_) => {
+                return authoring_command_error_report(active_document, document);
+            }
         };
         report_for_document_patch(document, active_document, slot, patch_report)
     }
@@ -1552,6 +1840,42 @@ impl EditorWorkspace {
         Ok((active_document, slot))
     }
 
+    fn apply_extension_history_transition(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: DocumentRevision,
+        redo: bool,
+    ) -> EditorWorkspaceCommandReport {
+        let active = self.active_document;
+        let context = WorkspaceDocumentContext::new(active, Some(document));
+        let Some(document_slot @ EditorDocumentSlot::Extension(_)) =
+            self.documents.get_mut(&document)
+        else {
+            return workspace_document_error_report(context, document);
+        };
+        let EditorDocumentSlot::Extension(slot) = document_slot else {
+            unreachable!()
+        };
+        if slot.revision != base_revision {
+            return workspace_revision_error_report(
+                context,
+                document,
+                base_revision,
+                slot.revision,
+            );
+        }
+        let result = if redo {
+            slot.owner.redo()
+        } else {
+            slot.owner.undo()
+        };
+        if let Err(error) = result {
+            return extension_error_report(context, error);
+        }
+        slot.revision = slot.revision.next();
+        report_for_document(document, active, document_slot)
+    }
+
     fn resolve_exact_authoring_document_mutation_slot(
         &mut self,
         document: EditorDocumentId,
@@ -1575,7 +1899,8 @@ impl EditorWorkspace {
         let Some(slot) = self.documents.get(&document) else {
             return Err(workspace_document_error_report(context, document));
         };
-        if slot.authoring_readiness().is_none() {
+        if slot.authoring_readiness().is_none() && !matches!(slot, EditorDocumentSlot::Extension(_))
+        {
             return Err(authoring_document_error_report(
                 self.active_document,
                 document,
@@ -1662,7 +1987,7 @@ impl EditorWorkspace {
         }
         match self.documents.get_mut(&document) {
             Some(EditorDocumentSlot::Scene(slot)) => Ok(slot),
-            Some(EditorDocumentSlot::Prefab(_)) | None => {
+            Some(EditorDocumentSlot::Prefab(_) | EditorDocumentSlot::Extension(_)) | None => {
                 unreachable!("document kind changed while the workspace was mutably borrowed")
             }
         }
@@ -1687,7 +2012,7 @@ impl EditorWorkspace {
         }
         match self.documents.get_mut(&document) {
             Some(EditorDocumentSlot::Prefab(slot)) => Ok(slot),
-            Some(EditorDocumentSlot::Scene(_)) | None => {
+            Some(EditorDocumentSlot::Scene(_) | EditorDocumentSlot::Extension(_)) | None => {
                 unreachable!("document kind changed while the workspace was mutably borrowed")
             }
         }
@@ -2224,6 +2549,48 @@ impl EditorPrefabSlot {
     }
 }
 
+impl EditorWorkspace {
+    fn publish_reopened_extension_document(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: DocumentRevision,
+        source_binding: &EditorDocumentSourceBinding,
+        candidate: EditorExtensionDocumentCandidate,
+        digest: EditorDocumentDigest,
+    ) -> Result<EditorWorkspaceCommandReport, EditorWorkspaceCommandReport> {
+        let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, Some(document));
+        let Some(EditorDocumentSlot::Extension(slot)) = self.documents.get_mut(&document) else {
+            return Err(workspace_document_error_report(context, document));
+        };
+        if slot.owner.rust_type_id() != candidate.0.rust_type_id()
+            || slot.revision != base_revision
+            || &slot.source_binding != source_binding
+        {
+            return Err(workspace_error_report(
+                context,
+                "tooling.extension-document-reopen-stale",
+                "reopened document no longer matches the open source and revision",
+            ));
+        }
+        slot.owner = candidate.0;
+        slot.revision = DocumentRevision::initial();
+        slot.saved_revision = slot.revision;
+        slot.saved_content_state = slot.owner.content_state();
+        slot.saved_digest = Some(digest);
+        slot.external_reload = EditorExternalReloadState::Clean;
+        Ok(EditorWorkspaceCommandReport {
+            applied: true,
+            document: Some(document),
+            active_document,
+            dirty: Some(false),
+            revision: Some(slot.revision),
+            diagnostics: DiagnosticReport::default(),
+            ..EditorWorkspaceCommandReport::default()
+        })
+    }
+}
+
 impl EditorPersistenceAuthority {
     /// Captures the current revision of one document for a concrete persistence Host.
     #[must_use]
@@ -2250,6 +2617,13 @@ impl EditorPersistenceAuthority {
                 slot.revision(),
                 slot.session.content_state(),
                 EditorPersistenceContent::Prefab(slot.session.document().clone()),
+            ),
+            EditorDocumentSlot::Extension(slot) => (
+                EditorDocumentKind::Extension(slot.owner.type_id()),
+                Some(slot.source_binding.clone()),
+                slot.revision,
+                slot.owner.content_state(),
+                EditorPersistenceContent::Extension(slot.owner.encode()),
             ),
         };
         Some(EditorPersistenceCheckpoint {
@@ -2365,6 +2739,34 @@ impl EditorPersistenceAuthority {
             base_revision,
             source_binding,
             session,
+            digest,
+        )
+    }
+
+    /// Publishes a typed extension codec result only against its captured open revision.
+    #[doc(hidden)]
+    pub fn publish_reopened_extension_document(
+        &mut self,
+        workspace: &mut EditorWorkspace,
+        document: EditorDocumentId,
+        base_revision: DocumentRevision,
+        source_binding: &EditorDocumentSourceBinding,
+        candidate: EditorExtensionDocumentCandidate,
+        digest: EditorDocumentDigest,
+    ) -> Result<EditorWorkspaceCommandReport, EditorWorkspaceCommandReport> {
+        if !Arc::ptr_eq(&self.identity, &workspace.persistence_identity) {
+            let context = WorkspaceDocumentContext::new(workspace.active_document, Some(document));
+            return Err(workspace_error_report(
+                context,
+                "tooling.workspace-persistence-authority-mismatch",
+                "reopened extension document does not belong to the hosted workspace authority",
+            ));
+        }
+        workspace.publish_reopened_extension_document(
+            document,
+            base_revision,
+            source_binding,
+            candidate,
             digest,
         )
     }
@@ -2592,6 +2994,7 @@ pub struct EditorWorkspaceModel {
     pub documents: Vec<EditorDocumentTabModel>,
     pub scenes: Vec<EditorSceneTabModel>,
     pub active_scene: Option<EditorSceneModel>,
+    pub extension_documents: Vec<EditorExtensionDocumentView>,
     pub diagnostics: DiagnosticReport,
 }
 
@@ -2625,6 +3028,16 @@ impl EditorWorkspaceModel {
     #[must_use]
     pub fn scene(&self, document: EditorDocumentId) -> Option<&EditorSceneTabModel> {
         self.scenes.iter().find(|scene| scene.document == document)
+    }
+
+    #[must_use]
+    pub fn extension_document(
+        &self,
+        document: EditorDocumentId,
+    ) -> Option<&EditorExtensionDocumentView> {
+        self.extension_documents
+            .iter()
+            .find(|view| view.document() == document)
     }
 }
 
@@ -2780,6 +3193,21 @@ fn workspace_error_report(
     }
 }
 
+fn extension_error_report(
+    context: WorkspaceDocumentContext,
+    error: EditorExtensionDocumentError,
+) -> EditorWorkspaceCommandReport {
+    let mut diagnostics = DiagnosticReport::default();
+    diagnostics.push(with_workspace_document_context(error.diagnostic(), context));
+    EditorWorkspaceCommandReport {
+        applied: false,
+        document: context.target,
+        active_document: context.active,
+        diagnostics,
+        ..EditorWorkspaceCommandReport::default()
+    }
+}
+
 fn authoring_document_error_report(
     active_document: Option<EditorDocumentId>,
     document: EditorDocumentId,
@@ -2863,6 +3291,7 @@ fn document_kind_name(kind: EditorDocumentKind) -> &'static str {
     match kind {
         EditorDocumentKind::Scene => "scene",
         EditorDocumentKind::Prefab => "prefab",
+        EditorDocumentKind::Extension(type_id) => type_id,
     }
 }
 

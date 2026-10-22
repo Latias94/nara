@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use nara::tooling::{
-    EditorDocumentId, EditorDocumentKind, EditorDocumentTabModel, EditorFrameModel,
-    EditorSelectionSet,
+    EditorDocumentId, EditorDocumentKind, EditorDocumentTabModel, EditorExtensionDocumentView,
+    EditorFrameModel, EditorSelectionSet,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -98,6 +98,7 @@ pub enum EditorPanelTarget {
 pub enum EditorPanelSourceKind {
     Scene,
     Prefab,
+    Extension,
 }
 
 impl EditorPanelTarget {
@@ -110,14 +111,16 @@ impl EditorPanelTarget {
                 .documents
                 .iter()
                 .find(|document| {
-                    matches!(
+                    (matches!(
                         (kind, document.kind),
                         (EditorPanelSourceKind::Scene, EditorDocumentKind::Scene)
                             | (EditorPanelSourceKind::Prefab, EditorDocumentKind::Prefab)
-                    ) && document
-                        .source_binding
-                        .as_ref()
-                        .is_some_and(|source| source.locator() == locator)
+                    ) || matches!(kind, EditorPanelSourceKind::Extension)
+                        && matches!(document.kind, EditorDocumentKind::Extension(_)))
+                        && document
+                            .source_binding
+                            .as_ref()
+                            .is_some_and(|source| source.locator() == locator)
                 })
                 .map(|document| document.document),
             Self::Workspace => None,
@@ -257,5 +260,11 @@ impl<'a> EditorPanelModel<'a> {
             .as_ref()
             .filter(|scene| scene.document == document)
             .map(|scene| &scene.selection)
+    }
+
+    #[must_use]
+    pub fn extension_document(&self) -> Option<&'a EditorExtensionDocumentView> {
+        self.document()
+            .and_then(|document| self.frame.workspace().extension_document(document.document))
     }
 }

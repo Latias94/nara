@@ -9,6 +9,7 @@ mod authoring_preview;
 mod authoring_runtime;
 mod content_refresh;
 mod document_open;
+mod extension_documents;
 mod external_play;
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 mod game_view;
@@ -34,6 +35,7 @@ pub(crate) use authoring_runtime::EditorImageRuntimeFailure;
 pub(crate) use document_open::EditorDocumentOpenRequestResult;
 #[cfg(test)]
 pub(crate) use document_open::preparation::OpenTestPhase;
+pub use extension_documents::EditorExtensionDocumentHostError;
 #[doc(hidden)]
 pub use external_play::{
     EditorExternalPlayReceiptError, SupervisedDesktopSourceAdmissionError,
@@ -462,6 +464,7 @@ enum PendingPersistence {
 enum PendingSave {
     Scene(SceneSaveCandidate),
     Prefab(crate::project_host::persistence::PrefabSaveCandidate),
+    Extension(nara_tooling::EditorPersistenceCheckpoint),
 }
 
 #[derive(Clone)]
@@ -477,6 +480,7 @@ struct PendingProjectContentRefresh {
 enum PersistenceLane {
     Scene,
     Prefab,
+    Extension(EditorDocumentId),
 }
 
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
@@ -741,6 +745,7 @@ pub struct EditorProjectSession {
     pending_content_refresh: Option<PendingProjectContentRefresh>,
     failed_content_refresh: Option<PendingProjectContentRefresh>,
     prefab_lane: Option<EditorPrefabPersistenceLane>,
+    extension_documents: extension_documents::EditorExtensionDocumentsHost,
     pending_document_open: Option<document_open::PendingDocumentOpen>,
     next_document_open_request: u64,
     document_open_result: Option<nara_tooling::EditorDocumentOpenResult>,
@@ -1347,6 +1352,7 @@ impl EditorProjectSession {
             pending_content_refresh: None,
             failed_content_refresh: None,
             prefab_lane: None,
+            extension_documents: extension_documents::EditorExtensionDocumentsHost::default(),
             pending_document_open: None,
             next_document_open_request: 0,
             document_open_result: None,
@@ -1580,6 +1586,7 @@ impl EditorProjectSession {
             pending_content_refresh: None,
             failed_content_refresh: None,
             prefab_lane: None,
+            extension_documents: extension_documents::EditorExtensionDocumentsHost::default(),
             pending_document_open: None,
             next_document_open_request: 0,
             document_open_result: None,
@@ -2930,7 +2937,8 @@ impl EditorProjectSession {
                             .try_with(|host| host.retry_cleanup())
                             .unwrap_or(false)
                 });
-                if !scene_clean || !prefab_clean {
+                let extension_clean = self.extension_documents.retire(pending.document);
+                if !scene_clean || !prefab_clean || !extension_clean {
                     self.workspace_intent_result = Some(EditorWorkspaceIntentResult::Rejected {
                         intent: EditorWorkspaceIntent::CloseDocument {
                             document: pending.document,

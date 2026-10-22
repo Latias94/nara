@@ -114,6 +114,9 @@ impl AuthoringWorkflow<'_> {
         let source = project.join(match kind {
             EditorDocumentKind::Scene => "worlds/entry.scene.json",
             EditorDocumentKind::Prefab => "blueprints/ordinary.prefab.json",
+            EditorDocumentKind::Extension(_) => {
+                unreachable!("extension documents are not fixture sources")
+            }
         });
         let manifest = self
             .application

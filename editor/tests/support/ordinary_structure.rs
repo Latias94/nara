@@ -68,6 +68,9 @@ fn compose(app: &mut EditorApplication, command: SceneCompositionCommand) {
                 _ => unreachable!("this structural consumer only moves and removes"),
             },
         },
+        EditorDocumentKind::Extension(_) => {
+            unreachable!("this consumer exercises Scene and Prefab documents")
+        }
     };
     dispatch(app, Some(EditorAction::Mutate(mutation)));
 }
@@ -204,6 +207,9 @@ fn ordinary_scene_and_prefab_move_unknown_records_restore_exact_history_and_reop
                     entity: id("parent-b"),
                 },
             },
+            EditorDocumentKind::Extension(_) => {
+                unreachable!("this consumer exercises Scene and Prefab documents")
+            }
         };
         compose(
             &mut app,

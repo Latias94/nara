@@ -387,6 +387,9 @@ fn prove_external_creation_composition(root: &Path, baseline_player_x: f64) {
                     placement,
                 },
             },
+            EditorDocumentKind::Extension(_) => {
+                unreachable!("this consumer exercises Scene and Prefab documents")
+            }
         };
         let created = dispatch(&mut application, EditorAction::Mutate(create));
         let scene = created.workspace().active_scene.as_ref().unwrap();
@@ -435,6 +438,9 @@ fn prove_external_creation_composition(root: &Path, baseline_player_x: f64) {
                     component: ComponentTypeId::new(COLLECTIBLE),
                 },
             },
+            EditorDocumentKind::Extension(_) => {
+                unreachable!("this consumer exercises Scene and Prefab documents")
+            }
         };
         let added = dispatch(&mut application, EditorAction::Mutate(add));
         assert_eq!(collectible_radius(&added), 20.0);
@@ -530,6 +536,9 @@ fn prove_external_creation_composition(root: &Path, baseline_player_x: f64) {
                     component: ComponentTypeId::new(COLLECTIBLE),
                 },
             },
+            EditorDocumentKind::Extension(_) => {
+                unreachable!("this consumer exercises Scene and Prefab documents")
+            }
         };
         dispatch(&mut application, EditorAction::Mutate(remove));
         for (redo, depth) in [
@@ -635,6 +644,9 @@ fn prove_external_creation_composition(root: &Path, baseline_player_x: f64) {
                     .unwrap()
                     .to_json_string()
                     .unwrap()
+            }
+            EditorDocumentKind::Extension(_) => {
+                unreachable!("this consumer exercises Scene and Prefab documents")
             }
         };
         let expected: Value = serde_json::from_str(&expected_json).unwrap();

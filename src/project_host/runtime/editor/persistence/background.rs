@@ -13,6 +13,7 @@ mod tests;
 pub(super) enum SaveLane {
     Scene(EditorScenePersistenceLane),
     Prefab(EditorPrefabPersistenceLane),
+    Extension(super::super::extension_documents::ExtensionPersistenceLane),
 }
 
 impl SaveLane {
@@ -20,6 +21,7 @@ impl SaveLane {
         match self {
             Self::Scene(lane) => lane.document,
             Self::Prefab(lane) => lane.document,
+            Self::Extension(lane) => lane.document,
         }
     }
 
@@ -29,6 +31,9 @@ impl SaveLane {
                 lane.host.try_with(|host| host.mark_uncertain());
             }
             Self::Prefab(lane) => {
+                lane.host.try_with(|host| host.mark_uncertain());
+            }
+            Self::Extension(lane) => {
                 lane.host.try_with(|host| host.mark_uncertain());
             }
         }
@@ -98,6 +103,9 @@ impl BackgroundSave {
                             .unwrap_or(PersistenceSaveOutcome::Rejected(
                                 EditorPersistenceRejection::Busy,
                             )),
+                        (SaveLane::Extension(lane), PendingSave::Extension(checkpoint)) => {
+                            lane.save(checkpoint)
+                        }
                         _ => PersistenceSaveOutcome::Rejected(
                             EditorPersistenceRejection::DocumentKindMismatch,
                         ),

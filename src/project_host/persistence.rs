@@ -302,47 +302,13 @@ impl PersistenceFileState {
             return PersistenceSaveOutcome::Failed(EditorPersistenceFailureStage::Encode);
         }
 
-        let previous_identity = match self.publication.binding() {
-            FilePublicationBinding::Existing { identity, .. } => identity,
-            FilePublicationBinding::Missing => {
-                return PersistenceSaveOutcome::Rejected(
-                    EditorPersistenceRejection::PreservationMismatch,
-                );
-            }
-        };
-        let accepted = match self.publication.publish(bytes) {
-            FilePublicationOutcome::Published(accepted) => accepted,
-            FilePublicationOutcome::Rejected(reason) => {
-                return PersistenceSaveOutcome::Rejected(editor_publication_rejection(reason));
-            }
-            FilePublicationOutcome::Failed(stage) => {
-                return PersistenceSaveOutcome::Failed(editor_publication_failure(stage));
-            }
-            FilePublicationOutcome::Uncertain(evidence) => {
-                return PersistenceSaveOutcome::PersistenceUncertain {
-                    evidence: editor_persistence_receipt(&checkpoint, &evidence),
-                };
-            }
-        };
-        let evidence = editor_persistence_receipt(&checkpoint, accepted.evidence());
-
-        #[cfg(test)]
-        if std::mem::take(&mut self.reject_next_valid_receipt) {
-            self.publication.mark_uncertain();
-            return PersistenceSaveOutcome::PersistenceUncertain { evidence };
-        }
-
-        let (publication_evidence, binding) = accepted.into_parts();
-        let (receipt, _) = publication_evidence.into_parts();
-        let Some(commit) =
-            EditorPersistenceCommit::from_publication(checkpoint, previous_identity, receipt)
-        else {
-            self.publication.mark_uncertain();
-            return PersistenceSaveOutcome::PersistenceUncertain { evidence };
-        };
-
-        self.publication.commit_published(binding);
-        PersistenceSaveOutcome::Saved { commit, evidence }
+        publish_editor_checkpoint(
+            &mut self.publication,
+            checkpoint,
+            bytes,
+            #[cfg(test)]
+            std::mem::take(&mut self.reject_next_valid_receipt),
+        )
     }
 
     fn commit_reopen(&mut self, identity: FileIdentity, digest: ContentDigest) {
@@ -390,6 +356,10 @@ impl PersistenceFileState {
 }
 
 impl ScenePersistenceHost {
+    pub(super) fn read_source(&self) -> super::file_publication::FilePublicationReadSource {
+        self.file.publication.read_source()
+    }
+
     #[cfg(test)]
     pub(super) fn test_fail_after_write(&mut self) -> CleanupTestControl {
         self.file.publication.test_fail_after_write()
@@ -518,6 +488,10 @@ impl ScenePersistenceHost {
 }
 
 impl PrefabPersistenceHost {
+    pub(super) fn read_source(&self) -> super::file_publication::FilePublicationReadSource {
+        self.file.publication.read_source()
+    }
+
     #[cfg(test)]
     pub(super) fn test_fail_after_write(&mut self) -> CleanupTestControl {
         self.file.publication.test_fail_after_write()
@@ -781,6 +755,53 @@ fn validate_authoring_prefab_save(
     Ok(())
 }
 
+/// Codec-independent persistence publication shared by Scene, Prefab, and extension owners.
+pub(super) fn publish_editor_checkpoint(
+    publication: &mut FilePublicationHost,
+    checkpoint: EditorPersistenceCheckpoint,
+    bytes: &[u8],
+    #[cfg(test)] reject_receipt: bool,
+) -> PersistenceSaveOutcome {
+    let previous_identity = match publication.binding() {
+        FilePublicationBinding::Existing { identity, .. } => identity,
+        FilePublicationBinding::Missing => {
+            return PersistenceSaveOutcome::Rejected(
+                EditorPersistenceRejection::PreservationMismatch,
+            );
+        }
+    };
+    let accepted = match publication.publish(bytes) {
+        FilePublicationOutcome::Published(accepted) => accepted,
+        FilePublicationOutcome::Rejected(reason) => {
+            return PersistenceSaveOutcome::Rejected(editor_publication_rejection(reason));
+        }
+        FilePublicationOutcome::Failed(stage) => {
+            return PersistenceSaveOutcome::Failed(editor_publication_failure(stage));
+        }
+        FilePublicationOutcome::Uncertain(evidence) => {
+            return PersistenceSaveOutcome::PersistenceUncertain {
+                evidence: editor_persistence_receipt(&checkpoint, &evidence),
+            };
+        }
+    };
+    let evidence = editor_persistence_receipt(&checkpoint, accepted.evidence());
+    #[cfg(test)]
+    if reject_receipt {
+        publication.mark_uncertain();
+        return PersistenceSaveOutcome::PersistenceUncertain { evidence };
+    }
+    let (publication_evidence, binding) = accepted.into_parts();
+    let (receipt, _) = publication_evidence.into_parts();
+    let Some(commit) =
+        EditorPersistenceCommit::from_publication(checkpoint, previous_identity, receipt)
+    else {
+        publication.mark_uncertain();
+        return PersistenceSaveOutcome::PersistenceUncertain { evidence };
+    };
+    publication.commit_published(binding);
+    PersistenceSaveOutcome::Saved { commit, evidence }
+}
+
 fn editor_persistence_receipt(
     checkpoint: &EditorPersistenceCheckpoint,
     evidence: &FilePublicationEvidence,
@@ -835,7 +856,7 @@ const fn editor_publication_failure(
     }
 }
 
-fn editor_digest(digest: ContentDigest) -> EditorDocumentDigest {
+pub(super) fn editor_digest(digest: ContentDigest) -> EditorDocumentDigest {
     EditorDocumentDigest::new(digest.length(), *digest.as_bytes())
 }
 

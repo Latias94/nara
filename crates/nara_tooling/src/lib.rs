@@ -92,12 +92,14 @@ pub use source_asset_import::{
 };
 pub use workspace::{
     EditorDocumentDigest, EditorDocumentId, EditorDocumentKind, EditorDocumentSourceBinding,
-    EditorDocumentTabModel, EditorExternalReloadState, EditorPrefabSessionPublicationError,
-    EditorPrefabSlot, EditorSceneModel, EditorSceneSessionPublicationError, EditorSceneSlot,
-    EditorSceneTabModel, EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand,
-    EditorWorkspaceCommandReport, EditorWorkspaceModel,
+    EditorDocumentTabModel, EditorExtensionCommand, EditorExtensionDocument,
+    EditorExtensionDocumentError, EditorExtensionDocumentView, EditorExternalReloadState,
+    EditorPrefabSessionPublicationError, EditorPrefabSlot, EditorSceneModel,
+    EditorSceneSessionPublicationError, EditorSceneSlot, EditorSceneTabModel, EditorSelectionSet,
+    EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceModel,
 };
 #[doc(hidden)]
 pub use workspace::{
-    EditorPersistenceAuthority, EditorPersistenceCheckpoint, EditorPersistenceCommit,
+    EditorExtensionDocumentCandidate, EditorPersistenceAuthority, EditorPersistenceCheckpoint,
+    EditorPersistenceCommit,
 };

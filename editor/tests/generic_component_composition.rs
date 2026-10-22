@@ -337,6 +337,9 @@ fn empty_documents_offer_catalog_templates_before_any_component_exists() {
                     placement: ScenePlacement::last(ScenePlacementOwner::Root),
                 },
             },
+            EditorDocumentKind::Extension(_) => {
+                unreachable!("this consumer exercises Scene and Prefab documents")
+            }
         };
         dispatch(&mut app, Some(EditorAction::Mutate(mutation)));
         let entity = frame(&app)
@@ -413,6 +416,9 @@ fn ordinary_scene_and_prefab_create_custom_components_without_project_execution(
                     placement: ScenePlacement::last(ScenePlacementOwner::Root),
                 },
             },
+            EditorDocumentKind::Extension(_) => {
+                unreachable!("this consumer exercises Scene and Prefab documents")
+            }
         };
         dispatch(&mut app, Some(EditorAction::Mutate(mutation)));
         let created = frame(&app);
@@ -704,6 +710,9 @@ fn compose_component(
                 PrefabCompositionCommand::RemoveComponent { entity, component }
             },
         },
+        EditorDocumentKind::Extension(_) => {
+            unreachable!("this consumer exercises Scene and Prefab documents")
+        }
     };
     dispatch(app, Some(EditorAction::Mutate(mutation)));
 }
@@ -910,6 +919,9 @@ impl CompositionProject {
         self.root.join(match kind {
             EditorDocumentKind::Scene => "worlds/entry.scene.json",
             EditorDocumentKind::Prefab => "blueprints/ordinary.prefab.json",
+            EditorDocumentKind::Extension(_) => {
+                unreachable!("this consumer exercises Scene and Prefab documents")
+            }
         })
     }
 }

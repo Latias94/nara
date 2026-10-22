@@ -188,6 +188,9 @@ impl EditorProjectSession {
                 rejected("project.editor.document-activation-failed")
             };
         }
+        if self.extension_documents.has_source(relative_path) {
+            return rejected("project.editor.document-source-already-open");
+        }
 
         let relative_path: Arc<str> = Arc::from(relative_path);
         let captured = match project.capture_indexed_document(
@@ -278,6 +281,9 @@ impl EditorProjectSession {
             .ok_or("project.editor.document-index-unavailable")?;
         if !Arc::ptr_eq(&current, &admission.index) {
             return Err("project.editor.document-index-stale");
+        }
+        if self.extension_documents.has_source(&admission.path) {
+            return Err("project.editor.document-source-already-open");
         }
         match (
             &admission.replacing,
@@ -390,13 +396,18 @@ impl EditorProjectSession {
             self.document_open_result = Some(EditorDocumentOpenResult::Cancelled { request });
             return true;
         }
-        let prepared = match completion
-            .and_then(|prepared| self.validate_document_open(&admission).map(|()| prepared))
-        {
+        let prepared = match completion.and_then(|prepared| {
+            self.validate_document_open(&admission)
+                .map(|()| prepared)
+                .map_err(preparation::DocumentOpenFailure::from_code)
+        }) {
             Ok(prepared) => prepared,
-            Err(code) => {
-                self.document_open_result =
-                    Some(EditorDocumentOpenResult::Rejected { request, code });
+            Err(failure) => {
+                let _ = self.diagnostics.push(failure.diagnostic);
+                self.document_open_result = Some(EditorDocumentOpenResult::Rejected {
+                    request,
+                    code: failure.code,
+                });
                 return true;
             }
         };
@@ -423,7 +434,7 @@ impl EditorProjectSession {
         true
     }
 
-    /// Recheck pure owner facts immediately before any irreversible predecessor retirement.
+    /// Recheck owner facts and file aliases before any irreversible predecessor retirement.
     pub(super) fn admit_document_open_retirement(&mut self) -> bool {
         let Some(PendingDocumentOpen::AwaitingClose {
             admission,

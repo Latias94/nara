@@ -2,8 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-22 (complete compiled composition and observed replacement handoff)
-**Owner**: Private Editor product, tooling, reflection and Scene/Prefab document owners
+**Last Revised**: 2026-10-22 (compiled composition, replacement handoff and independent document ownership)
+**Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
 **Implementation Plan**: [Editor Foundation and Frontends](../../plans/2026-10-16-1229-refactor-editor-foundation-and-frontends-plan.md)
@@ -31,6 +31,47 @@ Document mutation remains revision-based; geometric input remains bound to the a
 No universal widget tree, generic command transport, parallel undo system or Editor kernel crate is required.
 Future custom UI reuses these semantic boundaries and render-view handoff, but may replace all widget, layout, focus and docking code.
 Sharing rendering does not require sharing the runtime game's complete UI toolkit.
+
+### Independent document domains share the workspace lifecycle
+
+A trusted source-built non-Scene document owner implements `EditorExtensionDocument` with typed
+commands, an immutable typed view, a bounded codec and its own inverse/history storage. The
+Workspace retains document identity, monotonic accepted revisions, saved content checkpoints,
+dirty/history projections and ordinary Save/Discard/Cancel arbitration. Domain content-state
+identity follows Undo/Redo, while a forward branch receives a fresh identity. Scene and Prefab
+keep their existing typed owners and share the source-incarnation/revision primitives; they do
+not pass their mutation or native admission through a second generic transaction layer.
+
+The product session registers the finite owner set explicitly and opens project-relative sources
+through its existing filesystem capability. Registration and opening are also available to a
+trusted embedded application for the current published project session. This is not project-code
+discovery, automatic session replacement registration, or a dynamic plugin mechanism. An
+extension action erases only a domain-typed command targeted at the exact open owner and live
+revision, not an arbitrary service invocation. A panel receives no mutable document or filesystem
+writer; hiding/closing its draft never removes the document or its history.
+
+Source namespaces remain explicit: extension locators are project-relative, while Scene/Prefab
+locators retain their configured source scopes. The Host excludes duplicate publication ownership
+by reserved path and actual current file identity across these namespaces, including filesystem
+case aliases. Existing publication capabilities retain the actual parent directory, so source
+exclusion follows atomic Save replacement and parent-directory renames without global path
+lowercasing or another source registry.
+
+Save captures the exact encoded content state. The existing background publication Host and
+linear receipt acknowledgement own disk writes and dirty checkpoint advancement. A later edit
+remains dirty when the older capture saves. Reopen transports only a read-only source capability
+and pure codec work, then revalidates the exact document/source/revision before owner-thread
+publication and file-binding reconciliation. Reopen starts a new incarnation and resets history;
+stale or failed preparation leaves the current content and history unchanged. Whole-session close
+retires every extension publication registration through the existing Host-custody shutdown
+participant before the session reports Complete. A failed document Close/Save preserves the open
+document and its file custody for another explicit decision. Physical Host custody survives task
+completion and panel retirement through the existing close participant.
+
+The small independently compiled dialogue consumer and its public tests determine this boundary.
+The [document extension guide](../../guides/editor-documents.md) records the supported workflow
+and verification scope. It does not establish generic graph editing, domain-native resources,
+unbounded codecs, asynchronous extension traits, or native pixel/input qualification.
 
 ### Native local workspaces use cooperative filesystem authority
 
