@@ -262,12 +262,15 @@ pub fn repair_startup_scene(
     if manifest.identity() != issue.manifest_identity {
         return Err(ProjectStartupSceneRepairError::StaleIssue);
     }
-    let lock = match manifest.try_lock(LockMode::Exclusive) {
-        Ok(lock) => lock,
-        Err(FsError::LockContended) => {
-            return Err(ProjectStartupSceneRepairError::LockUnavailable);
+    let manifest = match manifest.try_lock(LockMode::Exclusive) {
+        Ok(manifest) => manifest,
+        Err(failure) => {
+            let (error, _file) = failure.into_parts();
+            return Err(match error {
+                FsError::LockContended => ProjectStartupSceneRepairError::LockUnavailable,
+                error => ProjectStartupSceneRepairError::Filesystem(error),
+            });
         }
-        Err(error) => return Err(ProjectStartupSceneRepairError::Filesystem(error)),
     };
     verify_manifest_digest(&manifest, issue.manifest_digest)?;
 
@@ -364,7 +367,6 @@ pub fn repair_startup_scene(
             return Err(ProjectStartupSceneRepairError::TemporaryFile(failure));
         }
     };
-    drop(lock);
     drop(manifest);
 
     let parent_directory_sync = manifest_parent
@@ -457,7 +459,7 @@ fn check_request(issue: &ProjectStartupSceneIssue) -> ProjectCheckRequest {
 }
 
 fn verify_manifest_digest(
-    manifest: &nara_fs::FileCapability,
+    manifest: &nara_fs::LockedFileCapability,
     expected: ContentDigest,
 ) -> Result<(), ProjectStartupSceneRepairError> {
     match manifest.verify_digest(expected, DEFAULT_MANIFEST_BYTE_LIMIT) {

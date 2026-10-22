@@ -88,26 +88,30 @@ pub(super) fn stage_export_tree(
             .by_path
             .get(parent_path)
             .expect("the export planner creates every member parent");
-        let mut source_reader = match source {
-            ProjectExportMemberSource::Executable(target) => build
-                .executable(*target)
+        let content_source;
+        let source_file = match source {
+            ProjectExportMemberSource::Executable(target) => build.executable(*target),
+            ProjectExportMemberSource::Content(source_path) => {
+                content_source = delivery_content
+                    .project_root()
+                    .open_file(
+                        &RelativePath::new(source_path.as_str())
+                            .expect("the project-content owner publishes valid source paths"),
+                    )
+                    .map_err(|source| ProjectExportStageError::OpenSource {
+                        path: source_path.clone(),
+                        source,
+                    })?;
+                &content_source
+            }
+        };
+        let mut source_reader =
+            source_file
                 .reader()
                 .map_err(|source| ProjectExportStageError::OpenSource {
                     path: member.path.clone(),
                     source,
-                })?,
-            ProjectExportMemberSource::Content(source_path) => delivery_content
-                .project_root()
-                .open_file(
-                    &RelativePath::new(source_path.as_str())
-                        .expect("the project-content owner publishes valid source paths"),
-                )
-                .and_then(|file| file.reader())
-                .map_err(|source| ProjectExportStageError::OpenSource {
-                    path: source_path.clone(),
-                    source,
-                })?,
-        };
+                })?;
         let target_file = match member.kind {
             super::ProjectExportMemberKind::HeadlessExecutable
             | super::ProjectExportMemberKind::DesktopExecutable => {

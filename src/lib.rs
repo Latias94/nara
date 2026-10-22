@@ -311,12 +311,12 @@ pub mod advanced_prelude {
         CapabilityGeneration, CapabilityReader, CapabilityRights, CapabilitySessionId,
         ConflictProtection, ContentDigest, DigestLimit, DirectoryCapability,
         DirectoryEntryObservation, DirectorySyncReceipt, DirectorySyncTier, DurabilityProgress,
-        ExpectedTarget, FileCapability, FileIdentity, FileKind, FileLock, FileSyncReceipt,
-        FileSyncTier, FsError, FsOperation, HostCapabilityOptions, LockGuarantee, LockMode,
-        LockScope, ParentAuthorizationTier, PathValidationError, PlatformCapabilityMatrix,
-        ProofStatus, PublicationAtomicity, PublicationIdentityEvidence, PublicationSourceBinding,
-        RelativeComponent, RelativePath, ReplaceReceipt, ResolutionTier, StageStatus,
-        TemporaryFile, TrustMode, platform_capability_matrix,
+        ExpectedTarget, FileCapability, FileIdentity, FileKind, FileLockError, FileSyncReceipt,
+        FileSyncTier, FileUnlockError, FsError, FsOperation, HostCapabilityOptions, LockGuarantee,
+        LockMode, LockScope, LockedFileCapability, ParentAuthorizationTier, PathValidationError,
+        PlatformCapabilityMatrix, ProofStatus, PublicationAtomicity, PublicationIdentityEvidence,
+        PublicationSourceBinding, RelativeComponent, RelativePath, ReplaceReceipt, ResolutionTier,
+        StageStatus, TemporaryFile, TrustMode, platform_capability_matrix,
     };
     pub use nara_gameplay::{
         GameplayCommandBatch, GameplayCommandEnvelope, GameplayCommandIdError,

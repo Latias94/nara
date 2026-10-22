@@ -8,7 +8,7 @@ use std::{
 
 use nara::fs::{
     CapabilityRights, DirectoryCapability, FileCapability, HostCapabilityOptions, LockMode,
-    TrustMode,
+    LockedFileCapability, TrustMode,
 };
 use nara::project_host::MAX_SUPERVISED_DESKTOP_EXECUTABLE_BYTES;
 
@@ -170,7 +170,7 @@ pub(super) fn scavenge_inactive_at(
 }
 
 pub(super) struct OwnerMarker {
-    file: FileCapability,
+    file: LockedFileCapability,
     root: DirectoryCapability,
 }
 
@@ -208,7 +208,7 @@ impl OwnerMarker {
                 operation: "sync-owner-marker",
                 source,
             })?;
-        retain_exclusive_lock(&file)?;
+        let file = retain_exclusive_lock(file)?;
         Ok(Self {
             file,
             root: root.share(),
@@ -236,10 +236,9 @@ impl OwnerMarker {
             && named.parent_identity() == Some(self.root.identity())
             && self.file.link_count() == 1
             && named.link_count() == 1
-            && matches!(
-                named.try_lock(LockMode::Exclusive),
-                Err(nara::fs::FsError::LockContended)
-            )
+            && named
+                .try_lock(LockMode::Exclusive)
+                .is_err_and(|failure| matches!(failure.error(), nara::fs::FsError::LockContended))
     }
 }
 
@@ -256,8 +255,8 @@ fn inspect_inactive_marker(
     let root = open_directory_capability(store_path).ok()?;
     let marker_name = component(OWNER_MARKER_NAME).ok()?;
     let capability = root.open_child_file(&marker_name).ok()?;
-    match retain_exclusive_lock(&capability) {
-        Ok(()) => {
+    match retain_exclusive_lock(capability) {
+        Ok(capability) => {
             let bytes = capability
                 .read_to_end_bounded(MAX_OWNER_MARKER_BYTES)
                 .ok()?;
@@ -278,17 +277,16 @@ fn inspect_inactive_marker(
     }
 }
 
-fn retain_exclusive_lock(file: &FileCapability) -> Result<(), GenerationStoreError> {
-    let lock =
-        file.try_lock(LockMode::Exclusive)
-            .map_err(|source| GenerationStoreError::Capability {
-                operation: "lock-owner-marker",
-                source,
-            })?;
-    // The operating-system lock is tied to the opened file. Keeping the capability alive while
-    // forgetting this unlocking guard intentionally retains ownership until that file closes.
-    std::mem::forget(lock);
-    Ok(())
+fn retain_exclusive_lock(
+    file: FileCapability,
+) -> Result<LockedFileCapability, GenerationStoreError> {
+    file.try_lock(LockMode::Exclusive).map_err(|failure| {
+        let (source, _file) = failure.into_parts();
+        GenerationStoreError::Capability {
+            operation: "lock-owner-marker",
+            source,
+        }
+    })
 }
 
 fn ensure_namespace(base_root: &Path) -> Result<PathBuf, GenerationStoreError> {

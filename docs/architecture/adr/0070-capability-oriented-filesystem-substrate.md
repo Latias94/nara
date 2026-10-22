@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-10
-**Last Revised**: 2026-08-19
+**Last Revised**: 2026-10-23
 **Refines**: [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
 [ADR 0049](0049-untrusted-project-input-and-parse-budget-policy.md),
 [ADR 0050](0050-asset-root-symlink-junction-and-package-trust-policy.md)
@@ -77,6 +77,41 @@ atomically prevented overwriting a concurrent writer. Ordinary POSIX `renameat` 
 not compare-and-swap. Advisory locks provide cooperative protection only when all nara writers use
 the same protocol. Durability receipts report completed OS-visible stages; they do not claim that
 physical media has persisted data the operating system reported as synced.
+
+### Native lock ownership
+
+- `FileCapability::try_lock(self, mode)` consumes the file and returns one non-cloneable
+  `LockedFileCapability`. Rejection returns the original file together with `FsError`; it must
+  not close the file merely because acquisition failed. There is no borrowed guard, reentrant
+  acquisition, lock upgrade, or second acquisition path through the locked owner.
+- Explicit `release(self)` returns the unlocked file on success. Failure returns the same locked
+  owner together with its error so the domain can retain it and retry. No implicit retry or
+  close runs before that error transfers ownership. Dropping a locked owner, including one in a
+  discarded release error, attempts native unlock and closes the file without a success receipt.
+- Reads, bounded reads, digests, and identity inspection use the exact owned handle. The locked
+  surface exposes only the read and inspection operations required by its consumers; release
+  restores the original file capability's rights. A `CapabilityReader` borrows that handle with
+  an independent positional cursor; it never duplicates a descriptor, retains a lock after its
+  owner closes, or grants a native unlock path. A live reader prevents consuming its owner for release.
+- The locked owner exposes no raw handle, `FileCapability` reference, `Deref` escape, or native
+  lease export. Successful native lease export from an unlocked file permanently marks that
+  capability ineligible for subsequent acquisition; `try_lock` returns `Unproven` and the original
+  file even after the lease is dropped, because its recipient may have duplicated it again.
+  This also covers the executable lease. On Unix, a duplicate descriptor can change `flock`
+  state on the same open-file description; hiding export only on the locked type is insufficient.
+- `FileCapability::from_host_handle` cannot revoke or exclude aliases retained before import.
+  Imported file capabilities therefore reject lock acquisition with `Unproven`, including a
+  native lease duplicated and reimported as a new capability. Lock ownership requires a file
+  independently opened or created through a directory capability without native handle export.
+  Import still grants ordinary access to the exact host file. Nara's ownership contract covers
+  its issued capabilities, not arbitrary foreign native operations.
+- Windows continues to report platform-enforced byte-range locking; Unix continues to report
+  advisory/cooperative `flock` with open-handle scope. Independent opens contend according to the
+  native primitive. Rust ownership does not strengthen platform support, publication conflict
+  protection, durability, or cross-process trust. Domain source-race and publication identity
+  checks remain required.
+- Long-lived generation markers store the locked capability directly. Deliberately forgetting
+  a borrowed guard to keep a native lock alive is obsolete.
 
 ### Strict untrusted/recovery policy
 

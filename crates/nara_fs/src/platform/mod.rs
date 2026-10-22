@@ -510,11 +510,6 @@ pub(crate) fn unlock(file: &File) -> Result<(), FsError> {
     imp::unlock(file)
 }
 
-pub(crate) fn clone_file(file: &File) -> Result<File, FsError> {
-    file.try_clone()
-        .map_err(|source| FsError::io(crate::FsOperation::CloneHandle, source))
-}
-
 /// Reopens a directory through the capability handle with the restrictive exact-self contract
 /// required by an immutable-generation launch.
 pub(crate) fn restrictive_clone_directory(file: &File) -> Result<File, FsError> {

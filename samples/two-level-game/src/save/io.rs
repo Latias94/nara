@@ -155,10 +155,13 @@ impl SaveSlot {
                 Some(file)
             }
         };
-        let _lock = existing
-            .as_ref()
+        let existing = existing
             .map(|file| file.try_lock(LockMode::Exclusive))
-            .transpose()?;
+            .transpose()
+            .map_err(|failure| {
+                let (error, _file) = failure.into_parts();
+                SaveIoError::File(error)
+            })?;
         if let (Some(file), Binding::Existing { digest, .. }) = (&existing, self.binding)
             && file
                 .verify_digest(digest, MAX_CHECKPOINT_BYTES as u64)

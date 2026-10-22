@@ -1219,7 +1219,6 @@ mod tests {
             FilePublicationOutcome::Rejected(FilePublicationRejection::LockUnavailable)
         ));
         drop(_lock);
-        drop(locked);
         assert_eq!(fs::read(target).unwrap(), b"externally changed metadata");
     }
 

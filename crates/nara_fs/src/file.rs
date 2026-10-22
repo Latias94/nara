@@ -2,13 +2,14 @@ use std::{
     fmt::{self, Debug, Formatter},
     fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 use crate::{
-    CapabilityRights, ContentDigest, DurabilityProgress, FileIdentity, FileKind, FileLock,
-    FileSyncReceipt, FileSyncTier, FsError, FsOperation, LockMode, ResolutionTier,
-    RestrictiveCapabilityHandleLease, StageStatus, TrustMode, capability::new_host_session,
-    platform,
+    CapabilityRights, ContentDigest, DurabilityProgress, FileIdentity, FileKind, FileLockError,
+    FileSyncReceipt, FileSyncTier, FsError, FsOperation, LockMode, LockedFileCapability,
+    ResolutionTier, RestrictiveCapabilityHandleLease, StageStatus, TrustMode,
+    capability::new_host_session, platform,
 };
 
 pub struct FileCapability {
@@ -19,11 +20,16 @@ pub struct FileCapability {
     rights: CapabilityRights,
     trust: TrustMode,
     resolution: ResolutionTier,
+    native_aliases_possible: AtomicBool,
 }
 
 impl FileCapability {
     /// Imports authority to one already-opened host file without granting
     /// sibling or parent access.
+    ///
+    /// Import cannot revoke or exclude existing native aliases, so this capability cannot
+    /// acquire locks. Lock ownership requires a file independently opened or created through
+    /// a directory capability and never exported as a native handle lease.
     pub fn from_host_handle(
         file: File,
         trust: TrustMode,
@@ -47,7 +53,7 @@ impl FileCapability {
                 links: facts.link_count,
             });
         }
-        Ok(Self::from_opened(
+        let capability = Self::from_opened(
             file,
             FileIdentity::new(
                 new_host_session()?,
@@ -59,7 +65,11 @@ impl FileCapability {
             CapabilityRights::ReadOnly,
             trust,
             ResolutionTier::OpenedHandleOnly,
-        ))
+        );
+        capability
+            .native_aliases_possible
+            .store(true, Ordering::Relaxed);
+        Ok(capability)
     }
 
     pub(crate) fn from_opened(
@@ -79,6 +89,7 @@ impl FileCapability {
             rights,
             trust,
             resolution,
+            native_aliases_possible: AtomicBool::new(false),
         }
     }
 
@@ -114,25 +125,33 @@ impl FileCapability {
     }
 
     /// Reopens this exact regular file through the platform's restrictive launch lease contract.
+    ///
+    /// Exporting a native handle permanently prevents lock acquisition on this capability:
+    /// a Unix duplicate can change the same open-file description's lock state.
     #[doc(hidden)]
     pub fn duplicate_restrictive_host_handle(
         &self,
     ) -> Result<RestrictiveCapabilityHandleLease, FsError> {
-        platform::restrictive_clone_file(&self.file).map(RestrictiveCapabilityHandleLease::new)
+        let file = platform::restrictive_clone_file(&self.file)?;
+        self.native_aliases_possible.store(true, Ordering::Relaxed);
+        Ok(RestrictiveCapabilityHandleLease::new(file))
     }
 
     /// Reopens this exact regular file with the execute access required by image attestation.
+    /// Exporting this native lease also permanently prevents lock acquisition.
     #[doc(hidden)]
     pub fn duplicate_restrictive_executable_host_handle(
         &self,
     ) -> Result<RestrictiveCapabilityHandleLease, FsError> {
-        platform::restrictive_clone_executable(&self.file)
-            .map(RestrictiveCapabilityHandleLease::new)
+        let file = platform::restrictive_clone_executable(&self.file)?;
+        self.native_aliases_possible.store(true, Ordering::Relaxed);
+        Ok(RestrictiveCapabilityHandleLease::new(file))
     }
 
-    pub fn reader(&self) -> Result<CapabilityReader, FsError> {
+    /// Borrows this handle with an independent positional cursor, without duplicating it.
+    pub fn reader(&self) -> Result<CapabilityReader<'_>, FsError> {
         Ok(CapabilityReader {
-            file: platform::clone_file(&self.file)?,
+            file: &self.file,
             offset: 0,
         })
     }
@@ -278,9 +297,35 @@ impl FileCapability {
         ))
     }
 
-    pub fn try_lock(&self, mode: LockMode) -> Result<FileLock<'_>, FsError> {
-        platform::try_lock(&self.file, mode)?;
-        Ok(FileLock::new(&self.file, mode))
+    /// Acquires one owned lock, returning this same file on rejection.
+    ///
+    /// Existing readers must finish before ownership can move into the lock.
+    /// Host import and native handle export make release ownership unprovable and are rejected.
+    ///
+    /// A file cannot issue two guards for the same native lock:
+    ///
+    /// ```compile_fail,E0382
+    /// use nara_fs::{FileCapability, LockMode};
+    /// fn duplicate_owner(file: FileCapability) {
+    ///     let first = file.try_lock(LockMode::Exclusive).unwrap();
+    ///     let second = file.try_lock(LockMode::Exclusive).unwrap();
+    ///     drop((first, second));
+    /// }
+    /// ```
+    pub fn try_lock(self, mode: LockMode) -> Result<LockedFileCapability, FileLockError> {
+        if self.native_aliases_possible.load(Ordering::Relaxed) {
+            return Err(FileLockError::new(
+                FsError::Unproven {
+                    operation: FsOperation::Lock,
+                    proof: "host import or native handle export cannot prove unique lock authority",
+                },
+                self,
+            ));
+        }
+        match platform::try_lock(&self.file, mode) {
+            Ok(()) => Ok(LockedFileCapability::new(self, mode)),
+            Err(error) => Err(FileLockError::new(error, self)),
+        }
     }
 }
 
@@ -308,8 +353,22 @@ impl Debug for FileCapability {
     }
 }
 
-pub struct CapabilityReader {
-    file: File,
+/// An independent positional cursor borrowing an authorized file handle.
+///
+/// This reader cannot keep a lock alive after its owner closes or release the lock itself.
+///
+/// ```compile_fail,E0505
+/// use std::io::Read;
+/// use nara_fs::LockedFileCapability;
+/// fn release_while_reading(locked: LockedFileCapability) {
+///     let mut reader = locked.reader().unwrap();
+///     let file = locked.release().unwrap();
+///     let mut bytes = [0; 1];
+///     reader.read_exact(&mut bytes).unwrap();
+/// }
+/// ```
+pub struct CapabilityReader<'file> {
+    file: &'file File,
     offset: u64,
 }
 
@@ -335,9 +394,9 @@ impl Debug for CapabilityWriter<'_> {
     }
 }
 
-impl Read for CapabilityReader {
+impl Read for CapabilityReader<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-        let read = positional_read(&self.file, buffer, self.offset)?;
+        let read = positional_read(self.file, buffer, self.offset)?;
         self.offset = self
             .offset
             .checked_add(read as u64)
@@ -346,7 +405,7 @@ impl Read for CapabilityReader {
     }
 }
 
-impl Seek for CapabilityReader {
+impl Seek for CapabilityReader<'_> {
     fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
         let next = match position {
             SeekFrom::Start(offset) => Some(offset),
@@ -387,7 +446,7 @@ fn positional_read(_file: &File, _buffer: &mut [u8], _offset: u64) -> io::Result
     ))
 }
 
-impl Debug for CapabilityReader {
+impl Debug for CapabilityReader<'_> {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("CapabilityReader")

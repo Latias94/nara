@@ -365,22 +365,23 @@ impl FilePublicationHost {
                 Some(target)
             }
         };
-        let lock = match target
-            .as_ref()
-            .map(|target| target.try_lock(LockMode::Exclusive))
-        {
+        let target = match target.map(|target| target.try_lock(LockMode::Exclusive)) {
             Some(Ok(lock)) => Some(lock),
-            Some(Err(FsError::LockContended)) => {
-                return FilePublicationOutcome::Rejected(FilePublicationRejection::LockUnavailable);
-            }
-            Some(Err(FsError::Unsupported { .. } | FsError::Unproven { .. })) => {
-                return FilePublicationOutcome::Rejected(
-                    FilePublicationRejection::UnsupportedGuarantee,
-                );
-            }
-            Some(Err(_)) => {
-                return FilePublicationOutcome::Failed(FilePublicationFailureStage::OpenTarget);
-            }
+            Some(Err(failure)) => match failure.error() {
+                FsError::LockContended => {
+                    return FilePublicationOutcome::Rejected(
+                        FilePublicationRejection::LockUnavailable,
+                    );
+                }
+                FsError::Unsupported { .. } | FsError::Unproven { .. } => {
+                    return FilePublicationOutcome::Rejected(
+                        FilePublicationRejection::UnsupportedGuarantee,
+                    );
+                }
+                _ => {
+                    return FilePublicationOutcome::Failed(FilePublicationFailureStage::OpenTarget);
+                }
+            },
             None => None,
         };
         if let FilePublicationBinding::Existing { identity, digest } = self.binding {
@@ -452,7 +453,7 @@ impl FilePublicationHost {
                     }
                 },
             };
-        drop(lock);
+        drop(target);
 
         let parent_directory_sync = self.parent.sync().map_or(StageStatus::Unknown, |receipt| {
             receipt.progress().parent_directory_synced()

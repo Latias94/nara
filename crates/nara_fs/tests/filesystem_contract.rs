@@ -818,8 +818,14 @@ fn file_lock_contention_is_structured() {
     let second = capability.open_file(&relative("workspace.lock")).unwrap();
     let _held = first.try_lock(LockMode::Exclusive).unwrap();
 
+    let second_identity = second.identity();
     let error = second.try_lock(LockMode::Exclusive).unwrap_err();
-    assert!(matches!(error, FsError::LockContended));
+    assert!(matches!(error.error(), FsError::LockContended));
+    assert_eq!(error.file().identity(), second_identity);
+    let second = error.into_file();
+    drop(_held);
+    let held = second.try_lock(LockMode::Exclusive).unwrap();
+    assert_eq!(held.identity(), second_identity);
 }
 
 #[test]
@@ -830,16 +836,27 @@ fn explicit_lock_release_allows_the_next_owner() {
     let first = capability.open_file(&relative("workspace.lock")).unwrap();
     let second = capability.open_file(&relative("workspace.lock")).unwrap();
 
-    first
+    let identity = first.identity();
+    let first = first
         .try_lock(LockMode::Exclusive)
         .unwrap()
         .release()
         .unwrap();
-    let _next = second.try_lock(LockMode::Exclusive).unwrap();
+    assert_eq!(first.identity(), identity);
+    let next = second.try_lock(LockMode::Exclusive).unwrap();
+
+    // Closing the released original must not unlock the next owner's independent handle.
+    drop(first);
+    let contender = capability.open_file(&relative("workspace.lock")).unwrap();
+    assert!(matches!(
+        contender.try_lock(LockMode::Exclusive).unwrap_err().error(),
+        FsError::LockContended
+    ));
+    drop(next);
 }
 
 #[test]
-fn dropped_lock_guard_allows_the_next_owner() {
+fn dropped_locked_file_allows_the_next_owner() {
     let root = TestRoot::new();
     fs::write(root.path().join("workspace.lock"), b"lock").unwrap();
     let capability = portable_read_only(&root);
@@ -850,6 +867,215 @@ fn dropped_lock_guard_allows_the_next_owner() {
     drop(held);
 
     let _next = second.try_lock(LockMode::Exclusive).unwrap();
+}
+
+#[test]
+fn locked_readers_keep_independent_offsets_without_releasing_lock_authority() {
+    let root = TestRoot::new();
+    fs::write(root.path().join("workspace.lock"), b"abcdef").unwrap();
+    let capability = portable_read_only(&root);
+    let file = capability.open_file(&relative("workspace.lock")).unwrap();
+    let identity = file.identity();
+    let held = file.try_lock(LockMode::Exclusive).unwrap();
+
+    assert_eq!(held.identity(), identity);
+    assert_eq!(held.parent_identity(), Some(capability.identity()));
+    assert_eq!(held.mode(), LockMode::Exclusive);
+    assert_eq!(held.rights(), CapabilityRights::ReadOnly);
+    assert_eq!(held.read_to_end_bounded(6).unwrap(), b"abcdef");
+    held.verify_digest(ContentDigest::of_bytes(b"abcdef"), 6)
+        .unwrap();
+    {
+        let mut first = held.reader().unwrap();
+        let mut second = held.reader().unwrap();
+        let mut pair = [0_u8; 2];
+        first.read_exact(&mut pair).unwrap();
+        assert_eq!(&pair, b"ab");
+        first.read_exact(&mut pair).unwrap();
+        assert_eq!(&pair, b"cd");
+        second.read_exact(&mut pair).unwrap();
+        assert_eq!(&pair, b"ab");
+    }
+    let contender = capability.open_file(&relative("workspace.lock")).unwrap();
+    let failure = contender.try_lock(LockMode::Exclusive).unwrap_err();
+    assert!(matches!(failure.error(), FsError::LockContended));
+    let contender = failure.into_file();
+    drop(held.release().unwrap());
+    let _next = contender.try_lock(LockMode::Exclusive).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn original_same_owner_dual_guard_primitive_releases_both_logical_locks() {
+    use rustix::fs::{FlockOperation, flock};
+
+    let root = TestRoot::new();
+    let path = root.path().join("workspace.lock");
+    fs::write(&path, b"lock").unwrap();
+    let original = File::open(&path).unwrap();
+    let duplicate = original.try_clone().unwrap();
+    let independent = File::open(&path).unwrap();
+
+    // The former borrowed guard API allowed both calls against this one native lock state.
+    flock(&original, FlockOperation::NonBlockingLockExclusive).unwrap();
+    flock(&duplicate, FlockOperation::NonBlockingLockExclusive).unwrap();
+    assert!(flock(&independent, FlockOperation::NonBlockingLockExclusive).is_err());
+    flock(&duplicate, FlockOperation::Unlock).unwrap();
+    flock(&independent, FlockOperation::NonBlockingLockExclusive).unwrap();
+    flock(&independent, FlockOperation::Unlock).unwrap();
+}
+
+#[cfg(any(windows, unix))]
+#[test]
+fn exported_native_file_lease_prevents_later_lock_authority() {
+    let root = TestRoot::new();
+    fs::write(root.path().join("workspace.lock"), b"lock").unwrap();
+    let capability = portable_read_only(&root);
+    let file = capability.open_file(&relative("workspace.lock")).unwrap();
+    let identity = file.identity();
+    let lease = file.duplicate_restrictive_host_handle().unwrap();
+    let failure = file.try_lock(LockMode::Exclusive).unwrap_err();
+    assert!(matches!(
+        failure.error(),
+        FsError::Unproven {
+            operation: nara_fs::FsOperation::Lock,
+            ..
+        }
+    ));
+    assert_eq!(failure.file().identity(), identity);
+
+    // Export is irreversible: the native recipient may have duplicated the lease again.
+    drop(lease);
+    let file = failure.into_file();
+    assert_eq!(file.read_to_end_bounded(4).unwrap(), b"lock");
+    assert!(matches!(
+        file.try_lock(LockMode::Exclusive).unwrap_err().error(),
+        FsError::Unproven {
+            operation: nara_fs::FsOperation::Lock,
+            ..
+        }
+    ));
+    let independent = capability.open_file(&relative("workspace.lock")).unwrap();
+    let _held = independent.try_lock(LockMode::Exclusive).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn exported_executable_lease_cannot_become_a_shared_description_lock_owner() {
+    let root = TestRoot::new();
+    fs::write(root.path().join("workspace.lock"), b"lock").unwrap();
+    let capability = portable_read_only(&root);
+    let file = capability.open_file(&relative("workspace.lock")).unwrap();
+    let _lease = file.duplicate_restrictive_executable_host_handle().unwrap();
+    let failure = file.try_lock(LockMode::Shared).unwrap_err();
+    assert!(matches!(
+        failure.error(),
+        FsError::Unproven {
+            operation: nara_fs::FsOperation::Lock,
+            ..
+        }
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn reimported_native_lease_cannot_bypass_original_export_rejection() {
+    use std::os::fd::AsFd;
+
+    let root = TestRoot::new();
+    fs::write(root.path().join("workspace.lock"), b"lock").unwrap();
+    let capability = portable_read_only(&root);
+    let file = capability.open_file(&relative("workspace.lock")).unwrap();
+    let lease = file.duplicate_restrictive_host_handle().unwrap();
+    let alias = File::from(lease.as_fd().try_clone_to_owned().unwrap());
+    let imported = FileCapability::from_host_handle(alias, TrustMode::TrustedLocal, 1).unwrap();
+
+    for file in [file, imported] {
+        let failure = file.try_lock(LockMode::Exclusive).unwrap_err();
+        assert!(matches!(
+            failure.error(),
+            FsError::Unproven {
+                operation: nara_fs::FsOperation::Lock,
+                ..
+            }
+        ));
+    }
+    let independent = capability.open_file(&relative("workspace.lock")).unwrap();
+    let _held = independent.try_lock(LockMode::Exclusive).unwrap();
+}
+
+#[cfg(any(windows, unix))]
+#[test]
+fn imported_native_aliases_cannot_create_independent_rust_lock_owners() {
+    let root = TestRoot::new();
+    let path = root.path().join("workspace.lock");
+    fs::write(&path, b"lock").unwrap();
+    let host = File::open(&path).unwrap();
+    let alias = host.try_clone().unwrap();
+    let first = FileCapability::from_host_handle(host, TrustMode::TrustedLocal, 1).unwrap();
+    let second = FileCapability::from_host_handle(alias, TrustMode::TrustedLocal, 1).unwrap();
+
+    for file in [first, second] {
+        let identity = file.identity();
+        let failure = file.try_lock(LockMode::Exclusive).unwrap_err();
+        assert!(matches!(
+            failure.error(),
+            FsError::Unproven {
+                operation: nara_fs::FsOperation::Lock,
+                ..
+            }
+        ));
+        assert_eq!(failure.file().identity(), identity);
+        assert_eq!(failure.into_file().read_to_end_bounded(4).unwrap(), b"lock");
+    }
+}
+
+#[test]
+fn shared_locks_preserve_other_owners_until_every_owner_releases() {
+    let root = TestRoot::new();
+    fs::write(root.path().join("workspace.lock"), b"lock").unwrap();
+    let capability = portable_read_only(&root);
+    let first = capability.open_file(&relative("workspace.lock")).unwrap();
+    let second = capability.open_file(&relative("workspace.lock")).unwrap();
+    let first = first.try_lock(LockMode::Shared).unwrap();
+    let second = second.try_lock(LockMode::Shared).unwrap();
+    let contender = capability.open_file(&relative("workspace.lock")).unwrap();
+    let failure = contender.try_lock(LockMode::Exclusive).unwrap_err();
+    assert!(matches!(failure.error(), FsError::LockContended));
+    let contender = failure.into_file();
+
+    drop(first.release().unwrap());
+    let failure = contender.try_lock(LockMode::Exclusive).unwrap_err();
+    assert!(matches!(failure.error(), FsError::LockContended));
+    let contender = failure.into_file();
+    drop(second);
+    let _exclusive = contender.try_lock(LockMode::Exclusive).unwrap();
+}
+
+#[test]
+fn owned_lock_returns_original_created_file_write_and_sync_authority() {
+    let root = TestRoot::new();
+    let capability = portable_read_write(&root);
+    let mut file = capability
+        .create_child_file(&component("workspace.lock"))
+        .unwrap();
+    let identity = file.identity();
+    {
+        let mut writer = file.writer().unwrap();
+        writer.write_all(b"locked contents").unwrap();
+        writer.flush().unwrap();
+    }
+    let held = file.try_lock(LockMode::Exclusive).unwrap();
+    assert_eq!(held.read_to_end_bounded(15).unwrap(), b"locked contents");
+    let mut file = held.release().unwrap();
+    assert_eq!(file.identity(), identity);
+    assert_eq!(file.rights(), CapabilityRights::ReadWrite);
+    file.writer().unwrap().write_all(b"!").unwrap();
+    assert_eq!(
+        file.sync().unwrap().progress().data_synced(),
+        StageStatus::Achieved
+    );
+    assert_eq!(file.read_to_end_bounded(16).unwrap(), b"locked contents!");
 }
 
 #[test]

@@ -34,7 +34,9 @@ pub use file::{CapabilityReader, CapabilityWriter, FileCapability};
 #[doc(hidden)]
 pub use host_handle::RestrictiveCapabilityHandleLease;
 pub use identity::{CapabilityGeneration, CapabilitySessionId, FileIdentity, FileKind};
-pub use lock::{FileLock, LockGuarantee, LockMode, LockScope};
+pub use lock::{
+    FileLockError, FileUnlockError, LockGuarantee, LockMode, LockScope, LockedFileCapability,
+};
 pub use path::{RelativeComponent, RelativePath, RelativePathPreflight};
 pub use proof::{
     ConflictProtection, DirectorySyncTier, DurabilityProgress, FileSyncTier,
