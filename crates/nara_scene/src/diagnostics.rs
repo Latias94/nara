@@ -335,14 +335,6 @@ pub(crate) fn with_codec_error(
         ComponentCodecError::AssetServerChanged => {
             with_public_identifier(diagnostic, "codec-error-kind", "asset-server-changed")
         }
-        ComponentCodecError::PreparedComponentTypeMismatch { .. } => with_secret(
-            with_public_identifier(
-                diagnostic,
-                "codec-error-kind",
-                "prepared-component-type-mismatch",
-            ),
-            "codec-detail",
-        ),
         ComponentCodecError::PersistentApplyReceiptMissing => with_public_identifier(
             diagnostic,
             "codec-error-kind",

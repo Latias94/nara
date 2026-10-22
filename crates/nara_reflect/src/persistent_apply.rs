@@ -1,7 +1,6 @@
 //! Guarded persistent-component application contracts.
 
 use std::{
-    any::TypeId,
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Display, Formatter},
 };
@@ -659,91 +658,77 @@ impl PreparedComponentApplyBatch {
 
 /// A codec-produced component value that has not yet been bound to a persistent schema identity.
 ///
-/// Candidates can only become applicable through a frozen [`crate::ComponentRegistry`].
-pub struct PreparedComponentCandidate {
-    prepare: Box<PrepareComponentFn>,
-    rust_type_id: TypeId,
-    rust_type_path: &'static str,
+/// The candidate produces exactly `T`, including when preparation is deferred. It cannot insert
+/// additional components or mutate a target World. Candidates can only become applicable through
+/// a frozen [`crate::ComponentRegistry`].
+pub struct PreparedComponentCandidate<T: Component> {
+    prepare: Box<
+        dyn FnOnce(&mut ComponentApplyContext) -> Result<T, ComponentCodecError> + Send + 'static,
+    >,
     may_touch_asset_server: bool,
 }
 
-impl PreparedComponentCandidate {
+impl<T: Component> PreparedComponentCandidate<T> {
     /// Defers fallible component preparation that cannot access target-World resources.
-    pub fn deferred<T>(
+    pub fn deferred(
         prepare: impl FnOnce() -> Result<T, ComponentCodecError> + Send + 'static,
-    ) -> Self
-    where
-        T: Component,
-    {
+    ) -> Self {
         Self {
-            prepare: Box::new(move |_context| {
-                prepare().map(|component| Box::new(component) as Box<_>)
-            }),
-            rust_type_id: TypeId::of::<T>(),
-            rust_type_path: std::any::type_name::<T>(),
+            prepare: Box::new(move |_context| prepare()),
             may_touch_asset_server: false,
         }
     }
 
     /// Defers component preparation that may resolve an asset through the apply context.
-    pub fn with_asset_server<T>(
+    pub fn with_asset_server(
         prepare: impl FnOnce(&mut ComponentApplyContext) -> Result<T, ComponentCodecError>
         + Send
         + 'static,
-    ) -> Self
-    where
-        T: Component,
-    {
+    ) -> Self {
         Self {
-            prepare: Box::new(move |context| {
-                prepare(context).map(|component| Box::new(component) as Box<_>)
-            }),
-            rust_type_id: TypeId::of::<T>(),
-            rust_type_path: std::any::type_name::<T>(),
+            prepare: Box::new(prepare),
             may_touch_asset_server: true,
         }
     }
 
-    pub fn insert<T>(component: T) -> Self
-    where
-        T: Component,
-    {
+    pub fn insert(component: T) -> Self {
         Self {
-            prepare: Box::new(move |_context| {
-                Ok(Box::new(component) as Box<dyn PreparedComponentValue>)
-            }),
-            rust_type_id: TypeId::of::<T>(),
-            rust_type_path: std::any::type_name::<T>(),
+            prepare: Box::new(move |_context| Ok(component)),
             may_touch_asset_server: false,
         }
     }
 
-    pub(crate) fn bind(
-        self,
-        component_id: ComponentTypeId,
-        rust_type_id: TypeId,
-        rust_type_path: &'static str,
-        register_component: fn(&mut World) -> ComponentId,
-        validate_component: fn(
-            &World,
-            Option<Entity>,
-        ) -> Result<(), PersistentComponentMetadataError>,
-    ) -> Result<PreparedComponent, ComponentCodecError> {
-        if self.rust_type_id != rust_type_id {
-            return Err(ComponentCodecError::PreparedComponentTypeMismatch {
-                expected: rust_type_path,
-                actual: self.rust_type_path,
-            });
+    pub(crate) fn erase(self) -> ErasedPreparedComponentCandidate {
+        ErasedPreparedComponentCandidate {
+            prepare: Box::new(move |context| {
+                (self.prepare)(context)
+                    .map(|component| Box::new(component) as Box<dyn PreparedComponentValue>)
+            }),
+            register_component: nara_ecs::__private::register_persistent_component::<T>,
+            validate_component: validate_registered_persistent_component_apply::<T>,
+            may_touch_asset_server: self.may_touch_asset_server,
         }
-        Ok(PreparedComponent {
+    }
+}
+
+pub(crate) struct ErasedPreparedComponentCandidate {
+    prepare: Box<PrepareComponentFn>,
+    register_component: fn(&mut World) -> ComponentId,
+    validate_component: fn(&World, Option<Entity>) -> Result<(), PersistentComponentMetadataError>,
+    may_touch_asset_server: bool,
+}
+
+impl ErasedPreparedComponentCandidate {
+    pub(crate) fn bind(self, component_id: ComponentTypeId) -> PreparedComponent {
+        PreparedComponent {
             prepare: self.prepare,
             binding: PreparedComponentBinding {
                 component_id,
-                register_component,
-                validate_component,
+                register_component: self.register_component,
+                validate_component: self.validate_component,
             },
             may_touch_asset_server: self.may_touch_asset_server,
-        })
+        }
     }
 }
 
@@ -894,10 +879,7 @@ pub fn validate_declared_persistent_apply_targets(
 
 #[cfg(test)]
 mod persistent_apply_contract_tests {
-    use std::{
-        any::TypeId,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use nara_ecs::{
         Component, Resource, World,
@@ -924,20 +906,10 @@ mod persistent_apply_contract_tests {
     #[derive(Resource, Default)]
     struct SupportCanary(usize);
 
-    fn register_test_component<T: Component>(world: &mut World) -> ComponentId {
-        world.register_component::<T>()
-    }
-
     fn bound_component<T: Component>(component: T, stable_id: &str) -> PreparedComponent {
         PreparedComponentCandidate::insert(component)
-            .bind(
-                ComponentTypeId::new(stable_id),
-                TypeId::of::<T>(),
-                std::any::type_name::<T>(),
-                register_test_component::<T>,
-                validate_registered_persistent_component_apply::<T>,
-            )
-            .unwrap()
+            .erase()
+            .bind(ComponentTypeId::new(stable_id))
     }
 
     fn direct_probe() -> PreparedComponent {
@@ -1247,14 +1219,8 @@ mod persistent_apply_contract_tests {
             Ok(DirectProbe)
         });
         let prepared = candidate
-            .bind(
-                ComponentTypeId::new("nara.test.AssetTouchProbe"),
-                TypeId::of::<DirectProbe>(),
-                std::any::type_name::<DirectProbe>(),
-                register_test_component::<DirectProbe>,
-                validate_registered_persistent_component_apply::<DirectProbe>,
-            )
-            .unwrap();
+            .erase()
+            .bind(ComponentTypeId::new("nara.test.AssetTouchProbe"));
 
         let error = prepared.apply(&mut world, target).unwrap_err();
 

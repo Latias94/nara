@@ -234,9 +234,7 @@ impl PreparedScenePublication {
                     world.insert_resource(domain);
                     instance
                 }
-                None => world.resource_scope(|_world, mut domain: Mut<WorldIdentityDomain>| {
-                    registration.commit(&mut domain)
-                }),
+                None => registration.commit(&mut world.resource_mut::<WorldIdentityDomain>()),
             },
             PreparedSceneIdentityCommit::Replace { replacement } => {
                 let mut domain = world

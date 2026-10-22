@@ -10,7 +10,7 @@ use nara_ecs::{
         validate_registered_persistent_component_apply, validate_resource_insertion,
         validate_resource_scope,
     },
-    Component, Entity, Mut, Resource, World, prepare_lifecycle_free_despawn,
+    Component, Entity, Resource, World, prepare_lifecycle_free_despawn,
     world::WorldId,
 };
 use thiserror::Error;
@@ -219,16 +219,11 @@ pub fn validate_identity_support_topology(
         })
         .map_err(|_| IdentitySupportTopologyError::LifecycleConflict)?;
     for target in targets {
-        let entity = world
+        world
             .get_entity(target)
             .map_err(|_| IdentitySupportTopologyError::TargetMissing)?;
-        if entity.contains::<IdentityEntityMarker>() {
-            validate_registered_persistent_component_apply::<IdentityEntityMarker>(
-                world,
-                Some(target),
-            )
+        validate_registered_persistent_component_apply::<IdentityEntityMarker>(world, Some(target))
             .map_err(|_| IdentitySupportTopologyError::LifecycleConflict)?;
-        }
     }
     Ok(())
 }
@@ -237,7 +232,7 @@ pub fn validate_identity_support_topology(
 mod identity_support_topology_tests {
     use nara_ecs::{
         Resource,
-        lifecycle::{Add, Despawn},
+        lifecycle::{Add, Despawn, Insert},
         observer::{Observer, On},
         system::ResMut,
     };
@@ -294,6 +289,45 @@ mod identity_support_topology_tests {
 
         assert_eq!(world.iter_entities().count(), baseline_entities);
         assert_eq!(world.resource::<SupportCanary>().0, 0);
+    }
+
+    #[test]
+    fn first_adoption_rejects_target_add_and_insert_observers_before_marker_insertion() {
+        for insert in [false, true] {
+            let mut world = World::new();
+            world.init_resource::<SupportCanary>();
+            let domain =
+                WorldIdentityDomain::new(&world, WorldIdentityDomainSettings::default()).unwrap();
+            world.insert_resource(domain);
+            let target = world.spawn_empty().id();
+            let marker = world.register_component::<IdentityEntityMarker>();
+            let observer = if insert {
+                Observer::new(|_: On<Insert<()>>, mut canary: ResMut<SupportCanary>| {
+                    canary.0 += 1;
+                })
+                .with_entity(target)
+                .with_component(marker)
+            } else {
+                Observer::new(|_: On<Add<()>>, mut canary: ResMut<SupportCanary>| {
+                    canary.0 += 1;
+                })
+                .with_entity(target)
+            };
+            world.spawn(observer);
+            world.flush();
+            let before = world.resource::<WorldIdentityDomain>().stats();
+            let entities = world.iter_entities().count();
+
+            assert_eq!(
+                adopt_identity_entity(&mut world, target),
+                Err(IdentityDomainError::LifecycleConflict)
+            );
+
+            assert!(world.get::<IdentityEntityMarker>(target).is_none());
+            assert_eq!(world.resource::<WorldIdentityDomain>().stats(), before);
+            assert_eq!(world.iter_entities().count(), entities);
+            assert_eq!(world.resource::<SupportCanary>().0, 0);
+        }
     }
 }
 
@@ -702,61 +736,29 @@ impl WorldIdentityDomain {
         }
     }
 
+    /// Adopts an entity for a detached domain, such as an unpublished Scene candidate.
+    ///
+    /// Use [`adopt_identity_entity`] when the domain is installed in the World.
     pub fn adopt_entity(
         &self,
         world: &mut World,
         entity: Entity,
     ) -> Result<WorldEntityToken, IdentityDomainError> {
         self.validate_world_binding(world)?;
-        validate_identity_support_topology(world, [entity])
-            .map_err(|_| IdentityDomainError::LifecycleConflict)?;
-        let mut entity_mut = world
-            .get_entity_mut(entity)
-            .map_err(|_| IdentityDomainError::EntityTokenNotAlive)?;
-        let incarnation = if let Some(marker) = entity_mut.get::<IdentityEntityMarker>() {
-            if marker.domain != self.id {
-                return Err(IdentityDomainError::EntityTokenNotOwned);
-            }
-            marker.incarnation
-        } else {
-            let incarnation = allocate_runtime_entity_incarnation()?;
-            entity_mut.insert(IdentityEntityMarker {
-                domain: self.id,
-                incarnation,
-            });
-            incarnation
-        };
-        Ok(WorldEntityToken {
-            domain: self.id,
-            entity,
-            incarnation,
-        })
+        validate_identity_adoption(world, entity)?;
+        adopt_entity_in_domain(world, self.id, entity)
     }
 
+    /// Registers a Scene instance in a detached domain after complete preflight.
+    ///
+    /// Use [`register_scene_instance`] when the domain is installed in the World.
     pub fn register_new_scene_instance(
         &mut self,
         world: &World,
         entries: impl IntoIterator<Item = (SceneEntityId, WorldEntityToken)>,
     ) -> Result<SpawnedSceneInstance, IdentityDomainError> {
-        self.validate_world_binding(world)?;
-        let instance = SceneInstanceId::from_non_zero(
-            self.scene_instance_allocator
-                .peek()
-                .map_err(|_| IdentityDomainError::SceneInstanceExhausted)?,
-        );
-        let maximum_entries = self.scene_entry_capacity(instance)?;
-        let entries = collect_scene_entries(
-            entries,
-            maximum_entries,
-            self.settings.lifetime_claims.get(),
-        )?;
-        self.preflight_scene_instance(world, instance, &entries)?;
-        let allocated = self
-            .scene_instance_allocator
-            .allocate()
-            .expect("scene instance allocation was preflighted");
-        debug_assert_eq!(allocated, instance.non_zero());
-        Ok(self.commit_scene_instance(instance, entries))
+        let prepared = self.prepare_scene_instance_registration(world, entries)?;
+        Ok(prepared.commit(self))
     }
 
     pub fn preflight_scene_instance_registration(
@@ -780,6 +782,14 @@ impl WorldIdentityDomain {
         world: &World,
         entries: &[(SceneEntityId, WorldEntityToken)],
     ) -> Result<PreparedSceneInstanceRegistration, IdentityDomainError> {
+        self.prepare_scene_instance_registration(world, entries.iter().cloned())
+    }
+
+    fn prepare_scene_instance_registration(
+        &self,
+        world: &World,
+        entries: impl IntoIterator<Item = (SceneEntityId, WorldEntityToken)>,
+    ) -> Result<PreparedSceneInstanceRegistration, IdentityDomainError> {
         self.validate_world_binding(world)?;
         let instance = SceneInstanceId::from_non_zero(
             self.scene_instance_allocator
@@ -788,7 +798,7 @@ impl WorldIdentityDomain {
         );
         let maximum_entries = self.scene_entry_capacity(instance)?;
         let entries = collect_scene_entries(
-            entries.iter().cloned(),
+            entries,
             maximum_entries,
             self.settings.lifetime_claims.get(),
         )?;
@@ -864,28 +874,26 @@ impl WorldIdentityDomain {
     ) -> Result<PreparedSceneInstanceReplacement, IdentityDomainError> {
         validate_identity_support_topology(world, entries.iter().map(|(_, token)| token.entity()))
             .map_err(|_| IdentityDomainError::LifecycleConflict)?;
-        world.resource_scope(|world, domain: Mut<WorldIdentityDomain>| {
-            domain.validate_world_binding(world)?;
-            let instance = SceneInstanceId::from_non_zero(
-                domain
-                    .scene_instance_allocator
-                    .peek()
-                    .map_err(|_| IdentityDomainError::SceneInstanceExhausted)?,
-            );
-            let maximum_entries = domain.scene_entry_capacity(instance)?;
-            let entries = collect_scene_entries(
-                entries.iter().cloned(),
-                maximum_entries,
-                domain.settings.lifetime_claims.get(),
-            )?;
-            domain.preflight_scene_instance(world, instance, &entries)?;
-            let retirement = domain.prepare_scene_instance_retirement(world, current, cause)?;
-            Ok(PreparedSceneInstanceReplacement {
-                domain: domain.id,
-                instance,
-                entries,
-                retirement,
-            })
+        let domain = installed_domain(world)?;
+        let instance = SceneInstanceId::from_non_zero(
+            domain
+                .scene_instance_allocator
+                .peek()
+                .map_err(|_| IdentityDomainError::SceneInstanceExhausted)?,
+        );
+        let maximum_entries = domain.scene_entry_capacity(instance)?;
+        let entries = collect_scene_entries(
+            entries.iter().cloned(),
+            maximum_entries,
+            domain.settings.lifetime_claims.get(),
+        )?;
+        domain.preflight_scene_instance(world, instance, &entries)?;
+        let retirement = domain.prepare_scene_instance_retirement(world, current, cause)?;
+        Ok(PreparedSceneInstanceReplacement {
+            domain: domain.id,
+            instance,
+            entries,
+            retirement,
         })
     }
 
@@ -898,12 +906,11 @@ impl WorldIdentityDomain {
     ) -> Result<PreparedSceneInstanceRetirement, IdentityDomainError> {
         validate_identity_support_topology(world, std::iter::empty())
             .map_err(|_| IdentityDomainError::LifecycleConflict)?;
-        world.resource_scope(|world, domain: Mut<WorldIdentityDomain>| {
-            let retirement = domain.prepare_scene_instance_retirement(world, current, cause)?;
-            Ok(PreparedSceneInstanceRetirement {
-                domain: domain.id,
-                retirement,
-            })
+        let domain = installed_domain(world)?;
+        let retirement = domain.prepare_scene_instance_retirement(world, current, cause)?;
+        Ok(PreparedSceneInstanceRetirement {
+            domain: domain.id,
+            retirement,
         })
     }
 
@@ -1077,16 +1084,29 @@ impl WorldIdentityDomain {
         Ok((target, remap))
     }
 
+    /// Registers a persistent axis in a detached domain.
+    ///
+    /// Use [`register_persistent_identity`] when the domain is installed in the World.
     pub fn register_persistent(
         &mut self,
         world: &World,
         token: WorldEntityToken,
         persistent: PersistentRuntimeReference,
     ) -> Result<WorldEntityLocator, IdentityDomainError> {
+        let reference = self.prepare_persistent_registration(world, token, &persistent)?;
+        Ok(self.commit_persistent_registration(token, persistent, reference))
+    }
+
+    fn prepare_persistent_registration(
+        &self,
+        world: &World,
+        token: WorldEntityToken,
+        persistent: &PersistentRuntimeReference,
+    ) -> Result<RuntimeEntityReference, IdentityDomainError> {
         self.validate_live_token(world, token)?;
         let entity = token.entity();
         let reference = RuntimeEntityReference::persistent(persistent.clone(), token.incarnation());
-        self.preflight_persistent_binding(&persistent, &reference)?;
+        self.preflight_persistent_binding(persistent, &reference)?;
         if self
             .identities_by_entity
             .get(&entity)
@@ -1096,6 +1116,16 @@ impl WorldIdentityDomain {
                 axis: EntityIdentityAxis::Persistent,
             });
         }
+        Ok(reference)
+    }
+
+    fn commit_persistent_registration(
+        &mut self,
+        token: WorldEntityToken,
+        persistent: PersistentRuntimeReference,
+        reference: RuntimeEntityReference,
+    ) -> WorldEntityLocator {
+        let entity = token.entity();
         self.persistent_records.insert(
             persistent,
             PersistentLogicalRecord::Active {
@@ -1108,7 +1138,7 @@ impl WorldIdentityDomain {
             .entry(entity)
             .or_default()
             .persistent = Some(reference.clone());
-        Ok(WorldEntityLocator::new(self.id, reference))
+        WorldEntityLocator::new(self.id, reference)
     }
 
     #[must_use]
@@ -1385,6 +1415,9 @@ impl WorldIdentityDomain {
         self.prepare_retirement(Some(instance.instance), entities, cause)
     }
 
+    /// Retires an entity in a detached domain.
+    ///
+    /// Use [`retire_identity_entity`] when the domain is installed in the World.
     pub fn retire_entity(
         &mut self,
         world: &mut World,
@@ -1885,6 +1918,15 @@ impl WorldIdentityDomain {
         world: &mut World,
         retirement: &PreparedRetirement,
     ) -> Result<(), IdentityDomainError> {
+        let live_entities = self.validate_retirement_markers(world, retirement)?;
+        revoke_retirement_markers(world, &live_entities)
+    }
+
+    fn validate_retirement_markers(
+        &self,
+        world: &World,
+        retirement: &PreparedRetirement,
+    ) -> Result<Vec<Entity>, IdentityDomainError> {
         let live_entities = retirement
             .entities
             .iter()
@@ -1904,14 +1946,12 @@ impl WorldIdentityDomain {
                 return Err(IdentityDomainError::StaleRegistration);
             }
         }
-        validate_identity_support_topology(world, live_entities.iter().copied())
-            .map_err(|_| IdentityDomainError::LifecycleConflict)?;
-        for entity in live_entities {
-            world.entity_mut(entity).remove::<IdentityEntityMarker>();
-        }
-        Ok(())
+        Ok(live_entities)
     }
 
+    /// Retires an entity in a detached domain with an explicit logical disposition.
+    ///
+    /// Use [`retire_identity_entity_with_disposition`] for the installed domain.
     pub fn retire_entity_with_disposition(
         &mut self,
         world: &mut World,
@@ -1919,6 +1959,20 @@ impl WorldIdentityDomain {
         cause: TombstoneCause,
         disposition: PersistentRetirementDisposition,
     ) -> Result<(), IdentityDomainError> {
+        let retirement =
+            self.prepare_entity_retirement_with_disposition(world, token, cause, disposition)?;
+        self.revoke_retirement_markers(world, &retirement)?;
+        self.commit_retirement(retirement);
+        Ok(())
+    }
+
+    fn prepare_entity_retirement_with_disposition(
+        &self,
+        world: &World,
+        token: WorldEntityToken,
+        cause: TombstoneCause,
+        disposition: PersistentRetirementDisposition,
+    ) -> Result<PreparedRetirement, IdentityDomainError> {
         self.validate_world_binding(world)?;
         self.validate_token_domain(token)?;
         let identity = self
@@ -1935,9 +1989,7 @@ impl WorldIdentityDomain {
         }
         let mut retirement = self.prepare_retirement(None, vec![token.entity()], cause)?;
         retirement.persistent_disposition = disposition;
-        self.revoke_retirement_markers(world, &retirement)?;
-        self.commit_retirement(retirement);
-        Ok(())
+        Ok(retirement)
     }
 
     pub fn delete_unloaded_persistent(
@@ -2078,17 +2130,15 @@ pub fn prepare_exact_entity_retirement(
     reference: &RuntimeEntityReference,
     cause: TombstoneCause,
 ) -> Result<PreparedEntityRetirement, IdentityDomainError> {
-    let prepared = world.resource_scope(|world, domain: Mut<WorldIdentityDomain>| {
-        let retirement =
-            domain.prepare_entity_retirement_with_reference(world, entity, reference, cause)?;
-        Ok::<_, IdentityDomainError>(PreparedEntityRetirement {
-            domain: domain.id,
-            retirement,
-        })
-    })?;
     validate_identity_support_topology(world, [entity])
         .map_err(|_| IdentityDomainError::LifecycleConflict)?;
-    Ok(prepared)
+    let domain = installed_domain(world)?;
+    let retirement =
+        domain.prepare_entity_retirement_with_reference(world, entity, reference, cause)?;
+    Ok(PreparedEntityRetirement {
+        domain: domain.id,
+        retirement,
+    })
 }
 
 /// Validates that every additional runtime retirement token belongs to this World and has no
@@ -2178,6 +2228,127 @@ pub fn spawn_identity_entity(world: &mut World) -> Result<WorldEntityToken, Iden
         entity,
         incarnation,
     })
+}
+
+/// Adopts a live entity using the identity domain installed in `world`.
+///
+/// The domain remains installed throughout admission and marker insertion. Adopting an entity
+/// that already belongs to the domain returns its current token without minting an incarnation.
+pub fn adopt_identity_entity(
+    world: &mut World,
+    entity: Entity,
+) -> Result<WorldEntityToken, IdentityDomainError> {
+    validate_identity_adoption(world, entity)?;
+    let domain = installed_domain(world)?.id;
+    adopt_entity_in_domain(world, domain, entity)
+}
+
+fn validate_identity_adoption(world: &mut World, entity: Entity) -> Result<(), IdentityDomainError> {
+    validate_identity_support_topology(world, [entity]).map_err(|error| match error {
+        IdentitySupportTopologyError::TargetMissing => IdentityDomainError::EntityTokenNotAlive,
+        IdentitySupportTopologyError::LifecycleConflict => IdentityDomainError::LifecycleConflict,
+    })
+}
+
+fn adopt_entity_in_domain(
+    world: &mut World,
+    domain: WorldIdentityDomainId,
+    entity: Entity,
+) -> Result<WorldEntityToken, IdentityDomainError> {
+    let mut target = world.entity_mut(entity);
+    let incarnation = if let Some(marker) = target.get::<IdentityEntityMarker>() {
+        if marker.domain != domain {
+            return Err(IdentityDomainError::EntityTokenNotOwned);
+        }
+        marker.incarnation
+    } else {
+        let incarnation = allocate_runtime_entity_incarnation()?;
+        target.insert(IdentityEntityMarker { domain, incarnation });
+        incarnation
+    };
+    Ok(WorldEntityToken {
+        domain,
+        entity,
+        incarnation,
+    })
+}
+
+/// Registers a fresh Scene instance without extracting the installed domain.
+pub fn register_scene_instance(
+    world: &mut World,
+    entries: impl IntoIterator<Item = (SceneEntityId, WorldEntityToken)>,
+) -> Result<SpawnedSceneInstance, IdentityDomainError> {
+    let prepared = installed_domain(world)?.prepare_scene_instance_registration(world, entries)?;
+    Ok(prepared.commit(&mut world.resource_mut::<WorldIdentityDomain>()))
+}
+
+/// Registers a persistent axis after shared World/domain preflight, then publishes only indexes.
+pub fn register_persistent_identity(
+    world: &mut World,
+    token: WorldEntityToken,
+    persistent: PersistentRuntimeReference,
+) -> Result<WorldEntityLocator, IdentityDomainError> {
+    let reference =
+        installed_domain(world)?.prepare_persistent_registration(world, token, &persistent)?;
+    Ok(world
+        .resource_mut::<WorldIdentityDomain>()
+        .commit_persistent_registration(token, persistent, reference))
+}
+
+/// Retires every semantic axis and revokes the token, leaving the runtime entity alive.
+pub fn retire_identity_entity(
+    world: &mut World,
+    token: WorldEntityToken,
+    cause: TombstoneCause,
+) -> Result<(), IdentityDomainError> {
+    retire_identity_entity_with_disposition(
+        world,
+        token,
+        cause,
+        PersistentRetirementDisposition::Unload,
+    )
+}
+
+/// Retires every semantic axis with an explicit persistent logical disposition.
+///
+/// Preparation borrows the installed domain immutably. Lifecycle admission precedes marker
+/// removal, followed by one short mutable borrow to publish the prepared index transition.
+pub fn retire_identity_entity_with_disposition(
+    world: &mut World,
+    token: WorldEntityToken,
+    cause: TombstoneCause,
+    disposition: PersistentRetirementDisposition,
+) -> Result<(), IdentityDomainError> {
+    world.flush();
+    let domain = installed_domain(world)?;
+    let retirement =
+        domain.prepare_entity_retirement_with_disposition(world, token, cause, disposition)?;
+    let live_entities = domain.validate_retirement_markers(world, &retirement)?;
+    revoke_retirement_markers(world, &live_entities)?;
+    world
+        .resource_mut::<WorldIdentityDomain>()
+        .commit_retirement(retirement);
+    Ok(())
+}
+
+fn revoke_retirement_markers(
+    world: &mut World,
+    live_entities: &[Entity],
+) -> Result<(), IdentityDomainError> {
+    validate_identity_support_topology(world, live_entities.iter().copied())
+        .map_err(|_| IdentityDomainError::LifecycleConflict)?;
+    for &entity in live_entities {
+        world.entity_mut(entity).remove::<IdentityEntityMarker>();
+    }
+    Ok(())
+}
+
+fn installed_domain(world: &World) -> Result<&WorldIdentityDomain, IdentityDomainError> {
+    let domain = world
+        .get_resource::<WorldIdentityDomain>()
+        .ok_or(IdentityDomainError::WorldDomainUnavailable)?;
+    domain.validate_world_binding(world)?;
+    Ok(domain)
 }
 
 fn collect_scene_entries(
@@ -2304,7 +2475,7 @@ pub enum IdentityDomainError {
     StaleRegistration,
     #[error("identity retirement sequence is exhausted")]
     RetirementSequenceExhausted,
-    #[error("identity replacement lifecycle topology is incompatible with atomic retirement")]
+    #[error("identity lifecycle topology is incompatible with atomic publication or retirement")]
     LifecycleConflict,
 }
 

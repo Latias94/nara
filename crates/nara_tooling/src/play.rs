@@ -871,14 +871,6 @@ fn with_codec_error(
         ComponentCodecError::AssetServerChanged => {
             diagnostic::with_public_identifier(entry, "codec_reason", "asset_server_changed")
         }
-        ComponentCodecError::PreparedComponentTypeMismatch { .. } => diagnostic::with_secret(
-            diagnostic::with_public_identifier(
-                entry,
-                "codec_reason",
-                "prepared_component_type_mismatch",
-            ),
-            "codec_detail",
-        ),
         ComponentCodecError::PersistentApplyReceiptMissing => diagnostic::with_public_identifier(
             entry,
             "codec_reason",

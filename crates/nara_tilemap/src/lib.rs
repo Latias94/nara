@@ -635,10 +635,7 @@ pub fn register_tilemap_components(
                 )))
             }
         },
-        |world, entity, context| {
-            let Some(tilemap) = world.get::<Tilemap>(entity) else {
-                return Ok(None);
-            };
+        |tilemap, world, context| {
             let tileset = match tilemap.tileset {
                 Some(handle) => Some(asset_ref_value(
                     &AssetRef::from_handle_with_policy(
@@ -655,7 +652,7 @@ pub fn register_tilemap_components(
                 None => None,
             };
 
-            Ok(Some(ComponentValue::map([
+            Ok(ComponentValue::map([
                 ("tile_size", vec2_value(tilemap.tile_size)?),
                 ("layer", ComponentValue::I64(i64::from(tilemap.layer.index))),
                 ("sort_key", ComponentValue::I64(i64::from(tilemap.sort_key))),
@@ -669,7 +666,7 @@ pub fn register_tilemap_components(
                 ),
                 ("tileset", tileset.unwrap_or(ComponentValue::Null)),
                 ("cells", cells_value(tilemap)?),
-            ])))
+            ]))
         },
     )?;
     Ok(())

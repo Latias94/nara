@@ -7,7 +7,8 @@ use nara_identity::{
     EntityLookup, EntityReference, IdentityDomainError, PersistentRetirementDisposition,
     PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
     RuntimeEntityReference, SceneEntityId, SpawnedSceneInstance, TombstoneCause,
-    WorldIdentityDomain, spawn_identity_entity,
+    WorldIdentityDomain, register_persistent_identity, retire_identity_entity,
+    retire_identity_entity_with_disposition, spawn_identity_entity,
 };
 use nara_reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId};
 use nara_scene::{
@@ -306,28 +307,22 @@ fn a_persistent_npc_rematerializes_without_reloading_its_scene_owner() {
         saved = ron::from_str(&saved_bytes).unwrap();
         let token = spawn_identity_entity(&mut world).unwrap();
         world.entity_mut(token.entity()).insert(saved.state.clone());
-        let locator = world.resource_scope(
-            |world, mut domain: bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
-                let locator = domain
-                    .register_persistent(world, token, saved.identity.clone())
-                    .unwrap();
-                if let Some(previous) = &previous_runtime {
-                    assert_eq!(domain.lookup(world, previous), EntityLookup::StaleRuntime);
-                }
-                assert_eq!(domain.stats().persistent_logical_records, 2);
-                assert_eq!(domain.stats().lifetime_claims, scene_claims);
-                assert_eq!(
-                    domain.resolve_entity_reference(
-                        world,
-                        &EntityReference::Persistent {
-                            entity: saved.identity.clone()
-                        },
-                        None
-                    ),
-                    EntityLookup::Resolved(token.entity())
-                );
-                locator
-            },
+        let locator = register_persistent_identity(&mut world, token, saved.identity.clone()).unwrap();
+        let domain = world.resource::<WorldIdentityDomain>();
+        if let Some(previous) = &previous_runtime {
+            assert_eq!(domain.lookup(&world, previous), EntityLookup::StaleRuntime);
+        }
+        assert_eq!(domain.stats().persistent_logical_records, 2);
+        assert_eq!(domain.stats().lifetime_claims, scene_claims);
+        assert_eq!(
+            domain.resolve_entity_reference(
+                &world,
+                &EntityReference::Persistent {
+                    entity: saved.identity.clone()
+                },
+                None
+            ),
+            EntityLookup::Resolved(token.entity())
         );
         assert!(matches!(
             instance.resolve(&world, &SceneEntityId::new("actor-instance").unwrap()),
@@ -337,22 +332,18 @@ fn a_persistent_npc_rematerializes_without_reloading_its_scene_owner() {
         assert_eq!(state.visits, expected_visit);
         state.visits += 1;
         saved.state = state.clone();
-        world.resource_scope(
-            |world, mut domain: bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
-                domain
-                    .retire_entity(world, token, TombstoneCause::Unloaded)
-                    .unwrap();
-                assert_eq!(
-                    domain.resolve_entity_reference(
-                        world,
-                        &EntityReference::Persistent {
-                            entity: saved.identity.clone()
-                        },
-                        None
-                    ),
-                    EntityLookup::Unloaded
-                );
-            },
+        retire_identity_entity(&mut world, token, TombstoneCause::Unloaded).unwrap();
+        assert_eq!(
+            world
+                .resource::<WorldIdentityDomain>()
+                .resolve_entity_reference(
+                    &world,
+                    &EntityReference::Persistent {
+                        entity: saved.identity.clone()
+                    },
+                    None
+                ),
+            EntityLookup::Unloaded
         );
         assert!(world.despawn(token.entity()));
         previous_runtime = Some(locator.entity().clone());
@@ -425,13 +416,7 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
             world
                 .entity_mut(token.entity())
                 .insert(NpcState { visits: 0 });
-            let first = world.resource_scope(
-                |world, mut domain: bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
-                    domain
-                        .register_persistent(world, token, persistent.clone())
-                        .unwrap()
-                },
-            );
+            let first = register_persistent_identity(&mut world, token, persistent.clone()).unwrap();
             assert_eq!(
                 world
                     .resource::<WorldIdentityDomain>()
@@ -452,13 +437,7 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
                 &durable_links_value(&reference)
             );
 
-            world.resource_scope(
-                |world, mut domain: bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
-                    domain
-                        .retire_entity(world, token, TombstoneCause::Unloaded)
-                        .unwrap();
-                },
-            );
+            retire_identity_entity(&mut world, token, TombstoneCause::Unloaded).unwrap();
             assert_eq!(
                 apply_npc_visit(&mut world, first.entity()),
                 Err(EntityLookup::Unloaded)
@@ -538,13 +517,8 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
             world
                 .entity_mut(replacement.entity())
                 .insert(NpcState { visits: 10 });
-            let current = world.resource_scope(
-                |world, mut domain: bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
-                    domain
-                        .register_persistent(world, replacement, persistent.clone())
-                        .unwrap()
-                },
-            );
+            let current =
+                register_persistent_identity(&mut world, replacement, persistent.clone()).unwrap();
             assert_eq!(
                 apply_npc_visit(&mut world, first.entity()),
                 Err(EntityLookup::StaleRuntime)
@@ -558,18 +532,13 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
                 world.get::<NpcState>(replacement.entity()).unwrap().visits,
                 11
             );
-            world.resource_scope(
-                |world, mut domain: bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
-                    domain
-                        .retire_entity_with_disposition(
-                            world,
-                            replacement,
-                            TombstoneCause::Despawned,
-                            PersistentRetirementDisposition::Delete,
-                        )
-                        .unwrap();
-                },
-            );
+            retire_identity_entity_with_disposition(
+                &mut world,
+                replacement,
+                TombstoneCause::Despawned,
+                PersistentRetirementDisposition::Delete,
+            )
+            .unwrap();
             assert_eq!(
                 apply_npc_visit(&mut world, current.entity()),
                 Err(EntityLookup::Deleted)
@@ -602,14 +571,10 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
             );
             assert!(export_scene(&world, &registry).output().is_none());
             let forbidden = spawn_identity_entity(&mut world).unwrap();
-            world.resource_scope(
-                |world, mut domain: bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
-                    assert!(matches!(
-                        domain.register_persistent(world, forbidden, persistent.clone()),
-                        Err(IdentityDomainError::PersistentIdentityDeleted { .. }),
-                    ));
-                },
-            );
+            assert!(matches!(
+                register_persistent_identity(&mut world, forbidden, persistent.clone()),
+                Err(IdentityDomainError::PersistentIdentityDeleted { .. }),
+            ));
         }
     }
 }
@@ -649,11 +614,7 @@ fn spawn_owned_instance(
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let instance = report.instance.unwrap();
     let token = spawn_identity_entity(world).unwrap();
-    world.resource_scope(
-        |world, mut domain: bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
-            domain.register_persistent(world, token, owner).unwrap();
-        },
-    );
+    register_persistent_identity(world, token, owner).unwrap();
     world
         .entity_mut(token.entity())
         .insert(InstanceOwner(instance.clone()));

@@ -296,11 +296,24 @@ runtime registry before materialization.
 
 ### Implemented RGF-U29 Persistent Apply Slice
 
-Persistent codecs produce `PreparedComponentCandidate`, which has no public apply operation. A
-frozen `ComponentRegistry` alone may bind the candidate's stable component identity, Rust type,
-registration function, and target-World validator into `PreparedComponent`. Building registries
-expose no applicable candidate, and compile-fail coverage prevents external construction of the
-bound type.
+Persistent codecs produce `PreparedComponentCandidate<T>`, which has no public apply operation.
+Registration for native component `T` requires a candidate that produces exactly `T`; deferred
+and asset-aware `Send + 'static` owning `FnOnce` closures retain that type relationship until a
+private registry adapter erases them for heterogeneous batches. Registering `T` with a candidate
+for another type is a compile error. The adapter carries the registration function and
+target-World validator for the same `T`, without caller-supplied runtime type proofs.
+
+The registry owns component selection during encoding. Encoders receive the selected `&T` and
+return one `ComponentValue`; only the registry reports component absence. Context-aware encoders
+also receive read-only `World` and asset export context, so resource-dependent references do not
+require repeated component lookup. This does not authorize codecs to mutate the target World.
+
+A frozen `ComponentRegistry` alone may bind the candidate's stable component identity into
+`PreparedComponent`. Building registries expose no applicable candidate, and compile-fail coverage
+prevents external construction of the bound type. Deferred preparation still shares one scratch
+`AssetServer` for the entire batch. A failed later candidate publishes neither earlier components
+nor scratch assets; commit revalidates the target World, lifecycle topology and captured asset
+server baseline before publication. Static component typing does not prove these mutable facts.
 
 Provider validation rejects Scene-capable component types with Bevy required-component metadata or
 intrinsic lifecycle hooks. Each real persistent apply then flushes deferred registration and checks

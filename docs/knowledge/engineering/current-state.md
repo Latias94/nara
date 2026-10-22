@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "51660f8a38cd1b0297b1bd2c11eb982630d4605ab491f54839f234c22b90f5e5"
+source_fingerprint: "a83124695aad8323438159d503c2838c716c6210f1a066a9a61c282eb3e47d4e"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "51660f8a38cd1b0297b1bd2c11eb982630d4605ab491f54839f234c22b9
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `51660f8a38cd1b0297b1bd2c11eb982630d4605ab491f54839f234c22b90f5e5`
-- Immutable records: 837
+- Source fingerprint: `a83124695aad8323438159d503c2838c716c6210f1a066a9a61c282eb3e47d4e`
+- Immutable records: 839
 - Active lane heads: 2
 
 # Active Registrations
@@ -68,6 +68,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [U6 typed codec and U8 identity consumer qualification](verification/2026-10/2026-10-22T191516Z-u6-typed-codec-and-u8-identity-consumer-qualification-0c76d56bc4b040118283f1024fe2b788.md) - Typed registry closure and installed identity operations pass owning suites and the independent durable workflow.
+- **Work Progress**: [Low-level implementation integration checkpoint](progress/2026-10/2026-10-22T190500Z-low-level-implementation-integration-checkpoint-536737a5326142e5b1376e520fb0fe30.md) - U1 U2 U7 U9 committed; owned locks identity typed codecs and spatial/gameplay implementations are being qualified serially.
 - **Verification Evidence**: [U7 facade-aware Bundle and SystemParam extraction](verification/2026-10/2026-10-22T190137Z-u7-facade-aware-bundle-and-systemparam-extraction-f14b220201744f71a90a123e476b1769.md) - Exact Bevy 0.20 extraction and executed renamed-root and renamed-ECS contracts with independent review.
 - **Verification Evidence**: [U9 key allocation admission and finite shortest-arc interpolation](verification/2026-10/2026-10-22T183934Z-u9-key-allocation-admission-and-finite-shortest-arc-interpolation-144afcea6c9846dab566ddcfe1eec9a5.md) - Original allocation and numeric regressions reproduced; shared key visitor and endpoint-oriented interpolation repaired.
 - **Verification Evidence**: [U2 task return and physical running accounting](verification/2026-10/2026-10-22T181737Z-u2-task-return-and-physical-running-accounting-ce30f14820ee4350931de3355bb0c955.md) - Executor return observer replaces local preparation flags; gated disposal and panic regressions qualify its scope.
@@ -78,8 +80,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Workflow refactor recovery and review corrections](verification/2026-10/2026-10-22T114555Z-workflow-refactor-recovery-and-review-corrections-43dfe5955a684108a8a65dab7aee5ed3.md) - Host cleanup regression verified; independent review corrections and remaining acceptance.
 - **Verification Evidence**: [Engine workflow refactor first cohort and remaining work](verification/2026-10/2026-10-22T044816Z-engine-workflow-refactor-first-cohort-and-remaining-work-758750f01ab241ceab2128c8d24183b2.md) - U1 U2 U3 U4 U9 implementation evidence before native Scene and authoring extensions.
 - **Verification Evidence**: [Editor authoring task budget and Bevy feature qualification](verification/2026-10/2026-10-21T071613Z-editor-authoring-task-budget-and-bevy-feature-qualification-b9b5f36f37fd4db8858dfec9a08a3e33.md) - Scoped authoring pool correction, before/after workload evidence, custody tests and Bevy ECS feature trial.
-- **Session Handoff**: [Checkpoint consumer qualified; task execution budget is the next investigation](sessions/2026-10/2026-10-21T032454Z-checkpoint-consumer-qualified-task-execution-budget-is-the-next-investigation-8f7f1c5d412d4b25b72aeb16bd3bab9a.md) - Session Handoff for Checkpoint consumer qualified; task execution budget is the next investigation.
-- **Verification Evidence**: [Atomic API rename under MSRV and portable wasm](verification/2026-10/2026-10-21T032015Z-atomic-api-rename-under-msrv-and-portable-wasm-284fef97fc6c4a208f370262189bdc6b.md) - Verification Evidence for Atomic API rename under MSRV and portable wasm.
 
 # Integration Notes
 

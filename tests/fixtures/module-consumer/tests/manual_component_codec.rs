@@ -1,8 +1,9 @@
 use nara_ecs::{Component, World};
 use nara_reflect::{
-    ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentApplyBatch, ComponentCapability, ComponentCodecError, ComponentFieldId,
+    ComponentFieldPath, ComponentFieldSchema, ComponentRegistry, ComponentRegistryError,
+    ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    PreparedComponentCandidate,
 };
 
 #[test]
@@ -106,4 +107,193 @@ fn documented_manual_codec_round_trips_through_the_public_registry() {
         .apply(&mut world, restored)
         .expect("encoded native value should decode and apply again");
     assert_eq!(world.get::<Health>(restored).unwrap().current, 17);
+}
+
+#[derive(Component)]
+struct Portrait(nara_asset::Handle<String>);
+
+#[derive(Component)]
+struct Dialogue {
+    portrait: nara_asset::Handle<String>,
+    text: String,
+}
+
+fn asset_codec_schema(id: &str) -> ComponentSchema {
+    ComponentSchema::new(ComponentTypeId::new(id), id, ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("asset"),
+                "Asset",
+                ComponentFieldPath::from_fields(["asset"]),
+                ComponentValueKind::AssetRef,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+            .with_capability(ComponentCapability::AssetRef),
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("text"),
+                "Text",
+                ComponentFieldPath::from_fields(["text"]),
+                ComponentValueKind::String,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+        ])
+}
+
+fn asset_codec_value(text: &str) -> ComponentValue {
+    ComponentValue::map([
+        (
+            "asset",
+            ComponentValue::map([
+                ("kind", ComponentValue::String("path".to_owned())),
+                (
+                    "value",
+                    ComponentValue::String("portraits/hero.txt".to_owned()),
+                ),
+            ]),
+        ),
+        ("text", ComponentValue::String(text.to_owned())),
+    ])
+}
+
+fn asset_codec_registry() -> ComponentRegistry {
+    use nara_asset::{AssetRef, AssetServer};
+
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_persistent_component_codec_with_context::<Portrait, _, _>(
+            asset_codec_schema("example.Portrait"),
+            |value, context| {
+                let asset = AssetRef::path(value.field("asset")?.field_str("value")?)
+                    .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
+                if let Some(handle) = context.resolve_asset_ref::<String>(&asset) {
+                    return handle
+                        .map(|handle| PreparedComponentCandidate::insert(Portrait(handle)))
+                        .map_err(|error| ComponentCodecError::Message(error.to_string()));
+                }
+                Ok(PreparedComponentCandidate::with_asset_server(
+                    move |context| {
+                        context
+                            .resolve_asset_ref::<String>(&asset)
+                            .map(Portrait)
+                            .map_err(|error| ComponentCodecError::Message(error.to_string()))
+                    },
+                ))
+            },
+            |portrait, world, context| {
+                let asset = AssetRef::from_handle_with_policy(
+                    world.resource::<AssetServer>(),
+                    portrait.0,
+                    context.asset_ref_export_policy(),
+                )
+                .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
+                assert_eq!(asset, AssetRef::path("portraits/hero.txt").unwrap());
+                Ok(asset_codec_value("portrait"))
+            },
+        )
+        .unwrap();
+    registry
+        .register_persistent_component_codec_with_context::<Dialogue, _, _>(
+            asset_codec_schema("example.Dialogue"),
+            |value, _context| {
+                let asset = AssetRef::path(value.field("asset")?.field_str("value")?)
+                    .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
+                let text = value.field_str("text")?.to_owned().into_boxed_str();
+                Ok(PreparedComponentCandidate::with_asset_server(
+                    move |context| {
+                        let portrait = context
+                            .resolve_asset_ref::<String>(&asset)
+                            .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
+                        if &*text == "reject" {
+                            return Err(ComponentCodecError::invalid_field(
+                                "text",
+                                "accepted dialogue",
+                            ));
+                        }
+                        Ok(Dialogue {
+                            portrait,
+                            text: text.into_string(),
+                        })
+                    },
+                ))
+            },
+            |dialogue, world, context| {
+                let asset = AssetRef::from_handle_with_policy(
+                    world.resource::<AssetServer>(),
+                    dialogue.portrait,
+                    context.asset_ref_export_policy(),
+                )
+                .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
+                assert_eq!(asset, AssetRef::path("portraits/hero.txt").unwrap());
+                Ok(asset_codec_value(&dialogue.text))
+            },
+        )
+        .unwrap();
+    registry.freeze().unwrap();
+    registry
+}
+
+#[test]
+fn typed_asset_codecs_own_inputs_and_share_one_batch_asset_server() {
+    use nara_asset::AssetServer;
+
+    let registry = asset_codec_registry();
+    for eager_decode in [false, true] {
+        for fail in [false, true] {
+            let mut world = World::new();
+            let target = world.spawn_empty().id();
+            let mut batch = ComponentApplyBatch::from_world(&world);
+            let portrait_id = ComponentTypeId::new("example.Portrait");
+            let dialogue_id = ComponentTypeId::new("example.Dialogue");
+            let portrait_value = asset_codec_value("portrait");
+            let portrait = if eager_decode {
+                batch.with_decode_context(None, |context| {
+                    registry.preflight_component_with_context(
+                        &portrait_id,
+                        &portrait_value,
+                        context,
+                    )
+                })
+            } else {
+                registry.preflight_component(&portrait_id, &portrait_value)
+            }
+            .unwrap()
+            .unwrap();
+            let text = if fail { "reject" } else { "Welcome" };
+            let dialogue_value = asset_codec_value(text);
+            let dialogue = registry
+                .preflight_component(&dialogue_id, &dialogue_value)
+                .unwrap()
+                .unwrap();
+            drop(portrait_value);
+            drop(dialogue_value);
+            let batch = batch.stage(target, portrait).unwrap();
+            assert!(world.get::<Portrait>(target).is_none());
+            assert!(!world.contains_resource::<AssetServer>());
+            let batch = batch.stage(target, dialogue);
+            if fail {
+                assert!(matches!(
+                    batch,
+                    Err(ComponentCodecError::InvalidField { .. })
+                ));
+                assert!(world.get::<Portrait>(target).is_none());
+                assert!(world.get::<Dialogue>(target).is_none());
+                assert!(!world.contains_resource::<AssetServer>());
+                continue;
+            }
+            batch.unwrap().commit(&mut world).unwrap();
+            let portrait = world.get::<Portrait>(target).unwrap();
+            let dialogue = world.get::<Dialogue>(target).unwrap();
+            assert_eq!(portrait.0.id(), dialogue.portrait.id());
+            assert_eq!(dialogue.text, text);
+            assert_eq!(
+                registry.encode_component(&dialogue_id, &world, target),
+                Some(Ok(Some(asset_codec_value(text)))),
+            );
+            assert_eq!(
+                registry.encode_component(&portrait_id, &world, target),
+                Some(Ok(Some(asset_codec_value("portrait")))),
+            );
+        }
+    }
 }

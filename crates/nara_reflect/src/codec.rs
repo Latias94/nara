@@ -5,16 +5,13 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
+use crate::{
+    ComponentDomainError, ComponentTypeId, ComponentValueError,
+    ComponentValueMaterializationLimits, persistent_apply::PersistentApplyRejection,
+};
 use nara_asset::{
     AssetRef, AssetRefError, AssetRefExportPolicy, AssetServer, AssetSourceKind, Handle,
     ProjectAssetDatabase,
-};
-use nara_ecs::{Entity, World};
-
-use crate::{
-    ComponentDomainError, ComponentTypeId, ComponentValue, ComponentValueError,
-    ComponentValueMaterializationLimits,
-    persistent_apply::{PersistentApplyRejection, PreparedComponentCandidate},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,10 +32,6 @@ pub enum ComponentCodecError {
     WrongWorld,
     AssetServerChanged,
     EntityMissing,
-    PreparedComponentTypeMismatch {
-        expected: &'static str,
-        actual: &'static str,
-    },
     PersistentApplyReceiptMissing,
     PersistentApplyTargetNotEmpty,
     PersistentApplyBindingConflict {
@@ -115,10 +108,6 @@ impl Display for ComponentCodecError {
                 formatter.write_str("asset server changed after the component batch was created")
             }
             Self::EntityMissing => formatter.write_str("target entity does not exist"),
-            Self::PreparedComponentTypeMismatch { expected, actual } => write!(
-                formatter,
-                "prepared component Rust type '{actual}' does not match registered type '{expected}'"
-            ),
             Self::PersistentApplyReceiptMissing => {
                 formatter.write_str("persistent component apply receipt is missing")
             }
@@ -296,61 +285,5 @@ impl<'a> ComponentEncodeContext<'a> {
     #[must_use]
     pub const fn project_asset_database(&self) -> Option<&ProjectAssetDatabase> {
         self.project_asset_database
-    }
-}
-
-pub(crate) trait ComponentCodec: Send + Sync {
-    fn preflight_with_context(
-        &self,
-        value: &ComponentValue,
-        context: &mut ComponentDecodeContext<'_>,
-    ) -> Result<PreparedComponentCandidate, ComponentCodecError>;
-
-    fn encode_with_context(
-        &self,
-        world: &World,
-        entity: Entity,
-        context: &ComponentEncodeContext<'_>,
-    ) -> Result<Option<ComponentValue>, ComponentCodecError>;
-}
-
-pub(crate) struct FnComponentCodec<Preflight, Encode> {
-    pub(crate) preflight: Preflight,
-    pub(crate) encode: Encode,
-}
-
-impl<Preflight, Encode> ComponentCodec for FnComponentCodec<Preflight, Encode>
-where
-    Encode: for<'a> Fn(
-            &World,
-            Entity,
-            &ComponentEncodeContext<'a>,
-        ) -> Result<Option<ComponentValue>, ComponentCodecError>
-        + Send
-        + Sync
-        + 'static,
-    Preflight: for<'a> Fn(
-            &ComponentValue,
-            &mut ComponentDecodeContext<'a>,
-        ) -> Result<PreparedComponentCandidate, ComponentCodecError>
-        + Send
-        + Sync
-        + 'static,
-{
-    fn preflight_with_context(
-        &self,
-        value: &ComponentValue,
-        context: &mut ComponentDecodeContext<'_>,
-    ) -> Result<PreparedComponentCandidate, ComponentCodecError> {
-        (self.preflight)(value, context)
-    }
-
-    fn encode_with_context(
-        &self,
-        world: &World,
-        entity: Entity,
-        context: &ComponentEncodeContext<'_>,
-    ) -> Result<Option<ComponentValue>, ComponentCodecError> {
-        (self.encode)(world, entity, context)
     }
 }

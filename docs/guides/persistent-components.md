@@ -185,8 +185,10 @@ trip compile in the independent
 Production composition places this registration in the provider callback described above.
 
 For fallible delayed preparation, use `register_persistent_component_codec` or its
-`_with_context` variant instead. These lower-level APIs return a `PreparedComponentCandidate`
-from preflight and encode from a `World` and entity (plus codec context for `_with_context`).
+`_with_context` variant instead. These lower-level APIs return a `PreparedComponentCandidate<T>`
+from preflight for the registered component `T`. The encoder receives `&T` and returns a
+`ComponentValue`; `_with_context` additionally supplies `&World` and `&ComponentEncodeContext`.
+The registry selects the component and handles absence before invoking the encoder.
 Choose the candidate constructor by the work it can perform:
 
 - `insert(value)` for a fully decoded component;

@@ -34,7 +34,9 @@ pub mod identity {
         RuntimeEntityIncarnationError, RuntimeEntityReference, SceneEntityId, SceneEntityIdError,
         SceneIdentitySnapshot, SceneInstanceId, SpawnedSceneInstance, TombstoneCause,
         WorldEntityLocator, WorldEntityLocatorRemap, WorldEntityLocators, WorldEntityToken,
-        WorldIdentityDomain, WorldIdentityDomainId, WorldIdentityDomainSettings, resolve_in_world,
+        WorldIdentityDomain, WorldIdentityDomainId, WorldIdentityDomainSettings,
+        adopt_identity_entity, register_persistent_identity, register_scene_instance,
+        resolve_in_world, retire_identity_entity, retire_identity_entity_with_disposition,
         spawn_identity_entity,
     };
 }
@@ -328,7 +330,9 @@ pub mod advanced_prelude {
         IdentityTombstone, IdentityTombstoneSubject, SceneIdentitySnapshot, SceneInstanceId,
         SpawnedSceneInstance, TombstoneCause, WorldEntityLocator, WorldEntityLocatorRemap,
         WorldEntityLocators, WorldIdentityDomain, WorldIdentityDomainId,
-        WorldIdentityDomainSettings, resolve_in_world,
+        WorldIdentityDomainSettings, adopt_identity_entity, register_persistent_identity,
+        register_scene_instance, resolve_in_world, retire_identity_entity,
+        retire_identity_entity_with_disposition,
     };
     pub use nara_reflect::{
         ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,

@@ -6,7 +6,7 @@ use std::{
 
 use nara_ecs::{
     Entity, Resource, World,
-    lifecycle::Despawn,
+    lifecycle::{Despawn, Insert, Remove},
     observer::{Observer, On},
     system::ResMut,
 };
@@ -24,7 +24,9 @@ use crate::{
     PersistentRuntimeNamespaceId, PersistentRuntimeReference, RuntimeEntityIncarnation,
     RuntimeEntityReference, SceneEntityId, SceneInstanceId, TombstoneCause, WorldEntityLocator,
     WorldEntityToken, WorldIdentityDomain, WorldIdentityDomainSettings,
-    allocate_world_identity_domain_id_from, resolve_in_world, spawn_identity_entity,
+    adopt_identity_entity, allocate_world_identity_domain_id_from, register_persistent_identity,
+    register_scene_instance, resolve_in_world, retire_identity_entity,
+    retire_identity_entity_with_disposition, spawn_identity_entity,
 };
 
 fn scene_id(value: &str) -> SceneEntityId {
@@ -1045,6 +1047,201 @@ fn prepared_exact_entity_retirement_preserves_authority_until_commit() {
 
 #[derive(Resource, Default)]
 struct RetirementObserverRuns(u32);
+
+#[test]
+fn world_identity_operations_preserve_custody_and_retirement_incarnations() {
+    let mut world = world_with_domain(16, 8);
+    let entity = world.spawn_empty().id();
+    let token = adopt_identity_entity(&mut world, entity).unwrap();
+    assert_eq!(adopt_identity_entity(&mut world, entity).unwrap(), token);
+    let id = scene_id("world-owned");
+    let instance = register_scene_instance(&mut world, [(id.clone(), token)]).unwrap();
+    let persistent = persistent_ref("66666666-6666-4666-8666-666666666666");
+    let first = register_persistent_identity(&mut world, token, persistent.clone()).unwrap();
+    let before = world.resource::<WorldIdentityDomain>().stats();
+    assert!(matches!(
+        register_persistent_identity(&mut world, token, persistent.clone()),
+        Err(IdentityDomainError::ReferenceAlreadyClaimed { .. })
+    ));
+    assert_eq!(world.resource::<WorldIdentityDomain>().stats(), before);
+
+    retire_identity_entity(&mut world, token, TombstoneCause::Unloaded).unwrap();
+    assert!(world.get_entity(entity).is_ok());
+    assert!(matches!(
+        instance.resolve(&world, &id),
+        EntityLookup::Tombstoned(Some(_))
+    ));
+    assert_eq!(resolve_in_world(&world, &first), EntityLookup::Unloaded);
+    let replacement = adopt_identity_entity(&mut world, entity).unwrap();
+    assert_ne!(token.incarnation(), replacement.incarnation());
+    let current = register_persistent_identity(&mut world, replacement, persistent).unwrap();
+    assert_eq!(resolve_in_world(&world, &first), EntityLookup::StaleRuntime);
+    let current_stats = world.resource::<WorldIdentityDomain>().stats();
+    assert_eq!(
+        retire_identity_entity(&mut world, token, TombstoneCause::Despawned),
+        Err(IdentityDomainError::StaleRegistration)
+    );
+    assert_eq!(world.resource::<WorldIdentityDomain>().stats(), current_stats);
+    assert_eq!(
+        resolve_in_world(&world, &current),
+        EntityLookup::Resolved(entity)
+    );
+    retire_identity_entity_with_disposition(
+        &mut world,
+        replacement,
+        TombstoneCause::Despawned,
+        crate::PersistentRetirementDisposition::Delete,
+    )
+    .unwrap();
+    assert_eq!(resolve_in_world(&world, &current), EntityLookup::Deleted);
+    assert_eq!(
+        world
+            .resource::<WorldIdentityDomain>()
+            .stats()
+            .persistent_logical_records,
+        1
+    );
+}
+
+#[test]
+fn exact_entity_preparation_rejects_resource_observers_before_any_effect() {
+    for insert in [false, true] {
+        let mut world = world_with_domain(16, 8);
+        world.init_resource::<RetirementObserverRuns>();
+        let token = spawn_token(&mut world);
+        let id = scene_id("retained");
+        let instance = register_scene_instance(&mut world, [(id.clone(), token)]).unwrap();
+        let reference = instance.runtime_reference(&id).unwrap();
+        if insert {
+            world.add_observer(
+                |_: On<Insert<WorldIdentityDomain>>, mut runs: ResMut<RetirementObserverRuns>| {
+                    runs.0 += 1;
+                },
+            );
+        } else {
+            world.add_observer(
+                |_: On<Remove<WorldIdentityDomain>>, mut runs: ResMut<RetirementObserverRuns>| {
+                    runs.0 += 1;
+                },
+            );
+        }
+        world.flush();
+        let before = world.resource::<WorldIdentityDomain>().stats();
+        let entities = world.iter_entities().count();
+
+        assert!(matches!(
+            prepare_exact_entity_retirement(
+                &mut world,
+                token.entity(),
+                &reference,
+                TombstoneCause::Despawned
+            ),
+            Err(IdentityDomainError::LifecycleConflict)
+        ));
+        assert_eq!(
+            retire_identity_entity(&mut world, token, TombstoneCause::Despawned),
+            Err(IdentityDomainError::LifecycleConflict)
+        );
+
+        assert_eq!(world.resource::<RetirementObserverRuns>().0, 0);
+        assert_eq!(world.resource::<WorldIdentityDomain>().stats(), before);
+        assert_eq!(world.iter_entities().count(), entities);
+        assert_eq!(
+            instance.resolve(&world, &id),
+            EntityLookup::Resolved(token.entity())
+        );
+        assert!(
+            world
+                .resource::<WorldIdentityDomain>()
+                .locators_for_token(&world, token)
+                .unwrap()
+                .is_some()
+        );
+    }
+}
+
+#[test]
+fn world_registration_borrows_the_installed_domain_without_resource_lifecycle() {
+    let mut world = world_with_domain(16, 8);
+    world.init_resource::<RetirementObserverRuns>();
+    let token = spawn_token(&mut world);
+    world.add_observer(
+        |_: On<Remove<WorldIdentityDomain>>, mut runs: ResMut<RetirementObserverRuns>| {
+            runs.0 += 1;
+        },
+    );
+    world.add_observer(
+        |_: On<Insert<WorldIdentityDomain>>, mut runs: ResMut<RetirementObserverRuns>| {
+            runs.0 += 1;
+        },
+    );
+    world.flush();
+
+    let id = scene_id("borrowed");
+    let instance = register_scene_instance(&mut world, [(id.clone(), token)]).unwrap();
+    let persistent = register_persistent_identity(
+        &mut world,
+        token,
+        persistent_ref("88888888-8888-4888-8888-888888888888"),
+    )
+    .unwrap();
+
+    assert_eq!(world.resource::<RetirementObserverRuns>().0, 0);
+    assert_eq!(
+        instance.resolve(&world, &id),
+        EntityLookup::Resolved(token.entity())
+    );
+    assert_eq!(
+        resolve_in_world(&world, &persistent),
+        EntityLookup::Resolved(token.entity())
+    );
+    assert_eq!(
+        world
+            .resource::<WorldIdentityDomain>()
+            .stats()
+            .registered_entities,
+        1
+    );
+}
+
+#[test]
+fn world_identity_operations_reject_a_domain_moved_from_another_world() {
+    let mut source = world_with_domain(16, 8);
+    let token = spawn_token(&mut source);
+    let mut target = World::new();
+    let entity = target.spawn_empty().id();
+    let domain = source.remove_resource::<WorldIdentityDomain>().unwrap();
+    target.insert_resource(domain);
+    let before = target.resource::<WorldIdentityDomain>().stats();
+    let components = target.entity(entity).archetype().components().len();
+
+    assert_eq!(
+        adopt_identity_entity(&mut target, entity),
+        Err(IdentityDomainError::WorldBindingMismatch)
+    );
+    assert_eq!(
+        register_scene_instance(&mut target, [(scene_id("wrong-world"), token)]),
+        Err(IdentityDomainError::WorldBindingMismatch)
+    );
+    assert_eq!(
+        register_persistent_identity(
+            &mut target,
+            token,
+            persistent_ref("77777777-7777-4777-8777-777777777777")
+        ),
+        Err(IdentityDomainError::WorldBindingMismatch)
+    );
+    assert_eq!(
+        retire_identity_entity(&mut target, token, TombstoneCause::Despawned),
+        Err(IdentityDomainError::WorldBindingMismatch)
+    );
+    assert_eq!(target.resource::<WorldIdentityDomain>().stats(), before);
+    assert_eq!(
+        target.entity(entity).archetype().components().len(),
+        components
+    );
+    assert!(source.get_entity(token.entity()).is_ok());
+}
 
 #[test]
 fn atomic_scene_replacement_rejects_old_entity_observer_before_publication() {

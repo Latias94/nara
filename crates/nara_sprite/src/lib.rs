@@ -332,10 +332,7 @@ pub fn register_sprite_components(
                 }))
             }
         },
-        |world, entity, context| {
-            let Some(sprite) = world.get::<Sprite>(entity) else {
-                return Ok(None);
-            };
+        |sprite, world, context| {
             let image = match sprite.material.image {
                 Some(handle) => Some(asset_ref_value(
                     &AssetRef::from_handle_with_policy(
@@ -381,7 +378,7 @@ pub fn register_sprite_components(
                     .transpose()?
                     .unwrap_or(ComponentValue::Null),
             ));
-            Ok(Some(ComponentValue::map(fields)))
+            Ok(ComponentValue::map(fields))
         },
     )?;
     Ok(())

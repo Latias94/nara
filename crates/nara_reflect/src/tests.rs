@@ -1,10 +1,9 @@
-use std::{any::TypeId, cell::Cell, collections::BTreeMap};
+use std::{cell::Cell, collections::BTreeMap};
 
 use nara_asset::{AssetRef, AssetServer};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_ecs::{
     Component, Resource, World,
-    component::ComponentId,
     lifecycle::{Add, HookContext},
     observer::On,
     world::DeferredWorld,
@@ -102,23 +101,11 @@ fn apply_probe_value(value: i64) -> ComponentValue {
     ComponentValue::map([("value", ComponentValue::I64(value))])
 }
 
-fn register_test_component<T: Component>(world: &mut World) -> ComponentId {
-    world.register_component::<T>()
-}
-
 fn bind_test_component<T: Component>(
-    prepared: PreparedComponentCandidate,
+    prepared: PreparedComponentCandidate<T>,
     component_id: &str,
 ) -> PreparedComponent {
-    prepared
-        .bind(
-            ComponentTypeId::new(component_id),
-            TypeId::of::<T>(),
-            std::any::type_name::<T>(),
-            register_test_component::<T>,
-            nara_ecs::__private::validate_registered_persistent_component_apply::<T>,
-        )
-        .unwrap()
+    prepared.erase().bind(ComponentTypeId::new(component_id))
 }
 
 fn test_component<T: Component>(component: T, component_id: &str) -> PreparedComponent {
@@ -721,33 +708,49 @@ fn failed_prepared_component_does_not_mutate_existing_world_state() {
 }
 
 #[test]
-fn custom_codec_cannot_prepare_a_different_rust_component_type() {
+fn custom_encoder_receives_the_selected_component_and_skips_missing_targets() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
     let mut registry = ComponentRegistry::new();
     let id = ComponentTypeId::new("nara.test.ApplyProbe");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let encoder_calls = Arc::clone(&calls);
     registry
         .register_persistent_component_codec::<ApplyProbe, _, _>(
             apply_probe_schema(),
-            |_value| {
-                Ok(PreparedComponentCandidate::insert(Velocity {
-                    dx: 1.0,
-                    dy: 2.0,
-                }))
+            |value| {
+                Ok(PreparedComponentCandidate::insert(ApplyProbe(
+                    value.field("value")?.as_i64().unwrap(),
+                )))
             },
-            |_world, _entity| Ok(Some(apply_probe_value(0))),
+            move |probe: &ApplyProbe| {
+                encoder_calls.fetch_add(1, Ordering::Relaxed);
+                Ok(apply_probe_value(probe.0))
+            },
         )
         .unwrap();
     registry.freeze().unwrap();
+    let mut world = World::new();
+    let missing = world.spawn(Velocity { dx: 1.0, dy: 2.0 }).id();
+    let selected = world.spawn(ApplyProbe(37)).id();
+    let retired = world.spawn(ApplyProbe(9)).id();
+    world.despawn(retired);
 
-    let error = registry
-        .preflight_component(&id, &apply_probe_value(1))
-        .unwrap()
-        .err()
-        .expect("mismatched prepared component type must reject");
-
-    assert!(matches!(
-        error,
-        ComponentCodecError::PreparedComponentTypeMismatch { .. }
-    ));
+    for entity in [missing, retired] {
+        assert_eq!(
+            registry.encode_component(&id, &world, entity),
+            Some(Ok(None))
+        );
+    }
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        registry.encode_component(&id, &world, selected),
+        Some(Ok(Some(apply_probe_value(37)))),
+    );
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
 }
 
 #[test]

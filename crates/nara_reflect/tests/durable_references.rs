@@ -155,3 +155,73 @@ fn optional_null_durable_field_creates_no_resolution_edge() {
     assert_eq!(visits, 0);
     assert_eq!(effective.as_ref(), &raw);
 }
+
+#[test]
+fn typed_deferred_codec_preserves_durable_reference_and_reads_encode_context() {
+    use nara_ecs::{Component, Resource};
+    use nara_reflect::{ComponentCodecError, ComponentRegistry, PreparedComponentCandidate};
+
+    #[derive(Component)]
+    struct DurableLink(EntityReference);
+
+    #[derive(Resource)]
+    struct SavedReference(EntityReference);
+
+    let component_id = ComponentTypeId::new("nara.test.TypedDurableLink");
+    let schema = ComponentSchema::new(
+        component_id.clone(),
+        "Durable link",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities([ComponentCapability::Scene])
+    .with_fields([ComponentFieldSchema::required(
+        ComponentFieldId::new("target"),
+        "Target",
+        ComponentFieldPath::from_fields(["target"]),
+        ComponentValueShape::EntityRef,
+    )
+    .with_capabilities([ComponentCapability::Scene, ComponentCapability::EntityRef])]);
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_persistent_component_codec_with_context::<DurableLink, _, _>(
+            schema,
+            |value, _context| {
+                let target = value.field_entity_reference("target")?.clone();
+                Ok(PreparedComponentCandidate::deferred(move || {
+                    Ok(DurableLink(target))
+                }))
+            },
+            |link, world, _context| {
+                if link.0 != world.resource::<SavedReference>().0 {
+                    return Err(ComponentCodecError::invalid_field(
+                        "target",
+                        "saved reference",
+                    ));
+                }
+                Ok(ComponentValue::map([(
+                    "target",
+                    ComponentValue::EntityReference(link.0.clone()),
+                )]))
+            },
+        )
+        .unwrap();
+    registry.freeze().unwrap();
+    let input = ComponentValue::map([("target", ComponentValue::EntityReference(reference()))]);
+    let prepared = registry
+        .preflight_component(&component_id, &input)
+        .unwrap()
+        .unwrap();
+    drop(input);
+    let mut world = World::new();
+    world.insert_resource(SavedReference(reference()));
+    let target = world.spawn_empty().id();
+    prepared.apply(&mut world, target).unwrap();
+    assert_eq!(world.get::<DurableLink>(target).unwrap().0, reference());
+    assert_eq!(
+        registry.encode_component(&component_id, &world, target),
+        Some(Ok(Some(ComponentValue::map([(
+            "target",
+            ComponentValue::EntityReference(reference())
+        ),])))),
+    );
+}

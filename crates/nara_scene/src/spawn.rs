@@ -8,7 +8,7 @@ use nara_asset::ProjectAssetDatabase;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{
     __private::validate_registered_persistent_component_apply, Component, Entity,
-    LifecycleFreeInsertionPlan, Mut, World, component::ComponentId, prepare_lifecycle_free_despawn,
+    LifecycleFreeInsertionPlan, World, component::ComponentId, prepare_lifecycle_free_despawn,
 };
 use nara_hierarchy::{
     __private::{prepare_construction_batch, prepare_mutation_baseline},
@@ -24,6 +24,7 @@ use nara_identity::{
     },
     IdentityDomainError, RuntimeEntityReference, SceneInstanceId, SpawnedSceneInstance,
     TombstoneCause, WorldEntityToken, WorldIdentityDomain, WorldIdentityDomainSettings,
+    adopt_identity_entity,
 };
 use nara_reflect::{
     __private::{
@@ -1649,9 +1650,12 @@ fn prepare_scene_identity_tokens(
     if !world.contains_resource::<WorldIdentityDomain>() {
         return Err(IdentityDomainError::WorldDomainUnavailable);
     }
-    world.resource_scope(|world, domain: Mut<WorldIdentityDomain>| {
-        adopt_scene_identity_tokens(&domain, world, spawned_by_id)
-    })
+    spawned_by_id
+        .iter()
+        .map(|(entity_id, entity)| {
+            adopt_identity_entity(world, *entity).map(|token| (entity_id.clone(), token))
+        })
+        .collect()
 }
 
 fn adopt_scene_identity_tokens(
@@ -1720,13 +1724,13 @@ fn prepare_scene_identity_commit(
                     registration,
                 });
             }
-            world.resource_scope(|world, domain: Mut<WorldIdentityDomain>| {
-                let registration =
-                    prepare_exact_scene_instance_registration(&domain, world, &entries)?;
-                Ok(PreparedSceneIdentityCommit::Register {
-                    domain: None,
-                    registration,
-                })
+            let domain = world
+                .get_resource::<WorldIdentityDomain>()
+                .ok_or(IdentityDomainError::WorldDomainUnavailable)?;
+            let registration = prepare_exact_scene_instance_registration(domain, world, &entries)?;
+            Ok(PreparedSceneIdentityCommit::Register {
+                domain: None,
+                registration,
             })
         }
         SceneIdentityCommit::Replace(current) => {

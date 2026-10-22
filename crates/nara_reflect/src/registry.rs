@@ -5,30 +5,26 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     error::Error,
     fmt::{self, Display, Formatter},
+    marker::PhantomData,
     sync::{Arc, Weak},
 };
 
 use bevy_reflect::{GetTypeRegistration, TypeRegistry};
 use nara_diagnostic::{DiagnosticCode, SafeSummary};
 use nara_ecs::{
-    __private::{
-        PersistentComponentMetadataError, register_persistent_component,
-        validate_persistent_component_registration, validate_registered_persistent_component_apply,
-    },
+    __private::{PersistentComponentMetadataError, validate_persistent_component_registration},
     Component, Entity, World,
-    component::ComponentId,
 };
 
 use crate::{
     ComponentDomainError, ComponentFieldPath, ComponentFieldPathSegment, ComponentValue,
     PersistentComponentProvider,
-    codec::{
-        ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
-        FnComponentCodec,
-    },
+    codec::{ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext},
     effective::{ComponentValueMaterializationLimits, effective_component_value},
     migration::{ComponentMigration, ComponentMigrationError, MigratedComponentValue},
-    persistent_apply::{PreparedComponent, PreparedComponentCandidate},
+    persistent_apply::{
+        ErasedPreparedComponentCandidate, PreparedComponent, PreparedComponentCandidate,
+    },
     provider::{
         ComponentSchemaContributionReceipt, ComponentSchemaOwnerContributionReceipt,
         ComponentSchemaOwnerId, ComponentSchemaProviderDefinition, ComponentSchemaProviderReceipt,
@@ -605,12 +601,70 @@ impl Display for ComponentProjectionError {
 
 impl Error for ComponentProjectionError {}
 
+trait ComponentCodec: Send + Sync {
+    fn preflight_with_context(
+        &self,
+        value: &ComponentValue,
+        context: &mut ComponentDecodeContext<'_>,
+    ) -> Result<ErasedPreparedComponentCandidate, ComponentCodecError>;
+
+    fn encode_with_context(
+        &self,
+        world: &World,
+        entity: Entity,
+        context: &ComponentEncodeContext<'_>,
+    ) -> Result<Option<ComponentValue>, ComponentCodecError>;
+}
+
+struct FnComponentCodec<T, Preflight, Encode> {
+    preflight: Preflight,
+    encode: Encode,
+    component: PhantomData<fn() -> T>,
+}
+
+impl<T, Preflight, Encode> ComponentCodec for FnComponentCodec<T, Preflight, Encode>
+where
+    T: Component,
+    Preflight: for<'a> Fn(
+            &ComponentValue,
+            &mut ComponentDecodeContext<'a>,
+        ) -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
+        + Send
+        + Sync
+        + 'static,
+    Encode: for<'a> Fn(
+            &T,
+            &World,
+            &ComponentEncodeContext<'a>,
+        ) -> Result<ComponentValue, ComponentCodecError>
+        + Send
+        + Sync
+        + 'static,
+{
+    fn preflight_with_context(
+        &self,
+        value: &ComponentValue,
+        context: &mut ComponentDecodeContext<'_>,
+    ) -> Result<ErasedPreparedComponentCandidate, ComponentCodecError> {
+        (self.preflight)(value, context).map(PreparedComponentCandidate::erase)
+    }
+
+    fn encode_with_context(
+        &self,
+        world: &World,
+        entity: Entity,
+        context: &ComponentEncodeContext<'_>,
+    ) -> Result<Option<ComponentValue>, ComponentCodecError> {
+        world
+            .get::<T>(entity)
+            .map(|component| (self.encode)(component, world, context))
+            .transpose()
+    }
+}
+
 struct NativeComponentBinding {
     rust_type_path: &'static str,
-    rust_type_id: TypeId,
-    register_component: fn(&mut World) -> ComponentId,
     validate_registration: fn() -> Result<(), PersistentComponentMetadataError>,
-    validate_apply: fn(&World, Option<Entity>) -> Result<(), PersistentComponentMetadataError>,
     codec: Box<dyn ComponentCodec>,
 }
 
@@ -1170,12 +1224,7 @@ impl ComponentRegistry {
                 let component = decode(value)?;
                 Ok(PreparedComponentCandidate::insert(component))
             },
-            move |world, entity, _context| {
-                let Some(component) = world.get::<T>(entity) else {
-                    return Ok(None);
-                };
-                encode(component).map(Some)
-            },
+            move |component, _world, _context| encode(component),
         )
     }
 
@@ -1196,15 +1245,36 @@ impl ComponentRegistry {
                 let component = decode(value)?;
                 Ok(PreparedComponentCandidate::insert(component))
             },
-            move |world, entity, _context| {
-                let Some(component) = world.get::<T>(entity) else {
-                    return Ok(None);
-                };
-                encode(component).map(Some)
-            },
+            move |component, _world, _context| encode(component),
         )
     }
 
+    /// Registers deferred preparation and encoding for exactly one component type.
+    ///
+    /// A candidate for a different component is rejected by Rust, before registration or decode:
+    ///
+    /// ```compile_fail
+    /// use nara_ecs::Component;
+    /// use nara_reflect::{
+    ///     ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
+    ///     ComponentValue, PreparedComponentCandidate,
+    /// };
+    ///
+    /// #[derive(Component)]
+    /// struct Registered;
+    /// #[derive(Component)]
+    /// struct Other;
+    ///
+    /// let mut registry = ComponentRegistry::new();
+    /// let schema = ComponentSchema::new(
+    ///     ComponentTypeId::new("example.Registered"), "Registered", ComponentSchemaVersion::ONE,
+    /// );
+    /// registry.register_persistent_component_codec::<Registered, _, _>(
+    ///     schema,
+    ///     |_| Ok(PreparedComponentCandidate::insert(Other)),
+    ///     |_: &Registered| Ok(ComponentValue::Null),
+    /// );
+    /// ```
     pub fn register_persistent_component_codec<T, Preflight, Encode>(
         &mut self,
         schema: ComponentSchema,
@@ -1213,22 +1283,47 @@ impl ComponentRegistry {
     ) -> Result<&mut Self, ComponentRegistryError>
     where
         T: Component,
-        Preflight: Fn(&ComponentValue) -> Result<PreparedComponentCandidate, ComponentCodecError>
+        Preflight: Fn(&ComponentValue) -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
             + Send
             + Sync
             + 'static,
-        Encode: Fn(&World, Entity) -> Result<Option<ComponentValue>, ComponentCodecError>
-            + Send
-            + Sync
-            + 'static,
+        Encode: Fn(&T) -> Result<ComponentValue, ComponentCodecError> + Send + Sync + 'static,
     {
         self.register_persistent_component_codec_with_context::<T, _, _>(
             schema,
             move |value, _context| preflight(value),
-            move |world, entity, _context| encode(world, entity),
+            move |component, _world, _context| encode(component),
         )
     }
 
+    /// Registers a typed codec with asset decode and read-only encode context.
+    ///
+    /// The registry selects `T` from the target entity. The encoder only runs when it is present;
+    /// `World` supplies read-only resource context, rather than component selection or absence.
+    /// Deferred candidates own their inputs and share the apply batch's scratch asset server.
+    ///
+    /// ```compile_fail
+    /// use nara_ecs::Component;
+    /// use nara_reflect::{
+    ///     ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
+    ///     ComponentValue, PreparedComponentCandidate,
+    /// };
+    ///
+    /// #[derive(Component)]
+    /// struct Registered;
+    /// #[derive(Component)]
+    /// struct Other;
+    ///
+    /// let mut registry = ComponentRegistry::new();
+    /// let schema = ComponentSchema::new(
+    ///     ComponentTypeId::new("example.Registered"), "Registered", ComponentSchemaVersion::ONE,
+    /// );
+    /// registry.register_persistent_component_codec_with_context::<Registered, _, _>(
+    ///     schema,
+    ///     |_, _| Ok(PreparedComponentCandidate::with_asset_server(move |_| Ok(Other))),
+    ///     |_: &Registered, _, _| Ok(ComponentValue::Null),
+    /// );
+    /// ```
     pub fn register_persistent_component_codec_with_context<T, Preflight, Encode>(
         &mut self,
         schema: ComponentSchema,
@@ -1240,15 +1335,15 @@ impl ComponentRegistry {
         Preflight: for<'a> Fn(
                 &ComponentValue,
                 &mut ComponentDecodeContext<'a>,
-            ) -> Result<PreparedComponentCandidate, ComponentCodecError>
+            ) -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
             + Send
             + Sync
             + 'static,
         Encode: for<'a> Fn(
+                &T,
                 &World,
-                Entity,
                 &ComponentEncodeContext<'a>,
-            ) -> Result<Option<ComponentValue>, ComponentCodecError>
+            ) -> Result<ComponentValue, ComponentCodecError>
             + Send
             + Sync
             + 'static,
@@ -1266,11 +1361,12 @@ impl ComponentRegistry {
             id,
             NativeComponentBinding {
                 rust_type_path: std::any::type_name::<T>(),
-                rust_type_id: TypeId::of::<T>(),
-                register_component: register_persistent_component::<T>,
                 validate_registration: validate_persistent_component_registration::<T>,
-                validate_apply: validate_registered_persistent_component_apply::<T>,
-                codec: Box::new(FnComponentCodec { preflight, encode }),
+                codec: Box::new(FnComponentCodec::<T, _, _> {
+                    preflight,
+                    encode,
+                    component: PhantomData,
+                }),
             },
         );
         self.commit_raw_registration();
@@ -1285,19 +1381,16 @@ impl ComponentRegistry {
     ) -> Result<&mut Self, ComponentRegistryError>
     where
         T: Component,
-        Preflight: Fn(&ComponentValue) -> Result<PreparedComponentCandidate, ComponentCodecError>
+        Preflight: Fn(&ComponentValue) -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
             + Send
             + Sync
             + 'static,
-        Encode: Fn(&World, Entity) -> Result<Option<ComponentValue>, ComponentCodecError>
-            + Send
-            + Sync
-            + 'static,
+        Encode: Fn(&T) -> Result<ComponentValue, ComponentCodecError> + Send + Sync + 'static,
     {
         self.register_native_component_codec_with_context::<T, _, _>(
             id,
             move |value, _context| preflight(value),
-            move |world, entity, _context| encode(world, entity),
+            move |component, _world, _context| encode(component),
         )
     }
 
@@ -1312,15 +1405,15 @@ impl ComponentRegistry {
         Preflight: for<'a> Fn(
                 &ComponentValue,
                 &mut ComponentDecodeContext<'a>,
-            ) -> Result<PreparedComponentCandidate, ComponentCodecError>
+            ) -> Result<PreparedComponentCandidate<T>, ComponentCodecError>
             + Send
             + Sync
             + 'static,
         Encode: for<'a> Fn(
+                &T,
                 &World,
-                Entity,
                 &ComponentEncodeContext<'a>,
-            ) -> Result<Option<ComponentValue>, ComponentCodecError>
+            ) -> Result<ComponentValue, ComponentCodecError>
             + Send
             + Sync
             + 'static,
@@ -1342,11 +1435,12 @@ impl ComponentRegistry {
             id.clone(),
             NativeComponentBinding {
                 rust_type_path: std::any::type_name::<T>(),
-                rust_type_id: TypeId::of::<T>(),
-                register_component: register_persistent_component::<T>,
                 validate_registration: validate_persistent_component_registration::<T>,
-                validate_apply: validate_registered_persistent_component_apply::<T>,
-                codec: Box::new(FnComponentCodec { preflight, encode }),
+                codec: Box::new(FnComponentCodec::<T, _, _> {
+                    preflight,
+                    encode,
+                    component: PhantomData,
+                }),
             },
         );
         self.commit_raw_registration();
@@ -1636,15 +1730,7 @@ impl ComponentRegistry {
                         .codec
                         .preflight_with_context(effective.as_ref(), context)
                 })
-                .and_then(|prepared| {
-                    prepared.bind(
-                        id.clone(),
-                        binding.rust_type_id,
-                        binding.rust_type_path,
-                        binding.register_component,
-                        binding.validate_apply,
-                    )
-                }),
+                .map(|prepared| prepared.bind(id.clone())),
         )
     }
 

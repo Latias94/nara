@@ -14,7 +14,7 @@ use nara_diagnostic::{
 };
 use nara_ecs::{
     Commands, Component, Entity, Mut, Resource, World,
-    lifecycle::{Add, Despawn, HookContext, Remove},
+    lifecycle::{Add, Despawn, HookContext, Insert, Remove},
     observer::{Observer, On},
     system::ResMut,
     world::DeferredWorld,
@@ -2322,6 +2322,68 @@ fn individual_scene_retirement_tombstones_identity_before_despawn() {
             .active_scene_entities,
         0
     );
+}
+
+#[test]
+fn individual_scene_retirement_rejects_identity_resource_observers_before_effects() {
+    for insert in [false, true] {
+        let registry = test_registry();
+        let id = scene_id("retained");
+        let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())
+            .with_component(position_type_id(), position_record(7))]);
+        let mut world = World::new();
+        world.init_resource::<PersistentApplyCanary>();
+        let report = spawn_scene(&mut world, &registry, &document);
+        let instance = spawned_instance(&report).clone();
+        let entity = spawned_entity(&world, &report, &id);
+        if insert {
+            world.add_observer(
+                |_: On<Insert<WorldIdentityDomain>>, mut canary: ResMut<PersistentApplyCanary>| {
+                    canary.0 += 1;
+                },
+            );
+        } else {
+            world.add_observer(
+                |_: On<Remove<WorldIdentityDomain>>, mut canary: ResMut<PersistentApplyCanary>| {
+                    canary.0 += 1;
+                },
+            );
+        }
+        world.flush();
+        let before = world.resource::<WorldIdentityDomain>().stats();
+        let roots = world
+            .resource::<HierarchyRoots>()
+            .iter()
+            .collect::<Vec<_>>();
+        let entities = world.iter_entities().count();
+
+        assert!(matches!(
+            retire_and_despawn_scene_entity(&mut world, entity),
+            Err(SceneEntityRetirementError::Identity(
+                IdentityDomainError::LifecycleConflict
+            ))
+        ));
+
+        assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+        assert_eq!(world.resource::<WorldIdentityDomain>().stats(), before);
+        assert_eq!(
+            instance.resolve(&world, &id),
+            EntityLookup::Resolved(entity)
+        );
+        assert_eq!(
+            world.get::<TestPosition>(entity),
+            Some(&TestPosition { x: 7 })
+        );
+        assert!(world.get::<SceneEntitySource>(entity).is_some());
+        assert_eq!(
+            world
+                .resource::<HierarchyRoots>()
+                .iter()
+                .collect::<Vec<_>>(),
+            roots
+        );
+        assert_eq!(world.iter_entities().count(), entities);
+    }
 }
 
 #[test]
@@ -5116,14 +5178,11 @@ fn test_asset_registry() -> ComponentRegistry {
                     },
                 ))
             },
-            |world, entity, _context| {
-                let Some(link) = world.get::<TestAssetLink>(entity) else {
-                    return Ok(None);
-                };
-                Ok(Some(ComponentValue::map([(
+            |link, _world, _context| {
+                Ok(ComponentValue::map([(
                     "handle",
                     ComponentValue::U64(link.handle.id().raw()),
-                )])))
+                )]))
             },
         )
         .unwrap();
@@ -5152,7 +5211,7 @@ fn alternate_asset_registry() -> ComponentRegistry {
                 let _ = read_asset_ref(value.field("asset")?, "asset")?;
                 Ok(PreparedComponentCandidate::insert(TestAlternateAssetLink))
             },
-            |_world, _entity| Ok(None),
+            |_component| Ok(ComponentValue::map([] as [(&str, ComponentValue); 0])),
         )
         .unwrap();
     registry.freeze().unwrap();
@@ -5193,7 +5252,9 @@ fn deferred_asset_registry() -> ComponentRegistry {
                     },
                 ))
             },
-            |_world, _entity, _context| Ok(None),
+            |_component, _world, _context| {
+                Ok(ComponentValue::map([] as [(&str, ComponentValue); 0]))
+            },
         )
         .unwrap();
     registry.freeze().unwrap();
@@ -5218,7 +5279,9 @@ fn broken_export_registry() -> ComponentRegistry {
         .register_persistent_component_codec_with_context::<TestBrokenExport, _, _>(
             schema,
             |_value, _context| Ok(PreparedComponentCandidate::insert(TestBrokenExport)),
-            |_world, _entity, _context| Err(ComponentCodecError::invalid_field("broken", "boom")),
+            |_component, _world, _context| {
+                Err(ComponentCodecError::invalid_field("broken", "boom"))
+            },
         )
         .unwrap();
     registry.freeze().unwrap();
@@ -5260,7 +5323,9 @@ fn failing_apply_registry() -> ComponentRegistry {
                     },
                 ))
             },
-            |_world, _entity, _context| Ok(None),
+            |_component, _world, _context| {
+                Ok(ComponentValue::map([] as [(&str, ComponentValue); 0]))
+            },
         )
         .unwrap();
     let apply_fails_schema = test_component_schema(
@@ -5299,7 +5364,9 @@ fn failing_apply_registry() -> ComponentRegistry {
                     ))
                 }))
             },
-            |_world, _entity, _context| Ok(None),
+            |_component, _world, _context| {
+                Ok(ComponentValue::map([] as [(&str, ComponentValue); 0]))
+            },
         )
         .unwrap();
     registry.freeze().unwrap();

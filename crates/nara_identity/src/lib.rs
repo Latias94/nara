@@ -10,7 +10,9 @@ pub use domain::{
     EntityIdentityAxis, EntityLookup, IdentityDomainError, IdentityDomainStats, IdentityTombstone,
     IdentityTombstoneSubject, PersistentRetirementDisposition, SceneIdentitySnapshot,
     SpawnedSceneInstance, TombstoneCause, WorldEntityLocators, WorldEntityToken,
-    WorldIdentityDomain, WorldIdentityDomainSettings, resolve_in_world, spawn_identity_entity,
+    WorldIdentityDomain, WorldIdentityDomainSettings, adopt_identity_entity,
+    register_persistent_identity, register_scene_instance, resolve_in_world, retire_identity_entity,
+    retire_identity_entity_with_disposition, spawn_identity_entity,
 };
 pub use remap::{EntityReferenceRemap, IdentityRemapError, WorldEntityLocatorRemap};
 pub use types::{

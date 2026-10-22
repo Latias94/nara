@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-10-18
+**Last Revised**: 2026-10-23
 **Refines**: ADR 0034: Editor Play Mode World Boundary; ADR 0038: Scene/Prefab Authoring
 Identity and Provenance; ADR 0056: Headless Runtime and Dedicated Server Readiness
 **Refined By**: ADR 0076: Play Runtime Debug Control and Observation
@@ -86,6 +86,26 @@ domain marker to the entity. Registration accepts the token plus the target `Wor
 `Entity`, and validates the world binding, token domain, current entity generation, and private
 marker and matching incarnation before consuming a claim. Equal entity allocator bits, a moved domain resource, a dead token,
 or an unrelated replacement entity therefore cannot acquire another world's identity.
+
+Ordinary mutation uses World-oriented operations: `adopt_identity_entity`,
+`register_scene_instance`, `register_persistent_identity`, `retire_identity_entity`, and
+`retire_identity_entity_with_disposition`. The installed domain stays present. Preparation reads
+the World and domain together, marker changes pass lifecycle admission, and a short mutable
+resource borrow publishes the prepared indexes. Consumers do not remove/reinsert the resource or
+use `resource_scope` merely to satisfy Rust borrowing. Detached domain methods remain available
+for unpublished candidates and advanced multi-owner transactions, sharing the same invariant
+implementation rather than defining another identity policy.
+
+Identity support admission checks each exact target even before it has the private marker.
+Entity-scoped Add/Insert observers and entity/component-scoped observers can affect the first
+marker insertion and must reject before incarnation allocation or marker/index publication.
+Legal repeated adoption remains idempotent. Exact retirement preparation is read-only with respect
+to the domain and its resource lifecycle. It admits the existing identity support topology,
+including the domain's remove/reinsert lifecycle where the Scene commit tail needs extraction,
+before any such effect. A rejected resource Remove/Insert observer runs zero callbacks and leaves
+the domain installed, identity indexes, ownership marker, and runtime entity unchanged. A Scene
+owner may still detach the domain in its prevalidated exclusive commit tail; pure preparation
+must not introduce that lifecycle work.
 
 Creating a `SceneSpawner` never creates an allocator. Every spawn entry point obtains the allocator
 from the target world's identity domain, so `SceneSpawner::new`, `SceneSpawner::default`, and all
