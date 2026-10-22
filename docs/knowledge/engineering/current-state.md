@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "3a5abcf1a5064971183717440a58a86fa732136dfc55209a42e7d3899ec7b8d4"
+source_fingerprint: "c3983c5f6319a621bdeecda1939aa9208d23c8e35510215ae86c90a140a6fb98"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "3a5abcf1a5064971183717440a58a86fa732136dfc55209a42e7d3899ec
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `3a5abcf1a5064971183717440a58a86fa732136dfc55209a42e7d3899ec7b8d4`
-- Immutable records: 833
+- Source fingerprint: `c3983c5f6319a621bdeecda1939aa9208d23c8e35510215ae86c90a140a6fb98`
+- Immutable records: 834
 - Active lane heads: 2
 
 # Active Registrations
@@ -68,6 +68,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [U1 rejected close registration preserves runtime custody](verification/2026-10/2026-10-22T175315Z-u1-rejected-close-registration-preserves-runtime-custody-0b351d9e2f324d8fb56fa85b6d2da7fb.md) - Fresh failing custody regressions then 132 App tests pass; exact App ownership fix and ADR clarification.
 - **Work Progress**: [Low-level refactor plan reviewed and development Goal active](progress/2026-10/2026-10-22T174629Z-low-level-refactor-plan-reviewed-and-development-goal-active-e0bf96f51312477c95bfcddf4203b916.md) - Eleven implementation units authorized; five plan reviewers completed; Resolve/Capture temporal correction applied; U1 starts proof-first.
 - **Work Progress**: [Low-level contract redesign research and independent challenge](progress/2026-10/2026-10-22T165457Z-low-level-contract-redesign-research-and-independent-challenge-ea78e11f9cd34f21a77c8eda0239f9ac.md) - Proposed owner-preserving transfers, phase spatial snapshots, owned locks, asset intent and typed codecs; source-confirmed gaps and consumer migrations.
 - **Verification Evidence**: [Engine workflow refactor final integration](verification/2026-10/2026-10-22T130424Z-engine-workflow-refactor-final-integration-ac0a299fafd64a6dba6179531a1f5cff.md) - Final U1-U9 owner, public-consumer, Editor and compilation evidence with bounded review outcomes.
@@ -79,7 +80,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Two-level checkpoint consumer and complete-frame headless qualification](verification/2026-10/2026-10-21T025657Z-two-level-checkpoint-consumer-and-complete-frame-headless-qualification-72c5ef2705f0461e90916bb60e1bb345.md) - Verification Evidence for Two-level checkpoint consumer and complete-frame headless qualification.
 - **Session Handoff**: [Hosted Scene committed and two-level consumer verification open](sessions/2026-10/2026-10-20T190703Z-hosted-scene-committed-and-two-level-consumer-verification-open-ac1d26bed07c4a4ba3ebb1fab17c5ac8.md) - Session Handoff for Hosted Scene committed and two-level consumer verification open.
 - **Verification Evidence**: [Hosted Scene residency and owned preparation qualification](verification/2026-10/2026-10-20T183137Z-hosted-scene-residency-and-owned-preparation-qualification-d8d63279f87c4b34bc83eeeccdc7550e.md) - Verification Evidence for Hosted Scene residency and owned preparation qualification.
-- **Verification Evidence**: [Current Scene ownership and decoded-generation custody qualification](verification/2026-10/2026-10-20T172653Z-current-scene-ownership-and-decoded-generation-custody-qualification-0bf781c53d9e4cc3950bfb77b98d2b8a.md) - Qualify the first P2 ownership slice and retain the concrete residency design limits.
 
 # Integration Notes
 

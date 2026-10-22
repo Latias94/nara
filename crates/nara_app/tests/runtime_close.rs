@@ -5,15 +5,200 @@ use std::sync::{
 use std::time::Duration;
 
 use nara_app::{
-    App, RuntimeCandidateRetirementState, RuntimeCloseCause, RuntimeCloseContext,
-    RuntimeCloseErrorDisposition, RuntimeCloseParticipant, RuntimeCloseParticipantError,
-    RuntimeCloseParticipantId, RuntimeCloseParticipantPhase, RuntimeClosePolicy,
-    RuntimeCloseProgress, RuntimeControl, RuntimeControlFailure, RuntimeControlRequestResult,
-    RuntimeControlStatus, RuntimeInstance, RuntimeObligationLedger, RuntimeState,
+    AddPluginsError, App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
+    PluginShutdownObligationId, RuntimeCandidateRetirementState, RuntimeCloseCause,
+    RuntimeCloseContext, RuntimeCloseErrorDisposition, RuntimeCloseParticipant,
+    RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseParticipantPhase,
+    RuntimeClosePolicy, RuntimeCloseProgress, RuntimeControl, RuntimeControlFailure,
+    RuntimeControlRequestResult, RuntimeControlStatus, RuntimeInstance, RuntimeObligationLedger,
+    RuntimeState,
 };
 
 const PARTICIPANT: RuntimeCloseParticipantId =
     RuntimeCloseParticipantId::new("nara.test.completed-close-error");
+
+const REJECTED_PLUGIN: PluginId = PluginId::new("nara.test.rejected-close-owner");
+const DECLARED_OBLIGATION: PluginShutdownObligationId =
+    PluginShutdownObligationId::new("nara.test.declared-close");
+const UNDECLARED_OBLIGATION: PluginShutdownObligationId =
+    PluginShutdownObligationId::new("nara.test.undeclared-close");
+const REJECTED_PARTICIPANT: RuntimeCloseParticipantId =
+    RuntimeCloseParticipantId::new("nara.test.rejected-close");
+const RETAINED_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(REJECTED_PLUGIN, PluginCategory::Runtime)
+        .shutdown_obligations(&[DECLARED_OBLIGATION]);
+
+#[derive(Clone, Default)]
+struct CustodyProbe {
+    ready: Arc<AtomicBool>,
+    begins: Arc<AtomicUsize>,
+    drops: Arc<AtomicUsize>,
+}
+
+struct CustodyParticipant(CustodyProbe);
+
+impl Drop for CustodyParticipant {
+    fn drop(&mut self) {
+        self.0.drops.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+impl RuntimeCloseParticipant for CustodyParticipant {
+    fn begin_close(
+        &mut self,
+        _: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+        self.0.begins.fetch_add(1, Ordering::SeqCst);
+        Ok(RuntimeCloseProgress::Pending)
+    }
+
+    fn poll_close(
+        &mut self,
+        _: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+        Ok(if self.0.ready.load(Ordering::SeqCst) {
+            RuntimeCloseProgress::Complete
+        } else {
+            RuntimeCloseProgress::Pending
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RegistrationRejection {
+    Undeclared,
+    DuplicateObligation,
+}
+
+struct RejectedClosePlugin {
+    rejection: RegistrationRejection,
+    probe: CustodyProbe,
+}
+
+impl Plugin for RejectedClosePlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &RETAINED_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        let obligation = match self.rejection {
+            RegistrationRejection::Undeclared => UNDECLARED_OBLIGATION,
+            RegistrationRejection::DuplicateObligation => {
+                app.register_plugin_runtime_close_participant(
+                    DECLARED_OBLIGATION,
+                    PARTICIPANT,
+                    CustodyParticipant(self.probe.clone()),
+                )?;
+                DECLARED_OBLIGATION
+            }
+        };
+        app.register_plugin_runtime_close_participant(
+            obligation,
+            REJECTED_PARTICIPANT,
+            CustodyParticipant(self.probe.clone()),
+        )?;
+        Ok(())
+    }
+}
+
+#[test]
+fn rejected_close_registration_outside_build_retains_custody_until_retry() {
+    let probe = CustodyProbe::default();
+    let mut app = App::new();
+    assert!(matches!(
+        app.register_plugin_runtime_close_participant(
+            DECLARED_OBLIGATION,
+            REJECTED_PARTICIPANT,
+            CustodyParticipant(probe.clone()),
+        ),
+        Err(PluginError::ShutdownObligationOutsideBuild)
+    ));
+    let drops_before_close = probe.drops.load(Ordering::SeqCst);
+    let begins_before_close = probe.begins.load(Ordering::SeqCst);
+    let runtime = RuntimeInstance::start_with_options(
+        app,
+        RuntimeObligationLedger::new(),
+        RuntimeClosePolicy::new(Duration::ZERO),
+    )
+    .unwrap();
+    let mut failure = runtime.finish().unwrap_err();
+    let state_before_retry = failure.retirement_state();
+    let begins_before_retry = probe.begins.load(Ordering::SeqCst);
+    let drops_before_retry = probe.drops.load(Ordering::SeqCst);
+    probe.ready.store(true, Ordering::SeqCst);
+    let state_after_retry = failure.drive_retirement();
+    drop(failure);
+
+    assert_eq!(drops_before_close, 0);
+    assert_eq!(begins_before_close, 0);
+    assert_eq!(begins_before_retry, 1);
+    assert_eq!(drops_before_retry, 0);
+    assert_eq!(probe.begins.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        state_before_retry,
+        RuntimeCandidateRetirementState::RetirementIncomplete
+    );
+    assert_eq!(state_after_retry, RuntimeCandidateRetirementState::Retired);
+    assert_eq!(probe.drops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn rejected_close_registration_inside_build_retains_custody_until_retry() {
+    for rejection in [
+        RegistrationRejection::Undeclared,
+        RegistrationRejection::DuplicateObligation,
+    ] {
+        let probe = CustodyProbe::default();
+        let mut app = App::new();
+        let expected = match rejection {
+            RegistrationRejection::Undeclared => PluginError::UndeclaredShutdownObligation {
+                plugin: REJECTED_PLUGIN,
+                obligation: UNDECLARED_OBLIGATION,
+            },
+            RegistrationRejection::DuplicateObligation => {
+                PluginError::DuplicateShutdownObligation {
+                    plugin: REJECTED_PLUGIN,
+                    obligation: DECLARED_OBLIGATION,
+                }
+            }
+        };
+        let owner_count = match rejection {
+            RegistrationRejection::Undeclared => 1,
+            RegistrationRejection::DuplicateObligation => 2,
+        };
+        assert!(matches!(
+            app.add_plugin(RejectedClosePlugin {
+                rejection,
+                probe: probe.clone(),
+            }),
+            Err(AddPluginsError::Plugin(error)) if error.error() == &expected
+        ));
+        let drops_before_close = probe.drops.load(Ordering::SeqCst);
+        let mut failure = RuntimeInstance::start_with_options(
+            app,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::new(Duration::ZERO),
+        )
+        .unwrap_err();
+        let state_before_retry = failure.retirement_state();
+        let begins_before_retry = probe.begins.load(Ordering::SeqCst);
+        let drops_before_retry = probe.drops.load(Ordering::SeqCst);
+        probe.ready.store(true, Ordering::SeqCst);
+        let state_after_retry = failure.drive_retirement();
+        drop(failure);
+
+        assert_eq!(drops_before_close, 0);
+        assert_eq!(begins_before_retry, owner_count);
+        assert_eq!(drops_before_retry, 0);
+        assert_eq!(probe.begins.load(Ordering::SeqCst), owner_count);
+        assert_eq!(
+            state_before_retry,
+            RuntimeCandidateRetirementState::RetirementIncomplete
+        );
+        assert_eq!(state_after_retry, RuntimeCandidateRetirementState::Retired);
+        assert_eq!(probe.drops.load(Ordering::SeqCst), owner_count);
+    }
+}
 
 struct CompletedWithError {
     phase: RuntimeCloseParticipantPhase,

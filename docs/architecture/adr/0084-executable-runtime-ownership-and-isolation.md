@@ -158,6 +158,13 @@ need it.
   Rust types. Immediate runtime-local cleanup may remain in the once-only plugin shutdown hook;
   owners that require Host-issued authority, asynchronous progress, or waitable close must register
   a typed close obligation before App sealing.
+  Passing a close participant to the App registration operation transfers cleanup custody even
+  when activation rejects its phase, declaration, obligation or participant ID. The App retains
+  rejected participants for its existing close drive; registration runs no close callbacks.
+  Ordinary plugin errors therefore cannot discard a transferred protocol owner. Standalone
+  obligation-ledger registration instead returns its rejected participant to its caller. App
+  configuration is consumed by runtime/retirement conversion and is not recovered after physical
+  close; this rule does not reopen a completed runtime to accept new work.
   After successful startup and every fallible publication precondition, one atomic, infallible
   publish-and-promote move makes the same owner the Host-visible executable runtime. No
   promoted-but-unpublished owner or fallible hook exists across that boundary. `App` remains the

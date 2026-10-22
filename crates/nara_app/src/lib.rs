@@ -1446,6 +1446,11 @@ impl App {
         Ok(self)
     }
 
+    /// Takes custody of a close participant, even if plugin registration is rejected.
+    ///
+    /// Rejected participants remain owned by this App's retirement protocol; registration never
+    /// starts their callbacks. The standalone [`RuntimeObligationLedger::register`] instead
+    /// returns the participant when its caller has not transferred runtime cleanup responsibility.
     pub fn register_plugin_runtime_close_participant<P>(
         &mut self,
         obligation: PluginShutdownObligationId,
@@ -1456,9 +1461,17 @@ impl App {
         P: RuntimeCloseParticipant,
     {
         let Some((plugin, PluginHook::Build)) = self.owner.active_plugin_hook else {
+            self.owner
+                .obligations
+                .retain_for_retirement(participant_id, participant);
             return Err(PluginError::ShutdownObligationOutsideBuild);
         };
-        self.register_plugin_shutdown_obligation(obligation)?;
+        if let Err(error) = self.register_plugin_shutdown_obligation(obligation) {
+            self.owner
+                .obligations
+                .retain_for_retirement(participant_id, participant);
+            return Err(error);
+        }
         if let Err(failure) = self.owner.obligations.register(participant_id, participant) {
             let (ledger_error, participant) = failure.into_parts();
             self.owner
