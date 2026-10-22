@@ -95,9 +95,9 @@ nara_ui_render = { path = "crates/nara_ui_render" }
 nara_window = { path = "crates/nara_window" }
 nara_winit = { path = "crates/nara_winit" }
 
-bevy_ecs = "0.20"
-bevy_ecs_macro_logic = "0.20"
-bevy_macro_utils = "0.20"
+bevy_ecs = "=0.20.0"
+bevy_ecs_macro_logic = "=0.20.0"
+bevy_macro_utils = "=0.20.0"
 bevy_reflect = { version = "0.20", features = ["glam"] }
 blake3 = "1"
 bytemuck = { version = "1", features = ["derive"] }

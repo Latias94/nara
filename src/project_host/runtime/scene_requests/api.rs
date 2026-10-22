@@ -1,9 +1,6 @@
 //! Public finite request surface and explicit owner-thread commit.
 
 use super::*;
-// Bevy's SystemParam derive resolves its substrate by this local name. Reuse Nara's re-export
-// instead of adding a second direct ECS dependency to the root product.
-use nara_ecs as bevy_ecs;
 
 /// Exact request identity. Runtime and process-wide sequence prevent cross-World replay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -6,6 +6,29 @@ use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
 use syn::{DeriveInput, Error, Ident, Path, Result, parse_macro_input, parse_quote};
 
+mod upstream;
+
+#[proc_macro_derive(Bundle, attributes(bundle))]
+pub fn derive_bundle(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    ecs_path()
+        .and_then(|ecs| upstream::bundle::derive_bundle(input, &ecs))
+        .unwrap_or_else(Error::into_compile_error)
+        .into()
+}
+
+#[proc_macro_derive(SystemParam, attributes(system_param))]
+pub fn derive_system_param(input: TokenStream) -> TokenStream {
+    let tokens = input.clone();
+    let input = parse_macro_input!(input as DeriveInput);
+    let ecs = match ecs_path() {
+        Ok(ecs) => ecs,
+        Err(error) => return error.into_compile_error().into(),
+    };
+    upstream::system_param::derive_system_param(tokens, input, &ecs)
+        .unwrap_or_else(|error| error.into_compile_error().into())
+}
+
 #[proc_macro_derive(
     Component,
     attributes(component, require, relationship, relationship_target, entities)
@@ -105,4 +128,35 @@ fn ecs_path() -> Result<Path> {
         Span::call_site(),
         "nara ECS derives require a direct nara or nara_ecs dependency",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::upstream::bundle;
+    use syn::parse_quote;
+
+    #[test]
+    fn invalid_bundle_attributes_keep_actionable_diagnostics() {
+        let path = parse_quote!(::renamed_ecs);
+        let container = parse_quote! {
+            #[bundle(unknown)]
+            struct Invalid;
+        };
+        assert_eq!(
+            bundle::derive_bundle(container, &path)
+                .unwrap_err()
+                .to_string(),
+            "Invalid bundle container attribute. Allowed attributes: `ignore_from_components`"
+        );
+        let field = parse_quote! {
+            struct Invalid {
+                #[bundle(unknown)]
+                value: u32,
+            }
+        };
+        assert_eq!(
+            bundle::derive_bundle(field, &path).unwrap_err().to_string(),
+            "Invalid bundle attribute. Use `ignore`"
+        );
+    }
 }

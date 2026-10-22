@@ -185,7 +185,9 @@ pub mod prelude {
         Asset, AssetId, AssetPath, AssetRef, AssetServer, Assets, Handle, StableAssetId,
     };
     pub use nara_core::{Color, Vec2, Vec3};
-    pub use nara_ecs::{Bundle, Commands, Component, Entity, Query, Res, ResMut, Resource, World};
+    pub use nara_ecs::{
+        Bundle, Commands, Component, Entity, Query, Res, ResMut, Resource, SystemParam, World,
+    };
     pub use nara_gameplay::{
         ActionCommandBinding, ActionCommandMap, GameplayCommandDraft, GameplayCommandIngressSource,
         GameplayCommandKey, GameplayCommandPayload, GameplayCommandSource, GameplayCommandSourceId,

@@ -41,6 +41,37 @@ nara owns the product layer around the ECS:
 - `nara_tooling` owns inspector and AI-facing metadata.
 - `nara_render` owns extraction and renderer backend seams.
 
+### Facade Derives
+
+The supported authoring derives are `Component`, `Resource`, `Bundle`,
+`SystemParam`, `ScheduleLabel` and `SystemSet`. They resolve a direct `nara_ecs`
+or `nara` dependency by its Cargo package identity, including a renamed
+dependency. Consumers do not need a direct `bevy_ecs` dependency or a local
+`bevy_ecs` alias. Both the ECS root/prelude and the `bundle::Bundle` and
+`system::SystemParam` module paths expose the adapted derives alongside the
+upstream traits.
+
+This is a selected public surface, not a claim that every re-exported Bevy macro
+supports Nara-only dependencies. Derives outside this set need their own path
+adaptation and generated-code qualification before receiving that guarantee.
+
+Bevy 0.20.0 provides path-parameterized helpers for component/resource expansion
+and schedule labels, but not for Bundle or SystemParam. The latter two use
+bounded private extractions of the exact published macro source in the existing
+`nara_ecs_derive` crate, with upstream license and source provenance. They retain
+Bevy's storage, pointer movement, access registration, parameter validation and
+deferred application semantics. Bundle's precise return-type capture also
+includes const and lifetime generic parameters, which the released source's
+type-only list omits.
+
+The runtime, macro helper dependencies and extracted sources are one upgrade
+unit. The exact published source must be reviewed on upgrades; the renamed
+dependency fixtures must compile and execute generic/const bundles and system
+parameters, ignored fields, nested bundles and deferred commands. Hidden
+`ptr`/`__macro_exports` re-exports support generated code and are not a separate
+stable authoring API. Token string replacement and a second implementation of
+ECS runtime semantics are excluded.
+
 ## Alternatives Considered
 
 ### Option A: Use `bevy_ecs` through `nara_ecs` (Chosen)

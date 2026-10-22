@@ -1,5 +1,26 @@
 use engine::{PersistentComponent, ecs::Component};
 
+#[cfg(test)]
+use engine::ecs;
+
+#[cfg(test)]
+#[path = "../../facade_contract.rs"]
+mod facade_contract;
+
+#[cfg(test)]
+#[derive(engine::prelude::Bundle)]
+pub struct RootBundle(RenamedRoot);
+
+#[cfg(test)]
+#[derive(engine::prelude::SystemParam)]
+pub struct RootParams<'w> {
+    value: engine::ecs::ResMut<'w, RootResource>,
+}
+
+#[cfg(test)]
+#[derive(Default, engine::prelude::Resource)]
+pub struct RootResource(u32);
+
 #[derive(Component, PersistentComponent)]
 #[nara(
     id = "nara.test.RenamedRoot",
@@ -14,6 +35,17 @@ pub struct RenamedRoot {
 }
 
 engine::persistent_components! { pub mod inventory = [RenamedRoot]; }
+
+#[test]
+fn root_prelude_derives_execute_without_a_bevy_dependency() {
+    let mut world = ecs::World::new();
+    world.init_resource::<RootResource>();
+    let entity = world.spawn(RootBundle(RenamedRoot { value: 4 })).id();
+    let mut state = ecs::system::SystemState::<RootParams>::new(&mut world);
+    state.get_mut(&mut world).unwrap().value.0 += 1;
+    assert_eq!(world.resource::<RootResource>().0, 1);
+    assert_eq!(world.get::<RenamedRoot>(entity).unwrap().value, 4);
+}
 
 #[test]
 fn root_only_dependency_exposes_the_inventory_and_typed_range_derive() {

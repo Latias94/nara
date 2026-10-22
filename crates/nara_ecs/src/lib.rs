@@ -5,14 +5,31 @@
 //! narrow public boundary where nara can add conventions without pretending to
 //! own a separate ECS implementation.
 
-pub use nara_ecs_derive::{Component, Resource, ScheduleLabel, SystemSet};
+pub use nara_ecs_derive::{Bundle, Component, Resource, ScheduleLabel, SystemSet};
 
 pub use bevy_ecs::{
-    bundle, change_detection, component, entity, error, event, hierarchy, lifecycle, message, name,
-    observer, query, relationship, resource, schedule, system, world,
+    change_detection, component, entity, error, event, hierarchy, lifecycle, message, name, observer,
+    query, relationship, resource, schedule, world,
 };
 
 pub use bevy_ecs::prelude::*;
+
+/// Bundles and their facade-aware derive.
+pub mod bundle {
+    pub use bevy_ecs::bundle::*;
+    pub use nara_ecs_derive::Bundle;
+}
+
+/// Systems and their facade-aware parameter derive.
+pub mod system {
+    pub use bevy_ecs::system::*;
+    pub use nara_ecs_derive::SystemParam;
+}
+
+pub use system::SystemParam;
+
+#[doc(hidden)]
+pub use bevy_ecs::{__macro_exports, ptr};
 
 #[doc(hidden)]
 pub mod __private;
@@ -25,6 +42,6 @@ pub use transaction::{
 };
 
 pub mod prelude {
-    pub use crate::{Component, Resource, ScheduleLabel, SystemSet};
+    pub use crate::{Bundle, Component, Resource, ScheduleLabel, SystemParam, SystemSet};
     pub use bevy_ecs::prelude::*;
 }

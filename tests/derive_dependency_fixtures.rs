@@ -7,7 +7,7 @@ use std::{
 #[test]
 fn renamed_dependencies_resolve_derive_crates() {
     for fixture in ["renamed-root", "renamed-ecs"] {
-        check_fixture(fixture);
+        run_fixture(fixture);
     }
 }
 
@@ -187,7 +187,7 @@ fn canonical_project_fixtures_are_checked_out_with_lf() {
     }
 }
 
-fn check_fixture(fixture: &str) {
+fn run_fixture(fixture: &str) {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fixture_root = repository
         .join("tests")
@@ -197,9 +197,9 @@ fn check_fixture(fixture: &str) {
     let manifest = fixture_root.join("Cargo.toml");
     let output = Command::new(cargo_executable())
         .current_dir(repository)
-        .args(["check", "--manifest-path"])
+        .args(["test", "--manifest-path"])
         .arg(&manifest)
-        .args(["--locked", "--jobs", "1"])
+        .args(["--locked", "--jobs", "1", "--", "--test-threads=1"])
         .env("CARGO_TERM_COLOR", "never")
         .env("CARGO_TARGET_DIR", target_directory(repository))
         .output()
