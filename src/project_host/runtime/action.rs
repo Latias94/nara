@@ -1,10 +1,8 @@
 use std::{fmt, num::NonZeroU32, time::Duration};
 
-use nara_app::RuntimeClosePolicy;
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-use nara_app::{
-    AppExit, AppRunError, RuntimeCloseCause, RuntimeCloseEvidence, RuntimeFaultKind, RuntimeState,
-};
+use nara_app::{AppExit, AppRunError, RuntimeCloseCause, RuntimeFaultKind, RuntimeState};
+use nara_app::{RuntimeCloseEvidence, RuntimeClosePolicy};
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::Resource;
 use nara_fs::DirectoryCapability;
@@ -555,16 +553,22 @@ impl DesktopRun {
         let close_evidence = host
             .running_runtime_close_evidence()
             .expect("the desktop Host retains close evidence until terminal lowering");
+        let runtime_faulted = host.running_runtime_has_fault();
         let mut terminal = desktop_terminal_after_runner(
             run_result,
             runtime_state,
             &close_evidence,
+            runtime_faulted,
             &mut self.diagnostics,
         );
-        append_plugin_shutdown_diagnostics(
-            &mut self.diagnostics,
-            host.running_runtime_plugin_failure_report(),
-        );
+        if let Some(report) = host.running_runtime_close_failure_report() {
+            self.diagnostics.extend(report);
+        } else {
+            append_plugin_shutdown_diagnostics(
+                &mut self.diagnostics,
+                host.running_runtime_plugin_failure_report(),
+            );
+        }
         if let Some(verification) = verification {
             match verification.outcome() {
                 DesktopFirstPresentOutcome::Accepted(presented_frame) => {
@@ -639,6 +643,22 @@ impl DesktopRun {
         }
     }
 
+    pub(crate) fn incomplete_cleanup_diagnostics(&self) -> DiagnosticReport {
+        let mut diagnostics = DiagnosticReport::default();
+        if let DesktopRunState::Cleaning { hosts, .. } = &self.state {
+            for host in hosts {
+                if let super::ProjectHostSlot::Cleaning { owner, .. } = &host.slot {
+                    let empty = RuntimeCloseEvidence::default();
+                    diagnostics.extend(super::cleanup_incomplete_report(
+                        owner.close_evidence().unwrap_or(&empty),
+                        owner.plugin_failure_report(),
+                    ));
+                }
+            }
+        }
+        diagnostics
+    }
+
     fn report(&self) -> DesktopRunReport {
         let outcome = match &self.state {
             DesktopRunState::Completed(exit) => DesktopRunOutcome::Completed(*exit),
@@ -700,6 +720,7 @@ fn desktop_terminal_after_runner(
     run_result: Result<AppExit, AppRunError>,
     runtime_state: RuntimeState,
     close_evidence: &RuntimeCloseEvidence,
+    runtime_faulted: bool,
     diagnostics: &mut DiagnosticReport,
 ) -> PendingDesktopTerminal {
     if runtime_state == RuntimeState::CloseIncomplete {
@@ -724,7 +745,21 @@ fn desktop_terminal_after_runner(
 
     match run_result {
         Ok(exit) if runtime_state == RuntimeState::Stopped => {
-            PendingDesktopTerminal::Completed(exit)
+            if runtime_faulted {
+                diagnostics.extend(single_error(
+                    "project.desktop.runtime-faulted",
+                    "Desktop runtime retained a runtime fault after stopping",
+                ));
+                PendingDesktopTerminal::Failed
+            } else if close_evidence.has_terminal_failure() {
+                diagnostics.extend(single_error(
+                    "project.desktop.cleanup-failed",
+                    "Desktop runtime cleanup retained a terminal failure",
+                ));
+                PendingDesktopTerminal::Failed
+            } else {
+                PendingDesktopTerminal::Completed(exit)
+            }
         }
         Ok(_) => {
             diagnostics.extend(single_error(
@@ -819,6 +854,7 @@ mod desktop_terminal_tests {
     enum CloseFailureMode {
         Pending,
         RetryableParticipant,
+        CompletedWithError,
     }
 
     struct ControlledCloseParticipant {
@@ -852,6 +888,11 @@ mod desktop_terminal_tests {
                 CloseFailureMode::RetryableParticipant => Err(
                     RuntimeCloseParticipantError::retryable("nara.test.desktop-close-participant"),
                 ),
+                CloseFailureMode::CompletedWithError => {
+                    Ok(RuntimeCloseProgress::CompleteWithError {
+                        code: "nara.test.desktop-close-terminal",
+                    })
+                }
             }
         }
     }
@@ -889,7 +930,9 @@ mod desktop_terminal_tests {
             .unwrap();
         let policy = match mode {
             CloseFailureMode::Pending => RuntimeClosePolicy::new(Duration::ZERO),
-            CloseFailureMode::RetryableParticipant => RuntimeClosePolicy::default(),
+            CloseFailureMode::RetryableParticipant | CloseFailureMode::CompletedWithError => {
+                RuntimeClosePolicy::default()
+            }
         };
         let mut runtime = RuntimeAdmissionReservation::try_acquire()
             .unwrap()
@@ -961,6 +1004,7 @@ mod desktop_terminal_tests {
             Err(AppRunError::runner("managed runtime close is incomplete")),
             RuntimeState::CloseIncomplete,
             &deadline_close_evidence(),
+            false,
             &mut diagnostics,
         );
 
@@ -999,6 +1043,7 @@ mod desktop_terminal_tests {
             )),
             RuntimeState::CloseIncomplete,
             &participant_close_evidence(),
+            false,
             &mut diagnostics,
         );
 
@@ -1032,6 +1077,7 @@ mod desktop_terminal_tests {
                 Ok(AppExit::Success),
                 RuntimeState::Stopped,
                 &RuntimeCloseEvidence::default(),
+                false,
                 &mut stopped_diagnostics,
             ),
             PendingDesktopTerminal::Completed(AppExit::Success)
@@ -1044,6 +1090,7 @@ mod desktop_terminal_tests {
                 Ok(AppExit::Success),
                 RuntimeState::Running,
                 &RuntimeCloseEvidence::default(),
+                false,
                 &mut running_diagnostics,
             ),
             PendingDesktopTerminal::Failed
@@ -1052,6 +1099,73 @@ mod desktop_terminal_tests {
             &running_diagnostics,
             "project.desktop.runtime-not-stopped"
         ));
+    }
+
+    #[test]
+    fn stopped_runtime_with_close_error_or_fault_is_not_reported_as_completed() {
+        let mut close_error_diagnostics = DiagnosticReport::default();
+        let terminal_evidence = terminal_close_evidence();
+        assert!(matches!(
+            desktop_terminal_after_runner(
+                Ok(AppExit::Success),
+                RuntimeState::Stopped,
+                &terminal_evidence,
+                false,
+                &mut close_error_diagnostics,
+            ),
+            PendingDesktopTerminal::Failed
+        ));
+        assert!(has_code(
+            &close_error_diagnostics,
+            "project.desktop.cleanup-failed"
+        ));
+
+        let mut fault_diagnostics = DiagnosticReport::default();
+        assert!(matches!(
+            desktop_terminal_after_runner(
+                Ok(AppExit::Success),
+                RuntimeState::Stopped,
+                &RuntimeCloseEvidence::default(),
+                true,
+                &mut fault_diagnostics,
+            ),
+            PendingDesktopTerminal::Failed
+        ));
+        assert!(has_code(
+            &fault_diagnostics,
+            "project.desktop.runtime-faulted"
+        ));
+    }
+
+    fn terminal_close_evidence() -> RuntimeCloseEvidence {
+        let released = Arc::new(AtomicBool::new(false));
+        let mut obligations = RuntimeObligationLedger::new();
+        obligations
+            .register(
+                RuntimeCloseParticipantId::new("nara.test.desktop-terminal-evidence"),
+                ControlledCloseParticipant {
+                    released,
+                    mode: CloseFailureMode::CompletedWithError,
+                },
+            )
+            .unwrap();
+        let mut runtime = RuntimeAdmissionReservation::try_acquire()
+            .unwrap()
+            .admit(
+                App::new().seal().unwrap(),
+                obligations,
+                RuntimeClosePolicy::default(),
+            )
+            .unwrap()
+            .complete_startup()
+            .unwrap()
+            .promote();
+        assert!(matches!(
+            runtime.request_control(RuntimeControl::Stop),
+            RuntimeControlRequestResult::Accepted(_)
+        ));
+        drive_until_state(&mut runtime, RuntimeState::Stopped);
+        runtime.close_evidence().clone()
     }
 
     #[test]
@@ -1328,6 +1442,20 @@ where
             diagnostics: self.diagnostics.clone(),
             startup_content_closure: self.startup_content_closure.clone(),
         }
+    }
+
+    pub(crate) fn incomplete_cleanup_diagnostics(&self) -> DiagnosticReport {
+        let mut diagnostics = DiagnosticReport::default();
+        if let HeadlessRunState::Cleaning { host, .. } = &self.state
+            && let super::ProjectHostSlot::Cleaning { owner, .. } = &host.slot
+        {
+            let empty = RuntimeCloseEvidence::default();
+            diagnostics.extend(super::cleanup_incomplete_report(
+                owner.close_evidence().unwrap_or(&empty),
+                owner.plugin_failure_report(),
+            ));
+        }
+        diagnostics
     }
 }
 

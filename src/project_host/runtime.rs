@@ -372,7 +372,7 @@ impl CleanupOwner {
     fn completion_failure_report(&self) -> DiagnosticReport {
         let mut diagnostics = DiagnosticReport::default();
         if let Some(evidence) = self.close_evidence()
-            && close_evidence_has_terminal_failure(evidence)
+            && evidence.has_terminal_failure()
         {
             diagnostics.extend(cleanup_failed_report(
                 evidence,
@@ -419,10 +419,18 @@ impl ProjectHost {
         }
     }
 
+    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+    fn running_runtime_has_fault(&self) -> bool {
+        match &self.slot {
+            ProjectHostSlot::Running(published) => published.runtime().fault().is_some(),
+            ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => false,
+        }
+    }
+
     fn running_runtime_close_failure_report(&self) -> Option<DiagnosticReport> {
         match &self.slot {
             ProjectHostSlot::Running(published)
-                if close_evidence_has_terminal_failure(published.runtime().close_evidence()) =>
+                if published.runtime().close_evidence().has_terminal_failure() =>
             {
                 Some(cleanup_failed_report(
                     published.runtime().close_evidence(),
@@ -438,7 +446,7 @@ impl ProjectHost {
     fn running_runtime_has_terminal_close_failure(&self) -> bool {
         match &self.slot {
             ProjectHostSlot::Running(published) => {
-                close_evidence_has_terminal_failure(published.runtime().close_evidence())
+                published.runtime().close_evidence().has_terminal_failure()
             }
             ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => false,
         }
@@ -1013,7 +1021,7 @@ impl ProjectHost {
 
         match published.runtime().state() {
             RuntimeState::Stopped => {
-                if close_evidence_has_terminal_failure(published.runtime().close_evidence()) {
+                if published.runtime().close_evidence().has_terminal_failure() {
                     Err(HostFault::new(cleanup_failed_report(
                         published.runtime().close_evidence(),
                         published.runtime().plugin_failure_report(),
@@ -1033,7 +1041,7 @@ impl ProjectHost {
                 if published.runtime().fault().is_some() {
                     diagnostics.extend(runtime_faulted_report());
                 }
-                if close_evidence_has_terminal_failure(published.runtime().close_evidence()) {
+                if published.runtime().close_evidence().has_terminal_failure() {
                     diagnostics.extend(single_error(
                         "project.run.cleanup-failed",
                         "Project runtime cleanup reported a terminal failure",
@@ -1730,6 +1738,19 @@ fn cleanup_failed_report(
 }
 
 fn append_close_cause_diagnostics(report: &mut DiagnosticReport, evidence: &RuntimeCloseEvidence) {
+    for pending in evidence.pending_participants() {
+        let diagnostic = Diagnostic::warning(
+            diagnostic_code("project.run.cleanup-participant-pending"),
+            safe_summary("Project runtime cleanup participant remains unfinished"),
+        );
+        let diagnostic =
+            attach_identifier(diagnostic, "participant", pending.participant().as_str());
+        report.push(attach_identifier(
+            diagnostic,
+            "phase",
+            close_phase_id(pending.phase()),
+        ));
+    }
     for cause in evidence.causes() {
         let diagnostic = match cause {
             RuntimeCloseCause::PluginShutdown => Diagnostic::error(
@@ -1768,19 +1789,6 @@ fn append_close_cause_diagnostics(report: &mut DiagnosticReport, evidence: &Runt
         };
         report.push(diagnostic);
     }
-}
-
-fn close_evidence_has_terminal_failure(evidence: &RuntimeCloseEvidence) -> bool {
-    evidence.causes().iter().any(|cause| {
-        matches!(cause, RuntimeCloseCause::PluginShutdown)
-            || matches!(
-                cause,
-                RuntimeCloseCause::ParticipantError {
-                    disposition: RuntimeCloseErrorDisposition::Terminal,
-                    ..
-                }
-            )
-    })
 }
 
 fn failure_diagnostic(

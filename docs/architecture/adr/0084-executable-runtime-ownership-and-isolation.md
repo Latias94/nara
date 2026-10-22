@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-10-22 (separate physical close completion from final failure evidence)
+**Last Revised**: 2026-10-22 (physical close evidence and ordinary product launch custody)
 **Owner**: `nara_app` and concrete executable hosts
 **Refined By**: [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): 2D Foundation Ownership and Authoring Contracts
 **Admission Trigger**: RGD-U2 through RGD-U6 replaced the plan/World behavior split, removed
@@ -189,6 +189,14 @@ need it.
   candidate construction, drives `RuntimeInstance` through the same public control/drive/close
   contract, and cannot be replaced from a plugin hook. External candidates are not filtered by
   crate path or first-party ID.
+
+Ordinary desktop/headless process entrypoints delegate source selection, supervised bootstrap
+verification where applicable, and retained cleanup driving to their concrete product Host.
+Advanced embedded Hosts keep their explicit run owner and event-loop policy. An ordinary process
+that exhausts its cleanup deadline reports the still-owned participant evidence and exits with
+failure; it must not drop live custody and report successful retirement. This deadline is checked
+between cooperative cleanup drives and cannot interrupt a blocking native callback. Launch
+preparation success and the terminal runtime outcome remain separate report facts.
 
 ### Owner Thread And Transportable Definitions
 

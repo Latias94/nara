@@ -3,8 +3,96 @@
 use std::{
     error::Error,
     fmt,
+    fs::File,
+    io,
     path::{Component, Path, PathBuf},
 };
+
+use nara_fs::{
+    CapabilityRights, DirectoryCapability, FsError, FsOperation, HostCapabilityOptions, TrustMode,
+};
+
+/// Opens the read-only source of an ordinary product without consulting the current directory.
+///
+/// An executable installed under `bin` or `tools` uses its sibling `project` directory. Other
+/// executables use the supplied absolute development root. Failure to open a packaged source
+/// never falls back to development data.
+#[doc(hidden)]
+pub fn open_product_project_root(
+    development_root: impl AsRef<Path>,
+) -> Result<DirectoryCapability, FsError> {
+    let executable = std::env::current_exe().map_err(open_directory_error)?;
+    let path = default_project_root(&executable, development_root.as_ref()).map_err(|source| {
+        open_directory_error(io::Error::new(io::ErrorKind::InvalidInput, source))
+    })?;
+    open_explicit_product_project_root(&path)
+}
+
+/// Opens one explicit absolute product root with the product Host's read-only source policy.
+#[doc(hidden)]
+pub fn open_explicit_product_project_root(
+    root: impl AsRef<Path>,
+) -> Result<DirectoryCapability, FsError> {
+    let path = resolve_product_project_root(ProductProjectRootSource::Explicit(root.as_ref()))
+        .map_err(|source| {
+            open_directory_error(io::Error::new(io::ErrorKind::InvalidInput, source))
+        })?;
+    open_project_root_path(&path)
+}
+
+fn default_project_root(
+    executable: &Path,
+    development_root: &Path,
+) -> Result<PathBuf, ProductProjectRootError> {
+    match resolve_product_project_root(ProductProjectRootSource::PackagedExecutable(executable)) {
+        Ok(root) => Ok(root),
+        Err(ProductProjectRootError::UnsupportedPackagedDirectory) => {
+            resolve_product_project_root(ProductProjectRootSource::Explicit(development_root))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn open_project_root_path(path: &Path) -> Result<DirectoryCapability, FsError> {
+    let directory = host_directory(path).map_err(open_directory_error)?;
+    let trust = if cfg!(any(windows, target_os = "linux")) {
+        TrustMode::Untrusted
+    } else {
+        TrustMode::TrustedLocal
+    };
+    DirectoryCapability::from_host_handle(
+        directory,
+        HostCapabilityOptions::new(CapabilityRights::ReadOnly, trust),
+    )
+}
+
+fn open_directory_error(source: io::Error) -> FsError {
+    FsError::Io {
+        operation: FsOperation::OpenDirectory,
+        source,
+    }
+}
+
+fn host_directory(path: &Path) -> io::Result<File> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        const FILE_SHARE_READ_WRITE_DELETE: u32 = 0x1 | 0x2 | 0x4;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+
+        std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ_WRITE_DELETE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+    }
+    #[cfg(not(windows))]
+    {
+        File::open(path)
+    }
+}
 
 /// Explicit product-root sources accepted by Nara product entry points.
 ///
@@ -130,6 +218,46 @@ mod tests {
             .unwrap(),
             PathBuf::from(PACKAGED_PROJECT_ROOT)
         );
+    }
+
+    #[test]
+    fn ordinary_launch_selects_packaged_source_before_development_root() {
+        assert_eq!(
+            default_project_root(
+                Path::new(PACKAGED_EXECUTABLE),
+                Path::new(EXPLICIT_PROJECT_ROOT),
+            )
+            .unwrap(),
+            PathBuf::from(PACKAGED_PROJECT_ROOT)
+        );
+        let development_executable = Path::new(EXPLICIT_PROJECT_ROOT)
+            .join("target")
+            .join("debug")
+            .join("desktop");
+        assert_eq!(
+            default_project_root(&development_executable, Path::new(EXPLICIT_PROJECT_ROOT),)
+                .unwrap(),
+            PathBuf::from(EXPLICIT_PROJECT_ROOT)
+        );
+    }
+
+    #[test]
+    fn explicit_product_source_is_read_only_and_rejects_relative_paths() {
+        let root = std::env::temp_dir().join(format!(
+            "nara-product-root-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("source.txt"), b"product source").unwrap();
+        let source = open_explicit_product_project_root(&root).unwrap();
+        assert_eq!(source.options().rights(), CapabilityRights::ReadOnly);
+        assert!(open_explicit_product_project_root("project").is_err());
+        drop(source);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

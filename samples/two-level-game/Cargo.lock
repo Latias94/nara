@@ -1492,6 +1492,7 @@ dependencies = [
  "nara_window",
  "nara_winit",
  "rustix 1.1.5",
+ "serde",
  "serde_json",
  "thiserror 2.0.21",
  "toml",

@@ -1,13 +1,8 @@
-use std::{env, ffi::OsString, process::ExitCode, time::Instant};
+use std::{env, ffi::OsString, process::ExitCode};
 
-use nara::project_host::{
-    DesktopRun, DesktopRunIntent, DesktopRunOutcome, ProductSupervisedDesktopLaunchCandidate,
-    SupervisedDesktopProductIdentity,
-};
-use nara_game::{open_explicit_project_root, open_project_root};
+use nara::project_host::{DesktopProductLaunch, DesktopRunOutcome};
 
 const VERIFY_FIRST_PRESENT_ARGUMENT: &str = "--verify-first-present";
-const CLEANUP_DEADLINE_SECONDS: u64 = 5;
 const DESKTOP_BINARY_TARGET: &str = "desktop";
 
 fn main() -> ExitCode {
@@ -18,105 +13,48 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let supervised_candidate =
-        match ProductSupervisedDesktopLaunchCandidate::read_from_inherited_bootstrap() {
-            Ok(candidate) => candidate,
-            Err(error) => {
-                eprintln!("failed to read supervised desktop launch: {error}");
-                return ExitCode::FAILURE;
-            }
-        };
-    if verify_first_present && supervised_candidate.is_some() {
-        eprintln!(
-            "{VERIFY_FIRST_PRESENT_ARGUMENT} cannot be combined with a supervised desktop launch"
-        );
-        return ExitCode::FAILURE;
-    }
-    let project_root = match supervised_candidate.as_ref() {
-        Some(candidate) => open_explicit_project_root(candidate.context().project_root()),
-        None => open_project_root(),
-    };
-    let project_root = match project_root {
-        Ok(project_root) => project_root,
+    let launch = DesktopProductLaunch::from_cargo_product(
+        env!("CARGO_MANIFEST_DIR"),
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+        DESKTOP_BINARY_TARGET,
+        nara_game::product_recipe(),
+    );
+    let launch = match launch {
+        Ok(launch) if verify_first_present => launch.with_first_present_verification(),
+        Ok(launch) => launch,
         Err(error) => {
-            eprintln!("failed to open project source: {error}");
+            eprintln!("{error}");
             return ExitCode::FAILURE;
         }
     };
-    let supervised_session = match supervised_candidate {
-        Some(candidate) => match candidate.verify_project_source(&project_root) {
-            Ok(session) => Some(session),
-            Err(error) => {
-                eprintln!("failed to revalidate supervised desktop source facts: {error}");
-                return ExitCode::FAILURE;
-            }
-        },
-        None => None,
-    };
-    let profile = supervised_session
-        .as_ref()
-        .map(|session| session.context().profile_name().to_owned())
-        .unwrap_or_else(|| "desktop".to_owned());
-    let intent = DesktopRunIntent::new()
-        .with_profile(profile)
-        .with_recipe(nara_game::product_recipe());
-    let intent = match supervised_session {
-        Some(session) => {
-            let product_identity = match SupervisedDesktopProductIdentity::from_cargo_product(
-                env!("CARGO_PKG_NAME"),
-                env!("CARGO_PKG_VERSION"),
-                DESKTOP_BINARY_TARGET,
-            ) {
-                Ok(identity) => identity,
-                Err(error) => {
-                    eprintln!("failed to construct desktop product identity: {error}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            intent.with_supervised_desktop_activation(session, product_identity)
+    let report = launch.run();
+    let report = match report {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
         }
-        None if verify_first_present => intent.with_first_present_verification(),
-        None => intent,
     };
-    let mut run = DesktopRun::new(project_root, intent);
-    let mut cleanup_deadline = None;
-
-    loop {
-        let report = run.execute();
-        match report.outcome() {
-            DesktopRunOutcome::Completed(_) if !verify_first_present => return ExitCode::SUCCESS,
-            DesktopRunOutcome::Completed(_) if report.presentation_verification().is_some() => {
-                let Some(closure) = report.startup_content_closure() else {
-                    eprintln!("desktop run completed without startup-content evidence");
-                    return ExitCode::FAILURE;
-                };
-                if let Err(error) = nara_game::record_product_observation(
-                    nara_game::ProductObservationTarget::Desktop,
-                    closure,
-                ) {
-                    eprintln!("failed to record desktop product observation: {error}");
-                    return ExitCode::FAILURE;
-                }
-                println!("starter_desktop: ok first_present_verified=true");
-                return ExitCode::SUCCESS;
-            }
-            DesktopRunOutcome::Completed(_) | DesktopRunOutcome::Failed => {
-                eprintln!("{:#?}", report.diagnostics());
-                return ExitCode::FAILURE;
-            }
-            DesktopRunOutcome::CleanupIncomplete => {
-                let now = Instant::now();
-                let deadline = cleanup_deadline.get_or_insert_with(|| {
-                    now + std::time::Duration::from_secs(CLEANUP_DEADLINE_SECONDS)
-                });
-                if now >= *deadline {
-                    eprintln!("desktop cleanup exceeded its bounded deadline");
-                    return ExitCode::FAILURE;
-                }
-                std::thread::yield_now();
-            }
-        }
+    if !matches!(report.outcome(), DesktopRunOutcome::Completed(_)) {
+        eprintln!("{:#?}", report.diagnostics());
+        return ExitCode::FAILURE;
     }
+    if verify_first_present {
+        let Some(closure) = report.startup_content_closure() else {
+            eprintln!("desktop run completed without startup-content evidence");
+            return ExitCode::FAILURE;
+        };
+        if let Err(error) = nara_game::record_product_observation(
+            nara_game::ProductObservationTarget::Desktop,
+            closure,
+        ) {
+            eprintln!("failed to record desktop product observation: {error}");
+            return ExitCode::FAILURE;
+        }
+        println!("starter_desktop: ok first_present_verified=true");
+    }
+    ExitCode::SUCCESS
 }
 
 fn parse_arguments(arguments: impl IntoIterator<Item = OsString>) -> Option<bool> {

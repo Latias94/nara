@@ -56,6 +56,15 @@ pub use composition::{
     compiled_product_capabilities, resolve_product_recipe,
 };
 pub use ingest::{ProjectCandidateError, ProjectCandidateErrorKind, ingest_project_manifest};
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+pub use product_launch::HeadlessProductRun;
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "serde",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
+pub use product_launch::{DesktopProductLaunch, DesktopProductLaunchError};
 #[cfg(feature = "runtime-core")]
 #[doc(hidden)]
 pub use product_launch::{
@@ -74,6 +83,7 @@ pub use product_launch::{
 pub use product_launch::{
     ProductProjectRootError, ProductProjectRootSource, resolve_product_project_root,
 };
+pub use product_launch::{open_explicit_product_project_root, open_product_project_root};
 #[cfg(feature = "runtime-ui")]
 #[doc(hidden)]
 pub const PROJECT_PRIMARY_UI_SURFACE_ID: u64 = crate::product::PROJECT_PRIMARY_UI_SURFACE_ID;

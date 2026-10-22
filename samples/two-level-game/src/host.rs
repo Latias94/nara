@@ -1,38 +1,21 @@
 #[cfg(not(windows))]
 use std::fs::File;
-use std::{
-    io,
-    path::{Path, PathBuf},
-};
+use std::{io, path::Path};
 
 use nara::{
     fs::{
         CapabilityRights, DirectoryCapability, FsError, FsOperation, HostCapabilityOptions,
         TrustMode,
     },
-    project_host::{
-        ProductProjectRootError, ProductProjectRootSource, resolve_product_project_root,
-    },
+    project_host::{open_explicit_product_project_root, open_product_project_root},
 };
 
 pub fn open_project_root() -> Result<DirectoryCapability, FsError> {
-    let executable = std::env::current_exe().map_err(open_error)?;
-    let path = match resolve_product_project_root(ProductProjectRootSource::PackagedExecutable(
-        &executable,
-    )) {
-        Ok(path) => path,
-        Err(ProductProjectRootError::UnsupportedPackagedDirectory) => {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        }
-        Err(error) => return Err(open_error(io::Error::other(error))),
-    };
-    open_explicit_project_root(&path)
+    open_product_project_root(env!("CARGO_MANIFEST_DIR"))
 }
 
 pub fn open_explicit_project_root(path: &Path) -> Result<DirectoryCapability, FsError> {
-    let path = resolve_product_project_root(ProductProjectRootSource::Explicit(path))
-        .map_err(|error| open_error(io::Error::other(error)))?;
-    directory(&path, CapabilityRights::ReadOnly)
+    open_explicit_product_project_root(path)
 }
 
 pub(crate) fn directory(

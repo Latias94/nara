@@ -1,11 +1,6 @@
-use std::{
-    num::NonZeroU32,
-    path::PathBuf,
-    process::ExitCode,
-    time::{Duration, Instant},
-};
+use std::{num::NonZeroU32, path::PathBuf, process::ExitCode, time::Duration};
 
-use nara::project_host::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome};
+use nara::project_host::{HeadlessProductRun, HeadlessRunIntent, HeadlessRunOutcome};
 use two_level_game::{GamePhase, GameSnapshot, RunOptions, Scenario};
 
 fn main() -> ExitCode {
@@ -24,13 +19,6 @@ fn main() -> ExitCode {
         }
     };
     let scripted = options.scenario != Scenario::Interactive;
-    let source = match two_level_game::open_project_root() {
-        Ok(source) => source,
-        Err(error) => {
-            eprintln!("project source: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
     let intent = HeadlessRunIntent::frames(
         NonZeroU32::new(if scripted { 200_000 } else { 1 }).unwrap(),
         Duration::from_millis(20),
@@ -44,82 +32,87 @@ fn main() -> ExitCode {
                 snapshot.initialized
             }
     });
-    let mut run = HeadlessRun::<GameSnapshot>::new(source, intent, Vec::new());
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        let report = run.execute_bounded();
-        match report.outcome() {
-            HeadlessRunOutcome::Completed(snapshot) => {
-                if snapshot.error.is_some()
-                    || !snapshot.initialized
-                    || snapshot.phase != GamePhase::Running
-                    || (scripted && !snapshot.verified)
-                {
-                    eprintln!("unexpected gameplay result: {snapshot:?}");
-                    return ExitCode::FAILURE;
-                }
-                if options.scenario == Scenario::Save {
-                    let mut slot = match two_level_game::save::io::SaveSlot::open(
-                        options.save_path.as_ref().unwrap(),
-                    ) {
-                        Ok(slot) => slot,
-                        Err(error) => {
-                            eprintln!("save readback: {error}");
-                            return ExitCode::FAILURE;
-                        }
-                    };
-                    let saved = match slot.load() {
-                        Ok(saved) => saved.checkpoint,
-                        Err(error) => {
-                            eprintln!("save decode: {error}");
-                            return ExitCode::FAILURE;
-                        }
-                    };
-                    if saved.score != 30
-                        || saved.collected.len() != 3
-                        || saved.markers.len() != 3
-                        || saved.next_marker_id.get() != 4
-                        || saved.location.level
-                            != two_level_game::levels::LevelKey::main(
-                                two_level_game::levels::LevelId::Cavern,
-                            )
-                    {
-                        eprintln!("published checkpoint disagrees with gameplay: {saved:?}");
-                        return ExitCode::FAILURE;
-                    }
-                }
-                let Some(closure) = report.startup_content_closure() else {
-                    eprintln!("missing startup evidence");
-                    return ExitCode::FAILURE;
-                };
-                if let Err(error) = two_level_game::record_product_observation(
-                    two_level_game::ProductObservationTarget::Headless,
-                    closure,
-                ) {
-                    eprintln!("product observation: {error}");
-                    return ExitCode::FAILURE;
-                }
-                println!(
-                    "two_level_headless: ok scenario={:?} level={:?} score={} collected={} markers={:?} travels={} saves={} restores={} verified={}",
-                    options.scenario,
-                    snapshot.level,
-                    snapshot.score,
-                    snapshot.collected,
-                    snapshot.markers,
-                    snapshot.travel_count,
-                    snapshot.saves,
-                    snapshot.restores,
-                    snapshot.verified
-                );
-                return ExitCode::SUCCESS;
-            }
-            HeadlessRunOutcome::CleanupIncomplete if Instant::now() < deadline => {
-                std::thread::yield_now()
-            }
-            _ => {
-                eprintln!("headless run failed: {:?}", report.diagnostics());
+    let report = match HeadlessProductRun::<GameSnapshot>::new(
+        env!("CARGO_MANIFEST_DIR"),
+        intent,
+        Vec::new(),
+    )
+    .run()
+    {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("project source: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match report.outcome() {
+        HeadlessRunOutcome::Completed(snapshot) => {
+            if snapshot.error.is_some()
+                || !snapshot.initialized
+                || snapshot.phase != GamePhase::Running
+                || (scripted && !snapshot.verified)
+            {
+                eprintln!("unexpected gameplay result: {snapshot:?}");
                 return ExitCode::FAILURE;
             }
+            if options.scenario == Scenario::Save {
+                let mut slot = match two_level_game::save::io::SaveSlot::open(
+                    options.save_path.as_ref().unwrap(),
+                ) {
+                    Ok(slot) => slot,
+                    Err(error) => {
+                        eprintln!("save readback: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                };
+                let saved = match slot.load() {
+                    Ok(saved) => saved.checkpoint,
+                    Err(error) => {
+                        eprintln!("save decode: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                };
+                if saved.score != 30
+                    || saved.collected.len() != 3
+                    || saved.markers.len() != 3
+                    || saved.next_marker_id.get() != 4
+                    || saved.location.level
+                        != two_level_game::levels::LevelKey::main(
+                            two_level_game::levels::LevelId::Cavern,
+                        )
+                {
+                    eprintln!("published checkpoint disagrees with gameplay: {saved:?}");
+                    return ExitCode::FAILURE;
+                }
+            }
+            let Some(closure) = report.startup_content_closure() else {
+                eprintln!("missing startup evidence");
+                return ExitCode::FAILURE;
+            };
+            if let Err(error) = two_level_game::record_product_observation(
+                two_level_game::ProductObservationTarget::Headless,
+                closure,
+            ) {
+                eprintln!("product observation: {error}");
+                return ExitCode::FAILURE;
+            }
+            println!(
+                "two_level_headless: ok scenario={:?} level={:?} score={} collected={} markers={:?} travels={} saves={} restores={} verified={}",
+                options.scenario,
+                snapshot.level,
+                snapshot.score,
+                snapshot.collected,
+                snapshot.markers,
+                snapshot.travel_count,
+                snapshot.saves,
+                snapshot.restores,
+                snapshot.verified
+            );
+            return ExitCode::SUCCESS;
+        }
+        _ => {
+            eprintln!("headless run failed: {:?}", report.diagnostics());
+            return ExitCode::FAILURE;
         }
     }
 }

@@ -221,10 +221,43 @@ same owner for explicit retirement retry. A terminal plugin shutdown failure is 
 after physical retirement completes. Embedded UI hosts request Stop and advance close progress
 without waiting for completion on their UI thread.
 
-File-backed product Hosts accept the same recipe while retaining project loading, admission,
-publication, and close authority:
+Ordinary headless and desktop binaries delegate source opening and process cleanup to the product
+Host:
 
 ```rust
+let report = HeadlessProductRun::<GameOutcome>::from_recipe(
+    env!("CARGO_MANIFEST_DIR"),
+    recipe()?,
+    fixed_ticks,
+    commands,
+)
+.run()?;
+if !matches!(report.outcome(), HeadlessRunOutcome::Completed(_)) {
+    return Err(game_run_failure(report.diagnostics()));
+}
+
+let report = DesktopProductLaunch::from_cargo_product(
+    env!("CARGO_MANIFEST_DIR"),
+    env!("CARGO_PKG_NAME"),
+    env!("CARGO_PKG_VERSION"),
+    "desktop",
+    recipe()?,
+)?
+.run()?;
+if !matches!(report.outcome(), DesktopRunOutcome::Completed(_)) {
+    return Err(game_run_failure(report.diagnostics()));
+}
+```
+
+These owners select packaged or development project sources and handle bounded cleanup. Desktop
+launch also owns inherited Editor bootstrap, exact source verification, and product identity.
+An outer `Ok(report)` means launch preparation succeeded; inspect the report outcome for runtime
+or shutdown failure. Here `game_run_failure` is the game's own diagnostic-to-error conversion.
+When an embedded Host must retain an incomplete owner or choose a different event-loop policy, use
+the lower-level run owners directly:
+
+```rust
+let project_root = open_product_project_root(env!("CARGO_MANIFEST_DIR"))?;
 let mut headless = HeadlessRun::<GameOutcome>::from_recipe(
     project_root,
     recipe()?,
@@ -234,9 +267,16 @@ let mut headless = HeadlessRun::<GameOutcome>::from_recipe(
 let report = headless.execute_bounded();
 ```
 
-With the corresponding features enabled, use `DesktopRun::from_recipe(project_root, recipe()?)`
-for the first-party desktop Host. Ordinary generic Editor opening reads the declared authoring
-bundle and does not accept or load the game's native recipe. A user-selected local workspace uses
+Use `DesktopRun::from_recipe(project_root, recipe()?)` for the corresponding desktop path. An
+ordinary process launch reports a retained live cleanup obligation and explicitly terminates after
+its bounded cleanup deadline; it does not drop that obligation as if retirement had succeeded.
+The deadline is checked between cleanup drives and cannot interrupt a blocking callback. Native
+cleanup participants must return promptly and keep unfinished work in their existing owner.
+The lower-level `HeadlessRun` and `DesktopRun` APIs retain the owner when an execution report is
+`CleanupIncomplete`; keep the same run value and call its execute method again to advance cleanup.
+Dropping a run with live cleanup responsibilities abandons the caller's custody of that owner.
+Ordinary generic Editor opening reads the declared authoring bundle and does not accept or load the
+game's native recipe. A user-selected local workspace uses
 cooperative `ReadWrite + TrustedLocal` filesystem authority for cross-platform Save, independently
 of this data-only Open and explicit project-code execution policy. An engine integration that explicitly
 needs trusted in-process execution uses
