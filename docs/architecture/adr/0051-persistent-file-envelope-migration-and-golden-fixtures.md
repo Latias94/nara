@@ -45,15 +45,18 @@ flowchart TD
 Rules:
 
 - Persistent files include at least `kind`, `format_version`, `engine_min_version`, and `generator`.
-- The corrected unreleased shape for each kind is canonical `format_version = 1`. Superseded draft
-  readers, structs, and fixtures are removed, and corrected Rust APIs use unsuffixed names.
+- The corrected unreleased shape defaults to canonical `format_version = 1` unless an owning ADR
+  explicitly selects another current envelope. ADR 0081 selects version 2 for recursive component
+  catalogs and authoring bundles; it does not retain a version-1 compatibility reader. Superseded
+  draft readers, structs and fixtures are removed; corrected Rust APIs use unsuffixed names.
 - Scene, prefab, scene patch, component schema catalog, and asset metadata currently have distinct
   canonical kinds. Import artifact records and a future file-backed project-manifest envelope
   remain long-term participants.
 - Unknown future versions fail with structured diagnostics.
 - Prototype versions/shapes fail with structured diagnostics rather than using a hidden fallback.
-- A non-v1 version is readable only when the format's compatibility matrix links an ADR that names
-  its support window, owner, pure migration chain, fixtures, and removal trigger.
+- A version other than the selected canonical version is readable only when its owning ADR names
+  a support window, owner, pure migration chain, fixtures and removal trigger. A current version 2
+  does not itself imply historical-version compatibility.
 - Runtime load may migrate in memory but must not rewrite source files silently.
 - Patch migration runs before patch validation/apply and must rewrite operation payloads and field paths through registered migration data.
 - Component field path migrations are part of schema migration review when a field is renamed, moved, split, or merged.
@@ -69,7 +72,8 @@ Rules:
 | `scene` | 1 | 1 | none |
 | `prefab` | 1 | 1 | none |
 | `scene_patch` | 1 | 1 | none |
-| `component_schema_catalog` | 1 | 1 | none; a successor is checked against its direct predecessor |
+| `component_schema_catalog` | 2 | 2 | none; semantic lineage is checked against its direct predecessor under ADR 0081 |
+| `authoring_schema_bundle` | 2 | 2 | none; embeds the recursive catalog under ADR 0081 |
 | `asset_meta` | 1 | 1 | none |
 
 ADR 0115 resets the unreleased canonical `asset_meta` version-1 payload to one typed composition.

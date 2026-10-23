@@ -1,8 +1,12 @@
 # ADR 0004: Use Bevy Reflect-Backed Component Metadata
 
-**Status**: Accepted
+**Status**: Superseded
 **Date**: 2026-07-08
+**Superseded By**: [ADR 0119](0119-schema-first-semantic-metadata-authority.md)
 **Refined By**: ADR 0045: Component Schema Capability Metadata
+
+The original decision below is historical. ADR 0119 makes Nara Schema the semantic authority
+and Bevy reflection an optional native adapter; it does not qualify dynamic runtime bindings.
 
 ## Context
 

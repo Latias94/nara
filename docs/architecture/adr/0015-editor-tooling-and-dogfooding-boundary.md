@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-16
+**Last Revised**: 2026-10-23
 **Refined By**: ADR 0044: Root Facade and Prelude Layering Policy; ADR 0045: Component Schema
 Capability Metadata; ADR 0047: Editor Workspace and Scene Document State; ADR 0095: Plugin-Owned
 Specialized Domains and Project Configuration;
@@ -21,49 +21,78 @@ conformance](../../knowledge/engineering/verification/2026-08/2026-08-15T233000Z
 
 Toolkit-neutral tooling models and commands are a product boundary, not proof that complete editor
 toolkits are interchangeable. One panel implemented in a second toolkit proves only that panel's
-model/command separation. A reusable toolkit Adapter or replacement Editor Shell requires a real
-second product workflow and its own admission evidence.
+model/command separation. A reusable toolkit Adapter or replacement Editor Shell needs evidence
+for the workflows and native capabilities it claims. A second implementation is useful evidence
+for sharing or portability, not a prerequisite for a first concrete owner API or semantic-tool tracer.
 
 ## ADR 0118 Refinement
 
 [ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md) owns the private frontend/application split, stable panel instances, layout preferences, independent render views and controlled secondary-window delegation.
-It admits the direct dear-imgui-rs 0.20.0 evaluation route, with adoption conditional on actual product parity; it does not claim a replacement is implemented.
+Its original direct dear-imgui-rs 0.20.0 study is historical research. Dear ImGui is the currently
+selected Editor frontend; the [implementation ledger](implementation-status.md) records the
+actual migration and qualification scope. Toolkit selection is not evidence for untested native
+platforms, OS IME candidate windows, accessibility or additional extension facets.
 
 ## Context
 
-nara's editor is intentionally later than the core runtime, but editor boundaries must be clear
-early. The editor should validate the engine experience without coupling runtime logic to editor UI.
-Runtime/game UI and editor/tool UI serve different products; whether they eventually share a
-retained implementation foundation must be decided by working game and editor workloads rather
-than assumed from either product's first implementation.
+Nara's Editor validates the engine experience without making gameplay logic depend on Editor UI.
+It is both an authoring client and an executable Runtime Host: document editing, runtime
+construction and native lifecycle are different responsibilities within the integrated product.
+Runtime/game UI and editor/tool UI serve different products. Permanent toolkit separation is a
+legitimate design; shared fundamentals require concrete consumer evidence rather than an assumed
+future common retained implementation.
 
 The user wants nara to grow into a mature engine and asked whether the future editor UI should dogfood nara's own engine UI.
 
 ## Decision
 
-The editor is a **client of the runtime**, not the owner of runtime logic.
+The Editor is an **authoring client and executable Runtime Host**, not the owner of gameplay logic.
+Its concrete Host constructs, drives and retires trusted in-process runtimes and supervises ordinary
+external Play through the distinct placements in ADRs 0082/0084/0116/0117. Authoring and toolkit
+code do not thereby gain unrestricted World, process or native-service authority.
 
 Dogfooding policy:
 
 - Runtime/game UI and editor/tool UI are separate product layers. They may share narrow services or
-  a proven retained foundation later, but neither product requires a shared widget tree, authoring
-  model, or toolkit now.
+  proven text/semantics/rendering fundamentals, but neither product requires a shared widget tree,
+  authoring model or toolkit, now or eventually.
 - The editor should dogfood nara runtime concepts: ECS world inspection, scene/prefab data model, asset handles, render views, diagnostics, and command/patch application.
 - The editor should dogfood nara rendering where practical, especially viewport rendering, gizmos, overlays, scene preview, and in-engine debug panels.
-- The editor UI toolkit can be phased. Early editor/debug UI may use egui or dear-imgui-rs for
-  productivity. A future nara UI system may gradually take over complete panels when mature enough.
-  Success with one panel proves that panel's tooling-model/command separation, not toolkit
-  replaceability and not that the final editor must use the runtime UI toolkit.
+- Dear ImGui is the selected Editor frontend. egui belongs to the historical authoring baseline.
+  A future Nara UI panel is optional, not a required milestone or an implied convergence decision.
+  Success with one panel proves that panel's tooling-model/command separation, not complete toolkit
+  replaceability or ecosystem parity.
 - Docking, panel catalogs, workspace layout, and detached-window intent belong to the Editor Shell.
   Event-loop, native-window, surface, and GPU submission authority remain with the selected
-  platform/window and render-execution authorities, never ordinary UI adapters or panel
-  contributions.
+  platform/window and render-execution authorities. ADR 0118 permits explicit Host delegation to
+  the selected platform/renderer adapter; ordinary panel contributions never gain that authority.
 - Runtime crates must not depend on editor crates.
 - Editor mutations should go through explicit commands/patches and validation, not direct private storage access.
 - UI adapters should render UI-agnostic tooling models and submit tooling commands. They should not
   own scene mutation semantics.
+- Domain draft basis, validation and exact results remain UI-neutral. The frontend owns invalid
+  text, caret, selection, composition and scrolling; the Host/platform owns window/seat focus,
+  capture, clipboard and native IME arbitration. Editor controls need not route through game ECS
+  actions, and IME preedit is not a document mutation.
 
-Implementation notes as of 2026-08-15:
+### Semantic tools and qualification
+
+An independent semantic tool can use the selected Dear ImGui panel or a window-free project
+session to plan a currently legal patch, preview its intent, submit through the document owner,
+and observe the exact action result, Undo and Save/Reopen. Ordered actions are not an atomic
+transaction; a cohesive edit must use an already admitted atomic patch. A tool preview does not
+claim a public owner-held prepared candidate, selection-independent query API or new mixed
+structural transaction. Those extensions require their own scoped contracts and evidence.
+
+Keep queries and semantic proposals with their domain owners and frontend facets optional; do not
+introduce a universal Automation service or Widget trait. A pure semantic tracer need not wait for
+complete Nara UI, native accessibility parity or an installable-package product. Public API,
+native input/rendering and platform claims remain separately qualified under ADR 0014.
+
+## Historical Implementation Evidence
+
+The following notes describe the 2026-08-15 authoring slice, not the current frontend or a universal
+single-window topology. ADR 0118 and the implementation ledger own later frontend/view evidence:
 
 - `nara_tooling::SceneInspectorState` remains the UI-agnostic inspector controller while
   `EditorWorkspace` owns document identity, selection, history, dirty state, and exact mutation
@@ -77,15 +106,19 @@ Implementation notes as of 2026-08-15:
 - The first bounded authoring trajectory proves exact edit, stale rejection, Undo/Redo,
   receipt-backed Save, Close/Reopen/Close, project check, generated-product run, and
   source-carrying export against the same starter source change.
-- Future nara UI adapters must render the same model and submit the same action vocabulary rather
-  than owning separate Inspector, document, or persistence state machines.
+- That slice established the semantic model/action seam rather than a requirement to build a
+  Nara UI Inspector or another document/persistence state machine.
 - This evidence is an authoring-slice conformance baseline, not the complete Editor
   Product-Validated Baseline; Viewport, IME, semantic output, and native accessibility remain
   focused successors.
 
+The current responsibility split is:
+
 ```mermaid
 flowchart TD
-    Editor[nara_editor] --> Runtime[nara Runtime APIs]
+    Editor[Editor application] --> Authoring[Document and tooling owners]
+    Editor --> Host[Concrete executable Host]
+    Host --> Runtime[Nara Runtime APIs]
     Editor --> Registry[ComponentRegistry]
     Editor --> Assets[AssetServer]
     Editor --> Diagnostics[Diagnostics]
@@ -113,11 +146,12 @@ flowchart TD
 
 **Decision**: Rejected for early phases.
 
-### Option C: Runtime-client editor with phased UI dogfooding (Chosen)
+### Option C: Authoring client and Runtime Host with independent UI products (Chosen)
 
 **Pros**: Validates runtime mechanisms while allowing pragmatic UI tech choices.
 
-**Cons**: Requires adapters between editor UI toolkit and runtime commands/snapshots.
+**Cons**: Requires explicit semantic actions and Host handoffs; separate toolkits can duplicate
+some implementation work.
 
 **Decision**: Chosen.
 
@@ -129,7 +163,8 @@ flowchart TD
 | Runtime dogfooding | Editor uses real scene/asset/diagnostic APIs | Code review |
 | Safe mutation | Editor changes flow through commands/patches with validation | `scene_inspector` and `scene_authoring_session` tests |
 | UI flexibility | A complete panel can use another adapter without changing its tooling model, commands, validation, or undo semantics | Cross-adapter fixtures and architecture review |
-| Host exclusivity | UI adapters and panel contributions do not own event loops, native windows, surfaces, or GPU submission | Dependency/API audit and Host integration tests |
+| Host authority | Native ownership is Host-controlled, including explicitly delegated adapter ownership; panels cannot create competing authority | Dependency/API audit and Host integration tests |
+| Semantic tool independence | A current legal edit, exact result, Undo and persistence can be exercised without complete Nara UI | Scoped panel or window-free consumer tests |
 | Viewport fidelity | Editor view uses same render backend path as runtime where practical | Future integration test |
 
 ## Risks and Mitigations
@@ -137,12 +172,14 @@ flowchart TD
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | Editor becomes a separate engine | High | Medium | Force editor to use runtime APIs and diagnostics |
-| UI dogfooding slows core runtime | Medium | Medium | Phase UI dogfooding; start with egui/imgui if needed |
-| Premature toolkit convergence pollutes game UI or editor delivery | High | Medium | Migrate complete panels and require heterogeneous workload evidence before choosing a final topology |
+| UI dogfooding slows core runtime | Medium | Medium | Keep the selected Dear ImGui frontend independent of Runtime UI completion |
+| Premature toolkit convergence pollutes game UI or editor delivery | High | Medium | Allow permanent separation and share only fundamentals justified by concrete consumers |
 | Editor needs private access | High | Medium | Add explicit inspection/patch interfaces instead of breaking encapsulation |
 
 ## Consequences
 
 The application and toolkit adapter must coordinate without sharing document mutation ownership.
-The ADR 0118 successor may break private egui-shaped product interfaces and remove the superseded frontend after parity.
-Widgets and toolkit layout remain replacement work; the reusable contract is semantic authoring and Host-owned lifecycle, not a universal UI abstraction.
+ADR 0118 permits breaking private frontend interfaces and removing superseded production paths
+after matching parity qualification. Historical egui evidence retains only its recorded scope.
+Widgets and toolkit layout remain replacement work; the reusable contract is semantic authoring
+and Host-owned lifecycle, not a universal UI abstraction or mandatory toolkit convergence.

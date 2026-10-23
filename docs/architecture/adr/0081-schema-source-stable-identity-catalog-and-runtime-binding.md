@@ -13,6 +13,19 @@ target-World eligibility on 2026-07-18
 [ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md)
 **Related**: ADR 0034, ADR 0058, ADR 0076
 
+## Semantic Authority And Representation Scope
+
+[ADR 0119](0119-schema-first-semantic-metadata-authority.md) owns the Schema-first semantic
+authority, replacing ADR 0004's Bevy-reflection substrate assumption. This ADR's executable
+preparation, freeze and one-to-one World binding requirements describe the current **native
+representation**. They remain mandatory for every Runtime path implemented today.
+
+[Proposed ADR 0120](0120-schema-publications-and-execution-representations.md) compares complete
+owner-managed representations and narrower immutable publications for runtime-defined Behavior
+Schemas. It does not authorize skipping current native bindings, mutating a frozen registry or
+turning the native bijection into a multimap. A new representation needs its own complete
+read/absence, grouped preparation, encoding, reference and retirement proof before adoption.
+
 ## ADR 0095 Refinement
 
 A schema owner's durable identity/version/tombstone lineage is distinct from one product recipe's

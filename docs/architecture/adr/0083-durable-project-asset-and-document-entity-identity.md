@@ -2,13 +2,12 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-21
+**Last Revised**: 2026-10-23
 **Owner**: `nara_asset`, `nara_identity`, `nara_scene`, persistent document owners, and authoring
 hosts
-**Admission Trigger**: One production-shaped identity tracer proves two entity-bearing products
-from one source, repeated and nested prefab instances, prefab-internal references, one explicit
-outer binding, cross-document references, deterministic copy-closure remapping, a read-only package
-collision, and crash-recoverable pre-1.0 migration through public tooling
+**Admission Trigger**: A scoped identity decision establishes source/product/document equality,
+authored continuity authority, and explicit conflict/remap behavior; importer publication and
+project-wide migration qualify separately after those semantics are selected
 **Revisit Trigger**: Measured project scale, package composition, merge behavior, or imported-product
 reconciliation proves that the scoped identity and indexed lowering model cannot remain bounded or
 collision-safe
@@ -24,8 +23,9 @@ native handles. Its current project identity is still transitional:
   creating two potential authorities for a movable asset.
 - One source may publish multiple products, but names, array indexes, `ArtifactLabel`, Rust types,
   and content digests do not provide rename/reorder-stable product identity.
-- `SceneEntityId` remains a path-like string. Prefab expansion manufactures values such as
-  `anchor/source_entity` in the same type, mixing source identity with projected location.
+- `SceneEntityId` remains a transitional string identity. Current private `prefab_N` expansion
+  locators are projection addresses, not durable source entity identity; they do not establish the
+  complete product-aware provenance needed across source revisions.
 - Persistent `SceneLocal` references can currently escape a prefab and resolve against its eventual
   containing runtime instance without declaring an outer binding.
 - Reference-game systems compare authored ID text such as `player` and `enemy-anchor/enemy`, making
@@ -77,6 +77,8 @@ placement, or constructors.
 | `StableAssetId` | One logical source asset across move, rename, reimport, and compatible package update | One composed content universe | Project/package source and product references |
 | `ImportedProductId` | One logical product across reimport | All product kinds within one `StableAssetId` | Complete product/document selection |
 | `AssetProductRef` | `StableAssetId + ImportedProductId` | One product or entity-bearing document | Asset, document, and provenance references |
+| `ImportRecipeDigest` | Declared source, continuity mapping, settings, implementation, dependency and target inputs | One canonical import recipe | Rebuild/cache lookup, never logical identity |
+| `ArtifactContentDigest` | Integrity and content address of immutable output bytes | One encoded output | Generated storage and verification, never continuity authority |
 | `SceneEntityId` | One authored entity record | One entity-bearing `AssetProductRef` | Local entity and source-record selection |
 | Source entity reference | `AssetProductRef + SceneEntityId` | One authored source record | Cross-document authoring, patching, and provenance |
 | Prefab projection path | Root authored anchor plus an exact bounded source chain | One projected authoring location | Selection, override routing, diagnostics, and write-back provenance |
@@ -142,14 +144,41 @@ scene or prefab document.
 - Reimport preserves an ID only when semantic continuity is proven. Rename and reorder alone do not
   change it. Duplicate IDs, kind drift, or ambiguous continuity reject the complete candidate group
   or require an explicit remap transaction.
-- Removing a product does not authorize rebinding its ID to a different logical product. ADR 0087
-  owns the bounded continuity/retirement evidence and candidate-group publication mechanism.
+- Removing a product does not authorize rebinding its ID to a different logical product. Authored
+  continuity/retirement evidence belongs to the source identity contract here; ADR 0087 consumes
+  that evidence and owns candidate-group validation and publication.
 - Duplicating a source preserves its internal product-ID pattern only under the newly allocated
   enclosing `StableAssetId`.
 
 An entity-bearing document is identified by `AssetProductRef`, not `StableAssetId` alone. This
 allows two scene/prefab products from one source to contain the same document-local entity ID
 without aliasing.
+
+### Authored Product Continuity Authority
+
+An import-cache manifest cannot be the only record linking a logical subproduct to its
+`ImportedProductId`. The source owner selects one of two durable authorities:
+
+- A source format with intrinsic stable subproduct IDs may supply a validated, versioned mapping
+  to Nara product IDs. The mapping must preserve the source ID's scope and distinguish kind/schema
+  lineage; a display label is not an intrinsic ID.
+- Otherwise, authored adjacent metadata or a versioned sidecar continuity table owns the mapping,
+  outside generated `.nara` cache data. It travels with the source through move, copy, version
+  control and package publication. Initial identity assignment is an explicit authoring operation.
+
+The table retains the continuity facts needed for live and known-retired products under its stated
+lineage policy. Cache deletion, process restart or another machine must reconstruct the same
+`AssetProductRef` values from source plus authored metadata. If that authority is lost or the
+source no longer permits an unambiguous reconciliation, import reports an identity conflict.
+Names, indices, byte digests and fuzzy matching may inform a user-visible repair proposal; they
+must not silently select or mint replacement identities. An explicit reviewed remap owns reference
+changes and any required complete traversal.
+
+Continuity changes use the persistence guarantee of the operation actually performed: one sidecar
+can use receipt-based single-document Save, while a coupled source/sidecar/reference rewrite needs
+a qualified cross-file transaction. Neither identity semantics nor a read-only continuity fixture
+requires the entire ADR 0091 journal. Generated manifests bind the exact admitted continuity
+revision; an importer cannot hide durable ID allocation in cache-only publication.
 
 ### Document-Local Entity Identity
 
@@ -250,6 +279,11 @@ multiple instances of the same source without manufacturing another `SceneEntity
 - Override, apply-back, convert-to-local, duplicate, merge, and export preflight complete injective
   identity/reference remaps before mutating authoring or runtime state.
 
+Durable overrides address source/product/entity identity, the nested instance chain and the owning
+Schema's durable property address. Revision-bound editor operation/inverse patches are not that
+identity model; unkeyed collection indices remain revision-local. Property/overlay owners define
+stable member keys or explicit whole-root migration rather than assigning a UUID to every scalar.
+
 `SceneInstanceId` is never part of persistent project provenance. Runtime lookup adds it only after
 the authored key is complete:
 
@@ -294,7 +328,9 @@ are not the per-frame gameplay lookup representation.
 
 Before the first target-`World` allocation or persistent component insertion, the Host must:
 
-1. capture one committed project/content generation and complete schema/reference catalog;
+1. capture one admitted immutable source/content closure with the consistency evidence required
+   for its references, plus the complete schema/reference catalog; this need not be an Editor
+   journal-owned whole-project snapshot;
 2. validate asset/product/document identity uniqueness, expected kinds, package availability, and
    the full typed reference closure;
 3. expand and validate prefab projection paths and explicit outer bindings;
@@ -309,7 +345,8 @@ is not an accepted implementation strategy.
 
 ### Pre-1.0 Migration
 
-Acceptance requires a canonical version-1 reset rather than a permanent dual reader.
+The project-migration slice requires a canonical version-1 reset rather than a permanent dual
+reader. It is not a prerequisite for selecting the identity semantic slice.
 
 1. Assign a non-nil `StableAssetId` to every source asset and a stable product ID to every product.
 2. Identify every entity-bearing document by `AssetProductRef`.
@@ -322,17 +359,19 @@ Acceptance requires a canonical version-1 reset rather than a permanent dual rea
 5. Preflight the complete project graph, schemas, entity IDs, parent edges, references, patches,
    overrides, workspace selections, and package availability in memory. Unknown or unavailable
    reference-bearing schema blocks migration.
-6. Delegate staging, transaction fencing, replacement receipts, committed project snapshot,
-   recovery journal, and old-or-new publication to ADR 0091 or a compatible Accepted successor.
-   This ADR does not create a second journal or physical cross-file atomicity claim.
+6. Delegate the genuine cross-file rewrite's staging, fencing, receipts, recovery and logical
+   old-or-new publication to a qualified ADR 0091 transaction slice or compatible Accepted
+   successor. Use its actual publication/read-admission boundary, not a claim of simultaneous
+   physical replacement or a second identity-owned journal.
 7. Validate the fully staged identity/reference graph before publishing the new generation/index.
 8. Runtime loading never rewrites source files. Migration is an explicit offline/editor command.
 9. After the new committed generation is proven readable, remove obsolete readers and fixtures,
    update golden fixtures, and record the breaking format change.
 
-If ADR 0091 remains Proposed, this ADR's migration activation remains blocked. Identity semantics
-may be reviewed independently, but no plan may implement or advertise crash-safe project migration
-without a compatible Accepted persistence contract.
+Migration activation remains blocked until its cross-file persistence contract is Accepted and
+qualified; accepting a smaller Save or source-capture contract is not enough. Identity semantics
+and durable continuity authority may be selected independently. No plan may advertise crash-safe
+project migration merely because the semantic slice or import publication is qualified.
 
 ## Alternatives Considered
 
@@ -402,6 +441,7 @@ unreliable.
 | Product/document uniqueness | Two entity-bearing products from one source resolve independently | Compound importer fixture |
 | Rename/reparent stability | Entity and reference bytes remain unchanged | Scene/prefab golden diff |
 | Reimport continuity | Rename/reorder preserves IDs; ambiguity/kind drift publishes nothing | Import reconciliation fixture |
+| Cache independence | Deleting generated cache reconstructs exactly the same product references from authored continuity | Clear-cache and fresh-machine fixtures |
 | Package collision safety | Project/package and package/package ID collisions fail before composition publication | Read-only package fixture |
 | Copy determinism | Every single-source and closure copy follows the declared ID/remap table | Copy transaction matrix |
 | Reference completeness | All declared entity references are enumerated; unavailable schema blocks rewrite | Schema/reference traversal fixture |
@@ -421,7 +461,7 @@ unreliable.
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | Opaque IDs reduce source readability | Medium | High | Keep names/paths as display projections and show stable locators in diagnostics. |
-| Product ID silently aliases after reimport | Critical | Medium | Bind kind/schema lineage, retain continuity evidence, and reject ambiguous candidate groups. |
+| Product ID silently aliases after reimport | Critical | Medium | Bind kind/schema lineage, retain authored continuity outside generated cache, and require explicit remap on ambiguity. |
 | Read-only package collision strands content | High | Medium | Reject composition with provenance diagnostics; require explicit vendor/fork remap. |
 | Copy closure misses a hidden reference | Critical | Medium | Require typed complete traversal; block on unavailable schema; preflight atomically. |
 | Prefab source reference escapes into outer scene implicitly | High | High | Require explicit outer binding/override and include the reference-game case in admission. |
@@ -441,13 +481,16 @@ If accepted:
 - ADR 0007 retains ordinary `AssetRef::Path`/`AssetRef::StableId` policy and runtime typed handles;
   this ADR removes path authority from metadata and defines source/product identity.
 - ADR 0038 retains source/anchor/override/write-back provenance; this ADR replaces string-composed
-  projected IDs and incomplete cross-document references with structured product-aware locators.
+  or revision-local projection addresses and incomplete cross-document references with durable
+  product-aware locators. Existing structured expansion does not by itself establish that durable
+  identity contract.
 - ADR 0058 retains runtime identity domains, `SceneInstanceId`, runtime lookup, fork/restore, and
   tombstones. Source/product/projection keys are inputs to that runtime lowering, not aliases.
 - ADR 0081 retains schema identity and catalog authority. Persistent identity axes remain distinct
   from component/field IDs.
-- ADR 0087 owns importer continuity evidence and artifact-group publication; it must use the
-  source-local product semantics selected here.
+- ADR 0087 consumes the authored continuity authority selected here and owns tracked import inputs,
+  reconciliation validation and artifact-group publication. It does not determine durable IDs from
+  generated cache or gate the prior identity semantic decision on its own acceptance.
 - ADR 0089 owns runtime scene load/activate/unload/travel and explicit instance selection.
 - ADR 0090 may own lossless unavailable-schema authoring, but it cannot claim duplicate/remap/
   flatten/migration correctness without complete reference traversal.
@@ -456,18 +499,39 @@ If accepted:
 - Reference-game authored IDs, gameplay role selection, prefab outer references, fixtures, patches,
   overrides, and workspace selections require one coordinated pre-1.0 rewrite.
 
-No public `IdentityService`, generic provider interface, universal object registry, crate move, or
-implementation plan is authorized by this proposal. While it remains Proposed, the current
-path-like/string-composed implementation remains implementation truth.
+This proposal does not prescribe a public `IdentityService`, generic provider interface, universal
+object registry or crate move. A named workflow may study the scoped semantic contract without
+those abstractions. While it remains Proposed, current implementation and its qualification records
+remain implementation truth; these proposed identities do not imply that compound product identity
+or migration already exists.
 
-No Accepted ADR is superseded as a whole. Acceptance must add `Refines: ADR 0006, ADR 0007,
-ADR 0038` here, reciprocal `Refined By: ADR 0083` metadata to those ADRs, the implementation-ledger
-transition, and the migration record in one reviewed change.
+No Accepted ADR is superseded as a whole. Each adopted slice must name the affected owner contracts
+and record its scope and evidence in the implementation ledger. Adoption of source/product
+semantics does not assert completion of entity migration, prefab lowering or crash-safe rewrites;
+the migration record accompanies that later qualification, not the first semantic decision.
 
 ## Admission Evidence
 
-Acceptance requires the complete success-metric matrix, not UUID parsing/equality tests. The minimum
-production-shaped tracer must include all of the following in one coherent project workflow:
+Admission is ordered, not circular. This ADR remains `Proposed`; the following are distinct
+decisions and qualification boundaries, not claims that any slice is implemented:
+
+1. **Identity semantics and authored continuity.** Select equality scopes, source/product/entity
+   distinctions, intrinsic-ID or authored-sidecar authority, retirement/conflict behavior and
+   explicit remap. Bounded fixtures demonstrate two independently addressable products,
+   rename/reorder, cache deletion, lost/ambiguous continuity and collision rejection. This decision
+   may be adopted here with an explicit slice boundary or by a named compatible Accepted owner;
+   it does not require ADR 0087 artifact publication or the whole ADR 0091 journal/package system.
+2. **Importer publication.** ADR 0087 then qualifies tracked recipes, exact invalidation and
+   complete old-or-new artifact groups against the selected identity authority. It must not be
+   used to retroactively infer continuity from generated outputs.
+3. **Document/runtime integration.** Product-aware source references, prefab provenance, copy
+   closure and indexed lowering need their relevant consumers and reference-traversal evidence.
+4. **Project migration.** A qualified cross-file persistence owner precedes destructive format
+   migration and recovery claims. Source-free delivery and later package features have their own
+   evidence; they are not gates for the first identity decision.
+
+The complete production-shaped identity workflow still requires the following evidence, attached
+to the slice that owns each obligation rather than to an indivisible admission gate:
 
 1. one compound source publishing at least two entity-bearing products;
 2. two instances of one prefab and one nested instance of the same source under another anchor;
@@ -485,8 +549,10 @@ production-shaped tracer must include all of the following in one coherent proje
    selection;
 10. a measured runtime proving durable identifiers are lowered before frame-critical work.
 
-ADR 0083 remains `Proposed` until this evidence exists and ADR 0087/0091, or compatible Accepted
-successors, supply the product-publication and project-transaction prerequisites.
+UUID parsing/equality tests alone are insufficient for any continuity or migration claim. The
+full matrix qualifies the full workflow; it does not prevent selecting a smaller semantic contract
+first. ADR 0087 depends on that selected contract, while only project-wide rewrite qualification
+depends on the cross-file transaction slice of ADR 0091 or a compatible Accepted successor.
 
 ## Citations
 

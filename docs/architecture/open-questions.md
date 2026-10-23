@@ -1,7 +1,7 @@
 # nara Architecture Open Questions
 
 **Status**: Living Draft
-**Updated**: 2026-08-18
+**Updated**: 2026-10-23
 
 This document owns open architecture questions and stable redirects for recently resolved question
 identities. Accepted decisions belong in ADRs; implementation evidence belongs in
@@ -93,10 +93,10 @@ decision authority.
 - **Related ADRs**: 0003, 0010, 0020, 0034, 0035, 0039, 0042, 0045, 0055, 0076,
   0079, 0081, 0082, 0084, 0086, 0088, 0090, 0093
 - **Question**: Which concrete adapter should be trialed first, which lifecycle/data/tooling contracts belong to that adapter, and which contracts have enough independent consumers to move into Nara-owned domain APIs without creating a universal Behavior Host?
-- **Current hypothesis**: The preferred product hypothesis and leading first-party trial candidate
-  is an optional C# gameplay Adapter using CoreCLR hosting plus the Roslyn/MSBuild toolchain. The
-  trial selects the then-current supported .NET LTS; this hypothesis does not select a public SDK,
-  runtime version, or Accepted implementation.
+- **Current hypothesis**: Optional C# gameplay using CoreCLR/Roslyn/MSBuild remains one candidate,
+  not a selected VM or mandatory SDK. A Lua-family candidate may be compared on the same bounded
+  gameplay task alongside Rust without first proving C# failure. A C# trial pins its tested .NET
+  version; neither the hypothesis nor a comparison accepts a runtime, public SDK or platform claim.
 - **Current research evidence**: [The LogLog/C# gameplay research
   note](../knowledge/engineering/subagents/2026-07/2026-07-17-loglog-rust-gamedev-csharp-gameplay-research.md)
   maps the experienced Rust-gameplay critique to language relief, engine-owned product work, and a
@@ -106,56 +106,46 @@ decision authority.
   [The C# authoring-surface
   note](../knowledge/engineering/csharp-gameplay-authoring-surface-research.md) compares the Unity
   and Godot object models and develops the parameterless Behaviour plus explicit binding
-  hypothesis. All three are non-normative research evidence and do not advance this question's
-  admission ladder.
+  hypothesis. All three are non-normative research evidence, not completed API, shared-protocol or
+  product-support qualification.
 - **Editor extension boundary**: A future Product Package may carry both managed gameplay and
   managed Editor Contributions, but OQ-007 owns only the gameplay-language Adapter and its Player
   workflow. A C# Dock, Inspector, importer, or build contribution must use the separately admitted
   Editor contribution contract and Host lifecycle owned by OQ-031 or an Accepted successor. The
-  current leading placement hypothesis is a replaceable isolated Extension Host; loading trusted
-  managed code into the long-lived Editor with a collectible `AssemblyLoadContext` remains a later
-  latency optimization with Host/Editor restart fallback, not a prerequisite or an implied
-  production capability.
-- **Research admission ladder**:
-  1. Read-only precedent research may continue at any time, but it may only refine this question or
-     language-independent work already justified by Rust consumers. It cannot add a production
-     Adapter crate, public C# API, root capability, manifest field, VM dependency, or managed
-     artifact layout.
-  2. Bounded CoreCLR/Roslyn feasibility research may begin only after this question's Trigger is
-     satisfied and the active reference-game plan, or its actively registered successor, has all of
-     the following evidence: stable runtime-independent Schema identities and Catalog/native-binding
-     separation; an `RGF-U14` Continue result for the Rust headless and desktop first playable;
-     `RGF-U17` Host-owned Editor Play/Stop/fresh-Restart; and `RGF-U7` checkout-free Rust candidate
-     packaging. Its outputs are design evidence, measurements, and a disposable tracer outside
-     production APIs; completing the foundations alone does not admit this research automatically.
-  3. A product-shaped C# vertical slice may begin only when `RGF-U20`, or the corresponding closure
-     unit of an actively registered successor plan, records a non-blocking next-slice decision that
-     admits a separate OQ-007 Trial plan. A missing feasibility tracer, an incomplete result, or a
-     triggered stop condition can only keep OQ-007 deferred. An admission record must pin the tracer
-     revision, result, and stop-condition verdict and name the target author, Rust workflow gap,
-     comparison task, supported desktop profile, maintenance/reversibility budget, and Trial stop
-     conditions. It does not change the current Rust release verdict.
-  4. Production adoption and Adapter-specific Accepted ADRs require the end-to-end Trial evidence
-     below. A technically functioning bridge is not sufficient by itself.
+  leading ordinary-tool hypothesis is a replaceable isolated Extension Host. Trusted in-process
+  placement may also be studied for a named native authority need or measured latency/throughput
+  pressure; it need not wait for an unsuitable complete IPC implementation. Collectible
+  `AssemblyLoadContext` unloading is not physical-retirement proof, and restart remains a fallback.
+  No placement is an implied production capability.
+- **Separate qualification gates**:
+  1. Research may use precedent, feasibility code and same-task C#/Lua comparisons for a named
+     workflow with falsifiable outcomes and bounded cost. Historical RGF IDs, registration and
+     reference-game completion are evidence references, not research authorization gates. Research
+     does not silently add a production VM, public SDK, root capability or manifest format.
+  2. A first concrete adapter-owned API may be designed and trialed from that workflow without a
+     second implementation. A scoped trial records author, task, revision, comparison baseline,
+     tested target/profile, authority, maintenance budget and stop conditions. It need not qualify
+     unrelated toolkit, package-marketplace or complete engine capabilities first.
+  3. A reusable Nara-owned binding/protocol freezes only after independent consumers challenge its
+     common semantics and implementation-specific limits. This gate does not block the first
+     concrete API or authorize a universal Behavior Host.
+  4. Production adoption and platform claims require the relevant end-to-end evidence below and
+     adapter-specific Accepted decisions. A functioning bridge or favorable microbenchmark alone
+     is insufficient and does not change the complete Rust path's release verdict.
 
 ```mermaid
 flowchart LR
-  F[Language-independent Rust foundations] --> R[Bounded C# feasibility research]
-  R --> G{Tracer passes its stop conditions?}
-  G -->|No| H[Keep OQ-007 deferred]
-  G -->|Yes| D{U20 admits a separate Trial?}
-  D -->|No| H[Keep OQ-007 deferred]
-  D -->|Yes| T[Product-shaped C# vertical slice]
-  T --> A{Adoption evidence passes?}
-  A -->|No| H
-  A -->|Yes| P[Adapter-specific ADRs and production work]
+  W[Named author workflow] --> R[Bounded same-task research]
+  R --> C[First concrete adapter-owned API and trial]
+  C --> S[Independent consumers qualify shared protocol freeze]
+  C --> P[End-to-end target and product qualification]
+  S -. only if a shared layer is needed .-> P
 ```
 
-- **Research-timing alternatives**: Starting production Adapter work now is rejected because it
-  would make an unproven language shape the Rust foundation. Waiting until every engine subsystem
-  is complete is also rejected because Host, Schema, Play, and export constraints would become
-  expensive to challenge. The staged ladder above begins disposable research once the relevant
-  foundations and Rust baseline exist, while reserving production authority for a separate Trial.
+- **Research-timing alternatives**: Neither silently adopting an unproven production Adapter nor
+  waiting for every engine subsystem is appropriate. A bounded experiment can challenge Host,
+  Schema, Play and export design now; supported workflow claims follow their own evidence. Current
+  native registry, exact binding and fresh-runtime invariants remain in force during experiments.
 - **Product-shape alternatives**: The trial must distinguish Rust-only, mixed Rust Host/Plugin plus
   C# gameplay, and C#-only projects using a prebuilt Nara Host. An initial technical slice may use a
   project-built Rust Host, but first-party C# product adoption must prove Play and clean export
@@ -169,10 +159,9 @@ flowchart LR
 - **Leading authoring hypothesis**: Evaluate a Unity/Godot-like Behavior facade over
   Adapter-private managed instances first, backed by stable Nara Schema data, generation-stamped
   handles, batched query views, commands, and services. A second managed ECS authority or dynamic
-  Bevy component storage remains a counterfactual, admitted only if the Behavior/hybrid tracer fails
-  for a named storage or performance reason. Compare another gameplay-language candidate only when
-  measured evidence shows that the C# product hypothesis cannot meet an accepted workflow or target
-  constraint, not merely because the first implementation is difficult.
+  Bevy component storage is a separate representation experiment for named storage or performance
+  pressure, not a requirement for language comparison. Compare C# and Lua-family authoring on the
+  same task with declared tradeoffs rather than treating either language as a prerequisite.
 - **Leading author-visible binding hypothesis**: Keep the default C# surface domain-oriented rather
   than generating a one-to-one mirror of ECS components or Schema fields. Every dependency in an
   ordinary Behavior must declare one source category: a callback-scoped Host value such as input or
@@ -189,18 +178,21 @@ flowchart LR
   public universal enum or service trait; concrete public APIs remain domain-owned.
 - **Cross-domain promotion gate**: The movement-and-fire slice may validate a disposable or
   Adapter-specific implementation, but it cannot by itself freeze a reusable Nara-owned binding or
-  dispatcher contract. Promotion requires focused harness evidence for a physics query plus contact
-  callback, an animation parameter/marker/root-motion handoff, a shared-material versus
-  per-instance render override, and one cancellable asynchronous service result with a logical
-  handle. The harnesses need not implement complete domains and do not admit their public APIs.
+  dispatcher contract. Qualify only the operations a proposed shared boundary claims to cover. A
+  boundary spanning physics queries/contact callbacks, animation parameter/marker/root-motion
+  handoff, shared-material/per-instance overrides and cancellable asynchronous logical-handle
+  results needs focused harness evidence for each claimed shape. This neither requires a universal
+  dispatcher nor blocks a first concrete domain API on all four harnesses. The harnesses need not
+  implement complete domains and do not admit their public APIs.
 - **Author-role separation**: The Trial must distinguish an ordinary C# game author, a managed-only
   gameplay package author consuming existing domain APIs, a native Rust domain package author that
   supplies a managed companion facade, and the engine/SDK author that owns Host and binding
   infrastructure. Before ecosystem parity is claimed, at least one independent managed-only
   package and one independent Rust-backed domain package must install, diagnose, run, stop, and
   update without a core package allowlist.
-- **First-trial multiplicity**: One scene entity may attach at most one instance of each stable C#
-  Behavior type; different Behavior types remain composable. Repeated configuration should first use
+- **First-trial multiplicity**: As a bounded trial limit, not a permanent product decision, one scene
+  entity may attach at most one instance of each stable C# Behavior type; different Behavior types
+  remain composable. Repeated configuration should first use
   schema-backed collections or child entities. Multiple same-type attachments require a real game
   workflow and a separate stable attachment identity, ordering, patch-address, prefab, and migration
   decision; an array index, CLR object reference, or GC handle can never be that identity.
@@ -222,19 +214,21 @@ flowchart LR
   structured compile diagnostics, bounded gameplay data access, command/service integration,
   Play/Stop/restart behavior, clean-machine desktop export, and measured edit latency, bridge/GC
   frame cost, startup, and package size. For one named target-author persona and the same gameplay
-  task, it must compare authoring outcome with the `RGF-U14`/`RGF-U20` Rust baseline, demonstrate a
+  task, it must compare authoring outcome with a pinned relevant Rust baseline, demonstrate a
   material user benefit, remain within a precommitted maintenance/reversibility budget, and show no
   unacceptable regression to the complete Rust path.
 - **Adoption impact**: Success may refine project layout/settings (ADRs 0020/0035), Adapter-owned
   Schema projection and lossless missing-type authoring (0045/0081/0090), optional product and CI
-  capabilities (0055/0079), and managed target artifacts (0088). ADR 0086 remains the Rust/Cargo
-  executable-generation contract; a managed module generation must not masquerade as a native
-  executable generation, and shared activation concepts move outward only after both paths prove
+  capabilities (0055/0079), and managed target artifacts (0088). ADR 0084 is Accepted and owns
+  native runtime lifecycle; ADR 0086 remains a Proposed Rust/Cargo executable-generation design.
+  A managed module generation must not masquerade as a native executable generation, and shared
+  activation concepts move outward only after both paths prove
   the same contract.
-- **Foundation guardrail**: Before this question triggers, continue only language-independent
-  foundations already justified by the Rust/editor path. Before the bounded-research gate, only
-  read-only precedent work is admitted; before the separate Trial plan, do not add Adapter-specific
-  production APIs in anticipation of C#.
+- **Foundation guardrail**: Experiments do not mutate an admitted native registry or weaken strict
+  Runtime/Play/Cook readiness. Proposed owner-local managed module/catalog publication needs
+  isolated migration, required-cohort routing and physical retirement of invocations, callbacks,
+  tasks and drop functions; fencing late results is not code reclamation. Process replacement or
+  restart remains the fallback. No such module-publication behavior is claimed implemented here.
 - **Terminology**: Existing Nara documents use *managed runtime* for a runtime lifecycle managed by
   a Nara Host/`RuntimeInstance`, not for CLR-managed code. This question uses *.NET runtime* or
   *CoreCLR* when it means the managed-code runtime.
@@ -554,25 +548,43 @@ flowchart LR
 - **Admission constraints**: Project data cannot grant native-code trust or store its own approval.
   Any future approval must be Host-owned outside the project, bind the project-root capability plus
   source/manifest/lock/features or equivalent executable identity, and invalidate on relevant drift.
-  In-process Rust, Cargo build scripts, proc macros, and native importers are fully trusted code;
-  only a separately proven process or sandbox Adapter may claim isolation.
+  In-process Rust, Cargo build scripts, proc macros, and native importers are fully trusted code.
+  Process isolation provides lifecycle/fault containment, not an OS sandbox; revoking protocol
+  grants does not revoke ambient native filesystem, network or process I/O. Security confinement
+  requires separately tested platform enforcement, not a permission list or matching Host grants.
 - **Protocol and ABI boundary**: The default Extension Host hypothesis permits a versioned semantic
   protocol, not Rust trait objects across processes. A future in-process Native Extension requires
   a separately admitted C-compatible ABI, opaque generation handles, explicit allocator/panic/
   thread/callback/retirement rules, and target-specific conformance. Raw Rust `dyn Plugin`, Bevy
   `World`/`Entity`, UI toolkit objects, and GPU/window handles are not Package ABI values.
 - **Editor authority boundary**: The long-lived Editor Shell retains workspace, document, undo,
-  selection, window/event-loop, Nara UI, package-transaction, and registry authority. Ordinary
+  selection, window/event-loop, frontend, package-transaction, and registry authority. Ordinary
   extensions contribute versioned panels, commands, inspectors, gizmos, import/build operations,
-  diagnostics, and bounded surface intents. The Widget/custom-surface protocol waits for complete
-  Nara UI and independent tool tracers.
+  diagnostics, and bounded surface intents. A narrow semantic command/property tracer can use
+  current Dear ImGui adapters and a window-free session to preview one legal edit, observe its exact
+  action result and prove Undo/Save/Reopen. It need not await a complete Nara UI toolkit or freeze a
+  universal Widget/custom-surface protocol. A later bounded Rust child tool can return a proposal
+  to the same owner without rebuilding Editor; that remains an experiment, not a dynamic package
+  implementation claim.
 - **Removal boundary**: Cargo dependency removal, provider deactivation, derived-cache garbage
   collection, mounted package content, copied templates/samples, and missing-schema preservation are
   distinct owner-specific actions. A package directory, current manifest, or original filename
   cannot prove deletion authority. Only recorded installation ownership plus matching content
   identity/digest or lease evidence may authorize deletion; modified, adopted, or provenance-unknown
   project files are preserved and reported by default. Editor contribution withdrawal is a catalog
-  generation operation, not an uninstall-script side effect.
+  generation operation, not an uninstall-script side effect. Removal that would break required
+  installed dependents is blocked by default, whether they are enabled or disabled. An explicit
+  separately confirmed preview may cascade over the complete affected required-dependent closure;
+  cancellation or pre-publication failure preserves the prior installed/enabled graph. Routing
+  withdrawal does not complete physical removal: report Retiring until the owning lifecycle proves
+  retirement, never leave an invalid enabled graph or claim code retired early.
+- **Research and selection scope**: A named workflow may compare source-built, isolated semantic
+  Host and trusted in-process placements on the same tool. Native authority or measured latency
+  can justify studying the privileged path; a complete IPC path is not a prerequisite. Research,
+  first concrete API, shared protocol freeze and supported package/platform claims are distinct.
+  Static Rust declarations and `required <= requested <= compiled` govern source-built runtime
+  composition only. Future settings may select installed declared packages within Host-approved
+  availability and trust; they cannot grant executable authority or create a new source resolver.
 - **Research basis**: [Package and extension lifecycle research](../knowledge/engineering/godot-unity-package-extension-lifecycle-research.md)
   verifies Godot's addon/GDExtension/restart behavior and Asset Store limitations against Unity UPM
   governance. [Content and Product Package Graph Research](../knowledge/engineering/2026-07/2026-07-22T054245Z-content-and-product-package-graph-research-1c0d7699f5024b15a3b5ea43dc6b6ed9.md)
@@ -831,8 +843,9 @@ flowchart LR
 - **Remaining question**: A local compiled-Rust fixture does not prove package installation,
   independently versioned external distribution, file-backed plugin settings, profile overlays,
   or lossless missing-package round trips. Those workflows keep this question open. They must not
-  add a general `PackageDefinition`, registry, provider selector, or multi-role kernel until a real
-  package needs more than runtime plugins plus persistent schema.
+  infer a general `PackageDefinition`, registry, provider selector or multi-role kernel. A named
+  package workflow can justify bounded research and a first concrete role API without such a
+  kernel; OQ-031 owns installation and lifecycle qualification separately.
 
 ## OQ-046: Canonical Authoring Serialization Format
 

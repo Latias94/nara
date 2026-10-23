@@ -1,6 +1,6 @@
 ---
 name: Nara
-last_updated: 2026-10-15
+last_updated: 2026-10-23
 ---
 
 # Nara Strategy
@@ -20,7 +20,12 @@ from explicit, composable modules. Public Rust APIs must support the whole game
 production path, while the default module combination prioritizes a coherent
 experience. Stable extension seams allow modules, backends, editor tools, and
 optional scripting adapters without requiring a second official author language.
-Generalize only when a complete game or focused external evidence creates pressure.
+The integrated Editor also targets installable tools and optional gameplay-language
+workflows that do not require rebuilding the Editor. Rust-complete does not mean
+Rust-exclusive. Execution placement, compatibility and activation effects are explicit
+per contribution. Generalize when a complete game, a named target-author workflow,
+safety evidence or focused external evidence creates pressure; bounded experiments
+may challenge an existing architecture before the full product path exists.
 
 ## Who it's for
 
@@ -29,6 +34,9 @@ game from prototype to release. They are hiring Nara for Rust control together
 with an integrated editor, runtime, tooling, and delivery path. A team may include
 artists, designers, and other contributors who work through visual and data
 workflows; Nara is not limited to teams in which every contributor is a programmer.
+Extension and optional-language trials also serve tool/package authors and gameplay
+authors evaluating prebuilt Hosts. They do not make a second language a prerequisite
+for Rust projects or broaden an unqualified platform release claim.
 
 ## Key metrics
 
@@ -42,6 +50,9 @@ workflows; Nara is not limited to teams in which every contributor is a programm
 - **Module integration quality** - Success rate and completion time for adding,
   replacing, or independently consuming a supported module through documented
   contracts.
+- **Programmable authoring** - Engine-private changes, author-visible concepts and
+  Editor rebuild/restart requirements for an independent semantic tool, including
+  preview, exact result, Undo and persistence rather than panel registration alone.
 - **Runtime tail budget** - Frame-time P99, memory, and service-boundary overhead
   on target hardware.
 
@@ -81,7 +92,9 @@ the same deliberate boundaries instead of competing architecture goals.
 ### Delivery and ecosystem
 
 Make public APIs, documentation, standalone export, Cargo/Git/local package use,
-and later external-developer validation part of the production path.
+installable contribution lifecycle, and external-developer validation part of the
+production path. Preserve toolchain authority over source dependency graphs; a
+product Package is not a new Cargo/NuGet resolver or a universal execution Host.
 
 _Why it serves the approach:_ A game that only works inside the engine repository
 does not prove a usable engine.
@@ -98,8 +111,9 @@ does not prove a usable engine.
   runtime restart, and explicit state restoration.
 - High-end 3D, networking/rollback, browser, mobile, or console support in the
   first production proof.
-- Horizontal crate and ADR expansion without a direct reference-game, safety, or
-  measured platform requirement.
+- Horizontal crate and ADR expansion without a named product workflow, safety,
+  independent-consumer or platform requirement. This does not prohibit focused
+  extension, representation or execution experiments before full product support.
 
 ## Marketing
 

@@ -19,6 +19,14 @@ replaced, and which implementation details stay hidden behind narrow boundaries.
 
 ## Governance
 
+The [2026-10-23 reassessment](foundation-architecture-reassessment.md) challenges the full
+foundation and records target alternatives, not implemented capability. ADR 0119 replaces the
+old Bevy-reflection metadata authority with the existing Schema-first boundary. Proposed
+0120/0121 do not yet change native freeze or the current stock render execution contract.
+Use the [rebaseline plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md) for
+recommended changes; existing diagrams below describe selected owners, not a literal Cargo
+dependency graph or proof of future extension completeness.
+
 This document summarizes the selected architecture; it is not evidence that every selected
 contract is complete. ADR decision status and implementation status are separate. The canonical
 decision catalogue and evidence rules live in `adr/README.md`, per-ADR implementation state lives

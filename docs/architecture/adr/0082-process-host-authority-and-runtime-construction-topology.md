@@ -219,9 +219,9 @@ test double or three loops consuming the same concrete root is not that evidence
 child-process Play remains an Adapter/deployment choice behind the concrete Editor Host.
 
 The integrated runtime path has exactly one driver route: the selected Platform/Runner Adapter
-drives `RuntimeInstance`. The separate code-first `App::set_runner`/`App::run` path may remain for
-direct embedding, but an App carrying that raw runner is not also admitted into ADR 0084's managed
-runtime path.
+drives `RuntimeInstance`. ADR 0117 removed the separate raw `App::set_runner`/`App::run`
+execution path. Direct embedding also constructs and drives the managed Runtime owner; it does
+not create a second scheduler or bypass startup/fault/close authority.
 
 ### Service Sessions and Sharing
 

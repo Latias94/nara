@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-08-13
+**Last Revised**: 2026-10-23
 **Refines**: ADR 0003, ADR 0010, ADR 0035, ADR 0040, ADR 0044
 **Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0079: Root Product
 Capabilities and Placeholder Domain Retirement; ADR 0095: Plugin-Owned Specialized Domains and
@@ -77,7 +77,12 @@ There is already pressure:
 
 ## Decision
 
-nara plugins expose lightweight metadata and nara provides explicit default plugin groups.
+Source-built Rust runtime plugins expose lightweight metadata and Nara provides explicit default
+plugin groups. The static declaration, repeatable recipe, compiled capability ceiling and closed
+commit below govern that native composition path, not every future Product Package contribution.
+An installed semantic tool, managed module or binary adapter would use its separately admitted
+owner contract; it is not required to become a static Rust `Plugin` or mutate an admitted native
+registry. Those dynamic paths remain proposals, not implementation claims.
 
 ```mermaid
 flowchart TD
@@ -93,10 +98,10 @@ flowchart TD
 
 The plugin metadata contract is:
 
-- Every plugin type owns one static `Plugin::declaration()` containing a stable `PluginId` suitable
-  for diagnostics, generated docs, and project inspection. Constructed instances and entry drafts
-  records do not provide competing metadata authorities. Rust `TypeId` may support private typed
-  erasure, but it is not a public or persistent identity.
+- Every source-built Rust runtime plugin type owns one static `Plugin::declaration()` containing a
+  stable `PluginId` suitable for diagnostics, generated docs, and project inspection. Constructed
+  instances and entry draft records do not provide competing metadata authorities. Rust `TypeId`
+  may support private typed erasure, but it is not a public or persistent identity.
 - A declaration may add provided/required capabilities, concrete plugin requirements, conflicts,
   services, schema providers, shutdown obligations, and a short category when a real composition or
   lifecycle consumer uses that fact. Empty dimensions are valid and must not create authoring
@@ -156,9 +161,11 @@ The plugin metadata contract is:
   contribution must not require a first-party ID allowlist or an edit to Nara core merely because
   its crate is external.
 - Moving exclusive authority out of `Plugin::build` is not permission to reserve it for Nara.
-  `PluginGroup` may aggregate runtime-plugin companions only. A future `PackageDefinition`, product
-  preset, or typed root helper may aggregate those plugins with roles that already have their own
-  Accepted admission contract so the user still selects one coherent product entry. Render-family,
+  `PluginGroup` may aggregate runtime-plugin companions only. Product orchestration may coordinate
+  those plugins with roles that have their own Accepted admission contract so the user still
+  selects one coherent product entry; this does not require a universal `PackageDefinition` or
+  service layer. A named workflow may justify research and a first concrete contribution API
+  before a reusable protocol is frozen or product support is claimed. Render-family,
   exact-GPU, replacement Render Host, or platform/runner examples do not become supported
   roles merely by being named here. For each admitted exclusive role, root composition chooses its
   owner explicitly and external candidates use the same supported slot/conformance contract as the
@@ -204,9 +211,11 @@ installs an Editor workspace into a game World.
 `MinimalPlugins` should remain small and headless. It should not grow into "everything a sample game
 might want." Examples can use richer groups when they need rendering, windowing, asset import, or UI.
 The old fixed, opaque `DesktopWgpuPlugins` bundle is removed. This does not justify forcing code-
-first users to assemble product internals: OQ-045 must expose one inspectable, editable official
-top-level recipe shared with file-backed composition after validating compiled/requested/required
-product subsets and plugin closure.
+first users to assemble product internals: the bounded `ProductRecipe` path described above supplies
+one inspectable official recipe shared with file-backed composition after validating the native
+compiled/requested/required product subsets and plugin closure. OQ-045 retains the unimplemented
+distribution and file-backed settings questions; it does not reopen the delivered helper as a
+prerequisite for research.
 
 ## Alternatives Considered
 
@@ -282,8 +291,9 @@ immediate-install semantics.
 
 ## Consequences
 
-- `Plugin` exposes one static declaration with stable identity and only the composition/lifecycle
-  facts it actually uses; group membership is resolved provenance rather than plugin-owned metadata.
+- A source-built Rust runtime `Plugin` exposes one static declaration with stable identity and only
+  the composition/lifecycle facts it actually uses; group membership is resolved provenance rather
+  than plugin-owned metadata.
 - `PluginGroupBuilder` is data-only, and `App::add_plugins` lowers plugin/group/tuple inputs through
   the same resolver and closed lifecycle commit.
 - Pre-resolution occurrences use private entry-draft vocabulary; resolved inspection exposes
@@ -304,7 +314,8 @@ immediate-install semantics.
 
 ## Open Questions
 
-- OQ-045 owns the ordinary declaration helper, unanchored append, plugin-plus-schema contribution,
-  and editable official recipe needed by a clean-room external package.
+- OQ-045 records the bounded compiled-Rust recipe evidence and the remaining independently
+  versioned distribution, file-backed settings, and missing-package workflows. OQ-031 owns the
+  broader installable Product Package and contribution lifecycle, not this static plugin plan.
 - Which future scarce Host role, if any, needs a public slot-conformance carrier beyond known bundle
   editing? Ordinary physics/audio/text replacement does not qualify by category alone.

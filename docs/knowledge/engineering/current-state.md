@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "a8a74fef82e8ccd370c223c9453463f5b477339fb65994bad635484d3f42709e"
+source_fingerprint: "27e416561ee003044051b3be520ea04d4208c6037ff91f6e20092d6130035f89"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "a8a74fef82e8ccd370c223c9453463f5b477339fb65994bad635484d3f4
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `a8a74fef82e8ccd370c223c9453463f5b477339fb65994bad635484d3f42709e`
-- Immutable records: 861
+- Source fingerprint: `27e416561ee003044051b3be520ea04d4208c6037ff91f6e20092d6130035f89`
+- Immutable records: 863
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Foundation architecture rebaseline documentation checks and adversarial closure](verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md) - Inventory, status, link and scoped adversarial checks close design work only; no runtime or performance qualification.
+- **Subagent Finding**: [Complete foundation review: six independent lanes and integrated design choices](subagents/2026-10/2026-10-23T113840Z-complete-foundation-review-six-independent-lanes-and-integrated-design-choices-0520f18c9f084c319ab268ab36204938.md) - Six source reviews challenge all conversation foundation topics and 103 baseline ADRs without claiming implementation.
 - **Verification Evidence**: [Chat-informed architecture review probes and design constraints](verification/2026-10/2026-10-23T105719Z-chat-informed-architecture-review-probes-and-design-constraints-cc6bbbacdaac48eea3745bc7d36f8d9a.md) - Three public-interface probes distinguish a reproduced control defect from current Identity and Theme contract debt.
 - **Verification Evidence**: [Post-boundary U1 to U8 final integration and requirement audit](verification/2026-10/2026-10-23T075653Z-post-boundary-u1-to-u8-final-integration-and-requirement-audit-c11cf626f4494238bf3d1a2532e40634.md) - Verification Evidence for Post-boundary U1 to U8 final integration and requirement audit.
 - **Verification Evidence**: [Post-boundary U8 explicit Bevy ECS entry qualification](verification/2026-10/2026-10-23T075151Z-post-boundary-u8-explicit-bevy-ecs-entry-qualification-b54c09bf3ae54a5dbc48b382336ea785.md) - Verification Evidence for Post-boundary U8 explicit Bevy ECS entry qualification.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Session Handoff**: [Post-boundary U1 to U4 delivered U5 red regression next](sessions/2026-10/2026-10-23T061900Z-post-boundary-u1-to-u4-delivered-u5-red-regression-next-595eef43ad4a46f1a6ebcfd1b3c3c540.md) - Goal budget stopped execution after four qualified owner units; U5 through U8 remain unfinished.
 - **Verification Evidence**: [Post-boundary U1 U2 lossless outcomes and disposal-close qualification](verification/2026-10/2026-10-23T055844Z-post-boundary-u1-u2-lossless-outcomes-and-disposal-close-qualification-3f13b79a544a478b974d062c99662a12.md) - Current-source regression, Host bookkeeping, task disposal custody and exact native scope for post-boundary owner repairs.
 - **Verification Evidence**: [Post-boundary U4 post-flush persistent admission qualification](verification/2026-10/2026-10-23T055642Z-post-boundary-u4-post-flush-persistent-admission-qualification-e1266d181d7043a3b9ce33b60697d53c.md) - Post-flush target facts preserve original asset interference guards across direct batch and fresh preparation.
-- **Verification Evidence**: [Post-boundary U3 capability write cursor Windows qualification](verification/2026-10/2026-10-23T054535Z-post-boundary-u3-capability-write-cursor-windows-qualification-89d81288b77f48d79370b7a9dbf9b089.md) - Logical capability write position, exact-handle and lock controls qualified on Windows; other platforms unclaimed.
-- **Verification Evidence**: [ADR boundary and frozen codec execution verification](verification/2026-10/2026-10-23T022246Z-adr-boundary-and-frozen-codec-execution-verification-b210d1cf09c94203b04bffcfa1dbe236.md) - Serial workspace, independent consumer and focused Editor verification for the ADR boundary and frozen codec refactor.
 
 # Integration Notes
 

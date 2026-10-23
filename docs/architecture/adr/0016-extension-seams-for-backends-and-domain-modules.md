@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-10-23
 **Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0094: Minimal Render Execution
 Boundary and Evidence-Gated Extensions; ADR 0095: Plugin-Owned Specialized Domains and Project
 Configuration
@@ -12,8 +12,8 @@ Configuration
 An extension seam means that an independently owned plugin can join Nara's public substrate. It
 does not imply that Nara owns portable domain components, scene schemas, or a provider trait.
 Plugin-specific durable schemas are valid when stable and migration-aware; only native/runtime
-handles are categorically excluded. The second-real-implementation rule applies before advertising
-a Nara-owned portable Interface, not before shipping an ordinary plugin-owned integration.
+handles are categorically excluded. Real semantic-variation evidence is required before freezing a
+Nara-owned portable Interface, not before researching or shipping a concrete plugin-owned API.
 
 ## Context
 
@@ -32,12 +32,20 @@ Examples:
 nara defines **extension seams** by allowing independently owned plugins to join public product
 substrate. An extension seam does not automatically create an engine-owned domain Interface.
 
-A concrete integration may ship with its own strongly typed components, schema, systems, sets,
-queries, commands, events, and configuration. Nara freezes a portable cross-implementation
-Interface only after one production-shaped consumer creates real portability pressure, an
-independent implementation challenges the proposed seam, and a second real implementation proves
-the common semantics. Fakes remain useful conformance and fault-injection oracles, but do not prove
-ecosystem replaceability.
+A concrete integration may define a first public owner API and ship its own strongly typed
+components, schema, systems, sets, queries, commands, events, and configuration. A named workflow
+and falsifiable experiment justify studying or revising that owner contract; neither a completed
+reference game nor a second implementation is a prerequisite for that work. Nara freezes a portable
+cross-implementation Interface only after a production-shaped workflow creates real portability
+pressure and either two real implementations or one real implementation plus a real portability
+consumer expose and challenge semantic variation. Matching method names or a consumer that merely
+uses one implementation do not establish common semantics. Fakes remain useful conformance and
+fault-injection oracles, but alone do not prove ecosystem replaceability.
+
+Research feasibility, a first concrete owner API, shared abstraction freeze, and supported
+product/platform claims are separate qualifications. Historical plan IDs are evidence references,
+not research authorization. The [foundation reassessment](../foundation-architecture-reassessment.md#d18-decision-scope-evidence-and-deletion-discipline)
+applies that distinction without claiming its proposed dynamic capabilities are implemented.
 
 Core rule:
 
@@ -94,12 +102,22 @@ Event loops, native windows, renderer surfaces/devices, filesystem capabilities,
 process-scoped authority use explicit Host contributions and lifecycle ownership. This is a safety
 property, not a template for ordinary physics/audio/text plugins.
 
+Explicit authority does not mandate IPC. Source-built Rust contributions remain trusted native
+code. A bounded comparison may study trusted in-process placement for a named native authority
+need or a measured latency/throughput requirement without first building a complete isolated
+alternative. A supported binary seam still needs its own compatibility, callback/drop retirement,
+fault-domain and restart contract. Process isolation alone is not an OS sandbox, and withdrawing
+Host protocol grants does not revoke arbitrary native code's ambient filesystem or network I/O.
+
 ### Rule 5: Shared traits follow evidence
 
-Use a public trait only when multiple real participants require the same behavior and the semantics
-are stronger than matching method names. A second implementation is required before compatibility
-freeze for a portable Interface, not before the first concrete plugin can ship. Rendering follows
-ADR 0094's narrower evidence ladder and wgpu-only RHI decision.
+Use a shared public trait only when multiple real participants require the same behavior and the
+semantics are stronger than matching method names. A first concrete owner API may be public before
+that evidence exists; it must not advertise cross-implementation compatibility. Portable freeze
+requires real semantic variation from two implementations or one implementation plus a real
+portability consumer that challenges the shared boundary, not test fakes alone. This does not gate
+research or the first concrete plugin. Rendering retains ADR 0094's currently accepted stock
+boundary and wgpu-only RHI decision until a scoped successor is accepted.
 
 `PluginServiceId` can validate that a declared service is present. It is not a provider registry,
 exclusive owner selector, or runtime dispatch Interface.
@@ -149,7 +167,7 @@ exclusive owner selector, or runtime dispatch Interface.
 | Persistent isolation | Plugin schemas contain no native or process-local identity | Schema/golden review |
 | Plugin integration | An external plugin owns data, systems, sets, diagnostics, and optional schema through public APIs | Clean-room fixture |
 | Honest replacement | Domain replacement documentation names migrations and unsupported equivalence | Documentation review |
-| No premature trait soup | A portable Interface cites real portability pressure and two challenged implementations | ADR/conformance review |
+| No premature trait soup | A portable Interface cites real portability pressure and semantic variation from two real implementations or one implementation plus a real portability consumer; fakes alone are insufficient | ADR/conformance review |
 | Authoring ergonomics | Ordinary plugins do not require provider slots or advanced plan vocabulary | Independent example review |
 
 ## Risks and Mitigations
@@ -158,7 +176,7 @@ exclusive owner selector, or runtime dispatch Interface.
 |---|---|---:|---|
 | Plugin-specific schemas fragment content | High | Medium | Maintain one strong official default, stable namespaces, migrations, and demand-driven converters |
 | Native state leaks into durable data | Critical | Medium | Enforce schema eligibility, canonical grammars, type audits, and hostile fixtures |
-| Trait abstractions become shallow | Medium | Medium | Require real portability pressure and two challenged implementations before compatibility freeze |
+| Trait abstractions become shallow | Medium | Medium | Require real portability pressure and challenged semantic variation from two real implementations or one implementation plus a real portability consumer before compatibility freeze; do not count fakes alone |
 | Replacement promise is overstated | High | Medium | Treat replacement as explicit migration unless an Accepted portable contract says otherwise |
 | Host-only machinery burdens ordinary plugins | High | Medium | Reserve Host contributions for scarce process/native authority |
 

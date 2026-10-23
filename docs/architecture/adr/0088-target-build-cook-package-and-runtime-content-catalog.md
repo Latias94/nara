@@ -2,11 +2,11 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-10-23
 **Owner**: product build hosts, `nara_asset`, cook providers, and runtime content adapters
-**Admission Trigger**: A reference-game desktop and headless/server build proves deterministic
-dependency closure, target cooking, capability stripping, package/catalog publication, validated
-old-or-new mount-resolver publication, and source-free runtime acquisition
+**Admission Trigger**: A local immutable base catalog proves declared dependency closure, target
+cooking/stripping, verified Runtime bytes and source-free boot; patch/DLC, remote authenticity,
+resolver replacement and rollback qualify later rather than gating that first slice
 **Revisit Trigger**: A real store, CDN, streaming-install, encrypted container, or platform signing
 adapter proves that the logical package/mount-set model cannot express its requirements
 **Related**: ADR 0020, ADR 0035, ADR 0037, ADR 0049, ADR 0050, ADR 0051, ADR 0055, ADR 0056,
@@ -26,27 +26,29 @@ Godot export presets, Unity Build Profiles/Addressables, and Unreal cooking/Asse
 this a product-level contract. Without one, Nara could accidentally ship `.meta` and import-cache
 internals, omit dynamically addressed content, include client-only assets in a server, or let one
 runtime acquisition resolve through a mixed package set during a patch. A package container is an
-implementation detail;
-dependency closure, identity, compatibility, trust, and atomic mount publication are the durable
-boundaries.
+implementation detail; dependency closure, identity, compatibility and Host-authorized catalog
+admission are the first durable boundaries. Atomic resolver updates and overlay trust add further
+obligations when those operations are introduced.
 
 ## Decision
 
 If accepted, Nara will separate target planning, cooking, package generation, and runtime mount.
-Every stage consumes immutable verified inputs and publishes a new immutable generation.
+Every stage consumes immutable verified inputs and publishes a new immutable generation. The first
+source-free slice is a Host-trusted local immutable directory plus base catalog; it does not need
+an archive, patch/DLC system or remote package service.
 
 ```mermaid
 flowchart LR
-    Revision[CommittedProjectSnapshot]
+    Revision[Immutable Host build-source capture]
     Artifacts[Verified ArtifactGroup snapshots]
     Plan[Pure TargetBuildPlan]
     Closure[Dependency closure and stripping]
     Cook[Target cook]
     Members[Immutable package members]
     Manifest[PackageManifest + RuntimeContentCatalog]
-    Verify[Integrity / compatibility / external authenticity]
+    Verify[Integrity / compatibility / Host expectation]
     Publish[Immutable package artifact publication]
-    Mount[Validated MountSetGeneration snapshot]
+    Mount[Validated base catalog snapshot]
     Load[ADR 0037 resolve/acquire]
 
     Revision --> Plan
@@ -58,11 +60,11 @@ flowchart LR
 
 | Value | Meaning | Not interchangeable with |
 |---|---|---|
-| `CommittedProjectSnapshot` digest | Coherent authored member table from ADR 0091/host resolver | Import or package generation |
+| Build-source capture digest | Host-retained immutable source closure and its explicit consistency envelope | Editor transaction commit, import or package generation |
 | `ArtifactGroupManifest` digest | Verified source-import product group | Cooked/package identity |
 | `TargetBuildPlan` digest | Pure target/profile/closure recipe | Executable or artifact bytes |
-| `PackageManifestDigest` | One immutable base/patch/DLC package artifact and member table | Mount-set generation or residency |
-| `MountSetGenerationId` | One validated ordered set of package manifests | Package artifact or runtime handle |
+| `PackageManifestDigest` | One immutable package artifact and member table; initially a local base | Mount-set generation or residency |
+| `MountSetGenerationId` | One validated package resolver snapshot; initially a singleton base | Package artifact or runtime handle |
 | `RuntimeContentCatalogDigest` | Merged identity-to-member mapping bound to one mount set | Residency state |
 | Optional `ExecutableGeneration` manifest digest | Compatibility input from ADR 0086 | Content/package identity |
 
@@ -76,17 +78,38 @@ generation.
 `TargetBuildPlan` is side-effect-free inspectable data derived before cook work starts. It records:
 
 - target triple/platform, build profile, and normalized product capabilities;
-- immutable committed-project snapshot, schema/catalog fingerprints, and artifact-group snapshots;
+- immutable Host build-source capture, its consistency evidence, schema/catalog fingerprints and
+  verified artifact-group snapshots;
 - optional compatible ADR 0086 executable-generation manifest digest when the product couples code
   and content;
 - engine/plugin/importer/cook-provider/toolchain provenance;
 - startup scenes, always-include roots, explicitly addressable groups, and target-specific roots;
 - client/server/headless/editor exclusions and required compatibility ranges;
-- package/chunk assignment policy where selected.
+- package assignment policy, with chunk/overlay policy only where that later scope is selected.
 
-Release planning accepts an ADR 0091/host-produced `CommittedProjectSnapshot` plus verified artifact
-groups. A development preview may use an explicitly marked ephemeral snapshot, but that snapshot
-cannot publish as release content.
+Release planning accepts a Host-owned immutable source capture plus verified artifact groups. The
+capture binds selected roots, exact source/metadata/continuity and auxiliary member bytes/digests,
+their identity evidence, and the admission/revalidation policy. A qualified ADR 0091 transaction
+snapshot can supply it, but full Editor journaling is not a dependency of build-source capture.
+An explicitly marked unsaved development capture cannot silently publish as saved release source.
+
+Per-file capture does not prove that an entire mutable workspace existed at one instant. A build
+requiring a cross-file invariant must obtain stronger evidence, such as an immutable source tree
+or a qualified committed generation, or reject/retry that capture. The plan states this consistency
+envelope and any untracked native-tool/environment inputs; immutable captured content is not a
+claim of filesystem-wide atomicity or hermetic compilation.
+
+Deterministic content recipes use canonical member identities, bytes/settings/continuity digests
+and declared tool/target inputs. Capture-instance IDs, timestamps, absolute locations and live-file
+identity receipts remain separate provenance, not accidental sources of a new content recipe.
+Keeping those receipts does not assert that different capture instances are the same operation.
+
+Host tool construction/selection, target executable build and target activation/qualification
+remain separate under ADR 0086. Host cooker/importer tools use their Host selection, while the
+Player has an explicit Cargo package/bin/profile/features/target/toolchain selection. Cargo remains
+the code dependency authority; target content planning is not another resolver. A foreign-target
+artifact can be built and verified without executing it on the build Host. Target-runner evidence
+is required before readiness or a native platform support claim.
 
 ### Dependency Closure and Cooking
 
@@ -101,6 +124,10 @@ cannot publish as release content.
 - Cook providers transform backend-neutral imported products into target-specific runtime members.
   They consume only the immutable plan and verified artifact products; they do not reread mutable
   authoring source or bypass the import graph.
+- A declared pass-through codec may preserve verified bytes as Runtime content. It still names a
+  Runtime schema/decoder and belongs to the catalog; runtime boot cannot fall back to mutable source,
+  `.meta` files, an importer or the import cache. Renaming a source-delivery directory is not
+  source-free export.
 - Cook inputs and outputs are bounded, generation-stamped, cancellation-aware, and deterministic
   for publishable builds. Stale or superseded results cannot enter a package artifact candidate.
 
@@ -111,7 +138,8 @@ A package manifest uses the ADR 0051 envelope and records:
 - `kind`, `format_version`, `engine_min_version`, `generator`, package ID/version, and its canonical
   `PackageManifestDigest`;
 - target/profile/capabilities and compatible engine/schema/plugin ranges;
-- every member identity, size, content digest, compression/encryption descriptor, and dependencies;
+- every member identity, size, content digest, Runtime schema/decoder and dependencies, plus any
+  selected compression/encryption descriptor;
 - runtime catalog/member-table digest, build/tool provenance, and optional base-manifest binding;
 - privacy-safe relative logical names, never absolute author/cache paths or credentials.
 
@@ -120,9 +148,10 @@ dependency metadata for the candidate mount set. Its digest is bound into that
 `MountSetGenerationId`. It does not own `Handle<T>`, `LoadState`, leases, retention, decode, or
 eviction; ADR 0037 owns those runtime concerns.
 
-Base, patch, and DLC are immutable package artifacts. A patch binds the exact base manifest
-digest it expects. Overlay precedence is explicit, and an unauthorized duplicate product mapping
-rejects the candidate rather than becoming implicit last-writer-wins.
+The initial base is one immutable directory/member set with a complete catalog. Each product maps
+to one admitted member; duplicates reject, required dependencies close, and Host expectations bind
+the selected base identity/digest and target/schema. Directory layout is not permission to access
+authoring source. Patch/DLC overlay fields and algorithms are not prerequisites of this base format.
 
 The persistent file kinds `nara.package-manifest`, `nara.runtime-content-catalog`, and any future
 mount-set manifest begin at canonical version 1 with compatibility matrices and non-empty golden
@@ -130,12 +159,34 @@ fixtures. Package manifest, catalog, member table, and dependency graph enforce 
 byte, shape, count, depth, string, dependency, time, and diagnostic budgets before signature work,
 large allocation, member decode, or mount publication.
 
-### Mount, Integrity, and Trust
+### Base Catalog Mount, Integrity, and Trust
 
-- The runtime constructs and verifies a complete candidate mount-set snapshot before publication.
+- The runtime constructs and verifies the complete base catalog/member snapshot before boot.
 - Wrong target/profile, incompatible engine/schema/plugin range, missing required member, digest
-  mismatch, invalid base binding, or catalog collision changes no active mount state.
-- Publication swaps one immutable active mount-set snapshot at a host safe point. In-flight loads
+  mismatch or catalog collision rejects the candidate before runtime acquisition/publication.
+- The Host supplies the expected local base identity/digest and allowed namespace independently
+  of package bytes. A manifest cannot authorize itself. The first slice is trusted local build
+  output, not proof of freshness/authenticity for remote or adversarial package delivery.
+- Runtime acquisition resolves required/soft/addressable references through the admitted catalog.
+  It succeeds with source, `.meta`, generated import cache and Cargo inaccessible on the run
+  machine. Source-carrying Export remains a distinct supported mode, not evidence for this slice.
+- In-flight loads capture the immutable base snapshot and retain their required members. Catalog
+  integrity and Runtime decode/readiness remain separate observations under ADR 0037/0084.
+- Content digest/integrity is separate from signature/authenticity. Signing keys, notarization,
+  store credentials, and signature operations belong to trusted release/platform adapters.
+- Package filesystem access follows ADR 0050/0070 containment and guarantee tiers. Native code
+  packages remain explicitly trusted executable extensions, not sandboxed catalog content.
+
+### Later Patch, DLC, and Resolver Qualification
+
+These obligations apply when those operations are selected, not to first base-catalog admission:
+
+- Base, patch, and DLC remain immutable artifacts. A patch binds the exact expected base manifest.
+  Overlay precedence is explicit; unauthorized duplicate product mappings reject rather than
+  becoming implicit last-writer-wins.
+- Verify a complete candidate mount set before replacing active resolution. Invalid base binding,
+  target/schema mismatch, member failure or catalog collision leaves the current resolver intact.
+- Publication swaps one immutable active mount-set snapshot at a Host safe point. In-flight loads
   capture their original snapshot and cannot be redirected to mixed generations.
 - Mount publication changes future resolution only. Already resident values may retain their
   origin `MountSetGenerationId`, so old and new resident values can coexist. Whole-runtime content
@@ -144,16 +195,13 @@ large allocation, member decode, or mount publication.
 - An old mount-set snapshot and its required package members remain leased while any in-flight load
   or resident value depends on that origin generation. Unmount/garbage collection is budgeted and
   observable and cannot invalidate a live value's dependency closure.
-- Content digest/integrity is separate from signature/authenticity. Signing keys, notarization,
-  store credentials, and signature operations belong to trusted release/platform adapters.
 - A package manifest cannot authorize its own package ID, base binding, product namespace,
   override/precedence, or version freshness. The Host supplies the expected package identity and
   digest plus allowed namespace/base/override policy independently of package bytes. Source
   substitution, unauthorized overlay, and rollback reject before mount publication.
-- The first accepted scope may be Host-trusted local build output only. Any untrusted or unsigned
-  package policy must be explicit per product and prove the independent authorization rule above.
-  Native code packages are trusted executable extensions, not sandboxed content.
-- Package filesystem access follows ADR 0050/0070 containment and guarantee tiers.
+- Remote/untrusted delivery adds independent authenticity, authorized update and freshness/rollback
+  policy with explicit product evidence. An unsigned policy cannot omit authorization by letting
+  supplied bytes select their own expectations.
 
 Exact archive/container layout, compression algorithm, encryption, store SDK, CDN, install
 streaming, shader pipeline cache layout, and world-partition algorithm remain deliberately
@@ -168,7 +216,8 @@ unfrozen.
 **Cons**: Leaks source/editor data, lacks target stripping and compatibility, and gives no atomic
 catalog/mount contract.
 
-**Decision**: Rejected.
+**Decision**: Rejected as source-free delivery. The existing source-carrying Export mode remains
+valid within its declared scope and evidence.
 
 ### Option B: Let an Opaque Packer Import, Cook, and Package Everything
 
@@ -184,8 +233,8 @@ boundary between source products and runtime members.
 **Pros**: Makes target closure, provenance, stripping, patch compatibility, and runtime mount
 publication inspectable while leaving container implementations replaceable.
 
-**Cons**: Requires manifest schemas, deterministic cook providers, and extensive corruption/crash
-tests before visual export tooling exists.
+**Cons**: Requires manifest schemas, deterministic cook providers and base-content corruption tests;
+later resolver/overlay support additionally needs update fault and trust qualification.
 
 **Decision**: Proposed.
 
@@ -193,15 +242,18 @@ tests before visual export tooling exists.
 
 | Metric | Target | Measurement |
 |---|---:|---|
-| Deterministic content | Two clean builds produce equal plan, package-manifest, member, and catalog digests | Clean build fixture |
+| Deterministic content | Equal declared captures/recipes produce equal canonical plan, package-manifest, member and catalog digests, not necessarily identical Rust binaries | Clean content build fixture |
 | Closure correctness | Required, soft, addressable, dynamic-root, and missing-dependency cases match declared policy | Dependency fixture matrix |
 | Server stripping | Server package contains zero forbidden client/editor capability members | Package audit |
-| Runtime independence | Packaged runtime opens with no source tree, `.meta`, or import-cache access | Export integration test |
-| Corruption rejection | Damaged member/catalog/base binding is rejected before mount publication | Hostile package tests |
-| Mount authorization | Package bytes cannot self-authorize identity, namespace, base/override precedence, or rollback; all must match Host-provided expectation | Source-substitution, unauthorized-overlay, and rollback fixtures |
-| Resolver atomicity | Every patch/mount fault point leaves a complete old or complete new mount resolver active | Fault-injection matrix |
-| Snapshot consistency | In-flight load resolves all dependencies within one captured mount-set generation | Concurrent load/update test |
-| Residency provenance | Every resident value reports its origin mount-set generation across resolver updates | Runtime asset test |
+| Runtime independence | Local base runtime boots with source tree, `.meta`, import cache and Cargo inaccessible | Base-catalog boot fixture |
+| Capture honesty | Build consumes retained selected bytes under a stated envelope without requiring the full Editor journal or a global snapshot claim | Source drift and journal-absent fixtures |
+| Target separation | Host tools and target Player use explicit separate selections; native qualification is not inferred from cross-compilation | Host/target-different plan and runner fixtures |
+| Base corruption rejection | Wrong target/schema, damaged member/catalog or duplicate mapping rejects before boot publication | Hostile base-catalog tests |
+| Base authorization | Local base bytes match independently supplied Host identity/digest and namespace expectations | Source-substitution fixture |
+| Later mount authorization | Package bytes cannot self-authorize base/override precedence or rollback | Unauthorized-overlay and rollback fixtures |
+| Later resolver atomicity | Every patch/mount fault point leaves a complete old or complete new mount resolver active | Update fault-injection matrix |
+| Later snapshot consistency | In-flight load resolves all dependencies within one captured mount-set generation | Concurrent load/update test |
+| Later residency provenance | Every resident value reports its origin mount-set generation across resolver updates | Runtime asset test |
 | Privacy | Package bytes/manifests/diagnostics contain no absolute author paths, cache paths, or secrets | Artifact scanner |
 
 ## Risks and Mitigations
@@ -221,8 +273,9 @@ If accepted:
 
 - ADR 0020 remains only the authoring source layout;
 - ADR 0087 owns source import/product graphs; this ADR consumes immutable artifact-group snapshots;
-- ADR 0091/host resolver produces the coherent committed-project snapshot consumed by target
-  planning;
+- a Host source-capture owner produces immutable declared inputs with explicit consistency
+  evidence; a qualified ADR 0091 transaction snapshot can supply them without making the full
+  Editor journal a prerequisite;
 - ADR 0086 owns executable code generations; an optional manifest compatibility link does not merge
   code/content identity or block content-only patching;
 - ADR 0037 resolves runtime identity through the active content catalog and independently owns
@@ -234,16 +287,25 @@ If accepted:
 
 ## Admission Evidence
 
-ADR 0087 and ADR 0091 must already be Accepted, be replaced by named compatible Accepted
-successors, or this ADR must be split so its accepted subset no longer depends on their import-
-publication and committed-project-snapshot semantics. Partial promotion of the coupled model is
-invalid.
+The first slice requires an adopted identity semantic/continuity authority, a qualified source
+capture contract and the import-publication contract actually consumed. ADR 0087 may supply
+artifact-group publication once its relevant slice is Accepted/qualified, or a named compatible
+Accepted owner must supply the narrower guarantees. This does not accept all of Proposed ADR
+0083/0087/0091. Source capture may qualify independently of the full Editor journal; simple build
+inputs do not acquire the entire project-migration protocol as a front gate.
 
-Acceptance requires desktop and headless/server package fixtures, deterministic clean rebuilds,
-complete closure/stripping cases, source-free runtime boot, corruption rejection, and old-or-new
-base/patch mount-resolver publication, including resident-value origin-generation tests. It also
-requires independently expected package identity plus source-substitution, unauthorized-overlay,
-and rollback rejection. Creating a zip file or serializing a catalog map alone is insufficient.
+Base qualification proves a local immutable directory catalog, required/soft/addressable closure,
+the selected target's cook/stripping policy, canonical clean content rebuilds, independently
+expected base identity, wrong-target/schema/member-digest rejection and actual Runtime boot with
+source/cache inaccessible and no Cargo on the run machine. A Host/target-different build plan is
+qualified separately from native execution. Desktop and headless/server support claims each need
+their own matching target fixture; one does not gate a bounded first-target experiment.
+
+Patch/DLC, remote authenticity/freshness, overlay rollback, resolver replacement, concurrent
+load/update and resident-origin tests qualify those later operations only. They are not conditions
+for adopting or implementing the bounded base slice. This ADR remains Proposed, and existing
+source-carrying export evidence does not establish the source-free slice. Creating a zip file or
+serializing a catalog map alone is insufficient for either boot or update qualification.
 
 ## Citations
 

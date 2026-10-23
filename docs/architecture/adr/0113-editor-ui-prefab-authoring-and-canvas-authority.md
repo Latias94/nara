@@ -2,28 +2,31 @@
 
 **Status**: Accepted
 **Date**: 2026-08-17
-**Last Revised**: 2026-08-18
+**Last Revised**: 2026-10-23
 **Amended**: 2026-08-18 to make the exact U2 authoring projection the single Canvas source
 authority, separate receipt-backed Prefab persistence from immutable project-content generation
 publication, admit source-local ordered entity structure through ordinary Prefab history, and close
 first-party UI structural composition through exact frame-lowered transactions
 **Owner**: `nara_scene`, `nara_tooling`, project Host, and the private Editor execution owner
 **Refines**: [ADR 0026](0026-editor-command-patch-and-undo-model.md), [ADR 0047](0047-editor-workspace-and-scene-document-state.md), [ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md), [ADR 0107](0107-shared-ui-foundation-and-independent-product-layers.md), and [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md)
-**Refined By**: None
+**Refined By**: [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): revision-based
+semantic edits and presented geometry; [ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md):
+independent document domains, ordinary structural authoring, selected frontend and independent views
 **Implementation Plan**: [Editor UI Prefab Authoring and Canvas v1](../../plans/2026-08-17-1930-feat-editor-ui-prefab-authoring-and-canvas-v1-plan.md), EUA-U1 through EUA-U5; [Editor UI Prefab Structural Composition v1](../../plans/2026-08-18-0848-feat-editor-ui-prefab-structural-composition-v1-plan.md), EUSC-U1 through EUSC-U5
 
 ## Context
 
-Nara already has persistent `SceneDocument` and `PrefabDocument` values, canonical Prefab
-encoding, bounded Scene authoring history, an editor workspace, and a private Scene/Game image
-execution owner. The missing product path is editing a UI Prefab and seeing the accepted unsaved
-source in a Canvas before saving it back to the project.
+The original UI Prefab slice extended persistent `SceneDocument` and `PrefabDocument` values,
+canonical Prefab encoding, bounded Scene authoring history, the workspace and private Scene/Game
+image execution. It established editing a UI Prefab and seeing accepted unsaved source in a Canvas
+before saving it back to the project.
 
 The first implementation must not make a Prefab look editable by silently instantiating it as a
 Scene and later serializing the expanded value. That would lose the source kind, canonical root
 order, source path, and the distinction between Prefab content and Scene instance facts. It would
-also give the Editor window an accidental UI resolution authority and make a future Nara UI panel
-disagree with Runtime UI.
+also give the Editor window an accidental UI resolution authority and make Canvas preview disagree
+with Runtime UI. The original implementation used egui; the selected Dear ImGui frontend and
+independent workspace/view lifecycle now follow ADR 0118 without changing Prefab source authority.
 
 ## Decision
 
@@ -31,24 +34,28 @@ disagree with Runtime UI.
 
 `PrefabDocument` is opened, revised, selected, saved, and reopened as a Prefab. A Prefab authoring
 session owns the canonical Prefab value and applies `ScenePatchDocument` operations directly to
-that source shape. The implementation may share a private patch/history core with
-`SceneAuthoringSession`, but it must not expose a generic public document trait, synthetic Scene
-conversion, or a second history authority.
+that source shape. It may share private patch/history mechanics with `SceneAuthoringSession`, but
+must not use synthetic Scene conversion or a competing history authority. ADR 0118 admits the
+typed `EditorExtensionDocument` boundary for independent non-Scene domains; Scene and Prefab retain
+their existing typed owners rather than passing through a second generic transaction layer.
 
-Each open document has a closed kind (`Scene` or `Prefab`), an editor document identity, a source
-binding, a monotonic authoring revision, an opaque content-state identity, a saved checkpoint, a
-selection set, and an external-reload state. Mutation, Undo, and Redo require the exact document
-identity and base revision. Navigation actions do not invent a revision.
+Each open Scene or Prefab retains its source kind, editor document identity, source binding,
+monotonic authoring revision, opaque content-state identity, saved checkpoint, selection set and
+external-reload state. Mutation, Undo and Redo require the exact document incarnation and base
+revision. Navigation does not invent a revision. Scene and Prefab are not the permanently closed
+set of workspace document domains: ADR 0118's explicitly registered extension owners retain their
+own content/history while sharing workspace revision, dirty-state and persistence lifecycle facts.
 
 Source-local Prefab structure uses the same ordered `ScenePatchDocument` transaction and history
-authority as other Prefab edits. Prefab authoring admits complete `AddEntity`, `RemoveEntity`,
-`RestoreEntity`, and `MoveEntity` operations with exact stable placement preconditions while
-continuing to reject independent `AddComponent`, `RemoveComponent`, and `ReplaceComponent`
-operations. Each accepted transaction validates and canonicalizes an unpublished Prefab candidate,
-admits its inverse and history cost, and only then publishes the document, monotonic revision, and
-branch-safe content state together. Scene and Prefab retain nominal public document types; only
-private ordered-record mechanics are shared, and no Prefab-to-Scene mutation roundtrip is an
-authoring boundary.
+authority as other Prefab edits. The specialized UI Prefab slice admits complete `AddEntity`,
+`RemoveEntity`, `RestoreEntity` and `MoveEntity` operations with exact stable placement preconditions;
+its structural recipes do not grant arbitrary component composition. ADR 0118 separately admits
+ordinary Scene/Prefab component and structural authoring with its exact catalog, unavailable-record
+and reference-preservation gates. Each accepted transaction validates and canonicalizes an
+unpublished Prefab candidate, admits its inverse and history cost, and only then publishes the
+document, monotonic revision and branch-safe content state together. Scene and Prefab retain
+nominal public types while sharing applicable revision primitives and private ordered-record
+mechanics. No Prefab-to-Scene mutation roundtrip is an authoring boundary.
 
 ```mermaid
 stateDiagram-v2
@@ -87,23 +94,28 @@ validates and publishes this immutable profile before Runtime UI or Editor UI co
 installed. Runtime and Editor each derive their own target transform from the same profile and
 the current Host target.
 
-The profile is not a Prefab field, an egui preference, a window-size fallback, or a Reference Game
+The profile is not a Prefab field, a toolkit preference, a window-size fallback, or a Reference Game
 constant. Missing or invalid profile data makes the UI Canvas unavailable while leaving the
 Hierarchy and Inspector usable. Multiple named profiles and a general surface registry remain
 deferred.
 
 ### 4. Toolkit and Canvas ownership stay separated
 
-egui remains the first Editor shell. Nara UI owns the accepted authored UI projection and Canvas
-candidate in a private Editor producer. The shared seam is one immutable authoring frame paired
-with one ordered, revision-bound action trace; no shared public Widget trait or toolkit-owned
-document state is introduced.
+Dear ImGui is the selected Editor frontend under ADR 0118. Nara UI owns the accepted authored UI
+projection and Canvas candidate in a private Editor producer; it does not own the Editor toolkit.
+The seam carries immutable authoring facts and revision-bound actions. An ordered action trace
+is not an atomic batch; each cohesive edit uses its owning document transaction. No universal
+Widget or Automation trait, toolkit-owned document state or future Nara UI Inspector is required.
 
-The Canvas is one mutually exclusive producer in the existing private Authoring/Game target
-topology. It gains input authority only from the exact final Editor composite receipt for the
-visible document revision, target generation, texture registration, device epoch, and window
-generation. A candidate, offscreen submission, stale receipt, or image-only success cannot select
-or mutate a Prefab.
+The Canvas uses the independent render-view lifecycle refined by ADRs 0117/0118, not a permanent
+mutually exclusive Authoring/Game slot. It gains geometric input authority only from the exact
+final Editor composite receipt for the visible document revision, target generation, texture
+registration, device epoch and window generation. A candidate, offscreen submission, stale receipt,
+or image-only success cannot select or mutate a Prefab through geometric input. Non-geometric
+property and structural commands use
+the exact document/source incarnation, admitted schema and base revision; they do not require a
+presentation receipt. A window-free semantic tool need not forge Canvas authority or wait for
+complete Nara UI to exercise a legal edit and observe its exact result, Undo and persistence.
 
 ### 5. Saved source and project content publish as separate generations
 
@@ -119,24 +131,27 @@ attempt rejects before publication and releases all candidate charges. Source mi
 content, capacity rejection, or preview replacement failure leaves the saved file honest, retains
 the last-good snapshot, and publishes typed `RefreshPending` or `Stale` Editor facts.
 
-A running Runtime never observes the replacement in place. Dirty Prefab content and pending or
-stale project content mark it out of date. Stop remains available, while new Play/Restart requires
-clean Prefab source and current project content. After a successful refresh, an explicit Restart or
-fresh Play start binds the successor snapshot.
+A running Runtime never observes the replacement in place. In the trusted in-process preview
+placement, dirty Prefab content and pending/stale project content mark it out of date; a new
+start or Restart retains that placement's clean-source and current-content admission. Stop remains
+available. Ordinary external Play instead admits saved source under ADR 0116: unsaved edits do not
+redefine its receipt, and Restart requires exact equality with the running generation's source
+receipt. Neither placement silently substitutes unsaved Canvas content for its admitted source.
 
-### 6. UI structural composition is closed, source-local, and receipt-gated
+### 6. Specialized UI structural composition is finite, source-local, and owner-gated
 
-`nara_ui` owns one closed first-party composition catalog for Container, Text, Image, and Button.
+The specialized v1 `nara_ui` slice owns a finite first-party composition catalog for Container,
+Text, Image and Button. This is not a permanently closed workspace document or extension model.
 Each catalog entry lowers to a complete source recipe; adapters cannot assemble partial component
 sets, invent schema fields, or allocate persistent entity identities. Placement choices come from
 the complete ordered Prefab source topology, exclude protected roots, descendants, cycles, and
 hidden mixed-content subtrees, and retain exact parent and sibling-anchor preconditions.
 
-The current `EditorUiAuthoringFrame` is the only lowering authority. `nara_tooling` allocates the
-stable identity and atomically publishes the accepted Prefab patch, one history record, revision,
-selection, and content state. egui and any later adapter submit the returned document- and
-revision-bound mutation unchanged; they do not build raw structure patches or repair stale
-placements.
+For this specialized catalog, `EditorUiAuthoringFrame` is the lowering authority. `nara_tooling`
+allocates the stable identity and atomically publishes the accepted Prefab patch, one history
+record, revision, selection and content state. The selected frontend submits the returned
+document- and revision-bound mutation unchanged; it does not build raw structure patches or
+repair stale placements.
 
 Persistent UI brushes distinguish semantic role and image forms. Image brushes store a canonical
 asset reference, and the accepted predecessor migration rewrites legacy brush data before normal
@@ -144,9 +159,10 @@ authoring. The ordinary project-content loader discovers that reference even whe
 is the image's only startup-closure dependency. Save, content refresh, Reopen, and explicit Runtime
 Restart therefore consume the same canonical source instead of an Editor-only cache.
 
-Every accepted structural publication retires the predecessor authoring frame and Canvas input
-authority. Preview resumes from the successor source revision, and selection or manipulation is
-restored only after the matching final Editor composite receipt is presented.
+Every accepted structural publication retires the predecessor authoring frame and Canvas geometric
+input authority. Preview resumes from the successor source revision; Canvas picking/manipulation
+authority resumes only after the matching final Editor composite receipt is presented. Semantic
+selection remains with the workspace owner and does not depend on a presentation receipt.
 
 ## Alternatives Considered
 
@@ -155,34 +171,35 @@ restored only after the matching final Editor composite receipt is presented.
 Rejected. It obscures source kind and path, risks writing expanded data back to the wrong file, and
 cannot preserve Prefab-specific canonical ownership.
 
-### Let egui own the editable UI model and use Nara UI only at runtime
+### Let the Editor toolkit own the editable UI model and use Nara UI only at runtime
 
 Rejected. The shell would invent a second layout, selection, and field authority, making Canvas
-preview differ from Runtime UI and preventing a later Nara UI panel from consuming the same facts.
+preview differ from Runtime UI. Toolkit independence does not require a second domain authority.
 
 ### Make the Editor window or a global surface registry own the logical UI extent
 
 Rejected. Window size is a Host fact and varies per target; authored logical extent is a product
 fact. Combining them makes runtime, Canvas, and future render targets disagree.
 
-### Add a generic public document/history trait now
+### Route every document through one generic mutation/history layer
 
-Rejected. The current consumers are exactly Scene and Prefab. A private shared mechanics module
-can remove duplicated implementation without freezing a public abstraction before a second
-heterogeneous document consumer exists.
+Rejected. Scene and Prefab keep their typed owners and may share private mechanics. ADR 0118 now
+admits an independent typed extension-document owner with domain-owned commands/history and shared
+workspace lifecycle. This supersedes the original two-kind/no-public-document-trait restriction;
+it does not introduce a universal document transaction, Automation service or Widget hierarchy.
 
 ## Consequences
 
-- `nara_tooling` becomes document-kind aware while retaining explicit Scene-only composition and
-  Play actions.
+- `nara_tooling` retains source-domain-aware admission; extension documents do not acquire Scene
+  composition, Canvas or Play authority merely by joining the workspace lifecycle.
 - The Host needs separate Scene and Prefab persistence lanes and must rebuild a project content
   snapshot after a successful Prefab save; a running Runtime never changes in place.
 - The Editor pays a small amount of explicit source/revision identity plumbing in exchange for
   stale-input safety and exact Save/Reopen behavior.
-- The private Canvas can reuse the existing WGPU execution owner without adding a public image
-  Surface, RenderGraph, docking system, or multi-window scheduler.
-- A future Nara UI Inspector can replace or coexist with egui by consuming the same authoring
-  frame and action trace.
+- The private Canvas reuses the WGPU execution owner and ADR 0118's render-view/Host handoff;
+  this authoring contract adds no public render scheduler or generic toolkit layer.
+- Domain-owned history and Canvas authority survive frontend changes. Permanent Editor/game
+  toolkit separation remains legitimate under ADR 0107.
 
 ## Success Metrics
 
@@ -195,7 +212,7 @@ heterogeneous document consumer exists.
 | Surface authority | Runtime and Canvas consume one effective project profile | project lowering tests |
 | Canvas input safety | Candidate/stale/retired facts never select or mutate | private Canvas transaction tests |
 | Content publication | Save digest mismatch or a third retained revision never replaces last-good content | project-content and Editor Host refresh tests |
-| Runtime freshness | A running Runtime remains immutable and only explicit Restart consumes the successor snapshot | Reference Game Editor trajectory |
+| Trusted runtime freshness | In-process source refresh never mutates a running Runtime; explicit Restart consumes the successor snapshot | Reference Game Editor trajectory |
 | Structural composition | Create, move, and subtree delete publish one exact Prefab transaction and one history record | Scene, tooling, Adapter, and Reference Game trajectory tests |
 | Structural Canvas safety | A predecessor receipt cannot pick after structure publication; the exact successor can | Native Editor UI Canvas canary |
 | Image dependency retention | A migrated image brush remains in the startup closure when the created UI node is its sole reference | Reference Game Save/Reopen/Restart trajectory |
@@ -205,15 +222,21 @@ heterogeneous document consumer exists.
 | Risk | Severity | Mitigation |
 |---|---|---|
 | Patch logic is duplicated between Scene and Prefab | High | Extract only a private document-neutral mechanics core; keep public document types nominal. |
-| Save receipt is applied to the wrong document kind | Critical | Bind checkpoints and persistence lanes to closed document kind and source identity. |
+| Save receipt is applied to the wrong document domain | Critical | Bind checkpoints and persistence lanes to the exact typed owner, source identity and captured content state. |
 | Editor window silently becomes UI resolution authority | High | Store one validated profile in effective project settings and derive target transforms at each consumer. |
-| Unsaved Canvas preview mutates Runtime or persistence state | Critical | Compile a private candidate from the exact authoring projection and require the final composite receipt for input authority. |
-| Save succeeds but successor content cannot publish | High | Keep persistence and content freshness separate, retain last-good previews, expose typed remediation, and block new Play/Restart. |
-| Early generic abstractions freeze the wrong toolkit boundary | Medium | Keep the authoring frame/action seam private or narrow until a second consumer proves the need. |
+| Unsaved Canvas preview mutates Runtime or persistence state | Critical | Compile from the exact authoring projection; require final composite evidence for geometric input and owner revision/schema admission for semantic edits. |
+| Save succeeds but successor content cannot publish | High | Keep persistence and content freshness separate, retain last-good previews and typed remediation, and enforce each Play placement's source-admission rules. |
+| Early generic abstractions freeze the wrong toolkit boundary | Medium | Use the concrete typed owner and current frame/action seam; require scoped consumer evidence for broader shared claims. |
 | A closed catalog becomes a premature plugin registry | Medium | Keep the four complete recipes first-party and private; require a focused successor before extensibility. |
 | Structural edits leave stale Canvas authority alive | Critical | Retire the predecessor frame on publication and require the exact successor composite receipt. |
 
 ## Implementation Evidence
+
+The records below are historical evidence for the original egui-era slices and their recorded
+native scope, not fresh qualification of today's frontend, all document domains or platform
+support. ADR 0118 and the [implementation ledger](implementation-status.md) track the subsequent
+Dear ImGui, independent-domain and render-view work. This revision changes contracts only; it
+does not claim new editing, extension or native capabilities have been implemented.
 
 EUA-U1 through EUA-U5 are implemented at `dc7ea07`, `16b0d30`, `bca3e62`, `155d147`, and
 `ed9f1cd`. The final conformance record is

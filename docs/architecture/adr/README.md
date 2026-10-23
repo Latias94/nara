@@ -71,7 +71,7 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0001](0001-runtime-workspace-boundaries.md): Runtime Workspace Boundaries
 - [ADR 0002](0002-use-bevy-ecs-as-ecs-substrate.md): Use Bevy ECS as the ECS Substrate
 - [ADR 0003](0003-own-app-plugin-and-schedule-lifecycle.md): Own App, Plugin, and Schedule Lifecycle
-- [ADR 0004](0004-use-bevy-reflect-backed-component-metadata.md): Use Bevy Reflect-Backed Component Metadata
+- [ADR 0004](0004-use-bevy-reflect-backed-component-metadata.md): Use Bevy Reflect-Backed Component Metadata (Superseded by ADR 0119)
 - [ADR 0005](0005-dimension-aware-runtime-with-2d-first-authoring.md): Dimension-Aware Runtime with 2D-First Authoring
 - [ADR 0006](0006-scene-and-prefab-data-model.md): Scene and Prefab Data Model
 - [ADR 0007](0007-asset-identity-and-import-pipeline.md): Asset Identity and Import Pipeline
@@ -171,3 +171,6 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0116](0116-standalone-supervised-editor-play.md): Standalone Supervised Editor Play
 - [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): 2D Foundation Ownership and Authoring Contracts
 - [ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md): Editor Workspaces, Frontends, and Creation Templates
+- [ADR 0119](0119-schema-first-semantic-metadata-authority.md): Schema-First Semantic Metadata Authority (Accepted; replaces ADR 0004)
+- [ADR 0120](0120-schema-publications-and-execution-representations.md): Schema Publications and Execution Representations (Proposed)
+- [ADR 0121](0121-composable-render-programs-and-host-execution.md): Composable Render Programs and Host Execution (Proposed)

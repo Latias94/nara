@@ -2,7 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-10-23
 **Owner**: `nara_asset`, importer-owning domains, and authoring hosts
 **Admission Trigger**: A bounded multi-product importer proves tracked dependency discovery,
 stable product reconciliation, exact invalidation, and crash-safe old-or-new artifact-group
@@ -65,9 +65,24 @@ The graph keeps these values distinct:
 | `ArtifactGroupManifest` digest | Atomic publication generation for one source import | Package generation or authoring commit |
 
 `Primary` is the reserved main product ID. Auxiliary product IDs are non-nil opaque values scoped
-to the source. Importer reconciliation preserves them across rename, reorder, and content changes
-when semantic continuity is provable. Ambiguity rejects the candidate or requires an explicit
-remap transaction.
+to the source. ADR 0083's identity semantic slice selects their authored continuity authority
+before this graph is qualified. Validated intrinsic source IDs may supply that mapping; sources
+without them require versioned authored metadata/sidecar continuity outside generated `.nara`
+cache. Importer reconciliation consumes that authority and preserves IDs across rename, reorder,
+content changes and clear-cache rebuild. Lost or ambiguous continuity rejects the candidate and
+requires explicit repair/remap, not a guessed match or cache-local ID allocation.
+
+The recipe index and immutable content-addressed storage are generated data:
+
+```text
+authored source/product IDs + admitted continuity mapping
+    -> declared source/settings/implementation/dependencies/target -> recipe digest
+    -> verified group manifest -> member content digests -> immutable blobs
+```
+
+The continuity mapping is an input, not a cache product. Deleting the recipe index, manifests or
+blobs must not delete the only product identity evidence. Equal output bytes may be shared by
+distinct products; one durable product may acquire new recipe and content digests after an edit.
 
 ### Dependency Edges
 
@@ -101,6 +116,7 @@ specific edge kind with safe cyclic semantics.
 `ImportRecipeDigest` covers:
 
 - stable source ID and immutable source-content digest;
+- the admitted authored product-continuity mapping revision/digest;
 - importer ID, version, and implementation/tool digest;
 - canonical import settings and selected import profile;
 - the complete transitive import-input closure with roles and content digests;
@@ -109,6 +125,11 @@ specific edge kind with safe cyclic semantics.
 An observed input missing from the recipe is an importer contract violation. Equal recipe inputs
 must produce the same canonical group manifest and member digests before an importer is admitted to
 the publish path. Dependency changes invalidate only the reverse-reachable affected closure.
+
+Implementation/tool identity must name its authority, such as a verified compiled tool artifact
+or a bounded implementation-input digest. A manually bumped importer version is not by itself
+proof that changed implementation code has the same recipe. Recipe digests identify declared
+inputs; member content digests verify actual outputs and remain different semantic types.
 
 ### Artifact Group Publication
 
@@ -126,7 +147,11 @@ One import candidate contains immutable artifact members plus one manifest mappi
   one-frame non-use is not a deletion contract.
 
 Artifact groups are generated cache data. They do not contain GPU handles, authored source truth,
-runtime `Handle<T>` values, package signatures, or editor recovery journals.
+runtime `Handle<T>` values, package signatures, editor recovery journals, or the sole durable
+continuity table. A group binds the exact admitted source and continuity revision. If creating
+new products changes authored continuity, the Host persists that mapping through its qualified
+Save/transaction path before making a group that relies on it visible; this is not permission to
+reimplement the full Editor journal inside the importer.
 
 `nara.asset-artifact-group` is the first persistent import-cache manifest file kind. It uses the
 ADR 0051 envelope (`kind`, `format_version`, `engine_min_version`, `generator`), canonical version
@@ -170,6 +195,7 @@ and gives reload/cook one verified immutable publication unit.
 |---|---:|---|
 | Deterministic recipe | Equal immutable inputs produce equal recipe, member, and group digests | Clean-import fixture |
 | Product stability | Rename/reorder changes rewrite zero `AssetProductRef` values | Compound importer fixture |
+| Cache independence | Clear-cache rebuild reconstructs identical product IDs from authored continuity; ambiguity requires explicit remap | Fresh-cache and lost-mapping fixtures |
 | Exact invalidation | One dependency edit rebuilds exactly its reverse-reachable import closure | Graph integration test |
 | Publication atomicity | Every stage/member/manifest crash point reopens to complete old or new group | Fault-injection matrix |
 | Stale result safety | Cancelled, timed-out, stale, and superseded jobs publish zero manifests | Task integration tests |
@@ -194,7 +220,8 @@ If accepted:
 
 - ADR 0007 and ADR 0033 retain source/import and render-preparation ownership but use this graph as
   the canonical multi-product import and publication contract;
-- ADR 0083 remains the durable source/product identity authority;
+- the selected ADR 0083 identity semantic slice or named compatible Accepted successor remains the
+  durable source/product and authored-continuity authority;
 - ADR 0037 consumes verified groups for source reload and independently owns runtime acquisition,
   residency, release, and eviction;
 - target cook/package consumes immutable group manifests and must not reread mutable authored
@@ -207,15 +234,19 @@ GPU preparation policy, editor save transaction, or arbitrary plugin sandbox.
 
 ## Admission Evidence
 
-ADR 0083's durable source/product identity must already be Accepted or replaced by a named
-compatible Accepted successor. This proposal cannot make a Proposed identity model authoritative
-by accepting the import graph first.
+First select the bounded source/product identity semantics and durable continuity authority from
+ADR 0083 through a scoped Accepted decision or a named compatible Accepted successor. That
+decision does not depend on this graph's acceptance, the rest of ADR 0083's prefab/migration
+matrix, or the whole ADR 0091 recovery journal. This graph cannot make an unadopted Proposed
+identity model authoritative by accepting publication first.
 
 Acceptance requires the complete success-metric matrix with at least one real compound importer,
-one transitive dependency fixture, last-good reimport behavior, and crash recovery across every
-artifact-group publication boundary. It must label in-process native importers as trusted and
-separate reproducibility evidence from any enforceable isolated-Adapter claim. A struct named
-`ImportContext` or a multi-output vector alone is insufficient.
+one transitive dependency fixture, cache deletion with unchanged product references, explicit
+ambiguous-continuity rejection/remap, last-good reimport behavior, and crash recovery across every
+artifact-group publication boundary. These are artifact-publication qualification, not prerequisites
+for studying a typed importer or selecting identity semantics. It must label in-process native
+importers as trusted and separate reproducibility evidence from any enforceable isolated-Adapter
+claim. A struct named `ImportContext` or a multi-output vector alone is insufficient.
 
 ## Citations
 
@@ -224,5 +255,5 @@ separate reproducibility evidence from any enforceable isolated-Adapter claim. A
 - Bevy processor dependency hashing: `repo-ref/bevy/crates/bevy_asset/src/processor/process.rs`
 - Unity asset metadata identity: <https://docs.unity3d.com/Manual/AssetMetadata.html>
 - Godot importer and generated-file registry:
-  `repo-ref/godot/editor/import/resource_importer.h`,
-  `repo-ref/godot/editor/import/resource_importer.cpp`
+  `repo-ref/godot/core/io/resource_importer.h`,
+  `repo-ref/godot/core/io/resource_importer.cpp`

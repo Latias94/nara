@@ -286,7 +286,9 @@ in 0078/0111/0112 without discarding displayed-frame authority.
 
 Content, target, device, and presented-frame identities remain separate. One private presentation owner
 joins them and returns an opaque token. Toolkit texture registration belongs in the native adapter,
-refining 0040/0107/0111/0112. Existing egui remains an adapter; no replacement toolkit is selected.
+refining 0040/0107/0111/0112. ADR 0118 owns the current Dear ImGui frontend selection and its native
+qualification. ADR 0107 permits independent toolkits and selective sharing; this foundation summary
+neither selects another toolkit nor requires eventual convergence.
 
 ### Validation and effect ownership
 

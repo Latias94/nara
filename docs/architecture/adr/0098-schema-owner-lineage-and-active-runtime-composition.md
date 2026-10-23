@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-27
-**Last Revised**: 2026-07-27
+**Last Revised**: 2026-10-23
 **Owner**: `nara_reflect`, schema-owning plugins, and product composition
 **Refines**: [ADR 0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md) and
 [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md)
@@ -30,7 +30,8 @@ ADR 0081 and ADR 0095 already require owner lineage to remain distinct from one 
 composition, but they do not select the minimum record or predecessor authority. The correction
 must preserve Nara's strict Runtime boundary: every active schema still needs its executable
 binding, codec, and migration chain before a registry snapshot is published. It must not introduce
-ADR 0090's still-Proposed degraded authoring model as a side effect.
+new Runtime readiness states as a side effect. Accepted ADR 0090 separately owns lossless
+unavailable-schema authoring; it does not make those records executable.
 
 The current canonical `component_schema_catalog` files also contain no owner identity. Assigning an
 owner from a component ID prefix, Rust type path, or the product recipe would create a new implicit
@@ -223,12 +224,20 @@ managed Host.
 
 ### Readiness Boundary
 
-This ADR does not admit `KnownUnbound`, `UnknownSchema`, placeholder ECS components, optional
-runtime bindings, lossless degraded save, generic unavailable-schema Inspector UI, or a Package
-Manager. Those remain Proposed under ADR 0090 and OQ-044.
+This native composition slice does not admit placeholder ECS components or optional Runtime
+bindings. Accepted ADR 0090 separately governs bounded unavailable-schema preservation, save
+and inspection. Package management remains an open product question, not a capability inferred
+from owner lineage.
 
 The only publishable Runtime readiness state in this slice is complete. Owner receipts describe
-lineage provenance; they do not make unavailable component records executable or editable.
+lineage provenance; they alone grant neither execution nor edit eligibility. ADR 0090's
+operation-specific authoring rules determine which preservation/edit operations remain valid.
+
+Compiled provider definitions are the implemented native registration mechanism, not the
+permanent carrier for every future data/module Schema owner. Proposed
+[ADR 0120](0120-schema-publications-and-execution-representations.md) explores owner publications
+with their own execution proof. Until adopted, native snapshot pointer identity and frozen
+complete bindings remain required; content equality alone never grants managed Host authority.
 
 ## Alternatives Considered
 

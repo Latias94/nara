@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
+**Last Revised**: 2026-10-23
 **Owner**: `nara_asset`, concrete asset domains, host-authorized source reads, and runtime asset publication
 **Refines**: [ADR 0007](0007-asset-identity-and-import-pipeline.md),
 [ADR 0033](0033-asset-import-and-render-resource-preparation-seam.md),
@@ -16,12 +17,13 @@ Image Import Metadata and Authoring Publication
 
 ## Context
 
-Nara has typed importer and imported-product abstractions plus registry metadata, but no production
-host executes that registry. The only complete consumer is Image, whose domain already owns the
-meaningful work: bounded source admission, task preparation, decoding, stale-result checks, and
-typed runtime publication. Keeping an unconsumed registry makes registration appear to be an
-executable extension contract while leaving scheduling, authority, budgets, and publication to
-ad hoc code outside it.
+At the original decision, Nara had typed importer/imported-product abstractions and registry
+metadata, but no production Host executed that registry. Image supplied the complete consumer:
+bounded source admission, task preparation, decoding, stale-result checks and typed publication.
+Keeping an unconsumed registry made registration appear to be an executable extension contract
+while leaving scheduling, authority, budgets and publication to ad hoc code outside it. The later
+compiled source-backed and Editor metadata refinements below add bounded workflows, not a
+universal processed-product or Runtime-decode contract.
 
 ADR 0087 proposes a larger tracked dependency and multi-product artifact graph. The current Image
 consumer neither proves that graph nor needs it. Nara therefore needs a concrete execution boundary
@@ -72,16 +74,18 @@ flowchart LR
   API, provider ID, and metadata that no executor consumes are removed rather than deprecated.
 - Failed, cancelled, over-budget, stale, and superseded work publishes no new asset state. A prior
   verified value remains last-good according to the existing asset replacement contract.
-- A shared executor seam may be reconsidered only after a second production asset domain completes
-  the same end-to-end workflow and demonstrates concrete duplicated policy that cannot remain
-  domain-owned. The review must compare the two landed paths and name the shared authority, error,
-  task, budget, and publication semantics.
+- A named importer workflow may motivate a typed owner/facet design or bounded experiment now;
+  it does not need two production domains before design can begin. Freezing a reusable execution
+  protocol requires evidence for the actual shared authority, errors, task custody, budgets and
+  publication semantics, with comparison to representative domains where reuse is claimed. A
+  second real implementation is useful evidence, not a blanket permission gate for a first owner
+  contract or compound-import study.
 - Multi-product dependency tracking and artifact-group publication remain governed by Proposed ADR
   0087 until its own admission evidence is complete.
 - ADR 0115's explicit Editor Import/Reimport lane and Host-private referenced-image hydration
   worklist are two consumers of the same Image-domain implementation. Host-owned metadata
-  publication and a concrete Editor image store do not make either path a second asset domain and
-  do not satisfy the shared-executor trigger.
+  publication and a concrete Editor image store do not prove that their distinct publication rules
+  can be replaced by an erased shared executor.
 
 ### Source-backed project domains (2026-10-21 refinement)
 
@@ -125,7 +129,7 @@ This refinement admits compiled, stateless source preparation and raw auxiliary 
 It does not by itself admit Editor import contributions, mutable native/GPU products, cross-domain prepared
 product dependencies, cook artifacts, file watchers, or dynamic loading. An import-only package
 has no source-backed Play support merely because it supplies an importer. The broader multi-product
-graph and shared import executor triggers above remain unchanged.
+graph remains Proposed; the design permission above does not qualify it or supply missing facets.
 
 See the [qualification plan](../../plans/2026-10-21-external-asset-domain-qualification-plan.md),
 [public guide](../../guides/project-asset-domains.md),
@@ -178,6 +182,53 @@ product graph. Image's concrete typed stores and resource-publication rules rema
 The [Editor qualification plan](../../plans/2026-10-21-editor-source-domain-import-plan.md) names
 the external text consumer and required evidence.
 
+### Typed Operation Facets and a Named Compound-Importer Study (2026-10-23 refinement)
+
+A compiled resource package may be designed as operation-specific typed facets connected by one
+release/composition identity: source/import preparation, processed Runtime decode, optional target
+cook, and optional Editor settings/import contribution. Those are distinct capabilities, not a
+universal executor method or an assumption that every registered resource supports every stage.
+Host-private erasure may store selected heterogeneous implementations; a public `Any` store,
+arbitrary mutable `World` callback or erased all-operation execution bus is not the extension
+contract.
+
+```text
+trusted compiled resource package selection
+    -> source/import | Runtime-decode | optional target-cook | optional Editor facet
+    -> Host admits the requested operation and its exact immutable inputs
+    -> typed domain candidate -> domain validation and publication
+```
+
+An independent compound atlas/text-bundle package is the named study consumer. It may explore
+Editor settings, Check, source-backed Play, processed decode and Export without waiting for two
+production domains, the whole ADR 0087 graph or a complete source-free packaging product. Each
+operation must name its own input/identity/budget/result/publication contract. Missing Runtime or
+cook facets return operation-unavailable; import registration or Check success does not imply
+processed Runtime support. Tracked cross-product inputs, stable subproduct reconciliation and
+artifact-group publication remain separate Proposed obligations under ADR 0083/0087.
+
+Reusable source/import and Runtime-decode contracts belong below root project orchestration and
+must not require Editor, Scene or 2D merely to express a pure importer. The root Host retains exact
+source receipts, aggregate budgets and Scene commit; Image/TileSet retain their own prepared-state
+and publication semantics. Do not add crates just to make a facet diagram symmetrical. Settings
+are versioned domain data with trusted typed and optional authorable forms, not necessarily fields
+in `nara.toml` or a universal serialization schema.
+
+Executable composition remains an explicit trusted Host action. Project data, a source kind,
+settings, a manifest, an installed crate or supplied package bytes cannot grant download, build,
+activation or native execution authority. A selected facet cannot bypass data-only Open or obtain
+filesystem writes, directory publication or mutable Editor/World authority through its data.
+
+This amendment permits and bounds the study; it does not claim those facets are implemented. The
+existing compiled `ProjectAssetDomain` Check/Play/source-carrying Export and selected Editor
+metadata facet remain the qualified slice described above. The prospective consumer must test
+absent facets, old-generation retention, importer failure, tracked cross-product inputs and a
+dependency probe showing that a pure importer does not pull in Editor/Scene/2D. Shared-protocol
+freeze and production/platform claims require their matching later evidence; historical plan IDs
+are evidence navigation, not authorization gates for this study. See foundation reassessment
+[D10](../foundation-architecture-reassessment.md#d10-resource-extension-facets) and
+[D18](../foundation-architecture-reassessment.md#d18-decision-scope-evidence-and-deletion-discipline).
+
 ## Alternatives Considered
 
 ### Option 1: Keep the generic registry as a future-facing placeholder
@@ -187,14 +238,15 @@ a false public capability and forces consumers to infer behavior that the contra
 
 ### Option 2: Centralize all decoding behind an erased asset-service executor
 
-Rejected. It moves domain budgets, typed validation, and publication policy into a broad service
-before two domains have demonstrated common semantics. Erasure also weakens the Rust-native type
-boundary without a real dynamic consumer.
+Rejected. It moves operation-specific budgets, typed validation and publication policy into a broad
+service without a demonstrated shared contract. Public erasure weakens the Rust-native boundary;
+private Host storage erasure does not justify a universal public executor.
 
 ### Option 3: Keep common primitives in `nara_asset` and let each domain own execution
 
 Selected. It preserves stable asset identity and task safety while making the only real workflow
-complete and keeping future generalization evidence-driven.
+complete at the original decision and keeping later generalization evidence-driven. Typed facets
+can extend concrete workflows without reviving the unused registry or universalizing publication.
 
 ## Consequences
 
@@ -207,16 +259,19 @@ complete and keeping future generalization evidence-driven.
   receipts, while `nara_image` retains settings-hash, decode, and typed commit authority.
 - Accepting this decision does not accept the compound-product graph, remote import execution,
   artifact cache protocol, GPU preparation, or a plugin sandbox.
+- The typed-facet study is authorized design work, not new implementation evidence. Source-backed
+  products, processed Runtime decode, cook artifacts and Editor resource publication stay distinct.
 
 ## Success Metrics
 
 | Metric | Target | Measurement |
 |---|---:|---|
-| Public generic importer executors and registries | 0 | Public API and stale-symbol inspection |
+| Unconsumed generic registries and universal erased executors | 0; typed operation facets are not forbidden by this count | Public API and stale-symbol inspection |
 | Image import path ownership | 1 concrete domain from bounded input through publication | Image import and replacement integration tests |
 | Partial publication after decode, budget, cancellation, or stale-result failure | 0 cases | Hostile input and task-generation tests |
 | GPU/native handles in imported Image output | 0 | Type and dependency audit |
-| Shared executor readmission evidence | At least 2 complete production domain paths and one measured duplicated policy | Future ADR admission review |
+| Typed-facet study | Named compound consumer, explicit per-operation contracts, absent-facet failure and domain-owned publication | Bounded design/consumer review; not current implementation evidence |
+| Reusable protocol freeze | Named shared authority/errors/custody/budgets/publication with representative consumer evidence for claimed reuse | Later protocol qualification, separate from permission to design |
 
 ## Risks and Mitigations
 
@@ -224,6 +279,6 @@ complete and keeping future generalization evidence-driven.
 |---|---|---:|---|
 | Domain import paths drift in stale-result semantics | High | Medium | Keep generation, expected-version, and task-set primitives in `nara_asset` and require the same conformance fixtures. |
 | Image code gains ambient filesystem authority | High | Medium | Admit only host-authorized source capabilities or immutable bounded snapshots and audit ordinary construction paths. |
-| Removing the registry appears to block future formats | Medium | Medium | Document the second-domain admission trigger and derive any later abstraction from two complete paths. |
+| Removing the registry appears to block future formats | Medium | Medium | Permit named typed owner/facet studies now; qualify reuse without making a second production domain a design gate. |
 | A failed replacement destroys the last-good image | High | Low | Validate and decode off to the side, then publish only after current generation/version checks pass. |
 | ADR 0087 is accidentally treated as implemented | High | Medium | Keep its status Proposed and explicitly limit this ADR to single-domain concrete execution. |

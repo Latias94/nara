@@ -82,6 +82,15 @@ CPU, memory, build size or frame P99.
 
 ## Background Designs
 
+The [complete conversation reassessment](foundation-architecture-reassessment.md) revisits 36
+foundation topics and [all 103 baseline ADRs](../audits/2026-10-23-foundation-architecture-coverage.md),
+including execution, Schema/storage, Prefab, asset/build delivery, rendering, packages and
+Editor/UI authority. It challenges current design choices rather than treating owner bug fixes as
+a complete architecture verdict. The [rebaseline plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md)
+orders concrete comparisons and fearless replacements. ADR 0119 adopts the Schema-first metadata
+correction; 0120 and 0121 remain Proposed. Coverage does not mean the replacements are implemented
+or every recommended ADR amendment has been applied.
+
 The [chat-informed foundation review](../audits/2026-10-23-chat-informed-engine-architecture-review.md)
 compares the supplied engine-design conversation with the current owners and pinned Bevy/Godot
 sources at `f91466b`. Four independent review lanes and three public-interface probes distinguish

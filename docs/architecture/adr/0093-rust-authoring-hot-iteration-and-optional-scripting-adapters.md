@@ -2,13 +2,13 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-10-23
 **Owner**: Rust authoring, executable/runtime hosts, optional scripting adapter packages
 **Supersedes**: [ADR 0021](0021-scripting-and-wasm-boundary.md)
 **Related**: ADR 0034, ADR 0039, ADR 0042, ADR 0045, ADR 0076, ADR 0084, ADR 0086
-**Revisit Trigger**: Measured production evidence shows that the complete Rust path cannot meet an
-accepted workflow, or two independent scripting adapters prove a shared Nara-owned contract that
-cannot remain adapter-local
+**Revisit Trigger**: A named author workflow, focused external evidence or measured iteration cost
+justifies a bounded comparison or first concrete adapter API; a portable/shared contract requires
+independent consumer evidence before freeze, and product support requires end-to-end qualification
 
 ## Context
 
@@ -57,9 +57,9 @@ flowchart TD
   path. Enabling no scripting or hot-patch package must not remove a required game capability.
 - Asset, scene, prefab, and project-data reload use their domain-owned, generation-stamped pipelines
   and last-good values.
-- Rust source changes always have a reliable rebuild path. Structural or unknown changes create a
-  fresh isolated runtime candidate; they never mutate component layouts or plugin topology inside
-  the active `World`.
+- Native Rust source changes always have a reliable rebuild path. Structural or unknown changes
+  create a fresh isolated runtime candidate; they never mutate component layouts or plugin
+  topology inside the active `World`.
 - State restoration is explicit and validated. Editor documents remain the edit authority;
   supported checkpoints or semantic save records may restore runtime state. Resident process
   memory is not a migration contract.
@@ -67,11 +67,11 @@ flowchart TD
   Failure keeps or returns to a known last-good executable/runtime path rather than publishing a
   partially prepared candidate.
 
-This ADR accepts only the high-level invariant that structural or unknown Rust changes rebuild,
-start through fresh isolation, restore only validated state, and retain a known-good fallback. It
-does not accept ADR 0084's proposed runtime-owner/state/close topology or ADR 0086's proposed
-executable-generation and activation topology. Those proposals remain non-authoritative until their
-own admission evidence and reviews succeed.
+ADR 0084 is Accepted and owns the current native runtime lifecycle, generation and physical-close
+contract. Structural or unknown native Rust changes rebuild, start through fresh isolation, restore
+only validated state, and retain a known-good fallback. ADR 0086 remains Proposed; its wider
+executable-generation and activation design is not accepted merely by this reference. Existing
+bounded build/Play behavior retains its own Accepted owner contracts and recorded evidence.
 
 ### Optional Rust hot-patching
 
@@ -94,7 +94,8 @@ until measured with the reference game and is not part of the runtime correctnes
 ### Optional scripting and sandbox adapters
 
 - A scripting runtime is installed through an ordinary Rust package/plugin, for example a possible
-  first-party `nara_luau` package.
+  first-party adapter package. This is the source-built native integration path, not a requirement
+  that every future installed module implement Rust `Plugin` or rebuild the Editor.
 - The adapter owns its VM, language bindings, module lifecycle, reload semantics, private execution
   state, diagnostics, and target restrictions.
 - Adapters reuse Nara-owned domain APIs, stable handles, schema metadata, and command/service
@@ -105,12 +106,18 @@ until measured with the reference game and is not part of the runtime correctnes
   query, command, schema, and service APIs.
 - A trusted in-process Rust adapter must disclose that it is not a sandbox. Trust describes the
   native host package's process privileges; it does not widen the script module's data-access
-  contract.
+  contract. A gameplay VM may execute inside its Player at explicit phases; ordinary gameplay
+  queries do not require Editor IPC. Trusted in-process placement may be studied for a named native
+  authority need or a measured latency/throughput requirement, without first completing an
+  unsuitable isolated path. It needs explicit compatibility, fault, retirement and restart rules
+  before support is claimed.
 - Every concrete Adapter declares the script-module trust level, allowed Host capabilities/imports,
   default filesystem/network/process policy, instruction or fuel/time/memory/stack/handle/output
   budgets, cancellation and fault isolation, module provenance, persistent-state policy, and
   diagnostic disclosure rules. A VM or OS boundary may be called a sandbox only when enforcement
-  and termination/reclamation behavior are tested on every supported target.
+  and termination/reclamation behavior are tested on every supported target. Process separation
+  alone is not an OS sandbox. Revoking protocol grants or rejecting stale results does not revoke
+  running native code's ambient filesystem, network or process authority.
 - Wasm is one possible adapter for a concrete sandboxing or portability use case. It is neither the
   default scripting runtime nor the universal plugin ABI.
 - Shared scripting contracts move into Nara-owned APIs only after at least two independent adapters
@@ -120,6 +127,26 @@ until measured with the reference game and is not part of the runtime correctnes
 
 `Plugin` continues to mean a Rust-side engine or game module. A scripting package may contain such
 a plugin, but script modules loaded by that adapter are not Rust `Plugin` implementations.
+
+### Research, first API, shared contract and support
+
+A named workflow and falsifiable bounded experiment may compare Lua-family and C# candidates on
+the same gameplay task now, alongside the complete Rust path. No mandatory VM, second official
+language or production SDK is selected. Historical RGF unit IDs, plan registration and a finished
+reference game are not research authorization gates. A first concrete adapter-owned API may be
+designed and tested without a second adapter; a shared Nara-owned protocol still needs independent
+consumer evidence and explicit semantic limits before freeze. Supported products and platforms
+need their own complete authoring, diagnostics, lifecycle, recovery and export evidence.
+
+The [foundation reassessment](../foundation-architecture-reassessment.md#d03-immutable-publications-and-reload)
+and [Proposed ADR 0120](0120-schema-publications-and-execution-representations.md) study owner-local
+immutable module/catalog publications. A managed body-only edit could replace
+one module generation; a field/constraint change would require owner-catalog validation and explicit
+state migration. Neither is permission to mutate an admitted native registry or bypass exact
+snapshot/native-binding checks. Required cohorts need all-or-nothing routing, and old invocations,
+callbacks, tasks and drop functions must physically retire before code is reclaimed. Generation
+fencing alone is insufficient; process replacement or restart remains the fallback. These are
+candidate adapter contracts, not implemented managed reload or hot-unload guarantees.
 
 ## Alternatives Considered
 
@@ -194,8 +221,8 @@ product investment.
 - Rust remains sufficient for a complete Nara game.
 - Subsecond is a useful prototype candidate, not a current product guarantee or a reason to design a
   stable Rust dynamic ABI.
-- A Luau, Wasm, or other adapter can offer a separately reloadable gameplay layer without changing
-  the core language decision.
+- Lua-family, C#, Wasm or other adapter candidates may trial a separately reloadable gameplay layer
+  without changing the core language decision or implying an implemented SDK.
 - Runtime isolation, exact tick boundaries, schema inspection, structured diagnostics, and
   last-good recovery benefit Rust iteration even if native hot-patching is never admitted.
 - Nara documentation describes which edit path ran and what state was retained; it does not use

@@ -2,11 +2,11 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-10-23
 **Owner**: executable hosts, build tooling, and Rust project composition
-**Admission Trigger**: An independent reference-game workspace builds locked desktop and headless
-development/release executables, starts them through ADR 0082/0084, rejects stale candidates, and
-preserves a launchable last-good activation record after build or startup failure
+**Admission Trigger**: Scoped fixtures separately prove Cargo-authoritative Host tool construction,
+immutable target executable build/provenance, and target-runner activation/last-good behavior;
+a foreign-target build does not require running that executable on the build Host
 **Revisit Trigger**: A proven stable dynamic ABI, remote build system, or generic editor workflow
 requires a different executable activation topology
 **Related**: ADR 0010, ADR 0020, ADR 0035, ADR 0046, ADR 0052, ADR 0055, ADR 0056,
@@ -33,20 +33,24 @@ dependency graphs or treat compile success as runtime publication. Copying Cargo
 
 If accepted, file-backed Nara applications will remain ordinary Cargo packages or workspace
 members. Cargo metadata and the application lockfile own Rust dependency resolution; Nara tooling
-owns a bounded build/activation workflow around immutable executable generations.
+owns bounded build and activation workflows around immutable executable generations. Host tool
+construction, target executable construction, and target qualification/activation are separate
+operations with separate results.
 
 ```mermaid
 flowchart TD
-    Source[Source revision]
+    Source[Host-owned source capture]
     Cargo[Cargo.toml / workspace + Cargo.lock]
     Project[Validated nara.toml revision]
     Profile[Trusted host build profile]
-    Resolve[Resolve package, bin, target, profile, features]
+    Resolve[Select Cargo package, bin, target, profile, features, toolchain]
+    Tools[Build or select Host tools for the Host triple]
     Job[Generation-stamped build job]
     Built[Built candidate]
     Validate[Validate provenance and capability manifest]
     Staged[Staged ExecutableGeneration]
-    Host[ExecutableHostGeneration]
+    Qualify[Target runner qualification]
+    Host[ExecutableHostGeneration on supported execution Host]
     Admission[ADR 0082 host admission]
     Runtime[ADR 0084 unpublished runtime candidate]
     Ready[Published runtime and current/last-good activation record]
@@ -55,7 +59,10 @@ flowchart TD
     Cargo --> Resolve
     Project --> Resolve
     Profile --> Resolve
-    Resolve --> Job --> Built --> Validate --> Staged --> Host --> Admission --> Runtime --> Ready
+    Profile --> Tools
+    Resolve --> Job --> Built --> Validate --> Staged
+    Tools --> Job
+    Staged --> Qualify --> Host --> Admission --> Runtime --> Ready
     Job -. stale / failed .-> Failed[Typed report; current and last-good unchanged]
     Validate -. reject .-> Failed
     Host -. startup failure .-> Failed
@@ -80,6 +87,31 @@ flowchart TD
   with locked resolution. Dependency updates are an explicit authoring action that publishes a new
   lock revision before another build request. Toolchain acquisition, registry authentication, and
   dependency vendoring remain host/repository policy.
+- Cargo owns dependency, feature and target resolution, including its Host/target treatment of
+  build scripts and proc macros. Nara inspects Cargo metadata/artifact messages and selects trusted
+  inputs; it does not add a resolver, compiler/name-resolution frontend, or duplicate feature graph
+  in `xtask`. Fixed starter binary names, feature sets and file observations are starter-adapter
+  policy, not the general project contract.
+
+### Host Tools, Target Builds, and Target Qualification
+
+A Host-side importer, cooker or build coordinator must run on its execution Host. A Player/server
+executable is compiled for its selected target, which may differ from that Host. Each selection
+explicitly names Cargo package/bin/profile/features/target/toolchain; a desktop label alone cannot
+infer the flags, and tool and Player selections need not share a binary or feature set.
+
+1. **Host tool build/selection** establishes runnable trusted tooling for the Host triple and
+   records its implementation identity. It is not a Player build or runtime-readiness receipt.
+2. **Target executable build** produces immutable bytes plus verified artifact/provenance facts
+   for the chosen target. Compile/link success and integrity validation can finish on a different
+   Host; a foreign binary need not and must not be executed there merely to declare build success.
+3. **Target qualification/activation** runs on a supported native, remote or explicitly admitted
+   emulated target runner. Its result records that runner and scope. Only actual Host/runtime
+   admission can establish readiness or advance an activation last-good record.
+
+An unavailable target runner leaves a valid built artifact `Unqualified`, not falsely `Ready` and
+not a failed compilation. Cross-target build-plan validation is not native platform qualification.
+Trusted selection of executable tools is separate from reading project configuration or content.
 
 ### Generation Axes
 
@@ -87,18 +119,19 @@ These generations are independent:
 
 | Generation | Owns | Publication evidence |
 |---|---|---|
-| `ExecutableGeneration` | Immutable code artifact digest/length, provenance-manifest digest, target/profile, and compiled capability ceiling | Artifact validation plus successful activation |
+| Host tool generation | Immutable Host tool bytes/implementation identity and Host-target selection | Host artifact validation and the tool operation's required qualification |
+| `ExecutableGeneration` | Immutable target code artifact digest/length, provenance-manifest digest, target/profile, and compiled capability ceiling | Artifact/provenance validation; activation is a separate fact |
 | `ExecutableHostGeneration` | One OS process or in-process host activation of an executable artifact | Host adapter reports admitted startup |
 | ADR 0084 runtime generation | One isolated `App`, `World`, service sessions, and runtime lifecycle | Runtime candidate publishes `Ready` |
 
-Compile/link success creates only a built candidate. It does not publish a host or runtime and does
-not mark an artifact last-good.
+Compile/link success creates only a built candidate. Validated bytes may publish an immutable
+executable artifact without publishing a Host/runtime or marking an activation last-good.
 
 ### Build Request and Candidate Publication
 
 A build request captures immutable identities for:
 
-- source/workspace revision and `Cargo.lock` digest;
+- Host-owned source capture identity, its consistency envelope, and `Cargo.lock` digest;
 - selected package and binary target;
 - Rust target triple, Cargo profile, and toolchain identity;
 - explicit normalized Cargo feature set selected by the trusted build profile and the resulting
@@ -109,6 +142,13 @@ The staged generation identity binds the verified executable byte digest and len
 canonical provenance/capability manifest digest. A reused output path or matching request metadata
 without matching bytes is not the same generation. Bit-for-bit reproducible compilation is not
 required, but published bytes are immutable and integrity-verifiable.
+
+Source capture binds the selected immutable inputs actually consumed, with per-member
+identity/digest evidence, capture/revalidation policy, and explicit unsupported or untracked
+inputs. It may be produced without the full Editor recovery journal. It is not a claim of an
+instantaneous workspace-wide filesystem snapshot or a hermetic Cargo build: trusted build scripts,
+proc macros and external tools may have ambient inputs unless a separately qualified mechanism
+constrains them.
 
 The build coordinator is host/tooling state, not an ECS resource, `nara_project` side effect, or
 gameplay task pool. It owns compiler processes/jobs, diagnostics, staged artifacts, retention, and
@@ -124,16 +164,19 @@ access, disclosure, transport, and retention contract.
 
 1. resolve Cargo metadata from the trusted build profile and validate package/bin/profile/target;
 2. preflight the captured lock revision, explicit feature set, toolchain, and compiled ceiling;
-3. run a locked generation-stamped build job into an isolated staging location;
+3. run a locked generation-stamped build job, reusing Cargo's build cache and staging final bytes
+   separately rather than requiring a new Cargo target directory per generation;
 4. validate artifact kind, target, provenance, and capability manifest;
 5. stage an immutable executable generation;
-6. let an activation adapter start an executable host generation;
-7. run ADR 0082 admission and ADR 0084 unpublished runtime startup;
-8. advance current/last-good only after the runtime publishes successfully.
+6. return the validated target build result independently of a launch;
+7. on a separate activation request, let a suitable target runner start an executable Host
+   generation and run ADR 0082 admission plus ADR 0084 unpublished runtime startup;
+8. advance activation current/last-good only after the runtime publishes successfully.
 
 If source, lock, project, or selection state advances during a build, the old job may finish for
-diagnostics/cache reuse but is `Superseded` and cannot publish. Cancellation is best effort; a late
-compiler result remains unable to publish.
+diagnostics/cache reuse against its original capture, but is `Superseded` for the current request
+and cannot replace that request's selected artifact or activation. Cancellation is best effort;
+a late compiler result cannot acquire current publication eligibility.
 
 Editor Play and other integrated launchers expose which source/project/content revision is current,
 which executable is building, which candidate is staged, which exact executable/host/runtime
@@ -213,6 +256,8 @@ last-good behavior, and desktop/headless parity.
 | Metric | Target | Measurement |
 |---|---:|---|
 | Independent workspace | Renamed Nara dependency builds locked desktop/headless dev and release bins | External fixture matrix |
+| Host/target separation | A Host tool and foreign-target Player have independent explicit Cargo selections; building the Player does not execute it on the Host | Build-plan and artifact fixture |
+| Qualification honesty | Built, integrity-verified, target-qualified and runtime-ready are distinct results; an absent runner never yields readiness | Runner-unavailable and target activation fixtures |
 | Authority separation | Trusted build profile selects features/ceiling; `nara.toml` only validates as a subset | Metadata/composition tests |
 | Structural safety | Layout/plugin/dependency/feature changes inject zero code into the active host | Capability and API audit |
 | No partial publication | Build, validation, host, or runtime failure leaves current/last-good activation records and bytes unchanged | Fault-injection matrix |
@@ -230,7 +275,7 @@ last-good behavior, and desktop/headless parity.
 |---|---|---:|---|
 | Incremental builds are too slow | High | Medium | Preserve Cargo units, stage only immutable results, measure before adding remote/distributed complexity. |
 | Editor and exported builds diverge | Critical | Medium | Use one Cargo target/profile selection and the same ADR 0082/0084 startup path. |
-| Build success is mistaken for runtime success | High | Medium | Advance last-good only after runtime publication. |
+| Build success is mistaken for runtime success | High | Medium | Publish artifact evidence separately; advance activation last-good only after target runtime publication. |
 | Stale compiler result replaces newer code | High | Medium | Stamp every request and validate expected revision immediately before publication. |
 | Native build code is mistaken for sandboxed content | Critical | Low | Declare trusted-code authority and require explicit host action before compilation/execution. |
 | Raw build output leaks host or credential data | Critical | Medium | Keep raw output local, bounded, access-restricted, and short-lived; export only classified structured summaries. |
@@ -252,15 +297,20 @@ If accepted:
 
 ## Admission Evidence
 
-ADR 0082 and ADR 0084 must already be Accepted, or their required Host/runtime authority must be
-owned by named compatible Accepted successors. Native project-code trust must also have an Accepted
-owner, or this ADR's admission must explicitly remain limited to already trusted code-first builds.
+Admission may select the Host tool and immutable target-build contracts before target activation
+is qualified. Their evidence includes independent Cargo selections, locked builds, exact artifact
+provenance, stale-result rejection and a Host/target-different plan/artifact fixture. No target
+execution on the build Host is required. Source-capture evidence states its actual consistency
+envelope and is independent of the full ADR 0091 journal.
 
-Acceptance requires the independent-workspace build matrix, concurrent stale-build proof,
-capability mismatch rejection, and end-to-end last-good fault matrix through editor, desktop, and
-headless activation. A wrapper around `cargo build` without immutable generation and runtime
-publication semantics is insufficient. The same evidence must prove observable active/candidate/
-last-good generations and reject raw build-output canaries at every external diagnostic sink.
+The activation slice requires Accepted ADR 0082/0084 Host/runtime authority or named compatible
+Accepted successors, plus an explicit native-code trust owner (or a scope limited to already
+trusted code-first builds). Its editor/desktop/headless fixtures prove capability rejection,
+observable active/candidate/last-good generations and the end-to-end last-good fault matrix on
+the actual runner. Build-only evidence cannot qualify that slice or a foreign platform release.
+Every slice with an external diagnostic sink must reject raw-output canaries. A `cargo build`
+wrapper without immutable artifact/provenance validation is insufficient even for the build
+slice; missing activation evidence does not invalidate an honestly scoped build result.
 
 ## Citations
 

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-08-13
+**Last Revised**: 2026-10-23
 **Refines**: ADR 0001, ADR 0030, ADR 0035, ADR 0044, ADR 0046, ADR 0055, ADR 0056,
 ADR 0070
 **Refined By**: [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md);
@@ -34,18 +34,22 @@ into runtime plans, and no tooling plugin group or workspace resource is install
 
 ## ADR 0095 Refinement
 
-Compiled Cargo features may name concrete code because they define the binary ceiling. Project
-requirements must not select or install a Rust plugin/provider. Manifest-visible backend names are
+Compiled Cargo features may name concrete code because they define the source-built runtime binary
+ceiling. On that path, project requirements do not discover, install or rebind arbitrary Rust
+plugins/providers; the compiled recipe owns concrete selection. A future package workflow may let
+settings select installed, declared packages within Host-admitted availability and trust, but
+settings cannot supply executable authority, make absent code available or prove provider
+equivalence. That workflow is not implemented by this ADR. Manifest-visible backend names are
 transitional and must converge on semantic product needs or disappear when the Rust product recipe
 already supplies the complete selection truth. Every accepted capability must map to observable
 composition behavior; parse-only capabilities are invalid product claims.
 
 ## Context
 
-The root `nara` package currently declares `default = []`, but a fresh no-default dependency tree
-still compiles 24 direct engine crates. That tree includes image, render, sprite, tilemap, runtime
-UI, tooling, window, and the unused audio placeholder. Feature flags only gate four adapters, so the
-root dependency graph does not describe the product a host selected.
+Before this decision, the root `nara` package declared `default = []`, but a fresh no-default
+dependency tree still compiled 24 direct engine crates. That tree included image, render, sprite,
+tilemap, runtime UI, tooling, window, and the unused audio placeholder. Feature flags only gated
+four adapters, so the root dependency graph did not describe the product a host selected.
 
 Runtime composition has the inverse problem. `ProjectPluginPlan` is a mutually exclusive enum that
 mixes execution policy, authoring domains, and platform adapters. `Runtime2dPlugins` installs runtime
@@ -66,7 +70,7 @@ exports it.
 
 ## Decision
 
-nara uses nested product capability closures:
+Source-built native runtime composition uses nested product capability closures:
 
 ```mermaid
 flowchart LR
@@ -90,7 +94,7 @@ flowchart LR
     CommitResult -->|yes| Ready[Continue runtime startup]
 ```
 
-After normalization, the product-capability invariant is:
+After normalization, the source-built runtime product-capability invariant is:
 
 ```text
 required product capabilities of the resolved plugin plan
@@ -105,6 +109,13 @@ separately, including requirements, conflicts, and group membership. A Cargo fea
 compile-time upper bound, not a request to install plugins. A project request is declarative data,
 not authority to compile code or mutate an app. Static plugin declarations and resolved plan
 entries remain the runtime inspection and dependency contract.
+
+This inequality is not a universal package-system ceiling: it says nothing about independently
+installed semantic tools, adapter-owned module generations or target artifacts admitted by other
+Hosts. Availability, installation, enablement, trust and active generation are distinct facts in
+those proposed workflows. They require their own owner contracts and qualification; they neither
+bypass native preflight nor mutate an already admitted native registry. A named bounded experiment
+may study them now without treating historical RGF completion IDs as research authorization.
 
 ### Root Cargo capabilities
 
@@ -203,9 +214,9 @@ raw-path API. This is the project-manifest application of ADR 0070, not a genera
 
 ### Placeholder retirement and crate admission
 
-RGF-U3 deletes `nara_audio` from workspace membership, the root facade/prelude, and the lockfile. ADR
-0030 remains the direction for a future audio vertical slice. No empty `audio` capability is
-reserved.
+RGF-U3 recorded deletion of `nara_audio` from workspace membership, the root facade/prelude, and the
+lockfile. ADR 0095 supersedes ADR 0030's preselected audio Adapter shape: the first audio vertical
+slice should be a concrete plugin-owned integration. No empty `audio` capability is reserved.
 
 A new engine crate requires a real production consumer and at least two of these demonstrated
 benefits:
@@ -217,7 +228,9 @@ benefits:
 
 Modules may deepen inside an existing crate before these conditions hold. A placeholder crate is
 deleted when it loses its consumer or cannot justify the boundary; an accepted future ADR alone is
-not an implementation consumer.
+not an implementation consumer. This is a production crate-admission rule, not a prohibition on
+bounded feasibility research or a first concrete owner API for a named workflow. Reusable
+abstraction freeze and supported platform/product claims need their own stronger evidence.
 
 #### Proc-macro crate admission evidence
 
@@ -305,7 +318,7 @@ feature-combination test matrix.
 | UI still pulls sprite/tilemap through a shared backend helper | High | High initially | Introduce a backend-private quad representation and assert dependency trees for UI-only and 2D-only products. |
 | Server safety is confused with compiled input support | High | Medium | Test installed resources/plugins independently from Cargo membership; keep server group exclusions authoritative. |
 | Coarse capabilities hide a useful smaller product | Medium | Low | Add a capability only for a demonstrated product consumer and a measurable dependency or platform boundary. |
-| Deleting audio appears to reject the domain | Medium | Medium | Retain ADR 0030 and OQ-014; recreate a crate only with a real import/intent/service/backend vertical slice. |
+| Deleting audio appears to reject the domain | Medium | Medium | Retain ADR 0030 as superseded rationale and OQ-014 as a concrete workflow question; admit a plugin-owned audio slice under ADR 0095, not a mandatory service/backend topology. |
 | Breaking names burden downstream users | Medium | High | Ship one migration entry covering features, plugin/profile data, groups, examples, and cache/source actions; keep no aliases. |
 
 ## Consequences
@@ -320,7 +333,8 @@ feature-combination test matrix.
 - Root facade items are conditionally visible according to compiled product capabilities.
 - `ProjectPluginPlan`, legacy adapter feature names, `DesktopWgpuPlugins`, and the `nara_audio`
   placeholder are intentionally breaking deletions.
-- ADR 0030 remains future architecture; it no longer implies a live crate.
+- ADR 0030 remains superseded rationale; ADR 0095 owns future audio integration and neither implies
+  a live placeholder crate.
 
 ## Deferred Decisions
 

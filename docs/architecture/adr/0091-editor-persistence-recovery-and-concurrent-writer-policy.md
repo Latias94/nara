@@ -2,11 +2,11 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-21
+**Last Revised**: 2026-10-23
 **Owner**: `nara_tooling`, persistent document owners, `nara_fs`, and editor hosts
-**Admission Trigger**: Editor workspace fixtures prove receipt-backed save, external conflict,
-read-only second writer, bounded journal recovery, and old-or-new multi-document transaction
-publication through one committed project snapshot at every injected filesystem failure/crash point
+**Admission Trigger**: Qualify receipt-backed document Save, genuine cross-file transaction/recovery,
+and Host build-source capture as separate slices, with evidence for each operation's actual
+consistency and filesystem guarantee tier
 **Revisit Trigger**: Real collaborative live editing, remote filesystems, or source-control checkout
 policy proves that cooperative single-writer plus explicit external-conflict handling is insufficient
 **Related**: ADR 0026, ADR 0034, ADR 0043, ADR 0047, ADR 0048, ADR 0049, ADR 0050, ADR 0051,
@@ -31,20 +31,24 @@ and normal version-control workflows.
 
 If accepted, the editor will advance a saved checkpoint only from a matching typed persistence
 receipt. File-backed workspaces use expected-digest conflict protection, cooperative writer
-ownership, same-directory staging, explicit durability tiers, a committed-project publication
-fence, and a bounded recovery journal.
+ownership, same-directory staging and explicit durability tiers. A cross-file identity/reference
+rewrite additionally needs transaction fencing and bounded journal recovery; a Host source capture
+for import/build is a separate read operation, not an implicit Save or project transaction.
+
+| Operation | Required result/authority | Does not imply |
+|---|---|---|
+| Document Save | Matching document/revision/bytes/replacement receipt at the selected tier | Whole-workspace validation, cross-file atomicity or build capture |
+| Cross-file transaction | Complete invariant closure, durable intent, receipts, read-admission fence and recovery result | Simultaneous physical replacement visible to external tools |
+| Host build-source capture | Retained immutable selected inputs, member evidence and an explicit consistency envelope | Saved editor state, a recovery journal, global instantaneous snapshot or hermetic tool execution |
 
 ```mermaid
 sequenceDiagram
     participant W as Workspace revision
-    participant J as Recovery journal
     participant F as nara_fs capability
     W->>W: capture immutable save candidate
-    W->>J: durable intent + expected disk digest
     W->>F: stage canonical bytes in same directory
-    F->>F: identity/CAS check + replace + sync
+    F->>F: expected-content check + replace + supported sync
     F-->>W: typed PersistenceReceipt
-    W->>J: durable commit record
     W->>W: advance saved checkpoint if receipt matches
 ```
 
@@ -66,15 +70,51 @@ predecessor digest/identity, publication result, and the filesystem guarantee/du
 actually proven. Only a matching successful receipt may advance the saved checkpoint. There is no
 public command that marks an arbitrary current revision saved without such evidence.
 
-### Committed Project Snapshot
+### Host Build-Source Capture
 
-Nara import, build, and project-open consumers require one coherent logical source generation:
+Import/build consumers need immutable inputs, but not necessarily an Editor-owned project commit
+or the full recovery journal. A Host captures the selected operation's declared source closure:
+
+```text
+BuildSourceCapture {
+    project_binding,
+    capture_id,
+    member_table: logical identity/path -> retained bytes + digest + identity evidence,
+    consistency_envelope,
+    capture_digest,
+}
+```
+
+Names describe semantic roles, not an existing API. The Host bounds discovery and reads, retains
+the actual immutable bytes consumed, and records the selected roots, metadata/continuity,
+auxiliary inputs and relevant tool-selection inputs. Capture may use admitted saved documents,
+an immutable checkout, an existing committed snapshot or capability-scoped observations with
+explicit revalidation. A development capture containing unsaved data is marked as such and is
+not silently promoted to saved release source.
+
+The envelope states which consistency evidence was proven. Per-file identity/digest checks,
+even with before/after revalidation, do not prove that all files existed together at one global
+instant against non-cooperating writers. A request requiring a coherent cross-file invariant
+needs a qualified committed generation, immutable source tree or other explicit evidence; it
+fails/retries if that requirement cannot be met. Weaker captures remain labeled weaker. Neither
+capture nor a cooperative lock proves hermetic compilation or constrains ambient reads by trusted
+native tools.
+
+Capture success/failure is independent of a prior document Save receipt. It does not mutate
+documents or mark them clean, and does not force each Save to scan unrelated workspace files.
+Source-free delivery can qualify this bounded capture contract before the Editor's cross-file
+journal exists.
+
+### Committed Transaction Snapshot
+
+When a genuine multi-file transaction is selected, participating Nara consumers require one
+coherent logical generation for the declared transaction/read-admission scope:
 
 ```text
 CommittedProjectSnapshot {
     project_binding,
     authoring_commit_id,
-    member_table: logical identity/path -> content digest + file identity receipt,
+    member_table: declared logical identity/path -> retained content + digest + identity receipt,
     snapshot_digest,
 }
 ```
@@ -84,17 +124,19 @@ artifact-group, package, executable, or runtime generation IDs. An `AuthoringCom
 small durable publication record for the active snapshot. Authored member files remain source truth;
 the index is coordination/recovery evidence that says which complete set Nara consumers may use.
 
-- A successful single-document save may publish a new project snapshot only after the persistence
-  coordinator verifies every unchanged member against the preceding snapshot and binds the new
-  receipt for the changed member.
-- A multi-document transaction publishes one new snapshot after every replacement verifies.
-- Non-editor Git/IDE/script changes enter through the same host resolver: raw watcher events are
-  coalesced, bounded, and validated into a complete candidate member table before publication.
-- All Nara project openers, watch resolvers, ADR 0087 importers, and ADR 0088 builders consume a
-  `CommittedProjectSnapshot` lease. They do not treat a raw path event as a committed generation.
+- A multi-document transaction publishes one new snapshot after every replacement and the declared
+  invariant closure verify. Reused members need valid retained evidence for the consistency claim;
+  a whole-workspace scan is not the default unit of every operation.
+- Ordinary single-document Save completes from its own receipt. An optional snapshot/index refresh
+  is a separate result and cannot retroactively invalidate that Save or demand unrelated-file
+  verification without an explicit consistency requirement.
+- Non-editor Git/IDE/script changes invalidate relevant observations. Raw watcher events are
+  coalesced and bounded, not treated as proof of complete bytes or a committed generation.
+- Import/build/open consumers choose an admitted source capture or transaction snapshot that
+  meets their own consistency requirement. They need not all depend on this journal protocol.
 - Existing consumers retain their captured snapshot/bytes/handles. While a transaction fence is
-  active, new consumers wait or receive a typed pending/recovery result; they never reopen a mixture
-  of old and replaced member paths.
+  active, new reads overlapping that scope wait or receive a typed pending/recovery result; they
+  never reopen a mixture of old and replaced member paths.
 
 ### Single-Document Save
 
@@ -107,17 +149,19 @@ The file-backed save path is:
 5. revalidate expected revision and disk identity/digest;
 6. replace through the strongest proven ADR 0070 primitive and synchronize parent metadata where
    supported;
-7. return a typed receipt and append a durable journal commit;
-8. advance saved checkpoint only if document, revision, digest, and required tier all match;
-9. verify the remaining member table and publish a new `CommittedProjectSnapshot`, or retain the
-   prior snapshot and report the external/member conflict.
+7. return a typed receipt identifying publication and the durability/observation evidence actually
+   proven; a failed or ambiguous post-replacement observation is not success;
+8. advance the matching saved checkpoint only if document, revision, digest, and required tier all
+   match. Later in-memory edits remain dirty.
 
 A platform/filesystem that cannot prove the required tier fails closed or exposes an explicitly
 weaker product mode. Advisory locks and canonicalize-then-open are not presented as strict CAS or
 authorization.
 
-Source change observation for import/reload is emitted only after committed-project snapshot
-publication succeeds. This ADR never writes import-cache artifact groups, cooked packages, or
+An ordinary successful Save may emit a source-change observation bound to its exact receipt.
+Import/reload then obtains its own admitted immutable inputs; the notification is not import or
+runtime publication evidence. Cross-file transaction notifications are fenced until that
+transaction publishes. This ADR never writes import-cache artifact groups, cooked packages, or
 runtime save slots.
 
 ### Concurrent Writer and External Change Policy
@@ -137,6 +181,8 @@ runtime save slots.
 
 ### Recovery Journal
 
+The cross-file transaction/recovery slice uses a journal. Receipt-based document Save and read-only
+build-source capture do not acquire that dependency merely by sharing filesystem primitives.
 The recovery journal is local generated recovery material, not authored truth, source-control
 content, permanent undo history, or a package artifact. Each record contains:
 
@@ -189,7 +235,7 @@ an explicit `ProjectMutationTransaction`:
 
 ```mermaid
 flowchart LR
-    Preflight[Preflight complete document/reference graph]
+    Preflight[Preflight declared invariant and reference closure]
     Old[Capture old bytes and digests]
     Stage[Stage every candidate]
     Intent[Durable transaction intent]
@@ -207,10 +253,12 @@ finishes forward, restores the complete old graph when proven possible, or stays
 evidence. Nara promises detectable/recoverable logical old-or-new publication, not magical physical
 atomicity across arbitrary filesystems.
 
-The transaction fence prevents Nara consumers from treating intermediate physical replacements as
-active. Raw watcher events are quarantined/coalesced until the commit index publishes or recovery
-retains the old snapshot. Non-Nara tools may still observe intermediate filesystem paths; that is
-why physical cross-file atomicity is not claimed.
+The transaction fence prevents participating Nara consumers from treating intermediate physical
+replacements in its declared read scope as active. A source capture overlapping that scope waits,
+retries or rejects; one with independent retained inputs need not be blocked globally. Raw watcher
+events are quarantined/coalesced until the commit index publishes or recovery retains the old
+snapshot. Non-Nara tools may still observe intermediate filesystem paths; that is why physical
+cross-file atomicity is not claimed.
 
 ### Close and Runtime Interaction
 
@@ -247,13 +295,13 @@ multi-file recovery across all supported filesystems.
 
 **Decision**: Rejected.
 
-### Option D: Expected Digest, Typed Receipts, Cooperative Lock, and Bounded Journal
+### Option D: Typed Save Receipts, Explicit Cross-File Transactions, and Independent Source Capture
 
 **Pros**: Keeps authored files authoritative while making save truth, conflicts, recovery, and
 platform guarantees explicit and testable.
 
-**Cons**: Requires platform-specific evidence, fault injection, read-only fallback, and transaction
-state before editor polish.
+**Cons**: Requires platform-specific evidence, distinct operation results, fault injection and
+read-only fallback; the cross-file slice additionally needs journal/transaction state.
 
 **Decision**: Proposed.
 
@@ -262,14 +310,16 @@ state before editor polish.
 | Metric | Target | Measurement |
 |---|---:|---|
 | Receipt-backed dirty state | Dirty clears only when receipt document/revision/digest/tier all match | Workspace tests |
-| Single-file crash safety | Every stage/write/sync/replace/journal failure reopens old, new, or explicit read-only state | Fault matrix |
+| Single-file crash safety | Every stage/write/sync/replace/receipt failure reopens old, new, or explicit read-only state at the declared tier | Document Save fault matrix |
+| Save locality | Saving one independent document validates that document and target, not every unrelated workspace file | Scoped read/write observation fixture |
 | Conflict precision | Stale revision, changed digest, replaced identity, deletion, and second writer are distinct typed results | Conflict fixtures |
 | Journal safety | Truncated/corrupt/oversized/timeout journals terminate within budget and publish no partial state | Hostile recovery tests |
 | Multi-file coherence | No injected crash or raw watcher event publishes a mixed member table as the committed project snapshot | Transaction/watch fault matrix |
-| Snapshot production | Single save, multi-file transaction, and validated external edit each publish one complete `CommittedProjectSnapshot` | Project resolver tests |
+| Transaction snapshot | A genuine cross-file transaction publishes one complete snapshot of its declared invariant/read scope | Project transaction tests |
+| Build capture honesty | Captured inputs remain immutable and have explicit consistency evidence without requiring the Editor journal | Source drift, retained-byte and journal-absent fixtures |
 | Close safety | Save/Play-stop/cancel failure keeps document visible and dirty | Editor integration tests |
 | Guarantee honesty | Platform tests report actual CAS/atomicity/durability tier, never a generic `safe` boolean | Filesystem matrix |
-| Source notification | Import/reload sees a source change only after committed authoring publication | Integration test |
+| Source notification | Single Save notifications bind receipts; cross-file notifications wait for transaction publication | Save/import and transaction integration tests |
 
 ## Risks and Mitigations
 
@@ -282,6 +332,8 @@ state before editor polish.
 | Autosave competes with explicit save | Medium | Medium | Serialize persistence transactions per document and stamp expected revisions. |
 | Saved checkpoint advances before true durability | Critical | Medium | Make typed receipt/tier the only transition authority. |
 | Watcher exposes transaction intermediate state | Critical | Medium | Gate Nara consumers on the commit index and quarantine/coalesce raw events behind the transaction fence. |
+| Every Save becomes a whole-workspace verification | High | Medium | Keep Save receipts local and make cross-file consistency/capture separate requested operations. |
+| Per-file capture is advertised as a global snapshot | High | Medium | State the consistency envelope and require stronger evidence for cross-file invariants. |
 | Journal replays into a copied/moved project | High | Medium | Verify `RecoveryBinding` root/session/baseline/owner evidence and require explicit rebind. |
 
 ## Consequences
@@ -292,18 +344,30 @@ If accepted:
 - ADR 0070 supplies the platform/filesystem capabilities and guarantee receipts while tooling owns
   document/workspace semantics;
 - ADR 0083 multi-file identity rewrites use the same project transaction/recovery boundary;
-- ADR 0088 consumes the resulting `CommittedProjectSnapshot` rather than an undefined ambient
-  project revision;
+- ADR 0088 consumes an immutable Host build-source capture with an explicit consistency envelope;
+  a qualified transaction snapshot may supply that capture but is not its only authority;
 - importer artifact publication and target package publication keep their own manifests/generation
   IDs and do not reuse the editor recovery journal;
 - live multi-user editing remains a separate future session-authority/causal-order decision.
 
 ## Admission Evidence
 
-Acceptance requires real filesystem integration tests for every supported guarantee tier, complete
-single/multi-file fault injection, second-writer and non-cooperating external-write cases, bounded
-journal corruption/rebinding cases, receipt-backed dirty state, snapshot publication/watcher fences,
-and close/runtime failure behavior. An atomic rename helper or autosave timer alone is insufficient.
+Admission is per operation, not an indivisible project-persistence gate:
+
+1. **Document Save** requires receipt-backed dirty state, scoped target validation, actual
+   filesystem-tier evidence, concurrent/external-write cases, uncertain-result handling and
+   close failure behavior. It must prove no unnecessary unrelated-workspace verification.
+2. **Cross-file transaction/recovery** additionally requires complete invariant-closure preflight,
+   second-writer policy, journal corruption/rebinding, snapshot/read-admission fences and every
+   relevant filesystem failure/crash point. A sequence of independent Save receipts or a
+   compensating Undo does not prove this contract.
+3. **Host build-source capture** requires bounded closure discovery, retained immutable inputs,
+   source-drift detection/rejection at its stated tier, explicit consistency limits and overlapping
+   transaction-fence handling. It may qualify without the Editor journal and cannot claim a
+   global instantaneous snapshot or hermetic tool execution without separate evidence.
+
+An atomic rename helper or autosave timer alone is insufficient. Adopting one slice does not
+accept the others or turn current limited Save evidence into general transaction qualification.
 
 ### RGF-U17 Trial Evidence
 
@@ -318,7 +382,9 @@ and committed as the observed baseline.
 
 This trial deliberately does not implement a recovery journal, committed project snapshot,
 multi-document old-or-new publication, general concurrent-writer policy, or crash-point matrix.
-Those missing admission metrics keep this ADR Proposed.
+Its post-publication observation is `DetectOnly`, not strict CAS against a write after observation.
+This documentation amendment does not expand that trial's implementation or guarantee tier. This
+ADR remains Proposed; later slice adoption and implementation claims require their own evidence.
 
 ## Citations
 

@@ -2,16 +2,18 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-21
+**Last Revised**: 2026-10-23
 **Refined By**: ADR 0047: Editor Workspace and Scene Document State; ADR 0058: Stable Runtime
 Identity and Entity References; ADR 0076: Play Runtime Debug Control and Observation
-**Proposed Refinement Under Evaluation**: ADR 0082 and ADR 0084 jointly propose concrete Host-owned
-runtime construction; that ownership model is not current authority while either ADR remains
-Proposed.
+**Current ownership and deployment**:
+[ADR 0082](0082-process-host-authority-and-runtime-construction-topology.md): Process Host Authority;
+[ADR 0084](0084-executable-runtime-ownership-and-isolation.md): Executable Runtime Ownership;
+[ADR 0116](0116-standalone-supervised-editor-play.md): Standalone Supervised Editor Play;
+[ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): Managed Execution and Authoring
 
 ## Context
 
-nara now has the first authoring stack:
+The authoring stack separates persistent data from live projections:
 
 - `SceneDocument` / `PrefabDocument` as persistent scene data.
 - `ScenePatchDocument` as the editor/AI mutation format.
@@ -19,11 +21,10 @@ nara now has the first authoring stack:
   projection.
 - `SceneInspectorState` as a UI-agnostic inspector controller.
 
-The next editor milestone is Play Mode. This boundary is high-risk because a mature editor must
-separate authoring state from runtime simulation without making iteration slow. Unity, Godot, and
-similar engines all expose the same product problem: users need fast play/stop iteration, but they
-also need clear answers for whether runtime changes are temporary, persistent, undoable, or safe to
-serialize.
+Play must separate authoring state from runtime simulation while keeping iteration useful. The
+Editor is both an authoring client and an executable Runtime Host. Its trusted in-process placement
+and ordinary supervised external placement have different source and control contracts, but neither
+may silently turn transient runtime state into authoring data.
 
 The core question:
 
@@ -40,39 +41,39 @@ The editor has three distinct state categories:
 1. **Edit document**: the authoritative `SceneDocument` / `PrefabDocument` plus undo/redo stacks.
 2. **Edit preview world**: a live projection owned by `SceneAuthoringSession` for inspection,
    gizmos, preview rendering, and debug tooling.
-3. **Play world**: a separate runtime `World` projection spawned from the current validated
-   document snapshot. RGF-U17 runs this projection in a concrete Editor Host-owned
-   `RuntimeInstance` around one `App`; ADR 0082/0084 still decide whether that placement becomes
-   durable architecture authority.
+3. **Play world**: a separate runtime `World` in an isolated executable Runtime. Its source is an
+   explicitly admitted document snapshot for trusted in-process Play, or admitted saved source
+   for ordinary external Play. These placements are not interchangeable fallbacks.
 
 Rules:
 
 - The edit document is the only persistent authoring truth.
 - The edit preview world is disposable. It can be rebuilt from the edit document at any time.
-- The Play world is isolated from the edit preview world and must not share runtime `Entity`
-  identities with it.
-- Pressing Play snapshots the current edit document, validates it, expands prefab sources, then
-  spawns a fresh Play world through an exact runtime recipe and fresh runtime generation.
-- The concrete root Editor Host owns the unpublished start attempt, published runtime, and
-  stop-first replacement intent. `nara_tooling` retains only UI-neutral commands, views,
-  observations, and Apply Changes models; neither tooling nor UI adapters retain the live runtime
-  owner or unrestricted `World` access. Whether this ownership placement becomes durable authority
-  remains the ADR 0082/0084 question.
+- The Play world has its own World/runtime identity and generation. Numerically equal ECS `Entity`
+  values in different Worlds are not shared identity or a persistence bridge.
+- A Play request admits the exact source and executable composition for its placement before
+  publishing a fresh runtime generation. Snapshot Play is not the ordinary external-Play source rule.
+- The concrete Editor Host owns trusted in-process start attempts, published runtimes and
+  stop-first replacement intent under Accepted ADRs 0082/0084, refined by ADR 0117. Under ADR 0116,
+  the Editor supervises the external build/generation/process lifecycle while the child owns its
+  executable Runtime. `nara_tooling` and frontends retain UI-neutral commands, views and results,
+  not a competing live-runtime owner or unrestricted World/process authority.
 - Pressing Stop discards the isolated Play world and runtime changes by default through finite
   shutdown with retained incomplete-shutdown ownership.
-- Runtime changes write back to the edit document only through an explicit **Apply Changes**
+- Where a placement supports it, runtime changes write back only through an explicit **Apply Changes**
   operation that produces `ScenePatchDocument` values and runs the normal patch validation/undo
   path.
-- Editor UI must show the current mode clearly: `Edit`, `Play`, or `Paused`.
-- Editor inspector commands in Edit Mode target `SceneAuthoringSession`. Inspector commands in
-  Play Mode target runtime/debug command surfaces and are not persistent unless converted into
-  explicit scene patches.
+- Editor UI must show placement, mode and pending/fault/cleanup state honestly. Pause, Resume and
+  Step are available only where the placement supports them; ADR 0116's external placement does not.
+- Authoring Inspector commands target the document owner, including while an external child runs.
+  Runtime Inspector commands, where supported by the placement, target runtime/debug surfaces and
+  are not persistent unless converted into explicit scene patches.
 - Save games remain separate from scene authoring data. Play Mode runtime state should not silently
   become scene data.
 
-The following diagram shows the implemented RGF-U17 product flow. The isolated Play and explicit
-write-back behavior are accepted here; RGD-U7 subsequently accepted the named Host/runtime
-placement in ADR 0082/0084 for the bounded Host-trusted scope.
+The following diagram describes the trusted in-process placement, not ordinary external Play.
+RGF-U17 supplied the historical trial; RGD-U7 accepted the bounded Host/runtime ownership in
+ADRs 0082/0084. Apply Changes is an explicit capability, not an automatic Stop effect.
 
 ```mermaid
 flowchart TD
@@ -94,6 +95,25 @@ flowchart TD
     Session --> Doc
 ```
 
+## Source and Placement Admission
+
+| Placement | Source authority | Execution and completion |
+|---|---|---|
+| Trusted in-process preview/Game View | Exact validated document snapshot, source revision and compiled composition | Concrete Editor Host owns isolated Runtime lifecycle; presentation/input follow the selected embedded-view contract |
+| Ordinary external Play | ADR 0116's complete saved-source receipt and exact profile declaration | Editor supervises an immutable executable generation; child owns Runtime/window; Running requires first-present READY |
+
+Ordinary project Open remains data-only and does not authorize loading project Rust into the
+Editor. An external Play request never silently launches an unsaved document snapshot or falls
+back to trusted in-process execution. Unsaved edits do not redefine saved-source identity.
+Restart readmits actual saved source and requires receipt equality before retiring a running
+child. Source divergence leaves the running generation intact and rejects Restart; explicit Stop
+followed by Play targets current saved source. Build success alone is not Running or last-good.
+
+Trusted snapshot preview must validate its own exact source/catalog and runtime admission; data
+authoring success is not native readiness. Neither source placement implies that external live
+edit, runtime inspection, frame transport or Apply Changes is available. ADR 0116 deliberately
+adds no post-start command channel.
+
 ## Mode Model
 
 Conceptual state:
@@ -101,12 +121,15 @@ Conceptual state:
 ```text
 EditorMode
   Edit
-  Play { paused: bool, source_revision: SceneRevision }
+  Play { placement, source_basis, runtime_generation, supported_controls }
 ```
 
-The exact Rust names can evolve, but these semantics should remain stable.
+This is a conceptual model, not a new public type. Trusted snapshot source basis includes the
+document incarnation/revision; external basis uses its admitted saved-source receipt. Lifecycle
+projections also retain preparation, faults and incomplete cleanup rather than reducing them to
+`Edit`, `Play` and `Paused` labels alone.
 
-Current implementation:
+Trusted in-process ownership and observation:
 
 - `nara_scene::SceneAuthoringRevision` is the source revision stamp.
 - `nara_tooling::EditorPlayCommand` and `EditorPlayView` expose UI-neutral lifecycle control/status.
@@ -115,12 +138,13 @@ Current implementation:
 - Runtime generation plus source revision bind runtime edit and Apply Changes requests without
   exposing runtime `Entity` values or a mutable `World` command surface.
 
-These ownership bullets are implementation evidence for the non-authoritative ADR 0082/0084
-refinement; they do not pre-accept the final Host topology.
+These owners follow Accepted ADRs 0082/0084/0117. External placement uses ADR 0116's separate
+value-only request/observation seam; it does not transfer a child Runtime into the Editor process.
 
 Important invariants:
 
-- A Play world records the edit document revision it was spawned from.
+- A trusted snapshot runtime records its source document basis; an external generation retains
+  its complete admitted saved-source receipt. Process-local tokens are not cross-process authority.
 - Edit document patches made while Play is running do not automatically mutate the Play world.
 - If nara later supports "edit while playing", those edits must be mode-aware commands with clear
   diagnostics rather than accidental shared-world mutation.
@@ -130,8 +154,10 @@ Important invariants:
 
 ## Host-Owned Start Flow
 
-RGF-U17 implements this flow. Its behavior is accepted here; its owner placement remains
-conditional on the independent ADR 0082/0084 decisions.
+### Trusted in-process placement
+
+The historical RGF-U17 flow below uses the Accepted concrete Host/runtime ownership. Snapshot
+capture here is not a requirement to save, or permission to load arbitrary project code.
 
 ```mermaid
 sequenceDiagram
@@ -160,23 +186,35 @@ Failure rules:
 - Failed Play start must not mutate the edit document, undo stack, or existing edit preview world.
 - Diagnostics should identify scene entity IDs, component IDs, field paths, and asset references.
 
-## Proposed Host-Owned Stop Flow
+### Ordinary external placement
 
-This flow is conditional on joint ADR 0082/0084 acceptance. The accepted invariant today is that
-Stop discards Play state and never writes it into the edit document.
+ADR 0116 owns the exact protocol: admit saved-source receipt and execution declaration, build,
+publish an immutable executable generation, launch with a fresh child-only context, and accept
+Running only after the matching first-present READY. The child performs strict compiled admission;
+neither an Editor document preview nor successful Cargo completion can substitute for it. Pending
+work and terminal outcomes retain their original request/generation identity. Dispatch success
+does not report eventual Play completion.
+
+## Host-Owned Stop Flow
+
+Stop discards transient Play state by default and never writes it into the edit document. The
+trusted in-process owner requests finite runtime close at a safe point. The external owner uses
+ADR 0116's platform-specific process/pipe cleanup; no runtime safe-point command is implied there.
+Both retain incomplete physical custody and prevent conflicting replacement while cleanup is
+incomplete. A Stop dispatch is not a successful cleanup receipt.
 
 ```mermaid
 sequenceDiagram
     participant UI as Editor UI
     participant Host as Concrete Editor Host
-    participant Play as Play Runtime
+    participant Play as Placement cleanup owner
     participant Session as SceneAuthoringSession
 
     UI->>Host: Request Stop Play
-    Host->>Play: Request finite close at safe point
-    Play-->>Host: Stopped or CloseIncomplete
+    Host->>Play: Request placement-specific finite cleanup
+    Play-->>Host: Cleanup evidence or incomplete outcome
     Host-->>UI: Status, diagnostics, and legal controls
-    Host->>Session: Return to Edit only after Stopped
+    Host->>Session: Publish stopped lifecycle only after cleanup completes
     Session-->>UI: Edit document and preview remain authoritative
 ```
 
@@ -184,11 +222,10 @@ Default Stop never writes runtime state back to the edit document.
 
 ## Apply Changes Flow
 
-Apply Changes is explicit and conservative:
-
-The Host transport in this diagram is the implemented RGF-U17 path and is accepted by ADR
-0082/0084 for the bounded Host-trusted scope. The accepted contract here is the explicit bounded
-export, `ScenePatchDocument` validation, and undo path.
+Apply Changes is explicit and conservative in the trusted in-process placement. It exports a
+bounded schema-aware subset at a generation-stamped safe point and submits a candidate patch
+through the document owner. This is not a feature of ADR 0116's ordinary external placement and
+does not establish an IPC, universal Automation service or generic runtime-session API.
 
 ```mermaid
 sequenceDiagram
@@ -209,17 +246,12 @@ sequenceDiagram
 
 Rules:
 
-- The current implementation supports the first narrow Apply Changes subset: one selected
+- The trusted in-process slice supports a narrow Apply Changes subset: one selected
   `SceneEntityId` plus explicitly requested registered scene/edit-capable component IDs.
-- The proposed runtime Interface uses a generation-stamped, schema-aware safe-point export request.
-  The current direct local Play-world export is transitional implementation evidence, not the
-  long-term authority boundary.
-- `SceneEditorState::export_apply_changes*` encodes requested Play world components through
-  `ComponentRegistry` and `ComponentEncodeContext`, compares them with the authoring document, and
-  returns a candidate `ScenePatchDocument` without mutating `SceneAuthoringSession`.
-- `SceneEditorState::apply_changes*` applies exported patches through `SceneAuthoringSession` so
-  validation, revision updates, inverse patches, and undo history stay on the normal authoring
-  path.
+- Runtime access follows the existing generation-stamped safe-point boundary, not direct
+  frontend/tooling World access. Export returns a candidate `ScenePatchDocument` without mutating
+  the authoring session. The exact document owner validates and publishes revision, inverse and
+  history through the normal authoring path; tools do not construct a second inverse authority.
 - Apply Changes never copies raw runtime `Entity`, `AssetId`, backend handles, task handles, GPU
   resources, timers, or transient events into scene documents.
 - Apply Changes must be component-schema-aware. Only components with scene and edit capabilities,
@@ -228,19 +260,22 @@ Rules:
   and duplicate component requests produce diagnostics instead of best-effort serialization.
 - Supported no-op requests return no patch and do not create undo entries.
 - Apply Changes enters undo history as normal patch transactions.
-- Runtime Inspector editing is separate from Apply Changes. It submits a one-shot,
-  generation-stamped component patch at a runtime safe point; later simulation may overwrite the
-  value. A retained override layer would require separate lifetime/priority/clear semantics and is
-  not implied by this ADR.
-- If the edit document changed after Play started, apply-back must detect the revision mismatch and
-  either reject with diagnostics or require a merge UI. It must not silently overwrite edits.
+- Where admitted by the placement, Runtime Inspector editing is separate from Apply Changes.
+  It submits a one-shot, generation-stamped component patch at a runtime safe point; later
+  simulation may overwrite the value. A retained override layer would require separate
+  lifetime/priority/clear semantics and is not implied by this ADR.
+- If the document incarnation or revision changed after Play started, apply-back must detect the
+  mismatch and either reject with diagnostics or require a merge UI. It must not silently overwrite edits.
 - Whole-scene runtime diffing, field-level diff minimization, prefab override write-back, and
   edit-while-playing merge UI remain future work.
 
-Implementation note, 2026-07-09: the selected-entity / explicit-component subset is implemented in
-`nara_tooling`. Earlier Play Mode diagnostics-only apply-back notes are superseded by the
-patch-producing flow above; unsupported or ambiguous changes still reject with diagnostics rather
-than falling back to broad world diffing.
+Historical evidence, 2026-07-09: the selected-entity / explicit-component subset first lived in
+`nara_tooling`, with `SceneEditorState::export_apply_changes*` encoding via `ComponentRegistry` and
+`ComponentEncodeContext` and `apply_changes*` using `SceneAuthoringSession`. RGF-U17 and the later
+Accepted Host/runtime decisions separated executable custody from tooling. These notes explain
+the narrow patch-producing trajectory, not current permission for tooling to own a live World or
+proof of external apply-back, new public APIs or native platform support. The
+[implementation ledger](implementation-status.md) records actual qualification scope.
 
 ## Alternatives Considered
 
@@ -276,10 +311,11 @@ automatic persistence the default.
 
 ## Consequences
 
-- `nara_tooling` currently owns the UI-agnostic Play controller, mode state, commands, and views.
-  If ADRs 0082/0084 are accepted, a concrete Editor Host will take Play runtime lifecycle and
-  authority while `nara_tooling` keeps only commands/views; this does not require a universal
+- Concrete Hosts own executable lifecycle and physical retirement. `nara_tooling` exposes
+  UI-neutral commands/views/results without a live runtime owner. This requires no universal
   `nara_editor` trait or public Host abstraction.
+- Trusted snapshot preview and ordinary saved-source external Play retain separate source,
+  controls, completion and cleanup contracts; neither silently falls back to the other.
 - `nara_scene` should continue treating documents as persistent data and worlds as projections.
 - `nara_tooling` must expose mode-aware models rather than assuming every inspector command is
   persistent.
@@ -295,7 +331,8 @@ automatic persistence the default.
 |---|---:|---|
 | Play isolation | Play systems cannot mutate the edit preview world accidentally | Play Mode tests with distinct entity maps |
 | Stop safety | Stop Play discards runtime-only changes by default | Play/Stop integration test |
-| Explicit persistence | Apply Changes is explicit; selected scene/edit-capable components produce scene patches, unsupported cases reject with diagnostics | Apply Changes export/apply tests |
+| Source placement | Trusted preview uses its admitted snapshot; ordinary external Play uses exact saved source with no implicit fallback | Placement admission and saved-source/Restart tests |
+| Explicit persistence | Trusted Apply Changes is explicit and schema-bounded; external placement does not imply apply-back support | Apply Changes export/apply and availability tests |
 | Revision safety | Apply-back detects edit document changes made after Play started | Revision mismatch test |
 | Persistence hygiene | Runtime `Entity`, `AssetId`, backend handles, and transient components never serialize into scene data | Serialization leak search and tests |
 
@@ -308,6 +345,7 @@ automatic persistence the default.
 | Apply-back diffs become too broad | High | Medium | Start with explicit scene/edit-capable component subset and reject unsupported runtime state |
 | Edit while playing creates merge conflicts | High | Medium | Track source revisions and reject ambiguous apply-back until merge tooling exists |
 | Runtime-only components leak into scenes | High | Low | Keep scene export/schema filters strict and test for handle/entity serialization leaks |
+| Snapshot preview is mistaken for ordinary external Play | High | Medium | Keep source receipts, control availability and placement-specific completion explicit |
 
 ## Follow-Up Questions
 
@@ -324,3 +362,7 @@ automatic persistence the default.
 - Event/command model: [0023-event-message-and-command-model.md](0023-event-message-and-command-model.md)
 - Editor patch and undo model: [0026-editor-command-patch-and-undo-model.md](0026-editor-command-patch-and-undo-model.md)
 - Save-game persistence boundary: [0027-save-game-and-runtime-persistence.md](0027-save-game-and-runtime-persistence.md)
+- Concrete Host authority: [0082-process-host-authority-and-runtime-construction-topology.md](0082-process-host-authority-and-runtime-construction-topology.md)
+- Executable lifecycle: [0084-executable-runtime-ownership-and-isolation.md](0084-executable-runtime-ownership-and-isolation.md)
+- Ordinary external Play: [0116-standalone-supervised-editor-play.md](0116-standalone-supervised-editor-play.md)
+- Managed execution and authoring: [0117-2d-foundation-ownership-and-authoring-contracts.md](0117-2d-foundation-ownership-and-authoring-contracts.md)

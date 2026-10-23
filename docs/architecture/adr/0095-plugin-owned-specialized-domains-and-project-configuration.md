@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-20
+**Last Revised**: 2026-10-23
 **Supersedes**: [ADR 0019](0019-physics-strategy.md) and
 [ADR 0030](0030-audio-strategy.md)
 **Refines**: [ADR 0015](0015-editor-tooling-and-dogfooding-boundary.md),
@@ -62,7 +63,7 @@ flowchart LR
     Substrate --> Audio
     Substrate --> Text
     Project[nara.toml: content and product settings] --> Composition
-    Project -. does not install or select .-> Physics
+    Project -. no code or trust grant .-> Physics
     Consumer[Game or downstream package] --> OptionalSeam[Consumer-owned portability layer]
     OptionalSeam --> Physics
 ```
@@ -107,17 +108,27 @@ One production integration is sufficient to ship a plugin-owned API. A second im
 required to validate ordinary plugin participation.
 
 The evidence rule applies only when somebody proposes a Nara-owned portable Interface. Such an
-Interface requires all of the following before acceptance:
+Interface requires all of the following before compatibility freeze:
 
-- at least two production-shaped implementations or one implementation plus a real downstream
-  consumer that needs portability;
+- two real implementations, or one real implementation plus a real portability consumer, that
+  expose and challenge semantic variation in the proposed common contract;
+- a production-shaped workflow with actual portability pressure, not just use of one implementation;
 - a named workflow that benefits from switching without owning the migration itself;
 - demonstrated common semantics beyond matching type names; and
 - an explicit account of behavior that remains implementation-specific.
 
 Until that evidence exists, any cross-implementation adapter belongs to the game, package, or
-consumer that actually needs it. Test fakes prove faults and conformance to one plugin contract; they
-do not prove a portable ecosystem contract.
+consumer that actually needs it. A real portability consumer can expose the necessary variation
+without a second completed implementation; simply using one implementation or matching method
+names is insufficient. Test fakes prove faults and conformance to one plugin contract; alone they
+do not prove a portable ecosystem contract. ADR 0016 uses this same freeze gate.
+
+Research feasibility, a first concrete public owner API, shared abstraction freeze and supported
+product/platform claims are different gates. A named workflow and falsifiable experiment suffice
+to study or revise an owner API; the first API does not need to wait for a second implementation or
+a complete reference game. Historical plan IDs are evidence, not research authorization. A shared
+boundary that makes no provider-interchangeability promise still needs independent consumers and
+explicit semantics, not a universal service layer inferred from domain names.
 
 ### Coexistence and Conflicts
 
@@ -159,9 +170,19 @@ once, rather than requiring games to maintain parallel plugin-edit and schema-pr
 
 ### `nara.toml` Boundary
 
-`nara.toml` remains the settings authority for a file-backed project, but it cannot introduce Rust
-code or select an arbitrary plugin/provider by string identity. Code availability and concrete
-implementation selection belong to Cargo plus a compiled Rust App/product recipe.
+`nara.toml` remains the settings authority for a file-backed project, but settings cannot introduce
+executable code, grant executable trust or rebind an arbitrary plugin/provider by string identity.
+For the current source-built runtime, Cargo plus a compiled Rust App/product recipe own code
+availability and concrete implementation selection. Static `Plugin` declarations and ADR 0079's
+`required <= requested <= compiled` invariant describe that native path, not a universal package
+system.
+
+A future admitted package workflow may let settings select installed, declared packages and their
+versioned configuration within Host-authorized availability, target and trust limits. Selection
+does not grant execution authority or imply interchangeable schemas. The owning Host validates
+the exact artifact, contribution role and permitted activation effect; source graphs stay with
+Cargo, NuGet/MSBuild or their existing toolchains. This policy permits a concrete experiment, not
+an implemented package loader, new resolver or global mutable service/settings registry.
 
 The manifest may request provider-independent product capabilities and settings, such as a windowed
 2D presentation, startup scene, fixed-step policy, or task budget. A compiled Rust recipe may map
@@ -224,14 +245,16 @@ inspectors.
 **Decision**: Rejected as the first-party product experience; still valid for expert code-first
 embedding.
 
-### Option D: Provider Selection in `nara.toml`
+### Option D: Arbitrary Provider Selection in `nara.toml`
 
 **Pros**: Provider switching appears data-driven and resembles an integrated editor product.
 
 **Cons**: Configuration cannot add Rust code to a binary, duplicates Cargo/composition authority,
 and hides the source/data migration that different implementations require.
 
-**Decision**: Rejected.
+**Decision**: Rejected as arbitrary provider discovery or authority. Selection among installed,
+declared packages under a future admitted Host contract is a different operation, not an exception
+that lets settings grant executable trust.
 
 ## Success Metrics
 
