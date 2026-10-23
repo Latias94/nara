@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "22331e424f9006c18cde7369b10a0de677c3df4519ea31d530c792d5caecbe81"
+source_fingerprint: "87be911ba4fc78a1a5bf1c1d91db76656774d522f4d897b0320bbb3e2c81bf73"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "22331e424f9006c18cde7369b10a0de677c3df4519ea31d530c792d5cae
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `22331e424f9006c18cde7369b10a0de677c3df4519ea31d530c792d5caecbe81`
-- Immutable records: 868
+- Source fingerprint: `87be911ba4fc78a1a5bf1c1d91db76656774d522f4d897b0320bbb3e2c81bf73`
+- Immutable records: 869
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Additive Scene and Prefab Open qualification](verification/2026-10/2026-10-23T202313Z-additive-scene-and-prefab-open-qualification-d0b1fc894dd2419fa1cf43c9e39eb79d.md) - Removes same-kind predecessor retirement, retains per-document Host custody, and qualifies explicit Close and public/native multi-document workflows.
 - **Verification Evidence**: [Multi-source Prefab refresh obligation qualification](verification/2026-10/2026-10-23T192721Z-multi-source-prefab-refresh-obligation-qualification-47f6266123094e7bb2ea046f42131843.md) - Complete source-keyed refresh, canonical Prefab observations, budgeted loader admission and bounded recovery/native evidence.
 - **Verification Evidence**: [Common source admission and retained Scene preview qualification](verification/2026-10/2026-10-23T180456Z-common-source-admission-and-retained-scene-preview-qualification-45ffac37614a4edaa792f08d650f292e.md) - Three-domain source exclusion, explicit Scene preview selection, trusted source observation and bounded actual native evidence.
 - **Verification Evidence**: [Per-document persistence custody qualification](verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md) - Typed document file custody, captured Save/Reopen Hosts, exact cleanup isolation and bounded native/public evidence.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Post-boundary U1 to U8 final integration and requirement audit](verification/2026-10/2026-10-23T075653Z-post-boundary-u1-to-u8-final-integration-and-requirement-audit-c11cf626f4494238bf3d1a2532e40634.md) - Verification Evidence for Post-boundary U1 to U8 final integration and requirement audit.
 - **Verification Evidence**: [Post-boundary U8 explicit Bevy ECS entry qualification](verification/2026-10/2026-10-23T075151Z-post-boundary-u8-explicit-bevy-ecs-entry-qualification-b54c09bf3ae54a5dbc48b382336ea785.md) - Verification Evidence for Post-boundary U8 explicit Bevy ECS entry qualification.
 - **Verification Evidence**: [Post-boundary U7 borrowed and exclusive Scene consumer qualification](verification/2026-10/2026-10-23T074124Z-post-boundary-u7-borrowed-and-exclusive-scene-consumer-qualification-24bb1ff684fa45c48abb28ebc9aded12.md) - Verification Evidence for Post-boundary U7 borrowed and exclusive Scene consumer qualification.
-- **Verification Evidence**: [Post-boundary U6 bounded Image recovery continuity qualification](verification/2026-10/2026-10-23T072629Z-post-boundary-u6-bounded-image-recovery-continuity-qualification-1f48883676614cde8d61d8a59e3cef2d.md) - Verification Evidence for Post-boundary U6 bounded Image recovery continuity qualification.
 
 # Integration Notes
 
