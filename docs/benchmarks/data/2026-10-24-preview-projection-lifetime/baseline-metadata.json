@@ -1,0 +1,134 @@
+{
+  "date": "2026-10-24",
+  "source_head": "dcbb08acd76f5c53888f5512f5a1e7c669bfc7e5",
+  "variant_scope": "Incumbent EditorAuthoringRuntime plus bounded full-owner reconstruction-cost control before SceneProjection integration; dirty tree contains Identity proof/ADR and test harness only.",
+  "command": "CARGO_BUILD_JOBS=1 cargo +1.95.0 nextest run -p nara --release --lib --no-default-features --features presentation-2d,tooling,serde --locked --run-ignored only -E test(preview_content_tests::lifetime::) --no-fail-fast --no-capture",
+  "processor": "13th Gen Intel(R) Core(TM) i9-13900KF; 24 cores, 32 logical processors",
+  "physical_memory_bytes": 68400455680,
+  "platform": "Windows 11; PowerShell 7",
+  "workload": {
+    "populations": [
+      64,
+      1024
+    ],
+    "warmups": 2,
+    "samples": 16,
+    "control_epoch_publications": 8
+  },
+  "summary": [
+    {
+      "run": 1,
+      "population": 64,
+      "variant": "retained-default",
+      "p50_ns": 777700,
+      "p95_ns": 1127900,
+      "epoch_crossings": 0,
+      "max_claims": 1235
+    },
+    {
+      "run": 1,
+      "population": 64,
+      "variant": "full-owner-epoch-control",
+      "p50_ns": 753300,
+      "p95_ns": 902400,
+      "epoch_crossings": 2,
+      "max_claims": 520
+    },
+    {
+      "run": 1,
+      "population": 1024,
+      "variant": "retained-default",
+      "p50_ns": 13985600,
+      "p95_ns": 14908400,
+      "epoch_crossings": 0,
+      "max_claims": 19475
+    },
+    {
+      "run": 1,
+      "population": 1024,
+      "variant": "full-owner-epoch-control",
+      "p50_ns": 13804300,
+      "p95_ns": 14880100,
+      "epoch_crossings": 2,
+      "max_claims": 8200
+    },
+    {
+      "run": 2,
+      "population": 64,
+      "variant": "retained-default",
+      "p50_ns": 758500,
+      "p95_ns": 940600,
+      "epoch_crossings": 0,
+      "max_claims": 1235
+    },
+    {
+      "run": 2,
+      "population": 64,
+      "variant": "full-owner-epoch-control",
+      "p50_ns": 772400,
+      "p95_ns": 1099900,
+      "epoch_crossings": 2,
+      "max_claims": 520
+    },
+    {
+      "run": 2,
+      "population": 1024,
+      "variant": "retained-default",
+      "p50_ns": 14145500,
+      "p95_ns": 14733900,
+      "epoch_crossings": 0,
+      "max_claims": 19475
+    },
+    {
+      "run": 2,
+      "population": 1024,
+      "variant": "full-owner-epoch-control",
+      "p50_ns": 13866700,
+      "p95_ns": 14407000,
+      "epoch_crossings": 2,
+      "max_claims": 8200
+    },
+    {
+      "run": 3,
+      "population": 64,
+      "variant": "retained-default",
+      "p50_ns": 740000,
+      "p95_ns": 986800,
+      "epoch_crossings": 0,
+      "max_claims": 1235
+    },
+    {
+      "run": 3,
+      "population": 64,
+      "variant": "full-owner-epoch-control",
+      "p50_ns": 739800,
+      "p95_ns": 947600,
+      "epoch_crossings": 2,
+      "max_claims": 520
+    },
+    {
+      "run": 3,
+      "population": 1024,
+      "variant": "retained-default",
+      "p50_ns": 13940400,
+      "p95_ns": 15206800,
+      "epoch_crossings": 0,
+      "max_claims": 19475
+    },
+    {
+      "run": 3,
+      "population": 1024,
+      "variant": "full-owner-epoch-control",
+      "p50_ns": 13500300,
+      "p95_ns": 14419400,
+      "epoch_crossings": 2,
+      "max_claims": 8200
+    }
+  ],
+  "sha256": {
+    "baseline-1.jsonl": "1adcea6838d552b106b0ee20cb32fd37d46392e3dd4f5bc024fa39b785be0d9e",
+    "baseline-2.jsonl": "0ce6a5da57f58e02696672fd2bff0c62daa10101017bcb677bd2829959410cde",
+    "baseline-3.jsonl": "58e2125aa067b217a5b5ede9a4d7e4af33016b1769a6d1dc0bd1d31a56921e55"
+  },
+  "limits": "Transform only; no allocation bytes, native latency, pending image/task continuity, or P99 claim. Samples include ambient local contention."
+}

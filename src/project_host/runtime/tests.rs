@@ -4567,7 +4567,7 @@ fn authoring_prefab_source_survives_failed_publication_close_and_reopen() {
     );
 }
 
-#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+#[cfg(feature = "tooling")]
 fn open_prefab_from_scene(
     editor: &mut super::editor::EditorProjectSession,
     scene_document: nara_tooling::EditorDocumentId,

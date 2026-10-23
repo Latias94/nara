@@ -1009,6 +1009,8 @@ fn runtime_error(code: &'static str) -> DiagnosticReport {
 
 #[cfg(all(test, feature = "presentation-2d"))]
 mod preview_content_tests {
+    mod lifetime;
+
     use std::sync::Arc;
 
     use nara_asset::{AssetPath, ProjectAssetDatabase, StableAssetId};
@@ -1022,6 +1024,12 @@ mod preview_content_tests {
     };
 
     fn authoring_runtime() -> (EditorAuthoringRuntime, AssetRecord, Handle<ImageAsset>) {
+        authoring_runtime_with_claim_limit(None)
+    }
+
+    fn authoring_runtime_with_claim_limit(
+        lifetime_claims: Option<usize>,
+    ) -> (EditorAuthoringRuntime, AssetRecord, Handle<ImageAsset>) {
         let registry = crate::project_host::authoring::first_party_authoring_preview_registry(
             crate::project_host::composition::built_in_schema_providers(),
         )
@@ -1034,6 +1042,19 @@ mod preview_content_tests {
         let mut database = ProjectAssetDatabase::default();
         database.insert(record.clone()).unwrap();
         let mut app = build_authoring_app().unwrap();
+        if let Some(lifetime_claims) = lifetime_claims {
+            let world = app.world_mut().unwrap();
+            let domain = nara_identity::WorldIdentityDomain::new(
+                world,
+                nara_identity::WorldIdentityDomainSettings::new(
+                    ItemLimit::new(lifetime_claims).unwrap(),
+                    ItemLimit::new(1_024).unwrap(),
+                    ItemLimit::new(64).unwrap(),
+                ),
+            )
+            .unwrap();
+            world.insert_resource(domain);
+        }
         let preview =
             EditorPreviewSession::install_authoring(&mut app, &registry, Arc::new(database))
                 .unwrap();
