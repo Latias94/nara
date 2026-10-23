@@ -43,6 +43,67 @@ Retain proven ownership invariants; replace constraints that encode accidental p
 Nara is unreleased, so affected callers and formats can change together. No new migration guide
 is required for this work.
 
+## Target Architecture And Refactor Decision Rule
+
+The integrated recommendation is one architecture with five cooperating responsibility groups.
+These are semantic owners, not five mandatory new crates, services, inheritance roots or threads.
+Existing modules can be merged, moved or deleted when a complete replacement makes that simpler.
+
+| Owner group | Authoritative facts | Ordinary consumer interface | Must not also own |
+| --- | --- | --- | --- |
+| Authoring | Semantic Schema, document/source identity, accepted revisions, transactional history | Query, prepare edit, inspect diff, commit, exact operation observation | Executable World or GPU/native-resource lifetime |
+| Runtime | One simulation World/generation, complete execution plan, simulation inputs and domain state | Typed Rust systems and concrete domain queries/commands; admitted dynamic representation when qualified | Saved document truth, workspace tabs or process-global devices |
+| Content | Source/product continuity, tracked import recipes, immutable products and target delivery closure | Typed source/import/decode/cook facets, exact product captures | Project-code authorization, gameplay World or target presentation |
+| Hosts | Filesystem/process/native-window/GPU authority and physical execution facilities | Concrete scoped admission, drive, results and physical retirement | A universal service locator or implicit persistent-data semantics |
+| Product composition | Selected modules, targets, package contributions and compatible routing | Ordinary game recipe, Editor/tool workflow and explicit contribution activation | Another ECS, source dependency resolver or global rollback engine |
+
+```mermaid
+flowchart TB
+    Product[Game / Editor product composition]
+    Authoring[Authoring: Schema / documents / history]
+    Content[Content: source / products / target artifacts]
+    Runtime[Runtime: typed World / admitted execution]
+    Hosts[Concrete Hosts: physical authority / facilities]
+    UI[Editor frontend / CLI / semantic extension]
+    Product --> Authoring
+    Product --> Content
+    Product --> Runtime
+    Product --> Hosts
+    UI -->|queries and edit proposals| Authoring
+    Authoring -->|validated revision-bound inputs| Runtime
+    Content -->|immutable products| Runtime
+    Runtime -->|captured work and frames| Hosts
+    Hosts -->|typed observations| Product
+```
+
+Arrows describe data/authority interaction, not literal Rust dependencies. Shared traits do not
+belong in a new central kernel simply because several groups interact. Domain modules own their
+meaning; adapters consume the narrow facts necessary for their operation. The Editor is a client
+of authoring and a Host for executable previews/Players. An Editor widget does not need to be an
+ECS component, while a gameplay system need not cross a document transaction for every mutation.
+
+The selected direction is document-first authoring plus native ECS execution, Schema-first
+metadata plus complete representation families, scoped logical activity plus Host-owned physical
+resources, immutable content products, and typed contributions with explicit placement. Start
+dynamic Behavior work with owner-managed rows as the leading design; compare an explicit
+attachment envelope on the same task and keep only the winning production path. Start ordinary
+installable tools with bounded semantic contributions; do not make all gameplay/native calls IPC.
+Start rendering composition with typed Features and a finite resource plan, preserving one
+physical execution Host. None of those intended interfaces is qualified merely by this paragraph.
+
+"Most correct" is evaluated against falsifiable product obligations: a game can be authored,
+edited, run, extended, saved and delivered through public contracts; failed work cannot publish
+as current; old observations never gain new authority; physical owners retire truthfully; and
+ordinary authors do not manually reproduce internal registration/result/lifecycle choreography.
+A design with more abstractions or more ADRs is not better by that measure.
+
+Each refactor selects an owning contract and one complete public workflow, develops the necessary
+alternative only far enough to answer the disputed question, replaces implementation and callers
+together, proves failure/lifetime behavior, then deletes the displaced path. Keep one coherent
+architecture at integration points. Reversible development steps are not an obligation to keep
+obsolete interfaces in the final product, and breaking changes are not a reason to rewrite
+unrelated proven modules.
+
 ## D01: Product Composition And Author Roles
 
 Topics: T01, T02, T10, T33. ADRs: 0001, 0002, 0016, 0044, 0055, 0093, 0095.

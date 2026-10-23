@@ -1,7 +1,7 @@
 ---
 title: Foundation Architecture Rebaseline And Fearless Refactor
 date: 2026-10-23
-status: Design baseline recorded; executable units not started
+status: Design and workflow-driven execution baseline
 ---
 
 # Foundation Architecture Rebaseline And Fearless Refactor
@@ -62,30 +62,64 @@ to alter concurrent work. Execution automation state remains external to the arc
 
 ## Dependency Shape
 
-This is not a requirement to finish the whole engine before any extension can run.
+R numbers identify responsibilities, not a mandatory linear implementation order. The previous
+`R2 + R3 -> all of R5` chain was too coarse: durable addressing must be decided before freezing
+prepared-edit/Behavior/Prefab contracts, while projection/history lifetime is independently useful.
+Likewise native completion custody precedes narrow executable replacement, not every experiment
+in R3. No slice must implement a Cartesian product of languages, representations and Host modes.
 
 ```text
-R0: design and scope reconciliation
-  -> R1: minimal semantic tool / exact outcomes
-  -> R2: prepared document editing / queries
-  -> R3: Behavior representation / module iteration
-  -> R4: automatic execution / scopes / native close
-
-R2 + R3 -> R5: durable addressing / Prefab / projection lifetime
-R0 -> R6: resource facets / continuity / local artifact store
-R6 -> R7: target code / base source-free delivery
-R0 -> R8: render composition / Host execution
-R6 + R8 -> R9: shader/material / view/color / render projections
-R4 -> R10: motion / time / repeatability / bounded network-audio seams
-R1 + owning changed UI seam -> R11: UI/text/input qualification
-selected changed units -> R12: final consumer integration / canonical documentation
+R0 design -> R1a exact direct submission -> R1 semantic tool / public workflow oracle
+R5a source/property address semantics -> R2 prepared edit / query contract
+R5a + R2 -> R5b declarative Prefab overlay -> durable Behavior/Prefab qualification
+R3a representation trial -> R3b language workflow comparison -> selected Behavior owner API
+R4a native close completion + selected R3 owner -> R3c narrow module replacement
+R4b activity scopes / facility policy and R4c phase-plan comparison qualify independently
+R1/R2 + selected Host custody -> R1b real tool placement / local install lifecycle
+R6a continuity + typed Runtime decode + bounded immutable catalog -> R7 base delivery
+R6b recipe-index / CAS is an independent cache work unit, not base delivery admission
+R8 render composition + R9a View / color / captured-time facts qualify together
+R6 shader inputs + selected R8 seam -> R9b durable shader/material resources
+R9c retained geometry is a separate measured mechanism
+R4c + motion/input consumers -> selected R10 domain / repeatability qualification
+every changed seam -> matching R11 / R12 integration, deletion and current documentation
 ```
 
-R1 can run on current APIs before R2. R3 can use fresh-Runtime replacement before proving narrow
-module replacement. R4's close/scopes and phase-plan comparisons are independent sub-units.
-R8's resource-plan experiment can start without CAS or complete material assets. R7 needs a
-bounded immutable source capture, not the full R5 projection or multi-file recovery design.
-Order is practical default priority; these edges identify real dependencies, not authorization.
+R1 can begin on current fields/patches. R3a may use disposable adapter-private records and a fresh
+Runtime while addressing and native-close work proceed; it cannot thereby freeze the final Prefab
+contract or claim narrow reload. R8 can begin without durable materials/CAS. R7 needs explicit
+immutable source capture, not the complete Editor recovery journal. Independent source experiments
+may run ahead; canonical integration and Cargo verification in this checkout remain serial.
+
+## Seven Delivery Waves
+
+The [target architecture](../architecture/foundation-architecture-reassessment.md#target-architecture-and-refactor-decision-rule)
+defines five responsibility groups, not a mandated crate layout. These waves turn that direction
+into complete outcomes; a small prerequisite repair does not count as finishing its whole wave.
+
+| Wave | Complete public workflow | Displaced design to delete | Exit criterion |
+| --- | --- | --- | --- |
+| 1. Authoritative editing | Query a non-active document; construct an object with components/references; prepare/diff/commit; Undo/Redo and Save/Reopen through tool and window-free consumers | Tool-owned inverses, separate dry-run logic, action lists presented as atomic transactions | Final-operation failure publishes nothing; stale basis rejects; one accepted transaction is one Undo; query does not move selection |
+| 2. Independent sessions and physical lifetime | Two preview/Play scopes use selected facilities; close one while the other continues; sustain projection editing | Replaced mandatory per-Runtime physical owners and release-by-call-order assumptions | Pending consumer blocks provider release; error/physical completion differ; epoch-stale references never alias; edit churn has an honest history policy |
+| 3. Installable useful tool | The same command plus inline Inspector customization compares source-built, isolated semantic and trusted native placement; selected path installs/updates/disables/removes locally | Losing prototype protocols and first-party-only private tool hooks | Ordinary installed tools need no Shell rebuild; crash/disable leaves documents usable; late results fence; required dependents and modified files survive correctly |
+| 4. Behavior and durable Prefab | Two runtime-defined Schemas coexist, edit/run/migrate independently; base Prefab changes; missing module saves/restores | Global each-Schema-needs-Rust-type assumption and operation patches as durable overlays | One selected representation/language path completes native coexistence and fresh-Runtime recovery; narrow reload separately proves physical code custody |
+| 5. Products to independent delivery | Compound importer -> Check/Play -> verified Runtime catalog -> source/cache/Cargo-free run machine | Duplicate root/domain registration, hidden source fallback and generic starter-bin build policy | Clear-cache product identity stable; wrong target/Schema/digest rejects; compatible last-good is recoverable; CAS may remain independent |
+| 6. Composable rendering | Independent two-pass effect in Runtime, Scene View and offscreen; stock features share the seam; durable material follows | Central package-specific payload/match growth and displaced fixed material path | View/color/time semantics agree; multiple streams retire independently; old packets and loss/recovery remain correct; retained geometry must win measured comparison |
+| 7. Full production consumer | Two-level game crosses editing/tool/Behavior/content/Play/checkpoint/export, pause/exact-step/input and close | Remaining replaced entry points, duplicate canonical rules and obsolete mechanisms | Public workflows and relevant native evidence pass together; each replay/audio/prediction scope is reported independently, not implied complete |
+
+Each wave includes independently compiled consumers, appropriate failure/lifetime tests, relevant
+native evidence, current ADR/guide updates and deletion of its replaced paths. R11/R12 are not
+reasons to delay all integration until wave 7. Rewrite a module internally when necessary; keep
+the integrated product at coherent verified checkpoints rather than preserving old public APIs.
+
+### Current First Unit
+
+R1a replaces the direct Application submission's boolean-only return with owned per-action
+dispatch observations and a separate subsequent drive update. It is a production boundary
+correction and the first executable prerequisite, not completion of R1, wave 1 or the architecture.
+Its public tests cover exact order, partial per-action rejection, whole-batch rejection, close
+filtering, workspace retirement and dispatch-versus-eventual Save outcome. R2/R5a work is still
+needed to deliver the first wave's complete editing transaction.
 
 ## R0: Complete Review And Reconcile Research/Product Scope
 
@@ -106,7 +140,9 @@ Document checks are sufficient for documentation closure; no inherited test coun
 
 ## R1: Minimal Semantic Tool And Exact Operation Outcomes
 
-**Design:** D13, D17. **State:** not started. **Owners:** existing tooling/session, selected frontend
+**Design:** D13, D17. R1a is the owned direct-submission prerequisite; its qualified scope belongs
+in the ADR implementation ledger and engineering evidence, not a full-R1 completion claim.
+**Owners:** existing tooling/session, selected frontend
 and project workflow adapters; no new Automation crate.
 
 - Implement one pure semantic proposal over existing legal fields/patches. Expose preview and
@@ -119,6 +155,14 @@ and project workflow adapters; no new Automation crate.
 - Follow with a finite explicitly enabled child-process tool returning a proposal to the same
   owner, only after its bounded input/output and trust are stated. No sandbox or stable wire SDK
   claim follows from it.
+
+**R1b placement and local lifecycle** is a separate deliverable beyond that proposal experiment.
+Use the same useful command plus inline Inspector customization to compare source-built companion,
+replaceable semantic tool Host and a narrowly trusted native SDK. Establish selection from native
+authority, author concepts, update/diagnostic/recovery behavior and measured calls/latency, without
+implementing three production SDKs. The selected ordinary-tool path then completes local install,
+update, enable/disable and remove under the phased Package contract, including required dependent
+closure, stale proposals and modified/adopted file preservation. A panel alone cannot close this.
 
 Acceptance: panel/session parity, exact result, one Undo, Save/Reopen, rejected/stale proposal,
 delayed completion after newer requests, multiple observers and bounded structured diagnostic
@@ -148,10 +192,20 @@ Amend 0026/0047/0118 for the selected contract, not an imagined universal docume
 **Design:** D02, D03, D06. **State:** not started. **Owners:** Schema, Scene materialization,
 concrete language adapter and executable Host; Proposed 0120.
 
-Compare explicit attachments envelope and owner-managed rows with two distinct Behavior Schemas,
-not two Rust component types. Exercise one complete authoring/gameplay task with C# and Lua
-feasibility adapters; choose a production candidate only on author workflow, targets, lifetime
-and measured toolchain costs. This is not a commitment to maintain both SDKs.
+**R3a representation:** compare an explicit attachments envelope and owner-managed rows with one
+bounded adapter and two distinct Behavior Schemas, not two Rust component types. Do not first
+build each representation in each language. Runtime-independent address semantics come from
+R5a; final Prefab compatibility waits for the selected R5b overlay, not qualification of a
+known-to-be-displaced operation-patch format.
+
+**R3b language workflow:** fix the representation enough to compare the same gameplay task with
+C# and Lua feasibility adapters. Choose a production candidate on author workflow, targets,
+lifetime and measured toolchain cost. This is not a commitment to maintain both SDKs.
+
+**R3c replacement:** qualify only the modes needed by the selected owner, after its native
+completion/retirement proof in R4a. Defining coexist-and-switch and Stop-first semantics does not
+require every Host to implement both. Shared facilities and general phase-plan work are not
+automatic prerequisites to the fresh-Runtime representation trial.
 
 Acceptance: independent attach/edit/Undo/Prefab/source round-trip, recursive refs, one-record
 migration, missing-module preservation, mixed native materialization, exact absence/export/retire
@@ -183,15 +237,16 @@ Delete false universal TypeId/binding assumptions; preserve exact native candida
 
 Three independently verifiable sub-units:
 
-1. Compare expanded public sets, a sealed automatic phase plan and `bevy_app::App::empty()`
-   using independently authored Physics-like/Animation-like flows. Preserve one driver and
-   complete fixed-tick success before Ack; reject bad topology before startup.
-2. Compare lazy per-Runtime facilities with Host facilities plus logical scopes. Scope close
+1. **R4a native close:** compare typed composite close owners with a minimal sealed completion
+   dependency plan. Support owner-local participants and separate quiesce from destructive release.
+   Pending or physically incomplete failure blocks provider release; failed-but-complete retains
+   errors. This is a prerequisite to the selected dynamic replacement mode.
+2. **R4b activity scopes:** compare lazy per-Runtime facilities with Host facilities plus scopes. Scope close
    proves owned work/disposal return without claiming shared worker join. Keep frame access-aware
    execution, blocking work, Future I/O and real-time callbacks distinct.
-3. Compare typed composite close owners with a minimal sealed completion dependency plan.
-   Support owner-local participants and separate quiesce from destructive release. Pending or
-   physically incomplete failure blocks provider release; failed-but-complete retains errors.
+3. **R4c execution phases:** compare public sets, a sealed automatic phase plan and
+   `bevy_app::App::empty()` using independently authored Physics-like/Animation-like flows.
+   Preserve one driver and whole successful fixed-tick finalization; reject bad topology before startup.
 
 Acceptance: two independent scopes, independent close, saturation/cancel/late/sub-work,
 uncooperative worker, partial startup, local SDK controller and close cycles/missing dependencies.
@@ -205,6 +260,10 @@ Delete extra physical owners and accidental hardcoded phase knowledge when super
 ## R5: Durable Addressing, Prefab Overlays And Projection Lifetime
 
 **Design:** D04, D05. **State:** not started. **Owners:** identity/Schema/Scene and preview Host.
+
+R5a selects address semantics before R2/R3 persistent contracts freeze. R5b replaces durable
+Prefab overlay/rebase semantics before Behavior/Prefab production qualification. R5c projection/
+history lifetime proceeds independently of language and package choices; it need not wait for R3.
 
 Separate source identity, structured projection chain, durable property and runtime incarnation.
 Select named nested member identity and keyed-item addressing; unkeyed list positions remain
@@ -231,6 +290,9 @@ Build one independent compound importer through typed source, Runtime decode, op
 Editor facets; separate format contracts from root/2D dependencies. Choose authored continuity
 for subproducts without intrinsic IDs. Then implement local recipe-index/group-manifest/CAS
 publication with tracked inputs; identity does not come from generated cache or byte hashes.
+
+R6a is the facet/continuity/verified Runtime-product contract. R6b adds the durable recipe index
+and local CAS; it does not block an independently qualified R7 immutable base catalog.
 
 Acceptance: clear-cache stable references, rename/reorder/ambiguity, dependency/settings/target
 drift, member corruption, cache explanations and every group publication fault point. Preserve
@@ -283,6 +345,10 @@ Turn the palette consumer into durable typed parameters/references plus tracked 
 artifacts. Derive one inspectable binding model rather than maintaining Rust and dynamic metadata
 separately. Introduce shared View envelope with typed projection, explicit transfer/alpha and
 captured time; investigate distinct linear/sRGB types as an unreleased breaking change.
+
+R9a View identity/target/transfer/alpha/captured-time facts are designed with R8's external pass,
+not deferred until the complete asset/cache work. R9b is durable shader/material preparation and
+dependency invalidation. R9c is optional measured geometry retention, not shared protocol admission.
 
 Acceptance: second material layout, shared shader-dependency invalidation, compile failure keeping
 same-epoch last-good, pipeline variant accounting, drawing/picking inverse/DPI/mirror tests,
