@@ -1,6 +1,8 @@
 use std::{collections::BTreeMap, error::Error, fmt};
 
+mod projection;
 mod publication;
+pub use projection::SceneProjection;
 use publication::PreparedScenePublication;
 pub use publication::PreparedSceneReplacement;
 
@@ -19,13 +21,14 @@ use nara_identity::{
     __private::{
         AdditionalRetirementIdentityError, IdentitySupportTopologyError,
         PreparedSceneInstanceRegistration, PreparedSceneInstanceReplacement,
-        prepare_exact_entity_retirement, prepare_exact_scene_instance_registration,
-        prepare_exact_scene_instance_replacement, prepare_exact_scene_instance_retirement,
+        PreparedSceneInstanceRetirement, prepare_exact_entity_retirement,
+        prepare_exact_scene_instance_registration, prepare_exact_scene_instance_replacement,
+        prepare_exact_scene_instance_retirement, prepare_scene_projection_epoch_retirement,
         validate_additional_retirement_identity_axes, validate_identity_support_topology,
     },
     IdentityDomainError, RuntimeEntityReference, SceneInstanceId, SpawnedSceneInstance,
-    TombstoneCause, WorldEntityToken, WorldIdentityDomain, WorldIdentityDomainSettings,
-    adopt_identity_entity,
+    TombstoneCause, WorldEntityToken, WorldIdentityDomain, WorldIdentityDomainId,
+    WorldIdentityDomainSettings, adopt_identity_entity,
 };
 use nara_reflect::{
     __private::{
@@ -188,6 +191,7 @@ enum PrepareSceneProductTransactionError {
 enum SceneIdentityCommit<'a> {
     Register,
     Replace(&'a SpawnedSceneInstance),
+    Projection(Option<&'a SpawnedSceneInstance>),
 }
 
 enum PreparedSceneIdentityCommit {
@@ -198,6 +202,12 @@ enum PreparedSceneIdentityCommit {
     Replace {
         replacement: PreparedSceneInstanceReplacement,
     },
+    Projection {
+        domain: WorldIdentityDomain,
+        predecessor: Option<WorldIdentityDomainId>,
+        retirement: Option<PreparedSceneInstanceRetirement>,
+        registration: PreparedSceneInstanceRegistration,
+    },
 }
 
 impl PreparedSceneIdentityCommit {
@@ -205,6 +215,7 @@ impl PreparedSceneIdentityCommit {
         match self {
             Self::Register { registration, .. } => registration.instance_id(),
             Self::Replace { replacement, .. } => replacement.instance_id(),
+            Self::Projection { registration, .. } => registration.instance_id(),
         }
     }
 
@@ -212,7 +223,21 @@ impl PreparedSceneIdentityCommit {
         match self {
             Self::Register { .. } => &[],
             Self::Replace { replacement, .. } => replacement.retiring_entities(),
+            Self::Projection { retirement, .. } => retirement
+                .as_ref()
+                .map_or(&[], |retirement| retirement.retiring_entities()),
         }
+    }
+
+    fn replaces_instance(&self) -> bool {
+        matches!(
+            self,
+            Self::Replace { .. }
+                | Self::Projection {
+                    retirement: Some(_),
+                    ..
+                }
+        )
     }
 }
 
@@ -517,7 +542,9 @@ impl SceneSpawner {
         };
         // Admission for retiring the old membership precedes scratch entity allocation. A global
         // despawn observer could also run while abandoning an otherwise empty candidate.
-        if let SceneIdentityCommit::Replace(current) = commit {
+        if let SceneIdentityCommit::Replace(current)
+        | SceneIdentityCommit::Projection(Some(current)) = commit
+        {
             let retirement = match prepare_exact_scene_instance_retirement(
                 world,
                 current,
@@ -632,6 +659,10 @@ impl SceneSpawner {
                             SceneIdentityCommit::Replace(_) => diagnostic_error(
                                 "scene.identity-replacement-failed",
                                 "Scene identity replacement failed",
+                            ),
+                            SceneIdentityCommit::Projection(_) => diagnostic_error(
+                                "scene.projection-epoch-ineligible",
+                                "Scene projection epoch could not be prepared",
                             ),
                         },
                         &error,
@@ -812,6 +843,10 @@ impl SceneSpawner {
                             "scene.identity-replacement-failed",
                             "Scene identity replacement failed",
                         ),
+                        SceneIdentityCommit::Projection(_) => diagnostic_error(
+                            "scene.projection-epoch-ineligible",
+                            "Scene projection epoch could not be prepared",
+                        ),
                     },
                     &error,
                 ));
@@ -842,6 +877,10 @@ impl SceneSpawner {
                             "scene.identity-replacement-failed",
                             "Scene identity replacement failed",
                         ),
+                        SceneIdentityCommit::Projection(_) => diagnostic_error(
+                            "scene.projection-epoch-ineligible",
+                            "Scene projection epoch could not be prepared",
+                        ),
                     },
                     &error,
                 ));
@@ -857,36 +896,36 @@ impl SceneSpawner {
         let scene_retirements = prepared_identity.retiring_entities().to_vec();
         let mut retired_entities = scene_retirements.clone();
         retired_entities.extend(additional_retirements.iter().map(|token| token.entity()));
-        let prepared_hierarchy_retirement = match &prepared_identity {
-            PreparedSceneIdentityCommit::Register { .. } => None,
-            PreparedSceneIdentityCommit::Replace { .. } => {
-                match prepare_scene_hierarchy_retirement(world, &retired_entities) {
-                    Ok(retirement) => Some(retirement),
-                    Err(_) => {
-                        diagnostics.push(diagnostic_error(
-                            "scene.hierarchy-retirement-ineligible",
-                            "Scene hierarchy could not be prepared for exact retirement",
-                        ));
-                        rollback_spawn_transaction(world, &spawned_entities);
-                        return Err(SceneSpawnReport {
-                            instance: None,
-                            diagnostics,
-                            retired_entities: 0,
-                        });
-                    }
+        let prepared_hierarchy_retirement = if prepared_identity.replaces_instance() {
+            match prepare_scene_hierarchy_retirement(world, &retired_entities) {
+                Ok(retirement) => Some(retirement),
+                Err(_) => {
+                    diagnostics.push(diagnostic_error(
+                        "scene.hierarchy-retirement-ineligible",
+                        "Scene hierarchy could not be prepared for exact retirement",
+                    ));
+                    rollback_spawn_transaction(world, &spawned_entities);
+                    return Err(SceneSpawnReport {
+                        instance: None,
+                        diagnostics,
+                        retired_entities: 0,
+                    });
                 }
             }
+        } else {
+            None
         };
-        let hierarchy_operations = match &prepared_identity {
-            PreparedSceneIdentityCommit::Register { .. } => new_hierarchy_operations.clone(),
-            PreparedSceneIdentityCommit::Replace { .. } => combine_scene_hierarchy_operations(
+        let hierarchy_operations = if prepared_identity.replaces_instance() {
+            combine_scene_hierarchy_operations(
                 world,
                 prepared_hierarchy_retirement
                     .as_ref()
                     .expect("prepared scene replacement requires hierarchy retirement"),
                 &new_hierarchy_operations,
                 &scene_retirements,
-            ),
+            )
+        } else {
+            new_hierarchy_operations.clone()
         };
         if !additional_retirements.is_empty()
             && PreparedSceneEntityRetirement::prepare(
@@ -943,18 +982,16 @@ impl SceneSpawner {
             });
         }
 
-        if matches!(
-            &prepared_identity,
-            PreparedSceneIdentityCommit::Replace { .. }
-        ) && validate_scene_entity_retirement_admission(
-            world,
-            &retired_entities,
-            prepared_hierarchy_retirement
-                .as_ref()
-                .expect("prepared scene replacement requires hierarchy retirement"),
-            claims.component_ids(),
-        )
-        .is_err()
+        if prepared_identity.replaces_instance()
+            && validate_scene_entity_retirement_admission(
+                world,
+                &retired_entities,
+                prepared_hierarchy_retirement
+                    .as_ref()
+                    .expect("prepared scene replacement requires hierarchy retirement"),
+                claims.component_ids(),
+            )
+            .is_err()
         {
             diagnostics.push(diagnostic_error(
                 "scene.identity-replacement-ineligible",
@@ -1029,6 +1066,7 @@ impl SceneSpawner {
             expected: match commit {
                 SceneIdentityCommit::Register => None,
                 SceneIdentityCommit::Replace(current) => Some(current.clone()),
+                SceneIdentityCommit::Projection(current) => current.cloned(),
             },
             prepared_components,
             product_insertion,
@@ -1675,10 +1713,20 @@ fn adopt_scene_identity_tokens(
 }
 
 fn prepare_scene_identity(
-    world: &World,
+    world: &mut World,
     entity_count: usize,
     commit: SceneIdentityCommit<'_>,
 ) -> Result<Option<WorldIdentityDomain>, IdentityDomainError> {
+    if let SceneIdentityCommit::Projection(current) = commit {
+        prepare_scene_projection_epoch_retirement(world, current)?;
+        let settings = world.get_resource::<WorldIdentityDomain>().map_or_else(
+            WorldIdentityDomainSettings::default,
+            WorldIdentityDomain::settings,
+        );
+        let domain = WorldIdentityDomain::new(world, settings)?;
+        domain.preflight_scene_instance_registration(world, entity_count)?;
+        return Ok(Some(domain));
+    }
     if let Some(domain) = world.get_resource::<WorldIdentityDomain>() {
         match commit {
             SceneIdentityCommit::Register => {
@@ -1691,6 +1739,9 @@ fn prepare_scene_identity(
                     entity_count,
                     TombstoneCause::Replaced,
                 )?;
+            }
+            SceneIdentityCommit::Projection(_) => {
+                unreachable!("projection prepares a detached domain")
             }
         }
         return Ok(None);
@@ -1743,6 +1794,21 @@ fn prepare_scene_identity_commit(
                 TombstoneCause::Replaced,
             )?;
             Ok(PreparedSceneIdentityCommit::Replace { replacement })
+        }
+        SceneIdentityCommit::Projection(current) => {
+            let retirement = prepare_scene_projection_epoch_retirement(world, current)?;
+            let predecessor = world
+                .get_resource::<WorldIdentityDomain>()
+                .map(WorldIdentityDomain::id);
+            let domain =
+                new_domain.expect("projection identity is prepared in a fresh detached domain");
+            let registration = prepare_exact_scene_instance_registration(&domain, world, &entries)?;
+            Ok(PreparedSceneIdentityCommit::Projection {
+                domain,
+                predecessor,
+                retirement,
+                registration,
+            })
         }
     }
 }

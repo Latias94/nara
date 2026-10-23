@@ -2,7 +2,7 @@
   "date": "2026-10-24",
   "source_head": "dcbb08acd76f5c53888f5512f5a1e7c669bfc7e5",
   "variant_scope": "Incumbent EditorAuthoringRuntime plus bounded full-owner reconstruction-cost control before SceneProjection integration; dirty tree contains Identity proof/ADR and test harness only.",
-  "command": "CARGO_BUILD_JOBS=1 cargo +1.95.0 nextest run -p nara --release --lib --no-default-features --features presentation-2d,tooling,serde --locked --run-ignored only -E test(preview_content_tests::lifetime::) --no-fail-fast --no-capture",
+  "command": "CARGO_BUILD_JOBS=1 cargo +1.95.0 nextest run -p nara --release --lib --no-default-features --features 'presentation-2d,tooling,serde' --locked --run-ignored only -E 'test(preview_content_tests::lifetime::)' --no-fail-fast --no-capture",
   "processor": "13th Gen Intel(R) Core(TM) i9-13900KF; 24 cores, 32 logical processors",
   "physical_memory_bytes": 68400455680,
   "platform": "Windows 11; PowerShell 7",
@@ -126,9 +126,10 @@
     }
   ],
   "sha256": {
-    "baseline-1.jsonl": "1adcea6838d552b106b0ee20cb32fd37d46392e3dd4f5bc024fa39b785be0d9e",
-    "baseline-2.jsonl": "0ce6a5da57f58e02696672fd2bff0c62daa10101017bcb677bd2829959410cde",
-    "baseline-3.jsonl": "58e2125aa067b217a5b5ede9a4d7e4af33016b1769a6d1dc0bd1d31a56921e55"
+    "baseline-1.jsonl": "34a8d7d2c9d773757181bfb9bdcab0c44566bc1f7754065c714dd2cbbd005b8e",
+    "baseline-2.jsonl": "5b1f5c3e1128c6319e2d5d3b106d213df12f3a319f830e476b84a031a014bf05",
+    "baseline-3.jsonl": "927bcc6f8eeb5208b3835fcb1da613df846d9fa58c90788202c4b2c4dfb05309"
   },
-  "limits": "Transform only; no allocation bytes, native latency, pending image/task continuity, or P99 claim. Samples include ambient local contention."
+  "limits": "Transform only; no allocation bytes, native latency, pending image/task continuity, or P99 claim. Samples include ambient local contention.",
+  "collector_commit": "6f558f3"
 }

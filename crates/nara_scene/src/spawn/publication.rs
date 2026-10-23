@@ -34,9 +34,18 @@ pub(super) struct PreparedScenePublication {
 }
 
 struct FinalScenePublication {
-    identity: Option<PreparedSceneIdentityCommit>,
+    identity: FinalSceneIdentityCommit,
     hierarchy: PreparedHierarchyBatch,
     retirement: Option<PreparedSceneEntityRetirement>,
+}
+
+enum FinalSceneIdentityCommit {
+    Register,
+    Replace(PreparedSceneInstanceReplacement),
+    Projection {
+        registration: PreparedSceneInstanceRegistration,
+        retirement: Option<PreparedSceneInstanceRetirement>,
+    },
 }
 
 impl PreparedSceneReplacement {
@@ -110,20 +119,66 @@ impl PreparedScenePublication {
         }
         let candidates = self.spawned_by_id.values().copied().collect::<Vec<_>>();
         validate_scene_source_support(world, &candidates).map_err(|_| changed())?;
-        let mut retirement = None;
-        let identity = if let Some(expected) = &self.expected {
-            let identity = prepare_scene_identity_commit(
-                world,
-                &self.identity_tokens,
-                SceneIdentityCommit::Replace(expected),
-                None,
-            )
-            .map_err(|_| changed())?;
-            if identity.instance_id() != self.prepared_identity.instance_id()
-                || identity.retiring_entities() != self.scene_retirements
-            {
-                return Err(changed());
+        let entries = self
+            .identity_tokens
+            .iter()
+            .map(|(id, token)| (id.clone(), *token))
+            .collect::<Vec<_>>();
+        let identity = match &self.prepared_identity {
+            PreparedSceneIdentityCommit::Register { .. } => FinalSceneIdentityCommit::Register,
+            PreparedSceneIdentityCommit::Replace { .. } => {
+                let expected = self
+                    .expected
+                    .as_ref()
+                    .expect("replacement retains its predecessor receipt");
+                let replacement = prepare_exact_scene_instance_replacement(
+                    world,
+                    expected,
+                    &entries,
+                    TombstoneCause::Replaced,
+                )
+                .map_err(|_| changed())?;
+                if replacement.instance_id() != self.prepared_identity.instance_id()
+                    || replacement.retiring_entities() != self.scene_retirements
+                {
+                    return Err(changed());
+                }
+                FinalSceneIdentityCommit::Replace(replacement)
             }
+            PreparedSceneIdentityCommit::Projection {
+                domain,
+                predecessor,
+                ..
+            } => {
+                if world
+                    .get_resource::<WorldIdentityDomain>()
+                    .map(WorldIdentityDomain::id)
+                    != *predecessor
+                {
+                    return Err(changed());
+                }
+                let retirement =
+                    prepare_scene_projection_epoch_retirement(world, self.expected.as_ref())
+                        .map_err(|_| changed())?;
+                let registration =
+                    prepare_exact_scene_instance_registration(domain, world, &entries)
+                        .map_err(|_| changed())?;
+                if registration.instance_id() != self.prepared_identity.instance_id()
+                    || retirement
+                        .as_ref()
+                        .map_or(&[][..], |retirement| retirement.retiring_entities())
+                        != self.scene_retirements
+                {
+                    return Err(changed());
+                }
+                FinalSceneIdentityCommit::Projection {
+                    registration,
+                    retirement,
+                }
+            }
+        };
+        let mut retirement = None;
+        if self.expected.is_some() {
             let hierarchy = prepare_scene_hierarchy_retirement(world, &self.retired_entities)
                 .map_err(|_| changed())?;
             if finalize {
@@ -164,10 +219,7 @@ impl PreparedScenePublication {
                 PreparedSceneEntityRetirement::prepare(world, &additional_entities, &hierarchy)
                     .map_err(|_| changed())?;
             }
-            Some(identity)
-        } else {
-            None
-        };
+        }
         let hierarchy =
             prepare_construction_batch(world, &self.hierarchy_operations).map_err(|_| changed())?;
         Ok(FinalScenePublication {
@@ -204,7 +256,6 @@ impl PreparedScenePublication {
             .expect("Scene overlay was validated in the same exclusive publication tail")
             .commit();
         prepared_components.commit(world);
-        let prepared_identity = finalization.identity.unwrap_or(prepared_identity);
         let instance_id = prepared_identity.instance_id();
         for (entity_id, runtime_entity) in &spawned_by_id {
             let source = provenance.as_ref().map(|sources| {
@@ -224,11 +275,14 @@ impl PreparedScenePublication {
         }
         finalization.hierarchy.commit(world);
         world.flush();
-        let instance = match prepared_identity {
-            PreparedSceneIdentityCommit::Register {
-                domain,
-                registration,
-            } => match domain {
+        let instance = match (prepared_identity, finalization.identity) {
+            (
+                PreparedSceneIdentityCommit::Register {
+                    domain,
+                    registration,
+                },
+                FinalSceneIdentityCommit::Register,
+            ) => match domain {
                 Some(mut domain) => {
                     let instance = registration.commit(&mut domain);
                     world.insert_resource(domain);
@@ -236,7 +290,10 @@ impl PreparedScenePublication {
                 }
                 None => registration.commit(&mut world.resource_mut::<WorldIdentityDomain>()),
             },
-            PreparedSceneIdentityCommit::Replace { replacement } => {
+            (
+                PreparedSceneIdentityCommit::Replace { .. },
+                FinalSceneIdentityCommit::Replace(replacement),
+            ) => {
                 let mut domain = world
                     .remove_resource::<WorldIdentityDomain>()
                     .expect("prepared Scene replacement retains its identity domain");
@@ -249,6 +306,29 @@ impl PreparedScenePublication {
                 world.insert_resource(domain);
                 instance
             }
+            (
+                PreparedSceneIdentityCommit::Projection { mut domain, .. },
+                FinalSceneIdentityCommit::Projection {
+                    registration,
+                    retirement,
+                },
+            ) => {
+                if let Some(retirement) = retirement {
+                    let mut predecessor = world
+                        .remove_resource::<WorldIdentityDomain>()
+                        .expect("projection retains its predecessor until exact retirement");
+                    let retired = retirement.commit(&mut predecessor);
+                    debug_assert_eq!(retired, scene_retirements);
+                    finalization
+                        .retirement
+                        .expect("projection prepared exact retirement")
+                        .commit(world);
+                }
+                let instance = registration.commit(&mut domain);
+                world.insert_resource(domain);
+                instance
+            }
+            _ => unreachable!("final identity admission matches the prepared publication mode"),
         };
         if let Some(resources) = product_resources {
             resources.commit(world);
@@ -271,7 +351,8 @@ impl PreparedScenePublication {
             PreparedSceneIdentityCommit::Register {
                 domain: Some(domain),
                 ..
-            } => domain,
+            }
+            | PreparedSceneIdentityCommit::Projection { domain, .. } => domain,
             _ => match world.get_resource::<WorldIdentityDomain>() {
                 Some(domain) => domain,
                 None => return Err(self),

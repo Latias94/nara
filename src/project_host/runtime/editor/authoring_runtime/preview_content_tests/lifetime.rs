@@ -194,8 +194,8 @@ impl Observed {
 }
 
 #[test]
-#[ignore = "manual bounded full-owner reconstruction-cost control; not a production A winner"]
-fn retained_owner_against_full_owner_epoch_control() {
+#[ignore = "manual bounded Scene epoch comparison with the frozen incumbent and full-owner control"]
+fn candidate_epoch_against_full_owner_epoch_control() {
     let mut all_exact = true;
     for population in [64, 1_024] {
         let (registry, mut source) = fixture(population);
@@ -205,9 +205,9 @@ fn retained_owner_against_full_owner_epoch_control() {
             let variant = if epochs {
                 "full-owner-epoch-control"
             } else {
-                "retained-default"
+                "scene-projection-epoch"
             };
-            let cap = epochs.then_some((population + 1) * EPOCH_PUBLICATIONS);
+            let cap = Some((population + 1) * if epochs { EPOCH_PUBLICATIONS } else { 1 });
             let started = Instant::now();
             let mut owner = RetiringOwner::new(cap);
             let setup_ns = started.elapsed().as_nanos();
@@ -259,12 +259,14 @@ fn retained_owner_against_full_owner_epoch_control() {
                         )
                 } else {
                     next.render_source == previous.render_source
-                        && next.snapshot.domain_id == previous.snapshot.domain_id
+                        && next.snapshot.domain_id != previous.snapshot.domain_id
+                        && matches!(stale, EntityLookup::WrongDomain { .. })
                 };
                 let accepted = edited
                     && next.exact
                     && separated
                     && next.revision != previous.revision
+                    && next.stats.lifetime_claims == population + 1
                     && !matches!(stale, EntityLookup::Resolved(_));
                 // The successor's first candidate is checked while its predecessor is still alive.
                 let retirement_ns = match successor {
@@ -315,134 +317,4 @@ fn retained_owner_against_full_owner_epoch_control() {
         }
     }
     assert!(all_exact, "inspect the bounded JSON acceptance records");
-}
-
-#[test]
-#[ignore = "manual tiny-cap witness; saturation is observed, not a permanent production invariant"]
-fn tiny_claim_cap_keeps_last_good_and_fresh_full_owner_can_progress() {
-    let (registry, mut source) = fixture(4);
-    let started = Instant::now();
-    let mut owner = RetiringOwner::new(Some(15));
-    let setup_ns = started.elapsed().as_nanos();
-    let started = Instant::now();
-    let candidate = preview(&mut owner.0, &source);
-    let publication_ns = started.elapsed().as_nanos();
-    let mut last = Observed::capture(&owner, candidate, &source, 4, 0.0);
-    last.emit(
-        "tiny-cap-incumbent",
-        4,
-        "initial",
-        0,
-        false,
-        [setup_ns, publication_ns, 0],
-        json!({"exact": last.exact, "claim_cap": 15}),
-    );
-    let mut exact = last.exact;
-    let mut saturated = false;
-    let mut last_angle = 0.0;
-    // Four total incumbent attempts suffice for today's five-claims-per-publication behavior.
-    // If production later reuses claims, record non-saturation instead of requiring exhaustion.
-    for attempt in 1..=3 {
-        let angle = if attempt % 2 == 1 { 0.25 } else { 0.0 };
-        exact &= edit_rotation(&mut source, &registry, angle);
-        let started = Instant::now();
-        let report = owner.0.drive_preview(Some(EditorPreviewSource {
-            document: EditorDocumentId::from_raw(1),
-            revision: source.revision(),
-            projection: Some(EditorPreviewProjection::new(
-                source.document().clone(),
-                EditorAuthoringPreviewOmissions::empty(
-                    EditorDocumentId::from_raw(1),
-                    source.revision(),
-                ),
-            )),
-        }));
-        let candidate = owner.0.take_preview_candidate();
-        let publication_ns = started.elapsed().as_nanos();
-        if let Some(candidate) = candidate {
-            let next = Observed::capture(&owner, candidate, &source, 4, angle);
-            exact &= report.is_none() && next.exact;
-            next.emit(
-                "tiny-cap-incumbent",
-                4,
-                "budget-publication",
-                attempt,
-                false,
-                [0, publication_ns, 0],
-                json!({"exact": exact, "claim_cap": 15}),
-            );
-            last = next;
-            last_angle = angle;
-            continue;
-        }
-        let before = owner
-            .0
-            .runtime
-            .world()
-            .resource::<WorldIdentityDomain>()
-            .stats();
-        saturated = report.as_ref().is_some_and(|report| report.has_errors())
-            && before.lifetime_claims == 15;
-        let retained = saturated
-            && before == last.stats
-            && exact_transforms(&owner, 4, last_angle)
-            && WorldIdentitySnapshot::capture_default(owner.0.runtime.world()).unwrap()
-                == last.snapshot
-            && matches!(
-                resolve_in_world(owner.0.runtime.world(), &last.snapshot.locators[0]),
-                EntityLookup::Resolved(_)
-            )
-            && source.revision() != last.revision;
-        let started = Instant::now();
-        let mut fresh = RetiringOwner::new(Some(15));
-        let setup_ns = started.elapsed().as_nanos();
-        let started = Instant::now();
-        let candidate = preview(&mut fresh.0, &source);
-        let fresh_publication_ns = started.elapsed().as_nanos();
-        let next = Observed::capture(&fresh, candidate, &source, 4, angle);
-        let old_ledger_unchanged = owner
-            .0
-            .runtime
-            .world()
-            .resource::<WorldIdentityDomain>()
-            .stats()
-            == before;
-        let progressed = next.exact
-            && next.snapshot.domain_id != last.snapshot.domain_id
-            && next.render_source != last.render_source
-            && old_ledger_unchanged
-            && matches!(
-                resolve_in_world(fresh.0.runtime.world(), &last.snapshot.locators[0]),
-                EntityLookup::WrongDomain { .. }
-            );
-        exact &= retained && progressed;
-        let retirement_ns = std::mem::replace(&mut owner, fresh).finish();
-        next.emit(
-            "tiny-cap-full-owner-control",
-            4,
-            "budget-rejection-recovery",
-            attempt,
-            true,
-            [setup_ns, fresh_publication_ns, retirement_ns],
-            json!({"exact": exact, "last_good_retained": retained, "fresh_progress": progressed,
-                "old_ledger_unchanged": old_ledger_unchanged, "old_stats": stats_json(before),
-                "rejected_publication_elapsed_ns": publication_ns, "claim_cap": 15}),
-        );
-        last = next;
-        break;
-    }
-    let retirement_ns = owner.finish();
-    last.emit(
-        "tiny-cap-summary",
-        4,
-        "retirement",
-        0,
-        false,
-        [0, 0, retirement_ns],
-        json!({"exact": exact, "saturation_observed": saturated, "claim_cap": 15}),
-    );
-    assert!(
-        exact,
-        "inspect tiny-cap last-good and fresh-owner acceptance records"
-    );
 }

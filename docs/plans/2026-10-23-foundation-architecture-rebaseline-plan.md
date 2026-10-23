@@ -287,6 +287,15 @@ selected custody, source/preview, refresh, additive Open and Play-source contrac
 separately scoped implementation evidence in the ledger. Neither the design nor those bounded
 qualifications complete the broader R5c projection/history lifetime work.
 
+The next bounded R5c unit adopts a [same-World disposable Scene epoch](../architecture/editor-preview-projection-lifetime-design.md),
+not full authoring Runtime reconstruction or a second authoring history. Identity proves the
+complete predecessor history/live-token responsibility before Scene prepares and again before
+exclusive publication. Ordinary same-domain Scene consumers retain their existing history.
+The [frozen incumbent and candidate comparison](../benchmarks/2026-10-24-preview-projection-lifetime.md)
+records actual N+1 steady claims and bounded publication costs; held task/image/Save and actual
+presentation/picking coverage remain separate qualification obligations. Incremental projection,
+durable addressing and the remaining waves are not closed by an epoch policy.
+
 Separate source identity, structured projection chain, durable property and runtime incarnation.
 Select named nested member identity and keyed-item addressing; unkeyed list positions remain
 revision-local. Separate declarative Prefab overrides from exact editor operation/inverse patches;
@@ -296,8 +305,10 @@ epoch reconstruction, not a generic incremental graph.
 Acceptance: nested and repeated instances, base rename/reorder/delete, same-name members,
 Behavior migration, convert-to-local and explicit remap. Long edit churn preserves stale-alias
 protection without silently exhausting lifetime identity. Amend 0058 before changing classification:
-bounded history returns Expired/HistoryUnavailable, while checkpoint history has an explicit
-owner. Test attempted readmission of a formerly Deleted identity after history expiry: refuse
+eviction from a continuing bounded history requires Expired/HistoryUnavailable, while checkpoint
+history has an explicit owner. A completely owned disposable projection instead may end its entire
+domain epoch under the adopted proof, without evicting history from a continuing domain or adding
+a global Expired interface. Test attempted readmission of a formerly Deleted identity after history expiry: refuse
 without the required evidence or use an explicit distinct epoch/timeline contract, never silently
 resurrect it. No high-watermark claim for arbitrary history. This resolves earlier F5 as a lifecycle
 redesign, not by clearing tombstones or changing Scene data into World truth.

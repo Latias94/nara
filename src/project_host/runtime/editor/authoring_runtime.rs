@@ -1009,6 +1009,7 @@ fn runtime_error(code: &'static str) -> DiagnosticReport {
 
 #[cfg(all(test, feature = "presentation-2d"))]
 mod preview_content_tests {
+    mod epoch;
     mod lifetime;
 
     use std::sync::Arc;

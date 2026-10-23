@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-10-24
 **Amended**: 2026-08-15 to require exact mutation preconditions and independently bounded,
 branch-aware authoring history
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
@@ -130,6 +130,11 @@ Implementation notes as of 2026-07-08:
 - The first live sync implementation is rebuild-style: spawn the current document projection,
   reject it if diagnostics contain errors, then despawn only the previous entities owned by the
   session. Unrelated runtime entities are preserved.
+- The integrated Editor's disposable Scene preview is not another authoring session. A concrete
+  Scene projection owner materializes the admitted document without another Undo history. It may
+  end its complete identity epoch under ADR 0058's exclusive historical-ownership proof, while
+  retaining the same World and shared task/image/filesystem owners. Ordinary authoring sync and
+  independently resident Scene replacement retain their same-domain history semantics.
 - Incremental `WorldCommand` synchronization remains a later optimization. Spawning still
   preflights expanded documents before mutating the ECS `World`.
 

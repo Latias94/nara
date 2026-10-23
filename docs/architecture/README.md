@@ -103,6 +103,13 @@ distinguish associated-source/whole-session Close from unrelated document Close.
 Prepared edits or per-document storage alone
 do not qualify public same-kind multi-open.
 
+The [Scene preview lifetime design](editor-preview-projection-lifetime-design.md) separates
+disposable Scene identity epochs from document history and the unchanged authoring Runtime.
+ADRs 0058/0026/0047/0111 adopt complete predecessor ownership and exact accepted-source/producer
+association; ADR 0115 retains shared task/image custody. The
+[bounded comparison](../benchmarks/2026-10-24-preview-projection-lifetime.md) records the frozen
+incumbent and same-World candidate, without implying incremental projection or native qualification.
+
 The [chat-informed foundation review](../audits/2026-10-23-chat-informed-engine-architecture-review.md)
 compares the supplied engine-design conversation with the current owners and pinned Bevy/Godot
 sources at `f91466b`. Four independent review lanes and three public-interface probes distinguish

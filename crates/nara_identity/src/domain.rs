@@ -23,6 +23,10 @@ use crate::{
     allocator::MonotonicNonZeroU64Allocator,
 };
 
+mod scene_projection_epoch;
+
+pub use scene_projection_epoch::prepare_scene_projection_epoch_retirement;
+
 const DEFAULT_LIFETIME_CLAIMS: usize = 1_048_576;
 const DEFAULT_PERSISTENT_LOGICAL_RECORDS: usize = 1_048_576;
 const DEFAULT_RECENT_TOMBSTONES: usize = 4_096;
@@ -2437,6 +2441,8 @@ pub enum IdentityDomainError {
     SceneInstanceNotActive { instance: SceneInstanceId },
     #[error("scene instance membership does not match the identity domain")]
     SceneInstanceMembershipMismatch { instance: SceneInstanceId },
+    #[error("identity domain is not exclusive to the disposable scene projection epoch")]
+    ProjectionEpochNotExclusive,
     #[error("entity reference identity was already claimed")]
     ReferenceAlreadyClaimed { reference: RuntimeEntityReference },
     #[error("runtime entity already has an identity on this axis")]

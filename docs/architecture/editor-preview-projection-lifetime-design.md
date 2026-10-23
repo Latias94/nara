@@ -1,7 +1,7 @@
 ---
 title: Editor Preview Projection Epochs
 date: 2026-10-24
-status: Proposed comparison and qualification scope
+status: Adopted epoch contract; bounded implementation qualified
 ---
 
 # Editor Preview Projection Epochs
@@ -17,6 +17,12 @@ the document remains editable. This obeys ADR 0058 but is not a suitable unlimit
 This slice qualifies sustained preview editing, not durable property addressing, Prefab overlays,
 checkpoint restore, multiple independent Play sessions or a universal lifetime framework.
 The [foundation plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md) stays active.
+
+The owning ADRs 0058/0026/0047/0111 now adopt the same-World Scene epoch contract; ADR 0115 retains
+the shared task/image owner. The [bounded measurements](../benchmarks/2026-10-24-preview-projection-lifetime.md)
+record the frozen incumbent and candidate without selecting full-owner reconstruction for production.
+Actual implementation and public/native coverage belong in the ledger and qualification evidence,
+not this document's status alone.
 
 ## Alternatives
 
@@ -77,8 +83,11 @@ they do not carry a perpetual Tombstoned promise. Process-unique incarnations mu
 This does not permit persistent Deleted resurrection, a same-timeline restore or a global Expired API.
 
 The Editor must capture source document/revision, omissions, domain snapshot and render-source
-generation for one accepted projection. Reserve publication identity before Scene commit; a
-failed reservation or candidate cannot relabel last-good as the new revision. Old captured pixels
+generation for one accepted projection. Reserve the renderer producer when the preview owner is
+installed, before Scene commit; a failed reservation or candidate cannot relabel last-good as the new revision.
+The renderer producer and monotonic frame stream remain unchanged across same-owner identity
+epochs; this preserves native target/texture reuse. The document/presentation receipts fence
+pixels and picking, while domain locators fence ECS lookup. Old captured pixels
 may remain visible but cannot authorize new-revision picking or mutation. Task/image state,
 pending Save/import work and physical close owners remain unchanged by a preview-only epoch.
 
@@ -124,4 +133,4 @@ bytes and native edit-to-present need their own collectors; no such measurement 
    physical cleanup and qualify the affected actual Windows/DX12 trajectory.
 
 Selection and implementation claims belong in the implementation ledger with committed evidence.
-This proposal alone completes none of these qualification steps.
+This design document alone is not executed qualification and does not complete the broader R5c plan.

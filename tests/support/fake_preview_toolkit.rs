@@ -224,6 +224,180 @@ fn close_editor(editor: &mut EditorProjectSession) {
 }
 
 #[test]
+fn public_edit_history_save_reopen_and_close_keep_one_preview_producer_and_fresh_picking() {
+    use nara::{
+        reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
+        scene::{ScenePatchDocument, ScenePatchOperation},
+        tooling::{
+            EditorPersistenceCommand, EditorPersistenceRequestResult, EditorPersistenceResult,
+            EditorWorkspaceCommand, EditorWorkspaceIntent, EditorWorkspaceIntentRequestResult,
+        },
+    };
+    let project = TestProject::new("public-preview-epoch-workflow");
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        let extent = Extent2d::new(320, 180).unwrap();
+        editor.configure_editor_preview(Some(extent));
+        let (document, sprite) = add_sprite(&mut editor);
+        let mut toolkit = FakeToolkit::new();
+        let mut previous_token = None;
+        let mut physical_owner = None;
+        let mut present = |editor: &mut EditorProjectSession, toolkit: &mut FakeToolkit| {
+            let preview = candidate(editor);
+            assert_eq!(preview.document(), document);
+            let revision = preview.revision();
+            assert_eq!(
+                editor
+                    .current_frame()
+                    .workspace()
+                    .scene(document)
+                    .unwrap()
+                    .revision,
+                revision
+            );
+            let command = toolkit.submit(preview, mapping(extent));
+            if let Some(previous) = previous_token {
+                assert!(
+                    toolkit
+                        .presentation
+                        .token(document, revision, command.image, command.mapping)
+                        .is_none()
+                );
+                assert!(toolkit.presentation.pick(previous, [260.0, 170.0]).is_err());
+            }
+            let token = toolkit.finish(command);
+            assert_eq!(
+                toolkit.presentation.pick(token, [260.0, 170.0]).unwrap(),
+                Some(sprite.clone())
+            );
+            let owner = (
+                toolkit.source.unwrap(),
+                toolkit.target.as_ref().unwrap().generation,
+            );
+            assert_eq!(*physical_owner.get_or_insert(owner), owner);
+            previous_token = Some(token);
+        };
+        present(&mut editor, &mut toolkit);
+        for rotation in [0.125, 0.25, 0.375, 0.5] {
+            assert!(super::apply_scene_patch(
+                &mut editor,
+                document,
+                ScenePatchDocument::new([ScenePatchOperation::SetField {
+                    entity: sprite.clone(),
+                    component: ComponentTypeId::new("nara.transform.Transform2d"),
+                    component_version: ComponentSchemaVersion::ONE,
+                    field: ComponentFieldId::new("rotation"),
+                    value: ComponentValue::f64(rotation).unwrap(),
+                }])
+            ));
+            present(&mut editor, &mut toolkit);
+        }
+        for redo in [false, true] {
+            let frame = editor.current_frame();
+            let base_revision = frame.workspace().scene(document).unwrap().revision;
+            let command = if redo {
+                EditorWorkspaceCommand::Redo {
+                    document,
+                    base_revision,
+                }
+            } else {
+                EditorWorkspaceCommand::Undo {
+                    document,
+                    base_revision,
+                }
+            };
+            assert!(editor_driver::apply_workspace_command(&mut editor, command).applied);
+            present(&mut editor, &mut toolkit);
+        }
+        assert!(super::apply_scene_patch(
+            &mut editor,
+            document,
+            super::add_entity_patch("extra")
+        ));
+        present(&mut editor, &mut toolkit);
+        assert_eq!(
+            editor_driver::request_persistence(
+                &mut editor,
+                EditorPersistenceCommand::Save {
+                    document: Some(document)
+                }
+            ),
+            EditorPersistenceRequestResult::Accepted
+        );
+        assert!(
+            matches!(editor_driver::drive_persistence_until_result(&mut editor).persistence().result(), Some(EditorPersistenceResult::Saved { document: saved, .. }) if saved == document)
+        );
+        assert!(
+            std::fs::read_to_string(project.scene_path())
+                .unwrap()
+                .contains("\"extra\"")
+        );
+        assert_eq!(
+            editor_driver::request_persistence(
+                &mut editor,
+                EditorPersistenceCommand::AcknowledgeResult
+            ),
+            EditorPersistenceRequestResult::Accepted
+        );
+        assert_eq!(
+            editor_driver::request_persistence(
+                &mut editor,
+                EditorPersistenceCommand::Reopen {
+                    document: Some(document)
+                }
+            ),
+            EditorPersistenceRequestResult::Accepted
+        );
+        assert!(
+            matches!(editor_driver::drive_persistence_until_result(&mut editor).persistence().result(), Some(EditorPersistenceResult::Opened { document: opened, .. }) if opened == document)
+        );
+        present(&mut editor, &mut toolkit);
+        assert!(
+            !editor
+                .current_frame()
+                .workspace()
+                .scene(document)
+                .unwrap()
+                .dirty
+        );
+        assert_eq!(
+            editor_driver::request_persistence(
+                &mut editor,
+                EditorPersistenceCommand::AcknowledgeResult
+            ),
+            EditorPersistenceRequestResult::Accepted
+        );
+        assert_eq!(
+            editor_driver::request_workspace_intent(
+                &mut editor,
+                EditorWorkspaceIntent::CloseDocument { document }
+            ),
+            EditorWorkspaceIntentRequestResult::Accepted
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while editor.current_frame().workspace().scene(document).is_some() {
+            editor.drive_editor_frame(Duration::ZERO);
+            assert!(
+                Instant::now() < deadline,
+                "the public source Close did not finish"
+            );
+            std::thread::yield_now();
+        }
+        assert!(editor.take_editor_preview_candidate().is_none());
+        toolkit.presentation.retire();
+        assert!(toolkit.current_token().is_none());
+    }));
+    close_editor(&mut editor);
+    if let Err(error) = outcome {
+        resume_unwind(error);
+    }
+}
+
+#[test]
 fn fake_toolkit_picks_only_finished_host_preview_and_preserves_last_display() {
     let project = TestProject::new("fake-toolkit-preview");
     let mut editor = EditorProjectSession::open_trusted_compiled(

@@ -76,6 +76,66 @@ fn two_resolved_sources_merge_and_spawn_through_the_public_scene_module() {
 }
 
 #[test]
+fn disposable_projection_keeps_repeated_prefab_provenance_in_bounded_epochs() {
+    let registry = frozen_scene_registry().unwrap();
+    let database = merged_database();
+    let scene = stable_scene(&registry, &database);
+    let resolver = prefab_resolver(&database, &registry);
+    let mut world = World::new();
+    let settings = nara_identity::WorldIdentityDomainSettings::new(
+        nara_core::ItemLimit::new(6).unwrap(),
+        nara_core::ItemLimit::ONE,
+        nara_core::ItemLimit::ONE,
+    );
+    let domain = WorldIdentityDomain::new(&world, settings).unwrap();
+    world.insert_resource(domain);
+    let mut projection = nara_scene::SceneProjection::default();
+    let mut previous: Option<SpawnedSceneInstance> = None;
+    for _ in 0..16 {
+        let report = projection
+            .publish_with_prefab_resolver(&mut world, &registry, &scene, &resolver, &database);
+        assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+        let instance = report.instance.unwrap();
+        assert_eq!(projection.instance(), Some(&instance));
+        assert_eq!(instance.len(), 5);
+        let domain = world.resource::<WorldIdentityDomain>();
+        assert_eq!(domain.stats().lifetime_claims, 6);
+        assert_eq!(domain.stats().active_scene_entities, 5);
+        assert_eq!(domain.settings(), settings);
+        if let Some(previous) = &previous {
+            assert_ne!(previous.domain_id(), instance.domain_id());
+            for id in previous.entity_ids() {
+                assert!(matches!(
+                    previous.resolve(&world, id),
+                    EntityLookup::WrongDomain { .. }
+                ));
+            }
+        }
+        let mut projected = world.query::<(&SceneEntitySource, &Name)>();
+        let mut depths = projected
+            .iter(&world)
+            .filter_map(|(source, name)| {
+                (source.source_entity_id.as_str() == "opaque/shared" && name.as_str() == "Shared")
+                    .then(|| {
+                        source
+                            .projection_path
+                            .as_ref()
+                            .unwrap()
+                            .source_chain()
+                            .len()
+                    })
+            })
+            .collect::<Vec<_>>();
+        depths.sort();
+        assert_eq!(depths, [1, 2]);
+        previous = Some(instance);
+    }
+    assert_eq!(projection.clear(&mut world).unwrap(), 5);
+    assert!(projection.instance().is_none());
+    assert!(!world.contains_resource::<WorldIdentityDomain>());
+}
+
+#[test]
 fn duplicate_uuid_in_second_resolved_source_preserves_the_published_database() {
     let first = resolve_source(&[SCENE_PATH, ACTOR_PATH]);
     let second = resolve_source(&[SHARED_PATH, "source-b/collision.prefab.ron"]);

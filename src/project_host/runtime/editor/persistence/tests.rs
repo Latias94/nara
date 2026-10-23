@@ -15,6 +15,8 @@ use nara_scene::{
 use super::*;
 
 mod content_refresh;
+#[cfg(feature = "presentation-2d")]
+mod preview_epoch;
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
 

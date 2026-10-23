@@ -542,6 +542,10 @@ second real adapter or stronger isolation pressure.
   documented direct scene-module slice, not arbitrary Nara-module or cross-engine composition.
 - `nara_scene` edits authoring documents through atomic `ScenePatchDocument` transactions with operation-indexed diagnostics and inverse patches.
 - `SceneAuthoringSession` owns the first editor/AI authoring boundary: document-as-truth patch application, undo/redo stacks, source revision stamps, dirty tracking, and rebuild-style live `World` projection that only replaces entities it owns.
+- The integrated Scene preview uses `SceneProjection`, not another authoring session. It may end
+  its complete identity domain only after proving exclusive current and historical responsibility;
+  the World, shared task/image/filesystem owners and renderer producer remain in place. Document
+  revision, Scene identity epoch and image presentation authority have distinct lifetimes.
 - `nara_tooling::SceneInspectorState` builds UI-agnostic inspector models from
   `SceneAuthoringSession`, a frozen `ComponentRegistry`, and an optional identity-only
   `WorldIdentitySnapshot`. Its local projection includes only component and field values eligible

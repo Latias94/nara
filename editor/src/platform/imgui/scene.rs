@@ -56,6 +56,12 @@ impl ImguiScenePresenter {
         }) || self.presented.as_ref().is_some_and(|presented| {
             presented.content == content
                 && matches_target(target, presented.receipt.image(), presented.texture)
+                && self.authority.token(
+                    candidate.document(),
+                    candidate.revision(),
+                    presentation_image(presented.receipt.image()),
+                    presented.mapping,
+                ) == Some(presented.token)
         }) {
             return Ok(());
         }
@@ -686,6 +692,7 @@ mod binding_tests {
             if canvas_priority {
                 return self.run_canvas_priority(scene);
             }
+            self.verify_scene_epochs_reuse_target(scene)?;
             let image = self
                 .native
                 .scene
@@ -815,6 +822,161 @@ mod binding_tests {
                 return Err("closing the bound Scene changed the active ordinary Prefab".to_owned());
             }
             self.ensure_retired()
+        }
+
+        fn verify_scene_epochs_reuse_target(
+            &mut self,
+            document: EditorDocumentId,
+        ) -> Result<(), String> {
+            use nara::{
+                scene::{ScenePlacement, ScenePlacementOwner},
+                tooling::{
+                    EditorDocumentMutation, SceneCompositionCommand, SceneCompositionEntityKind,
+                },
+            };
+            let identity = self
+                .native
+                .scene
+                .identity
+                .ok_or("the Scene has no target identity")?;
+            let texture = self
+                .native
+                .scene
+                .texture
+                .ok_or("the Scene has no texture registration")?;
+            // Reproduce a rejected-source observation without changing the retained source.
+            let previous = self.native.scene_presenter.presented.as_ref().unwrap();
+            let old_token = previous.token;
+            let mapping = previous.mapping;
+            let mismatched_revision =
+                nara::scene::SceneAuthoringSession::new(Default::default()).revision();
+            if self
+                .native
+                .scene_presenter
+                .authority
+                .token(
+                    document,
+                    mismatched_revision,
+                    presentation_image(previous.receipt.image()),
+                    mapping,
+                )
+                .is_some()
+            {
+                return Err(
+                    "an incompatible source revision did not invalidate the old presentation"
+                        .to_owned(),
+                );
+            }
+            self.paint()?;
+            let frame = self.application.current_frame().unwrap();
+            if !self.native.scene_presenter.is_presented(
+                &self.native.scene,
+                &frame,
+                self.native.scene_extent,
+            ) || self
+                .native
+                .scene_presenter
+                .presented
+                .as_ref()
+                .is_none_or(|presented| presented.token == old_token)
+                || self
+                    .native
+                    .scene_presenter
+                    .authority
+                    .pick(old_token, [0.0, 0.0])
+                    .is_ok()
+            {
+                return Err("identical last-good content did not receive fresh presentation authority after invalidation".to_owned());
+            }
+            for _ in 0..4 {
+                for undo in [false, true] {
+                    let previous = self
+                        .native
+                        .scene_presenter
+                        .presented
+                        .as_ref()
+                        .ok_or("the Scene has no presented token")?;
+                    let old_token = previous.token;
+                    let mapping = previous.mapping;
+                    let content = mapping.content_rect();
+                    let point = [
+                        (content.min[0] + content.max[0]) * 0.5,
+                        (content.min[1] + content.max[1]) * 0.5,
+                    ];
+                    let frame = self.application.current_frame().unwrap();
+                    let base_revision = frame.workspace().document(document).unwrap().revision;
+                    let mutation = if undo {
+                        EditorDocumentMutation::Undo {
+                            document,
+                            base_revision,
+                        }
+                    } else {
+                        EditorDocumentMutation::ComposeScene {
+                            document,
+                            base_revision,
+                            command: SceneCompositionCommand::CreateEntity {
+                                kind: SceneCompositionEntityKind::Empty,
+                                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                            },
+                        }
+                    };
+                    let submission = self.application.submit_and_drive(
+                        EditorActionBatch::new(frame.revision(), [EditorAction::Mutate(mutation)]),
+                        Duration::ZERO,
+                    );
+                    if !matches!(submission.actions(), [crate::EditorApplicationActionDispatch::Dispatched(nara::tooling::EditorActionOutcome::Workspace(report))] if report.applied)
+                    {
+                        return Err(format!(
+                            "the epoch edit was not admitted: {:?}",
+                            submission.actions()
+                        ));
+                    }
+                    let frame = self.application.current_frame().unwrap();
+                    if frame.workspace().document(document).unwrap().revision == base_revision
+                        || self
+                            .native
+                            .scene_presenter
+                            .resolve_pick(&frame, point, mapping)
+                            .is_some()
+                    {
+                        return Err(
+                            "an old Scene receipt authorized a new source revision".to_owned()
+                        );
+                    }
+                    let deadline = Instant::now() + Duration::from_secs(10);
+                    loop {
+                        self.paint()?;
+                        let frame = self.application.current_frame().unwrap();
+                        if self.native.scene_presenter.is_presented(
+                            &self.native.scene,
+                            &frame,
+                            self.native.scene_extent,
+                        ) {
+                            break;
+                        }
+                        if Instant::now() >= deadline {
+                            return Err("the next Scene epoch was not presented".to_owned());
+                        }
+                    }
+                    if self.native.scene.identity != Some(identity)
+                        || self.native.scene.texture != Some(texture)
+                    {
+                        return Err("a disposable identity epoch rebuilt the unchanged native image target or texture registration".to_owned());
+                    }
+                    if self
+                        .native
+                        .scene_presenter
+                        .authority
+                        .pick(old_token, point)
+                        .is_ok()
+                    {
+                        return Err(
+                            "the newly presented Scene accepted an old picking token".to_owned()
+                        );
+                    }
+                }
+            }
+            Ok(())
         }
 
         fn run_canvas_priority(&mut self, scene: EditorDocumentId) -> Result<(), String> {

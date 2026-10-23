@@ -99,7 +99,7 @@ pub use scene_components::{
     register_scene_components,
 };
 pub use spawn::{
-    SceneEntityRetirementError, SceneEntitySource, SceneSpawnReport, SceneSpawner,
+    SceneEntityRetirementError, SceneEntitySource, SceneProjection, SceneSpawnReport, SceneSpawner,
     retire_and_despawn_scene_entity, spawn_expanded_scene, spawn_prefab,
     spawn_prefab_with_asset_database, spawn_prefab_with_patch,
     spawn_prefab_with_patch_and_asset_database, spawn_scene, spawn_scene_with_asset_database,

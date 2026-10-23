@@ -65,6 +65,19 @@ flowchart LR
 
 ### One-target packets and producer identity
 
+One accepted disposable Scene projection binds its document/revision, omission facts, identity
+domain and render-source generation together. Reserve the producer generation when its preview
+owner is installed, before any Scene publication. A rejected projection cannot relabel last-good.
+The same preview owner retains its producer and monotonic frame stream across Scene identity
+epochs, source switches and image-only refresh. Producer replacement, identity-domain replacement,
+image target/texture registration and composite presentation are distinct lifetimes. An unchanged
+owner/target does not rebuild its native texture merely because its Scene identity epoch changes.
+Same-producer stale frames and receipts still fail exact frame/submission/document/presentation
+admission. An invalidated presentation cannot become input authority through a content-cache hit;
+restoring identical last-good content requires a newly accepted, submitted and composited token.
+Old pixels may remain visible but never authorize new-revision picking. Epoch replacement retains
+the shared task/image owner required by ADR 0115; it is not full Runtime replacement.
+
 - `RenderFramePacket` contains exactly one tagged `Window` or `Image` target.
 - Window packet behavior remains unchanged. An image packet names one exact `RenderImage2d`
   handle and a non-zero origin-aligned physical extent.

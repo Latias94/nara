@@ -445,22 +445,22 @@ impl ProjectContentSnapshot {
     #[cfg(feature = "presentation-2d")]
     pub(crate) fn sync_editor_preview_scene(
         &self,
-        session: &mut nara_scene::SceneAuthoringSession,
+        projection: &mut nara_scene::SceneProjection,
+        document: &SceneDocument,
         world: &mut nara_ecs::World,
         registry: &nara_reflect::ComponentRegistry,
-    ) -> nara_scene::SceneAuthoringSyncReport {
+    ) -> nara_scene::SceneSpawnReport {
         let resolver = SnapshotPrefabResolver {
             prefabs: self.prefabs(),
             database: self.inner.assets.database(),
         };
-        session
-            .sync_world_with_prefab_resolver_and_asset_database(
-                world,
-                registry,
-                &resolver,
-                self.inner.assets.database(),
-            )
-            .expect("Editor preview materializers always retain native authority")
+        projection.publish_with_prefab_resolver(
+            world,
+            registry,
+            document,
+            &resolver,
+            self.inner.assets.database(),
+        )
     }
 }
 

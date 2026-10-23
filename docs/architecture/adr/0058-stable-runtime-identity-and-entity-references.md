@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-10-24
 **Refines**: ADR 0034: Editor Play Mode World Boundary; ADR 0038: Scene/Prefab Authoring
 Identity and Provenance; ADR 0056: Headless Runtime and Dedicated Server Readiness
 **Refined By**: ADR 0076: Play Runtime Debug Control and Observation
@@ -176,6 +176,38 @@ logical deletion. Durable references resolve the current logical binding, while 
 references never follow a reactivation. Callers retire identity before or as part of despawn/unload. Direct external
 despawn that bypasses the identity domain is detectable as a stale registration and must be
 reconciled diagnostically; it is not silently treated as a valid entity.
+
+### Disposable Scene projection epochs
+
+A disposable Scene projection may end its entire identity-domain lifetime without replacing its
+parent task/image Runtime. This is an explicit owner transaction, not eviction from a continuing
+domain or permission to assign a fresh domain resource from a Host. The Scene owner prepares and
+publishes a fresh domain bound to the same World through its normal validated publication tail.
+The Identity owner proves that the complete predecessor authority belongs to the exact projection:
+
+- the only claimed and active Scene instance is the current receipt, including an empty instance;
+- every retained Scene reference claim and registered entity belongs to that exact membership;
+- the complete persistent logical ledger is empty, including Unloaded and Deleted records;
+- every live predecessor-domain ownership marker belongs to that retirement set, including tokens
+  that were adopted but never registered;
+- initial publication uses no predecessor domain, or a domain with no claims, logical records,
+  active indexes or live ownership markers.
+
+An unrelated retired claim is a refusal even when only one Scene remains active. The new candidate's
+tokens originate in its detached successor domain; they are not retagged predecessor tokens.
+Preparation and final admission repeat the exact ownership and lifecycle checks while the old
+domain remains installed. Failure preserves the accepted projection. The final exclusive tail
+retires the complete predecessor membership and publishes the successor without callbacks.
+Ordinary Scene replacement retains its existing same-domain history and arbitrary restore contract.
+
+The old epoch's locators are obsolete and reject the successor domain. Domain-free runtime
+references require their owning epoch/timeline admission; they do not promise permanent Tombstoned
+classification across a closed domain lifetime. Checked process-unique incarnations still prevent
+aliasing. This operation does not restore a timeline, resurrect Deleted identity, discard another
+owner's history, or add a global Expired classification. Captured source/render/input publications
+must fence the epoch independently; task, image and filesystem custody remain with their owners.
+The [preview lifetime design](../editor-preview-projection-lifetime-design.md) defines the bounded
+consumer and alternatives; the implementation ledger records its actual qualification.
 
 ### Spawn, fork, duplicate, and restore
 

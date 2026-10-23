@@ -52,6 +52,11 @@ Rules:
 - `SceneAuthoringSession` remains the per-document scene authoring/live projection boundary. The
   workspace coordinates many sessions; it does not replace patch validation or direct document
   ownership rules.
+- The integrated Scene preview owns a disposable materialization, not a second authoring session
+  or document history. Requested source and accepted projection remain distinct. Scene owns exact
+  epoch replacement under ADR 0058; preview changes do not restart the shared authoring Runtime or
+  transfer its pending Save/import, task, image or filesystem responsibility. A refused candidate
+  preserves last-good and does not mark the requested source revision accepted.
 - Selection is workspace state: a selection set, top-selected item, selection history, and optional
   viewport/tool context. Selection targets use authoring identities and provenance, not runtime
   `Entity` values. Inspector state consumes that selection and does not retain a second durable

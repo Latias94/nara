@@ -1,0 +1,136 @@
+{
+  "date": "2026-10-24",
+  "source_basis": "6f558f3 plus final uncommitted complete-domain Scene epoch and stable-preview-owner producer corrections; qualification record binds source commit.",
+  "producer_policy": "Fresh Scene identity domain per accepted source publication; stable renderer producer and World per preview owner. Owner replacement still changes producer.",
+  "run_ids": [
+    "3ebac4c2-5131-4126-8b55-5533c7c7cecf",
+    "66d32eb7-36a0-4d2b-ba03-9bc2763d20e7",
+    "d63b9207-b74e-4fa6-8a17-9cb758480415"
+  ],
+  "command": "CARGO_BUILD_JOBS=1 cargo +1.95.0 nextest run -p nara --release --lib --no-default-features --features 'presentation-2d,tooling,serde' --locked --run-ignored only -E 'test(preview_content_tests::lifetime::)' --no-fail-fast --no-capture",
+  "source_sha256_canonical_lf": {
+    "crates/nara_identity/src/domain/scene_projection_epoch.rs": "a87ac16f73e213810afa8efc56410bd729675d4fdc98b5466dea2d2902b8b3fc",
+    "crates/nara_scene/src/spawn.rs": "1afd76176f0974e7fc1e7654a42ade24f6ca8acb7b5aa290f47f2df65314c1d5",
+    "crates/nara_scene/src/spawn/publication.rs": "e9275b527b18a3950f501ed80305bfb208ab73d06b07730d0d765805c60b019f",
+    "crates/nara_scene/src/spawn/projection.rs": "a07cae6a232f1eb108bd581d5b88ac214c52c3e8d00b46106b507033a1bf00cc",
+    "src/project_host/runtime/editor/preview.rs": "1e64b5fff8c9ac3343a67b3f6f266c051f4adc4af0516346e68628c309c4a3ca",
+    "src/project_content.rs": "2622131ff18f5e973d78657581cd9894ac9130e4b7958c83164455e46cfbc65f",
+    "editor/src/platform/imgui/scene.rs": "534ac4bf74a8a70bc9611c7b81aca9ac074af5d668165c117ed0ca8c7dacdb2d"
+  },
+  "summary": [
+    {
+      "run": 1,
+      "population": 64,
+      "variant": "scene-projection-epoch",
+      "p50_ns": 819900,
+      "p95_ns": 920800,
+      "incumbent_p95_ratio": 0.8164,
+      "max_claims": 65
+    },
+    {
+      "run": 1,
+      "population": 64,
+      "variant": "full-owner-epoch-control",
+      "p50_ns": 831800,
+      "p95_ns": 1085900,
+      "incumbent_p95_ratio": 0.9628,
+      "max_claims": 65
+    },
+    {
+      "run": 1,
+      "population": 1024,
+      "variant": "scene-projection-epoch",
+      "p50_ns": 14952200,
+      "p95_ns": 15764000,
+      "incumbent_p95_ratio": 1.0574,
+      "max_claims": 1025
+    },
+    {
+      "run": 1,
+      "population": 1024,
+      "variant": "full-owner-epoch-control",
+      "p50_ns": 14562400,
+      "p95_ns": 15163600,
+      "incumbent_p95_ratio": 1.0171,
+      "max_claims": 1025
+    },
+    {
+      "run": 2,
+      "population": 64,
+      "variant": "scene-projection-epoch",
+      "p50_ns": 816200,
+      "p95_ns": 873400,
+      "incumbent_p95_ratio": 0.9286,
+      "max_claims": 65
+    },
+    {
+      "run": 2,
+      "population": 64,
+      "variant": "full-owner-epoch-control",
+      "p50_ns": 847700,
+      "p95_ns": 1246500,
+      "incumbent_p95_ratio": 1.3252,
+      "max_claims": 65
+    },
+    {
+      "run": 2,
+      "population": 1024,
+      "variant": "scene-projection-epoch",
+      "p50_ns": 14852900,
+      "p95_ns": 15842900,
+      "incumbent_p95_ratio": 1.0753,
+      "max_claims": 1025
+    },
+    {
+      "run": 2,
+      "population": 1024,
+      "variant": "full-owner-epoch-control",
+      "p50_ns": 14419600,
+      "p95_ns": 15707100,
+      "incumbent_p95_ratio": 1.0661,
+      "max_claims": 1025
+    },
+    {
+      "run": 3,
+      "population": 64,
+      "variant": "scene-projection-epoch",
+      "p50_ns": 803100,
+      "p95_ns": 1097500,
+      "incumbent_p95_ratio": 1.1122,
+      "max_claims": 65
+    },
+    {
+      "run": 3,
+      "population": 64,
+      "variant": "full-owner-epoch-control",
+      "p50_ns": 823300,
+      "p95_ns": 974400,
+      "incumbent_p95_ratio": 0.9874,
+      "max_claims": 65
+    },
+    {
+      "run": 3,
+      "population": 1024,
+      "variant": "scene-projection-epoch",
+      "p50_ns": 15074500,
+      "p95_ns": 16553600,
+      "incumbent_p95_ratio": 1.0886,
+      "max_claims": 1025
+    },
+    {
+      "run": 3,
+      "population": 1024,
+      "variant": "full-owner-epoch-control",
+      "p50_ns": 14835300,
+      "p95_ns": 17322000,
+      "incumbent_p95_ratio": 1.1391,
+      "max_claims": 1025
+    }
+  ],
+  "sha256": {
+    "candidate-1.jsonl": "c0d60d0be1b8c9f856c5a43defce243bf434d2c07ac77a84c1466cd9fbe41224",
+    "candidate-2.jsonl": "3775fb3b0d2386f1456b2571534c5d9d0706eeaeb457e6bff3d9d7840b75e805",
+    "candidate-3.jsonl": "1644a188307c9b62e3979f8db15f2d9a79ce8ceb7a1739e8d2ea5906afa3637c"
+  },
+  "limits": "Transform only; no allocation bytes, native latency, pending image/task continuity, or P99 claim. Samples include ambient local contention."
+}

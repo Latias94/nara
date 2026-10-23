@@ -17,8 +17,8 @@ use nara_render::{
     RenderFrameSourceGeneration, RenderImage2d, RenderTarget, ViewportRect,
 };
 use nara_scene::{
-    __private::AuthoringPreviewOmission, SceneAuthoringRevision, SceneAuthoringSession,
-    SceneDocument, SceneEntityId, SceneEntitySource,
+    __private::AuthoringPreviewOmission, SceneAuthoringRevision, SceneDocument, SceneEntityId,
+    SceneEntitySource, SceneProjection,
 };
 use nara_sprite_render::__private::{QueuedSpriteItems, SpriteBatches, SpriteInstance};
 use nara_tooling::{EditorDocumentId, WorldIdentitySnapshot};
@@ -154,7 +154,13 @@ impl EditorPreviewCandidate {
     }
 }
 
-struct EditorPreviewRequest {
+enum EditorPreviewRequest {
+    Publish(EditorPreviewPublicationRequest),
+    Clear,
+}
+
+struct EditorPreviewPublicationRequest {
+    generation: EditorRenderGeneration,
     document: EditorDocumentId,
     revision: SceneAuthoringRevision,
     projection: Option<EditorPreviewProjection>,
@@ -242,12 +248,18 @@ struct EditorPreviewDocumentStamp {
 
 #[derive(Default, Resource)]
 struct EditorPreviewRuntimeState {
-    materializer: Option<SceneAuthoringSession>,
+    materializer: SceneProjection,
     requested: Option<EditorPreviewDocumentStamp>,
-    accepted: Option<EditorPreviewDocumentStamp>,
-    omissions: Option<EditorAuthoringPreviewOmissions>,
+    requested_projection: Option<EditorPreviewProjection>,
+    accepted: Option<AcceptedEditorPreview>,
     camera: Option<Entity>,
     diagnostics: DiagnosticReport,
+}
+
+struct AcceptedEditorPreview {
+    stamp: EditorPreviewDocumentStamp,
+    generation: EditorRenderGeneration,
+    omissions: EditorAuthoringPreviewOmissions,
 }
 
 pub(super) struct EditorPreviewSource {
@@ -313,6 +325,8 @@ impl EditorPreviewSession {
         project: EditorPreviewProject,
         registry: &ComponentRegistrySnapshot,
     ) -> Result<Self, DiagnosticReport> {
+        let generation = EditorRenderGeneration::try_acquire()
+            .ok_or_else(|| preview_error("project.editor.preview-generation-exhausted"))?;
         let input = Arc::new(Mutex::new(None));
         app.insert_resource(EditorPreviewInput(Arc::clone(&input)))
             .and_then(|app| {
@@ -324,8 +338,6 @@ impl EditorPreviewSession {
             .and_then(|app| app.insert_resource(EditorPreviewRuntimeState::default()))
             .and_then(|app| app.add_systems(CoreStage::First, apply_editor_preview_request))
             .map_err(|_| preview_error("project.editor.preview-state-install-failed"))?;
-        let generation = EditorRenderGeneration::try_acquire()
-            .ok_or_else(|| preview_error("project.editor.preview-generation-exhausted"))?;
         Ok(Self {
             input,
             generation,
@@ -390,20 +402,40 @@ impl EditorPreviewSession {
         image_publication_revision: u64,
     ) -> Result<(), DiagnosticReport> {
         self.candidate = None;
+        let Some(source) = source else {
+            self.world_snapshot = None;
+            if runtime
+                .world()
+                .resource::<EditorPreviewRuntimeState>()
+                .requested
+                .is_some()
+            {
+                *self
+                    .input
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                    Some(EditorPreviewRequest::Clear);
+                runtime
+                    .drive(Duration::ZERO)
+                    .map_err(|_| preview_error("project.editor.preview-frame-failed"))?;
+                let state = runtime.world().resource::<EditorPreviewRuntimeState>();
+                if state.requested.is_some() {
+                    return Err(state.diagnostics.clone());
+                }
+            }
+            return Ok(());
+        };
         let Some(extent) = self.extent else {
             return Ok(());
         };
-        let Some(source) = source else {
-            self.world_snapshot = None;
-            return Ok(());
-        };
-        let request = EditorPreviewRequest {
+        let request = EditorPreviewRequest::Publish(EditorPreviewPublicationRequest {
+            generation: self.generation,
             document: source.document,
             revision: source.revision,
             projection: source.projection,
             extent,
             target: self.target,
-        };
+        });
         *self
             .input
             .lock()
@@ -420,14 +452,18 @@ impl EditorPreviewSession {
             revision: source.revision,
         };
         let runtime_state = runtime.world().resource::<EditorPreviewRuntimeState>();
-        if runtime_state.accepted != Some(stamp) {
+        let Some(accepted) = runtime_state
+            .accepted
+            .as_ref()
+            .filter(|accepted| accepted.stamp == stamp)
+        else {
             return Err(runtime_state.diagnostics.clone());
-        }
+        };
         let views = runtime.world().resource::<ExtractedViews>();
         let target_descriptor = editor_viewport_image_target(self.target, extent)
             .map_err(|_| preview_error("project.editor.preview-target-rejected"))?;
         let packet = build_editor_render_frame_packet(
-            self.generation,
+            accepted.generation,
             runtime.world().resource::<RenderFrame>().index,
             views,
             target_descriptor,
@@ -477,10 +513,7 @@ impl EditorPreviewSession {
             packet,
             sprite_batches: runtime.world().resource::<SpriteBatches>().clone(),
             hits,
-            omissions: runtime_state
-                .omissions
-                .clone()
-                .expect("an accepted Editor preview retains exact omission facts"),
+            omissions: accepted.omissions.clone(),
         });
         self.geometry_revision = geometry_revision;
         self.world_snapshot = Some(world_snapshot);
@@ -520,6 +553,22 @@ fn apply_editor_preview_request(world: &mut World) {
         .remove_resource::<EditorPreviewRuntimeState>()
         .expect("the Editor preview runtime state is installed");
 
+    let EditorPreviewRequest::Publish(request) = request else {
+        match state.materializer.clear(world) {
+            Ok(_) => {
+                state.requested = None;
+                state.requested_projection = None;
+                state.accepted = None;
+                state.diagnostics = DiagnosticReport::default();
+            }
+            Err(diagnostics) => state.diagnostics = diagnostics,
+        }
+        world.insert_resource(state);
+        world.insert_resource(registry);
+        world.insert_resource(project);
+        return;
+    };
+
     let stamp = EditorPreviewDocumentStamp {
         document: request.document,
         revision: request.revision,
@@ -528,35 +577,37 @@ fn apply_editor_preview_request(world: &mut World) {
         let projection = request
             .projection
             .expect("a changed Editor preview source carries its safe projection and omissions");
-        let EditorPreviewProjection { scene, omissions } = projection;
-        debug_assert_eq!(omissions.document(), request.document);
-        debug_assert_eq!(omissions.revision(), request.revision);
-        match state.materializer.as_mut() {
-            Some(materializer) => materializer
-                .replace_document(scene)
-                .expect("Editor preview materializers always retain native authority"),
-            None => state.materializer = Some(SceneAuthoringSession::new(scene)),
-        }
+        debug_assert_eq!(projection.omissions.document(), request.document);
+        debug_assert_eq!(projection.omissions.revision(), request.revision);
         state.requested = Some(stamp);
-        state.omissions = Some(omissions);
+        state.requested_projection = Some(projection);
     }
-    if state.accepted != Some(stamp) {
-        let materializer = state
-            .materializer
-            .as_mut()
-            .expect("a requested preview owns one materializer");
+    if state.accepted.as_ref().map(|accepted| accepted.stamp) != Some(stamp) {
+        let projection = state
+            .requested_projection
+            .as_ref()
+            .expect("a requested preview retains its exact projection");
         let report = match &project {
-            EditorPreviewProject::Authoring(assets) => materializer
-                .sync_world_with_asset_database(world, &registry.0, &assets.database)
-                .expect("authoring preview projections always create native materializers"),
-            EditorPreviewProject::TrustedCompiled(project) => {
-                project.sync_editor_preview_scene(materializer, world, &registry.0)
+            EditorPreviewProject::Authoring(assets) => {
+                state
+                    .materializer
+                    .publish(world, &registry.0, &projection.scene, &assets.database)
             }
+            EditorPreviewProject::TrustedCompiled(project) => project.sync_editor_preview_scene(
+                &mut state.materializer,
+                &projection.scene,
+                world,
+                &registry.0,
+            ),
         };
-        state.diagnostics = report.diagnostics.clone();
-        if report.synced {
+        state.diagnostics = report.diagnostics;
+        if report.instance.is_some() {
             remove_authored_preview_cameras(world);
-            state.accepted = Some(stamp);
+            state.accepted = Some(AcceptedEditorPreview {
+                stamp,
+                generation: request.generation,
+                omissions: projection.omissions.clone(),
+            });
         }
     }
     ensure_preview_camera(world, &mut state, request.target, request.extent);

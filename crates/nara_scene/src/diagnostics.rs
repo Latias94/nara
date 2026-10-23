@@ -530,6 +530,11 @@ pub(crate) fn with_identity_error(
             "scene-instance",
             instance.get(),
         ),
+        IdentityDomainError::ProjectionEpochNotExclusive => with_public_identifier(
+            diagnostic,
+            "identity-error-kind",
+            "projection-epoch-not-exclusive",
+        ),
         IdentityDomainError::ReferenceAlreadyClaimed { .. } => with_public_identifier(
             diagnostic,
             "identity-error-kind",

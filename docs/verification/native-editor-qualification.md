@@ -85,6 +85,12 @@ second Scene does not fall back to the retained first Scene. The second trajecto
 and UI Prefabs together, preserves Canvas priority through unrelated Prefab and Scene Close, and
 retires it after its own source closes. These are bounded same-kind Open/navigation trajectories,
 not qualification of multiple simultaneous preview Runtimes or every persistence combination.
+The retained-Scene trajectory also performs four real empty-entity creation/Undo pairs. Its
+same-owner/extent Scene epochs must retain the exact native target identity and texture
+registration while old presentation tokens fail. It explicitly invalidates a presentation with
+an incompatible source revision, then requests the unchanged accepted Host source and requires
+a fresh submitted/composite token. That recovery probe simulates rejected-source observation;
+the owner tests separately exercise actual materialization rejection and exact source restoration.
 
 For trusted Play source association and source-local document Close, also execute:
 
