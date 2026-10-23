@@ -975,7 +975,7 @@ impl EditorImageRevocationPort {
             });
         });
         #[cfg(feature = "presentation-2d")]
-        if let Some(mut prepared) = world.get_resource_mut::<nara_render::PreparedRenderResources<nara_image::PreparedImageResource>>() {
+        if let Some(mut prepared) = world.get_resource_mut::<nara_image::PreparedImages>() {
             for handle in handles {
                 prepared.remove(nara_image::image_resource_key(handle));
             }

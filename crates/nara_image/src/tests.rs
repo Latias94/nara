@@ -28,7 +28,6 @@ use nara_ecs::{ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_fs::{
     CapabilityRights, ContentDigest, DirectoryCapability, HostCapabilityOptions, TrustMode,
 };
-use nara_render::PreparedRenderResources;
 use nara_tasks::{
     TaskCancellation, TaskCancellationReason, TaskCancellationToken, TaskCoalesceKey,
     TaskCompletionCutoffError, TaskFailure, TaskHandle, TaskKindConfig, TaskOverloadPolicy,
@@ -1800,16 +1799,78 @@ fn shared_host_freezes_one_overlap_ceiling_for_different_importer_limits() {
 }
 
 #[test]
+fn code_first_prepared_capture_binds_the_actual_slot_without_a_managed_catalog() {
+    let handle = nara_asset::allocate_anonymous_handle::<ImageAsset>().unwrap();
+    let mut images = Assets::default();
+    let mut states = AssetStates::default();
+    let mut events = AssetEvents::default();
+    let source = direct_image_source();
+    let image = |pixels: Vec<u8>| {
+        ImageAsset::new(
+            source.clone(),
+            ImageExtent::new(1, 1),
+            ImageFormat::Rgba8,
+            pixels,
+        )
+        .unwrap()
+    };
+    assert!(PreparedImageSnapshot::capture(handle, &images, &states).is_none());
+    images.insert(handle, image(vec![255, 0, 0, 255]));
+    assert!(PreparedImageSnapshot::capture(handle, &images, &states).is_none());
+    images
+        .commit_loaded(
+            handle,
+            image(vec![255, 0, 0, 255]),
+            &mut states,
+            &mut events,
+            None,
+            None,
+        )
+        .unwrap();
+    let first = PreparedImageSnapshot::capture(handle, &images, &states).unwrap();
+    let same = PreparedImageSnapshot::capture(handle, &images, &states).unwrap();
+    assert_eq!(first.identity(), same.identity());
+    assert_eq!(
+        first.resource().pixels().as_ptr(),
+        same.resource().pixels().as_ptr()
+    );
+
+    images.insert(handle, image(vec![0, 255, 0, 255]));
+    let second = PreparedImageSnapshot::capture(handle, &images, &states).unwrap();
+    assert_eq!(
+        first.identity().asset_version(),
+        second.identity().asset_version()
+    );
+    assert_eq!(
+        first.identity().descriptor_hash(),
+        second.identity().descriptor_hash()
+    );
+    assert_ne!(
+        first.identity().slot_revision(),
+        second.identity().slot_revision()
+    );
+    assert_eq!(first.resource().pixels(), &[255, 0, 0, 255]);
+    assert_eq!(second.resource().pixels(), &[0, 255, 0, 255]);
+
+    let mut prepared = PreparedImages::default();
+    assert!(prepared.insert(first.clone()).is_none());
+    let retained = prepared.get(image_resource_key(handle)).unwrap().clone();
+    assert_eq!(prepared.insert(second.clone()), Some(first));
+    drop(images);
+    drop(prepared);
+    assert_eq!(retained.resource().pixels(), &[255, 0, 0, 255]);
+    assert_eq!(second.resource().pixels(), &[0, 255, 0, 255]);
+}
+
+#[test]
 fn prepare_system_writes_backend_neutral_image_resource() {
     let (app, handle) = app_with_loaded_image(ImageImporter::default());
 
     let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
     runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let prepared = runtime
-        .world()
-        .resource::<PreparedRenderResources<PreparedImageResource>>();
-    let resource = prepared.get_ready(image_resource_key(handle)).unwrap();
+    let prepared = runtime.world().resource::<PreparedImages>();
+    let resource = prepared.get(image_resource_key(handle)).unwrap().resource();
     assert_eq!(resource.extent(), ImageExtent::new(1, 1));
     assert_eq!(resource.pixel_len(), 4);
     assert_eq!(runtime.world().resource::<ImagePrepareStats>().prepared, 1);
@@ -1840,16 +1901,14 @@ fn retained_publication_prepares_during_loading_and_after_reload_failure() {
         let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
         runtime.drive(Duration::ZERO).unwrap();
 
-        let prepared = runtime
-            .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>();
-        let resource = prepared.get_ready(image_resource_key(handle)).unwrap();
+        let prepared = runtime.world().resource::<PreparedImages>();
+        let resource = prepared.get(image_resource_key(handle)).unwrap().resource();
         assert_eq!(resource.pixels(), &[0, 0, 255, 255]);
         assert_eq!(
             prepared
                 .get(image_resource_key(handle))
                 .unwrap()
-                .snapshot()
+                .identity()
                 .asset_version(),
             version
         );
@@ -1880,8 +1939,8 @@ fn revoked_publication_removes_prepared_resources_and_cannot_prepare_retained_pi
         assert!(
             runtime
                 .world()
-                .resource::<PreparedRenderResources<PreparedImageResource>>()
-                .get_ready(image_resource_key(handle))
+                .resource::<PreparedImages>()
+                .get(image_resource_key(handle))
                 .is_none()
         );
         assert_eq!(
@@ -1927,8 +1986,8 @@ fn rejected_removal_revokes_prepared_image_and_retires_obsolete_completion() {
     assert!(
         runtime
             .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>()
-            .get_ready(image_resource_key(handle))
+            .resource::<PreparedImages>()
+            .get(image_resource_key(handle))
             .is_some()
     );
     assert_eq!(runtime.world().resource::<ImageReloadStats>().pending, 1);
@@ -1958,8 +2017,8 @@ fn rejected_removal_revokes_prepared_image_and_retires_obsolete_completion() {
     assert!(
         runtime
             .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>()
-            .get_ready(image_resource_key(handle))
+            .resource::<PreparedImages>()
+            .get(image_resource_key(handle))
             .is_none()
     );
 
@@ -2000,8 +2059,8 @@ fn rejected_removal_revokes_prepared_image_and_retires_obsolete_completion() {
     assert!(
         runtime
             .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>()
-            .get_ready(image_resource_key(handle))
+            .resource::<PreparedImages>()
+            .get(image_resource_key(handle))
             .is_none()
     );
 
@@ -2026,9 +2085,10 @@ fn rejected_removal_revokes_prepared_image_and_retires_obsolete_completion() {
     assert_eq!(
         runtime
             .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>()
-            .get_ready(image_resource_key(handle))
+            .resource::<PreparedImages>()
+            .get(image_resource_key(handle))
             .unwrap()
+            .resource()
             .pixels(),
         &[0, 0, 255, 255]
     );
@@ -2065,13 +2125,12 @@ fn accepted_replacement_prepares_when_its_next_attempt_already_failed() {
 
     runtime.drive(Duration::ZERO).unwrap();
 
-    let prepared = runtime
-        .world()
-        .resource::<PreparedRenderResources<PreparedImageResource>>();
+    let prepared = runtime.world().resource::<PreparedImages>();
     assert_eq!(
         prepared
-            .get_ready(image_resource_key(handle))
+            .get(image_resource_key(handle))
             .unwrap()
+            .resource()
             .pixels(),
         &[255, 0, 0, 255]
     );
@@ -2079,7 +2138,7 @@ fn accepted_replacement_prepares_when_its_next_attempt_already_failed() {
         prepared
             .get(image_resource_key(handle))
             .unwrap()
-            .snapshot()
+            .identity()
             .asset_version(),
         version
     );
@@ -2093,20 +2152,20 @@ fn unchanged_image_snapshot_reuses_the_prepared_resource() {
     runtime.drive(std::time::Duration::ZERO).unwrap();
     let first = runtime
         .world()
-        .resource::<PreparedRenderResources<PreparedImageResource>>()
+        .resource::<PreparedImages>()
         .get(image_resource_key(handle))
         .unwrap()
-        .snapshot()
+        .identity()
         .clone();
 
     runtime.drive(std::time::Duration::ZERO).unwrap();
 
     let second = runtime
         .world()
-        .resource::<PreparedRenderResources<PreparedImageResource>>()
+        .resource::<PreparedImages>()
         .get(image_resource_key(handle))
         .unwrap()
-        .snapshot();
+        .identity();
     assert_eq!(&first, second);
     assert_eq!(runtime.world().resource::<ImagePrepareStats>().prepared, 0);
     runtime.finish().unwrap();
@@ -2119,10 +2178,10 @@ fn direct_image_replacement_reprepares_when_asset_version_and_descriptor_are_unc
     runtime.drive(Duration::ZERO).unwrap();
     let first = runtime
         .world()
-        .resource::<PreparedRenderResources<PreparedImageResource>>()
+        .resource::<PreparedImages>()
         .get(image_resource_key(handle))
         .unwrap()
-        .snapshot()
+        .identity()
         .clone();
     let version = first.asset_version();
     let descriptor = first.descriptor_hash();
@@ -2149,10 +2208,8 @@ fn direct_image_replacement_reprepares_when_asset_version_and_descriptor_are_unc
 
     runtime.drive(Duration::ZERO).unwrap();
 
-    let prepared = runtime
-        .world()
-        .resource::<PreparedRenderResources<PreparedImageResource>>();
-    let second = prepared.get(image_resource_key(handle)).unwrap().snapshot();
+    let prepared = runtime.world().resource::<PreparedImages>();
+    let second = prepared.get(image_resource_key(handle)).unwrap().identity();
     assert_eq!(second.asset_version(), version);
     assert_eq!(second.descriptor_hash(), descriptor);
     assert_ne!(second.slot_revision(), first.slot_revision());
@@ -2168,10 +2225,10 @@ fn prepare_system_invalidates_when_image_descriptor_changes() {
     runtime.drive(Duration::ZERO).unwrap();
     let old_snapshot = runtime
         .world()
-        .resource::<PreparedRenderResources<PreparedImageResource>>()
+        .resource::<PreparedImages>()
         .get(image_resource_key(handle))
         .unwrap()
-        .snapshot()
+        .identity()
         .clone();
 
     let expected_version = runtime
@@ -2190,13 +2247,11 @@ fn prepare_system_invalidates_when_image_descriptor_changes() {
 
     runtime.drive(Duration::ZERO).unwrap();
 
-    let prepared = runtime
-        .world()
-        .resource::<PreparedRenderResources<PreparedImageResource>>();
+    let prepared = runtime.world().resource::<PreparedImages>();
     let new_snapshot = prepared
         .get(image_resource_key(handle))
         .unwrap()
-        .snapshot()
+        .identity()
         .clone();
     assert_ne!(old_snapshot, new_snapshot);
     assert_eq!(
@@ -2216,8 +2271,8 @@ fn prepare_system_removes_prepared_resources_for_removed_images() {
     assert!(
         runtime
             .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>()
-            .get_ready(image_resource_key(handle))
+            .resource::<PreparedImages>()
+            .get(image_resource_key(handle))
             .is_some()
     );
 
@@ -2228,17 +2283,12 @@ fn prepare_system_removes_prepared_resources_for_removed_images() {
     assert!(
         runtime
             .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>()
-            .get_ready(image_resource_key(handle))
+            .resource::<PreparedImages>()
+            .get(image_resource_key(handle))
             .is_none()
     );
     assert_eq!(runtime.world().resource::<ImagePrepareStats>().removed, 1);
-    assert!(
-        runtime
-            .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>()
-            .is_empty()
-    );
+    assert!(runtime.world().resource::<PreparedImages>().is_empty());
     runtime.finish().unwrap();
 }
 
@@ -2281,8 +2331,8 @@ fn image_plugin_reloads_a_linear_image_with_its_accepted_recipe() {
     assert!(
         runtime
             .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>()
-            .get_ready(image_resource_key(handle))
+            .resource::<PreparedImages>()
+            .get(image_resource_key(handle))
             .is_some()
     );
 
@@ -2317,13 +2367,7 @@ fn image_plugin_reloads_a_linear_image_with_its_accepted_recipe() {
         image.pixels().len()
     );
     assert_eq!(runtime.world().resource::<ImagePrepareStats>().prepared, 1);
-    assert_eq!(
-        runtime
-            .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>()
-            .len(),
-        1
-    );
+    assert_eq!(runtime.world().resource::<PreparedImages>().len(), 1);
     assert_app_image_budget_released(runtime.world());
 
     remove_temp_root(&temp_root);
@@ -3375,8 +3419,8 @@ fn image_plugin_coalesced_removal_and_recreation_preserves_metadata_dirtiness() 
         .map(|state| state.load_state().clone());
     let prepared_removed = runtime
         .world()
-        .resource::<PreparedRenderResources<PreparedImageResource>>()
-        .get_ready(image_resource_key(handle))
+        .resource::<PreparedImages>()
+        .get(image_resource_key(handle))
         .is_none();
     let budget = importer.budget_snapshot();
     runtime.finish().unwrap();
@@ -3429,8 +3473,8 @@ fn image_plugin_recovers_a_removed_image_from_same_identity_metadata() {
         .is_none();
     let prepared_removed = runtime
         .world()
-        .resource::<PreparedRenderResources<PreparedImageResource>>()
-        .get_ready(image_resource_key(handle))
+        .resource::<PreparedImages>()
+        .get(image_resource_key(handle))
         .is_none();
     let removed_count = runtime.world().resource::<ImageReloadStats>().removed;
 
@@ -3498,8 +3542,8 @@ fn image_plugin_recovers_a_removed_image_from_same_identity_metadata() {
     let applied = runtime.world().resource::<ImageReloadStats>().applied;
     let prepared = runtime
         .world()
-        .resource::<PreparedRenderResources<PreparedImageResource>>()
-        .get_ready(image_resource_key(handle))
+        .resource::<PreparedImages>()
+        .get(image_resource_key(handle))
         .is_some();
     let budget = importer.budget_snapshot();
     runtime.finish().unwrap();
@@ -3711,8 +3755,8 @@ fn image_plugin_removal_cannot_mint_recovery_after_a_post_resolution_state_write
         .version(handle.id());
     let prepared_absent = runtime
         .world()
-        .resource::<PreparedRenderResources<PreparedImageResource>>()
-        .get_ready(image_resource_key(handle))
+        .resource::<PreparedImages>()
+        .get(image_resource_key(handle))
         .is_none();
     let applied = runtime.world().resource::<ImageReloadStats>().applied;
     let budget = importer.budget_snapshot();
@@ -4009,8 +4053,8 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
     assert!(
         runtime
             .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>()
-            .get_ready(image_resource_key(handle))
+            .resource::<PreparedImages>()
+            .get(image_resource_key(handle))
             .is_some()
     );
     assert!(matches!(
@@ -4096,8 +4140,8 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
     assert!(
         runtime
             .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>()
-            .get_ready(image_resource_key(handle))
+            .resource::<PreparedImages>()
+            .get(image_resource_key(handle))
             .is_none()
     );
     assert!(
@@ -4149,9 +4193,10 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
     assert_eq!(
         runtime
             .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>()
-            .get_ready(image_resource_key(handle))
+            .resource::<PreparedImages>()
+            .get(image_resource_key(handle))
             .unwrap()
+            .resource()
             .pixels(),
         &[0, 255, 0, 255]
     );
@@ -5757,16 +5802,11 @@ fn image_plugin_removes_runtime_and_prepared_image() {
     assert!(
         runtime
             .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>()
-            .get_ready(image_resource_key(handle))
+            .resource::<PreparedImages>()
+            .get(image_resource_key(handle))
             .is_none()
     );
-    assert!(
-        runtime
-            .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>()
-            .is_empty()
-    );
+    assert!(runtime.world().resource::<PreparedImages>().is_empty());
 
     remove_temp_root(&temp_root);
     runtime.finish().unwrap();

@@ -1,15 +1,15 @@
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetVersion, Assets, ImportArtifactKey,
-    ImportArtifactRecord, ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId,
-    ImporterVersion, SourceHash, StableAssetId,
+    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetPath, AssetServer, AssetStates, Assets,
+    ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
+    ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
 };
 use nara_image::{
     ImageAsset, ImageExtent, ImageFormat, ImageImportSettings, ImageSourceMetadata,
-    PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash, image_resource_key,
+    PreparedImageSnapshot, PreparedImages,
 };
-use nara_render::{RenderResourceKey, RenderResourceKind, RenderResourceSnapshot, RenderTarget};
+use nara_render::RenderTarget;
 use nara_text::{FontFace, TextEngine, bundled_font_face};
 use nara_ui_kernel::{
     UiAuthoringSnapshotBuilder, UiBorder, UiBrush, UiColor, UiCompiler, UiCornerRadii, UiEdges,
@@ -91,9 +91,9 @@ fn solid_node(key: &str, x: f32) -> UiNode {
         .with_visual(UiVisual::solid(UiColor::rgba(0.1, 0.2, 0.3, 1.0)))
 }
 
-fn captured_image_snapshot() -> PreparedImageSnapshot {
+fn image_asset(pixels: [u8; 4]) -> ImageAsset {
     let stable_id = StableAssetId::parse_str("d7961f69-0e25-41d5-8893-0ef85ab19615").unwrap();
-    let source_hash = SourceHash::from_bytes(b"UI planner image fixture");
+    let source_hash = SourceHash::from_bytes(pixels);
     let artifact = ImportArtifactRecord::new(ImportArtifactKey::new(
         stable_id,
         source_hash,
@@ -107,7 +107,7 @@ fn captured_image_snapshot() -> PreparedImageSnapshot {
         ArtifactFormatVersion::new(1),
     ))
     .unwrap();
-    let image = ImageAsset::new(
+    ImageAsset::new(
         ImageSourceMetadata::new(
             AssetPath::new("ui/planner.png").unwrap(),
             ImageImportSettings::default(),
@@ -116,31 +116,27 @@ fn captured_image_snapshot() -> PreparedImageSnapshot {
         .unwrap(),
         ImageExtent::new(1, 1),
         ImageFormat::Rgba8,
-        vec![240, 16, 120, 255],
+        pixels.to_vec(),
     )
-    .unwrap();
-    let handle = nara_asset::allocate_anonymous_handle().unwrap();
-    let mut images = Assets::<ImageAsset>::default();
-    assert!(images.insert(handle, image).is_none());
-    let image = images.get(handle).unwrap();
-    let identity = RenderResourceSnapshot::new(
-        image_resource_key(handle),
-        AssetVersion::from_raw(1),
-        images.slot_revision(handle),
-        image_descriptor_hash(image),
-    );
-    PreparedImageSnapshot::new(identity, PreparedImageResource::from_image(image))
+    .unwrap()
 }
 
-fn captured_image_snapshot_with_kind(kind: RenderResourceKind) -> PreparedImageSnapshot {
-    let snapshot = captured_image_snapshot();
-    let identity = RenderResourceSnapshot::new(
-        RenderResourceKey::new(snapshot.identity().key().asset_id(), kind),
-        snapshot.identity().asset_version(),
-        snapshot.identity().slot_revision().clone(),
-        snapshot.identity().descriptor_hash(),
-    );
-    PreparedImageSnapshot::new(identity, snapshot.resource().clone())
+fn captured_image_snapshot() -> PreparedImageSnapshot {
+    let handle = nara_asset::allocate_anonymous_handle().unwrap();
+    let mut images = Assets::<ImageAsset>::default();
+    let mut states = AssetStates::default();
+    let mut events = AssetEvents::default();
+    images
+        .commit_loaded(
+            handle,
+            image_asset([240, 16, 120, 255]),
+            &mut states,
+            &mut events,
+            None,
+            None,
+        )
+        .unwrap();
+    PreparedImageSnapshot::capture(handle, &images, &states).unwrap()
 }
 
 #[test]
@@ -709,44 +705,100 @@ fn duplicate_image_and_glyph_references_consume_one_reference_each() {
 }
 
 #[test]
-fn non_image_resource_identity_is_rejected_before_packet_commit() {
-    let image_id = UiImageId::new("project://ui/not-an-image.png").unwrap();
-    let mut images = UiPreparedImages::default();
-    images.insert(
-        image_id.clone(),
-        captured_image_snapshot_with_kind(RenderResourceKind::new("not_image")),
-    );
+fn planned_packets_retain_image_snapshots_across_successor_publication() {
+    let image_id = UiImageId::new("project://ui/planner.png").unwrap();
+    let mut asset_server = AssetServer::new();
+    let handle = asset_server
+        .reserve::<ImageAsset>("ui/planner.png")
+        .unwrap();
+    let referenced = BTreeSet::from([image_id.clone()]);
+    let mut assets = Assets::<ImageAsset>::default();
+    let mut states = AssetStates::default();
+    let mut events = AssetEvents::default();
+    let mut prepared = PreparedImages::default();
+    let first_pixels = [240, 16, 120, 255];
+    let first_version = assets
+        .commit_loaded(
+            handle,
+            image_asset(first_pixels),
+            &mut states,
+            &mut events,
+            None,
+            None,
+        )
+        .unwrap();
+    let first_snapshot = PreparedImageSnapshot::capture(handle, &assets, &states).unwrap();
+    prepared.insert(first_snapshot.clone());
+    let first_images = UiPreparedImages::capture(&referenced, Some(&asset_server), Some(&prepared));
+    let visual = UiVisual::image(image_id, UiColor::rgba(1.0, 1.0, 1.0, 1.0));
     let target = RenderTarget::Window(WindowId::PRIMARY);
     let mut planner = UiPresentationPlanner::default();
     let first = planner
         .plan(
-            frame(1, 1, vec![solid_node("first", 0.0)]),
+            frame(1, 1, vec![text_node("label", "A", Some(visual.clone()))]),
             target,
-            &UiPreparedImages::default(),
+            &first_images,
         )
         .unwrap();
 
-    let error = planner
-        .plan(
-            frame(
-                1,
-                2,
-                vec![
-                    UiNode::new(UiStyle::absolute(0.0, 0.0, 32.0, 32.0))
-                        .with_key(UiLocalKey::runtime("packet-test", "invalid-kind").unwrap())
-                        .with_visual(UiVisual::image(image_id, UiColor::rgba(1.0, 1.0, 1.0, 1.0))),
-                ],
-            ),
-            target,
-            &images,
+    let successor_pixels = [16, 240, 120, 255];
+    let successor_version = assets
+        .commit_loaded(
+            handle,
+            image_asset(successor_pixels),
+            &mut states,
+            &mut events,
+            None,
+            None,
         )
-        .unwrap_err();
+        .unwrap();
+    let successor_snapshot = PreparedImageSnapshot::capture(handle, &assets, &states).unwrap();
+    prepared.insert(successor_snapshot.clone());
+    let successor_images =
+        UiPreparedImages::capture(&referenced, Some(&asset_server), Some(&prepared));
+    let successor = planner
+        .plan(
+            frame(1, 2, vec![text_node("label", "A", Some(visual))]),
+            target,
+            &successor_images,
+        )
+        .unwrap();
 
-    assert!(matches!(
-        error,
-        UiPresentationContentError::InvalidImageResourceKind { .. }
-    ));
-    assert!(Arc::ptr_eq(&planner.planned(target).unwrap(), &first));
+    drop(assets);
+    drop(states);
+    drop(asset_server);
+    drop(prepared);
+    drop(first_images);
+    drop(successor_images);
+    assert_eq!(first.images()[0].snapshot(), &first_snapshot);
+    assert_eq!(successor.images()[0].snapshot(), &successor_snapshot);
+    assert_eq!(
+        first_snapshot.identity().key(),
+        successor_snapshot.identity().key()
+    );
+    assert_eq!(first_snapshot.identity().asset_version(), first_version);
+    assert_eq!(
+        successor_snapshot.identity().asset_version(),
+        successor_version
+    );
+    assert_ne!(first_version, successor_version);
+    assert_ne!(
+        first_snapshot.identity().slot_revision(),
+        successor_snapshot.identity().slot_revision()
+    );
+    assert_ne!(
+        first_snapshot.identity().descriptor_hash(),
+        successor_snapshot.identity().descriptor_hash()
+    );
+    assert_eq!(
+        first.images()[0].snapshot().resource().pixels(),
+        &first_pixels
+    );
+    assert_eq!(
+        successor.images()[0].snapshot().resource().pixels(),
+        &successor_pixels
+    );
+    assert!(Arc::ptr_eq(&planner.planned(target).unwrap(), &successor));
 }
 
 #[test]

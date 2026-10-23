@@ -22,6 +22,13 @@ diagnostics. The full-feature root/domain670, public Runtime/Editor90 and select
 Windows/DX12 native trajectories pass. ADRs 0052/0076/0117 clarify those contracts without claiming
 arbitrary unwind recovery, escaped-output cleanup, cross-platform native qualification or performance.
 
+The [post-boundary U5 evidence](../../knowledge/engineering/verification/2026-10/2026-10-23T070352Z-post-boundary-u5-image-owned-prepared-capture-qualification-a532b06bf3d94666bc5f1c2748052ef5.md)
+qualifies ADRs 0033/0037's Image-owned immutable prepared association. Independent identity/pixel
+pairing and the unused generic prepared store are removed. Image92, render/Sprite/UI/WGPU244,
+root Image Host13, direct/renamed-root Image consumer2 and selected Reference Game38 pass, together
+with two actual Windows/DX12 Image/Canvas trajectories and a negative constructor doctest. These
+results do not qualify U6 recovery continuity or broaden native/performance claims.
+
 The [low-level integration](../../knowledge/engineering/verification/2026-10/2026-10-22T193724Z-u11-low-level-refactor-public-and-native-consumer-integration-ddb983fa80454657955de17ff65d1772.md) qualifies the bounded U1-U11 owner refactor: phase spatial cuts, retained asset intent,
 unique lock/task/close owners, typed codecs, facade derives, World identity operations and exact
 Gameplay success. Final owner329, root267/integration78, independent module77, Reference87/desktop6,

@@ -85,10 +85,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut runtime = RuntimeInstance::start(app)?;
     runtime.drive(std::time::Duration::ZERO)?;
 
-    let prepared = runtime
-        .world()
-        .resource::<PreparedRenderResources<PreparedImageResource>>();
-    assert!(prepared.get_ready(image_resource_key(texture)).is_some());
+    let prepared = runtime.world().resource::<PreparedImages>();
+    assert!(prepared.get(image_resource_key(texture)).is_some());
     assert_eq!(runtime.world().resource::<ImagePrepareStats>().prepared, 1);
 
     let stats = runtime

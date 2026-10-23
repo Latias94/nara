@@ -6,8 +6,8 @@ use nara_app::{
     RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
 };
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetPath, AssetStates, AssetVersion,
-    Assets, Handle, ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
+    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetPath, AssetStates, Assets, Handle,
+    ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
     ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
 };
 use nara_core::{Color, Vec2};
@@ -18,12 +18,10 @@ use nara_hierarchy::{
 };
 use nara_image::{
     ImageAsset, ImageExtent, ImageFormat, ImageImportSettings, ImageSourceMetadata,
-    PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash, image_resource_key,
+    PreparedImageSnapshot, PreparedImages, image_resource_key,
 };
 use nara_material::{AlphaMode2d, SamplerDescriptor};
-use nara_render::{
-    Camera2d, ExtractedView, RenderImage2d, RenderResourceSnapshot, RenderTarget, ViewportRect,
-};
+use nara_render::{Camera2d, ExtractedView, RenderImage2d, RenderTarget, ViewportRect};
 use nara_sprite::{Sprite, TextureRegion};
 use nara_tilemap::{TileAtlasLayout, TileCell, TileCoord, TileIndex, TileSet, Tilemap};
 use nara_transform::{Transform2d, TransformPlugin};
@@ -695,7 +693,101 @@ fn queueing_uses_prepared_image_resource_keys_and_uvs() {
         Some(image_resource_key(image))
     );
     assert_eq!(stats.unprepared_textures, 0);
+    let prepared = runtime
+        .world()
+        .resource::<PreparedImages>()
+        .get(image_resource_key(image))
+        .unwrap();
+    assert_eq!(queued.as_slice()[0].image.as_ref(), Some(prepared));
+    assert_eq!(batches.as_slice()[0].image.as_ref(), Some(prepared));
     runtime.finish().unwrap();
+}
+
+#[test]
+fn queued_image_snapshots_survive_successor_publication_and_cache_removal() {
+    use nara_ecs::upstream::system::RunSystemOnce;
+
+    let handle = nara_asset::allocate_anonymous_handle().unwrap();
+    let mut images = Assets::<ImageAsset>::default();
+    let mut states = AssetStates::default();
+    let mut events = AssetEvents::default();
+    let mut world = World::new();
+    let mut extracted = ExtractedSprites::default();
+    let mut sprite = placeholder_extracted_sprite();
+    sprite.material.image = Some(handle);
+    extracted.push(sprite);
+    let mut views = nara_render::ExtractedViews::default();
+    views.push(test_view());
+    world.insert_resource(extracted);
+    world.insert_resource(views);
+    world.init_resource::<PreparedImages>();
+    world.init_resource::<QueuedSpriteItems>();
+    world.init_resource::<SpriteBatches>();
+    world.init_resource::<SpriteRenderStats>();
+
+    let [old, new] = [vec![255; 16], [0, 255, 0, 255].repeat(4)].map(|pixels| {
+        let image = test_image_with_pixels(pixels);
+        let source_hash = image.source().source_hash();
+        let import_hash = image.source().artifact().key().digest();
+        let version = images
+            .commit_loaded(
+                handle,
+                image,
+                &mut states,
+                &mut events,
+                Some(source_hash),
+                Some(import_hash),
+            )
+            .unwrap();
+        let snapshot = PreparedImageSnapshot::capture(handle, &images, &states).unwrap();
+        assert_eq!(snapshot.identity().asset_version(), version);
+        world
+            .resource_mut::<PreparedImages>()
+            .insert(snapshot.clone());
+        world.run_system_once(crate::queue::queue_sprites).unwrap();
+        world
+            .run_system_once(crate::queue::sort_and_batch_sprites)
+            .unwrap();
+        assert_eq!(world.resource::<QueuedSpriteItems>().len(), 1);
+        assert_eq!(
+            world.resource::<QueuedSpriteItems>().as_slice()[0]
+                .image
+                .as_ref(),
+            Some(&snapshot)
+        );
+        assert_eq!(world.resource::<SpriteRenderStats>().unprepared_textures, 0);
+        let batches = world.resource::<SpriteBatches>().clone();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches.as_slice()[0].image.as_ref(), Some(&snapshot));
+        batches
+    });
+
+    world
+        .resource_mut::<PreparedImages>()
+        .remove(image_resource_key(handle));
+    drop(images);
+    drop(states);
+    world.run_system_once(crate::queue::queue_sprites).unwrap();
+    world
+        .run_system_once(crate::queue::sort_and_batch_sprites)
+        .unwrap();
+    assert!(world.resource::<QueuedSpriteItems>().is_empty());
+    assert!(world.resource::<SpriteBatches>().is_empty());
+    assert_eq!(world.resource::<SpriteRenderStats>().unprepared_textures, 1);
+
+    let old = old.as_slice()[0].image.as_ref().unwrap();
+    let new = new.as_slice()[0].image.as_ref().unwrap();
+    assert_eq!(old.identity().key(), new.identity().key());
+    assert_ne!(
+        old.identity().asset_version(),
+        new.identity().asset_version()
+    );
+    assert_ne!(
+        old.identity().slot_revision(),
+        new.identity().slot_revision()
+    );
+    assert_eq!(old.resource().pixels(), &[255; 16]);
+    assert_eq!(new.resource().pixels(), [0, 255, 0, 255].repeat(4));
 }
 
 #[test]
@@ -1481,8 +1573,12 @@ fn insert_loaded_image(app: &mut App, handle: Handle<ImageAsset>) {
 }
 
 fn test_image() -> ImageAsset {
+    test_image_with_pixels(vec![255; 16])
+}
+
+fn test_image_with_pixels(pixels: Vec<u8>) -> ImageAsset {
     let stable_id = StableAssetId::parse_str("ce2ab2f8-c58b-48e3-b94e-9465340262a1").unwrap();
-    let source_hash = SourceHash::from_bytes(b"test image");
+    let source_hash = SourceHash::from_bytes(&pixels);
     let key = ImportArtifactKey::new(
         stable_id,
         source_hash,
@@ -1502,29 +1598,27 @@ fn test_image() -> ImageAsset {
         artifact,
     )
     .unwrap();
-    ImageAsset::new(
-        source,
-        ImageExtent::new(2, 2),
-        ImageFormat::Rgba8,
-        vec![255; 16],
-    )
-    .unwrap()
+    ImageAsset::new(source, ImageExtent::new(2, 2), ImageFormat::Rgba8, pixels).unwrap()
 }
 
 fn prepared_image_snapshot() -> PreparedImageSnapshot {
     let handle = nara_asset::allocate_anonymous_handle().unwrap();
     let mut images = Assets::<ImageAsset>::default();
-    assert!(images.insert(handle, test_image()).is_none());
-    let image = images.get(handle).unwrap();
-    PreparedImageSnapshot::new(
-        RenderResourceSnapshot::new(
-            image_resource_key(handle),
-            AssetVersion::from_raw(1),
-            images.slot_revision(handle),
-            image_descriptor_hash(image),
-        ),
-        PreparedImageResource::from_image(image),
-    )
+    let mut states = AssetStates::default();
+    let image = test_image();
+    let source_hash = image.source().source_hash();
+    let import_hash = image.source().artifact().key().digest();
+    images
+        .commit_loaded(
+            handle,
+            image,
+            &mut states,
+            &mut AssetEvents::default(),
+            Some(source_hash),
+            Some(import_hash),
+        )
+        .unwrap();
+    PreparedImageSnapshot::capture(handle, &images, &states).unwrap()
 }
 
 fn material_key() -> SpriteMaterialKey {

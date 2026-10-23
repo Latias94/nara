@@ -277,9 +277,6 @@ fn map_image_error(error: UiPreparedImageError) -> UiPresentationContentError {
         UiPreparedImageError::Ambiguous { id, first, second } => {
             UiPresentationContentError::AmbiguousImage { id, first, second }
         }
-        UiPreparedImageError::InvalidKind { id, key } => {
-            UiPresentationContentError::InvalidImageResourceKind { id, key }
-        }
     }
 }
 

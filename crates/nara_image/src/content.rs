@@ -147,14 +147,11 @@ impl ImageContentSnapshot {
     #[cfg(any(feature = "render-prepare", test))]
     #[must_use]
     pub fn prepared_snapshot(&self) -> crate::PreparedImageSnapshot {
-        crate::PreparedImageSnapshot::new(
-            nara_render::RenderResourceSnapshot::new(
-                crate::image_resource_key(self.handle),
-                self.version,
-                self.slot.clone(),
-                crate::image_descriptor_hash(&self.image),
-            ),
-            crate::PreparedImageResource::from_image(&self.image),
+        crate::PreparedImageSnapshot::from_image(
+            self.handle,
+            self.version,
+            self.slot.clone(),
+            &self.image,
         )
     }
 }

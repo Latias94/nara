@@ -18,7 +18,7 @@ use nara_ecs::{
 };
 use nara_identity::EntityLookup;
 use nara_image::{
-    ImageAsset, ImageReloadStats, PreparedImageResource, PreparedImageSnapshot, image_resource_key,
+    ImageAsset, ImageReloadStats, PreparedImageSnapshot, PreparedImages, image_resource_key,
     prepare_images,
 };
 use nara_reflect::{
@@ -28,7 +28,6 @@ use nara_reflect::{
     PersistentComponent, PersistentComponentProvider, component_registry,
     register_schema_provider_for_plugin,
 };
-use nara_render::PreparedRenderResources;
 use nara_scene::{
     SceneAuthoringRevision, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
     SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
@@ -463,13 +462,10 @@ fn current_image_snapshot(world: &World) -> Option<PreparedImageSnapshot> {
         return None;
     }
     let handle = world.resource::<NativeImageSource>().0;
-    let record = world
-        .resource::<PreparedRenderResources<PreparedImageResource>>()
-        .get(image_resource_key(handle))?;
-    Some(PreparedImageSnapshot::new(
-        record.snapshot().clone(),
-        record.resource()?.clone(),
-    ))
+    world
+        .resource::<PreparedImages>()
+        .get(image_resource_key(handle))
+        .cloned()
 }
 
 fn reconcile_image_native_state(world: &mut World) {

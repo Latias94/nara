@@ -25,8 +25,8 @@ or a shared eviction executor.
 
 `nara_asset` owns source asset identity, request scheduling, runtime load state, reload
 generations, source-change diagnostics, and typed runtime asset tables. Domain asset crates own
-decode/import logic and typed value application. Render crates own prepared render resources and
-backend GPU caches.
+decode/import logic, typed value application and prepared content associations. `nara_render` owns
+neutral render identities and frame phases; backend crates own GPU caches.
 
 Runtime acquisition and source reload are separate operations:
 
@@ -117,15 +117,18 @@ The accepted identity, ownership and reload contract is:
   A retained Host receipt cannot keep it alive after shutdown. Only the current World-bound receipt
   may acknowledge completed reconciliation and install the new queue; abandonment or overflow
   during reconciliation leaves the obligation outstanding. No scan executes in a watcher callback.
-- Prepared render resources are backend-neutral cache entries. Backend-native GPU objects remain in
-  backend caches and are invalidated from prepared resource identity/version changes.
+- Prepared render resources are backend-neutral cache entries. Image owns their opaque
+  identity/pixel association and complete capture collection as refined in ADR 0033. Render
+  consumers retain complete snapshots rather than reassembling a pair from independent inputs.
+  Backend-native GPU objects remain in backend caches and are invalidated from prepared resource
+  identity/version changes.
 
 ```mermaid
 sequenceDiagram
     participant Watch as Watcher / Manual Source Change
     participant Asset as nara_asset
     participant Domain as Domain Import Plugin
-    participant Prepared as nara_render Prepared Resources
+    participant Prepared as Domain Prepared Captures
     participant Backend as Render Backend Cache
 
     Watch->>Asset: AssetSourceChange

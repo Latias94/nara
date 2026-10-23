@@ -17,24 +17,28 @@ pub(crate) fn two_image_versions() -> [nara_image::PreparedImageSnapshot; 2] {
 }
 
 pub(crate) fn image_versions(width: u32, height: u32) -> [nara_image::PreparedImageSnapshot; 2] {
-    use nara_asset::{AssetVersion, Assets};
-    use nara_image::{
-        PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash, image_resource_key,
-    };
+    use nara_asset::{AssetEvents, AssetStates, Assets};
+    use nara_image::PreparedImageSnapshot;
     let handle = nara_asset::allocate_anonymous_handle::<nara_image::ImageAsset>().unwrap();
     let mut images = Assets::<nara_image::ImageAsset>::default();
+    let mut states = AssetStates::default();
+    let mut events = AssetEvents::default();
     image_assets(width, height).map(|image| {
-        images.insert(handle, image);
-        let image = images.get(handle).unwrap();
-        PreparedImageSnapshot::new(
-            nara_render::RenderResourceSnapshot::new(
-                image_resource_key(handle),
-                AssetVersion::from_raw(1),
-                images.slot_revision(handle),
-                image_descriptor_hash(image),
-            ),
-            PreparedImageResource::from_image(image),
-        )
+        let source_hash = image.source().source_hash();
+        let import_hash = image.source().artifact().key().digest();
+        let version = images
+            .commit_loaded(
+                handle,
+                image,
+                &mut states,
+                &mut events,
+                Some(source_hash),
+                Some(import_hash),
+            )
+            .unwrap();
+        let snapshot = PreparedImageSnapshot::capture(handle, &images, &states).unwrap();
+        assert_eq!(snapshot.identity().asset_version(), version);
+        snapshot
     })
 }
 
@@ -234,6 +238,16 @@ fn exact_image_versions_render_together_and_repeat_without_reupload() {
     let [old, new] = two_image_versions();
     assert_eq!(old.identity().key(), new.identity().key());
     assert_ne!(old.identity(), new.identity());
+    assert_eq!(
+        old.identity().asset_version(),
+        nara_asset::AssetVersion::from_raw(1)
+    );
+    assert_eq!(
+        new.identity().asset_version(),
+        nara_asset::AssetVersion::from_raw(2)
+    );
+    assert_eq!(old.resource().pixels(), &[255, 0, 0, 255]);
+    assert_eq!(new.resource().pixels(), &[0, 255, 0, 255]);
     let batches = [old.clone(), new, old]
         .into_iter()
         .enumerate()

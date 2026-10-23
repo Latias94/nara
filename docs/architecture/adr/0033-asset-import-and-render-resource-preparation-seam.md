@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Amended**: 2026-10-23 for Image-owned immutable prepared captures
 **Refined By**: ADR 0037: Runtime Asset Acquisition, Reload, and Lifetime Policy; ADR 0040:
 Render Resource Lifetime and Submitter Ownership; ADR 0054: GPU Upload Budget and Buffer
 Allocation Policy; ADR 0080: Domain-Owned TaskUpdate Integration Sets;
@@ -53,9 +54,16 @@ Rules:
   context and an atomically published artifact group.
 - Image assets describe image content and import identity only. Sampler, alpha, tint, and material
   policy live above images in `nara_material`.
-- `nara_render` owns the backend-neutral render resource preparation interface and frame phase
-  vocabulary: loader versions, exact asset-slot revisions, render resource descriptors, snapshot
-  cache identity, and prepare/queue ordering.
+- `nara_render` owns backend-neutral render resource identity and frame phase vocabulary: loader
+  versions, exact asset-slot revisions, descriptor digests, and prepare/queue ordering. A neutral
+  identity alone does not prove association with any domain content.
+- `nara_image` owns `PreparedImageSnapshot`, an opaque association of exact immutable pixels and
+  their complete render identity, and the `PreparedImages` collection of those captures. A managed
+  `ImageContentSnapshot` projects its admitted content; code-first capture reads the actual typed
+  `Assets<ImageAsset>` slot and applicable usable `AssetStates` without requiring a source catalog.
+  Consumers may inspect or clone a capture, but cannot supply identity and pixels independently.
+  Collection insertion accepts only a complete capture. No generic writable identity/content
+  pairing store or speculative preparation framework is retained for hypothetical asset domains.
 - `nara_render_wgpu` owns the wgpu GPU resource cache. It consumes backend-neutral imported assets
   and render resource descriptors, then creates textures, buffers, samplers, bind groups, and
   pipelines.
@@ -75,7 +83,7 @@ The first implementation slice after scene/prefab serialization should therefore
 1. source-side `.meta` identity and stable `AssetRef::StableId` resolution;
 2. stable imported-artifact identity plus concrete domain-owned import execution;
 3. image import and texture descriptor assets;
-4. render resource preparation state in `nara_render`;
+4. neutral render identity in `nara_render` and coherent Image-owned prepared state;
 5. material-aware sprite/tilemap usage through typed handles and prepared render resources;
 6. wgpu image texture caches plus sampler/material bind-group caches in `nara_render_wgpu`.
 
@@ -152,7 +160,7 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
   `ImageImporter` as the concrete execution resource, spawns image reload jobs from
   `AssetReloadRequest` values in
   `AssetTaskUpdateSet::SpawnJobs`, applies typed `ImageAsset` results in
-  `AssetTaskUpdateSet::ApplyResults`, and then updates backend-neutral `PreparedImageResources` in
+  `AssetTaskUpdateSet::ApplyResults`, and then updates backend-neutral `PreparedImages` in
   `CoreStage::Prepare`.
 - `ImagePlugin` composes `ImagePreparePlugin` rather than registering a parallel prepare path. This
   keeps prepare stats and render-resource snapshot replacement single-pass even when sprite
@@ -177,6 +185,10 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
   exact `AssetSlotRevision`, prepared-resource snapshots, and source dependency edges behind those
   handles. Direct slot mutation is observable through the same exact revision even when loader
   metadata is unchanged.
+- An Image capture derives its slot, usable version, kind and descriptor inside the Image owner.
+  The shared pixel allocation and its retention owner live as long as any captured packet clone.
+  A successor publication or direct slot replacement cannot mutate an earlier capture. Equal
+  captures reuse preparation and GPU cache entries without a per-frame full-pixel hash.
 - Removed source assets clear `Assets<ImageAsset>` state and prepared image resources. Failed first
   loads and failed reloads update asset state without inventing a replacement backend resource.
 - `nara_asset_watch` is the optional desktop filesystem adapter. It owns `notify` and converts raw

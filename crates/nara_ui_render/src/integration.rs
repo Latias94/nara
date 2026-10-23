@@ -6,8 +6,8 @@ use std::{
 use nara_app::{App, Plugin, PluginDefinition, PluginDefinitionId, PluginError};
 use nara_asset::AssetServer;
 use nara_ecs::{Mut, ResMut, Resource, World, system::SystemParam};
-use nara_image::{IMAGE_PREPARE_PLUGIN_ID, PreparedImageResource};
-use nara_render::{PreparedRenderResources, RenderTarget};
+use nara_image::{IMAGE_PREPARE_PLUGIN_ID, PreparedImages};
+use nara_render::RenderTarget;
 use nara_text::FontFace;
 use nara_ui_kernel::{UiFrame, UiSurfaceId};
 use nara_window::WindowId;
@@ -592,7 +592,7 @@ pub fn compile_ui_paint_packets(
     let image_index = UiPreparedImages::capture(
         &referenced_images,
         world.get_resource::<AssetServer>(),
-        world.get_resource::<PreparedRenderResources<PreparedImageResource>>(),
+        world.get_resource::<PreparedImages>(),
     );
     let mut outcomes = Vec::new();
     let mut stats = UiPaintCompileStats::default();

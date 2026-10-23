@@ -2,8 +2,8 @@ use std::cmp::Ordering;
 
 use nara_core::{Color, Vec2};
 use nara_ecs::{Res, ResMut};
-use nara_image::{PreparedImageResource, PreparedImageSnapshot, image_resource_key};
-use nara_render::{ExtractedView, ExtractedViews, PreparedRenderResources, RenderPrepareStatus};
+use nara_image::{PreparedImageSnapshot, PreparedImages, image_resource_key};
+use nara_render::{ExtractedView, ExtractedViews};
 
 use crate::{
     ExtractedSprite, PreparedMaterial2d, QueuedSpriteItem, QueuedSpriteItems, SpriteBatch,
@@ -16,7 +16,7 @@ pub fn queue_sprites(
     mut stats: ResMut<SpriteRenderStats>,
     views: Res<ExtractedViews>,
     extracted: Res<crate::ExtractedSprites>,
-    prepared_images: Option<Res<PreparedRenderResources<PreparedImageResource>>>,
+    prepared_images: Option<Res<PreparedImages>>,
 ) {
     queued.clear();
     stats.unprepared_textures = 0;
@@ -218,7 +218,7 @@ struct QueueableSprite<'a> {
 
 fn resolve_queueable_sprites<'a>(
     sprites: impl Iterator<Item = &'a ExtractedSprite> + 'a,
-    prepared_images: Option<&'a PreparedRenderResources<PreparedImageResource>>,
+    prepared_images: Option<&'a PreparedImages>,
     stats: &'a mut SpriteRenderStats,
 ) -> impl Iterator<Item = QueueableSprite<'a>> + 'a {
     sprites.filter_map(move |sprite| {
@@ -236,7 +236,7 @@ fn resolve_queueable_sprites<'a>(
 
 fn resolve_sprite_material(
     sprite: &ExtractedSprite,
-    prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
+    prepared_images: Option<&PreparedImages>,
     stats: &mut SpriteRenderStats,
 ) -> Option<(
     SpriteMaterialKey,
@@ -273,7 +273,7 @@ fn resolve_sprite_material(
 
 fn resolve_image(
     texture: nara_asset::Handle<nara_image::ImageAsset>,
-    prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
+    prepared_images: Option<&PreparedImages>,
     stats: &mut SpriteRenderStats,
 ) -> Option<PreparedImageSnapshot> {
     let key = image_resource_key(texture);
@@ -281,20 +281,9 @@ fn resolve_image(
         stats.unprepared_textures = stats.unprepared_textures.saturating_add(1);
         return None;
     };
-    let Some(record) = prepared_images.get(key) else {
+    let Some(snapshot) = prepared_images.get(key) else {
         stats.unprepared_textures = stats.unprepared_textures.saturating_add(1);
         return None;
     };
-    let resource = match record.status() {
-        RenderPrepareStatus::Ready => record.resource(),
-        RenderPrepareStatus::Failed(_) => None,
-    };
-    let Some(resource) = resource else {
-        stats.unprepared_textures = stats.unprepared_textures.saturating_add(1);
-        return None;
-    };
-    Some(PreparedImageSnapshot::new(
-        record.snapshot().clone(),
-        resource.clone(),
-    ))
+    Some(snapshot.clone())
 }

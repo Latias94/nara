@@ -5,7 +5,6 @@ use nara::advanced_prelude::*;
 use nara::hierarchy::{
     HierarchyCommandsExt, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner,
 };
-use nara::image::PreparedImageSnapshot;
 
 use super::{ACTIVATE_ACTION, DOMAIN, UI_TEXTURE_STABLE_ID};
 
@@ -116,17 +115,11 @@ pub(super) fn capture_prepared_image(
     handle: Handle<ImageAsset>,
 ) -> Result<PreparedImageSnapshot, Box<dyn Error>> {
     let key = image_resource_key(handle);
-    let record = world
-        .resource::<PreparedRenderResources<PreparedImageResource>>()
+    world
+        .resource::<PreparedImages>()
         .get(key)
-        .ok_or("the gallery image was not prepared")?;
-    let resource = record
-        .resource()
-        .ok_or("the gallery image preparation did not retain a ready resource")?;
-    Ok(PreparedImageSnapshot::new(
-        record.snapshot().clone(),
-        resource.clone(),
-    ))
+        .cloned()
+        .ok_or_else(|| "the gallery image was not prepared".into())
 }
 
 pub(super) fn surface_id(value: u64) -> UiSurfaceId {

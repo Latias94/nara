@@ -1,14 +1,15 @@
 use std::{
+    collections::BTreeMap,
     fmt::{self, Debug, Formatter},
     sync::Arc,
 };
 
 use nara_app::{App, CoreStage, Plugin, PluginError};
-use nara_asset::{AssetStates, Assets, ImportArtifactDigest, SourceHash};
-use nara_ecs::{Res, ResMut, Resource};
-use nara_render::{
-    PreparedRenderResources, RenderResourceKey, RenderResourceKind, RenderResourceSnapshot,
+use nara_asset::{
+    AssetSlotRevision, AssetStates, AssetVersion, Assets, Handle, ImportArtifactDigest, SourceHash,
 };
+use nara_ecs::{Res, ResMut, Resource};
+use nara_render::{RenderResourceKey, RenderResourceKind, RenderResourceSnapshot};
 
 use crate::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, asset::ImagePixelRetention};
 
@@ -109,6 +110,16 @@ impl PartialEq for PreparedImageResource {
 impl Eq for PreparedImageResource {}
 
 /// Exact immutable prepared image value retained by a render packet.
+///
+/// Identity and pixels cannot be assembled independently:
+///
+/// ```compile_fail
+/// use nara_image::{PreparedImageResource, PreparedImageSnapshot};
+/// use nara_render::RenderResourceSnapshot;
+/// fn pair(identity: RenderResourceSnapshot, pixels: PreparedImageResource) -> PreparedImageSnapshot {
+///     PreparedImageSnapshot::new(identity, pixels)
+/// }
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedImageSnapshot {
     identity: RenderResourceSnapshot,
@@ -116,9 +127,41 @@ pub struct PreparedImageSnapshot {
 }
 
 impl PreparedImageSnapshot {
+    /// Captures a code-first image directly from its typed store and usable load state.
+    ///
+    /// A managed catalog is not required. The returned value retains the exact stored pixels;
+    /// later slot replacement cannot change an already captured render packet.
     #[must_use]
-    pub fn new(identity: RenderResourceSnapshot, resource: PreparedImageResource) -> Self {
-        Self { identity, resource }
+    pub fn capture(
+        handle: Handle<ImageAsset>,
+        images: &Assets<ImageAsset>,
+        states: &AssetStates,
+    ) -> Option<Self> {
+        let version = states.state(handle.id())?.usable_version()?;
+        let image = images.get(handle)?;
+        Some(Self::from_image(
+            handle,
+            version,
+            images.slot_revision(handle),
+            image,
+        ))
+    }
+
+    pub(super) fn from_image(
+        handle: Handle<ImageAsset>,
+        version: AssetVersion,
+        slot: AssetSlotRevision,
+        image: &ImageAsset,
+    ) -> Self {
+        Self {
+            identity: RenderResourceSnapshot::new(
+                image_resource_key(handle),
+                version,
+                slot,
+                image_descriptor_hash(image),
+            ),
+            resource: PreparedImageResource::from_image(image),
+        }
     }
 
     #[must_use]
@@ -129,6 +172,43 @@ impl PreparedImageSnapshot {
     #[must_use]
     pub const fn resource(&self) -> &PreparedImageResource {
         &self.resource
+    }
+}
+
+/// Image-owned prepared values. Each entry retains its identity and pixels together.
+///
+/// The collection is a cache of captures, not authority over current asset publication.
+#[derive(Debug, Default, Resource)]
+pub struct PreparedImages {
+    images: BTreeMap<RenderResourceKey, PreparedImageSnapshot>,
+}
+
+impl PreparedImages {
+    pub fn insert(&mut self, snapshot: PreparedImageSnapshot) -> Option<PreparedImageSnapshot> {
+        self.images.insert(snapshot.identity().key(), snapshot)
+    }
+
+    #[must_use]
+    pub fn get(&self, key: RenderResourceKey) -> Option<&PreparedImageSnapshot> {
+        self.images.get(&key)
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = RenderResourceKey> + '_ {
+        self.images.keys().copied()
+    }
+
+    pub fn remove(&mut self, key: RenderResourceKey) -> Option<PreparedImageSnapshot> {
+        self.images.remove(&key)
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.images.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.images.is_empty()
     }
 }
 
@@ -161,7 +241,7 @@ impl Plugin for ImagePreparePlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<Assets<ImageAsset>>()?;
         app.init_resource::<AssetStates>()?;
-        app.init_resource::<PreparedRenderResources<PreparedImageResource>>()?;
+        app.init_resource::<PreparedImages>()?;
         app.init_resource::<ImagePrepareStats>()?;
         app.add_systems(CoreStage::Prepare, prepare_images)?;
         Ok(())
@@ -171,7 +251,7 @@ impl Plugin for ImagePreparePlugin {
 pub fn prepare_images(
     images: Res<Assets<ImageAsset>>,
     states: Res<AssetStates>,
-    mut prepared_images: ResMut<PreparedRenderResources<PreparedImageResource>>,
+    mut prepared_images: ResMut<PreparedImages>,
     mut stats: ResMut<ImagePrepareStats>,
 ) {
     *stats = ImagePrepareStats::default();
@@ -209,11 +289,17 @@ pub fn prepare_images(
             image_descriptor_hash(image),
         );
 
-        if !prepared_images.needs_prepare(&snapshot) {
+        if prepared_images
+            .get(key)
+            .is_some_and(|prepared| prepared.identity() == &snapshot)
+        {
             continue;
         }
 
-        prepared_images.insert_ready(snapshot, PreparedImageResource::from_image(image));
+        prepared_images.insert(PreparedImageSnapshot {
+            identity: snapshot,
+            resource: PreparedImageResource::from_image(image),
+        });
         stats.prepared += 1;
     }
 }

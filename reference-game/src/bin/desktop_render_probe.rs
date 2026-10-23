@@ -15,13 +15,13 @@ use nara::{
     asset::{AssetEvents, AssetStates, Assets},
     ecs::{Entity, Query, With, schedule::IntoScheduleConfigs, system::SystemParam},
     gameplay::{GameplayCommandQueue, GameplayCommandSet},
-    image::{ImageAsset, PreparedImageResource},
+    image::{ImageAsset, PreparedImages},
     prelude::{App, CoreStage, FixedTime, Plugin, Res, ResMut, Resource},
     project_host::{
         DesktopRunOutcome,
         advanced::{RuntimeProbe, desktop_run_with_probe},
     },
-    render::{PreparedRenderResources, RenderFrame},
+    render::RenderFrame,
     render_wgpu::WgpuRenderBackend,
     sprite_render::__private::SpriteBatches,
     window::{
@@ -250,7 +250,7 @@ impl ProductContinuity {
 
 #[derive(SystemParam)]
 struct ProductRenderInputs<'w, 's> {
-    prepared: Res<'w, PreparedRenderResources<PreparedImageResource>>,
+    prepared: Res<'w, PreparedImages>,
     batches: Res<'w, SpriteBatches>,
     frame: Res<'w, RenderFrame>,
     backend: Res<'w, WgpuRenderBackend>,
@@ -265,7 +265,7 @@ struct ProductRenderInputs<'w, 's> {
 
 #[derive(SystemParam)]
 struct StartupPresentInputs<'w> {
-    prepared: Res<'w, PreparedRenderResources<PreparedImageResource>>,
+    prepared: Res<'w, PreparedImages>,
     batches: Res<'w, SpriteBatches>,
     frame: Res<'w, RenderFrame>,
     backend: Res<'w, WgpuRenderBackend>,

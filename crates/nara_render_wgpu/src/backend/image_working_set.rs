@@ -6,8 +6,8 @@ use nara_core::Vec2;
 use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
 };
-use nara_image::{ImageAsset, PreparedImageResource, PreparedImageSnapshot};
-use nara_render::{Camera2d, ExtractedViews, PreparedRenderResources, RenderFrame, RenderImage2d};
+use nara_image::{ImageAsset, PreparedImages};
+use nara_render::{Camera2d, ExtractedViews, RenderFrame, RenderImage2d};
 use nara_sprite::Sprite;
 use nara_transform::Transform2d;
 use nara_ui_kernel::{
@@ -125,14 +125,11 @@ fn captured_images(editor: bool, shared: bool) -> WgpuCapturedFrame {
             .unwrap()
         };
         let image = if shared {
-            let record = world
-                .resource::<PreparedRenderResources<PreparedImageResource>>()
+            world
+                .resource::<PreparedImages>()
                 .get(nara_image::image_resource_key(handles[0]))
-                .unwrap();
-            PreparedImageSnapshot::new(
-                record.snapshot().clone(),
-                record.resource().unwrap().clone(),
-            )
+                .unwrap()
+                .clone()
         } else {
             crate::readback_tests::two_image_versions()[0].clone()
         };

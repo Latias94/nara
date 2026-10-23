@@ -54,11 +54,7 @@ use nara_transform::PresentedSpatialSnapshot2d;
 use nara_transform::Transform2d;
 use nara_window::{PrimaryWindowId, Window, WindowId};
 
-pub use prepare::{
-    PreparedRenderResource, PreparedRenderResourceRecord, PreparedRenderResources,
-    RenderPrepareError, RenderPrepareStatus, RenderResourceKey, RenderResourceKind,
-    RenderResourceSnapshot,
-};
+pub use prepare::{RenderResourceKey, RenderResourceKind, RenderResourceSnapshot};
 
 #[doc(hidden)]
 pub mod __private {

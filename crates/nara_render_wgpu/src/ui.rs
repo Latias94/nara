@@ -354,16 +354,15 @@ mod tests {
     use super::*;
 
     use nara_asset::{
-        ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetVersion, Assets, ImportArtifactKey,
-        ImportArtifactRecord, ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId,
-        ImporterVersion, SourceHash, StableAssetId,
+        ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetPath, AssetStates, Assets,
+        ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
+        ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
     };
 
     use nara_image::{
         ImageAsset, ImageExtent, ImageFormat, ImageImportSettings, ImageSourceMetadata,
-        PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash, image_resource_key,
+        PreparedImageSnapshot,
     };
-    use nara_render::RenderResourceSnapshot;
     use nara_text::{FontFace, bundled_font_face};
     use nara_ui_kernel::{
         UiAuthoringSnapshotBuilder, UiBorder, UiBrush, UiColor, UiCompiler, UiCornerRadii,
@@ -755,14 +754,19 @@ mod tests {
         .unwrap();
         let handle = nara_asset::allocate_anonymous_handle().unwrap();
         let mut images = Assets::<ImageAsset>::default();
-        assert!(images.insert(handle, image).is_none());
-        let image = images.get(handle).unwrap();
-        let identity = RenderResourceSnapshot::new(
-            image_resource_key(handle),
-            AssetVersion::from_raw(1),
-            images.slot_revision(handle),
-            image_descriptor_hash(image),
-        );
-        PreparedImageSnapshot::new(identity, PreparedImageResource::from_image(image))
+        let mut states = AssetStates::default();
+        let source_hash = image.source().source_hash();
+        let import_hash = image.source().artifact().key().digest();
+        images
+            .commit_loaded(
+                handle,
+                image,
+                &mut states,
+                &mut AssetEvents::default(),
+                Some(source_hash),
+                Some(import_hash),
+            )
+            .unwrap();
+        PreparedImageSnapshot::capture(handle, &images, &states).unwrap()
     }
 }

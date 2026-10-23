@@ -7,13 +7,9 @@ use nara_asset::{
     AssetId, AssetPath, AssetServer, AssetSlotRevision, AssetStates, AssetVersion, Assets, Handle,
     ImportArtifactDigest, LoadState, SourceHash, StableAssetId,
 };
+#[cfg(feature = "presentation-ui")]
+use nara_image::PreparedImageSnapshot;
 use nara_image::{ImageAsset, ImageExtent, ImageFormat, ImageImportSettings};
-#[cfg(feature = "presentation-ui")]
-use nara_image::{
-    PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash, image_resource_key,
-};
-#[cfg(feature = "presentation-ui")]
-use nara_render::RenderResourceSnapshot;
 use nara_ui::__private::{
     UiImageChoice, UiImageChoiceGeneration, UiImageChoiceSet, UiStructureRejection,
 };
@@ -283,15 +279,8 @@ impl EditorAuthoringImageCatalogCandidate {
             stable_ids_by_path.insert(path.clone(), stable_id);
             captured_ids.insert(id);
             #[cfg(feature = "presentation-ui")]
-            let prepared = PreparedImageSnapshot::new(
-                RenderResourceSnapshot::new(
-                    image_resource_key(handle),
-                    state.version(),
-                    product.slot_revision.clone(),
-                    image_descriptor_hash(image),
-                ),
-                PreparedImageResource::from_image(image),
-            );
+            let prepared = PreparedImageSnapshot::capture(handle, images, states)
+                .ok_or(EditorAuthoringImageCatalogError::LoadedStateMismatch { id })?;
             captured.insert(
                 identity,
                 CapturedAuthoringImage {

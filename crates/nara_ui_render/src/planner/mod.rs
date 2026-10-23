@@ -410,8 +410,6 @@ pub enum UiPresentationContentError {
         first: RenderResourceKey,
         second: RenderResourceKey,
     },
-    #[error("UI image `{id}` resolved to non-image render resource {key:?}")]
-    InvalidImageResourceKind { id: String, key: RenderResourceKey },
     #[error("the UI target plan exceeds its {limit} referenced-image limit")]
     ReferencedImageLimitExceeded { limit: usize },
     #[error("the UI target plan exceeds its {limit} referenced-glyph limit")]

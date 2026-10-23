@@ -389,8 +389,8 @@ pub mod advanced_prelude {
     };
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     pub use nara_image::{
-        ImagePreparePlugin, ImagePrepareStats, PreparedImageResource, image_descriptor_hash,
-        image_resource_key, prepare_images,
+        ImagePreparePlugin, ImagePrepareStats, PreparedImageResource, PreparedImageSnapshot,
+        PreparedImages, image_descriptor_hash, image_resource_key, prepare_images,
     };
     #[cfg(any(
         feature = "presentation-2d",
@@ -398,11 +398,9 @@ pub mod advanced_prelude {
         feature = "render-wgpu"
     ))]
     pub use nara_render::{
-        Extent2d, ExtractedView, ExtractedViews, FrameStats, PreparedRenderResource,
-        PreparedRenderResourceRecord, PreparedRenderResources, RenderBackendState,
+        Extent2d, ExtractedView, ExtractedViews, FrameStats, RenderBackendState,
         RenderBackendStatus, RenderFrame, RenderFrameSkip, RenderFrameSkipReason, RenderFrameState,
-        RenderPrepareError, RenderPrepareStatus, RenderResourceKey, RenderResourceKind,
-        RenderResourceSnapshot, ViewportRect,
+        RenderResourceKey, RenderResourceKind, RenderResourceSnapshot, ViewportRect,
     };
     #[cfg(feature = "runtime-ui")]
     pub use nara_ui::advanced::{

@@ -1,10 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use nara_asset::AssetServer;
-use nara_image::{PreparedImageResource, PreparedImageSnapshot};
-use nara_render::{
-    PreparedRenderResources, RenderPrepareStatus, RenderResourceKey, RenderResourceKind,
-};
+use nara_image::{PreparedImageSnapshot, PreparedImages};
+use nara_render::RenderResourceKey;
 use nara_ui_kernel::{UiFrame, UiImageId, UiPaintPrimitive, UiResolvedBrush};
 
 #[derive(Debug, Default)]
@@ -26,7 +24,7 @@ impl UiPreparedImages {
     pub(crate) fn capture(
         referenced: &BTreeSet<UiImageId>,
         asset_server: Option<&AssetServer>,
-        prepared: Option<&PreparedRenderResources<PreparedImageResource>>,
+        prepared: Option<&PreparedImages>,
     ) -> Self {
         let (Some(asset_server), Some(prepared)) = (asset_server, prepared) else {
             return Self::default();
@@ -36,28 +34,17 @@ impl UiPreparedImages {
             return index;
         }
         for key in prepared.keys() {
-            let Some(record) = prepared.get(key) else {
-                continue;
-            };
-            let resource = match record.status() {
-                RenderPrepareStatus::Ready => record.resource(),
-                RenderPrepareStatus::Failed(_) => None,
-            };
-            let Some(resource) = resource else {
+            let Some(snapshot) = prepared.get(key) else {
                 continue;
             };
             let path = asset_server.path(key.asset_id());
             let stable_id = asset_server
                 .stable_id(key.asset_id())
                 .map(|id| id.to_string());
-            let mut snapshot = None;
             for id in referenced {
                 if !alias_matches(id.as_str(), path, stable_id.as_deref()) {
                     continue;
                 }
-                let snapshot = snapshot.get_or_insert_with(|| {
-                    PreparedImageSnapshot::new(record.snapshot().clone(), resource.clone())
-                });
                 index.insert_alias(id.as_str().to_owned(), snapshot.clone());
             }
         }
@@ -94,21 +81,12 @@ impl UiPreparedImages {
                 second,
             });
         }
-        let snapshot =
-            self.images
-                .get(id.as_str())
-                .cloned()
-                .ok_or_else(|| UiPreparedImageError::Missing {
-                    id: id.as_str().to_owned(),
-                })?;
-        let key = snapshot.identity().key();
-        if key.kind() != RenderResourceKind::IMAGE_2D {
-            return Err(UiPreparedImageError::InvalidKind {
+        self.images
+            .get(id.as_str())
+            .cloned()
+            .ok_or_else(|| UiPreparedImageError::Missing {
                 id: id.as_str().to_owned(),
-                key,
-            });
-        }
-        Ok(snapshot)
+            })
     }
 }
 
@@ -120,10 +98,6 @@ pub(super) enum UiPreparedImageError {
         id: String,
         first: RenderResourceKey,
         second: RenderResourceKey,
-    },
-    InvalidKind {
-        id: String,
-        key: RenderResourceKey,
     },
 }
 

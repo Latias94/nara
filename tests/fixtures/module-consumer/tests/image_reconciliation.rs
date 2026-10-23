@@ -11,10 +11,9 @@ use domain::{
     UnavailableReason, candidate, configuration_entity, empty_candidate, invalid_candidate,
 };
 use nara_app::{RuntimeControl, RuntimeControlRequestResult, RuntimeState};
-use nara_asset::Assets;
+use nara_asset::{AssetStates, Assets};
 use nara_fs::ContentDigest;
-use nara_image::{ImageAsset, ImageReloadStats, PreparedImageResource, image_resource_key};
-use nara_render::PreparedRenderResources;
+use nara_image::{ImageAsset, ImageReloadStats, PreparedImages, image_resource_key};
 use nara_tasks::{TaskPoolKind, TaskPools, TaskShutdownReport};
 use support::{IoGate, assert_image_queued, drive_until, with_runtime};
 
@@ -118,11 +117,18 @@ fn real_image_completion_uses_latest_accepted_revision_and_cannot_revive_unloade
         assert_ne!(snapshot.resource().source_hash(), initial_hash);
         let prepared = runtime
             .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>()
+            .resource::<PreparedImages>()
             .get(image_resource_key(fixture.handle))
             .unwrap();
-        assert_eq!(snapshot.identity(), prepared.snapshot());
-        assert_eq!(Some(snapshot.resource()), prepared.resource());
+        assert_eq!(snapshot.identity(), prepared.identity());
+        assert_eq!(snapshot.resource(), prepared.resource());
+        let facade_capture = nara_engine::image::PreparedImageSnapshot::capture(
+            fixture.handle,
+            runtime.world().resource::<Assets<ImageAsset>>(),
+            runtime.world().resource::<AssetStates>(),
+        )
+        .unwrap();
+        assert_eq!(snapshot, &facade_capture);
         assert!(!snapshot.resource().retains_source_allocation());
         let retained_snapshot = snapshot.clone();
         let retained_pixel_digest = ContentDigest::of_bytes(snapshot.resource().pixels());
@@ -195,7 +201,7 @@ fn real_image_completion_uses_latest_accepted_revision_and_cannot_revive_unloade
                 .is_none()
                 && runtime
                     .world()
-                    .resource::<PreparedRenderResources<PreparedImageResource>>()
+                    .resource::<PreparedImages>()
                     .get(image_resource_key(fixture.handle))
                     .is_none()
         });
@@ -284,12 +290,12 @@ fn real_image_task_close_keeps_incomplete_owner_and_retires_native_effects_exact
             .unwrap();
         let prepared = runtime
             .world()
-            .resource::<PreparedRenderResources<PreparedImageResource>>()
-            .get_ready(image_resource_key(fixture.handle))
+            .resource::<PreparedImages>()
+            .get(image_resource_key(fixture.handle))
             .unwrap();
         assert!(!image.pixels().is_empty());
-        assert_eq!(prepared.pixels(), image.pixels());
-        assert!(!prepared.retains_source_allocation());
+        assert_eq!(prepared.resource().pixels(), image.pixels());
+        assert!(!prepared.resource().retains_source_allocation());
         fixture.assert_import_work_released(runtime);
     });
 }
