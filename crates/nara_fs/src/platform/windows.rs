@@ -72,6 +72,11 @@ pub(crate) struct DirectoryEnumerationCursor {
     buffer: Box<[usize; DIRECTORY_ENUMERATION_BUFFER_WORDS]>,
 }
 
+pub(crate) fn write_at(file: &File, buffer: &[u8], offset: u64) -> io::Result<usize> {
+    use std::os::windows::fs::FileExt;
+    file.seek_write(buffer, offset)
+}
+
 pub(crate) fn restrictive_clone_directory(file: &File) -> Result<File, FsError> {
     restrictive_exact_self(
         file,

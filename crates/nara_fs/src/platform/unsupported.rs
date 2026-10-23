@@ -9,6 +9,13 @@ use crate::{
 
 pub(crate) struct DirectoryEnumerationCursor;
 
+pub(crate) fn write_at(_file: &File, _buffer: &[u8], _offset: u64) -> std::io::Result<usize> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "positional file writes are unsupported on this target",
+    ))
+}
+
 pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
     PlatformCapabilityMatrix {
         resolution: ResolutionTier::Unsupported,

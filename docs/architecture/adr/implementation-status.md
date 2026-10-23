@@ -4,6 +4,12 @@ This index separates architecture decisions from their recorded implementation c
 Decision and implementation states retain the scope of their linked evidence; updating this index
 does not requalify product behavior or change an ADR's acceptance.
 
+The [post-boundary U3 evidence](../../knowledge/engineering/verification/2026-10/2026-10-23T054535Z-post-boundary-u3-capability-write-cursor-windows-qualification-89d81288b77f48d79370b7a9dbf9b089.md)
+qualifies ADR 0070's capability-owned write cursor on Windows: mixed reads/seeks cannot reposition
+continuing writes, including lock/release and exact-handle name replacement. The combined App/FS
+211-test cohort passes, with three pre-existing privileged filesystem cases ignored. This does not
+extend earlier Linux lock evidence to the new cursor implementation or qualify performance.
+
 The [low-level integration](../../knowledge/engineering/verification/2026-10/2026-10-22T193724Z-u11-low-level-refactor-public-and-native-consumer-integration-ddb983fa80454657955de17ff65d1772.md) qualifies the bounded U1-U11 owner refactor: phase spatial cuts, retained asset intent,
 unique lock/task/close owners, typed codecs, facade derives, World identity operations and exact
 Gameplay success. Final owner329, root267/integration78, independent module77, Reference87/desktop6,

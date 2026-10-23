@@ -20,6 +20,7 @@ pub struct FileCapability {
     rights: CapabilityRights,
     trust: TrustMode,
     resolution: ResolutionTier,
+    write_offset: u64,
     native_aliases_possible: AtomicBool,
 }
 
@@ -89,6 +90,7 @@ impl FileCapability {
             rights,
             trust,
             resolution,
+            write_offset: 0,
             native_aliases_possible: AtomicBool::new(false),
         }
     }
@@ -156,10 +158,14 @@ impl FileCapability {
         })
     }
 
-    /// Borrows the already-authorized writable handle.
+    /// Borrows the already-authorized writable handle at this capability's logical write offset.
     ///
     /// Opening an existing file through a directory capability remains read-only. Only files
     /// created by a read-write capability currently carry write authority.
+    /// The offset starts at zero and advances by each successful write's byte count. It survives
+    /// writer reacquisition and lock/release; reads and reader seeks cannot reposition it.
+    /// This is not append mode: external changes to the file length do not move the write offset.
+    /// Requests exceeding the signed native file-offset range are rejected before I/O.
     pub fn writer(&mut self) -> Result<CapabilityWriter<'_>, FsError> {
         if self.rights == CapabilityRights::ReadOnly {
             return Err(FsError::ReadOnlyCapability {
@@ -168,6 +174,7 @@ impl FileCapability {
         }
         Ok(CapabilityWriter {
             file: &mut self.file,
+            offset: &mut self.write_offset,
         })
     }
 
@@ -372,18 +379,41 @@ pub struct CapabilityReader<'file> {
     offset: u64,
 }
 
+/// A borrowed writer continuing its capability's logical position on the exact authorized handle.
 pub struct CapabilityWriter<'file> {
     file: &'file mut File,
+    offset: &'file mut u64,
 }
 
 impl Write for CapabilityWriter<'_> {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        self.file.write(buffer)
+        let file = &*self.file;
+        write_at_offset(self.offset, buffer, |buffer, offset| {
+            platform::write_at(file, buffer, offset)
+        })
     }
 
     fn flush(&mut self) -> io::Result<()> {
         self.file.flush()
     }
+}
+
+fn write_at_offset(
+    offset: &mut u64,
+    buffer: &[u8],
+    write: impl FnOnce(&[u8], u64) -> io::Result<usize>,
+) -> io::Result<usize> {
+    if buffer.is_empty() {
+        return Ok(0);
+    }
+    // Validate the entire request before I/O, excluding negative Windows position sentinels.
+    offset
+        .checked_add(buffer.len() as u64)
+        .filter(|end| *end <= i64::MAX as u64)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "writer offset overflow"))?;
+    let written = write(buffer, *offset)?;
+    *offset += written as u64;
+    Ok(written)
 }
 
 impl Debug for CapabilityWriter<'_> {
@@ -451,5 +481,77 @@ impl Debug for CapabilityReader<'_> {
         formatter
             .debug_struct("CapabilityReader")
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use super::write_at_offset;
+
+    #[test]
+    fn write_offset_advances_by_partial_count_and_continues_at_that_position() {
+        let mut offset = 5;
+        let written = write_at_offset(&mut offset, b"abcd", |buffer, position| {
+            assert_eq!(buffer, b"abcd");
+            assert_eq!(position, 5);
+            Ok(2)
+        })
+        .unwrap();
+        assert_eq!(written, 2);
+        assert_eq!(offset, 7);
+        write_at_offset(&mut offset, b"cd", |buffer, position| {
+            assert_eq!(buffer, b"cd");
+            assert_eq!(position, 7);
+            Ok(buffer.len())
+        })
+        .unwrap();
+        assert_eq!(offset, 9);
+    }
+
+    #[test]
+    fn write_offset_is_unchanged_on_error_or_zero_progress() {
+        let mut offset = 7;
+        let error = write_at_offset(&mut offset, b"ab", |_, position| {
+            assert_eq!(position, 7);
+            Err(io::Error::from(io::ErrorKind::Interrupted))
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(offset, 7);
+        assert_eq!(
+            write_at_offset(&mut offset, b"ab", |_, position| {
+                assert_eq!(position, 7);
+                Ok(0)
+            })
+            .unwrap(),
+            0
+        );
+        assert_eq!(offset, 7);
+    }
+
+    #[test]
+    fn write_offset_checks_native_range_before_io_and_accepts_empty_writes() {
+        for initial in [u64::MAX - 1, i64::MAX as u64 - 1, u64::MAX] {
+            let mut offset = initial;
+            let error = write_at_offset(&mut offset, b"ab", |_, _| {
+                panic!("an overflowing write must not reach the native handle")
+            })
+            .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+            assert_eq!(offset, initial);
+        }
+        let mut offset = i64::MAX as u64 - 1;
+        assert_eq!(write_at_offset(&mut offset, b"a", |_, _| Ok(1)).unwrap(), 1);
+        assert_eq!(offset, i64::MAX as u64);
+        assert_eq!(
+            write_at_offset(&mut offset, b"", |_, _| {
+                panic!("an empty write must not reach the native handle")
+            })
+            .unwrap(),
+            0
+        );
+        assert_eq!(offset, i64::MAX as u64);
     }
 }

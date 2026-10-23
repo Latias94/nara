@@ -78,6 +78,17 @@ not compare-and-swap. Advisory locks provide cooperative protection only when al
 the same protocol. Durability receipts report completed OS-visible stages; they do not claim that
 physical media has persisted data the operating system reported as synced.
 
+### Borrowed file positions
+
+A borrowed reader has its own logical position. A writable file capability separately owns one
+logical write position, initially zero, which continues across writer borrows and lock/release.
+Readers, reader seeks, bounded reads and digest inspection cannot reposition subsequent writes.
+Writes use the exact authorized handle at that position and advance only by the actual returned
+byte count. This is not append mode or a content snapshot: external growth does not move the
+position, and concurrent foreign writes remain outside Nara's ownership guarantee. Requests beyond
+the signed native offset range reject before I/O. No reopen-by-path or second lock owner implements
+this cursor contract.
+
 ### Native lock ownership
 
 - `FileCapability::try_lock(self, mode)` consumes the file and returns one non-cloneable

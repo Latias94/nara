@@ -498,6 +498,10 @@ pub(crate) fn sync_file(file: &File) -> Result<FileSyncTier, FsError> {
     imp::sync_file(file)
 }
 
+pub(crate) fn write_at(file: &File, buffer: &[u8], offset: u64) -> std::io::Result<usize> {
+    imp::write_at(file, buffer, offset)
+}
+
 pub(crate) fn sync_directory(file: &File) -> Result<DirectorySyncTier, FsError> {
     imp::sync_directory(file)
 }

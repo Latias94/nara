@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File},
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -1067,6 +1067,17 @@ fn owned_lock_returns_original_created_file_write_and_sync_authority() {
     }
     let held = file.try_lock(LockMode::Exclusive).unwrap();
     assert_eq!(held.read_to_end_bounded(15).unwrap(), b"locked contents");
+    {
+        let mut reader = held.reader().unwrap();
+        reader.seek(SeekFrom::Start(7)).unwrap();
+        let mut pair = [0_u8; 2];
+        reader.read_exact(&mut pair).unwrap();
+        assert_eq!(&pair, b"co");
+    }
+    let contender = capability.open_file(&relative("workspace.lock")).unwrap();
+    let failure = contender.try_lock(LockMode::Exclusive).unwrap_err();
+    assert!(matches!(failure.error(), FsError::LockContended));
+    let contender = failure.into_file();
     let mut file = held.release().unwrap();
     assert_eq!(file.identity(), identity);
     assert_eq!(file.rights(), CapabilityRights::ReadWrite);
@@ -1076,6 +1087,7 @@ fn owned_lock_returns_original_created_file_write_and_sync_authority() {
         StageStatus::Achieved
     );
     assert_eq!(file.read_to_end_bounded(16).unwrap(), b"locked contents!");
+    let _next = contender.try_lock(LockMode::Exclusive).unwrap();
 }
 
 #[test]
@@ -1141,6 +1153,74 @@ fn readers_use_independent_positional_offsets() {
     second.read_exact(&mut second_pair).unwrap();
     assert_eq!(&first_pair, b"cd");
     assert_eq!(&second_pair, b"cd");
+}
+
+#[test]
+fn writer_position_survives_reads_seeks_and_reborrows() {
+    let root = TestRoot::new();
+    let capability = portable_read_write(&root);
+    let mut file = capability
+        .create_child_file(&component("asset.bin"))
+        .unwrap();
+    let identity = file.identity();
+    file.writer().unwrap().write_all(b"abcdef").unwrap();
+    {
+        let mut reader = file.reader().unwrap();
+        let mut pair = [0_u8; 2];
+        reader.read_exact(&mut pair).unwrap();
+        assert_eq!(&pair, b"ab");
+        reader.seek(SeekFrom::Start(99)).unwrap();
+    }
+    {
+        let mut writer = file.writer().unwrap();
+        assert_eq!(writer.write(&[]).unwrap(), 0);
+        writer.write_all(b"gh").unwrap();
+        writer.flush().unwrap();
+    }
+    assert_eq!(file.read_to_end_bounded(8).unwrap(), b"abcdefgh");
+    file.verify_digest(ContentDigest::of_bytes(b"abcdefgh"), 8)
+        .unwrap();
+    {
+        let mut first = file.reader().unwrap();
+        let mut second = file.reader().unwrap();
+        let mut pair = [0_u8; 2];
+        first.seek(SeekFrom::End(-2)).unwrap();
+        first.read_exact(&mut pair).unwrap();
+        assert_eq!(&pair, b"gh");
+        first.seek(SeekFrom::Current(-4)).unwrap();
+        first.read_exact(&mut pair).unwrap();
+        assert_eq!(&pair, b"ef");
+        second.read_exact(&mut pair).unwrap();
+        assert_eq!(&pair, b"ab");
+    }
+    file.writer().unwrap().write_all(b"ij").unwrap();
+    assert_eq!(file.identity(), identity);
+    assert_eq!(file.read_to_end_bounded(10).unwrap(), b"abcdefghij");
+}
+
+#[test]
+fn writer_keeps_exact_handle_and_position_after_name_replacement_and_external_growth() {
+    let root = TestRoot::new();
+    let capability = portable_read_write(&root);
+    let original = root.path().join("asset.bin");
+    let moved = root.path().join("moved.bin");
+    let mut file = capability
+        .create_child_file(&component("asset.bin"))
+        .unwrap();
+    let identity = file.identity();
+    file.writer().unwrap().write_all(b"abcdef").unwrap();
+    fs::rename(&original, &moved).unwrap();
+    fs::write(&original, b"replacement").unwrap();
+    {
+        let mut external = fs::OpenOptions::new().append(true).open(&moved).unwrap();
+        external.write_all(b"tail").unwrap();
+    }
+    assert_eq!(file.read_to_end_bounded(10).unwrap(), b"abcdeftail");
+    file.writer().unwrap().write_all(b"gh").unwrap();
+    assert_eq!(file.identity(), identity);
+    assert_eq!(file.read_to_end_bounded(10).unwrap(), b"abcdefghil");
+    assert_eq!(fs::read(&moved).unwrap(), b"abcdefghil");
+    assert_eq!(fs::read(&original).unwrap(), b"replacement");
 }
 
 #[test]

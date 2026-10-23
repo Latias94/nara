@@ -22,6 +22,11 @@ pub(crate) struct DirectoryEnumerationCursor {
     entries: rustix::fs::Dir,
 }
 
+pub(crate) fn write_at(file: &File, buffer: &[u8], offset: u64) -> std::io::Result<usize> {
+    use std::os::unix::fs::FileExt;
+    file.write_at(buffer, offset)
+}
+
 pub(crate) fn restrictive_clone_directory(file: &File) -> Result<File, FsError> {
     file.try_clone()
         .map_err(|source| FsError::io(FsOperation::CloneHandle, source))
