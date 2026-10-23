@@ -527,7 +527,11 @@ pub fn exercise_winit_accessibility_mapping_canary() -> WinitAccessibilityMappin
     runtime
         .with_driver_scope(|scope| {
             presenter::queue_component_accessibility_input(scope, platform.input)
-        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
     runtime
@@ -909,7 +913,11 @@ fn product_runtime_from_project(
                     queue.submit(command).unwrap();
                 }
             });
-        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap();
     candidate.complete_startup().unwrap().promote()
 }

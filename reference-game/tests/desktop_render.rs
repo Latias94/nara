@@ -321,7 +321,11 @@ fn desktop_weapon_keeps_its_local_offset_and_follows_the_player_in_same_tick_ext
     runtime
         .with_driver_scope(|scope| {
             apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Character('a')))
-        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
     runtime.drive(Duration::ZERO).unwrap();
@@ -404,7 +408,11 @@ fn render_terminal(outcome: WaveOutcome) -> RenderObservation {
                 scope,
                 ButtonDriverInput::Press(KeyCode::Character(movement_key)),
             )
-        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
     runtime.drive(Duration::ZERO).unwrap();
@@ -535,7 +543,11 @@ fn render_runtime_with_admission_edit(
                 assert!(!report.has_errors(), "{report:#?}");
                 edit(world);
             });
-        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap();
     candidate.complete_startup().unwrap().promote()
 }

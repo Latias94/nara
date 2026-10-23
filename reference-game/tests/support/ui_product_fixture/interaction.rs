@@ -77,7 +77,11 @@ pub(super) fn clear_focus(runtime: &mut RuntimeInstance) {
                 InputSeatId::PRIMARY,
                 InputWindowEvent::Focused(false),
             )
-        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
     runtime.drive(Duration::ZERO).unwrap();
@@ -94,7 +98,11 @@ pub(super) fn activate_gamepad(runtime: &mut RuntimeInstance) {
                 0,
                 ButtonTransitionPhase::Pressed,
             )
-        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
 }
@@ -128,7 +136,11 @@ pub(super) fn activate_component_accessibility(runtime: &mut RuntimeInstance) {
         action,
     );
     runtime
-        .with_driver_scope(|scope| queue_component_accessibility_input(scope, input)).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
+        .with_driver_scope(|scope| queue_component_accessibility_input(scope, input))
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
 }
@@ -210,7 +222,11 @@ pub(super) fn inject_keyboard(runtime: &mut RuntimeInstance, key: KeyCode) {
                 InputSeatId::PRIMARY,
                 ButtonDriverInput::Press(key),
             )
-        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
 }
@@ -224,7 +240,11 @@ pub(super) fn release_keyboard(runtime: &mut RuntimeInstance, key: KeyCode) {
                 InputSeatId::PRIMARY,
                 ButtonDriverInput::Release(key),
             )
-        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
 }
@@ -280,7 +300,11 @@ pub(super) fn pointer_move(runtime: &mut RuntimeInstance, point: Vec2) {
                 InputPointerId::PRIMARY,
                 PointerDriverInput::Moved(point),
             )
-        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
 }
@@ -295,7 +319,11 @@ pub(super) fn pointer_left(runtime: &mut RuntimeInstance) {
                 InputPointerId::PRIMARY,
                 PointerDriverInput::Left,
             )
-        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
 }
@@ -310,7 +338,11 @@ pub(super) fn resize(runtime: &mut RuntimeInstance, width: u32, height: u32) {
                 InputSeatId::PRIMARY,
                 InputWindowEvent::Resized { logical_size },
             )
-        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
     let transform = UiSurfaceContentTransform::new(
@@ -321,7 +353,11 @@ pub(super) fn resize(runtime: &mut RuntimeInstance, width: u32, height: u32) {
     )
     .expect("the resized target should produce one exact content transform");
     runtime
-        .with_driver_scope(|scope| queue_component_surface_update(scope, transform)).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
+        .with_driver_scope(|scope| queue_component_surface_update(scope, transform))
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
 }
@@ -336,7 +372,11 @@ pub(super) fn mouse(runtime: &mut RuntimeInstance, input: ButtonDriverInput<Mous
                 InputPointerId::PRIMARY,
                 input,
             )
-        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
 }

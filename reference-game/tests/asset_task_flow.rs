@@ -162,7 +162,11 @@ impl ReloadTestPort {
 
 fn request_reload(runtime: &mut RuntimeInstance, path: AssetPath) {
     runtime
-        .with_driver_scope(|scope| scope.__apply_port::<ReloadTestPort>(path)).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
+        .with_driver_scope(|scope| scope.__apply_port::<ReloadTestPort>(path))
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
 }

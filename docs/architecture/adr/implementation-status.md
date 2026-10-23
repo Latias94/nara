@@ -15,6 +15,13 @@ qualifies ADR 0081's post-flush support insertion facts while retaining original
 Queued first apply, direct/batch conflicts, support hooks and asset interference pass in the
 670-test full-feature root/domain cohort. Existing platform/native limits remain unchanged.
 
+The [post-boundary U1/U2 evidence](../../knowledge/engineering/verification/2026-10/2026-10-23T055844Z-post-boundary-u1-u2-lossless-outcomes-and-disposal-close-qualification-3f13b79a544a478b974d062c99662a12.md)
+qualifies lossless scope outcomes, typed owned input return, real Game View/Image/edit bookkeeping,
+admitted task disposal custody and terminal cleanup-failure propagation through Stop and Host
+diagnostics. The full-feature root/domain670, public Runtime/Editor90 and selected three actual
+Windows/DX12 native trajectories pass. ADRs 0052/0076/0117 clarify those contracts without claiming
+arbitrary unwind recovery, escaped-output cleanup, cross-platform native qualification or performance.
+
 The [low-level integration](../../knowledge/engineering/verification/2026-10/2026-10-22T193724Z-u11-low-level-refactor-public-and-native-consumer-integration-ddb983fa80454657955de17ff65d1772.md) qualifies the bounded U1-U11 owner refactor: phase spatial cuts, retained asset intent,
 unique lock/task/close owners, typed codecs, facade derives, World identity operations and exact
 Gameplay success. Final owner329, root267/integration78, independent module77, Reference87/desktop6,

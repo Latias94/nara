@@ -763,7 +763,9 @@ impl EditorProjectSession {
             return;
         };
         lane.runtime_edit_result = lane.runtime_edit_result.take().map(|result| match result {
-            EditorRuntimeEditResult::Pending(request) => EditorRuntimeEditResult::Cancelled(request),
+            EditorRuntimeEditResult::Pending(request) => {
+                EditorRuntimeEditResult::Cancelled(request)
+            }
             terminal => terminal,
         });
     }
