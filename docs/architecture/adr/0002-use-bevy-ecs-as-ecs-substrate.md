@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Amended**: 2026-10-23 for explicit `bevy_ecs` full-dependency access
 
 ## Context
 
@@ -42,7 +43,7 @@ nara owns the product layer around the ECS:
 - `nara_tooling` owns inspector and AI-facing metadata.
 - `nara_render` owns extraction and renderer backend seams.
 
-### Authoring And Upstream Responsibility
+### Authoring And Full Dependency Responsibility
 
 The ECS facade separates three responsibilities:
 
@@ -50,15 +51,18 @@ The ECS facade separates three responsibilities:
   authoring, queries, commands, change detection and system/schedule composition. Common authoring
   traits are included so ordinary callers can compose native systems without learning an advanced
   import path. This selection does not automatically grow with Bevy's prelude or enabled features.
-- `nara_ecs::upstream`, also available as `nara::ecs::upstream`, exposes the complete Bevy ECS
+- `nara_ecs::bevy_ecs`, also available as `nara::ecs::bevy_ecs`, exposes the complete Bevy ECS
   substrate. Component metadata, custom parameter implementations, observer internals and raw
   schedule configuration use this explicitly version-coupled path. Its names and semantics follow
   the bound Bevy version, and callers accept the corresponding upgrade migrations.
+  The name identifies the actual dependency; the earlier `upstream` alias is removed without a
+  compatibility alias. This does not rename the maintained derive provenance directory or make
+  the ECS backend interchangeable.
 - Hidden `__private` support is for generated code and internal cross-crate composition.
   Lifecycle-free transaction primitives belong there, not in the ordinary root or prelude. Hidden
   support is not an extension API or a promise of compatibility.
 
-Selected authoring exports and `upstream` share the same types and system model. Do not wrap
+Selected authoring exports and `bevy_ecs` share the same types and system model. Do not wrap
 `World`, `Query` or other substrate types to simulate an independent ECS. Nara remains responsible
 for reviewing authoring behavior and documenting migrations when the substrate changes; a
 maintained selection does not promise to make upstream semantics version-independent.
@@ -74,7 +78,7 @@ dependency. Consumers do not need a direct `bevy_ecs` dependency or a local
 upstream traits.
 
 This is a selected public surface, not a claim that every macro available through
-`upstream` supports Nara-only dependencies. Derives outside this set need their own path
+`bevy_ecs` supports Nara-only dependencies. Derives outside this set need their own path
 adaptation and generated-code qualification before receiving that guarantee.
 
 The selected derives preserve upstream storage, access, validation and deferred application
@@ -157,7 +161,7 @@ integration with Rust derives and reflection.
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | nara becomes a Bevy facade instead of its own engine | High | Medium | Do not adopt `bevy_app`, `bevy_render`, or `bevy_asset` by default |
-| Public API leaks too many Bevy-specific names | Medium | Medium | Keep ordinary exports explicit and complete substrate access under `upstream` |
+| Public API leaks too many Bevy-specific names | Medium | Medium | Keep ordinary exports explicit and complete substrate access under `bevy_ecs` |
 | Bevy ECS version churn affects nara users | Medium | Medium | Review runtime and derives together; qualify ordinary consumers and document upstream migrations |
 | Self-built placeholder code diverges from the chosen substrate | High | Medium | Replace placeholder ECS code early with a thin `bevy_ecs` layer |
 

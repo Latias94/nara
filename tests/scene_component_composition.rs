@@ -1,9 +1,9 @@
 use nara::{
     ecs::{
+        bevy_ecs::lifecycle::{Add, HookContext, Remove},
+        bevy_ecs::observer::On,
+        bevy_ecs::world::DeferredWorld,
         system::ResMut,
-        upstream::lifecycle::{Add, HookContext, Remove},
-        upstream::observer::On,
-        upstream::world::DeferredWorld,
     },
     identity::{EntityLookup, WorldIdentityDomain},
     prelude::{

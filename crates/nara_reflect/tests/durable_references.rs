@@ -71,7 +71,7 @@ fn nested_durable_values_do_not_require_live_residency_in_the_schema_visitor() {
         unreachable!()
     };
     world.resource_scope(
-        |world, mut domain: nara_ecs::upstream::change_detection::Mut<WorldIdentityDomain>| {
+        |world, mut domain: nara_ecs::bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
             domain
                 .register_persistent(world, token, logical.clone())
                 .unwrap();

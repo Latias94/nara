@@ -1,6 +1,6 @@
 use nara_ecs::{
     Component, World,
-    upstream::{
+    bevy_ecs::{
         component::{Immutable, StorageType},
         entity::EntityCloner,
     },

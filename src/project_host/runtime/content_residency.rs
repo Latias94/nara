@@ -15,7 +15,7 @@ use nara_asset::{
     ProjectAssetDatabase, SourceHash,
 };
 use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
-use nara_ecs::{Mut, Res, ResMut, Resource, World, upstream::system::SystemState};
+use nara_ecs::{Mut, Res, ResMut, Resource, World, bevy_ecs::system::SystemState};
 use nara_identity::{SpawnedSceneInstance, WorldEntityToken};
 use nara_image::ImageAsset;
 use nara_scene::{

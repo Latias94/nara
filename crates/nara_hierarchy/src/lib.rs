@@ -23,16 +23,16 @@ use nara_app::{
 };
 use nara_ecs::{
     Mut, Resource, World,
+    bevy_ecs::error::BevyError,
+    bevy_ecs::lifecycle::HookContext,
+    bevy_ecs::world::{DeferredWorld, WorldId},
     schedule::IntoScheduleConfigs,
-    upstream::error::BevyError,
-    upstream::lifecycle::HookContext,
-    upstream::world::{DeferredWorld, WorldId},
 };
 use validation::{HierarchyValidationScratch, validate_hierarchy_with_scratch};
 
 #[doc(hidden)]
 pub mod __private {
-    use nara_ecs::{Resource, SystemSet, World, upstream::world::WorldId};
+    use nara_ecs::{Resource, SystemSet, World, bevy_ecs::world::WorldId};
 
     use super::{
         HierarchyError, HierarchyGenerationState, HierarchyOperation, HierarchyOrder,
@@ -155,7 +155,7 @@ pub mod __private {
         world: &World,
         entities: &[nara_ecs::Entity],
         affected_entities: &[nara_ecs::Entity],
-        claimed_component_ids: &[nara_ecs::upstream::component::ComponentId],
+        claimed_component_ids: &[nara_ecs::bevy_ecs::component::ComponentId],
     ) -> Result<(), nara_ecs::__private::LifecycleFreeDespawnError> {
         validate_hierarchy_retirement_despawn_with_claimed_components(
             world,

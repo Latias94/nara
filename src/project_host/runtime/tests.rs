@@ -62,7 +62,7 @@ use nara_asset::{
     AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, StableAssetId,
 };
 use nara_diagnostic::DiagnosticValueRef;
-use nara_ecs::{Res, Resource, schedule::IntoScheduleConfigs, upstream::error::BevyError};
+use nara_ecs::{Res, Resource, bevy_ecs::error::BevyError, schedule::IntoScheduleConfigs};
 use nara_fs::{
     CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode,
 };

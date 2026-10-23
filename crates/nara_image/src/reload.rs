@@ -30,7 +30,7 @@ use nara_diagnostic::{
     SafeSummary,
 };
 use nara_ecs::{
-    Res, ResMut, Resource, SystemSet, schedule::IntoScheduleConfigs, upstream::error::BevyError,
+    Res, ResMut, Resource, SystemSet, bevy_ecs::error::BevyError, schedule::IntoScheduleConfigs,
 };
 use nara_tasks::{
     OrderedTaskReadySnapshot, OrderedTaskResults, TaskCancellation, TaskCancellationReason,

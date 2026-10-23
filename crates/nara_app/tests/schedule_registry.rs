@@ -17,8 +17,8 @@ use nara_app::{
 };
 use nara_ecs::{
     Commands, DetectChanges, Res, ResMut, Resource,
+    bevy_ecs::schedule::{InternedScheduleLabel, LogLevel},
     schedule::{IntoScheduleConfigs, ScheduleLabel, SystemSet},
-    upstream::schedule::{InternedScheduleLabel, LogLevel},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]

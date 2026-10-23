@@ -13,7 +13,7 @@ use nara_app::{
     RuntimeWorldAccessError,
 };
 use nara_core::Vec2;
-use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs, upstream::error::BevyError};
+use nara_ecs::{Res, ResMut, Resource, bevy_ecs::error::BevyError, schedule::IntoScheduleConfigs};
 
 mod schedule;
 mod semantic;

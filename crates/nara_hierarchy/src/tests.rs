@@ -1,5 +1,5 @@
 use nara_ecs::{
-    Commands, Entity, Resource, World, schedule::IntoScheduleConfigs, upstream::world::CommandQueue,
+    Commands, Entity, Resource, World, bevy_ecs::world::CommandQueue, schedule::IntoScheduleConfigs,
 };
 
 use super::*;
@@ -506,7 +506,7 @@ fn valid_baseline_cannot_bypass_new_lifecycle_observers() {
     let child = world.spawn_empty().id();
     place_root(&mut world, root);
     world.add_observer(
-        |_: nara_ecs::upstream::observer::On<nara_ecs::upstream::lifecycle::Insert<Parent>>| {},
+        |_: nara_ecs::bevy_ecs::observer::On<nara_ecs::bevy_ecs::lifecycle::Insert<Parent>>| {},
     );
 
     let result = HierarchyWriter::new(&mut world).place(child, child_last(root));

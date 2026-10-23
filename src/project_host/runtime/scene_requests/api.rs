@@ -1,6 +1,6 @@
 //! Public finite request surface and explicit owner-thread commit.
 
-use nara_ecs::upstream::system::SystemState;
+use nara_ecs::bevy_ecs::system::SystemState;
 
 use super::*;
 

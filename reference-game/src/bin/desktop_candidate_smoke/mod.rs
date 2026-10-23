@@ -8,7 +8,7 @@ use std::{
 use nara::{
     ProductRecipe,
     app::{AppExitRequests, PluginCategory, PluginDeclaration, PluginError, PluginId},
-    ecs::upstream::error::BevyError,
+    ecs::bevy_ecs::error::BevyError,
     fs::DirectoryCapability,
     prelude::{App, CoreStage, Plugin, Resource, World},
     project_host::{DesktopRun, DesktopRunIntent},
@@ -334,7 +334,7 @@ mod tests {
     use super::*;
     use nara::ecs::{
         World,
-        upstream::system::{RunSystemError, RunSystemOnce},
+        bevy_ecs::system::{RunSystemError, RunSystemOnce},
     };
 
     #[test]

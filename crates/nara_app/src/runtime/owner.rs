@@ -12,10 +12,10 @@ use std::{
 
 use nara_ecs::{
     World,
+    bevy_ecs::error::ErrorHandler,
+    bevy_ecs::observer::Observer,
+    bevy_ecs::schedule::Schedules,
     schedule::{IntoScheduleConfigs, Schedule},
-    upstream::error::ErrorHandler,
-    upstream::observer::Observer,
-    upstream::schedule::Schedules,
 };
 
 use crate::{

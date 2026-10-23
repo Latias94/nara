@@ -1,4 +1,4 @@
-use nara_ecs::{prelude::*, upstream};
+use nara_ecs::{bevy_ecs, prelude::*};
 
 #[derive(Component)]
 struct Value(u32);
@@ -30,16 +30,16 @@ fn accumulate(mut params: Accumulate) {
 }
 
 #[test]
-fn ordinary_authoring_and_upstream_share_the_native_system_model() {
-    let mut world: World = upstream::world::World::new();
+fn ordinary_authoring_and_bevy_ecs_share_the_native_system_model() {
+    let mut world: World = bevy_ecs::world::World::new();
     world.init_resource::<Total>();
     world.spawn(Values { value: Value(3) });
 
-    let mut schedule: Schedule = upstream::schedule::Schedule::new(Tick);
+    let mut schedule: Schedule = bevy_ecs::schedule::Schedule::new(Tick);
     schedule.add_systems(accumulate.in_set(Accumulation));
     schedule.run(&mut world);
     schedule.run(&mut world);
 
-    let native_total: upstream::change_detection::Ref<Total> = world.resource_ref::<Total>();
+    let native_total: bevy_ecs::change_detection::Ref<Total> = world.resource_ref::<Total>();
     assert_eq!(native_total.0, 9);
 }

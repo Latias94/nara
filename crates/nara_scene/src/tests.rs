@@ -14,10 +14,10 @@ use nara_diagnostic::{
 };
 use nara_ecs::{
     Commands, Component, Entity, Mut, Resource, World,
+    bevy_ecs::lifecycle::{Add, Despawn, HookContext, Insert, Remove},
+    bevy_ecs::observer::{Observer, On},
+    bevy_ecs::world::DeferredWorld,
     system::ResMut,
-    upstream::lifecycle::{Add, Despawn, HookContext, Insert, Remove},
-    upstream::observer::{Observer, On},
-    upstream::world::DeferredWorld,
 };
 use nara_hierarchy::{
     Children, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyRoots,

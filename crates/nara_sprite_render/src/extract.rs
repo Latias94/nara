@@ -1,6 +1,6 @@
 use nara_asset::{AssetServer, AssetStates, Assets};
 use nara_core::{Color, Mat3, Vec2};
-use nara_ecs::{Entity, Query, Res, ResMut, Resource, upstream::error::BevyError};
+use nara_ecs::{Entity, Query, Res, ResMut, Resource, bevy_ecs::error::BevyError};
 use nara_material::Material2dInstance;
 use nara_sprite::Sprite;
 use nara_tilemap::{TileCoord, TileIndex, TileSet, Tilemap};

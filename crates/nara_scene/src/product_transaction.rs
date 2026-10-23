@@ -7,7 +7,7 @@ use nara_core::ItemLimit;
 use nara_ecs::{
     __private::LifecycleFreeInsertionPlan,
     Component, Entity, Resource, World,
-    upstream::component::{ComponentId, Mutable},
+    bevy_ecs::component::{ComponentId, Mutable},
 };
 use nara_hierarchy::{Children, Parent};
 use nara_identity::SceneEntityId;

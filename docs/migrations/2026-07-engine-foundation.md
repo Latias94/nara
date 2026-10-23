@@ -26,6 +26,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 
 | Migration ID | Unit | Commit | Kind | Affected contract | Required action |
 |---|---|---|---|---|---|
+| PB-U8 | Post-boundary U8 | See implementation evidence | `rust-api` | Complete ECS dependency name | Replace the prototype `ecs::upstream` import with `ecs::bevy_ecs`. Original runtime types and six facade derives are unchanged; no compatibility alias remains. |
 | ABFE-1 | ADR boundary refinement | `05531a0` | `rust-api` | Frozen component codec execution | Obtain one `ComponentRegistrySnapshot` after freeze; execute preflight/encode on that snapshot. Handle execution errors separately from actual entity/component absence. |
 | ABFE-2 | ADR boundary refinement | `05531a0` | `rust-api` | ECS authoring, upstream and internal imports | Keep ordinary types and the six adapted derives on the ECS root/prelude. Move advanced Bevy API imports to `ecs::upstream`; internal transaction helpers no longer belong to the ordinary root. |
 | LLC-U4 | Low-level U4 | `89fdf6f` | `rust-api/behavior` | World-space spatial consumption | Replace Global Component queries and completion-token joins with Historical, Fixed or Presented snapshot readers. Resolve uses the fixed helper; Gameplay Capture reads Fixed directly in Finalize. A non-spatial direct parent ends inheritance. |
@@ -145,7 +146,7 @@ exports of lifecycle-free transaction primitives.
 
 **Canonical replacement**: `nara_ecs` and `nara::ecs` maintain selected authoring imports and the six
 adapted derives (`Component`, `Resource`, `Bundle`, `SystemParam`, `ScheduleLabel`, `SystemSet`).
-Advanced APIs use the complete version-bound `upstream` path. Runtime types remain original Bevy
+Advanced APIs use the complete version-bound `bevy_ecs` path. Runtime types remain original Bevy
 types; this does not create a replacement ECS.
 
 Before:
@@ -157,7 +158,7 @@ use nara::ecs::{component::ComponentId, world::DeferredWorld};
 After:
 
 ```rust
-use nara::ecs::upstream::{component::ComponentId, world::DeferredWorld};
+use nara::ecs::bevy_ecs::{component::ComponentId, world::DeferredWorld};
 ```
 
 The ordinary `bundle`, `system` and `schedule` modules contain selected authoring names. Hidden

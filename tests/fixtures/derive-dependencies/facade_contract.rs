@@ -1,4 +1,4 @@
-use crate::ecs::{self, prelude::*, upstream::system::SystemState};
+use crate::ecs::{self, bevy_ecs::system::SystemState, prelude::*};
 use std::{
     marker::PhantomData,
     sync::{
@@ -168,7 +168,7 @@ fn system_params_rebind_generics_and_apply_deferred_commands() {
 
 #[test]
 fn system_param_builders_and_schedules_keep_upstream_semantics() {
-    use ecs::upstream::system::{ParamBuilder, SystemParamBuilder};
+    use ecs::bevy_ecs::system::{ParamBuilder, SystemParamBuilder};
 
     let mut world = World::new();
     world.insert_resource(Counter::<2>(3));

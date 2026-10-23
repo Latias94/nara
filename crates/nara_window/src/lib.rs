@@ -603,7 +603,7 @@ pub mod backend;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_ecs::upstream::query::Changed;
+    use nara_ecs::bevy_ecs::query::Changed;
     use std::time::Duration;
 
     #[derive(Debug, Default, Resource)]

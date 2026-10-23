@@ -1,5 +1,5 @@
 use nara_core::ItemLimit;
-use nara_ecs::{Resource, World, upstream::resource::IsResource};
+use nara_ecs::{Resource, World, bevy_ecs::resource::IsResource};
 use nara_identity::{
     EntityLookup, IdentityDomainError, WorldEntityLocator, WorldIdentityDomain,
     WorldIdentityDomainId,

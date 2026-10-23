@@ -17,7 +17,7 @@ use nara_app::{
     RuntimeFaultReporter, RuntimeGeneration, RuntimeInstance, RuntimeObligationLedger,
     RuntimeScheduleError, RuntimeState, drive_runtime_quarantine, runtime_quarantine_status,
 };
-use nara_ecs::{Res, ResMut, Resource, ScheduleLabel, upstream::error::BevyError};
+use nara_ecs::{Res, ResMut, Resource, ScheduleLabel, bevy_ecs::error::BevyError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
 struct CustomSchedule;

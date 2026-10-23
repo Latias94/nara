@@ -19,8 +19,8 @@ use nara::{
         RuntimeGeneration, RuntimeWorldAccessError,
     },
     ecs::{
-        Entity, Mut, Resource, With, schedule::IntoScheduleConfigs, upstream::lifecycle::Add,
-        upstream::observer::On,
+        Entity, Mut, Resource, With, bevy_ecs::lifecycle::Add, bevy_ecs::observer::On,
+        schedule::IntoScheduleConfigs,
     },
     gameplay::{GameplayCommandBatch, GameplayCommandSet, add_local_gameplay_command_systems},
     identity::{EntityLookup, WorldIdentityDomain},

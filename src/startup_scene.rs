@@ -24,15 +24,15 @@ use nara_core::ByteLimit;
 use nara_diagnostic::{Diagnostic, DiagnosticCode, DiagnosticReport, SafeSummary};
 use nara_ecs::{
     Res, ResMut, Resource, SystemSet, World,
-    schedule::IntoScheduleConfigs,
-    system::SystemParam,
-    upstream::change_detection::Tick,
-    upstream::component::ComponentId,
-    upstream::error::BevyError,
-    upstream::system::{
+    bevy_ecs::change_detection::Tick,
+    bevy_ecs::component::ComponentId,
+    bevy_ecs::error::BevyError,
+    bevy_ecs::system::{
         ReadOnlySystemParam, ScheduleSystem, SystemAccess, SystemMeta, SystemParamValidationError,
     },
-    upstream::world::unsafe_world_cell::UnsafeWorldCell,
+    bevy_ecs::world::unsafe_world_cell::UnsafeWorldCell,
+    schedule::IntoScheduleConfigs,
+    system::SystemParam,
 };
 use nara_identity::SpawnedSceneInstance;
 use nara_reflect::{ComponentRegistry, component_registry, validate_component_registry_authority};
@@ -705,7 +705,7 @@ mod replacement_tests;
 mod tests {
     use std::sync::OnceLock;
 
-    use nara_ecs::upstream::system::SystemState;
+    use nara_ecs::bevy_ecs::system::SystemState;
 
     use super::*;
 

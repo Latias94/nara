@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Amended**: 2026-10-23 for explicit `bevy_ecs` full-dependency access
 **Refines**: ADR 0001, ADR 0012, ADR 0015, ADR 0032
 **Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups; ADR 0055: Feature Matrix,
 Boundary Checks, and Compatibility Fixtures; ADR 0079: Root Product Capabilities and Placeholder
@@ -49,14 +50,14 @@ Rules:
   path. Renaming the `nara` or `nara_ecs` dependency must not require a hidden Bevy dependency
   or alias. Module imports `nara::ecs::bundle::Bundle` and
   `nara::ecs::system::SystemParam` select those same facade-aware derives. This selected
-  guarantee does not imply that every derive exposed through `upstream` is adapted; source coupling
+  guarantee does not imply that every derive exposed through `bevy_ecs` is adapted; source coupling
   and generated support paths follow [ADR 0002](0002-use-bevy-ecs-as-ecs-substrate.md#facade-derives).
 - `nara::ecs` and its prelude expose an explicit ordinary authoring selection using original
   Bevy runtime types and common composition/change-detection traits. The `bundle`, `system` and
   `schedule` paths are selected authoring imports, not wholesale upstream modules. The root
   gameplay prelude remains a smaller, gameplay-first selection.
-- Complete substrate access is explicit through `nara::ecs::upstream` or
-  `nara_ecs::upstream`. Advanced consumers follow the bound Bevy version and its migrations.
+- Complete substrate access is explicit through `nara::ecs::bevy_ecs` or
+  `nara_ecs::bevy_ecs`. Advanced consumers follow the bound Bevy version and its migrations.
   This path does not expand the ordinary prelude or grant unadapted upstream macros the selected
   Nara-only dependency guarantee.
 - Hidden `__private` exports serve generated code and internal cross-crate composition only.

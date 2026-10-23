@@ -2,8 +2,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use nara_app::{FixedTime, RealTime, RuntimeGeneration};
 use nara_ecs::{
-    Entity, Res, Resource, SystemParam, World, upstream::entity::EntityHashMap,
-    upstream::world::WorldId,
+    Entity, Res, Resource, SystemParam, World, bevy_ecs::entity::EntityHashMap,
+    bevy_ecs::world::WorldId,
 };
 
 use crate::{GlobalTransform2d, Transform2d};
@@ -287,8 +287,8 @@ unsafe impl SystemParam for SnapshotWorldId {
 
     fn init_access(
         state: &Self::State,
-        meta: &mut nara_ecs::upstream::system::SystemMeta,
-        access: &mut nara_ecs::upstream::system::SystemAccess,
+        meta: &mut nara_ecs::bevy_ecs::system::SystemMeta,
+        access: &mut nara_ecs::bevy_ecs::system::SystemAccess,
         world: &mut World,
     ) {
         <WorldId as SystemParam>::init_access(state, meta, access, world);
@@ -296,17 +296,17 @@ unsafe impl SystemParam for SnapshotWorldId {
 
     unsafe fn get_param<'w, 's>(
         state: &'s mut Self::State,
-        meta: &nara_ecs::upstream::system::SystemMeta,
-        world: nara_ecs::upstream::world::unsafe_world_cell::UnsafeWorldCell<'w>,
-        tick: nara_ecs::upstream::change_detection::Tick,
-    ) -> Result<Self, nara_ecs::upstream::system::SystemParamValidationError> {
+        meta: &nara_ecs::bevy_ecs::system::SystemMeta,
+        world: nara_ecs::bevy_ecs::world::unsafe_world_cell::UnsafeWorldCell<'w>,
+        tick: nara_ecs::bevy_ecs::change_detection::Tick,
+    ) -> Result<Self, nara_ecs::bevy_ecs::system::SystemParamValidationError> {
         // SAFETY: The caller supplies the same registered access and initialized World.
         unsafe { <WorldId as SystemParam>::get_param(state, meta, world, tick).map(Self) }
     }
 }
 
 // SAFETY: The upstream fetch only calls UnsafeWorldCell::id and does not mutate the World.
-unsafe impl nara_ecs::upstream::system::ReadOnlySystemParam for SnapshotWorldId {}
+unsafe impl nara_ecs::bevy_ecs::system::ReadOnlySystemParam for SnapshotWorldId {}
 
 #[derive(SystemParam)]
 struct SnapshotContext<'w> {

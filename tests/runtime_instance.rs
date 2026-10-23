@@ -29,9 +29,8 @@ use nara::{
     },
     core::{ItemLimit, TimeLimit},
     ecs::{
-        Commands, Res, ResMut, Resource, World, schedule::IntoScheduleConfigs,
-        upstream::change_detection::DetectChangesMut, upstream::event::Event,
-        upstream::observer::On,
+        Commands, Res, ResMut, Resource, World, bevy_ecs::change_detection::DetectChangesMut,
+        bevy_ecs::event::Event, bevy_ecs::observer::On, schedule::IntoScheduleConfigs,
     },
     gameplay::{
         GameplayCommandBatch, GameplayCommandDraft, GameplayCommandIngressSource,
@@ -1942,7 +1941,7 @@ fn admission_panic_retains_its_owner_and_route_in_process_quarantine() {
 
     let mut app = configured_app(FixedTime::default());
     app.world_mut().unwrap().add_observer(
-        |_: On<nara::ecs::upstream::lifecycle::Add<nara::ecs::upstream::observer::Observer>>| {
+        |_: On<nara::ecs::bevy_ecs::lifecycle::Add<nara::ecs::bevy_ecs::observer::Observer>>| {
             panic!("injected observer materialization panic");
         },
     );

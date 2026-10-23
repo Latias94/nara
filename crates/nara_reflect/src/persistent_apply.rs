@@ -13,8 +13,8 @@ use nara_ecs::{
         validate_registered_persistent_component_apply, validate_resource_insertion,
     },
     Component, Entity, Resource, World,
-    upstream::component::ComponentId,
-    upstream::world::WorldId,
+    bevy_ecs::component::ComponentId,
+    bevy_ecs::world::WorldId,
 };
 
 use crate::{
@@ -881,9 +881,9 @@ mod persistent_apply_contract_tests {
 
     use nara_ecs::{
         Component, Resource, World,
+        bevy_ecs::lifecycle::{Add, Discard},
+        bevy_ecs::observer::{Observer, On},
         system::ResMut,
-        upstream::lifecycle::{Add, Discard},
-        upstream::observer::{Observer, On},
     };
 
     use super::*;
@@ -1524,7 +1524,7 @@ mod persistent_apply_contract_tests {
         let receipt_component = world.component_id::<PersistentApplyReceipts>().unwrap();
         world.spawn(
             Observer::new(
-                |_: On<nara_ecs::upstream::lifecycle::Despawn<()>>,
+                |_: On<nara_ecs::bevy_ecs::lifecycle::Despawn<()>>,
                  mut canary: ResMut<SupportCanary>| {
                     canary.0 += 1;
                 },

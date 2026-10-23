@@ -1310,7 +1310,7 @@ fn publish_snapshot_tilesets(
         )));
     }
     let mut access =
-        nara_ecs::upstream::system::SystemState::<nara_tilemap::TileSetContent>::new(world);
+        nara_ecs::bevy_ecs::system::SystemState::<nara_tilemap::TileSetContent>::new(world);
     let mut tilesets = access.get_mut(world).map_err(|_| {
         HostFault::new(single_error(
             "project.run.tileset-resources-missing",

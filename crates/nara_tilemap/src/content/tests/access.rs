@@ -1,4 +1,4 @@
-use nara_ecs::{Mut, World, upstream::system::SystemState};
+use nara_ecs::{Mut, World, bevy_ecs::system::SystemState};
 
 use super::*;
 

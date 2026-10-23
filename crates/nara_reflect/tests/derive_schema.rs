@@ -1,5 +1,5 @@
 use nara_ecs::{
-    Component, Resource, World, upstream::lifecycle::HookContext, upstream::world::DeferredWorld,
+    Component, Resource, World, bevy_ecs::lifecycle::HookContext, bevy_ecs::world::DeferredWorld,
 };
 use nara_identity::{EntityReference, SceneEntityId};
 use nara_reflect::{

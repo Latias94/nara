@@ -188,7 +188,7 @@ fn consuming_a_cut_then_mutating_membership_keeps_the_cut_until_next_publication
 
 #[test]
 fn readers_reject_missing_foreign_world_generation_phase_and_time() {
-    fn assert_read_only<T: nara_ecs::upstream::system::ReadOnlySystemParam>() {}
+    fn assert_read_only<T: nara_ecs::bevy_ecs::system::ReadOnlySystemParam>() {}
     assert_read_only::<HistoricalSpatialSnapshot2d>();
     assert_read_only::<FixedSpatialSnapshot2d>();
     assert_read_only::<PresentedSpatialSnapshot2d>();

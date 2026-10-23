@@ -228,7 +228,7 @@ fn capture_presented_font(world: &mut World) {
             .is_some_and(|gpu| gpu.submitted_glyph_quad_count() > 0 && gpu.glyph_page_count() > 0)
     );
     if let Some(canvas) = world.get_resource::<nara::render::WorldCanvas>().copied() {
-        use nara::{core::Vec2, ecs::upstream::system::SystemState, render::WorldPointer};
+        use nara::{core::Vec2, ecs::bevy_ecs::system::SystemState, render::WorldPointer};
         let view = world.resource::<nara::render::ExtractedViews>().as_slice()[0];
         assert_eq!(view.viewport.extent(), canvas.extent());
         let window = {

@@ -1,7 +1,7 @@
 use nara::{
     advanced_prelude::*,
     diagnostic::DiagnosticValueRef,
-    ecs::{system::ResMut, upstream::lifecycle::Add, upstream::observer::On},
+    ecs::{bevy_ecs::lifecycle::Add, bevy_ecs::observer::On, system::ResMut},
     scene::{
         SceneExportOptions, SceneSpawnReport, export_scene_with_options,
         spawn_prefab_with_asset_database, spawn_prefab_with_patch,

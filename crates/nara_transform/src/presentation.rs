@@ -3,9 +3,9 @@ use nara_app::{
     RuntimeTimeSettings, StartupStage,
 };
 use nara_ecs::{
-    Entity, FromWorld, Mut, QueryState, Resource, World, schedule::IntoScheduleConfigs,
-    upstream::entity::EntityHashMap, upstream::error::BevyError, upstream::schedule::ApplyDeferred,
-    upstream::world::WorldId,
+    Entity, FromWorld, Mut, QueryState, Resource, World, bevy_ecs::entity::EntityHashMap,
+    bevy_ecs::error::BevyError, bevy_ecs::schedule::ApplyDeferred, bevy_ecs::world::WorldId,
+    schedule::IntoScheduleConfigs,
 };
 
 use crate::{

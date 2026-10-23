@@ -12,7 +12,7 @@ use nara_ecs::{
         validate_resource_scope,
     },
     Component, Entity, Resource, World,
-    upstream::world::WorldId,
+    bevy_ecs::world::WorldId,
 };
 use thiserror::Error;
 
@@ -233,9 +233,9 @@ pub fn validate_identity_support_topology(
 mod identity_support_topology_tests {
     use nara_ecs::{
         Resource,
+        bevy_ecs::lifecycle::{Add, Despawn, Insert},
+        bevy_ecs::observer::{Observer, On},
         system::ResMut,
-        upstream::lifecycle::{Add, Despawn, Insert},
-        upstream::observer::{Observer, On},
     };
 
     use super::*;

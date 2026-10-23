@@ -35,7 +35,7 @@ use nara_app::{
     RuntimeDriverScope, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter, RuntimeGeneration,
     RuntimeWorldAccessError,
 };
-use nara_ecs::{Res, ResMut, schedule::IntoScheduleConfigs, upstream::system::ScheduleSystem};
+use nara_ecs::{Res, ResMut, bevy_ecs::system::ScheduleSystem, schedule::IntoScheduleConfigs};
 use nara_input::SemanticActions;
 
 use crate::schedule::GameplayCommandInternalSet;
@@ -1810,19 +1810,19 @@ mod tests {
         fixed: Res<FixedTime>,
         trajectory: Res<FailureTrajectory>,
         mut commands: nara_ecs::Commands,
-    ) -> Result<(), nara_ecs::upstream::error::BevyError> {
+    ) -> Result<(), nara_ecs::bevy_ecs::error::BevyError> {
         if fixed.tick() != trajectory.fail_tick {
             return Ok(());
         }
         if trajectory.deferred_failure {
             commands.queue(
-                |_world: &mut World| -> Result<(), nara_ecs::upstream::error::BevyError> {
-                    Err(nara_ecs::upstream::error::BevyError::error(ConsumerFailure))
+                |_world: &mut World| -> Result<(), nara_ecs::bevy_ecs::error::BevyError> {
+                    Err(nara_ecs::bevy_ecs::error::BevyError::error(ConsumerFailure))
                 },
             );
             Ok(())
         } else {
-            Err(nara_ecs::upstream::error::BevyError::error(ConsumerFailure))
+            Err(nara_ecs::bevy_ecs::error::BevyError::error(ConsumerFailure))
         }
     }
 
@@ -2015,9 +2015,9 @@ mod tests {
     fn fixed_system_cannot_hide_its_failure_by_replacing_the_world_reporter() {
         fn replace_reporter_and_fail(
             mut faults: ResMut<RuntimeFaultReporter>,
-        ) -> Result<(), nara_ecs::upstream::error::BevyError> {
+        ) -> Result<(), nara_ecs::bevy_ecs::error::BevyError> {
             *faults = RuntimeFaultReporter::new();
-            Err(nara_ecs::upstream::error::BevyError::error(ConsumerFailure))
+            Err(nara_ecs::bevy_ecs::error::BevyError::error(ConsumerFailure))
         }
 
         for before_admission in [false, true] {

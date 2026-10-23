@@ -4,7 +4,7 @@
 //! system composition. The six selected derives resolve a direct `nara` or `nara_ecs` dependency,
 //! including renamed dependencies, without requiring a direct Bevy dependency.
 //!
-//! [`upstream`] exposes the complete substrate for advanced integration. Its API follows the
+//! [`bevy_ecs`] exposes the complete substrate for advanced integration. Its API follows the
 //! bound Bevy version; upstream derives outside the selected six do not receive Nara's dependency
 //! resolution guarantee. All re-exported runtime types are the original Bevy types.
 
@@ -36,7 +36,13 @@ pub use prelude::*;
 /// Use this path for component metadata, custom parameter implementations, observers, messages,
 /// raw scheduling configuration and other advanced integration. Upgrades can require upstream
 /// API migrations even when the selected Nara authoring imports remain unchanged.
-pub use bevy_ecs as upstream;
+///
+/// The complete substrate has one explicit public name:
+///
+/// ```compile_fail,E0432
+/// use nara_ecs::upstream;
+/// ```
+pub use bevy_ecs;
 
 /// Bundles and their facade-aware derive.
 pub mod bundle {
@@ -66,7 +72,7 @@ mod transaction;
 /// Nara's maintained ordinary ECS authoring surface.
 ///
 /// This is an explicit selection, independent of additions to Bevy's prelude. Advanced substrate
-/// APIs remain available through [`crate::upstream`].
+/// APIs remain available through [`crate::bevy_ecs`].
 pub mod prelude {
     pub use crate::authoring::*;
     pub use nara_ecs_derive::{Bundle, Component, Resource, ScheduleLabel, SystemParam, SystemSet};

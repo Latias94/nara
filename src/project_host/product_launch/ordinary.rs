@@ -213,7 +213,7 @@ mod tests {
                 UnfinishedCloseParticipant,
             )?;
             app.add_systems(StartupStage::Runtime, || {
-                Err::<(), _>(nara_ecs::upstream::error::BevyError::error(
+                Err::<(), _>(nara_ecs::bevy_ecs::error::BevyError::error(
                     std::io::Error::other("product startup failure"),
                 ))
             })?;

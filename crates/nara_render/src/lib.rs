@@ -42,7 +42,7 @@ pub use nara_core::Color;
 #[cfg(test)]
 use nara_core::Vec2;
 use nara_ecs::{
-    Entity, Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs, upstream::error::BevyError,
+    Entity, Query, Res, ResMut, Resource, bevy_ecs::error::BevyError, schedule::IntoScheduleConfigs,
 };
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,

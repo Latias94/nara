@@ -9,7 +9,7 @@ use nara::{
     ProductRecipeError, SchemaContribution,
     advanced_prelude::add_startup_scene_activation_systems,
     app::{PluginCategory, PluginDeclaration, PluginError, PluginId, PluginSchemaProviderId},
-    ecs::{Entity, Or, With, schedule::IntoScheduleConfigs, upstream::error::BevyError},
+    ecs::{Entity, Or, With, bevy_ecs::error::BevyError, schedule::IntoScheduleConfigs},
     gameplay::{
         GameplayCommandBatch, GameplayCommandDraft, GameplayCommandIngressSource,
         GameplayCommandPayload, GameplayCommandSet, GameplayCommandSourceSequence,

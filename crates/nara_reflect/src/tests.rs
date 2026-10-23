@@ -4,9 +4,9 @@ use nara_asset::{AssetRef, AssetServer};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_ecs::{
     Component, Resource, World,
-    upstream::lifecycle::{Add, HookContext},
-    upstream::observer::On,
-    upstream::world::DeferredWorld,
+    bevy_ecs::lifecycle::{Add, HookContext},
+    bevy_ecs::observer::On,
+    bevy_ecs::world::DeferredWorld,
 };
 use nara_identity::{
     PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference, SceneEntityId,

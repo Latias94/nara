@@ -20,9 +20,9 @@ use nara::{
     },
     ecs::{
         Resource,
-        upstream::lifecycle::{Add, HookContext},
-        upstream::observer::On,
-        upstream::world::DeferredWorld,
+        bevy_ecs::lifecycle::{Add, HookContext},
+        bevy_ecs::observer::On,
+        bevy_ecs::world::DeferredWorld,
     },
     prelude::Vec2,
     project_host::{

@@ -47,7 +47,7 @@ use nara_app::{
 #[cfg(test)]
 use nara_ecs::Resource;
 use nara_ecs::{
-    Commands, Query, Res, ResMut, schedule::IntoScheduleConfigs, upstream::system::NonSendMarker,
+    Commands, Query, Res, ResMut, bevy_ecs::system::NonSendMarker, schedule::IntoScheduleConfigs,
 };
 #[cfg(test)]
 use nara_render::Color;
@@ -739,7 +739,7 @@ mod tests {
     use super::*;
     #[cfg(feature = "sprite-submitter")]
     use nara_ecs::Entity;
-    use nara_ecs::{Commands, system::IntoSystem, upstream::system::System};
+    use nara_ecs::{Commands, bevy_ecs::system::System, system::IntoSystem};
 
     fn admit_runtime(app: App) -> nara_app::RuntimeCandidate {
         nara_app::RuntimeAdmissionReservation::try_acquire()

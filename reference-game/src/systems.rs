@@ -8,8 +8,8 @@ use nara::{
     app::RuntimeFaultReporter,
     core::ItemLimit,
     ecs::{
-        Entity, Mut, With, Without, system::SystemParam, upstream::error::BevyError,
-        upstream::system::SystemState,
+        Entity, Mut, With, Without, bevy_ecs::error::BevyError, bevy_ecs::system::SystemState,
+        system::SystemParam,
     },
     gameplay::{GameplayCommandBatch, GameplayCommandValue},
     hierarchy::{

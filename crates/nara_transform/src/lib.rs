@@ -15,7 +15,7 @@ pub use snapshot::{
 
 use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext};
 use nara_core::{Mat3, Vec2};
-use nara_ecs::{Component, schedule::IntoScheduleConfigs, upstream::system::ScheduleSystem};
+use nara_ecs::{Component, bevy_ecs::system::ScheduleSystem, schedule::IntoScheduleConfigs};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,

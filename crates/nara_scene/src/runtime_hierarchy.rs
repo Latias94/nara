@@ -56,7 +56,7 @@ pub(crate) fn validate_scene_entity_retirement_admission(
     world: &mut World,
     entities: &[Entity],
     hierarchy: &PreparedSceneHierarchyRetirement,
-    claimed_component_ids: &[nara_ecs::upstream::component::ComponentId],
+    claimed_component_ids: &[nara_ecs::bevy_ecs::component::ComponentId],
 ) -> Result<(), LifecycleFreeDespawnError> {
     nara_hierarchy::__private::validate_retirement_despawn_with_claimed_components(
         world,

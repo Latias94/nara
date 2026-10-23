@@ -9,7 +9,7 @@ use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{
     __private::LifecycleFreeInsertionPlan, __private::prepare_lifecycle_free_despawn,
     __private::validate_registered_persistent_component_apply, Component, Entity, World,
-    upstream::component::ComponentId,
+    bevy_ecs::component::ComponentId,
 };
 use nara_hierarchy::{
     __private::{prepare_construction_batch, prepare_mutation_baseline},

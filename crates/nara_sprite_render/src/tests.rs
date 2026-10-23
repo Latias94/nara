@@ -705,7 +705,7 @@ fn queueing_uses_prepared_image_resource_keys_and_uvs() {
 
 #[test]
 fn queued_image_snapshots_survive_successor_publication_and_cache_removal() {
-    use nara_ecs::upstream::system::RunSystemOnce;
+    use nara_ecs::bevy_ecs::system::RunSystemOnce;
 
     let handle = nara_asset::allocate_anonymous_handle().unwrap();
     let mut images = Assets::<ImageAsset>::default();
