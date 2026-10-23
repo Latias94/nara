@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Amended**: 2026-10-23 to distinguish domain extensibility from future schema guarantees
 **Refined By**: ADR 0053: Visibility, Culling, and Tilemap Render Cache (Superseded); ADR 0096:
 Evidence-Gated Render Scaling and Upload Policy; ADR 0097: Future-Capable 2D and 3D Spatial
 Transform Model; [ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md): Ordered
@@ -10,7 +11,10 @@ Content and Presentation Product Composition
 
 ## Context
 
-nara wants an excellent 2D authoring experience, but it is intended to grow into a mature game engine rather than a small 2D framework. The architecture must not make future 3D support a retrofit.
+nara wants an excellent 2D authoring experience with room for a separate future 3D domain.
+Shared infrastructure must not assume that every entity is 2D. This does not freeze future
+transform fields or promise unchanged source schemas; ADR 0097 permits explicit source/schema
+migration when a concrete workflow proves the representation.
 
 The tension:
 
@@ -27,9 +31,9 @@ This means:
 
 - User-facing Phase 1 APIs optimize for 2D: `Transform2d`, `Camera2d`, `Sprite`, `Tilemap`, `Layer`, `SortKey`, `Handle<ImageAsset>`, and `TextureRegion`.
 - Runtime infrastructure must be designed as multi-domain from the start: scene storage, asset handles, render extraction, view/camera targets, render phases, and plugin lifecycle must not assume 2D only.
-- 3D support should be added as parallel domain modules later: `Transform3d`, `Camera3d`, `Mesh`, `Material3d`, `Light`, `SpatialBounds`, `Visibility3d`, and 3D render phases.
+- 3D support should be added as parallel domain modules when concrete workflows justify them. Their exact public types and schemas remain feature decisions; candidate domains include cameras, meshes, materials, lights, spatial bounds, visibility, and 3D render phases.
 - Scene and prefab files remain component-based and dimension-neutral. A scene is entities plus registered components, not a "2D scene" or "3D scene" file type.
-- Public transform authoring is split by domain: `Transform2d`/`GlobalTransform2d` now, `Transform3d`/`GlobalTransform3d` later. Internal hierarchy and propagation mechanisms should share infrastructure where practical.
+- Public transform authoring is split by domain: `Transform2d`/`GlobalTransform2d` now, with a separate 3D domain defined by its future feature contract. Internal hierarchy and propagation mechanisms should share infrastructure where practical.
 - Public cameras are split by domain: `Camera2d` now, `Camera3d` later. Rendering internals meet at a shared `View`/`ExtractedView` abstraction.
 - Rendering uses a phase-based pipeline from day one: `Extract -> Prepare -> Queue -> Sort -> Render -> Cleanup`. A full render graph is deferred.
 - Tilemap is a first-class 2D authoring model, not a mesh concept exposed to users. Internally it can lower to chunked mesh/instance/batch render data.
@@ -52,7 +56,7 @@ flowchart TD
 
 `Transform2d` and `Camera2d` are allowed to be first-class because 2D authoring is clearer when users do not constantly think in quaternions, perspective projection, or 3D depth.
 
-Future 3D should add `Transform3d` and `Camera3d` rather than forcing 2D users into a universal 3D transform too early.
+Future 3D should add a distinct spatial authoring domain rather than forcing 2D users into a universal 3D transform too early. Its concrete transform representation and public type names require a feature decision.
 
 The propagation infrastructure should still be mature: shared hierarchy traversal, dirty tracking, and scheduling are allowed when they reduce duplication without weakening the 2D authoring interface.
 
@@ -165,7 +169,7 @@ Internally, tilemap rendering can lower into chunked meshes, instance buffers, a
 | Metric | Target | Measurement |
 |---|---:|---|
 | 2D authoring simplicity | Sprite scene can be declared with `Transform2d`, `Camera2d`, `Sprite` | Example compile test |
-| 3D extensibility | Adding `Transform3d`/`Camera3d` does not require changing scene file identity or app lifecycle | Design/code review |
+| 3D extensibility | Adding a concrete 3D spatial domain does not require changing scene file identity or app lifecycle | Design/code review |
 | Renderer maturity | Sprite renderer uses extract/prepare/queue/sort/render/cleanup phases | Architecture review |
 | No vague render abstraction | No public universal `Renderable` component in Phase 1 | API review |
 | Scene neutrality | Scene/prefab storage is component-based, not 2D-file-specific | Scene schema review |

@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Amended**: 2026-10-23 to keep coordinate conventions independent from candidate 3D schemas
 **Refined By**: ADR 0097: Future-Capable 2D and 3D Spatial Transform Model
 
 ## Context
@@ -25,7 +26,9 @@ Rules:
 - Default forward direction for cameras and 3D entities is `-Z`.
 - Default up direction is `+Y`.
 - Rotations use radians.
-- `Transform3d` should use translation `Vec3`, rotation quaternion, and scale `Vec3`.
+- These coordinate conventions do not select `Transform3d` fields or a persistent rotation or
+  affine encoding. Those choices remain Proposed in the
+  [spatial affine representation design](../spatial-affine-representation-design.md).
 - Camera projection should distinguish perspective and orthographic 3D projections.
 - Imported assets must be converted into nara's coordinate convention at import time when needed.
 
@@ -43,7 +46,9 @@ Default camera forward: -Z
 
 ## Relationship to 2D
 
-2D world space remains X right, Y up. Conceptually, 2D content lives in the XY plane, with Z or layer/sort values used by renderer-specific ordering rules when needed.
+2D world space remains X right, Y up. The 2D domain uses explicit render layer/sort data rather
+than acquiring a hidden transform Z. Placing 2D content in a 3D world requires an explicit
+feature-owned bridge under ADR 0097.
 
 This keeps 2D authoring intuitive while allowing 3D systems to share units, math conventions, and editor gizmo behavior.
 
@@ -95,11 +100,10 @@ This keeps 2D authoring intuitive while allowing 3D systems to share units, math
 |---|---|---:|---|
 | Imported assets appear rotated/flipped | High | Medium | Store importer coordinate conversion settings and test common formats |
 | Users expect engine-specific conventions from other tools | Medium | Medium | Document convention clearly and provide import presets |
-| 2D render ordering conflicts with Z semantics | Medium | Medium | Keep 2D layer/sort explicit; use Z only when the 2D renderer opts in |
+| 2D render ordering conflicts with Z semantics | Medium | Medium | Keep 2D layer/sort explicit; bridge into a 3D domain only through a concrete feature |
 
 ## Follow-Up Questions
 
-- Should 2D renderer use transform Z once `Transform3d` exists, or keep explicit layer/sort only?
 - What coordinate presets should asset importers support first?
 - What axis color convention should editor gizmos use?
 

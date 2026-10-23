@@ -2,7 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-22
+**Last Revised**: 2026-10-23
 **Owner**: `nara_scene`, `nara_transform`, `nara_ui`, and render extraction domains
 **Admission Trigger**: A hierarchy-consuming product slice plus focused 3D, runtime-UI,
 lifecycle, identity, and physics tracers prove one canonical structural parent relation, independent
@@ -24,9 +24,11 @@ local/global 2D authority, and completed-consumer invariant;
 placement, exact anchor-based mutation/inverse, and its ordered runtime projection. This ADR remains
 Proposed for visibility, linked lifetime, physics, 3D, and any broader hierarchy semantics not
 owned by those extracted decisions.
-**Transform Model Authority**: ADR 0097 is Accepted and owns separate 2D/3D base TRS plus
-post-affine residual semantics. This Proposed ADR may define hierarchy transactions only in terms
-of that accepted transform model.
+**Transform Model Authority**: ADR 0097 accepts separate spatial domains, current local authored
+2D TRS, derived global affine values, explicit conversion and no silent loss. It does not select
+future residual/3D schemas or KeepWorld algorithms. Those candidates remain Proposed in the
+[spatial affine representation design](../spatial-affine-representation-design.md); this ADR's
+remaining proposals must not treat them as accepted prerequisites.
 
 ## Context
 
@@ -280,11 +282,11 @@ data.
 The low-level relationship operation has one deterministic meaning: change structure and preserve
 authored local values (`KeepLocal`). It never silently rewrites transform or layout data.
 
-Nara-owned higher-level transactions select domain behavior explicitly:
+The following higher-level behaviors remain proposals. Supported structural authoring continues
+to use `KeepLocal`; no accepted Editor default changes here:
 
-- Editor drag-reparent for 2D and future 3D defaults to requesting `KeepWorld`, because preserving
-  visible placement is the expected authoring workflow. The request remains fallible and visible
-  to the user.
+- A future Editor drag-reparent workflow may default to requesting `KeepWorld` if concrete
+  authoring evidence supports that choice. The request remains fallible and visible to the user.
 - Runtime commands must select `KeepLocal` or a domain-specific `KeepWorld`; they do not rely on a
   hidden boolean default.
 - UI reparent is a layout operation. It does not promise world-pose preservation unless a concrete
@@ -310,13 +312,14 @@ order, and local value together. A runtime operation may consume a cached global
 when its freshness contract proves the same structural/local revision; otherwise it recomputes the
 affected chain privately or rejects. It never preserves a known-stale global cache.
 
-For `Transform2d` and future `Transform3d`, the domain applies ADR 0097's base-TRS plus
-post-affine residual rules. `KeepWorldExact` may materialize a finite bounded post-affine residual
-to preserve a valid affine result; `KeepWorldTrs` rejects a residual-requiring result. A singular
-effective parent, missing projection, non-finite value, ownership violation, or unsupported
-physics/domain constraint rejects the whole transaction before publication. The decomposition and
-recomposition tolerance is engine-owned rather than caller-configurable persistent policy. No
-operation silently approximates or downgrades to `KeepLocal`.
+The local representation and algorithm remain open. `KeepWorldExact`, `KeepWorldTrs` and
+base-plus-residual lowering are candidates in the Proposed representation design, not obligations
+inherited from ADR 0097. Eliminating redundant residuals and retaining authored base fields need
+an explicit priority backed by workflow evidence. A singular effective parent, missing projection,
+non-finite value, ownership violation, or unsupported physics/domain constraint must reject the
+whole operation before publication when its precision/domain contract cannot be met. Precision,
+inverse admission and normalization require validation before acceptance; no operation silently
+approximates or downgrades to `KeepLocal`.
 
 The first concrete 2D integration may expose one hierarchy-only `KeepLocal` entry point and one
 2D-specific fallible move entry point. This ADR does not admit a `ReparentBehavior` provider,
@@ -501,7 +504,7 @@ budget updates, and patch operations that preserve relative placement.
 | Prefab provenance exactness | Source, anchor, expanded, instance-override-owned, and scene-local moves route to their owning document or reject without persisting expanded IDs | Prefab override and convert-to-local fixtures |
 | Spatial correctness | A three-level 2D hierarchy produces correct globals on startup and same-frame mutation; a focused 3D spike reuses only structural facts | Transform and extraction integration tests |
 | Projection independence | UI proves a private projection with one explicit ghost flatten rule, one layout-root boundary, and virtual/generated nodes | UI layout/render/input fixture |
-| Reparent behavior | KeepLocal, exact affine KeepWorld, strict-TRS residual rejection, singular failure, and domain-boundary behavior are deterministic and atomic | Reparent transaction matrix |
+| Reparent behavior | KeepLocal and any admitted world-preserving mode have explicit representation/precision limits, atomic failure and domain-boundary behavior | Reparent transaction matrix for the selected candidate |
 | Physics boundary | First dynamic bodies remain supported roots with identity effective scale; later parented writeback passes fixed-tick conversion/fault tracers before admission | Physics integration fixture |
 | Visibility and input | Hidden ancestor suppresses descendants and retires stale hover/press/focus/capture while layout and simulation remain present | UI/render/input tests |
 | Multi-view correctness | One entity can be visible in one view and absent in another without mutating hierarchy-effective visibility | Multi-camera frame-packet test |
@@ -518,7 +521,7 @@ budget updates, and patch operations that preserve relative placement.
 | Raw ECS mutation bypasses owned validation or World provenance | High | High | Prefer World-bound transactions, constrain diagnostics to captured evidence, and fault residual invariants before consumers. |
 | Custom relation reduces drop-in compatibility with Bevy hierarchy plugins | Medium | Medium | Document the boundary and provide focused adapters only for proven plugin workflows. |
 | Private projections drift from canonical structure | High | Medium | Rebuild or revision-stamp projections, expose named completion barriers, and test same-frame mutation. |
-| KeepWorld silently loses precision | High | Medium | Materialize a validated post-affine residual for exact retention; reject singular, non-finite, or domain-forbidden results atomically. |
+| KeepWorld silently loses precision | High | Medium | Validate a representation and precision contract against real edits; reject inadmissible results atomically rather than assuming residuals solve all cases. |
 | Persistent sibling order causes merge churn | Medium | Medium | Use parent-owned ordered lists plus stable relative move anchors; verify canonical fixture stability before considering rank metadata. |
 | Parent or order is duplicated across document records | Critical | Medium | Keep document hierarchy as the sole persistent topology/order authority and validate exact membership. |
 | Historical `KeepWorld` intent re-evaluates under a changed ancestor | High | Medium | Persist only final structural placement and local values; bind authoring intent compilation to a base revision. |
@@ -582,9 +585,9 @@ Acceptance requires all of the following, not merely a flat sprite demo:
    using the same structural facts with independent math and diagnostics.
 7. Nara runtime UI layout, render, hit-test, focus, clipping, and virtual/generated-node fixtures,
    including one explicit ghost/flatten rule and one explicit layout-root boundary.
-8. Move tests for `KeepLocal`, exact-affine `KeepWorld`, strict-TRS residual rejection, stale
-   projection, non-finite/singular failure, domain boundaries, ownership scope, relative order
-   movement, patch fact replay, and atomic no-change on error.
+8. Move tests for `KeepLocal` and any selected world-preserving candidate, including representation
+   and precision limits, stale projection, non-finite/singular failure, domain boundaries,
+   ownership scope, relative order movement, patch fact replay, and atomic no-change on error.
 9. Prefab fixtures proving source-relative override movement, instance-override-owned identity,
    deterministic two-segment anchor order, explicit conversion/adoption, and rejection of expanded
    IDs in persistent authority.
