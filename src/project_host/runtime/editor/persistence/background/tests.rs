@@ -82,7 +82,7 @@ impl SaveFixture {
         registry.freeze().unwrap();
         let opened =
             ScenePersistenceHost::open(&directory, "current.scene.json", &registry).unwrap();
-        let lane = SaveLane::Scene(EditorScenePersistenceLane {
+        let lane = PersistenceLane::Scene(EditorScenePersistenceLane {
             project_path: Arc::from("scenes/current.scene.json"),
             document: self.document,
             host: custody.retain_scene(opened.host).unwrap(),
@@ -96,8 +96,8 @@ impl SaveFixture {
         )
     }
 
-    fn assert_retry_can_publish(&mut self, lane: SaveLane) {
-        let SaveLane::Scene(lane) = lane else {
+    fn assert_retry_can_publish(&mut self, lane: PersistenceLane) {
+        let PersistenceLane::Scene(lane) = lane else {
             panic!("the fixture owns a Scene Host")
         };
         assert!(matches!(
@@ -273,7 +273,7 @@ fn worker_panic_recovers_the_poisoned_host_and_blocks_blind_retry() {
         EditorPersistenceRequestKind::Reopen,
         EditorDocumentId::from_raw(fixture.document.raw() + 1),
     ));
-    let SaveLane::Scene(lane) = lane else {
+    let PersistenceLane::Scene(lane) = lane else {
         panic!("the fixture owns a Scene Host")
     };
     assert!(matches!(
@@ -294,7 +294,7 @@ fn queued_save_rejects_when_its_original_host_retires_before_execution() {
     let mut save = fixture.start(&pools, &custody, None);
     let host = {
         let work = save.work.lock().unwrap();
-        let SaveLane::Scene(lane) = &work.as_ref().unwrap().lane else {
+        let PersistenceLane::Scene(lane) = &work.as_ref().unwrap().lane else {
             panic!("the fixture owns a Scene Host")
         };
         lane.host.clone()

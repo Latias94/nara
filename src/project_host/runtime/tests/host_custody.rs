@@ -92,7 +92,7 @@ fn terminal_failed_scene_and_prefab_saves_keep_cleanup_custody_after_session_dro
         let entries = directory_entries(&path);
         make_authoring_name_dirty(&mut editor, document, "dirty-unsaved");
         let before = editor.drive_editor_frame(Duration::ZERO);
-        guard = CleanupGuard::new(arm_failed_cleanup(&mut editor, kind));
+        guard = CleanupGuard::new(arm_failed_cleanup(&mut editor, document, kind));
         fail_save(&mut editor, document);
         assert_eq!(editor.current_frame().workspace(), before.workspace());
         assert_eq!(fs::read(&path).unwrap(), target);
@@ -126,7 +126,7 @@ fn failed_and_stale_reopen_preserve_failed_save_cleanup_through_session_drop() {
             let target = fs::read(&path).unwrap();
             let entries = directory_entries(&path);
             make_authoring_name_dirty(&mut editor, document, "dirty-before-reopen");
-            guard = CleanupGuard::new(arm_failed_cleanup(&mut editor, kind));
+            guard = CleanupGuard::new(arm_failed_cleanup(&mut editor, document, kind));
             fail_save(&mut editor, document);
             assert_eq!(
                 editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
@@ -194,7 +194,7 @@ fn document_replacement_rejects_until_failed_cleanup_retires_then_opens_the_new_
         let target = fs::read(&path).unwrap();
         let entries = directory_entries(&path);
         make_authoring_name_dirty(&mut editor, document, "retained-dirty");
-        guard = CleanupGuard::new(arm_failed_cleanup(&mut editor, kind));
+        guard = CleanupGuard::new(arm_failed_cleanup(&mut editor, document, kind));
         fail_save(&mut editor, document);
         let index = editor.project_source_index_snapshot().unwrap();
         let (source, source_kind) = successor(kind);
@@ -341,7 +341,7 @@ fn content_runtime_replacement_transfers_failed_cleanup_and_keeps_original_hosts
     assert!(report.applied, "{:?}", report.diagnostics);
     let prefab_document = report.opened_document.unwrap();
     edit_native_name(&mut editor, scene_document, "unsaved-scene");
-    guard = CleanupGuard::new(editor.test_fail_next_save_after_write());
+    guard = CleanupGuard::new(editor.test_fail_next_save_after_write(scene_document));
     fail_save(&mut editor, scene_document);
     assert_eq!(
         editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
@@ -565,11 +565,12 @@ fn successor(
 #[cfg(windows)]
 fn arm_failed_cleanup(
     editor: &mut editor::EditorProjectSession,
+    document: nara_tooling::EditorDocumentId,
     kind: EditorDocumentKind,
 ) -> crate::project_host::persistence::CleanupTestControl {
     match kind {
-        EditorDocumentKind::Scene => editor.test_fail_next_save_after_write(),
-        EditorDocumentKind::Prefab => editor.test_fail_next_prefab_save_after_write(),
+        EditorDocumentKind::Scene => editor.test_fail_next_save_after_write(document),
+        EditorDocumentKind::Prefab => editor.test_fail_next_prefab_save_after_write(document),
         EditorDocumentKind::Extension(_) => {
             unreachable!("fixture contains only Scene and Prefab sources")
         }

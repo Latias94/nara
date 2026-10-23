@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-10-24
 **Amended**: 2026-08-15 to make selection single-owner and separate monotonic revision from
 receipt-backed content state
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
@@ -100,7 +100,14 @@ Rules:
   Task cancellation or terminality does not prove that filesystem calls returned: retained runtime
   custody keeps the original Host and temporary cleanup alive through close or caller abandonment.
   Save exposes no public Cancel action. Reopen retains its separate exact-base-revision policy.
-- The private Scene/Prefab lane retains one concrete file Host for its entire lifetime, including
+- Each Scene/Prefab document retains its own concrete file lane keyed by `EditorDocumentId`.
+  Storage cardinality does not select active navigation, Scene preview or executable startup.
+  Save admission captures the matching concrete Host together with its checkpoint and readmission
+  basis; completion and uncertainty never look up a currently selected same-kind replacement.
+  Reopen retains the original Host and verifies that the document still owns that exact Host
+  before native admission, document publication and baseline reconciliation. This custody decision
+  does not by itself change the integrated Host's existing same-kind Open/retarget policy.
+- Each private Scene/Prefab lane retains one concrete file Host for its entire lifetime, including
   idle periods after an operation failed. Its runtime retirement registration is independent of
   task results and remains accountable for temporary cleanup after session abandonment. Operations
   borrow that Host; completing Save does not remove its retirement registration. A successful

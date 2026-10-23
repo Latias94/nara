@@ -17,6 +17,7 @@ use super::*;
 mod tests;
 
 pub(super) struct ReopenAdmission {
+    lane: PersistenceLane,
     document: EditorDocumentId,
     kind: EditorDocumentKind,
     revision: SceneAuthoringRevision,
@@ -145,19 +146,16 @@ impl EditorProjectSession {
             .workspace
             .document_kind(document)
             .ok_or(EditorPersistenceRejection::MissingDocument)?;
-        let (admission, request) = match kind {
-            EditorDocumentKind::Scene => {
+        let captured_lane = self.capture_persistence_lane(document)?;
+        let (admission, request) = match &captured_lane {
+            PersistenceLane::Scene(lane) => {
                 let slot = self
                     .workspace
                     .scene(document)
                     .ok_or(EditorPersistenceRejection::MissingDocument)?;
-                let lane = self
-                    .scene_lane
-                    .as_ref()
-                    .filter(|lane| lane.document == document)
-                    .ok_or(EditorPersistenceRejection::SourceBindingMismatch)?;
                 (
                     ReopenAdmission {
+                        lane: captured_lane.clone(),
                         document,
                         kind,
                         revision: slot.revision(),
@@ -174,18 +172,14 @@ impl EditorProjectSession {
                     ),
                 )
             }
-            EditorDocumentKind::Prefab => {
+            PersistenceLane::Prefab(lane) => {
                 let slot = self
                     .workspace
                     .prefab(document)
                     .ok_or(EditorPersistenceRejection::MissingDocument)?;
-                let lane = self
-                    .prefab_lane
-                    .as_ref()
-                    .filter(|lane| lane.document == document)
-                    .ok_or(EditorPersistenceRejection::SourceBindingMismatch)?;
                 (
                     ReopenAdmission {
+                        lane: captured_lane.clone(),
                         document,
                         kind,
                         revision: slot.revision(),
@@ -202,26 +196,21 @@ impl EditorProjectSession {
                     ),
                 )
             }
-            EditorDocumentKind::Extension(_) => {
-                let lane = self
-                    .extension_documents
-                    .lane(document)
-                    .ok_or(EditorPersistenceRejection::SourceBindingMismatch)?;
-                (
-                    ReopenAdmission {
-                        document,
-                        kind,
-                        revision: self
-                            .workspace
-                            .document_revision(document)
-                            .ok_or(EditorPersistenceRejection::MissingDocument)?,
-                        binding: Some(lane.source.clone()),
-                        project_path: Arc::from(lane.source.locator()),
-                        schema: None,
-                    },
-                    ReopenRequest::Extension(lane.capture_reopen()?),
-                )
-            }
+            PersistenceLane::Extension(lane) => (
+                ReopenAdmission {
+                    lane: captured_lane.clone(),
+                    document,
+                    kind,
+                    revision: self
+                        .workspace
+                        .document_revision(document)
+                        .ok_or(EditorPersistenceRejection::MissingDocument)?,
+                    binding: Some(lane.source.clone()),
+                    project_path: Arc::from(lane.source.locator()),
+                    schema: None,
+                },
+                ReopenRequest::Extension(lane.capture_reopen()?),
+            ),
         };
         Ok(PendingReopen { admission, request })
     }
@@ -237,8 +226,8 @@ impl EditorProjectSession {
         if self.workspace.document_revision(document) != Some(admission.revision) {
             return Err(EditorPersistenceRejection::StaleRevision);
         }
-        let (binding, schema, lane_matches) = match admission.kind {
-            EditorDocumentKind::Scene => {
+        let (binding, schema, lane_matches) = match &admission.lane {
+            PersistenceLane::Scene(captured) => {
                 let slot = self
                     .workspace
                     .scene(document)
@@ -246,12 +235,14 @@ impl EditorProjectSession {
                 (
                     slot.source_binding().cloned(),
                     slot.session().authoring_schema_basis(),
-                    self.scene_lane.as_ref().is_some_and(|lane| {
-                        lane.document == document && lane.project_path == admission.project_path
+                    self.scene_lanes.get(&document).is_some_and(|lane| {
+                        lane.project_path == admission.project_path
+                            && lane.host.same_owner(&captured.host)
+                            && captured.host.try_with(|_| ()).is_some()
                     }),
                 )
             }
-            EditorDocumentKind::Prefab => {
+            PersistenceLane::Prefab(captured) => {
                 let slot = self
                     .workspace
                     .prefab(document)
@@ -259,17 +250,21 @@ impl EditorProjectSession {
                 (
                     Some(slot.source_binding().clone()),
                     slot.session().authoring_schema_basis(),
-                    self.prefab_lane.as_ref().is_some_and(|lane| {
-                        lane.document == document && lane.project_path == admission.project_path
+                    self.prefab_lanes.get(&document).is_some_and(|lane| {
+                        lane.project_path == admission.project_path
+                            && lane.host.same_owner(&captured.host)
+                            && captured.host.try_with(|_| ()).is_some()
                     }),
                 )
             }
-            EditorDocumentKind::Extension(_) => (
+            PersistenceLane::Extension(captured) => (
                 self.workspace.document_source_binding(document).cloned(),
                 None,
-                self.extension_documents
-                    .lane(document)
-                    .is_some_and(|lane| lane.source.locator() == admission.project_path.as_ref()),
+                self.extension_documents.lane(document).is_some_and(|lane| {
+                    lane.source.locator() == admission.project_path.as_ref()
+                        && lane.host.same_owner(&captured.host)
+                        && captured.host.try_with(|_| ()).is_some()
+                }),
             ),
         };
         if !lane_matches || binding != admission.binding || schema != admission.schema {
@@ -298,20 +293,19 @@ impl EditorProjectSession {
         let registry = self
             .trusted_compiled()
             .map(|lane| lane.plan.schema_validation().registry());
-        match prepared {
-            ReopenCompletion::Scene(prepared) => {
+        match (prepared, &admission.lane) {
+            (ReopenCompletion::Scene(prepared), PersistenceLane::Scene(lane)) => {
                 let outcome = prepared.admit(registry);
-                self.publish_scene_reopen(admission.document, admission.revision, outcome)
+                self.publish_scene_reopen(lane, admission.revision, outcome)
             }
-            ReopenCompletion::Prefab(prepared) => {
+            (ReopenCompletion::Prefab(prepared), PersistenceLane::Prefab(lane)) => {
                 let outcome = prepared.admit(registry);
-                let refresh = self.prefab_lane.as_ref().is_some_and(|lane| {
-                    lane.host
-                        .try_with(|host| host.publishes_runtime_content())
-                        .unwrap_or(false)
-                });
+                let refresh = lane
+                    .host
+                    .try_with(|host| host.publishes_runtime_content())
+                    .unwrap_or(false);
                 self.publish_prefab_reopen(
-                    admission.document,
+                    lane,
                     admission.revision,
                     admission
                         .binding
@@ -321,10 +315,11 @@ impl EditorProjectSession {
                     outcome,
                 )
             }
-            ReopenCompletion::Unavailable => rejected(EditorPersistenceRejection::Busy),
-            ReopenCompletion::Extension(prepared) => {
-                self.publish_extension_reopen(admission.document, admission.revision, prepared)
+            (ReopenCompletion::Unavailable, _) => rejected(EditorPersistenceRejection::Busy),
+            (ReopenCompletion::Extension(prepared), PersistenceLane::Extension(lane)) => {
+                self.publish_extension_reopen(lane, admission.revision, prepared)
             }
+            _ => rejected(EditorPersistenceRejection::DocumentKindMismatch),
         }
     }
 

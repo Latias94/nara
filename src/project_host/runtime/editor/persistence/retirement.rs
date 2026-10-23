@@ -55,6 +55,10 @@ impl<H> RetainedHost<H> {
         }
     }
 
+    pub(in crate::project_host::runtime::editor) fn same_owner(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.host, &other.host)
+    }
+
     pub(in crate::project_host::runtime::editor) fn try_with<R>(
         &self,
         apply: impl FnOnce(&mut H) -> R,

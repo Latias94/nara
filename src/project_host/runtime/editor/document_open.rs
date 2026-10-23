@@ -234,20 +234,30 @@ impl EditorProjectSession {
         kind: AuthoringDocumentKind,
     ) -> Option<EditorDocumentId> {
         match kind {
-            AuthoringDocumentKind::Scene => self.scene_lane.as_ref().and_then(|lane| {
+            AuthoringDocumentKind::Scene => self.scene_lanes.values().find_map(|lane| {
                 (lane.project_path.as_ref() == relative_path).then_some(lane.document)
             }),
-            AuthoringDocumentKind::Prefab => self.prefab_lane.as_ref().and_then(|lane| {
+            AuthoringDocumentKind::Prefab => self.prefab_lanes.values().find_map(|lane| {
                 (lane.project_path.as_ref() == relative_path).then_some(lane.document)
             }),
         }
     }
 
     fn capture_replacing_document(&self, kind: AuthoringDocumentKind) -> Option<ReplacingDocument> {
-        let document = match kind {
-            AuthoringDocumentKind::Scene => self.scene_lane.as_ref()?.document,
-            AuthoringDocumentKind::Prefab => self.prefab_lane.as_ref()?.document,
+        let (document, count) = match kind {
+            AuthoringDocumentKind::Scene => (
+                self.scene_lanes.keys().next().copied()?,
+                self.scene_lanes.len(),
+            ),
+            AuthoringDocumentKind::Prefab => (
+                self.prefab_lanes.keys().next().copied()?,
+                self.prefab_lanes.len(),
+            ),
         };
+        assert_eq!(
+            count, 1,
+            "the current Open policy retains at most one document per source kind"
+        );
         let (binding, schema) = match kind {
             AuthoringDocumentKind::Scene => {
                 let slot = self.workspace.scene(document)?;
@@ -552,11 +562,15 @@ impl EditorProjectSession {
                     return Err("project.editor.scene-persistence-binding-failed");
                 }
                 let _ = self.diagnostics.extend(diagnostics);
-                self.scene_lane = Some(EditorScenePersistenceLane {
-                    project_path: relative_path,
+                self.scene_lanes.insert(
                     document,
-                    host,
-                });
+                    EditorScenePersistenceLane {
+                        project_path: relative_path,
+                        document,
+                        host,
+                    },
+                );
+                self.scene_preview_document = Some(document);
                 Ok(document)
             }
             PreparedDocument::Prefab {
@@ -587,11 +601,14 @@ impl EditorProjectSession {
                     return Err("project.editor.prefab-persistence-binding-failed");
                 }
                 let _ = self.diagnostics.extend(diagnostics);
-                self.prefab_lane = Some(EditorPrefabPersistenceLane {
-                    project_path: relative_path,
+                self.prefab_lanes.insert(
                     document,
-                    host,
-                });
+                    EditorPrefabPersistenceLane {
+                        project_path: relative_path,
+                        document,
+                        host,
+                    },
+                );
                 Ok(document)
             }
         };

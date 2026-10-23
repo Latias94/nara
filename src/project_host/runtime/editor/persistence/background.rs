@@ -10,38 +10,8 @@ use super::*;
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
 
-pub(super) enum SaveLane {
-    Scene(EditorScenePersistenceLane),
-    Prefab(EditorPrefabPersistenceLane),
-    Extension(super::super::extension_documents::ExtensionPersistenceLane),
-}
-
-impl SaveLane {
-    pub(super) fn document(&self) -> EditorDocumentId {
-        match self {
-            Self::Scene(lane) => lane.document,
-            Self::Prefab(lane) => lane.document,
-            Self::Extension(lane) => lane.document,
-        }
-    }
-
-    fn mark_uncertain(&mut self) {
-        match self {
-            Self::Scene(lane) => {
-                lane.host.try_with(|host| host.mark_uncertain());
-            }
-            Self::Prefab(lane) => {
-                lane.host.try_with(|host| host.mark_uncertain());
-            }
-            Self::Extension(lane) => {
-                lane.host.try_with(|host| host.mark_uncertain());
-            }
-        }
-    }
-}
-
 pub(super) struct SaveWork {
-    lane: SaveLane,
+    lane: PersistenceLane,
     candidate: Option<PendingSave>,
     authoring: Option<AuthoringDocumentReadmission>,
     started: bool,
@@ -61,7 +31,7 @@ pub(crate) struct BackgroundSave {
 
 impl BackgroundSave {
     pub(super) fn start(
-        lane: SaveLane,
+        lane: PersistenceLane,
         candidate: PendingSave,
         authoring: Option<AuthoringDocumentReadmission>,
         pools: &TaskPools,
@@ -91,19 +61,19 @@ impl BackgroundSave {
                     let candidate = work.candidate.take().expect("a save runs once");
                     let basis = work.authoring.take();
                     work.outcome = Some(match (&mut work.lane, candidate) {
-                        (SaveLane::Scene(lane), PendingSave::Scene(candidate)) => lane
+                        (PersistenceLane::Scene(lane), PendingSave::Scene(candidate)) => lane
                             .host
                             .with_worker(|host| host.save_owned(candidate, basis))
                             .unwrap_or(PersistenceSaveOutcome::Rejected(
                                 EditorPersistenceRejection::Busy,
                             )),
-                        (SaveLane::Prefab(lane), PendingSave::Prefab(candidate)) => lane
+                        (PersistenceLane::Prefab(lane), PendingSave::Prefab(candidate)) => lane
                             .host
                             .with_worker(|host| host.save_owned(candidate, basis))
                             .unwrap_or(PersistenceSaveOutcome::Rejected(
                                 EditorPersistenceRejection::Busy,
                             )),
-                        (SaveLane::Extension(lane), PendingSave::Extension(checkpoint)) => {
+                        (PersistenceLane::Extension(lane), PendingSave::Extension(checkpoint)) => {
                             lane.save(checkpoint)
                         }
                         _ => PersistenceSaveOutcome::Rejected(
@@ -119,7 +89,7 @@ impl BackgroundSave {
         Self { work, task }
     }
 
-    pub(super) fn poll(&mut self) -> Option<(SaveLane, PersistenceSaveOutcome)> {
+    pub(super) fn poll(&mut self) -> Option<(PersistenceLane, PersistenceSaveOutcome)> {
         if self.task.as_ref().is_some_and(|task| !task.is_finished()) {
             return None;
         }

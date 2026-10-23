@@ -1,22 +1,26 @@
 ---
 title: Per-Document Editor Persistence Custody
 date: 2026-10-23
-status: Proposed bounded R5c replacement
+status: Custody decision accepted; remaining R5c workflow Proposed
 ---
 
 # Per-Document Editor Persistence Custody
 
 ## Problem And Scope
 
-The prepared-edit consumer can target a non-active Scene or Prefab, but the integrated Host
-still retains one file lane of each kind. Opening another source of the same kind replaces
-its predecessor. The Workspace already has independently owned slots; keeping more tabs
-without their concrete file Hosts would strand persistence and cleanup authority.
+The prepared-edit consumer exposed a mismatch between independently owned Workspace slots and
+the integrated Host's singleton Scene/Prefab file custody. Opening another source of the same
+kind still follows the existing replacement policy. Merely keeping more tabs without their
+concrete file Hosts would strand persistence and cleanup authority.
 
 This design replaces that singleton assumption. It is the persistence-custody sub-unit of
 [R5c](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md), not the whole projection,
-durable-addressing, history-expiry or Prefab-overlay redesign. It is not implemented by the
-first prepared-edit slice. Amend the owning Accepted ADRs before adopting changed behavior.
+durable-addressing, history-expiry or Prefab-overlay redesign. ADRs
+[0047](adr/0047-editor-workspace-and-scene-document-state.md) and
+[0118](adr/0118-editor-workspaces-frontends-and-creation-templates.md) adopt the bounded
+per-document custody decision. Additive Open, complete alias convergence, multi-source refresh
+and Play-retirement source continuity remain Proposed. The implementation ledger owns actual
+qualification; neither prepared edits nor map storage alone establish public same-kind multi-open.
 
 ## Ownership And Alternatives
 
@@ -34,13 +38,20 @@ Keep four identities separate:
 Prefer two concrete maps keyed by `EditorDocumentId`, retaining the existing Scene/Prefab lane
 types. A single map with a closed enum is possible but does not remove the real codec and
 checkpoint distinctions. An erased store/trait would move those distinctions into downcasts
-or a second generic protocol without a consumer benefit. Retain existing `SaveLane` dispatch,
+or a second generic protocol without a consumer benefit. Retain closed typed persistence dispatch,
 extension-document maps and `HostCustody` registrations; do not create a Runtime per document.
 
 The pinned Godot source (`81ab961f91066a63bcbf3ec340962bb1a1ada558`) separates its `EditedScene`
 collection from `current_edited_scene` in `repo-ref/godot/editor/editor_data.h` and its associated
 activation/history operations in `editor_data.cpp`. This supports separating retained documents
 from active navigation; it does not establish equivalent Rust or file-capability guarantees.
+
+At Bevy pin `85503941e488152711a4695bbe248e9ed9f453fc`, the relevant source representations
+are `DynamicWorld` and `WorldAsset` under `crates/bevy_world_serialization`, not an assumed
+older `DynamicScene` API. `WorldInstanceSpawner` separately tracks asset/instance membership
+and instance/entity mappings. That distinction supports keeping source and live incarnation
+separate, but Bevy's World-backed representations do not supply Nara's data-only document,
+history, file-capability or saved-checkpoint contracts.
 
 ## Lifecycle
 
@@ -76,7 +87,10 @@ Reopen also binds its original Host, document incarnation/revision, source bindi
 Native callbacks remain in owner admission; background work does not gain executable authority.
 Use existing retained-handle identity rather than another public generation system.
 
-Prefab source observations need one canonical source-domain key. Content refresh must retain
+Prefab source observations need one canonical source-domain key: anchored Open currently uses
+Prefab-relative asset paths, while Browser slots may carry project-relative locators. Choose
+the domain key at admission rather than copying an arbitrary Workspace locator into refresh
+state. Content refresh must retain
 each saved source's outstanding digest obligation. A small source-keyed collection is sufficient:
 a later verified save may supersede the same source, not another source. Closing a tab does not
 erase an outstanding saved-content obligation. Publish `Current` only after the successor closure
@@ -100,6 +114,20 @@ with a retained last-explicitly-selected Scene binding before adoption; a closed
 must clear or deliberately rebind it. The current `Back to Scene` first-Scene search must either
 use that explicit binding or yield to the existing document selector. Keep the current global
 Scene Reopen-versus-Play exclusion until a separately qualified policy replaces it.
+
+The recommended multi-Scene policy is a retained last-explicitly-selected Scene: active-only
+preview would remove the existing Scene view while editing a Prefab or extension. Bind initial
+startup and successful explicit Scene selection/Open; leave non-active query/edit/Save/Reopen
+navigation-neutral. Clear only when the bound source actually closes, with no fallback to the
+first map entry. This broader selection policy is not adopted by the storage-only slice, whose
+private binding preserves the existing singleton Scene view. `Back to Scene` and presented-input
+admission must move with the later policy, independently of executable startup.
+
+Two further owner obligations remain explicit. The current content-refresh owner has one
+pending/failed obligation, so a later source must not be allowed to erase an earlier source's
+unsatisfied refresh. Trusted Play's cancelling/retiring states also need to retain their exact
+source before document Close can use source-local isolation throughout retirement. These are
+follow-up replacements, not claims that map storage has already fixed them.
 
 ## Ordered Change Set
 

@@ -2553,7 +2553,7 @@ fn scene_save_cleanup_blocks_session_close_until_retry() {
             })
             .applied
     );
-    editor.test_fail_next_save_after_write();
+    editor.test_fail_next_save_after_write(document);
     assert_eq!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document),
@@ -2575,7 +2575,7 @@ fn scene_save_cleanup_blocks_session_close_until_retry() {
             ..
         }
     ));
-    editor.test_allow_save_cleanup();
+    editor.test_allow_save_cleanup(document);
     assert!(matches!(
         drive_editor_close_to_completion(&mut editor),
         super::editor::EditorProjectCloseProgress::Complete(_)
@@ -3968,7 +3968,7 @@ fn close_prompt_replay_rejects_after_cancel_new_intent_and_failed_save() {
     );
     assert_eq!(editor.workspace_intent_view(), before);
     let disk_before = fs::read(project.root.join("scenes/startup.scene.json")).unwrap();
-    editor.test_fail_next_save(EditorPersistenceFailureStage::Encode);
+    editor.test_fail_next_save(document, EditorPersistenceFailureStage::Encode);
     assert_eq!(
         editor.resolve_workspace_intent(current, EditorCloseDecision::Save),
         EditorWorkspaceIntentRequestResult::Accepted
@@ -5507,7 +5507,10 @@ fn failed_and_uncertain_saves_do_not_advance_workspace_persistence_state() {
     let saved_revision = editor.workspace().scene(document).unwrap().saved_revision();
     let saved_digest = editor.workspace().scene(document).unwrap().saved_digest();
 
-    editor.test_fail_next_save(nara_tooling::EditorPersistenceFailureStage::Encode);
+    editor.test_fail_next_save(
+        document,
+        nara_tooling::EditorPersistenceFailureStage::Encode,
+    );
     assert_eq!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document),
@@ -5532,7 +5535,7 @@ fn failed_and_uncertain_saves_do_not_advance_workspace_persistence_state() {
         editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
         nara_tooling::EditorPersistenceRequestResult::Accepted
     );
-    editor.test_reject_next_valid_persistence_receipt();
+    editor.test_reject_next_valid_persistence_receipt(document);
     assert_eq!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document),

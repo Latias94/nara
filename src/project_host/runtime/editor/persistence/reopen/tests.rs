@@ -17,7 +17,7 @@ static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
 struct ReopenFixture {
     directory: PathBuf,
     original: Vec<u8>,
-    host: ScenePersistenceHost,
+    host: RetainedHost<ScenePersistenceHost>,
     registry: ComponentRegistry,
     workspace: EditorWorkspace,
     document: EditorDocumentId,
@@ -59,7 +59,7 @@ impl ReopenFixture {
         Self {
             directory,
             original,
-            host,
+            host: HostCustody::default().retain_scene(host).unwrap(),
             registry,
             workspace,
             document,
@@ -71,6 +71,11 @@ impl ReopenFixture {
         BackgroundReopen::start(
             PendingReopen {
                 admission: ReopenAdmission {
+                    lane: PersistenceLane::Scene(EditorScenePersistenceLane {
+                        project_path: Arc::from("scenes/current.scene.json"),
+                        document: self.document,
+                        host: self.host.clone(),
+                    }),
                     document: self.document,
                     kind: EditorDocumentKind::Scene,
                     revision: slot.revision(),
@@ -78,7 +83,12 @@ impl ReopenFixture {
                     project_path: Arc::from("scenes/current.scene.json"),
                     schema: None,
                 },
-                request: ReopenRequest::Scene(self.host.prepare_reopen(None).unwrap()),
+                request: ReopenRequest::Scene(
+                    self.host
+                        .try_with(|host| host.prepare_reopen(None))
+                        .unwrap()
+                        .unwrap(),
+                ),
             },
             pools,
             gate,

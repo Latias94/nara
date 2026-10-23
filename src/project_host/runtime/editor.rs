@@ -464,6 +464,7 @@ impl std::error::Error for EditorProjectOpenError {}
 
 enum PendingPersistence {
     Save {
+        lane: persistence::PersistenceLane,
         candidate: PendingSave,
         authoring: Option<nara_scene::AuthoringDocumentReadmission>,
     },
@@ -485,13 +486,6 @@ struct PendingProjectContentRefresh {
     prefab: nara_asset::AssetPath,
     saved_digest: nara_tooling::EditorDocumentDigest,
     expected_digest: ContentDigest,
-}
-
-#[derive(Clone, Copy)]
-enum PersistenceLane {
-    Scene,
-    Prefab,
-    Extension(EditorDocumentId),
 }
 
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
@@ -751,13 +745,14 @@ pub struct EditorProjectSession {
     closing: bool,
     workspace: EditorWorkspace,
     persistence_authority: EditorPersistenceAuthority,
-    scene_lane: Option<EditorScenePersistenceLane>,
+    scene_lanes: BTreeMap<EditorDocumentId, EditorScenePersistenceLane>,
+    scene_preview_document: Option<EditorDocumentId>,
     execution: EditorExecutionLane,
     project_content: EditorProjectContentView,
     next_project_content_generation: u64,
     pending_content_refresh: Option<PendingProjectContentRefresh>,
     failed_content_refresh: Option<PendingProjectContentRefresh>,
-    prefab_lane: Option<EditorPrefabPersistenceLane>,
+    prefab_lanes: BTreeMap<EditorDocumentId, EditorPrefabPersistenceLane>,
     extension_documents: extension_documents::EditorExtensionDocumentsHost,
     pending_document_open: Option<document_open::PendingDocumentOpen>,
     next_document_open_request: u64,
@@ -1351,20 +1346,26 @@ impl EditorProjectSession {
             closing: false,
             workspace,
             persistence_authority,
-            scene_lane: Some(EditorScenePersistenceLane {
-                project_path: startup_project_path,
+            scene_lanes: BTreeMap::from([(
                 document,
-                host: authoring_runtime
-                    .host_custody()
-                    .retain_scene(persistence)
-                    .ok_or_else(|| editor_open_error("project.editor.persistence-owner-closed"))?,
-            }),
+                EditorScenePersistenceLane {
+                    project_path: startup_project_path,
+                    document,
+                    host: authoring_runtime
+                        .host_custody()
+                        .retain_scene(persistence)
+                        .ok_or_else(|| {
+                            editor_open_error("project.editor.persistence-owner-closed")
+                        })?,
+                },
+            )]),
+            scene_preview_document: Some(document),
             execution: EditorExecutionLane::Authoring(parts.snapshot),
             project_content: EditorProjectContentView::NotInstalled,
             next_project_content_generation: 1,
             pending_content_refresh: None,
             failed_content_refresh: None,
-            prefab_lane: None,
+            prefab_lanes: BTreeMap::new(),
             extension_documents: extension_documents::EditorExtensionDocumentsHost::default(),
             pending_document_open: None,
             next_document_open_request: 0,
@@ -1566,14 +1567,20 @@ impl EditorProjectSession {
             closing: false,
             workspace,
             persistence_authority,
-            scene_lane: Some(EditorScenePersistenceLane {
-                project_path: startup_project_path,
+            scene_lanes: BTreeMap::from([(
                 document,
-                host: authoring_runtime
-                    .host_custody()
-                    .retain_scene(opened.host)
-                    .ok_or_else(|| editor_open_error("project.editor.persistence-owner-closed"))?,
-            }),
+                EditorScenePersistenceLane {
+                    project_path: startup_project_path,
+                    document,
+                    host: authoring_runtime
+                        .host_custody()
+                        .retain_scene(opened.host)
+                        .ok_or_else(|| {
+                            editor_open_error("project.editor.persistence-owner-closed")
+                        })?,
+                },
+            )]),
+            scene_preview_document: Some(document),
             execution: EditorExecutionLane::TrustedCompiled(Box::new(TrustedCompiledEditorLane {
                 plan,
                 content_candidate: candidate,
@@ -1600,7 +1607,7 @@ impl EditorProjectSession {
             next_project_content_generation: 2,
             pending_content_refresh: None,
             failed_content_refresh: None,
-            prefab_lane: None,
+            prefab_lanes: BTreeMap::new(),
             extension_documents: extension_documents::EditorExtensionDocumentsHost::default(),
             pending_document_open: None,
             next_document_open_request: 0,
@@ -2193,7 +2200,7 @@ impl EditorProjectSession {
         let authoring = self.authoring_project().is_some();
         let mut projection_rejected = false;
         let mut projection_omitted = false;
-        let scene_document = self.scene_lane.as_ref().map(|lane| lane.document);
+        let scene_document = self.scene_preview_document;
         let source_identity = scene_document.and_then(|document| {
             self.workspace
                 .scene(document)
@@ -2983,19 +2990,15 @@ impl EditorProjectSession {
         };
         match pending {
             PendingWorkspaceIntent::CloseDocument(pending) => {
-                let scene_clean = self.scene_lane.as_mut().is_none_or(|lane| {
-                    lane.document != pending.document
-                        || lane
-                            .host
-                            .try_with(|host| host.retry_cleanup())
-                            .unwrap_or(false)
+                let scene_clean = self.scene_lanes.get(&pending.document).is_none_or(|lane| {
+                    lane.host
+                        .try_with(|host| host.retry_cleanup())
+                        .unwrap_or(false)
                 });
-                let prefab_clean = self.prefab_lane.as_mut().is_none_or(|lane| {
-                    lane.document != pending.document
-                        || lane
-                            .host
-                            .try_with(|host| host.retry_cleanup())
-                            .unwrap_or(false)
+                let prefab_clean = self.prefab_lanes.get(&pending.document).is_none_or(|lane| {
+                    lane.host
+                        .try_with(|host| host.retry_cleanup())
+                        .unwrap_or(false)
                 });
                 let extension_clean = self.extension_documents.retire(pending.document);
                 if !scene_clean || !prefab_clean || !extension_clean {
@@ -3015,23 +3018,18 @@ impl EditorProjectSession {
                 let applied = report.applied;
                 if report.applied {
                     match closing_kind {
-                        Some(EditorDocumentKind::Scene)
-                            if self
-                                .scene_lane
-                                .as_ref()
-                                .is_some_and(|lane| lane.document == pending.document) =>
-                        {
-                            assert!(self.scene_lane.as_ref().unwrap().host.retire());
-                            self.scene_lane = None;
+                        Some(EditorDocumentKind::Scene) => {
+                            if let Some(lane) = self.scene_lanes.remove(&pending.document) {
+                                assert!(lane.host.retire());
+                            }
+                            if self.scene_preview_document == Some(pending.document) {
+                                self.scene_preview_document = None;
+                            }
                         }
-                        Some(EditorDocumentKind::Prefab)
-                            if self
-                                .prefab_lane
-                                .as_ref()
-                                .is_some_and(|lane| lane.document == pending.document) =>
-                        {
-                            assert!(self.prefab_lane.as_ref().unwrap().host.retire());
-                            self.prefab_lane = None;
+                        Some(EditorDocumentKind::Prefab) => {
+                            if let Some(lane) = self.prefab_lanes.remove(&pending.document) {
+                                assert!(lane.host.retire());
+                            }
                         }
                         _ => {}
                     }

@@ -48,7 +48,7 @@ fn assert_structural_save_snapshot(uncertain: bool) {
         .unwrap()
         .clone();
     if uncertain {
-        editor.test_reject_next_valid_persistence_receipt();
+        editor.test_reject_next_valid_persistence_receipt(document);
     }
     let control = editor.hold_next_save(editor::SaveTestPhase::BeforePublication);
     assert_eq!(

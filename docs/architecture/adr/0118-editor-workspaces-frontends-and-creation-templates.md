@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-23 (owned submissions, prepared document editing and explicit source queries)
+**Last Revised**: 2026-10-24 (per-document concrete persistence custody)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -67,6 +67,13 @@ retires every extension publication registration through the existing Host-custo
 participant before the session reports Complete. A failed document Close/Save preserves the open
 document and its file custody for another explicit decision. Physical Host custody survives task
 completion and panel retirement through the existing close participant.
+
+Scene and Prefab file custody is also keyed by the exact open document, using their concrete
+lane types rather than an erased document store. An operation retains its captured Host instead
+of resolving another same-kind lane at completion. Document storage, active navigation, Scene
+preview binding and executable startup are distinct responsibilities. This does not yet adopt
+additive same-kind Open or a new preview-selection policy; those require their own qualified
+workflow rather than following persistence-map iteration order.
 
 The small independently compiled dialogue consumer and its public tests determine this boundary.
 The [document extension guide](../../guides/editor-documents.md) records the supported workflow

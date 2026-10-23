@@ -94,7 +94,9 @@ or every recommended ADR amendment has been applied.
 The [per-document persistence-custody design](editor-document-persistence-custody-design.md)
 specifies R5c's concrete replacement for the integrated Host's per-kind file lanes. It separates
 source aliases, document sessions, preview selection and executable startup without an erased
-document store. It remains Proposed; prepared editing alone does not qualify same-kind multi-open.
+document store. ADRs 0047/0118 adopt the bounded custody decision; additive Open and the remaining
+source/preview/refresh/Play workflow remain Proposed. Prepared edits or per-document storage alone
+do not qualify public same-kind multi-open.
 
 The [chat-informed foundation review](../audits/2026-10-23-chat-informed-engine-architecture-review.md)
 compares the supplied engine-design conversation with the current owners and pinned Bevy/Godot

@@ -145,12 +145,6 @@ impl EditorExtensionDocumentsHost {
         }
         true
     }
-
-    pub(super) fn mark_uncertain(&mut self, document: EditorDocumentId) {
-        if let Some(lane) = self.lanes.get(&document) {
-            lane.host.try_with(|host| host.mark_uncertain());
-        }
-    }
 }
 
 impl EditorProjectSession {
@@ -192,13 +186,13 @@ impl EditorProjectSession {
         let binding = EditorDocumentSourceBinding::new(source.to_owned());
         if self.extension_documents.has_exact_source(source)
             || self
-                .scene_lane
-                .as_ref()
-                .is_some_and(|lane| lane.project_path.as_ref() == source)
+                .scene_lanes
+                .values()
+                .any(|lane| lane.project_path.as_ref() == source)
             || self
-                .prefab_lane
-                .as_ref()
-                .is_some_and(|lane| lane.project_path.as_ref() == source)
+                .prefab_lanes
+                .values()
+                .any(|lane| lane.project_path.as_ref() == source)
         {
             return Err(EditorExtensionDocumentHostError::SourceAlreadyOpen);
         }
@@ -214,25 +208,20 @@ impl EditorProjectSession {
         if self.extension_documents.has_file(&file)? {
             return Err(EditorExtensionDocumentHostError::SourceAlreadyOpen);
         }
-        let scene_source = self
-            .scene_lane
-            .as_ref()
-            .map(|lane| {
-                lane.host
-                    .try_with(|host| host.read_source())
-                    .ok_or(EditorExtensionDocumentHostError::Busy)
-            })
-            .transpose()?;
-        let prefab_source = self
-            .prefab_lane
-            .as_ref()
-            .map(|lane| {
-                lane.host
-                    .try_with(|host| host.read_source())
-                    .ok_or(EditorExtensionDocumentHostError::Busy)
-            })
-            .transpose()?;
-        for retained_source in scene_source.into_iter().chain(prefab_source) {
+        for lane in self.scene_lanes.values() {
+            let retained_source = lane
+                .host
+                .try_with(|host| host.read_source())
+                .ok_or(EditorExtensionDocumentHostError::Busy)?;
+            if source_aliases(&file, retained_source)? {
+                return Err(EditorExtensionDocumentHostError::SourceAlreadyOpen);
+            }
+        }
+        for lane in self.prefab_lanes.values() {
+            let retained_source = lane
+                .host
+                .try_with(|host| host.read_source())
+                .ok_or(EditorExtensionDocumentHostError::Busy)?;
             if source_aliases(&file, retained_source)? {
                 return Err(EditorExtensionDocumentHostError::SourceAlreadyOpen);
             }
@@ -402,10 +391,11 @@ pub(super) struct PreparedExtensionReopen {
 impl EditorProjectSession {
     pub(super) fn publish_extension_reopen(
         &mut self,
-        document: EditorDocumentId,
+        lane: &ExtensionPersistenceLane,
         revision: nara_core::DocumentRevision,
         prepared: Result<PreparedExtensionReopen, ExtensionReopenFailure>,
     ) -> EditorPersistenceResult {
+        let document = lane.document;
         let rejected = |reason| EditorPersistenceResult::Rejected {
             request: nara_tooling::EditorPersistenceRequestKind::Reopen,
             document: Some(document),
@@ -432,9 +422,6 @@ impl EditorProjectSession {
                     stage: EditorPersistenceFailureStage::Decode,
                 };
             }
-        };
-        let Some(lane) = self.extension_documents.lane(document) else {
-            return rejected(EditorPersistenceRejection::MissingDocument);
         };
         let Some(report) = lane.host.try_with(|host| {
             let report = self

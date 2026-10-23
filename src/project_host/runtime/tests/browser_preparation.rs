@@ -684,7 +684,10 @@ fn dirty_browser_replacement_cancel_and_failed_save_preserve_the_old_document_an
         let request = begin_open(&mut editor, SCENE);
         let awaiting = wait_close_prompt(&mut editor, request, document);
         if decision == EditorCloseDecision::Save {
-            editor.test_fail_next_save(nara_tooling::EditorPersistenceFailureStage::Encode);
+            editor.test_fail_next_save(
+                document,
+                nara_tooling::EditorPersistenceFailureStage::Encode,
+            );
         }
         assert_eq!(
             workspace_action(
