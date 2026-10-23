@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "c0d178b347a422447db0b6714c38a40f4eef2d24b67fbea7f4a05c8d8ed0e89c"
+source_fingerprint: "6000db445dc0fc007023d5ba58a3c891a94b29d4798ab737e92f0e5616fe82b6"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "c0d178b347a422447db0b6714c38a40f4eef2d24b67fbea7f4a05c8d8ed
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `c0d178b347a422447db0b6714c38a40f4eef2d24b67fbea7f4a05c8d8ed0e89c`
-- Immutable records: 865
+- Source fingerprint: `6000db445dc0fc007023d5ba58a3c891a94b29d4798ab737e92f0e5616fe82b6`
+- Immutable records: 866
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Per-document persistence custody qualification](verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md) - Typed document file custody, captured Save/Reopen Hosts, exact cleanup isolation and bounded native/public evidence.
 - **Verification Evidence**: [Prepared source editing and non-active entity query qualification](verification/2026-10/2026-10-23T140847Z-prepared-source-editing-and-non-active-entity-query-qualification-d08c0cb5ab2c4f798dd7cd98c2a2e6c5.md) - Owner-bound candidates, replayable inverses, public Scene/Prefab workflow, exact query custody and per-kind Host limitation.
 - **Verification Evidence**: [Workflow-driven foundation waves and R1a owned Application submission qualification](verification/2026-10/2026-10-23T123523Z-workflow-driven-foundation-waves-and-r1a-owned-application-submission-qualification-5e5f6c3eb3b84150bc3a5e06e9862abf.md) - Target owner boundaries, dependency corrections, exact direct dispatch observations, consumer evidence and explicit remaining scope.
 - **Verification Evidence**: [Foundation architecture rebaseline documentation checks and adversarial closure](verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md) - Inventory, status, link and scoped adversarial checks close design work only; no runtime or performance qualification.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Post-boundary U6 bounded Image recovery continuity qualification](verification/2026-10/2026-10-23T072629Z-post-boundary-u6-bounded-image-recovery-continuity-qualification-1f48883676614cde8d61d8a59e3cef2d.md) - Verification Evidence for Post-boundary U6 bounded Image recovery continuity qualification.
 - **Verification Evidence**: [Post-boundary U5 Image-owned prepared capture qualification](verification/2026-10/2026-10-23T070352Z-post-boundary-u5-image-owned-prepared-capture-qualification-a532b06bf3d94666bc5f1c2748052ef5.md) - Verification Evidence for Post-boundary U5 Image-owned prepared capture qualification.
 - **Work Progress**: [Post-boundary U5 owner capture and consumer migration](progress/2026-10/2026-10-23T065517Z-post-boundary-u5-owner-capture-and-consumer-migration-ed9ce78ba1e54cc0a5d6036ea12bf27f.md) - Work Progress for Post-boundary U5 owner capture and consumer migration.
-- **Session Handoff**: [Post-boundary U1 to U4 delivered U5 red regression next](sessions/2026-10/2026-10-23T061900Z-post-boundary-u1-to-u4-delivered-u5-red-regression-next-595eef43ad4a46f1a6ebcfd1b3c3c540.md) - Goal budget stopped execution after four qualified owner units; U5 through U8 remain unfinished.
 
 # Integration Notes
 
