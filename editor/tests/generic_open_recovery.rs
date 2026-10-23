@@ -534,7 +534,7 @@ fn dispatch(
         EditorActionBatch::new(frame.revision(), [action]),
         Duration::ZERO,
     );
-    assert!(update.actions_observed());
+    assert!(update.update().actions_observed());
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while current_frame(application).persistence().operation()
         != nara::tooling::EditorPersistenceOperation::Idle

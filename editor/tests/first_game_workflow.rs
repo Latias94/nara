@@ -1280,7 +1280,7 @@ fn dispatch(application: &mut EditorApplication, action: EditorAction) -> Arc<Ed
         EditorActionBatch::new(frame.revision(), [action]),
         Duration::ZERO,
     );
-    assert!(update.actions_observed());
+    assert!(update.update().actions_observed());
     let deadline = Instant::now() + Duration::from_secs(10);
     while current_frame(application).persistence().operation()
         != nara::tooling::EditorPersistenceOperation::Idle
@@ -1430,6 +1430,7 @@ fn close_application(application: &mut EditorApplication) {
             let frame = current_frame(application);
             if application
                 .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
+                .update()
                 .exit_ready()
             {
                 break;

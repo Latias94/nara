@@ -149,6 +149,7 @@ fn registered_panels_scroll_and_keep_independent_inspector_instances() {
                 EditorActionBatch::new(frame.revision(), actions),
                 Duration::ZERO,
             )
+            .update()
             .exit_ready()
         {
             break;

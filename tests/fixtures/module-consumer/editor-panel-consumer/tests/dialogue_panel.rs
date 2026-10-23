@@ -74,6 +74,7 @@ impl Drop for Application {
                     EditorActionBatch::new(frame.revision(), actions),
                     Duration::ZERO,
                 )
+                .update()
                 .exit_ready();
             std::thread::sleep(Duration::from_millis(1));
         }

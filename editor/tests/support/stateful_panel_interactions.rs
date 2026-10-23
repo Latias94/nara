@@ -236,6 +236,7 @@ fn public_layout_reset_and_restore_retire_objects_before_reusing_instance_ids() 
         };
         closed = application
             .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
+            .update()
             .exit_ready();
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(1));
@@ -462,6 +463,7 @@ fn contributed_drafts_follow_instance_target_document_and_project_lifetimes() {
                 EditorActionBatch::new(frame.revision(), actions),
                 Duration::ZERO,
             )
+            .update()
             .exit_ready()
         {
             break;

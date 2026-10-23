@@ -148,6 +148,26 @@ Painting a newer candidate supersedes unfinished observations from the previous 
 a candidate performs no application work. The ordinary application `EditorActionBatch` entry
 remains available for callers that do not need panel result routing.
 
+Direct application submissions return an owned `EditorApplicationSubmission`. Inspect `actions()`
+for one dispatch observation per original action, including explicit Closing, WorkspaceUnavailable
+or BatchRejected results for actions that never reached a session. An actual dispatched action
+retains its full `EditorActionOutcome`, including domain rejection. `update()` separately reports
+the subsequent drive's observation/exit flags. `actions_observed()` is not a success verdict.
+
+```rust,ignore
+let submission = application.submit_and_drive(batch, Duration::ZERO);
+for action in submission.actions() {
+    observe_dispatch(action);
+}
+if submission.update().exit_ready() {
+    // The application has completed the requested process-exit boundary.
+}
+```
+
+The returned observations stay associated with that call across later drives and do not settle
+panel callbacks. Save/Play request admission still needs its owning asynchronous completion
+observation; an Accepted request can later fail. Ordered actions are not an atomic transaction.
+
 Panel state survives docking, movement, relocation and native GPU reconstruction. Closing or
 hiding a panel retires that instance's drafts without closing its document. Reopening starts
 fresh state. Changing the panel target or its resolved document also retires drafts, including a

@@ -171,6 +171,50 @@ impl EditorApplicationUpdate {
     }
 }
 
+/// Why an action submitted directly to the application did not reach the session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorApplicationActionNotDispatched {
+    /// Project retirement admits only close resolution and cleanup retries.
+    Closing,
+    /// No workspace was available for action dispatch.
+    WorkspaceUnavailable,
+    /// The session rejected the batch before dispatching any of its actions.
+    BatchRejected(EditorActionRejection),
+}
+
+/// Immediate dispatch observation for one action, in its original submission position.
+///
+/// A dispatched request can still be rejected by its domain or finish asynchronously.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EditorApplicationActionDispatch {
+    Dispatched(EditorActionOutcome),
+    NotDispatched(EditorApplicationActionNotDispatched),
+}
+
+/// Owned observations from a direct application submission and the subsequent drive.
+///
+/// Dispatch results remain associated with this call even after another submission, frame
+/// advance or project retirement. They do not settle frontend panel callbacks, certify eventual
+/// Save/Play completion or make an ordered action batch atomic.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorApplicationSubmission {
+    update: EditorApplicationUpdate,
+    actions: Vec<EditorApplicationActionDispatch>,
+}
+
+impl EditorApplicationSubmission {
+    #[must_use]
+    pub const fn update(&self) -> EditorApplicationUpdate {
+        self.update
+    }
+
+    /// Returns exactly one result per submitted action, including actions filtered during close.
+    #[must_use]
+    pub fn actions(&self) -> &[EditorApplicationActionDispatch] {
+        &self.actions
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct EditorApplicationDispatch {
     actions_observed: bool,
@@ -183,6 +227,57 @@ pub(crate) struct EditorApplicationDispatch {
 }
 
 impl EditorApplicationDispatch {
+    fn into_submission(self, update: EditorApplicationUpdate) -> EditorApplicationSubmission {
+        let has_feedback = self.feedback.is_some();
+        let (mut outcomes, rejection) = match self.feedback {
+            Some(Ok(report)) => (
+                report
+                    .into_outcomes()
+                    .into_iter()
+                    .map(Some)
+                    .collect::<Vec<_>>(),
+                None,
+            ),
+            Some(Err(rejection)) => (Vec::new(), Some(rejection)),
+            None => (Vec::new(), None),
+        };
+        let actions = self
+            .original_slots
+            .into_iter()
+            .map(|slot| {
+                if slot.is_none() && self.closing_filter {
+                    return EditorApplicationActionDispatch::NotDispatched(
+                        EditorApplicationActionNotDispatched::Closing,
+                    );
+                }
+                let Some(slot) = slot else {
+                    assert!(
+                        !has_feedback,
+                        "an unavailable workspace cannot have dispatched action feedback"
+                    );
+                    return EditorApplicationActionDispatch::NotDispatched(
+                        EditorApplicationActionNotDispatched::WorkspaceUnavailable,
+                    );
+                };
+                if let Some(rejection) = rejection {
+                    return EditorApplicationActionDispatch::NotDispatched(
+                        EditorApplicationActionNotDispatched::BatchRejected(rejection),
+                    );
+                }
+                let outcome = outcomes
+                    .get_mut(slot)
+                    .and_then(Option::take)
+                    .expect("each dispatched action must consume exactly one reported outcome");
+                EditorApplicationActionDispatch::Dispatched(outcome)
+            })
+            .collect();
+        assert!(
+            outcomes.iter().all(Option::is_none),
+            "every reported outcome must belong to one submitted action"
+        );
+        EditorApplicationSubmission { update, actions }
+    }
+
     pub(crate) fn remap_original_slots(&mut self, slots: &[Option<usize>]) {
         self.original_slots = slots
             .iter()
@@ -732,13 +827,15 @@ impl EditorApplication {
                 .cloned()
         })
     }
+    /// Dispatches an ordered action batch and returns its exact observations after driving.
     pub fn submit_and_drive(
         &mut self,
         batch: EditorActionBatch,
         real_delta: Duration,
-    ) -> EditorApplicationUpdate {
+    ) -> EditorApplicationSubmission {
         let dispatch = self.dispatch_editor_actions(batch);
-        self.drive_editor_frame(real_delta, dispatch.actions_observed(), true)
+        let update = self.drive_editor_frame(real_delta, dispatch.actions_observed(), true);
+        dispatch.into_submission(update)
     }
 
     pub(crate) fn dispatch_editor_actions(
@@ -2079,6 +2176,63 @@ mod tests {
     use std::{io, path::PathBuf};
 
     #[test]
+    fn direct_submission_rejects_inconsistent_internal_outcome_mapping() {
+        use nara::tooling::*;
+
+        let frame = EditorFrameClock::new().publish(
+            EditorWorkspace::new().authoring_model(),
+            EditorProjectView::new(
+                EditorProjectReadinessView::new(
+                    EditorAuthoringReadiness::Complete,
+                    EditorRuntimeAvailability::TrustedInProcess,
+                ),
+                Default::default(),
+                EditorPlayView::new(EditorPlayState::Empty, None, None, None, false, None),
+                EditorPersistenceView::new(EditorPersistenceOperation::Idle, None),
+                EditorProjectContentView::NotInstalled,
+                EditorWorkspaceIntentView::new(None, None, None, None, None),
+            ),
+            Default::default(),
+            EditorReopenTarget::Unavailable,
+            None,
+        );
+        let report = |outcomes: Vec<EditorActionOutcome>| {
+            Some(Ok(EditorActionBatchReport::new(frame.revision(), outcomes)))
+        };
+        let outcome = EditorActionOutcome::Rejected(EditorActionRejection::NoPublishedFrame);
+        let silently_accepted = [
+            ("missing report", vec![Some(0)], None),
+            ("missing outcome", vec![Some(0)], report(vec![])),
+            (
+                "duplicate slot",
+                vec![Some(0), Some(0)],
+                report(vec![outcome.clone()]),
+            ),
+            (
+                "out-of-range slot",
+                vec![Some(1)],
+                report(vec![outcome.clone()]),
+            ),
+            ("unclaimed outcome", vec![], report(vec![outcome])),
+        ]
+        .into_iter()
+        .filter_map(|(name, original_slots, feedback)| {
+            let dispatch = super::EditorApplicationDispatch {
+                original_slots,
+                feedback,
+                ..Default::default()
+            };
+            std::panic::catch_unwind(|| {
+                dispatch.into_submission(super::EditorApplicationUpdate::idle())
+            })
+            .is_ok()
+            .then_some(name)
+        })
+        .collect::<Vec<_>>();
+        assert!(silently_accepted.is_empty(), "{silently_accepted:?}");
+    }
+
+    #[test]
     fn project_root_recovery_summary_is_bounded_and_path_free() {
         let private_path = PathBuf::from(r"C:\private\customer\prototype");
         let error = EditorApplicationOpenError::ProjectRootOpen {
@@ -2290,7 +2444,7 @@ mod tests {
                 EditorActionBatch::new(frame.revision(), actions),
                 std::time::Duration::ZERO,
             );
-            if update.exit_ready() {
+            if update.update().exit_ready() {
                 break;
             }
             std::thread::yield_now();

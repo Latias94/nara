@@ -7,8 +7,9 @@ use nara::{
     scene::{AuthoringFieldEdit, SceneEntityId},
 };
 use nara_editor::{
-    EditorApplication, EditorApplicationState, EditorLaunchOptions, EditorNativeComposition,
-    ImguiEditorPanel, ImguiEditorPanelContext, PanelActionDispatch, PanelSubmissionId,
+    EditorApplication, EditorApplicationActionDispatch, EditorApplicationState,
+    EditorLaunchOptions, EditorNativeComposition, ImguiEditorPanel, ImguiEditorPanelContext,
+    PanelActionDispatch, PanelSubmissionId,
     workspace::{
         EditorPanelDescriptor, EditorPanelMultiplicity, EditorPanelPlacement, EditorPanelTarget,
     },
@@ -101,7 +102,7 @@ fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selecti
         .id();
     let frame = application.current_frame().unwrap();
     let document = frame.workspace().active_document.unwrap();
-    application.submit_and_drive(
+    let direct_selection = application.submit_and_drive(
         EditorActionBatch::new(
             frame.revision(),
             [EditorAction::Navigate(
@@ -113,6 +114,12 @@ fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selecti
         ),
         Duration::ZERO,
     );
+    assert!(matches!(
+        direct_selection.actions(),
+        [EditorApplicationActionDispatch::Dispatched(
+            nara::tooling::EditorActionOutcome::Workspace(_)
+        )]
+    ));
     let selected = application.current_frame().unwrap();
     let scene = selected.workspace().active_scene.as_ref().unwrap();
     let selection = scene.selection.clone();
@@ -272,6 +279,7 @@ fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selecti
                 ),
                 Duration::ZERO,
             )
+            .update()
             .exit_ready();
     }
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
@@ -284,6 +292,7 @@ fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selecti
         };
         closed = application
             .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
+            .update()
             .exit_ready();
         if !closed {
             std::thread::sleep(Duration::from_millis(2));

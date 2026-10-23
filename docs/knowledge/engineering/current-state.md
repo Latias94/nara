@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "27e416561ee003044051b3be520ea04d4208c6037ff91f6e20092d6130035f89"
+source_fingerprint: "56238963ac9876602861dcbcbd43edd2b9592d7952e62bafa6fe50816ac129d2"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "27e416561ee003044051b3be520ea04d4208c6037ff91f6e20092d61300
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `27e416561ee003044051b3be520ea04d4208c6037ff91f6e20092d6130035f89`
-- Immutable records: 863
+- Source fingerprint: `56238963ac9876602861dcbcbd43edd2b9592d7952e62bafa6fe50816ac129d2`
+- Immutable records: 864
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Workflow-driven foundation waves and R1a owned Application submission qualification](verification/2026-10/2026-10-23T123523Z-workflow-driven-foundation-waves-and-r1a-owned-application-submission-qualification-5e5f6c3eb3b84150bc3a5e06e9862abf.md) - Target owner boundaries, dependency corrections, exact direct dispatch observations, consumer evidence and explicit remaining scope.
 - **Verification Evidence**: [Foundation architecture rebaseline documentation checks and adversarial closure](verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md) - Inventory, status, link and scoped adversarial checks close design work only; no runtime or performance qualification.
 - **Subagent Finding**: [Complete foundation review: six independent lanes and integrated design choices](subagents/2026-10/2026-10-23T113840Z-complete-foundation-review-six-independent-lanes-and-integrated-design-choices-0520f18c9f084c319ab268ab36204938.md) - Six source reviews challenge all conversation foundation topics and 103 baseline ADRs without claiming implementation.
 - **Verification Evidence**: [Chat-informed architecture review probes and design constraints](verification/2026-10/2026-10-23T105719Z-chat-informed-architecture-review-probes-and-design-constraints-cc6bbbacdaac48eea3745bc7d36f8d9a.md) - Three public-interface probes distinguish a reproduced control defect from current Identity and Theme contract debt.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Post-boundary U5 owner capture and consumer migration](progress/2026-10/2026-10-23T065517Z-post-boundary-u5-owner-capture-and-consumer-migration-ed9ce78ba1e54cc0a5d6036ea12bf27f.md) - Work Progress for Post-boundary U5 owner capture and consumer migration.
 - **Session Handoff**: [Post-boundary U1 to U4 delivered U5 red regression next](sessions/2026-10/2026-10-23T061900Z-post-boundary-u1-to-u4-delivered-u5-red-regression-next-595eef43ad4a46f1a6ebcfd1b3c3c540.md) - Goal budget stopped execution after four qualified owner units; U5 through U8 remain unfinished.
 - **Verification Evidence**: [Post-boundary U1 U2 lossless outcomes and disposal-close qualification](verification/2026-10/2026-10-23T055844Z-post-boundary-u1-u2-lossless-outcomes-and-disposal-close-qualification-3f13b79a544a478b974d062c99662a12.md) - Current-source regression, Host bookkeeping, task disposal custody and exact native scope for post-boundary owner repairs.
-- **Verification Evidence**: [Post-boundary U4 post-flush persistent admission qualification](verification/2026-10/2026-10-23T055642Z-post-boundary-u4-post-flush-persistent-admission-qualification-e1266d181d7043a3b9ce33b60697d53c.md) - Post-flush target facts preserve original asset interference guards across direct batch and fresh preparation.
 
 # Integration Notes
 

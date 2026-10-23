@@ -46,7 +46,7 @@ fn generated_starter_reaches_ready_stop_and_clean_editor_exit() {
         ),
         Duration::ZERO,
     );
-    assert!(accepted.actions_observed());
+    assert!(accepted.update().actions_observed());
 
     drive_until_external_state(
         &mut application,
@@ -69,7 +69,7 @@ fn generated_starter_reaches_ready_stop_and_clean_editor_exit() {
         ),
         Duration::ZERO,
     );
-    assert!(stopping.actions_observed());
+    assert!(stopping.update().actions_observed());
     drive_until_external_state(
         &mut application,
         EditorExternalPlayState::Idle,
@@ -163,7 +163,7 @@ fn drive_until_exit_ready(application: &mut EditorApplication, timeout: Duration
         let frame = current_frame(application);
         let update = application
             .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
-        if update.exit_ready() {
+        if update.update().exit_ready() {
             return;
         }
         assert!(

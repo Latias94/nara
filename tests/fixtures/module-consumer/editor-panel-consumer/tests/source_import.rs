@@ -23,7 +23,7 @@ fn drive(application: &mut nara_editor::EditorApplication) {
                 || frame.source_asset_import_work_pending()
                     != after.source_asset_import_work_pending()
                 || frame.image_import_work_pending() != after.image_import_work_pending())
-            && !update.actions_observed()
+            && !update.update().actions_observed()
         {
             close(application);
             panic!("a source import or metadata discovery change must request presentation");
@@ -88,6 +88,7 @@ fn close(application: &mut nara_editor::EditorApplication) {
         );
         ready = application
             .submit_and_drive(EditorActionBatch::new(revision, []), Duration::ZERO)
+            .update()
             .exit_ready();
         std::thread::sleep(Duration::from_millis(1));
     }
@@ -349,6 +350,7 @@ fn a_compiled_editor_imports_reimports_and_preserves_metadata_before_check_and_p
         assert!(
             !application
                 .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
+                .update()
                 .actions_observed(),
             "unchanged source import frames must remain quiet"
         );

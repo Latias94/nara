@@ -31,9 +31,9 @@ use nara::{
         ScenePlacementOwner,
     },
     tooling::{
-        EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentId,
-        EditorDocumentMutation, EditorFieldFeedbackReason, EditorFieldTarget,
-        EditorFieldValidationFailure, EditorNavigationAction, EditorPlayAction,
+        EditorAction, EditorActionBatch, EditorActionOutcome, EditorActionRejection,
+        EditorCloseDecision, EditorDocumentId, EditorDocumentMutation, EditorFieldFeedbackReason,
+        EditorFieldTarget, EditorFieldValidationFailure, EditorNavigationAction, EditorPlayAction,
         EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection, EditorPlayState,
         EditorRuntimeUnavailableReason, EditorSelectionSet, EditorWorkspaceIntent,
         EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult, SceneInspectorCommand,
@@ -42,8 +42,8 @@ use nara::{
     ui::__private::{UiAuthoringCanvasProjection, UiAuthoringFieldValue},
 };
 use nara_editor::{
-    EditorApplication, EditorApplicationState, EditorLaunchOptions, EditorProjectAction,
-    ImguiEditorFrontend,
+    EditorApplication, EditorApplicationActionDispatch, EditorApplicationActionNotDispatched,
+    EditorApplicationState, EditorLaunchOptions, EditorProjectAction, ImguiEditorFrontend,
 };
 
 #[path = "support/imgui.rs"]
@@ -51,6 +51,224 @@ mod imgui;
 
 const NARA_GIT_REVISION: &str = "0123456789abcdef0123456789abcdef01234567";
 static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
+
+#[test]
+fn direct_submission_retains_each_action_result_across_later_drives() {
+    let project = StarterProject::new("direct-submission-results");
+    let mut application = open_ordinary(project.root());
+    let frame = current_frame(&application);
+    let scene = frame.workspace().active_scene.as_ref().unwrap();
+    let create = |name| {
+        EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
+            document: scene.document,
+            base_revision: scene.revision,
+            patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                entity: SceneEntityRecord::new(SceneEntityId::new(name).unwrap()),
+                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            }]),
+        })
+    };
+    let submission = application.submit_and_drive(
+        EditorActionBatch::new(frame.revision(), [create("accepted"), create("stale")]),
+        Duration::ZERO,
+    );
+    assert!(submission.update().actions_observed());
+    assert!(matches!(
+        submission.actions(),
+        [
+            EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(_)),
+            EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Rejected(
+                EditorActionRejection::StaleDocumentFact { .. }
+            ))
+        ]
+    ));
+    let retained = submission.actions().to_vec();
+    let current = current_frame(&application);
+    let empty = application.submit_and_drive(
+        EditorActionBatch::new(current.revision(), []),
+        Duration::ZERO,
+    );
+    assert!(empty.actions().is_empty());
+    assert!(!empty.update().actions_observed());
+    assert_eq!(submission.actions(), retained);
+    assert!(active_scene_has_entity(
+        &current_frame(&application),
+        "accepted"
+    ));
+    assert!(!active_scene_has_entity(
+        &current_frame(&application),
+        "stale"
+    ));
+    close_direct_application(&mut application);
+    assert_eq!(submission.actions(), retained);
+}
+
+#[test]
+fn direct_submission_reports_whole_batch_rejection_without_dispatch() {
+    let project = StarterProject::new("direct-stale-batch");
+    let mut application = open_ordinary(project.root());
+    let frame = current_frame(&application);
+    let document = frame.workspace().active_document.unwrap();
+    let received = frame.revision();
+    application.submit_and_drive(EditorActionBatch::new(received, []), Duration::ZERO);
+    let expected = current_frame(&application).revision();
+    let submission = application.submit_and_drive(
+        EditorActionBatch::new(
+            received,
+            [
+                EditorAction::Navigate(EditorNavigationAction::SetActiveDocument { document }),
+                EditorAction::Navigate(EditorNavigationAction::SetActiveDocument { document }),
+            ],
+        ),
+        Duration::ZERO,
+    );
+    assert_eq!(
+        submission.actions(),
+        &vec![
+            EditorApplicationActionDispatch::NotDispatched(
+                EditorApplicationActionNotDispatched::BatchRejected(
+                    EditorActionRejection::StaleFrame { expected, received }
+                )
+            );
+            2
+        ]
+    );
+    close_direct_application(&mut application);
+}
+
+#[test]
+fn direct_submission_keeps_close_filtered_slots_in_original_order() {
+    let project = StarterProject::new("direct-closing-results");
+    let mut application = open_ordinary(project.root());
+    dirty_active_scene(&mut application);
+    application.submit_project_action(EditorProjectAction::CloseProject);
+    let frame = current_frame(&application);
+    let document = frame.workspace().active_document.unwrap();
+    let navigate =
+        || EditorAction::Navigate(EditorNavigationAction::SetActiveDocument { document });
+    let filtered = application.submit_and_drive(
+        EditorActionBatch::new(frame.revision(), [navigate()]),
+        Duration::ZERO,
+    );
+    assert_eq!(
+        filtered.actions(),
+        &[EditorApplicationActionDispatch::NotDispatched(
+            EditorApplicationActionNotDispatched::Closing
+        )]
+    );
+    assert!(!filtered.update().actions_observed());
+    let frame = current_frame(&application);
+    let cancel = EditorAction::WorkspaceIntent(
+        frame
+            .workspace_intent()
+            .decision_prompt()
+            .unwrap()
+            .resolve(EditorCloseDecision::Cancel),
+    );
+    let submission = application.submit_and_drive(
+        EditorActionBatch::new(frame.revision(), [navigate(), cancel, navigate()]),
+        Duration::ZERO,
+    );
+    assert!(matches!(
+        submission.actions(),
+        [
+            EditorApplicationActionDispatch::NotDispatched(
+                EditorApplicationActionNotDispatched::Closing
+            ),
+            EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::WorkspaceIntent(_)),
+            EditorApplicationActionDispatch::NotDispatched(
+                EditorApplicationActionNotDispatched::Closing
+            )
+        ]
+    ));
+    assert!(
+        current_frame(&application)
+            .workspace_intent()
+            .intent()
+            .is_none()
+    );
+    close_direct_application(&mut application);
+}
+
+#[test]
+fn direct_submission_without_workspace_returns_observations_without_replaying_actions() {
+    let project = StarterProject::new("direct-no-workspace");
+    let mut application = open_ordinary(project.root());
+    let frame = current_frame(&application);
+    let action = EditorAction::Navigate(EditorNavigationAction::SetActiveDocument {
+        document: frame.workspace().active_document.unwrap(),
+    });
+    close_direct_application(&mut application);
+    let submission = application.submit_and_drive(
+        EditorActionBatch::new(frame.revision(), [action]),
+        Duration::ZERO,
+    );
+    assert_eq!(
+        submission.actions(),
+        &[EditorApplicationActionDispatch::NotDispatched(
+            EditorApplicationActionNotDispatched::WorkspaceUnavailable
+        )]
+    );
+    assert!(!submission.update().actions_observed());
+    assert!(application.current_frame().is_none());
+}
+
+#[test]
+fn direct_submission_keeps_request_admission_distinct_from_failed_save_completion() {
+    use nara::tooling::{
+        EditorPersistenceAction, EditorPersistenceRequestResult, EditorPersistenceResult,
+    };
+    let project = StarterProject::new("direct-save-admission");
+    let mut application = open_ordinary(project.root());
+    dirty_active_scene(&mut application);
+    let frame = current_frame(&application);
+    let scene = frame.workspace().active_scene.as_ref().unwrap();
+    fs::write(
+        project.root().join("scenes/startup.scene.json"),
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            SceneEntityId::new("external-save-conflict").unwrap(),
+        )])
+        .to_json_string()
+        .unwrap(),
+    )
+    .unwrap();
+    let submission = application.submit_and_drive(
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Persistence(EditorPersistenceAction::Save {
+                document: scene.document,
+                base_revision: scene.revision,
+            })],
+        ),
+        Duration::ZERO,
+    );
+    assert_eq!(
+        submission.actions(),
+        &[EditorApplicationActionDispatch::Dispatched(
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        )]
+    );
+    settle_persistence(&mut application);
+    assert!(matches!(
+        current_frame(&application).persistence().result(),
+        Some(EditorPersistenceResult::Rejected { .. } | EditorPersistenceResult::Failed { .. })
+    ));
+    assert_eq!(
+        submission.actions(),
+        &[EditorApplicationActionDispatch::Dispatched(
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        )]
+    );
+    assert!(
+        current_frame(&application)
+            .workspace()
+            .active_scene
+            .as_ref()
+            .unwrap()
+            .dirty
+    );
+    close_direct_application(&mut application);
+}
 
 #[test]
 fn starter_opens_one_coherent_frame_and_empty_repaint_preserves_document_state() {
@@ -143,7 +361,7 @@ fn dirty_exit_cancel_preserves_the_session_and_discard_closes_it() {
     );
     let cancelled = application.submit_and_drive(cancel, Duration::ZERO);
     let cancelled_frame = current_frame(&application);
-    assert!(!cancelled.exit_ready());
+    assert!(!cancelled.update().exit_ready());
     assert!(cancelled_frame.workspace().active_scene.is_some());
     assert!(matches!(
         cancelled_frame.workspace_intent().result(),
@@ -171,7 +389,7 @@ fn dirty_exit_cancel_preserves_the_session_and_discard_closes_it() {
     );
     let discarded = application.submit_and_drive(discard, Duration::ZERO);
 
-    assert!(!discarded.exit_ready());
+    assert!(!discarded.update().exit_ready());
     assert_eq!(
         current_frame(&application).workspace_intent().phase(),
         Some(EditorWorkspaceIntentPhase::Prepared)
@@ -210,7 +428,7 @@ fn ordinary_workspace_exit_action_joins_process_retirement_only_after_admission(
     );
     application.submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
     let rejected = application.submit_and_drive(stale, Duration::ZERO);
-    assert!(!rejected.exit_ready());
+    assert!(!rejected.update().exit_ready());
     assert_eq!(
         current_frame(&application).workspace_intent().intent(),
         None
@@ -225,7 +443,7 @@ fn ordinary_workspace_exit_action_joins_process_retirement_only_after_admission(
         ),
         Duration::ZERO,
     );
-    assert!(!accepted.exit_ready());
+    assert!(!accepted.update().exit_ready());
     assert!(drive_process_exit_to_terminal(&mut application));
     assert!(application.current_frame().is_none());
 }
@@ -255,7 +473,7 @@ fn public_workspace_exit_action_preserves_dirty_cancel_and_later_discard() {
             Duration::ZERO,
         )
     };
-    assert!(!request(&mut application).exit_ready());
+    assert!(!request(&mut application).update().exit_ready());
     let frame = current_frame(&application);
     let prompt = frame.workspace_intent().decision_prompt().unwrap();
     assert!(
@@ -269,6 +487,7 @@ fn public_workspace_exit_action_preserves_dirty_cancel_and_later_discard() {
                 ),
                 Duration::ZERO
             )
+            .update()
             .exit_ready()
     );
     assert_eq!(
@@ -289,7 +508,7 @@ fn public_workspace_exit_action_preserves_dirty_cancel_and_later_discard() {
         ),
         Duration::ZERO,
     );
-    assert!(!request(&mut application).exit_ready());
+    assert!(!request(&mut application).update().exit_ready());
     let frame = current_frame(&application);
     assert!(
         !application
@@ -306,6 +525,7 @@ fn public_workspace_exit_action_preserves_dirty_cancel_and_later_discard() {
                 ),
                 Duration::ZERO
             )
+            .update()
             .exit_ready()
     );
     assert!(drive_process_exit_to_terminal(&mut application));
@@ -655,7 +875,7 @@ fn reference_game_opens_through_the_same_ordinary_editor_api() {
         ),
         Duration::ZERO,
     );
-    assert!(opened.actions_observed());
+    assert!(opened.update().actions_observed());
     let ui_frame = application
         .current_ui_authoring_frame()
         .expect("ordinary Generic Open must publish the active UI Prefab authoring frame");
@@ -702,7 +922,7 @@ fn reference_game_opens_through_the_same_ordinary_editor_api() {
         EditorActionBatch::new(action_frame, [EditorAction::Mutate(mutation)]),
         Duration::ZERO,
     );
-    assert!(edited.actions_observed());
+    assert!(edited.update().actions_observed());
     assert_ne!(
         current_frame(&application)
             .workspace()
@@ -821,7 +1041,7 @@ fn retry_and_replacement_close_are_failure_atomic() {
         )],
     );
     let resumed = application.submit_and_drive(edit_after_failed_save, Duration::ZERO);
-    assert!(resumed.actions_observed());
+    assert!(resumed.update().actions_observed());
     assert_eq!(current_frame(&application).workspace_intent().phase(), None);
     assert!(active_scene_has_entity(
         &current_frame(&application),
@@ -849,7 +1069,7 @@ fn retry_and_replacement_close_are_failure_atomic() {
         ),
         Duration::ZERO,
     );
-    assert!(replayed_save.actions_observed());
+    assert!(replayed_save.update().actions_observed());
     assert_eq!(
         application.state(),
         EditorApplicationState::OpeningReplacement
@@ -921,7 +1141,7 @@ fn workspace_open_project_action_enters_the_retained_replacement_flow() {
         ),
         Duration::ZERO,
     );
-    assert!(!ignored.actions_observed());
+    assert!(!ignored.update().actions_observed());
     drive_replacement_to_terminal(&mut application);
 
     assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
@@ -1013,7 +1233,7 @@ fn close_project_reuses_the_exit_decision_without_exiting_the_process() {
         ),
         Duration::ZERO,
     );
-    assert!(!ignored.actions_observed());
+    assert!(!ignored.update().actions_observed());
     assert_eq!(
         active_scene_state(&current_frame(&application)),
         before_scene
@@ -1033,7 +1253,7 @@ fn close_project_reuses_the_exit_decision_without_exiting_the_process() {
         ),
         Duration::ZERO,
     );
-    assert!(!cancelled.exit_ready());
+    assert!(!cancelled.update().exit_ready());
     assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
     assert_eq!(
         active_scene_state(&current_frame(&application)),
@@ -1056,7 +1276,7 @@ fn close_project_reuses_the_exit_decision_without_exiting_the_process() {
         Duration::ZERO,
     );
 
-    assert!(!closed.exit_ready());
+    assert!(!closed.update().exit_ready());
     drive_session_retirement_to_manager(&mut application);
     assert_eq!(application.state(), EditorApplicationState::ProjectManager);
     assert!(application.current_frame().is_none());
@@ -1176,6 +1396,30 @@ fn open_ordinary(project_root: &Path) -> EditorApplication {
     application
 }
 
+fn close_direct_application(application: &mut EditorApplication) {
+    if application.request_exit().exit_ready() {
+        return;
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while let Some(frame) = application.current_frame() {
+        let action = frame.workspace_intent().decision_prompt().map(|prompt| {
+            EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
+        });
+        let result = application.submit_and_drive(
+            EditorActionBatch::new(frame.revision(), action),
+            Duration::ZERO,
+        );
+        if result.update().exit_ready() {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "direct application did not retire"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 fn assert_recovery(project_root: &Path) {
     let application = open_ordinary(project_root);
     assert_eq!(application.state(), EditorApplicationState::Recovery);
@@ -1265,7 +1509,7 @@ fn drive_process_exit_to_terminal(application: &mut EditorApplication) -> bool {
         let frame = current_frame(application);
         let update = application
             .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
-        if update.exit_ready() {
+        if update.update().exit_ready() {
             return true;
         }
         std::thread::sleep(Duration::from_millis(1));

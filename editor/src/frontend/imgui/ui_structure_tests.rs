@@ -234,6 +234,7 @@ impl Drop for StructureInteraction {
                     EditorActionBatch::new(frame.revision(), decision),
                     Duration::ZERO,
                 )
+                .update()
                 .exit_ready()
             {
                 return;

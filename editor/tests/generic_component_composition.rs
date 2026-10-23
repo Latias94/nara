@@ -654,7 +654,7 @@ fn close(app: &mut EditorApplication) {
             EditorActionBatch::new(current.revision(), action),
             Duration::ZERO,
         );
-        if update.exit_ready() {
+        if update.update().exit_ready() {
             return;
         }
         std::thread::yield_now();

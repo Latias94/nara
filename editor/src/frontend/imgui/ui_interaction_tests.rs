@@ -420,7 +420,7 @@ impl Drop for UiInteraction {
                 EditorActionBatch::new(frame.revision(), decision),
                 Duration::ZERO,
             );
-            if update.exit_ready() {
+            if update.update().exit_ready() {
                 return;
             }
             std::thread::sleep(Duration::from_millis(1));

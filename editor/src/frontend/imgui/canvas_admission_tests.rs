@@ -252,6 +252,7 @@ impl Drop for CanvasAdmission {
                     EditorActionBatch::new(frame.revision(), resolution),
                     Duration::ZERO,
                 )
+                .update()
                 .exit_ready()
             {
                 return;

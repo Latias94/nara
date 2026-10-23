@@ -7,8 +7,9 @@ mod supervised_play;
 pub mod workspace;
 
 pub use app::{
-    EditorApplication, EditorApplicationOpenError, EditorApplicationState, EditorApplicationUpdate,
-    EditorLaunchOptions, EditorProjectAction,
+    EditorApplication, EditorApplicationActionDispatch, EditorApplicationActionNotDispatched,
+    EditorApplicationOpenError, EditorApplicationState, EditorApplicationSubmission,
+    EditorApplicationUpdate, EditorLaunchOptions, EditorProjectAction,
 };
 pub use frontend::{
     ImguiEditorFrontend, ImguiEditorPanel, ImguiEditorPanelContext, ImguiEditorSubmission,

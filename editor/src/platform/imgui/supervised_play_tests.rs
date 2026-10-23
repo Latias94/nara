@@ -447,19 +447,21 @@ impl SupervisedPlayTestHost {
                     == Some(EditorWorkspaceIntentPhase::AwaitingDecision)
             });
             let update = if let Some(frame) = decision {
-                self.application.submit_and_drive(
-                    EditorActionBatch::new(
-                        frame.revision(),
-                        [EditorAction::WorkspaceIntent(
-                            frame
-                                .workspace_intent()
-                                .decision_prompt()
-                                .unwrap()
-                                .resolve(EditorCloseDecision::Discard),
-                        )],
-                    ),
-                    Duration::ZERO,
-                )
+                self.application
+                    .submit_and_drive(
+                        EditorActionBatch::new(
+                            frame.revision(),
+                            [EditorAction::WorkspaceIntent(
+                                frame
+                                    .workspace_intent()
+                                    .decision_prompt()
+                                    .unwrap()
+                                    .resolve(EditorCloseDecision::Discard),
+                            )],
+                        ),
+                        Duration::ZERO,
+                    )
+                    .update()
             } else {
                 self.application
                     .drive_editor_frame(Duration::ZERO, false, true)

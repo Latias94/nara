@@ -231,6 +231,7 @@ fn dispatch(application: &mut EditorApplication, action: EditorAction) {
                 EditorActionBatch::new(current.revision(), [action]),
                 Duration::ZERO
             )
+            .update()
             .actions_observed()
     );
 }

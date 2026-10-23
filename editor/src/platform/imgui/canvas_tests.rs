@@ -227,19 +227,21 @@ pub(super) fn retire_application(application: &mut EditorApplication) -> Result<
             frame.workspace_intent().phase() == Some(EditorWorkspaceIntentPhase::AwaitingDecision)
         });
         let update = if let Some(frame) = decision {
-            application.submit_and_drive(
-                EditorActionBatch::new(
-                    frame.revision(),
-                    [EditorAction::WorkspaceIntent(
-                        frame
-                            .workspace_intent()
-                            .decision_prompt()
-                            .unwrap()
-                            .resolve(EditorCloseDecision::Discard),
-                    )],
-                ),
-                Duration::ZERO,
-            )
+            application
+                .submit_and_drive(
+                    EditorActionBatch::new(
+                        frame.revision(),
+                        [EditorAction::WorkspaceIntent(
+                            frame
+                                .workspace_intent()
+                                .decision_prompt()
+                                .unwrap()
+                                .resolve(EditorCloseDecision::Discard),
+                        )],
+                    ),
+                    Duration::ZERO,
+                )
+                .update()
         } else {
             application.drive_editor_frame(Duration::ZERO, false, true)
         };
