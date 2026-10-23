@@ -222,83 +222,326 @@ fn anchored_prefab_open_reuses_the_browser_slot_despite_locator_scope() {
 }
 
 #[test]
-fn late_alias_is_rejected_after_preparation_and_before_predecessor_retirement() {
-    for waiting_for_decision in [false, true] {
-        let project = TestProject::new("late-source-alias");
-        let source = project.root.join("scenes/startup.scene.json");
-        let candidate = project.root.join("scenes/candidate.scene.json");
+fn late_alias_is_rejected_after_preparation_before_additive_publication() {
+    let project = TestProject::new("late-source-alias");
+    let source = project.root.join("scenes/startup.scene.json");
+    let candidate = project.root.join("scenes/candidate.scene.json");
+    fs::write(
+        &source,
+        editable_authoring_scene("source").to_json_string().unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        &candidate,
+        editable_authoring_scene("candidate")
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let document = editor.workspace().active_document().unwrap();
+    make_authoring_name_dirty(&mut editor, document, "unsaved");
+    let before = editor.drive_editor_frame(Duration::ZERO);
+    let index = editor.project_source_index_snapshot().unwrap();
+    let gate = editor.hold_next_document_open(editor::OpenTestPhase::AfterPreparation);
+    assert!(matches!(
+        editor.request_indexed_authoring_document(
+            index,
+            "scenes/candidate.scene.json",
+            AuthoringDocumentKind::Scene
+        ),
+        editor::EditorDocumentOpenRequestResult::Preparing { .. }
+    ));
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(gate.wait_until_started());
+    fs::remove_file(&candidate).unwrap();
+    fs::hard_link(&source, &candidate).unwrap();
+    gate.release();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let result = loop {
+        let frame = editor.drive_editor_frame(Duration::ZERO);
+        if let Some(result) = frame.document_open().result() {
+            break result;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Open did not reject the late alias"
+        );
+        thread::sleep(Duration::from_millis(1));
+    };
+    let unchanged = editor.current_frame().workspace() == before.workspace();
+    assert!(editor.workspace_intent_view().decision_prompt().is_none());
+    assert!(editor.workspace_intent_view().result().is_none());
+    drive_editor_close_to_completion(&mut editor);
+    assert!(
+        matches!(
+            result,
+            nara_tooling::EditorDocumentOpenResult::Rejected {
+                code: "project.editor.document-source-already-open",
+                ..
+            }
+        ),
+        "{result:?}"
+    );
+    assert!(
+        unchanged,
+        "late alias rejection must preserve every existing document and its history"
+    );
+}
+
+#[test]
+fn pending_exit_rejects_anchored_prefab_activation_and_new_source_admission() {
+    for requested_source in ["existing", "new"] {
+        let project = TestProject::new("prefab-source-pending-exit");
+        let mut entities = vec![editable_name_entity("scene")];
+        for name in ["existing", "new"] {
+            fs::write(
+                project.root.join(format!("prefabs/{name}.prefab.json")),
+                editable_authoring_prefab(name).to_json_string().unwrap(),
+            )
+            .unwrap();
+            let entity = nara_identity::SceneEntityId::new(format!("{name}-anchor")).unwrap();
+            let mut anchor = SceneEntityRecord::new(entity.clone());
+            anchor.prefab = Some(PrefabInstance {
+                source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
+                overrides: ScenePatchDocument::default(),
+            });
+            entities.push(anchor);
+        }
         fs::write(
-            &source,
-            editable_authoring_scene("source").to_json_string().unwrap(),
-        )
-        .unwrap();
-        fs::write(
-            &candidate,
-            editable_authoring_scene("candidate")
+            project.root.join("scenes/startup.scene.json"),
+            SceneDocument::from_ordered_roots(entities)
                 .to_json_string()
                 .unwrap(),
         )
         .unwrap();
         let mut editor = open_generic_editor_with_ready_index(&project);
-        let document = editor.workspace().active_document().unwrap();
-        make_authoring_name_dirty(&mut editor, document, "unsaved");
-        let before = editor.drive_editor_frame(Duration::ZERO);
+        let scene = editor.workspace().active_document().unwrap();
         let index = editor.project_source_index_snapshot().unwrap();
-        let gate = (!waiting_for_decision)
-            .then(|| editor.hold_next_document_open(editor::OpenTestPhase::AfterPreparation));
-        if waiting_for_decision {
-            assert!(
-                matches!(editor.open_indexed_authoring_document(index, "scenes/candidate.scene.json", AuthoringDocumentKind::Scene), editor::EditorDocumentOpenRequestResult::AwaitingClose { document: old } if old == document)
-            );
-        } else {
-            assert!(matches!(
-                editor.request_indexed_authoring_document(
-                    index,
-                    "scenes/candidate.scene.json",
-                    AuthoringDocumentKind::Scene
-                ),
-                editor::EditorDocumentOpenRequestResult::Preparing { .. }
-            ));
-            editor.drive_editor_frame(Duration::ZERO);
-            assert!(gate.as_ref().unwrap().wait_until_started());
+        let existing = opened_document(editor.open_indexed_authoring_document(
+            index,
+            "prefabs/existing.prefab.json",
+            AuthoringDocumentKind::Prefab,
+        ));
+        assert!(
+            editor
+                .apply_workspace_command(EditorWorkspaceCommand::SetActiveDocument {
+                    document: scene
+                })
+                .applied
+        );
+        let anchor =
+            nara_identity::SceneEntityId::new(format!("{requested_source}-anchor")).unwrap();
+        assert!(
+            editor
+                .apply_workspace_command(EditorWorkspaceCommand::SelectEntity {
+                    document: scene,
+                    entity: Some(anchor.clone()),
+                })
+                .applied
+        );
+        make_authoring_name_dirty(&mut editor, scene, "exit-decision-pending");
+        assert_eq!(
+            editor.request_workspace_intent(EditorWorkspaceIntent::Exit),
+            nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+        );
+        let pending = editor.workspace_intent_view();
+        assert_eq!(pending.decision_document(), Some(scene));
+        assert_eq!(
+            pending.phase(),
+            Some(nara_tooling::EditorWorkspaceIntentPhase::AwaitingDecision)
+        );
+        let frame = editor.drive_editor_frame(Duration::ZERO);
+        let report = editor
+            .dispatch_editor_actions(EditorActionBatch::new(
+                frame.revision(),
+                [EditorAction::Navigate(
+                    EditorNavigationAction::OpenPrefabSource {
+                        document: scene,
+                        base_revision: editor.workspace().document_revision(scene).unwrap(),
+                        entity: anchor,
+                    },
+                )],
+            ))
+            .unwrap();
+        let [EditorActionOutcome::Workspace(outcome)] = report.outcomes() else {
+            panic!("{report:?}");
+        };
+        assert!(!outcome.applied);
+        assert!(outcome.opened_document.is_none());
+        assert!(report_has_code(
+            &outcome.diagnostics,
+            "project.editor.document-open-busy"
+        ));
+        let after = editor.drive_editor_frame(Duration::ZERO);
+        assert_eq!(after.workspace(), frame.workspace());
+        assert_eq!(editor.workspace_intent_view(), pending);
+        assert_eq!(editor.workspace().active_document(), Some(scene));
+        assert_eq!(editor.workspace().len(), 2);
+        assert!(editor.workspace().prefab(existing).is_some());
+        assert_eq!(
+            editor.resolve_workspace_intent(
+                pending.decision_prompt().unwrap(),
+                nara_tooling::EditorCloseDecision::Cancel,
+            ),
+            nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+        );
+        drive_editor_close_to_completion(&mut editor);
+    }
+}
+
+#[cfg(feature = "runtime-ui")]
+#[test]
+fn trusted_anchored_prefabs_keep_independent_dirty_sources_and_exact_save_receipts() {
+    let project = TestProject::new("trusted-two-prefab-sources");
+    let mut anchors = Vec::new();
+    let mut instances = Vec::new();
+    for name in ["first", "second"] {
+        fs::write(
+            project.root.join(format!("prefabs/{name}.prefab.json")),
+            editable_authoring_prefab(name).to_json_string().unwrap(),
+        )
+        .unwrap();
+        let entity = nara_identity::SceneEntityId::new(format!("{name}-anchor")).unwrap();
+        let mut instance = SceneEntityRecord::new(entity.clone());
+        instance.prefab = Some(PrefabInstance {
+            source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
+            overrides: ScenePatchDocument::default(),
+        });
+        instances.push(instance);
+        anchors.push(entity);
+    }
+    let scene_path = project.root.join("scenes/startup.scene.json");
+    fs::write(
+        &scene_path,
+        SceneDocument::from_ordered_roots(instances)
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    let scene_bytes = fs::read(&scene_path).unwrap();
+    let mut editor = editor::EditorProjectSession::open_trusted_compiled(
+        project.writable_capability(),
+        editor::TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
+    let scene = editor.workspace().active_document().unwrap();
+    let mut documents = Vec::new();
+    let mut first_dirty = None;
+    for (name, anchor) in ["first", "second"].into_iter().zip(&anchors) {
+        assert!(
+            editor
+                .apply_workspace_command(EditorWorkspaceCommand::SetActiveDocument {
+                    document: scene
+                })
+                .applied
+        );
+        editor.drive_editor_frame(Duration::ZERO);
+        let opened = open_prefab_from_scene(&mut editor, scene, anchor);
+        assert!(opened.applied, "{:?}", opened.diagnostics);
+        let document = opened.opened_document.unwrap();
+        assert_eq!(
+            editor
+                .workspace()
+                .prefab(document)
+                .unwrap()
+                .source_binding()
+                .locator(),
+            format!("{name}.prefab.json")
+        );
+        if let Some(before) = &first_dirty {
+            let first = documents[0];
+            let mut retained = editor.workspace_model().document(first).unwrap().clone();
+            retained.active = true;
+            assert_eq!(&retained, before);
         }
-        fs::remove_file(&candidate).unwrap();
-        fs::hard_link(&source, &candidate).unwrap();
-        if let Some(gate) = gate {
-            gate.release();
+        let base_revision = editor.workspace().document_revision(document).unwrap();
+        let report = editor.apply_workspace_command(EditorWorkspaceCommand::ApplyPrefabPatch {
+            document,
+            base_revision,
+            patch: ScenePatchDocument::new([ScenePatchOperation::SetField {
+                entity: nara_identity::SceneEntityId::new("editable-name").unwrap(),
+                component: ComponentTypeId::new("nara.scene.Name"),
+                component_version: ComponentSchemaVersion::ONE,
+                field: ComponentFieldId::new("value"),
+                value: ComponentValue::String(format!("saved-{name}")),
+            }]),
+        });
+        assert!(report.applied, "{:?}", report.diagnostics);
+        assert!(editor.workspace().document_is_dirty(document).unwrap());
+        documents.push(document);
+        if first_dirty.is_none() {
+            first_dirty = Some(editor.workspace_model().document(document).unwrap().clone());
         }
-        if waiting_for_decision {
-            let prompt = editor.workspace_intent_view().decision_prompt().unwrap();
-            let _ =
-                editor.resolve_workspace_intent(prompt, nara_tooling::EditorCloseDecision::Discard);
-        }
+    }
+    assert_ne!(documents[0], documents[1]);
+    assert_eq!(editor.workspace().len(), 3);
+    assert!(editor.workspace_intent_view().result().is_none());
+    assert!(editor.workspace_intent_view().decision_prompt().is_none());
+    for (index, name) in ["first", "second"].into_iter().enumerate() {
+        let document = documents[index];
+        let other = documents[1 - index];
+        let other_name = ["first", "second"][1 - index];
+        let other_path = project
+            .root
+            .join(format!("prefabs/{other_name}.prefab.json"));
+        let other_bytes = fs::read(&other_path).unwrap();
+        let other_before = editor.workspace_model().document(other).unwrap().clone();
+        let revision = editor.workspace().document_revision(document).unwrap();
+        assert_eq!(
+            editor.request_persistence(EditorPersistenceCommand::Save {
+                document: Some(document)
+            }),
+            nara_tooling::EditorPersistenceRequestResult::Accepted
+        );
+        let saved = drive_persistence_to_terminal(&mut editor);
+        let bytes = fs::read(project.root.join(format!("prefabs/{name}.prefab.json"))).unwrap();
+        let digest = crate::project_host::persistence::editor_digest(
+            nara_fs::ContentDigest::of_bytes(&bytes),
+        );
+        assert_eq!(
+            saved.persistence().result(),
+            Some(EditorPersistenceResult::Saved {
+                document,
+                revision,
+                digest
+            })
+        );
+        assert!(
+            String::from_utf8(bytes)
+                .unwrap()
+                .contains(&format!("saved-{name}"))
+        );
+        let slot = editor.workspace().prefab(document).unwrap();
+        assert_eq!(slot.saved_revision(), revision);
+        assert_eq!(slot.saved_digest(), Some(digest));
+        assert!(!slot.is_dirty());
+        assert_eq!(saved.workspace().document(other), Some(&other_before));
+        assert_eq!(fs::read(&other_path).unwrap(), other_bytes);
+        assert_eq!(fs::read(&scene_path).unwrap(), scene_bytes);
+        assert_eq!(editor.workspace().active_document(), Some(documents[1]));
+        assert!(matches!(
+            saved.project_content(),
+            EditorProjectContentView::RefreshPending {
+                document: observed, revision: observed_revision, saved_digest, ..
+            } if observed == document && observed_revision == revision && saved_digest == digest
+        ));
+        assert_eq!(
+            editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+            nara_tooling::EditorPersistenceRequestResult::Accepted
+        );
         let deadline = Instant::now() + Duration::from_secs(5);
-        let result = loop {
-            let frame = editor.drive_editor_frame(Duration::ZERO);
-            if let Some(result) = frame.document_open().result() {
-                break result;
-            }
+        while !editor.current_frame().project_content().is_current() {
             assert!(
                 Instant::now() < deadline,
-                "Open did not reject the late alias"
+                "the saved Prefab refresh did not settle"
             );
+            editor.drive_editor_frame(Duration::ZERO);
             thread::sleep(Duration::from_millis(1));
-        };
-        let unchanged = editor.current_frame().workspace() == before.workspace();
-        drive_editor_close_to_completion(&mut editor);
-        assert!(
-            matches!(
-                result,
-                nara_tooling::EditorDocumentOpenResult::Rejected {
-                    code: "project.editor.document-source-already-open",
-                    ..
-                }
-            ),
-            "{result:?}"
-        );
-        assert!(
-            unchanged,
-            "late alias rejection must precede any predecessor retirement"
-        );
+        }
     }
+    assert!(matches!(
+        drive_editor_close_to_completion(&mut editor),
+        editor::EditorProjectCloseProgress::Complete(_)
+    ));
 }

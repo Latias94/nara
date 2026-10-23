@@ -85,7 +85,7 @@ fn browser_open_preserves_safe_scene_and_prefab_format_reasons() {
 }
 
 #[test]
-fn prepared_browser_open_rejects_a_later_edit_without_losing_working_history() {
+fn prepared_browser_open_preserves_an_unrelated_later_edit_and_working_history() {
     let project = project("browser-open-later-edit");
     let mut editor = open_generic_editor_with_ready_index(&project);
     let document = editor.workspace().active_document().unwrap();
@@ -113,14 +113,22 @@ fn prepared_browser_open_rejects_a_later_edit_without_losing_working_history() {
     }
     control.release();
     let completed = wait_open(&mut editor, request);
-    assert_eq!(
-        completed.document_open().result(),
-        Some(EditorDocumentOpenResult::Rejected {
-            request,
-            code: "project.editor.document-open-stale-document",
-        })
-    );
-    assert_eq!(completed.workspace(), before.workspace());
+    let Some(EditorDocumentOpenResult::Opened {
+        request: completed_request,
+        document: opened,
+    }) = completed.document_open().result()
+    else {
+        close(&mut editor);
+        panic!(
+            "an unrelated edit must not stale Open: {:?}",
+            completed.document_open()
+        );
+    };
+    assert_eq!(completed_request, request);
+    assert_ne!(opened, document);
+    assert!(editor.workspace().scene(opened).is_some());
+    assert!(completed.workspace_intent().intent().is_none());
+    assert!(completed.workspace_intent().result().is_none());
     let slot = editor.workspace().scene(document).unwrap();
     assert_eq!(slot.session().document(), &working);
     assert_eq!(slot.session().history_status(), history);
@@ -143,10 +151,19 @@ fn prepared_browser_open_rejects_a_later_edit_without_losing_working_history() {
 }
 
 #[test]
-fn prepared_browser_open_rejects_a_refreshed_index_without_replacing_the_document() {
+fn prepared_browser_open_rejects_a_refreshed_index_without_losing_dirty_history() {
     let project = project("browser-open-refreshed-index");
     let mut editor = open_generic_editor_with_ready_index(&project);
+    let document = editor.workspace().active_document().unwrap();
+    make_authoring_name_dirty(&mut editor, document, "retained-dirty-value");
     let original = editor.drive_editor_frame(Duration::ZERO);
+    let history = editor
+        .workspace()
+        .scene(document)
+        .unwrap()
+        .session()
+        .history_status();
+    let disk = fs::read(project.root.join("scenes/startup.scene.json")).unwrap();
     let old_index = editor.project_source_index_snapshot().unwrap();
     let control = editor.hold_next_document_open(editor::OpenTestPhase::AfterPreparation);
     let request = begin_open(&mut editor, SCENE);
@@ -170,6 +187,22 @@ fn prepared_browser_open_rejects_a_refreshed_index_without_replacing_the_documen
         })
     );
     assert_eq!(completed.workspace(), original.workspace());
+    assert!(completed.workspace_intent().intent().is_none());
+    assert!(completed.workspace_intent().result().is_none());
+    assert_eq!(
+        editor
+            .workspace()
+            .scene(document)
+            .unwrap()
+            .session()
+            .history_status(),
+        history
+    );
+    assert_eq!(scene_name_value(&editor, document), "retained-dirty-value");
+    assert_eq!(
+        fs::read(project.root.join("scenes/startup.scene.json")).unwrap(),
+        disk
+    );
     acknowledge_open(&mut editor, request);
     close(&mut editor);
 }
@@ -216,7 +249,7 @@ fn browser_worker_rejects_identity_replacement_and_malformed_source_without_publ
 }
 
 #[test]
-fn browser_binding_rechecks_the_decoded_source_digest_before_retiring_its_predecessor() {
+fn browser_binding_rechecks_the_decoded_source_digest_before_publication() {
     let project = project("browser-open-binding-refusal");
     let mut editor = open_generic_editor_with_ready_index(&project);
     let before = editor.drive_editor_frame(Duration::ZERO);
@@ -351,14 +384,11 @@ fn cancelling_browser_open_waits_for_physical_return_and_requires_exact_result_a
     let scene_request = begin_open(&mut editor, SCENE);
     let scene_document = opened(&wait_open(&mut editor, scene_request), scene_request);
     assert_ne!(scene_document, original_document);
-    assert!(editor.workspace().scene(original_document).is_none());
+    assert!(editor.workspace().scene(original_document).is_some());
     assert!(editor.workspace().prefab(prefab_document).is_some());
     assert_eq!(scene_name_value(&editor, scene_document), "external");
     acknowledge_open(&mut editor, scene_request);
-    assert_eq!(
-        workspace_action(&mut editor, EditorWorkspaceIntentAction::AcknowledgeResult),
-        EditorWorkspaceIntentRequestResult::Accepted
-    );
+    assert!(editor.workspace_intent_view().result().is_none());
     close(&mut editor);
 }
 
@@ -496,13 +526,7 @@ fn exact_browser_request_authority_survives_old_frames_but_cannot_cross_sessions
         Some(document_b)
     );
     acknowledge_open(&mut session_b, request_b);
-    assert_eq!(
-        workspace_action(
-            &mut session_b,
-            EditorWorkspaceIntentAction::AcknowledgeResult
-        ),
-        EditorWorkspaceIntentRequestResult::Accepted
-    );
+    assert!(session_b.workspace_intent_view().result().is_none());
     close(&mut session_a);
     close(&mut session_b);
 }
@@ -599,75 +623,7 @@ fn rejected_workspace_exit_does_not_cancel_an_already_admitted_browser_open() {
 }
 
 #[test]
-fn dirty_browser_replacement_rechecks_the_index_before_discarding_its_predecessor() {
-    let project = project("browser-open-dirty-refresh");
-    let disk = fs::read(project.root.join("scenes/startup.scene.json")).unwrap();
-    let mut editor = open_generic_editor_with_ready_index(&project);
-    let document = editor.workspace().active_document().unwrap();
-    make_authoring_name_dirty(&mut editor, document, "retained-dirty-value");
-    let before = editor.drive_editor_frame(Duration::ZERO);
-    let history = editor
-        .workspace()
-        .scene(document)
-        .unwrap()
-        .session()
-        .history_status();
-    let request = begin_open(&mut editor, SCENE);
-    let awaiting = wait_close_prompt(&mut editor, request, document);
-    let prompt = awaiting.workspace_intent().decision_prompt().unwrap();
-    assert_eq!(
-        browser_action(
-            &mut editor,
-            EditorProjectBrowserAction::CancelOpen { request }
-        ),
-        EditorProjectBrowserActionOutcome::Rejected {
-            code: "project.editor.document-open-cancel-stale"
-        }
-    );
-    refresh_browser(&mut editor);
-    assert_eq!(
-        workspace_action(&mut editor, prompt.resolve(EditorCloseDecision::Discard)),
-        EditorWorkspaceIntentRequestResult::Accepted
-    );
-    let completed = wait_open(&mut editor, request);
-    assert_eq!(
-        completed.document_open().result(),
-        Some(EditorDocumentOpenResult::Rejected {
-            request,
-            code: "project.editor.document-index-stale",
-        })
-    );
-    assert!(
-        matches!(completed.workspace_intent().result(), Some(EditorWorkspaceIntentResult::Rejected {
-        intent: EditorWorkspaceIntent::CloseDocument { document: rejected }, ..
-    }) if rejected == document)
-    );
-    assert!(completed.workspace_intent().intent().is_none());
-    assert_eq!(completed.workspace(), before.workspace());
-    assert_eq!(
-        editor
-            .workspace()
-            .scene(document)
-            .unwrap()
-            .session()
-            .history_status(),
-        history
-    );
-    assert_eq!(scene_name_value(&editor, document), "retained-dirty-value");
-    assert_eq!(
-        fs::read(project.root.join("scenes/startup.scene.json")).unwrap(),
-        disk
-    );
-    acknowledge_open(&mut editor, request);
-    assert_eq!(
-        workspace_action(&mut editor, EditorWorkspaceIntentAction::AcknowledgeResult),
-        EditorWorkspaceIntentRequestResult::Accepted
-    );
-    close(&mut editor);
-}
-
-#[test]
-fn dirty_browser_replacement_cancel_and_failed_save_preserve_the_old_document_and_history() {
+fn explicit_close_retains_its_decision_while_cancelled_open_physically_returns() {
     for decision in [EditorCloseDecision::Cancel, EditorCloseDecision::Save] {
         let project = project("browser-open-dirty-cancel-or-save");
         let disk = fs::read(project.root.join("scenes/startup.scene.json")).unwrap();
@@ -681,8 +637,19 @@ fn dirty_browser_replacement_cancel_and_failed_save_preserve_the_old_document_an
         let saved_revision = slot.saved_revision();
         let saved_digest = slot.saved_digest();
         let source_binding = slot.source_binding().cloned();
+        let control = editor.hold_next_document_open(editor::OpenTestPhase::AfterPreparation);
         let request = begin_open(&mut editor, SCENE);
-        let awaiting = wait_close_prompt(&mut editor, request, document);
+        assert!(control.wait_until_started());
+        assert_eq!(
+            editor.request_workspace_intent(EditorWorkspaceIntent::CloseDocument { document }),
+            EditorWorkspaceIntentRequestResult::Accepted
+        );
+        let awaiting = editor.drive_editor_frame(Duration::ZERO);
+        let prompt = awaiting.workspace_intent().decision_prompt().unwrap();
+        assert_eq!(
+            awaiting.document_open().pending(),
+            Some((request, SCENE, EditorDocumentOpenPhase::Cancelling))
+        );
         if decision == EditorCloseDecision::Save {
             editor.test_fail_next_save(
                 document,
@@ -690,21 +657,39 @@ fn dirty_browser_replacement_cancel_and_failed_save_preserve_the_old_document_an
             );
         }
         assert_eq!(
-            workspace_action(
-                &mut editor,
-                awaiting
-                    .workspace_intent()
-                    .decision_prompt()
-                    .unwrap()
-                    .resolve(decision)
-            ),
+            workspace_action(&mut editor, prompt.resolve(decision)),
             EditorWorkspaceIntentRequestResult::Accepted
         );
-        let completed = wait_open(&mut editor, request);
+        if decision == EditorCloseDecision::Save {
+            drive_persistence_to_terminal(&mut editor);
+            let retry = editor.drive_editor_frame(Duration::ZERO);
+            assert_eq!(
+                retry.workspace_intent().phase(),
+                Some(EditorWorkspaceIntentPhase::AwaitingDecision)
+            );
+            assert!(retry.workspace_intent().result().is_none());
+            let next_prompt = retry.workspace_intent().decision_prompt().unwrap();
+            assert_ne!(next_prompt, prompt);
+            assert_eq!(
+                workspace_action(&mut editor, prompt.resolve(EditorCloseDecision::Discard)),
+                EditorWorkspaceIntentRequestResult::Rejected(
+                    nara_tooling::EditorWorkspaceIntentRejection::StalePrompt
+                )
+            );
+            assert_eq!(
+                workspace_action(
+                    &mut editor,
+                    next_prompt.resolve(EditorCloseDecision::Cancel)
+                ),
+                EditorWorkspaceIntentRequestResult::Accepted
+            );
+        }
+        let completed = editor.drive_editor_frame(Duration::ZERO);
         assert_eq!(
-            completed.document_open().result(),
-            Some(EditorDocumentOpenResult::Cancelled { request })
+            completed.document_open().pending(),
+            Some((request, SCENE, EditorDocumentOpenPhase::Cancelling))
         );
+        assert!(completed.document_open().result().is_none());
         assert_eq!(
             completed.workspace_intent().result(),
             Some(EditorWorkspaceIntentResult::Cancelled {
@@ -733,6 +718,12 @@ fn dirty_browser_replacement_cancel_and_failed_save_preserve_the_old_document_an
                 })
             );
         }
+        control.release();
+        let returned = wait_open(&mut editor, request);
+        assert_eq!(
+            returned.document_open().result(),
+            Some(EditorDocumentOpenResult::Cancelled { request })
+        );
         acknowledge_open(&mut editor, request);
         assert_eq!(
             workspace_action(&mut editor, EditorWorkspaceIntentAction::AcknowledgeResult),
@@ -749,6 +740,133 @@ fn dirty_browser_replacement_cancel_and_failed_save_preserve_the_old_document_an
         assert_eq!(scene_name_value(&editor, document), "startup");
         close(&mut editor);
     }
+}
+
+#[test]
+fn explicit_close_retries_synchronous_save_refusal_without_reviving_cancelled_open() {
+    use nara_tooling::{
+        EditorPersistenceRejection, EditorPersistenceRequestResult, EditorWorkspaceIntentRejection,
+    };
+
+    let project = project("browser-open-close-save-result-pending");
+    let source = project.root.join("scenes/startup.scene.json");
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let document = editor.workspace().active_document().unwrap();
+    make_authoring_name_dirty(&mut editor, document, "saved-checkpoint");
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Save {
+            document: Some(document)
+        }),
+        EditorPersistenceRequestResult::Accepted
+    );
+    let saved = drive_persistence_to_terminal(&mut editor);
+    assert!(
+        matches!(saved.persistence().result(), Some(EditorPersistenceResult::Saved { document: saved_document, .. }) if saved_document == document)
+    );
+    make_authoring_name_dirty(&mut editor, document, "later-working-value");
+    let before = editor.drive_editor_frame(Duration::ZERO);
+    let history = editor
+        .workspace()
+        .scene(document)
+        .unwrap()
+        .session()
+        .history_status();
+    let revision = editor.workspace().document_revision(document).unwrap();
+    let disk = fs::read(&source).unwrap();
+    let control = editor.hold_next_document_open(editor::OpenTestPhase::AfterPreparation);
+    let request = begin_open(&mut editor, SCENE);
+    assert!(control.wait_until_started());
+    let intent = EditorWorkspaceIntent::CloseDocument { document };
+    assert_eq!(
+        editor.request_workspace_intent(intent),
+        EditorWorkspaceIntentRequestResult::Accepted
+    );
+    let prompt = editor.workspace_intent_view().decision_prompt().unwrap();
+    assert_eq!(
+        workspace_action(&mut editor, prompt.resolve(EditorCloseDecision::Save)),
+        EditorWorkspaceIntentRequestResult::Rejected(
+            EditorWorkspaceIntentRejection::PersistenceRejected(
+                EditorPersistenceRejection::ResultPending
+            )
+        )
+    );
+    let rejected = editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        rejected.workspace_intent().phase(),
+        Some(EditorWorkspaceIntentPhase::AwaitingDecision)
+    );
+    assert!(rejected.workspace_intent().result().is_none());
+    let retry = rejected.workspace_intent().decision_prompt().unwrap();
+    assert_ne!(retry, prompt);
+    assert_eq!(rejected.workspace(), before.workspace());
+    assert_eq!(
+        editor
+            .workspace()
+            .scene(document)
+            .unwrap()
+            .session()
+            .history_status(),
+        history
+    );
+    assert_eq!(fs::read(&source).unwrap(), disk);
+    assert_eq!(
+        rejected.persistence().result(),
+        saved.persistence().result()
+    );
+    assert_eq!(
+        rejected.document_open().pending(),
+        Some((request, SCENE, EditorDocumentOpenPhase::Cancelling))
+    );
+    assert_eq!(
+        workspace_action(&mut editor, prompt.resolve(EditorCloseDecision::Discard)),
+        EditorWorkspaceIntentRequestResult::Rejected(EditorWorkspaceIntentRejection::StalePrompt)
+    );
+    assert_eq!(
+        editor.workspace_intent_view().decision_prompt(),
+        Some(retry)
+    );
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+        EditorPersistenceRequestResult::Accepted
+    );
+    assert_eq!(
+        workspace_action(&mut editor, retry.resolve(EditorCloseDecision::Save)),
+        EditorWorkspaceIntentRequestResult::Accepted
+    );
+    let completed = drive_persistence_to_terminal(&mut editor);
+    assert!(
+        matches!(completed.persistence().result(), Some(EditorPersistenceResult::Saved { document: saved_document, revision: saved_revision, .. }) if saved_document == document && saved_revision == revision)
+    );
+    assert_eq!(
+        completed.workspace_intent().result(),
+        Some(EditorWorkspaceIntentResult::Applied { intent })
+    );
+    assert!(completed.workspace().document(document).is_none());
+    assert!(completed.workspace().documents.is_empty());
+    assert_eq!(
+        completed.document_open().pending(),
+        Some((request, SCENE, EditorDocumentOpenPhase::Cancelling))
+    );
+    assert!(completed.document_open().result().is_none());
+    assert!(
+        fs::read_to_string(&source)
+            .unwrap()
+            .contains("later-working-value")
+    );
+    control.release();
+    let returned = wait_open(&mut editor, request);
+    assert_eq!(
+        returned.document_open().result(),
+        Some(EditorDocumentOpenResult::Cancelled { request })
+    );
+    assert!(returned.workspace().documents.is_empty());
+    acknowledge_open(&mut editor, request);
+    assert!(editor.acknowledge_workspace_intent_result());
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+        EditorPersistenceRequestResult::Accepted
+    );
+    close(&mut editor);
 }
 
 #[test]
@@ -1013,42 +1131,6 @@ fn workspace_action(
         ) => EditorWorkspaceIntentRequestResult::Accepted,
         (false, [EditorActionOutcome::WorkspaceIntent(outcome)]) => *outcome,
         other => panic!("the close decision did not produce its typed result: {other:?}"),
-    }
-}
-
-fn wait_close_prompt(
-    editor: &mut editor::EditorProjectSession,
-    request: EditorDocumentOpenId,
-    document: EditorDocumentId,
-) -> Arc<EditorFrameModel> {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let frame = editor.drive_editor_frame(Duration::ZERO);
-        assert!(
-            frame.document_open().result().is_none(),
-            "preparation failed before the dirty prompt: {:?}",
-            frame.document_open()
-        );
-        if frame.document_open().pending()
-            == Some((
-                request,
-                SCENE,
-                EditorDocumentOpenPhase::AwaitingClose { document },
-            ))
-        {
-            assert_eq!(
-                frame.workspace_intent().phase(),
-                Some(EditorWorkspaceIntentPhase::AwaitingDecision)
-            );
-            assert_eq!(frame.workspace_intent().decision_document(), Some(document));
-            assert!(frame.workspace_intent().decision_prompt().is_some());
-            return frame;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "prepared replacement did not reach its dirty close prompt"
-        );
-        std::thread::sleep(Duration::from_millis(1));
     }
 }
 

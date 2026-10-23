@@ -32,7 +32,10 @@ use nara_tooling::{
     EditorDocumentKind, EditorDocumentMutation, EditorDocumentOpenResult, EditorEntityPage,
     EditorEntityQuery, EditorEntityQueryBasis, EditorEntityQueryLimits, EditorEntityQueryPosition,
     EditorEntityQueryRejection, EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
-    EditorPersistenceOperation, EditorProjectBrowserAction, EditorReopenTarget,
+    EditorPersistenceOperation, EditorPersistenceRequestResult, EditorPersistenceResult,
+    EditorProjectBrowserAction, EditorProjectBrowserActionOutcome, EditorReopenTarget,
+    EditorWorkspaceIntent, EditorWorkspaceIntentAction, EditorWorkspaceIntentRequestResult,
+    EditorWorkspaceIntentResult,
 };
 
 #[path = "support/text_project.rs"]
@@ -289,88 +292,126 @@ impl ImguiEditorPanel for QueryPanel {
 }
 
 #[test]
-fn an_independent_tool_queries_and_commits_non_active_scene_and_prefab_without_selection_choreography()
- {
-    for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
-        let project = text_project::TextProject::new();
-        let schemas = bundle();
-        fs::write(
-            project.root.join("schema/authoring.bundle.json"),
-            schemas.to_json_string().unwrap(),
-        )
-        .unwrap();
-        let records = [
-            SceneEntityRecord::new(id("anchor")).with_component(
-                ComponentTypeId::new("consumer.Unknown"),
-                SceneComponentRecord::new(
-                    ComponentSchemaVersion::ONE,
-                    ComponentValue::String("preserve me".into()),
-                ),
+fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreography() {
+    let project = text_project::TextProject::new();
+    let schemas = bundle();
+    fs::write(
+        project.root.join("schema/authoring.bundle.json"),
+        schemas.to_json_string().unwrap(),
+    )
+    .unwrap();
+    let records = [
+        SceneEntityRecord::new(id("anchor")).with_component(
+            ComponentTypeId::new("consumer.Unknown"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("preserve me".into()),
             ),
-            SceneEntityRecord::new(id("tail")),
-        ];
-        // The current Host owns one Scene lane and one Prefab lane. Exercise each nominal
-        // document as the non-active target without pretending same-kind multi-open exists.
-        let (scene_records, prefab_records, source) = match kind {
-            EditorDocumentKind::Scene => (
-                records.to_vec(),
-                vec![SceneEntityRecord::new(id("active"))],
-                "scenes/startup.scene.json",
-            ),
-            EditorDocumentKind::Prefab => (
-                vec![SceneEntityRecord::new(id("active"))],
-                records.to_vec(),
-                "prefabs/secondary.prefab.json",
-            ),
-            _ => unreachable!(),
-        };
-        fs::write(
-            project.root.join("scenes/startup.scene.json"),
-            SceneDocument::from_ordered_roots(scene_records)
-                .to_json_string()
-                .unwrap(),
-        )
-        .unwrap();
-        fs::write(
-            project.root.join("prefabs/secondary.prefab.json"),
-            PrefabDocument::from_ordered_roots(prefab_records)
-                .to_json_string()
-                .unwrap(),
-        )
-        .unwrap();
-        let mut app = Application(EditorApplication::new(EditorLaunchOptions::new(
-            &project.root,
-        )));
-        app.native_shell_ready();
-        wait(&mut app, |frame| {
-            !frame.project_browser().has_pending_work()
-        });
-        let startup = frame(&app).workspace().active_document.unwrap();
-        submit(
+        ),
+        SceneEntityRecord::new(id("tail")),
+    ];
+    let sources = [
+        "scenes/startup.scene.json",
+        "scenes/secondary.scene.json",
+        "prefabs/primary.prefab.json",
+        "prefabs/secondary.prefab.json",
+    ];
+    for (source, contents) in sources.iter().zip([
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("active"))])
+            .to_json_string()
+            .unwrap(),
+        SceneDocument::from_ordered_roots(records.clone())
+            .to_json_string()
+            .unwrap(),
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("active"))])
+            .to_json_string()
+            .unwrap(),
+        PrefabDocument::from_ordered_roots(records)
+            .to_json_string()
+            .unwrap(),
+    ]) {
+        fs::write(project.root.join(source), contents).unwrap();
+    }
+    let mut app = Application(EditorApplication::new(EditorLaunchOptions::new(
+        &project.root,
+    )));
+    app.native_shell_ready();
+    wait(&mut app, |frame| {
+        !frame.project_browser().has_pending_work()
+    });
+    let startup = frame(&app).workspace().active_document.unwrap();
+    let mut documents = vec![startup];
+    for source in &sources[1..] {
+        let before = frame(&app);
+        let opening = submit(
             &mut app,
             EditorAction::ProjectBrowser(EditorProjectBrowserAction::Open {
-                relative_path: "prefabs/secondary.prefab.json".into(),
+                relative_path: (*source).into(),
             }),
         );
+        let [
+            EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::ProjectBrowser(
+                EditorProjectBrowserActionOutcome::Preparing { request },
+            )),
+        ] = opening.actions()
+        else {
+            panic!("{opening:?}");
+        };
+        let request = *request;
         wait(&mut app, |frame| frame.document_open().result().is_some());
         let opened = frame(&app);
-        let EditorDocumentOpenResult::Opened { document, .. } =
-            opened.document_open().result().unwrap()
+        let EditorDocumentOpenResult::Opened {
+            request: completed,
+            document,
+        } = opened.document_open().result().unwrap()
         else {
-            panic!("{opened:?}")
+            panic!("{opened:?}");
         };
-        let (document, active) = if kind == EditorDocumentKind::Scene {
-            (startup, document)
-        } else {
-            (document, startup)
-        };
-        submit(
+        assert_eq!(completed, request);
+        assert!(!documents.contains(&document));
+        assert_eq!(opened.workspace().documents.len(), documents.len() + 1);
+        assert_eq!(opened.workspace().active_document, Some(document));
+        assert!(opened.workspace_intent().intent().is_none());
+        assert!(opened.workspace_intent().decision_prompt().is_none());
+        assert!(opened.workspace_intent().result().is_none());
+        for retained in &before.workspace().documents {
+            let actual = opened.workspace().document(retained.document).unwrap();
+            let mut expected = retained.clone();
+            expected.active = actual.active;
+            assert_eq!(actual, &expected, "Open must not replace a retained source");
+        }
+        documents.push(document);
+        let acknowledged = submit(
             &mut app,
-            EditorAction::ProjectBrowser(EditorProjectBrowserAction::AcknowledgeOpen {
-                request: opened.document_open().result().unwrap().request(),
-            }),
+            EditorAction::ProjectBrowser(EditorProjectBrowserAction::AcknowledgeOpen { request }),
         );
-        assert_eq!(frame(&app).workspace().documents.len(), 2);
+        assert!(
+            matches!(acknowledged.actions(), [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::ProjectBrowser(EditorProjectBrowserActionOutcome::OpenAcknowledged { request: acknowledged }))] if *acknowledged == request),
+            "{acknowledged:?}"
+        );
+        assert!(frame(&app).document_open().result().is_none());
+    }
+    let [scene, second_scene, prefab, second_prefab] = documents.as_slice() else {
+        panic!("the Browser must retain two Scenes and two Prefabs");
+    };
+    for (document, kind, source) in [
+        (*scene, EditorDocumentKind::Scene, sources[0]),
+        (*second_scene, EditorDocumentKind::Scene, sources[1]),
+        (*prefab, EditorDocumentKind::Prefab, sources[2]),
+        (*second_prefab, EditorDocumentKind::Prefab, sources[3]),
+    ] {
+        let current = frame(&app);
+        let tab = current.workspace().document(document).unwrap();
+        assert_eq!(tab.kind, kind);
+        assert!(
+            tab.source_binding.is_some(),
+            "missing source binding for {source}"
+        );
+    }
+    for (document, active, source, panel_kind) in [
+        (*second_scene, *scene, sources[1], "consumer.query-scene"),
+        (*second_prefab, *prefab, sources[3], "consumer.query-prefab"),
+    ] {
         let activated = submit(
             &mut app,
             EditorAction::Navigate(EditorNavigationAction::SetActiveDocument { document: active }),
@@ -400,6 +441,43 @@ fn an_independent_tool_queries_and_commits_non_active_scene_and_prefab_without_s
             .unwrap()
             .selection
             .clone();
+        let preview = before.scene_preview_document();
+        let other_files: Vec<_> = sources
+            .iter()
+            .filter(|candidate| **candidate != source)
+            .map(|candidate| (*candidate, fs::read(project.root.join(candidate)).unwrap()))
+            .collect();
+        let assert_untargeted = |app: &EditorApplication| {
+            let current = frame(app);
+            assert_eq!(current.workspace().documents.len(), 4);
+            assert_eq!(current.workspace().active_document, Some(active));
+            assert_eq!(current.scene_preview_document(), preview);
+            assert_eq!(
+                current
+                    .workspace()
+                    .document(document)
+                    .unwrap()
+                    .source_binding,
+                before
+                    .workspace()
+                    .document(document)
+                    .unwrap()
+                    .source_binding
+            );
+            assert_eq!(
+                current.workspace().active_scene.as_ref().unwrap().selection,
+                selection
+            );
+            for retained in tabs.iter().filter(|tab| tab.document != document) {
+                assert_eq!(
+                    current.workspace().document(retained.document),
+                    Some(retained)
+                );
+            }
+            for (path, bytes) in &other_files {
+                assert_eq!(fs::read(project.root.join(path)).unwrap(), *bytes);
+            }
+        };
         let query_basis = basis(&app, document);
         let first = page(
             &mut app,
@@ -425,11 +503,7 @@ fn an_independent_tool_queries_and_commits_non_active_scene_and_prefab_without_s
             second
         );
         assert_eq!(frame(&app).workspace().documents, tabs);
-        assert_eq!(
-            frame(&app).workspace().active_document,
-            Some(active),
-            "direct query must not navigate"
-        );
+        assert_untargeted(&app);
 
         let evidence = Rc::new(RefCell::new(Vec::new()));
         let shared = Rc::clone(&evidence);
@@ -438,7 +512,7 @@ fn an_independent_tool_queries_and_commits_non_active_scene_and_prefab_without_s
         composition
             .register_panel(
                 EditorPanelDescriptor::new(
-                    "consumer.query",
+                    panel_kind,
                     "Query",
                     EditorPanelMultiplicity::Single,
                     EditorPanelPlacement::Floating,
@@ -476,11 +550,7 @@ fn an_independent_tool_queries_and_commits_non_active_scene_and_prefab_without_s
         );
         assert_eq!(frame(&app).workspace().documents, tabs);
 
-        assert_eq!(
-            frame(&app).workspace().active_document,
-            Some(active),
-            "panel painting/query dispatch must not navigate"
-        );
+        assert_untargeted(&app);
 
         let patch = construction(&schemas, 9);
         assert!(
@@ -499,6 +569,7 @@ fn an_independent_tool_queries_and_commits_non_active_scene_and_prefab_without_s
         assert_eq!(cancelled.inverse().operations.len(), 10);
         drop(cancelled);
         assert_eq!(frame(&app).workspace().documents, tabs);
+        assert_untargeted(&app);
         let prepared = app
             .prepare_authoring_edit(document, query_basis.revision, &patch)
             .unwrap();
@@ -519,16 +590,7 @@ fn an_independent_tool_queries_and_commits_non_active_scene_and_prefab_without_s
                 .undo_depth,
             1
         );
-        assert_eq!(committed.workspace().active_document, Some(active));
-        assert_eq!(
-            committed
-                .workspace()
-                .active_scene
-                .as_ref()
-                .unwrap()
-                .selection,
-            selection
-        );
+        assert_untargeted(&app);
         assert_eq!(
             page(&mut app, EditorEntityQueryPosition::Continue(cursor)),
             Err(EditorEntityQueryRejection::StaleRevision)
@@ -541,6 +603,7 @@ fn an_independent_tool_queries_and_commits_non_active_scene_and_prefab_without_s
             frame(&app).workspace().document(document),
             committed.workspace().document(document)
         );
+        assert_untargeted(&app);
         for redo in [false, true] {
             let revision = basis(&app, document).revision;
             let action = if redo {
@@ -562,17 +625,30 @@ fn an_independent_tool_queries_and_commits_non_active_scene_and_prefab_without_s
                 frame(&app).workspace().document(document).unwrap().dirty,
                 redo
             );
+            assert_untargeted(&app);
         }
         let revision = basis(&app, document).revision;
-        submit(
+        let saving = submit(
             &mut app,
             EditorAction::Persistence(EditorPersistenceAction::Save {
                 document,
                 base_revision: revision,
             }),
         );
+        assert!(matches!(
+            saving.actions(),
+            [EditorApplicationActionDispatch::Dispatched(
+                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+            )]
+        ));
         settle_persistence(&mut app);
+        assert!(
+            matches!(frame(&app).persistence().result(), Some(EditorPersistenceResult::Saved { document: saved, revision: saved_revision, .. }) if saved == document && saved_revision == revision),
+            "{:?}",
+            frame(&app).persistence()
+        );
         assert!(!frame(&app).workspace().document(document).unwrap().dirty);
+        assert_untargeted(&app);
         let bytes = fs::read(project.root.join(source)).unwrap();
         let saved: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         let records = saved["payload"]["entities"].as_array().unwrap();
@@ -619,7 +695,7 @@ fn an_independent_tool_queries_and_commits_non_active_scene_and_prefab_without_s
             &mut app,
             EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
         );
-        submit(
+        let reopening = submit(
             &mut app,
             EditorAction::Persistence(EditorPersistenceAction::Reopen {
                 target: EditorReopenTarget::OpenDocument {
@@ -628,33 +704,36 @@ fn an_independent_tool_queries_and_commits_non_active_scene_and_prefab_without_s
                 },
             }),
         );
+        assert!(matches!(
+            reopening.actions(),
+            [EditorApplicationActionDispatch::Dispatched(
+                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+            )]
+        ));
         settle_persistence(&mut app);
-        assert_ne!(
-            basis(&app, document).revision.source_id(),
-            revision.source_id()
+        let reopened_revision = basis(&app, document).revision;
+        assert!(
+            matches!(frame(&app).persistence().result(), Some(EditorPersistenceResult::Opened { document: opened, revision: opened_revision, .. }) if opened == document && opened_revision == reopened_revision),
+            "{:?}",
+            frame(&app).persistence()
         );
-        assert_eq!(frame(&app).workspace().active_document, Some(active));
-        assert_eq!(
-            frame(&app)
-                .workspace()
-                .active_scene
-                .as_ref()
-                .unwrap()
-                .selection,
-            selection
-        );
+        assert_ne!(reopened_revision.source_id(), revision.source_id());
+        assert_eq!(fs::read(project.root.join(source)).unwrap(), bytes);
+        assert_untargeted(&app);
         let result = app.commit_authoring_edit(old, Duration::ZERO);
         assert!(
             matches!(result.actions(), [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))] if !report.applied)
         );
         let mut entities = vec![];
         let mut position = EditorEntityQueryPosition::Start(basis(&app, document));
-        loop {
+        for page_index in 0..4 {
             let result = page(&mut app, position).unwrap();
+            assert!(result.scanned_records <= 1);
             entities.extend(result.entities);
             let Some(next) = result.next else {
                 break;
             };
+            assert!(page_index < 3, "four records must finish within four pages");
             position = EditorEntityQueryPosition::Continue(next);
         }
         assert_eq!(
@@ -667,8 +746,160 @@ fn an_independent_tool_queries_and_commits_non_active_scene_and_prefab_without_s
             ]
         );
         assert!(!frame(&app).workspace().document(document).unwrap().dirty);
-        assert!(app.close(), "the independent Editor owner did not retire");
+        assert_untargeted(&app);
+        submit(
+            &mut app,
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        );
     }
+    for document in [*second_scene, *second_prefab] {
+        let before = frame(&app);
+        assert_ne!(before.workspace().active_document, Some(document));
+        let files: Vec<_> = sources
+            .iter()
+            .map(|source| fs::read(project.root.join(source)).unwrap())
+            .collect();
+        let intent = EditorWorkspaceIntent::CloseDocument { document };
+        let closing = submit(
+            &mut app,
+            EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Request(intent)),
+        );
+        assert!(matches!(
+            closing.actions(),
+            [EditorApplicationActionDispatch::Dispatched(
+                EditorActionOutcome::WorkspaceIntent(EditorWorkspaceIntentRequestResult::Accepted)
+            )]
+        ));
+        wait(&mut app, |frame| {
+            frame.workspace_intent().result().is_some()
+        });
+        let closed = frame(&app);
+        assert_eq!(
+            closed.workspace_intent().result(),
+            Some(EditorWorkspaceIntentResult::Applied { intent })
+        );
+        assert!(closed.workspace().document(document).is_none());
+        assert_eq!(
+            closed.workspace().documents.len(),
+            before.workspace().documents.len() - 1
+        );
+        assert_eq!(
+            closed.workspace().active_document,
+            before.workspace().active_document
+        );
+        assert_eq!(
+            closed.workspace().active_scene,
+            before.workspace().active_scene
+        );
+        assert_eq!(
+            closed.scene_preview_document(),
+            before.scene_preview_document()
+        );
+        for retained in before
+            .workspace()
+            .documents
+            .iter()
+            .filter(|tab| tab.document != document)
+        {
+            assert_eq!(
+                closed.workspace().document(retained.document),
+                Some(retained)
+            );
+        }
+        for (source, bytes) in sources.iter().zip(files) {
+            assert_eq!(fs::read(project.root.join(source)).unwrap(), bytes);
+        }
+        submit(
+            &mut app,
+            EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::AcknowledgeResult),
+        );
+    }
+    for (document, source) in [(*scene, sources[0]), (*prefab, sources[2])] {
+        let before = frame(&app);
+        let other_files: Vec<_> = sources
+            .iter()
+            .filter(|candidate| **candidate != source)
+            .map(|candidate| (*candidate, fs::read(project.root.join(candidate)).unwrap()))
+            .collect();
+        let revision = basis(&app, document).revision;
+        let prepared = app
+            .prepare_authoring_edit(
+                document,
+                revision,
+                &ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                    entity: SceneEntityRecord::new(id("survivor-saved")),
+                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                }]),
+            )
+            .unwrap();
+        let committed = app.commit_authoring_edit(prepared, Duration::ZERO);
+        assert!(
+            matches!(committed.actions(), [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))] if report.applied)
+        );
+        let revision = basis(&app, document).revision;
+        let saving = submit(
+            &mut app,
+            EditorAction::Persistence(EditorPersistenceAction::Save {
+                document,
+                base_revision: revision,
+            }),
+        );
+        assert!(matches!(
+            saving.actions(),
+            [EditorApplicationActionDispatch::Dispatched(
+                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+            )]
+        ));
+        settle_persistence(&mut app);
+        assert!(
+            matches!(frame(&app).persistence().result(), Some(EditorPersistenceResult::Saved { document: saved, revision: saved_revision, .. }) if saved == document && saved_revision == revision),
+            "the surviving document lost its file Host: {:?}",
+            frame(&app).persistence()
+        );
+        let current = frame(&app);
+        assert_eq!(current.workspace().documents.len(), 2);
+        assert_eq!(
+            current.workspace().active_document,
+            before.workspace().active_document
+        );
+        assert_eq!(
+            current.scene_preview_document(),
+            before.scene_preview_document()
+        );
+        assert_eq!(
+            current.workspace().active_scene.as_ref().unwrap().selection,
+            before.workspace().active_scene.as_ref().unwrap().selection
+        );
+        assert!(!current.workspace().document(document).unwrap().dirty);
+        for retained in before
+            .workspace()
+            .documents
+            .iter()
+            .filter(|tab| tab.document != document)
+        {
+            assert_eq!(
+                current.workspace().document(retained.document),
+                Some(retained)
+            );
+        }
+        let bytes = fs::read(project.root.join(source)).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let entities = saved["payload"]["entities"].as_array().unwrap();
+        assert_eq!(entities.len(), 2);
+        assert_eq!(entities[0]["id"], "active");
+        assert_eq!(entities[1]["id"], "survivor-saved");
+        for (path, bytes) in other_files {
+            assert_eq!(fs::read(project.root.join(path)).unwrap(), bytes);
+        }
+        submit(
+            &mut app,
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        );
+    }
+    assert!(
+        app.close(),
+        "the four-document owner did not physically retire"
+    );
 }
 
 #[test]

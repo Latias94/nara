@@ -3561,6 +3561,7 @@ fn generic_editor_opens_closure_external_scene_and_prefab_with_independent_lanes
     .unwrap();
 
     let mut editor = open_generic_editor_with_ready_index(&project);
+    let startup = editor.workspace().active_document().unwrap();
     let index = editor.project_source_index_snapshot().unwrap();
     let opened_scene = editor.open_indexed_authoring_document(
         Arc::clone(&index),
@@ -3571,7 +3572,9 @@ fn generic_editor_opens_closure_external_scene_and_prefab_with_independent_lanes
         super::editor::EditorDocumentOpenRequestResult::Opened { document } => document,
         other => panic!("closure-external Scene was not opened: {other:?}"),
     };
-    assert_eq!(editor.workspace().len(), 1);
+    assert_eq!(editor.workspace().len(), 2);
+    assert!(editor.workspace().scene(startup).is_some());
+    assert!(editor.workspace_intent_view().result().is_none());
     assert_eq!(editor.workspace().active_document(), Some(scene_document));
     assert_eq!(
         editor
@@ -3601,7 +3604,8 @@ fn generic_editor_opens_closure_external_scene_and_prefab_with_independent_lanes
         super::editor::EditorDocumentOpenRequestResult::Opened { document } => document,
         other => panic!("closure-external Prefab was not opened: {other:?}"),
     };
-    assert_eq!(editor.workspace().len(), 2);
+    assert_eq!(editor.workspace().len(), 3);
+    assert!(editor.workspace().scene(startup).is_some());
     assert!(editor.workspace().scene(scene_document).is_some());
     assert_eq!(editor.workspace().active_document(), Some(prefab_document));
     assert_eq!(
@@ -3882,9 +3886,7 @@ fn duplicate_close_decision_cannot_approve_the_next_dirty_document() {
         "prefabs/close.prefab.json",
         crate::project_host::authoring::AuthoringDocumentKind::Prefab,
     ));
-    if editor.workspace_intent_view().result().is_some() {
-        assert!(editor.acknowledge_workspace_intent_result());
-    }
+    assert!(editor.workspace_intent_view().result().is_none());
     make_authoring_name_dirty(&mut editor, scene, "dirty-scene");
     make_authoring_name_dirty(&mut editor, prefab, "dirty-prefab");
     assert_eq!(
@@ -4050,8 +4052,12 @@ fn close_prompt_replay_rejects_after_cancel_new_intent_and_failed_save() {
 
 #[cfg(feature = "tooling")]
 #[test]
-fn dirty_scene_retarget_uses_cancel_discard_and_save_before_publication() {
-    let project = TestProject::new("generic-scene-retarget");
+fn additive_scene_open_preserves_dirty_documents_and_close_targets_cancel_discard_or_save() {
+    use nara_tooling::{
+        EditorCloseDecision, EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult,
+    };
+
+    let project = TestProject::new("generic-scene-additive-open");
     fs::create_dir_all(project.root.join("scripts")).unwrap();
     for name in ["first", "second", "third"] {
         fs::write(
@@ -4061,78 +4067,134 @@ fn dirty_scene_retarget_uses_cancel_discard_and_save_before_publication() {
         .unwrap();
     }
     let mut editor = open_generic_editor_with_ready_index(&project);
+    let startup = editor.workspace().active_document().unwrap();
     let index = editor.project_source_index_snapshot().unwrap();
     let first = opened_document(editor.open_indexed_authoring_document(
         Arc::clone(&index),
         "scenes/first.scene.json",
         crate::project_host::authoring::AuthoringDocumentKind::Scene,
     ));
-    assert!(editor.acknowledge_workspace_intent_result());
     make_authoring_name_dirty(&mut editor, first, "cancel-retained");
+    let first_before = editor.workspace_model().document(first).unwrap().clone();
 
+    let second = opened_document(editor.open_indexed_authoring_document(
+        Arc::clone(&index),
+        "scenes/second.scene.json",
+        crate::project_host::authoring::AuthoringDocumentKind::Scene,
+    ));
+    assert_ne!(first, second);
+    assert_eq!(editor.workspace().len(), 3);
+    assert!(editor.workspace_intent_view().decision_prompt().is_none());
+    assert!(editor.workspace_intent_view().result().is_none());
+    let mut retained = editor.workspace_model().document(first).unwrap().clone();
+    retained.active = first_before.active;
+    assert_eq!(retained, first_before);
+    assert_eq!(scene_name_value(&editor, first), "cancel-retained");
     assert_eq!(
-        editor.open_indexed_authoring_document(
-            Arc::clone(&index),
-            "scenes/second.scene.json",
-            crate::project_host::authoring::AuthoringDocumentKind::Scene,
-        ),
-        super::editor::EditorDocumentOpenRequestResult::AwaitingClose { document: first }
+        editor.request_workspace_intent(EditorWorkspaceIntent::CloseDocument { document: first }),
+        EditorWorkspaceIntentRequestResult::Accepted
     );
     assert_eq!(
         editor.resolve_workspace_intent(
             editor.workspace_intent_view().decision_prompt().unwrap(),
-            nara_tooling::EditorCloseDecision::Cancel
+            EditorCloseDecision::Cancel
         ),
-        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+        EditorWorkspaceIntentRequestResult::Accepted
     );
-    assert_eq!(editor.workspace().active_document(), Some(first));
+    assert_eq!(
+        editor.workspace_intent_view().result(),
+        Some(EditorWorkspaceIntentResult::Cancelled {
+            intent: EditorWorkspaceIntent::CloseDocument { document: first }
+        })
+    );
+    assert_eq!(editor.workspace().active_document(), Some(second));
     assert!(editor.workspace().scene(first).unwrap().is_dirty());
-    assert!(editor.acknowledge_workspace_intent_result());
-
-    assert!(matches!(
-        editor.open_indexed_authoring_document(
-            Arc::clone(&index),
-            "scenes/second.scene.json",
-            crate::project_host::authoring::AuthoringDocumentKind::Scene,
-        ),
-        super::editor::EditorDocumentOpenRequestResult::AwaitingClose { document } if document == first
-    ));
-    assert_eq!(
-        editor.resolve_workspace_intent(
-            editor.workspace_intent_view().decision_prompt().unwrap(),
-            nara_tooling::EditorCloseDecision::Discard
-        ),
-        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+    assert!(
+        editor
+            .apply_workspace_command(EditorWorkspaceCommand::Undo {
+                document: first,
+                base_revision: editor.workspace().document_revision(first).unwrap(),
+            })
+            .applied
     );
-    let second = editor.workspace().active_document().unwrap();
-    assert_ne!(second, first);
-    assert!(editor.workspace().scene(second).is_some());
+    assert_eq!(scene_name_value(&editor, first), "first");
+    make_authoring_name_dirty(&mut editor, first, "discarded-first");
     assert!(editor.acknowledge_workspace_intent_result());
-    make_authoring_name_dirty(&mut editor, second, "saved-before-retarget");
 
-    assert!(matches!(
-        editor.open_indexed_authoring_document(
-            index,
-            "scenes/third.scene.json",
-            crate::project_host::authoring::AuthoringDocumentKind::Scene,
-        ),
-        super::editor::EditorDocumentOpenRequestResult::AwaitingClose { document } if document == second
-    ));
+    assert_eq!(
+        editor.request_workspace_intent(EditorWorkspaceIntent::CloseDocument { document: first }),
+        EditorWorkspaceIntentRequestResult::Accepted
+    );
     assert_eq!(
         editor.resolve_workspace_intent(
             editor.workspace_intent_view().decision_prompt().unwrap(),
-            nara_tooling::EditorCloseDecision::Save
+            EditorCloseDecision::Discard
         ),
-        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+        EditorWorkspaceIntentRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        editor.workspace_intent_view().result(),
+        Some(EditorWorkspaceIntentResult::Applied {
+            intent: EditorWorkspaceIntent::CloseDocument { document: first }
+        })
+    );
+    assert!(editor.workspace().scene(first).is_none());
+    assert!(editor.workspace().scene(startup).is_some());
+    assert!(editor.workspace().scene(second).is_some());
+    assert!(
+        !fs::read_to_string(project.root.join("scenes/first.scene.json"))
+            .unwrap()
+            .contains("discarded-first")
+    );
+    assert!(editor.acknowledge_workspace_intent_result());
+    make_authoring_name_dirty(&mut editor, second, "saved-before-close");
+    let saved_revision = editor.workspace().document_revision(second).unwrap();
+
+    let third = opened_document(editor.open_indexed_authoring_document(
+        index,
+        "scenes/third.scene.json",
+        crate::project_host::authoring::AuthoringDocumentKind::Scene,
+    ));
+    assert_ne!(third, second);
+    assert_eq!(scene_name_value(&editor, second), "saved-before-close");
+    assert!(editor.workspace().scene(second).unwrap().is_dirty());
+    assert!(editor.workspace_intent_view().decision_prompt().is_none());
+    make_authoring_name_dirty(&mut editor, third, "retained-third");
+    let third_before = editor.workspace_model().document(third).unwrap().clone();
+    assert_eq!(
+        editor.request_workspace_intent(EditorWorkspaceIntent::CloseDocument { document: second }),
+        EditorWorkspaceIntentRequestResult::Accepted
+    );
+    assert_eq!(
+        editor.resolve_workspace_intent(
+            editor.workspace_intent_view().decision_prompt().unwrap(),
+            EditorCloseDecision::Save
+        ),
+        EditorWorkspaceIntentRequestResult::Accepted
     );
     drive_persistence_to_terminal(&mut editor);
-    let third = editor.workspace().active_document().unwrap();
-    assert_ne!(third, second);
-    assert!(editor.workspace().scene(third).is_some());
+    assert!(matches!(
+        editor.persistence_view().result(),
+        Some(EditorPersistenceResult::Saved { document, revision, .. })
+            if document == second && revision == saved_revision
+    ));
+    assert_eq!(
+        editor.workspace_intent_view().result(),
+        Some(EditorWorkspaceIntentResult::Applied {
+            intent: EditorWorkspaceIntent::CloseDocument { document: second }
+        })
+    );
+    assert!(editor.workspace().scene(second).is_none());
+    assert_eq!(
+        editor.workspace_model().document(third),
+        Some(&third_before)
+    );
+    assert!(editor.workspace().scene(startup).is_some());
     assert!(
         fs::read_to_string(project.root.join("scenes/second.scene.json"))
             .unwrap()
-            .contains("saved-before-retarget")
+            .contains("saved-before-close")
     );
     assert!(editor.acknowledge_workspace_intent_result());
     assert_eq!(
@@ -4146,8 +4208,9 @@ fn dirty_scene_retarget_uses_cancel_discard_and_save_before_publication() {
         "scenes/second.scene.json",
         crate::project_host::authoring::AuthoringDocumentKind::Scene,
     ));
-    assert_eq!(scene_name_value(&editor, reopened), "saved-before-retarget");
-    assert!(editor.acknowledge_workspace_intent_result());
+    assert_ne!(reopened, second);
+    assert_eq!(scene_name_value(&editor, reopened), "saved-before-close");
+    assert!(editor.workspace_intent_view().result().is_none());
 
     assert_eq!(
         editor
@@ -4155,10 +4218,17 @@ fn dirty_scene_retarget_uses_cancel_discard_and_save_before_publication() {
         nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
     );
     editor.drive_editor_frame(Duration::ZERO);
-    assert!(editor.workspace().is_empty());
+    assert!(editor.workspace().scene(reopened).is_none());
+    assert!(editor.workspace().scene(startup).is_some());
+    assert_eq!(scene_name_value(&editor, third), "retained-third");
+    let active = editor.workspace().active_document().unwrap();
+    assert_ne!(active, reopened);
     assert_eq!(
         editor.current_frame().reopen_target(),
-        nara_tooling::EditorReopenTarget::Unavailable
+        nara_tooling::EditorReopenTarget::OpenDocument {
+            document: active,
+            base_revision: editor.workspace().document_revision(active).unwrap(),
+        }
     );
     assert!(editor.acknowledge_workspace_intent_result());
 
@@ -4167,16 +4237,22 @@ fn dirty_scene_retarget_uses_cancel_discard_and_save_before_publication() {
         "scenes/second.scene.json",
         crate::project_host::authoring::AuthoringDocumentKind::Scene,
     ));
+    assert_ne!(reopened_after_release, reopened);
     assert_eq!(
         scene_name_value(&editor, reopened_after_release),
-        "saved-before-retarget"
+        "saved-before-close"
     );
+    assert_eq!(scene_name_value(&editor, third), "retained-third");
+    assert!(matches!(
+        drive_editor_close_to_completion(&mut editor),
+        super::editor::EditorProjectCloseProgress::Complete(_)
+    ));
 }
 
 #[cfg(feature = "tooling")]
 #[test]
-fn dirty_prefab_retarget_preserves_the_scene_lane_and_honors_cancel_or_discard() {
-    let project = TestProject::new("generic-prefab-retarget");
+fn additive_prefab_open_preserves_dirty_sources_and_close_targets_cancel_discard_or_save() {
+    let project = TestProject::new("generic-prefab-additive-open");
     fs::create_dir_all(project.root.join("scripts")).unwrap();
     for name in ["first", "second"] {
         fs::write(
@@ -4194,14 +4270,25 @@ fn dirty_prefab_retarget_preserves_the_scene_lane_and_honors_cancel_or_discard()
         crate::project_host::authoring::AuthoringDocumentKind::Prefab,
     ));
     make_authoring_name_dirty(&mut editor, first, "cancel-retained");
+    let first_before = editor.workspace_model().document(first).unwrap().clone();
 
+    let second = opened_document(editor.open_indexed_authoring_document(
+        index,
+        "prefabs/second.prefab.json",
+        crate::project_host::authoring::AuthoringDocumentKind::Prefab,
+    ));
+    assert_ne!(first, second);
+    assert_eq!(editor.workspace().len(), 3);
+    assert!(editor.workspace_intent_view().decision_prompt().is_none());
+    assert!(editor.workspace_intent_view().result().is_none());
+    let mut retained = editor.workspace_model().document(first).unwrap().clone();
+    retained.active = first_before.active;
+    assert_eq!(retained, first_before);
+    make_authoring_name_dirty(&mut editor, second, "retained-second");
+    let second_before = editor.workspace_model().document(second).unwrap().clone();
     assert_eq!(
-        editor.open_indexed_authoring_document(
-            Arc::clone(&index),
-            "prefabs/second.prefab.json",
-            crate::project_host::authoring::AuthoringDocumentKind::Prefab,
-        ),
-        super::editor::EditorDocumentOpenRequestResult::AwaitingClose { document: first }
+        editor.request_workspace_intent(EditorWorkspaceIntent::CloseDocument { document: first }),
+        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
     );
     assert_eq!(
         editor.resolve_workspace_intent(
@@ -4212,17 +4299,23 @@ fn dirty_prefab_retarget_preserves_the_scene_lane_and_honors_cancel_or_discard()
     );
     assert!(editor.workspace().scene(scene).is_some());
     assert!(editor.workspace().prefab(first).unwrap().is_dirty());
-    assert_eq!(editor.workspace().active_document(), Some(first));
+    assert_eq!(editor.workspace().active_document(), Some(second));
+    assert_eq!(
+        editor.workspace_model().document(second),
+        Some(&second_before)
+    );
+    assert_eq!(
+        editor.workspace_intent_view().result(),
+        Some(nara_tooling::EditorWorkspaceIntentResult::Cancelled {
+            intent: EditorWorkspaceIntent::CloseDocument { document: first }
+        })
+    );
     assert!(editor.acknowledge_workspace_intent_result());
 
-    assert!(matches!(
-        editor.open_indexed_authoring_document(
-            index,
-            "prefabs/second.prefab.json",
-            crate::project_host::authoring::AuthoringDocumentKind::Prefab,
-        ),
-        super::editor::EditorDocumentOpenRequestResult::AwaitingClose { document } if document == first
-    ));
+    assert_eq!(
+        editor.request_workspace_intent(EditorWorkspaceIntent::CloseDocument { document: first }),
+        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+    );
     assert_eq!(
         editor.resolve_workspace_intent(
             editor.workspace_intent_view().decision_prompt().unwrap(),
@@ -4230,9 +4323,19 @@ fn dirty_prefab_retarget_preserves_the_scene_lane_and_honors_cancel_or_discard()
         ),
         nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
     );
-    let second = editor.workspace().active_document().unwrap();
-    assert_ne!(second, first);
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        editor.workspace_intent_view().result(),
+        Some(nara_tooling::EditorWorkspaceIntentResult::Applied {
+            intent: EditorWorkspaceIntent::CloseDocument { document: first }
+        })
+    );
+    assert!(editor.workspace().prefab(first).is_none());
     assert!(editor.workspace().scene(scene).is_some());
+    assert_eq!(
+        editor.workspace_model().document(second),
+        Some(&second_before)
+    );
     assert_eq!(
         editor
             .workspace()
@@ -4242,6 +4345,49 @@ fn dirty_prefab_retarget_preserves_the_scene_lane_and_honors_cancel_or_discard()
             .locator(),
         "prefabs/second.prefab.json"
     );
+    assert!(
+        !fs::read_to_string(project.root.join("prefabs/first.prefab.json"))
+            .unwrap()
+            .contains("cancel-retained")
+    );
+    assert!(editor.acknowledge_workspace_intent_result());
+    assert_eq!(
+        editor.request_workspace_intent(EditorWorkspaceIntent::CloseDocument { document: second }),
+        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+    );
+    assert_eq!(
+        editor.workspace_intent_view().decision_document(),
+        Some(second)
+    );
+    assert_eq!(
+        editor.resolve_workspace_intent(
+            editor.workspace_intent_view().decision_prompt().unwrap(),
+            nara_tooling::EditorCloseDecision::Save,
+        ),
+        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+    );
+    assert!(matches!(
+        drive_persistence_to_terminal(&mut editor).persistence().result(),
+        Some(EditorPersistenceResult::Saved { document, revision, .. })
+            if document == second && revision == second_before.revision
+    ));
+    assert_eq!(
+        editor.workspace_intent_view().result(),
+        Some(nara_tooling::EditorWorkspaceIntentResult::Applied {
+            intent: EditorWorkspaceIntent::CloseDocument { document: second }
+        })
+    );
+    assert!(editor.workspace().prefab(second).is_none());
+    assert!(editor.workspace().scene(scene).is_some());
+    assert!(
+        fs::read_to_string(project.root.join("prefabs/second.prefab.json"))
+            .unwrap()
+            .contains("retained-second")
+    );
+    assert!(matches!(
+        drive_editor_close_to_completion(&mut editor),
+        super::editor::EditorProjectCloseProgress::Complete(_)
+    ));
 }
 
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]

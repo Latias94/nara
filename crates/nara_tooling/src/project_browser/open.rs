@@ -25,11 +25,10 @@ impl EditorDocumentOpenId {
     }
 }
 
-/// Pending work is distinct from opening a document or beginning its predecessor's close.
+/// Preparation and physical cancellation are distinct from successful document publication.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorDocumentOpenPhase {
     Preparing,
-    AwaitingClose { document: EditorDocumentId },
     Cancelling,
 }
 

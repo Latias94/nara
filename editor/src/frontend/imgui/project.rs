@@ -625,8 +625,6 @@ pub(super) fn show_document_open(
             "{}: {path}",
             match phase {
                 EditorDocumentOpenPhase::Preparing => "Preparing document",
-                EditorDocumentOpenPhase::AwaitingClose { .. } =>
-                    "Waiting for current document close",
                 EditorDocumentOpenPhase::Cancelling => "Cancelling document preparation",
             }
         ));

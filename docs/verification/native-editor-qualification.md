@@ -80,9 +80,11 @@ cargo +1.95.0 nextest run -p nara-editor --lib --locked --run-ignored only -E 't
 
 These hidden-window trajectories qualify the retained Scene's exact presentation receipt while
 an ordinary Prefab is active, disabled inactive-Scene picking, explicit return to the bound Scene,
-and retirement when that Scene closes. The second trajectory separately preserves active UI
-Prefab Canvas priority through Scene Close and retires it after its own source closes. They do
-not qualify additive same-kind Open or multiple simultaneous preview Runtimes.
+and additive second-Scene publication with stale first-Scene picking rejection. Closing the bound
+second Scene does not fall back to the retained first Scene. The second trajectory retains ordinary
+and UI Prefabs together, preserves Canvas priority through unrelated Prefab and Scene Close, and
+retires it after its own source closes. These are bounded same-kind Open/navigation trajectories,
+not qualification of multiple simultaneous preview Runtimes or every persistence combination.
 
 The full native platform group can be selected with:
 

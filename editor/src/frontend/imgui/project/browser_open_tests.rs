@@ -32,19 +32,12 @@ fn preparing_cancel_uses_the_exact_request_and_later_phases_do_not_offer_it() {
         )]
     );
 
-    for phase in [
-        EditorDocumentOpenPhase::Cancelling,
-        EditorDocumentOpenPhase::AwaitingClose {
-            document: EditorDocumentId::from_raw(4),
-        },
-    ] {
-        let waiting = pending(phase);
-        settle(&mut context, &waiting);
-        assert!(
-            click(&mut context, &waiting, cancel).is_empty(),
-            "{phase:?} must leave cancellation to physical retirement or the close prompt"
-        );
-    }
+    let cancelling = pending(EditorDocumentOpenPhase::Cancelling);
+    settle(&mut context, &cancelling);
+    assert!(
+        click(&mut context, &cancelling, cancel).is_empty(),
+        "cancelling must wait for physical return"
+    );
 }
 
 #[test]

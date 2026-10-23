@@ -160,7 +160,6 @@ impl EditorProjectSession {
             .strip_prefix('/')?;
         AssetPath::new(source.to_owned()).ok()
     }
-    /// Opens or activates the one path-bound Prefab lane owned by this Editor session.
     #[doc(hidden)]
     pub(super) fn open_prefab_source(
         &mut self,
@@ -170,7 +169,8 @@ impl EditorProjectSession {
     ) -> EditorWorkspaceCommandReport {
         if !self.accepts_new_work()
             || self.pending_persistence.is_some()
-            || self.document_open_preparing()
+            || self.pending_workspace_intent.is_some()
+            || self.pending_document_open.is_some()
         {
             return editor_workspace_command_rejected(
                 self.workspace.active_document(),
@@ -218,12 +218,6 @@ impl EditorProjectSession {
             return editor_workspace_command_rejected(
                 self.workspace.active_document(),
                 error.code(),
-            );
-        }
-        if !self.prefab_lanes.is_empty() {
-            return editor_workspace_command_rejected(
-                self.workspace.active_document(),
-                "project.editor.prefab-replacement-requires-close",
             );
         }
         if self.authoring_project().is_some() {
@@ -644,7 +638,7 @@ impl EditorProjectSession {
         command: EditorPersistenceCommand,
     ) -> EditorPersistenceRequestResult {
         if command != EditorPersistenceCommand::AcknowledgeResult
-            && (self.pending_workspace_intent.is_some() || self.document_open_preparing())
+            && (self.pending_workspace_intent.is_some() || self.pending_document_open.is_some())
         {
             return EditorPersistenceRequestResult::Rejected(EditorPersistenceRejection::Busy);
         }
@@ -869,15 +863,6 @@ impl EditorProjectSession {
                 | EditorPersistenceResult::Failed { .. }
                 | EditorPersistenceResult::PersistenceUncertain { .. },
             ) => {
-                if self.pending_document_open.is_some()
-                    && matches!(pending, PendingWorkspaceIntent::CloseDocument(_))
-                {
-                    self.cancel_pending_document_open();
-                    self.workspace_intent_result = Some(EditorWorkspaceIntentResult::Cancelled {
-                        intent: pending.intent(),
-                    });
-                    return;
-                }
                 pending.set_phase(EditorWorkspaceIntentPhase::AwaitingDecision);
             }
             Some(EditorPersistenceResult::Opened { .. })

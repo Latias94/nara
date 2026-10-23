@@ -2522,9 +2522,7 @@ impl EditorProjectSession {
                 PendingWorkspaceIntent::Exit(pending)
             }
         };
-        if self.document_open_preparing() {
-            self.cancel_pending_document_open();
-        }
+        self.cancel_pending_document_open();
         self.refresh_workspace_close_prompt(&mut pending);
         let should_retire = pending.phase() == EditorWorkspaceIntentPhase::RetiringRuntime;
         self.pending_workspace_intent = Some(pending);
@@ -2597,14 +2595,6 @@ impl EditorProjectSession {
                     let EditorPersistenceRequestResult::Rejected(reason) = requested else {
                         unreachable!()
                     };
-                    if self.pending_document_open.is_some() {
-                        self.cancel_pending_document_open();
-                        self.workspace_intent_result =
-                            Some(EditorWorkspaceIntentResult::Cancelled { intent });
-                        return EditorWorkspaceIntentRequestResult::Rejected(
-                            EditorWorkspaceIntentRejection::PersistenceRejected(reason),
-                        );
-                    }
                     self.refresh_workspace_close_prompt(&mut pending);
                     self.pending_workspace_intent = Some(pending);
                     return EditorWorkspaceIntentRequestResult::Rejected(
@@ -2891,13 +2881,6 @@ impl EditorProjectSession {
         if pending.phase() != EditorWorkspaceIntentPhase::RetiringRuntime {
             return;
         }
-        if !self.admit_document_open_retirement() {
-            return;
-        }
-        let pending = self
-            .pending_workspace_intent
-            .as_ref()
-            .expect("admitted intent remains owned");
         let close_document = match pending {
             PendingWorkspaceIntent::CloseDocument(pending) => Some(pending.document),
             PendingWorkspaceIntent::Exit(_) => None,
@@ -3012,7 +2995,6 @@ impl EditorProjectSession {
                             EditorPersistenceRejection::CleanupPending,
                         ),
                     });
-                    self.cancel_pending_document_open();
                     return;
                 }
                 let closing_kind = self.workspace.document_kind(pending.document);
@@ -3051,11 +3033,6 @@ impl EditorProjectSession {
                         reason: EditorWorkspaceIntentRejection::MissingDocument,
                     }
                 });
-                if applied {
-                    self.publish_pending_document_open();
-                } else {
-                    self.cancel_pending_document_open();
-                }
             }
             PendingWorkspaceIntent::Exit(mut pending) => {
                 pending.phase = EditorWorkspaceIntentPhase::Prepared;

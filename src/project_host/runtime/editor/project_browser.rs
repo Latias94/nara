@@ -353,9 +353,8 @@ fn map_open_result(result: EditorDocumentOpenRequestResult) -> EditorProjectBrow
             EditorProjectBrowserActionOutcome::Activated { document }
         }
         #[cfg(test)]
-        EditorDocumentOpenRequestResult::Opened { .. }
-        | EditorDocumentOpenRequestResult::AwaitingClose { .. } => {
-            unreachable!("the product request always prepares before replacement")
+        EditorDocumentOpenRequestResult::Opened { .. } => {
+            unreachable!("the product request always prepares before publication")
         }
         EditorDocumentOpenRequestResult::Rejected { code } => {
             EditorProjectBrowserActionOutcome::Rejected { code }

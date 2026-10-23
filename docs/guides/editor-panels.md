@@ -134,9 +134,10 @@ before another Open. An already bound source returns Activated directly.
 
 During preparation, `CancelOpen { request }` revokes that exact request's publication interest.
 `OpenCancellationRequested` does not mean its filesystem call has physically returned; the
-Cancelling projection keeps its work slot until return. Once preparation enters AwaitingClose,
-use the existing dirty-close prompt's Save/Discard/Cancel. Refresh and selection can continue,
-but changed index or predecessor facts reject a stale candidate before destructive retirement.
+Cancelling projection keeps its work slot until return. Opening a distinct Scene/Prefab adds its
+own document without closing an existing same-kind document. Use explicit Close for that
+document's Save/Discard/Cancel. Refresh and selection can continue; changed target index/source
+admission rejects a stale candidate, while editing an unrelated document does not.
 Copy the opaque request ID from the public result/projection; its numeric sequence alone is not
 request authority. Exact cancellation and acknowledgement remain valid after unrelated frame
 advances and cannot affect another Editor session. Keep driving pending work even when a panel
@@ -248,8 +249,8 @@ do not bound ID bytes, total work across a batch, or the subsequent normal Appli
 Expanded Prefab identities, field queries, unopened sources and project-wide indexing are not
 part of this interface.
 
-The Workspace can hold multiple slots, but the current integrated Host still owns one Scene
-file lane and one Prefab file lane. Opening another source of the same kind replaces that lane
-through its existing dirty-close/physical-retirement workflow. The qualified non-active workflow
-uses a Scene and a Prefab together; arbitrary same-kind multi-open needs per-document file-Host
-ownership and must not be implemented by leaving an unhosted tab behind.
+The integrated Host retains a concrete file lane for every open Scene/Prefab document. Opening
+another source of the same kind adds a slot; it does not trigger Close or discard dirty history.
+The independent consumer keeps two Scenes and two Prefabs and queries, edits, saves, reopens and
+explicitly closes non-active documents without retargeting the active source. This does not
+introduce cross-document transactions, concurrent Save, or one preview Runtime per document.

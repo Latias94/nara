@@ -185,9 +185,9 @@ fn failed_and_stale_reopen_preserve_failed_save_cleanup_through_session_drop() {
 
 #[cfg(windows)]
 #[test]
-fn document_replacement_rejects_until_failed_cleanup_retires_then_opens_the_new_lane() {
+fn additive_open_preserves_failed_cleanup_until_explicit_close_retires_only_its_lane() {
     for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
-        let project = seeded_project("host-custody-replacement");
+        let project = seeded_project("host-custody-additive-open");
         let guard;
         let mut editor = open_generic_editor_with_ready_index(&project);
         let (document, path) = open_kind(&project, &mut editor, kind);
@@ -196,11 +196,50 @@ fn document_replacement_rejects_until_failed_cleanup_retires_then_opens_the_new_
         make_authoring_name_dirty(&mut editor, document, "retained-dirty");
         guard = CleanupGuard::new(arm_failed_cleanup(&mut editor, document, kind));
         fail_save(&mut editor, document);
+        assert_eq!(
+            editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+            EditorPersistenceRequestResult::Accepted
+        );
+        let retained = editor.workspace_model().document(document).unwrap().clone();
         let index = editor.project_source_index_snapshot().unwrap();
         let (source, source_kind) = successor(kind);
+        let opened = opened_document(editor.open_indexed_authoring_document(
+            Arc::clone(&index),
+            source,
+            source_kind,
+        ));
+        assert_ne!(opened, document);
+        assert_eq!(editor.workspace().active_document(), Some(opened));
+        assert!(editor.workspace_intent_view().decision_prompt().is_none());
+        assert!(editor.workspace_intent_view().result().is_none());
+        let mut after_open = editor.workspace_model().document(document).unwrap().clone();
+        after_open.active = retained.active;
+        assert_eq!(after_open, retained);
+        make_authoring_name_dirty(&mut editor, opened, "saved-successor");
+        let saved_revision = editor.workspace().document_revision(opened).unwrap();
+        assert_eq!(
+            editor.request_persistence(EditorPersistenceCommand::Save {
+                document: Some(opened)
+            }),
+            EditorPersistenceRequestResult::Accepted
+        );
+        assert!(matches!(
+            drive_persistence_to_terminal(&mut editor).persistence().result(),
+            Some(EditorPersistenceResult::Saved { document: saved, revision, .. })
+                if saved == opened && revision == saved_revision
+        ));
         assert!(
-            matches!(editor.open_indexed_authoring_document(Arc::clone(&index), source, source_kind),
-            editor::EditorDocumentOpenRequestResult::AwaitingClose { document: closing } if closing == document)
+            fs::read_to_string(project.root.join(source))
+                .unwrap()
+                .contains("saved-successor")
+        );
+        assert_eq!(
+            editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+            EditorPersistenceRequestResult::Accepted
+        );
+        assert_eq!(
+            editor.request_workspace_intent(EditorWorkspaceIntent::CloseDocument { document }),
+            nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
         );
         let prompt = editor.workspace_intent_view().decision_prompt().unwrap();
         assert_eq!(
@@ -208,25 +247,42 @@ fn document_replacement_rejects_until_failed_cleanup_retires_then_opens_the_new_
             nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
         );
         let blocked = editor.drive_editor_frame(Duration::ZERO);
-        assert!(matches!(
+        assert_eq!(
             blocked.workspace_intent().result(),
             Some(nara_tooling::EditorWorkspaceIntentResult::Rejected {
+                intent: EditorWorkspaceIntent::CloseDocument { document },
                 reason: nara_tooling::EditorWorkspaceIntentRejection::PersistenceRejected(
                     EditorPersistenceRejection::CleanupPending
                 ),
-                ..
             })
-        ));
-        assert_eq!(editor.workspace().active_document(), Some(document));
+        );
+        assert_eq!(editor.workspace().active_document(), Some(opened));
+        assert_eq!(editor.workspace().document_kind(document), Some(kind));
+        assert!(
+            editor
+                .workspace()
+                .document_source_binding(document)
+                .is_some()
+        );
         assert!(editor.workspace().document_is_dirty(document).unwrap());
         assert_eq!(fs::read(&path).unwrap(), target);
         assert_eq!(directory_entries(&path), entries + 1);
+        let original = match kind {
+            EditorDocumentKind::Scene => "scenes/startup.scene.json",
+            EditorDocumentKind::Prefab => "prefabs/first.prefab.json",
+            EditorDocumentKind::Extension(_) => unreachable!(),
+        };
+        assert_eq!(
+            editor.open_indexed_authoring_document(index, original, source_kind),
+            editor::EditorDocumentOpenRequestResult::Activated { document }
+        );
+        assert!(editor.workspace().document_is_dirty(document).unwrap());
 
         guard.release();
         assert!(editor.acknowledge_workspace_intent_result());
-        assert!(
-            matches!(editor.open_indexed_authoring_document(index, source, source_kind),
-            editor::EditorDocumentOpenRequestResult::AwaitingClose { document: closing } if closing == document)
+        assert_eq!(
+            editor.request_workspace_intent(EditorWorkspaceIntent::CloseDocument { document }),
+            nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
         );
         let prompt = editor.workspace_intent_view().decision_prompt().unwrap();
         assert_eq!(
@@ -234,9 +290,33 @@ fn document_replacement_rejects_until_failed_cleanup_retires_then_opens_the_new_
             nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
         );
         editor.drive_editor_frame(Duration::ZERO);
-        assert_ne!(editor.workspace().active_document(), Some(document));
+        assert_eq!(
+            editor.workspace_intent_view().result(),
+            Some(nara_tooling::EditorWorkspaceIntentResult::Applied {
+                intent: EditorWorkspaceIntent::CloseDocument { document }
+            })
+        );
         assert!(editor.workspace().document_kind(document).is_none());
+        assert_eq!(editor.workspace().document_kind(opened), Some(kind));
         assert_eq!(directory_entries(&path), entries);
+        assert_eq!(fs::read(&path).unwrap(), target);
+        assert!(editor.acknowledge_workspace_intent_result());
+        make_authoring_name_dirty(&mut editor, opened, "saved-after-other-close");
+        assert_eq!(
+            editor.request_persistence(EditorPersistenceCommand::Save {
+                document: Some(opened)
+            }),
+            EditorPersistenceRequestResult::Accepted
+        );
+        assert!(matches!(
+            drive_persistence_to_terminal(&mut editor).persistence().result(),
+            Some(EditorPersistenceResult::Saved { document: saved, .. }) if saved == opened
+        ));
+        assert!(
+            fs::read_to_string(project.root.join(source))
+                .unwrap()
+                .contains("saved-after-other-close")
+        );
         assert_eq!(fs::read(&path).unwrap(), target);
         assert!(matches!(
             drive_editor_close_to_completion(&mut editor),

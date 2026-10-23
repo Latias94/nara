@@ -1,7 +1,7 @@
 ---
 title: Per-Document Editor Persistence Custody
 date: 2026-10-23
-status: Custody, source admission, retained preview and multi-source refresh accepted; additive Open and Play retirement Proposed
+status: Custody, source admission, retained preview, multi-source refresh and additive Open accepted; Play retirement Proposed
 ---
 
 # Per-Document Editor Persistence Custody
@@ -10,8 +10,8 @@ status: Custody, source admission, retained preview and multi-source refresh acc
 
 The prepared-edit consumer exposed a mismatch between independently owned Workspace slots and
 the integrated Host's singleton Scene/Prefab file custody. Opening another source of the same
-kind still follows the existing replacement policy. Merely keeping more tabs without their
-concrete file Hosts would strand persistence and cleanup authority.
+kind previously followed a replacement policy. Merely keeping more tabs without their concrete
+file Hosts would strand persistence and cleanup authority.
 
 This design replaces that singleton assumption. It is the persistence-custody sub-unit of
 [R5c](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md), not the whole projection,
@@ -22,8 +22,8 @@ per-document custody, common source admission and retained Scene preview decisio
 [0111](adr/0111-editor-scene-view-execution-and-picking-authority.md) owns bound Scene presentation
 and input admission; [0034](adr/0034-editor-play-mode-world-boundary.md) owns trusted Play source
 observation; [0113](adr/0113-editor-ui-prefab-authoring-and-canvas-authority.md) owns complete
-saved-source refresh obligations. Additive Open and Play-retirement source continuity remain
-Proposed. The implementation ledger owns actual
+saved-source refresh obligations. ADRs 0047/0118 also adopt additive Open and its separation from
+explicit Close; Play-retirement source continuity remains Proposed. The implementation ledger owns actual
 qualification; neither prepared edits nor map storage alone establish public same-kind multi-open.
 
 ## Ownership And Alternatives
@@ -160,9 +160,9 @@ not a claim that document storage, refresh obligations or Running observations h
 4. Retain multiple Prefab refresh obligations and exact Play source through retirement. Extend
    the independent consumer to two Scenes and two Prefabs, then qualify public/native adapters.
 
-The shared anchored-Prefab gate currently limits both Authoring and TrustedCompiled execution.
-Do not widen trusted multi-Prefab admission before the multi-source refresh obligation owner is
-qualified; a data-only additive consumer cannot prove trusted saved-content refresh. Exact Play
+The removed shared anchored-Prefab gate limited both Authoring and TrustedCompiled execution.
+Trusted multi-Prefab admission depends on the qualified multi-source refresh obligation owner;
+a data-only additive consumer cannot prove trusted saved-content refresh. Exact Play
 source retention is required before claiming unrelated document Close stays source-local during
 cancellation/retirement. Until then, the existing conservative global wait is not evidence that
 the retiring Runtime has no source.

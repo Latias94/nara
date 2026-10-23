@@ -349,6 +349,11 @@ mod binding_tests {
             .unwrap()
             .push(serde_json::to_value(anchor).unwrap());
         fs::write(source, serde_json::to_vec_pretty(&scene).unwrap()).unwrap();
+        fs::write(
+            project.0.join("scenes/other.scene.json"),
+            serde_json::to_vec_pretty(&scene).unwrap(),
+        )
+        .unwrap();
 
         let mut builder = EventLoop::builder();
         builder.with_any_thread(true);
@@ -489,6 +494,92 @@ mod binding_tests {
             if submission.actions().iter().all(|action| matches!(action,
                 crate::EditorApplicationActionDispatch::Dispatched(nara::tooling::EditorActionOutcome::Workspace(report)) if report.applied
             )) { Ok(()) } else { Err(format!("Prefab navigation did not pass its owning fences: {:?}", submission.actions())) }
+        }
+
+        fn open_scene(&mut self, path: &str) -> Result<EditorDocumentId, String> {
+            use nara::tooling::{
+                EditorActionOutcome, EditorDocumentOpenResult, EditorProjectBrowserAction,
+                EditorProjectBrowserActionOutcome,
+            };
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while self
+                .application
+                .current_frame()
+                .unwrap()
+                .project_browser()
+                .entry(path)
+                .is_none()
+            {
+                if Instant::now() >= deadline {
+                    return Err("the second Scene was not indexed".to_owned());
+                }
+                self.paint()?;
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let frame = self.application.current_frame().unwrap();
+            let submission = self.application.submit_and_drive(
+                EditorActionBatch::new(
+                    frame.revision(),
+                    [EditorAction::ProjectBrowser(
+                        EditorProjectBrowserAction::Open {
+                            relative_path: Arc::from(path),
+                        },
+                    )],
+                ),
+                Duration::ZERO,
+            );
+            let [
+                crate::EditorApplicationActionDispatch::Dispatched(
+                    EditorActionOutcome::ProjectBrowser(
+                        EditorProjectBrowserActionOutcome::Preparing { request },
+                    ),
+                ),
+            ] = submission.actions()
+            else {
+                return Err(format!(
+                    "second Scene Open was not admitted: {:?}",
+                    submission.actions()
+                ));
+            };
+            let request = *request;
+            loop {
+                let frame = self.application.current_frame().unwrap();
+                if let Some(result) = frame.document_open().result() {
+                    let EditorDocumentOpenResult::Opened {
+                        request: completed,
+                        document,
+                    } = result
+                    else {
+                        return Err(format!("second Scene Open failed: {result:?}"));
+                    };
+                    if completed != request {
+                        return Err("second Scene Open returned another request".to_owned());
+                    }
+                    let acknowledged = self.application.submit_and_drive(
+                        EditorActionBatch::new(
+                            frame.revision(),
+                            [EditorAction::ProjectBrowser(
+                                EditorProjectBrowserAction::AcknowledgeOpen { request },
+                            )],
+                        ),
+                        Duration::ZERO,
+                    );
+                    if !matches!(acknowledged.actions(), [crate::EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::ProjectBrowser(EditorProjectBrowserActionOutcome::OpenAcknowledged { request: exact }))] if *exact == request)
+                    {
+                        return Err(format!(
+                            "second Scene result acknowledgement failed: {:?}",
+                            acknowledged.actions()
+                        ));
+                    }
+                    return Ok(document);
+                }
+                if Instant::now() >= deadline {
+                    return Err("second Scene Open did not finish".to_owned());
+                }
+                self.application
+                    .drive_editor_frame(Duration::ZERO, false, true);
+                std::thread::sleep(Duration::from_millis(1));
+            }
         }
 
         fn close(&mut self, document: EditorDocumentId) -> Result<(), String> {
@@ -686,12 +777,39 @@ mod binding_tests {
                         .to_owned(),
                 );
             }
+            let second = self.open_scene("scenes/other.scene.json")?;
+            let frame = self.application.current_frame().unwrap();
+            if second == scene
+                || frame.workspace().document(scene).is_none()
+                || frame.workspace().document(prefab).is_none()
+                || frame.scene_preview_document() != Some(second)
+                || self
+                    .native
+                    .scene_presenter
+                    .resolve_pick(&frame, point, mapping)
+                    .is_some()
+            {
+                return Err(
+                    "additive Scene Open lost an old document or reused its picking authority"
+                        .to_owned(),
+                );
+            }
+            self.paint()?;
+            let frame = self.application.current_frame().unwrap();
+            if !self.native.scene_presenter.is_presented(
+                &self.native.scene,
+                &frame,
+                self.native.scene_extent,
+            ) {
+                return Err("the second Scene did not receive its own presentation".to_owned());
+            }
             self.navigate(EditorNavigationAction::SetActiveDocument { document: prefab });
-            self.close(scene)?;
+            self.close(second)?;
             self.paint()?;
             let frame = self.application.current_frame().unwrap();
             if frame.scene_preview_document().is_some()
                 || frame.workspace().active_document != Some(prefab)
+                || frame.workspace().document(scene).is_none()
                 || self.application.current_ui_authoring_frame().is_some()
             {
                 return Err("closing the bound Scene changed the active ordinary Prefab".to_owned());
@@ -700,6 +818,14 @@ mod binding_tests {
         }
 
         fn run_canvas_priority(&mut self, scene: EditorDocumentId) -> Result<(), String> {
+            self.open_prefab(scene, "ordinary-anchor")?;
+            let ordinary = self
+                .application
+                .current_frame()
+                .unwrap()
+                .workspace()
+                .active_document
+                .ok_or("the ordinary Prefab is not active")?;
             self.open_prefab(scene, "ui-anchor")?;
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
@@ -726,6 +852,26 @@ mod binding_tests {
                 .workspace()
                 .active_document
                 .ok_or("the UI Prefab is not active")?;
+            let frame = self.application.current_frame().unwrap();
+            if ordinary == prefab || frame.workspace().document(ordinary).is_none() {
+                return Err("opening a UI Prefab retired the unrelated ordinary Prefab".to_owned());
+            }
+            self.close(ordinary)?;
+            self.paint()?;
+            let frame = self.application.current_frame().unwrap();
+            let authoring = self
+                .application
+                .current_ui_authoring_frame()
+                .ok_or("unrelated Prefab Close lost the UI Canvas")?;
+            if frame.workspace().active_document != Some(prefab)
+                || frame.scene_preview_document() != Some(scene)
+                || !self
+                    .native
+                    .canvas
+                    .is_current(&self.native.scene, &authoring)
+            {
+                return Err("unrelated Prefab Close changed Canvas or Scene authority".to_owned());
+            }
             self.close(scene)?;
             self.paint()?;
             let frame = self.application.current_frame().unwrap();

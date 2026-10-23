@@ -97,7 +97,8 @@ source aliases, document sessions, preview selection and executable startup with
 document store. ADRs 0047/0118 adopt custody, common source admission and retained Scene selection;
 0111 owns bound Scene presentation/input and 0034 the exact trusted Running source observation.
 0113 owns the source-keyed refresh obligations and complete successor validation.
-Additive Open and cancellation/retirement source continuity remain Proposed.
+ADRs 0047/0118 also adopt additive Open independently of explicit Close;
+cancellation/retirement Play-source continuity remains Proposed.
 Prepared edits or per-document storage alone
 do not qualify public same-kind multi-open.
 

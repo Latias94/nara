@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-24 (source exclusion and retained Scene preview binding)
+**Last Revised**: 2026-10-24 (additive source Open and explicit Close separation)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -62,6 +62,10 @@ than raw Workspace locators from different configured source scopes. Browser and
 of one Prefab reuse the same slot/history; a different path alias is rejected. Extension duplicate
 Open retains its explicit `SourceAlreadyOpen` result. All three admission paths share exclusion
 over current retained targets, including rechecks immediately before source publication.
+Opening a distinct Scene/Prefab source adds its own slot and concrete persistence Host without
+closing another same-kind source. Anchored Prefab Open follows the same cardinality policy in
+Authoring and TrustedCompiled sessions. Pending workspace intents fence every Open ingress;
+neither a new source nor exact-source activation bypasses an admitted Close/Exit.
 
 Save captures the exact encoded content state. The existing background publication Host and
 linear receipt acknowledgement own disk writes and dirty checkpoint advancement. A later edit
@@ -233,13 +237,15 @@ snapshots on refusal and publishes only an actual completed matching attempt. Pu
 coalesces without spawning duplicate work; internal publication can reserve one successor scan.
 Logical cancellation never certifies physical capture disposal or session close completion.
 
-Browser document Open exposes request-specific preparation, dirty-close waiting and terminal
+Browser document Open exposes request-specific preparation, physical cancellation and terminal
 results in the public frame. Native maintenance polls pending work without repainting unchanged
 polls. Panels can cancel preparation and acknowledge only the exact terminal request through the
 ordinary action port; the dispatch callback still reports dispatch rather than eventual Open.
-Existing Save/Discard/Cancel owns a dirty replacement after preparation is admitted. File reads,
-pure classification and Host binding can leave the owner thread; Workspace mutation, predecessor
-retirement and publication stay with their current owner under ADR 0047. Cancelled or rejected
+Opening B does not consult or retire an unrelated A; Save/Discard/Cancel belongs to explicit
+Close/Exit. File reads, pure classification and Host binding can leave the owner thread;
+Workspace mutation and source publication stay with their current owner under ADR 0047.
+Admitted Close/Exit cancels pending preparation but retains its independent decision/retry outcome.
+Cancelled or rejected
 prepared Hosts retire through existing Host custody rather than accumulating until project exit.
 
 The native Host retains one event loop, device-creation authority and accountable close/recovery lifecycle.

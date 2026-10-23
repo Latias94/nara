@@ -5,7 +5,6 @@ use crate::project_host::authoring::{AdmittedAuthoringDocument, AuthoringDocumen
 use super::persistence::RetainedHost;
 use super::source_admission::SourceAdmissionError;
 use nara_fs::FileCapability;
-use nara_scene::{AuthoringSchemaBasis, SceneAuthoringRevision};
 use nara_tooling::{EditorDocumentDigest, EditorDocumentSourceBinding};
 use nara_tooling::{
     EditorDocumentOpenId, EditorDocumentOpenPhase, EditorDocumentOpenResult, EditorDocumentOpenView,
@@ -24,10 +23,6 @@ pub(crate) enum EditorDocumentOpenRequestResult {
     },
     #[cfg(test)]
     Opened {
-        document: EditorDocumentId,
-    },
-    #[cfg(test)]
-    AwaitingClose {
         document: EditorDocumentId,
     },
     Rejected {
@@ -108,32 +103,16 @@ impl Drop for PreparedAuthoringDocumentOpen {
     }
 }
 
-pub(super) struct OpenAdmission {
+struct OpenAdmission {
     request: EditorDocumentOpenId,
     path: Arc<str>,
-    kind: AuthoringDocumentKind,
     index: Arc<ProjectSourceIndexSnapshot>,
-    replacing: Option<ReplacingDocument>,
 }
 
-struct ReplacingDocument {
-    document: EditorDocumentId,
-    revision: SceneAuthoringRevision,
-    binding: Option<EditorDocumentSourceBinding>,
-    schema: Option<AuthoringSchemaBasis>,
-}
-
-pub(super) enum PendingDocumentOpen {
-    Preparing {
-        admission: OpenAdmission,
-        worker: DocumentOpenPreparation,
-        cancelled: bool,
-    },
-    AwaitingClose {
-        admission: OpenAdmission,
-        prepared: PreparedAuthoringDocumentOpen,
-        retirement_admitted: bool,
-    },
+pub(super) struct PendingDocumentOpen {
+    admission: OpenAdmission,
+    worker: DocumentOpenPreparation,
+    cancelled: bool,
 }
 
 impl EditorProjectSession {
@@ -173,13 +152,6 @@ impl EditorProjectSession {
                     EditorDocumentOpenResult::Cancelled { .. } => {
                         rejected("project.editor.document-open-cancelled")
                     }
-                };
-            }
-            if let Some(PendingDocumentOpen::AwaitingClose { admission, .. }) =
-                &self.pending_document_open
-            {
-                return EditorDocumentOpenRequestResult::AwaitingClose {
-                    document: admission.replacing.as_ref().unwrap().document,
                 };
             }
             assert!(
@@ -250,9 +222,7 @@ impl EditorProjectSession {
         let admission = OpenAdmission {
             request,
             path: relative_path,
-            kind,
             index,
-            replacing: self.capture_replacing_document(kind),
         };
         let worker = DocumentOpenPreparation::start(
             captured,
@@ -261,51 +231,12 @@ impl EditorProjectSession {
             #[cfg(test)]
             self.next_document_open_gate.take(),
         );
-        self.pending_document_open = Some(PendingDocumentOpen::Preparing {
+        self.pending_document_open = Some(PendingDocumentOpen {
             admission,
             worker,
             cancelled: false,
         });
         EditorDocumentOpenRequestResult::Preparing { request }
-    }
-
-    fn capture_replacing_document(&self, kind: AuthoringDocumentKind) -> Option<ReplacingDocument> {
-        let (document, count) = match kind {
-            AuthoringDocumentKind::Scene => (
-                self.scene_lanes.keys().next().copied()?,
-                self.scene_lanes.len(),
-            ),
-            AuthoringDocumentKind::Prefab => (
-                self.prefab_lanes.keys().next().copied()?,
-                self.prefab_lanes.len(),
-            ),
-        };
-        assert_eq!(
-            count, 1,
-            "the current Open policy retains at most one document per source kind"
-        );
-        let (binding, schema) = match kind {
-            AuthoringDocumentKind::Scene => {
-                let slot = self.workspace.scene(document)?;
-                (
-                    slot.source_binding().cloned(),
-                    slot.session().authoring_schema_basis(),
-                )
-            }
-            AuthoringDocumentKind::Prefab => {
-                let slot = self.workspace.prefab(document)?;
-                (
-                    Some(slot.source_binding().clone()),
-                    slot.session().authoring_schema_basis(),
-                )
-            }
-        };
-        Some(ReplacingDocument {
-            document,
-            revision: self.workspace.document_revision(document)?,
-            binding,
-            schema,
-        })
     }
 
     fn validate_document_open(
@@ -327,53 +258,21 @@ impl EditorProjectSession {
             .map_err(SourceAdmissionError::code)?;
         self.exclude_source_aliases(path, &current)
             .map_err(SourceAdmissionError::code)?;
-        match (
-            &admission.replacing,
-            self.capture_replacing_document(admission.kind),
-        ) {
-            (None, None) => Ok(()),
-            (Some(before), Some(now))
-                if before.document == now.document
-                    && before.revision == now.revision
-                    && before.binding == now.binding
-                    && before.schema == now.schema =>
-            {
-                Ok(())
-            }
-            _ => Err("project.editor.document-open-stale-document"),
-        }
+        Ok(())
     }
 
     pub(super) fn document_open_view(&self) -> EditorDocumentOpenView {
-        let pending = self
-            .pending_document_open
-            .as_ref()
-            .map(|pending| match pending {
-                PendingDocumentOpen::Preparing {
-                    admission,
-                    cancelled,
-                    ..
-                } => (
-                    admission.request,
-                    Arc::clone(&admission.path),
-                    if *cancelled {
-                        EditorDocumentOpenPhase::Cancelling
-                    } else {
-                        EditorDocumentOpenPhase::Preparing
-                    },
-                ),
-                PendingDocumentOpen::AwaitingClose { admission, .. } => (
-                    admission.request,
-                    Arc::clone(&admission.path),
-                    EditorDocumentOpenPhase::AwaitingClose {
-                        document: admission
-                            .replacing
-                            .as_ref()
-                            .expect("replacement has a predecessor")
-                            .document,
-                    },
-                ),
-            });
+        let pending = self.pending_document_open.as_ref().map(|pending| {
+            (
+                pending.admission.request,
+                Arc::clone(&pending.admission.path),
+                if pending.cancelled {
+                    EditorDocumentOpenPhase::Cancelling
+                } else {
+                    EditorDocumentOpenPhase::Preparing
+                },
+            )
+        });
         EditorDocumentOpenView::new(pending, self.document_open_result)
     }
 
@@ -391,7 +290,7 @@ impl EditorProjectSession {
 
     pub(super) fn cancel_document_open_request(&mut self, request: EditorDocumentOpenId) -> bool {
         match self.pending_document_open.as_mut() {
-            Some(PendingDocumentOpen::Preparing {
+            Some(PendingDocumentOpen {
                 admission,
                 worker,
                 cancelled,
@@ -400,33 +299,21 @@ impl EditorProjectSession {
                 worker.cancel();
                 true
             }
-            // Once dirty close is admitted, its existing prompt owns Save/Discard/Cancel.
             _ => false,
         }
     }
 
-    pub(super) fn document_open_preparing(&self) -> bool {
-        matches!(
-            self.pending_document_open,
-            Some(PendingDocumentOpen::Preparing { .. })
-        )
-    }
-
     pub(super) fn advance_document_open(&mut self) -> bool {
-        let Some(PendingDocumentOpen::Preparing { .. }) = self.pending_document_open.as_ref()
-        else {
-            return false;
-        };
-        let Some(PendingDocumentOpen::Preparing {
+        let Some(PendingDocumentOpen {
             admission,
             mut worker,
             cancelled,
         }) = self.pending_document_open.take()
         else {
-            unreachable!()
+            return false;
         };
         let Some(completion) = worker.poll() else {
-            self.pending_document_open = Some(PendingDocumentOpen::Preparing {
+            self.pending_document_open = Some(PendingDocumentOpen {
                 admission,
                 worker,
                 cancelled,
@@ -438,135 +325,40 @@ impl EditorProjectSession {
             self.document_open_result = Some(EditorDocumentOpenResult::Cancelled { request });
             return true;
         }
-        let prepared = match completion.and_then(|prepared| {
-            self.validate_document_open(&admission, &prepared)
-                .map(|()| prepared)
-                .map_err(preparation::DocumentOpenFailure::from_code)
-        }) {
-            Ok(prepared) => prepared,
-            Err(failure) => {
-                let _ = self.diagnostics.push(failure.diagnostic);
-                self.document_open_result = Some(EditorDocumentOpenResult::Rejected {
-                    request,
-                    code: failure.code,
-                });
-                return true;
-            }
-        };
-        if let Some(replacing) = &admission.replacing {
-            let document = replacing.document;
-            self.pending_document_open = Some(PendingDocumentOpen::AwaitingClose {
-                admission,
-                prepared,
-                retirement_admitted: false,
-            });
-            if self.request_workspace_intent(EditorWorkspaceIntent::CloseDocument { document })
-                != EditorWorkspaceIntentRequestResult::Accepted
-            {
-                self.reject_pending_document_open(
-                    "project.editor.document-replacement-close-rejected",
-                );
-            }
-        } else {
-            self.document_open_result = Some(match self.publish_prepared_document_open(prepared) {
+        self.document_open_result = Some(
+            match completion.and_then(|prepared| {
+                self.publish_prepared_document_open(&admission, prepared)
+                    .map_err(preparation::DocumentOpenFailure::from_code)
+            }) {
                 Ok(document) => EditorDocumentOpenResult::Opened { request, document },
-                Err(code) => EditorDocumentOpenResult::Rejected { request, code },
-            });
-        }
+                Err(failure) => {
+                    let _ = self.diagnostics.push(failure.diagnostic);
+                    EditorDocumentOpenResult::Rejected {
+                        request,
+                        code: failure.code,
+                    }
+                }
+            },
+        );
         true
-    }
-
-    /// Recheck owner facts and file aliases before any irreversible predecessor retirement.
-    pub(super) fn admit_document_open_retirement(&mut self) -> bool {
-        let Some(PendingDocumentOpen::AwaitingClose {
-            admission,
-            prepared,
-            retirement_admitted,
-            ..
-        }) = self.pending_document_open.as_ref()
-        else {
-            return true;
-        };
-        if *retirement_admitted {
-            return true;
-        }
-        if let Err(code) = self.validate_document_open(admission, prepared) {
-            self.reject_pending_document_open(code);
-            if let Some(pending) = self.pending_workspace_intent.take() {
-                self.workspace_intent_result = Some(EditorWorkspaceIntentResult::Rejected {
-                    intent: pending.intent(),
-                    reason: EditorWorkspaceIntentRejection::PersistenceRejected(
-                        EditorPersistenceRejection::StaleRevision,
-                    ),
-                });
-            }
-            return false;
-        }
-        if let Some(PendingDocumentOpen::AwaitingClose {
-            retirement_admitted,
-            ..
-        }) = self.pending_document_open.as_mut()
-        {
-            *retirement_admitted = true;
-        }
-        true
-    }
-
-    fn reject_pending_document_open(&mut self, code: &'static str) {
-        if let Some(PendingDocumentOpen::AwaitingClose { admission, .. }) =
-            self.pending_document_open.take()
-        {
-            self.document_open_result = Some(EditorDocumentOpenResult::Rejected {
-                request: admission.request,
-                code,
-            });
-        }
-    }
-
-    pub(super) fn publish_pending_document_open(&mut self) {
-        let Some(PendingDocumentOpen::AwaitingClose {
-            admission,
-            prepared,
-            ..
-        }) = self.pending_document_open.take()
-        else {
-            return;
-        };
-        let request = admission.request;
-        self.document_open_result = Some(match self.publish_prepared_document_open(prepared) {
-            Ok(document) => EditorDocumentOpenResult::Opened { request, document },
-            Err(code) => EditorDocumentOpenResult::Rejected { request, code },
-        });
     }
 
     pub(super) fn cancel_pending_document_open(&mut self) {
-        if let Some(PendingDocumentOpen::Preparing {
+        if let Some(PendingDocumentOpen {
             worker, cancelled, ..
         }) = self.pending_document_open.as_mut()
         {
             *cancelled = true;
             worker.cancel();
-        } else if let Some(PendingDocumentOpen::AwaitingClose { admission, .. }) =
-            self.pending_document_open.take()
-        {
-            self.document_open_result = Some(EditorDocumentOpenResult::Cancelled {
-                request: admission.request,
-            });
         }
     }
 
     fn publish_prepared_document_open(
         &mut self,
+        admission: &OpenAdmission,
         mut prepared: PreparedAuthoringDocumentOpen,
     ) -> Result<EditorDocumentId, &'static str> {
-        if !self.accepts_new_work() {
-            return Err("project.editor.document-open-busy");
-        }
-        let (path, current) = prepared
-            .current_source()
-            .map_err(SourceAdmissionError::code)?;
-        self.exclude_source_aliases(path, &current)
-            .map_err(SourceAdmissionError::code)?;
+        self.validate_document_open(admission, &prepared)?;
         let previous_active = self.workspace.active_document();
         let result = match prepared
             .document
