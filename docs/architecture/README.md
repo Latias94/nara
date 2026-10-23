@@ -109,6 +109,8 @@ ADRs 0058/0026/0047/0111 adopt complete predecessor ownership and exact accepted
 association; ADR 0115 retains shared task/image custody. The
 [bounded comparison](../benchmarks/2026-10-24-preview-projection-lifetime.md) records the frozen
 incumbent and same-World candidate, without implying incremental projection or native qualification.
+The separate [scoped qualification](../knowledge/engineering/verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md)
+binds the implemented epoch/producer/presentation contracts to public, held-work and actual native evidence.
 
 The [chat-informed foundation review](../audits/2026-10-23-chat-informed-engine-architecture-review.md)
 compares the supplied engine-design conversation with the current owners and pinned Bevy/Godot

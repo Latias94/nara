@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "20654483eebaa7432261769b3de96372e813e02266094a7550e39045896448e2"
+source_fingerprint: "aae21da15d083db60906c386e2793a2dcfb0e3d11c1591f3bdf2c7b33c02a4c4"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "20654483eebaa7432261769b3de96372e813e02266094a7550e39045896
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `20654483eebaa7432261769b3de96372e813e02266094a7550e39045896448e2`
-- Immutable records: 871
+- Source fingerprint: `aae21da15d083db60906c386e2793a2dcfb0e3d11c1591f3bdf2c7b33c02a4c4`
+- Immutable records: 872
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Disposable Scene projection epochs and stable native preview qualification](verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md) - Qualify complete-domain Scene epochs while retaining shared authoring owners and renderer producer identity.
 - **Work Progress**: [Projection lifetime next-unit design and measurement boundary](progress/2026-10/2026-10-23T211757Z-projection-lifetime-next-unit-design-and-measurement-boundary-d55f02e666d0487987d1a1f8b1d9c8b6.md) - Ground the remaining R5c preview-history pressure and compare explicit epoch handoff with owner-specific incremental projection; no production selection yet.
 - **Verification Evidence**: [Trusted Play source continuity and source-local Close qualification](verification/2026-10/2026-10-23T210921Z-trusted-play-source-continuity-and-source-local-close-qualification-61897d1b17744e2aaff6fc6efb1594a7.md) - Qualify the R5c trusted Play source through cancellation, Game handoff and physical retirement without stopping unrelated documents.
 - **Verification Evidence**: [Additive Scene and Prefab Open qualification](verification/2026-10/2026-10-23T202313Z-additive-scene-and-prefab-open-qualification-d0b1fc894dd2419fa1cf43c9e39eb79d.md) - Removes same-kind predecessor retirement, retains per-document Host custody, and qualifies explicit Close and public/native multi-document workflows.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Foundation architecture rebaseline documentation checks and adversarial closure](verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md) - Inventory, status, link and scoped adversarial checks close design work only; no runtime or performance qualification.
 - **Subagent Finding**: [Complete foundation review: six independent lanes and integrated design choices](subagents/2026-10/2026-10-23T113840Z-complete-foundation-review-six-independent-lanes-and-integrated-design-choices-0520f18c9f084c319ab268ab36204938.md) - Six source reviews challenge all conversation foundation topics and 103 baseline ADRs without claiming implementation.
 - **Verification Evidence**: [Chat-informed architecture review probes and design constraints](verification/2026-10/2026-10-23T105719Z-chat-informed-architecture-review-probes-and-design-constraints-cc6bbbacdaac48eea3745bc7d36f8d9a.md) - Three public-interface probes distinguish a reproduced control defect from current Identity and Theme contract debt.
-- **Verification Evidence**: [Post-boundary U1 to U8 final integration and requirement audit](verification/2026-10/2026-10-23T075653Z-post-boundary-u1-to-u8-final-integration-and-requirement-audit-c11cf626f4494238bf3d1a2532e40634.md) - Verification Evidence for Post-boundary U1 to U8 final integration and requirement audit.
 
 # Integration Notes
 

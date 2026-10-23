@@ -115,6 +115,7 @@ The enhanced actual Windows/DX12 retained-Scene trajectory separately passes unc
 identity/texture registration through four creation/Undo pairs and recovery after token
 invalidation. It does not turn this CPU collector into a GPU allocation-byte or latency measure.
 
-Full public editing/persistence and native presentation/picking evidence belong in the associated
-qualification record. Allocation bytes and complete frame-tail budgets remain unmeasured;
+Public editing/persistence and native presentation/picking evidence belong in the separate
+[qualification record](../knowledge/engineering/verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md).
+Allocation bytes and complete frame-tail budgets remain unmeasured;
 pending image/Save continuity needs explicit held-work tests rather than timing inference.

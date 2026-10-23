@@ -292,8 +292,10 @@ not full authoring Runtime reconstruction or a second authoring history. Identit
 complete predecessor history/live-token responsibility before Scene prepares and again before
 exclusive publication. Ordinary same-domain Scene consumers retain their existing history.
 The [frozen incumbent and candidate comparison](../benchmarks/2026-10-24-preview-projection-lifetime.md)
-records actual N+1 steady claims and bounded publication costs; held task/image/Save and actual
-presentation/picking coverage remain separate qualification obligations. Incremental projection,
+records actual N+1 steady claims and bounded publication costs. The
+[scoped qualification](../knowledge/engineering/verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md)
+records the separate held task/image/Save, joined public workflow and actual native evidence.
+Incremental projection,
 durable addressing and the remaining waves are not closed by an epoch policy.
 
 Separate source identity, structured projection chain, durable property and runtime incarnation.
