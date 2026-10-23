@@ -9,7 +9,10 @@ use nara_core::ItemLimit;
 use nara_ecs::Resource;
 
 use crate::revision::{RevisionCounter, RevisionIdentity};
-use crate::{AssetId, AssetSlotRevision, ImportArtifactDigest, SourceHash, StableAssetId};
+use crate::{
+    Asset, AssetId, AssetMutationBaseline, AssetSlotRevision, Assets, ImportArtifactDigest,
+    SourceHash, StableAssetId,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -66,6 +69,74 @@ impl fmt::Debug for AssetPublicationRevision {
         formatter
             .debug_struct("AssetPublicationRevision")
             .finish_non_exhaustive()
+    }
+}
+
+/// Opaque state-owner continuity for Image's pixel-free removal recovery.
+///
+/// Only the registered Image reload consumer issues these tokens. Resolver-admitted Loading,
+/// resolver capacity rejection, and an exactly validated Image failure preserve continuity.
+/// Ordinary state writes revoke it independently of the asset's version and state revision.
+/// Image must also validate its catalog, value store, and empty-slot recovery association.
+#[derive(Clone)]
+pub struct ImageRecoveryContinuity {
+    id: AssetId,
+    revision: RevisionIdentity,
+    authority: Arc<()>,
+}
+
+impl PartialEq for ImageRecoveryContinuity {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.revision == other.revision
+            && Arc::ptr_eq(&self.authority, &other.authority)
+    }
+}
+
+impl Eq for ImageRecoveryContinuity {}
+
+impl fmt::Debug for ImageRecoveryContinuity {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ImageRecoveryContinuity")
+            .finish_non_exhaustive()
+    }
+}
+
+impl ImageRecoveryContinuity {
+    #[must_use]
+    pub fn is_current(&self, states: &AssetStates, id: AssetId) -> bool {
+        self.id == id
+            && states
+                .image_reload_authority
+                .as_ref()
+                .is_some_and(|authority| Arc::ptr_eq(authority, &self.authority))
+            && self.revision == states.image_recovery_revision(id)
+    }
+
+    /// Records the existing failure transition without revoking current recovery continuity.
+    ///
+    /// Both this token and the exact per-attempt mutation baseline must still be current.
+    /// Successful failure recording advances the ordinary state revision and retains its events.
+    pub fn record_failure<T: Asset>(
+        &self,
+        baseline: AssetMutationBaseline<T>,
+        assets: &mut Assets<T>,
+        states: &mut AssetStates,
+        events: &mut AssetEvents,
+        message: impl Into<String>,
+    ) -> Result<AssetVersion, AssetStateError> {
+        let id = baseline.handle().id();
+        if !self.is_current(states, id) {
+            return Err(AssetStateError::MutationSuperseded { id });
+        }
+        baseline.validate(assets, states)?;
+        let current = states.take_image_recovery_revision(id);
+        let result = baseline.record_failure(assets, states, events, message);
+        if result.is_ok() {
+            states.restore_image_recovery_revision(id, current);
+        }
+        result
     }
 }
 
@@ -154,9 +225,11 @@ impl Default for AssetState {
 #[derive(Debug, Resource)]
 pub struct AssetStates {
     store_revision: Arc<()>,
+    image_reload_authority: Option<Arc<()>>,
     states: BTreeMap<AssetId, AssetState>,
     state_revisions: BTreeMap<AssetId, RevisionCounter>,
     publication_revisions: BTreeMap<AssetId, RevisionCounter>,
+    image_recovery_revisions: BTreeMap<AssetId, RevisionCounter>,
     published_slots: BTreeMap<AssetId, AssetSlotRevision>,
     managed_slots: Mutex<BTreeMap<AssetId, AssetSlotRevision>>,
     metadata_dirty: BTreeMap<AssetId, AssetStateRevision>,
@@ -167,9 +240,11 @@ impl Default for AssetStates {
     fn default() -> Self {
         Self {
             store_revision: Arc::new(()),
+            image_reload_authority: None,
             states: BTreeMap::new(),
             state_revisions: BTreeMap::new(),
             publication_revisions: BTreeMap::new(),
+            image_recovery_revisions: BTreeMap::new(),
             published_slots: BTreeMap::new(),
             managed_slots: Mutex::new(BTreeMap::new()),
             metadata_dirty: BTreeMap::new(),
@@ -246,9 +321,17 @@ impl AssetStates {
         self.advance_publication_revision(id);
     }
 
+    pub(crate) fn observe_image_source_removal(&mut self, id: AssetId) {
+        let current = self.take_image_recovery_revision(id);
+        self.observe_source_removal(id);
+        self.restore_image_recovery_revision(id, current);
+    }
+
     /// A concrete owner calls this only after publishing the current desired recipe.
     pub fn acknowledge_metadata_publication(&mut self, id: AssetId) {
-        self.metadata_dirty.remove(&id);
+        if self.metadata_dirty.remove(&id).is_some() {
+            self.advance_state_revision(id);
+        }
     }
 
     /// Iterates every authoritative runtime asset state, including removed and failed assets.
@@ -272,6 +355,36 @@ impl AssetStates {
     #[must_use]
     pub fn state_revision(&self, id: AssetId) -> AssetStateRevision {
         AssetStateRevision::new(&self.store_revision, self.state_revisions.get(&id))
+    }
+
+    pub(crate) fn bind_image_reload_authority(&mut self, authority: &Arc<()>) {
+        if self
+            .image_reload_authority
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, authority))
+        {
+            return;
+        }
+        for revision in self.image_recovery_revisions.values_mut() {
+            revision.advance();
+        }
+        self.image_reload_authority = Some(Arc::clone(authority));
+    }
+
+    pub(crate) fn image_recovery_continuity(
+        &self,
+        id: AssetId,
+        authority: Arc<()>,
+    ) -> ImageRecoveryContinuity {
+        ImageRecoveryContinuity {
+            id,
+            revision: self.image_recovery_revision(id),
+            authority,
+        }
+    }
+
+    fn image_recovery_revision(&self, id: AssetId) -> RevisionIdentity {
+        RevisionIdentity::capture(&self.store_revision, self.image_recovery_revisions.get(&id))
     }
 
     /// Returns authority that an immutable last-good value may retain until explicitly revoked.
@@ -389,6 +502,13 @@ impl AssetStates {
         version
     }
 
+    pub(crate) fn set_loading_for_image_reload(&mut self, id: AssetId) -> AssetVersion {
+        let current = self.take_image_recovery_revision(id);
+        let version = self.set_loading(id);
+        self.restore_image_recovery_revision(id, current);
+        version
+    }
+
     pub(crate) fn set_failed(
         &mut self,
         id: AssetId,
@@ -418,18 +538,29 @@ impl AssetStates {
         version
     }
 
+    pub(crate) fn reject_image_reload_capacity(
+        &mut self,
+        id: AssetId,
+        message: &'static str,
+    ) -> AssetVersion {
+        let current = self.take_image_recovery_revision(id);
+        let version = self.reject_reload_request(id, message);
+        self.restore_image_recovery_revision(id, current);
+        version
+    }
+
     /// Revokes a publication whose identity or authority is no longer valid.
     ///
     /// Retained CPU data and the latest diagnostic remain available for inspection, but cannot
     /// authorize derived resources. A subsequent successful publication restores availability.
     pub fn invalidate_publication(&mut self, id: AssetId) {
+        self.advance_state_revision(id);
         self.published_slots.remove(&id);
         let Some(current) = self.states.get_mut(&id) else {
             return;
         };
         if current.published_available {
             current.published_available = false;
-            self.advance_state_revision(id);
             self.advance_publication_revision(id);
         }
     }
@@ -444,6 +575,31 @@ impl AssetStates {
             .entry(id)
             .and_modify(RevisionCounter::advance)
             .or_default();
+        self.advance_image_recovery_revision(id);
+    }
+
+    fn advance_image_recovery_revision(&mut self, id: AssetId) {
+        self.image_recovery_revisions
+            .entry(id)
+            .and_modify(RevisionCounter::advance)
+            .or_default();
+    }
+
+    fn take_image_recovery_revision(&mut self, id: AssetId) -> Option<RevisionCounter> {
+        // Keep a distinct current identity until the known synchronous transition succeeds.
+        self.image_recovery_revisions
+            .insert(id, RevisionCounter::default())
+    }
+
+    fn restore_image_recovery_revision(&mut self, id: AssetId, current: Option<RevisionCounter>) {
+        match current {
+            Some(current) => {
+                self.image_recovery_revisions.insert(id, current);
+            }
+            None => {
+                self.image_recovery_revisions.remove(&id);
+            }
+        }
     }
 
     fn advance_publication_revision(&mut self, id: AssetId) {

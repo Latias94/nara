@@ -42,6 +42,10 @@ use crate::reload::{
     image_reload_diagnostic, record_image_reload_failure,
 };
 
+#[cfg(feature = "serde")]
+#[path = "tests/recovery_continuity.rs"]
+mod recovery_continuity;
+
 enum ImagePipelineEdit {
     SourceChange {
         path: AssetPath,
@@ -54,6 +58,11 @@ enum ImagePipelineEdit {
     ObserveMetadata(AssetId),
     #[cfg(feature = "serde")]
     ReloadRequests(nara_asset::AssetReloadRequests),
+    #[cfg(feature = "serde")]
+    RecoveryInterference {
+        handle: Handle<ImageAsset>,
+        kind: RecoveryInterference,
+    },
     Insert {
         handle: Handle<ImageAsset>,
         image: ImageAsset,
@@ -73,6 +82,65 @@ enum ImagePipelineEdit {
 
 #[derive(Default, Resource)]
 struct ImagePipelinePort;
+
+#[cfg(feature = "serde")]
+#[derive(Clone, Copy, Debug)]
+enum RecoveryInterference {
+    Loading,
+    Failure,
+    Invalidate,
+    Metadata,
+    SlotAba,
+    ReplaceValues,
+    ReplaceStates,
+}
+
+#[cfg(feature = "serde")]
+impl RecoveryInterference {
+    fn apply(self, world: &mut nara_ecs::World, handle: Handle<ImageAsset>) {
+        match self {
+            Self::Loading => {
+                world.resource_mut::<AssetStates>().set_loading(handle.id());
+            }
+            Self::Failure => {
+                world.resource_scope(|world, mut images: nara_ecs::Mut<Assets<ImageAsset>>| {
+                    images
+                        .record_load_failure(
+                            handle,
+                            &mut world.resource_mut::<AssetStates>(),
+                            &mut AssetEvents::default(),
+                            "asset.reload-request-byte-limit-exceeded",
+                        )
+                        .unwrap();
+                })
+            }
+            Self::Invalidate => world
+                .resource_mut::<AssetStates>()
+                .invalidate_publication(handle.id()),
+            Self::Metadata => world
+                .resource_mut::<AssetStates>()
+                .observe_metadata_change(handle.id()),
+            Self::SlotAba => {
+                let image = ImageAsset::new(
+                    direct_image_source(),
+                    ImageExtent::new(1, 1),
+                    ImageFormat::Rgba8,
+                    vec![255; 4],
+                )
+                .unwrap();
+                let mut images = world.resource_mut::<Assets<ImageAsset>>();
+                images.insert(handle, image);
+                images.remove(handle);
+            }
+            Self::ReplaceValues => {
+                world.insert_resource(Assets::<ImageAsset>::default());
+            }
+            Self::ReplaceStates => {
+                world.insert_resource(AssetStates::default());
+            }
+        }
+    }
+}
 
 impl nara_app::__RuntimeDriverPort for ImagePipelinePort {
     type Input = ImagePipelineEdit;
@@ -119,6 +187,8 @@ impl ImagePipelinePort {
             ImagePipelineEdit::ReloadRequests(requests) => {
                 world.insert_resource(requests);
             }
+            #[cfg(feature = "serde")]
+            ImagePipelineEdit::RecoveryInterference { handle, kind } => kind.apply(world, handle),
             ImagePipelineEdit::Insert { handle, image } => {
                 world
                     .resource_mut::<Assets<ImageAsset>>()
@@ -3435,6 +3505,147 @@ fn image_plugin_coalesced_removal_and_recreation_preserves_metadata_dirtiness() 
     assert_eq!(removed_state, Some(LoadState::Removed));
     assert!(prepared_removed);
     assert_budget_released(budget);
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn removed_image_recovery_survives_repeated_capacity_rejection_with_or_without_a_recipe() {
+    for item_limit in [false, true] {
+        for seed_failed_recipe in [false, true] {
+            let temp_root = unique_temp_root();
+            let texture_path = temp_root.join("textures").join("player.png");
+            fs::create_dir_all(texture_path.parent().unwrap()).unwrap();
+            let record = image_record("textures/player.png");
+            let mut app = app_with_image_plugin(&temp_root, record.clone());
+            let importer = app.world().resource::<ImageImporter>().clone();
+            let (server, handle, images, states, events) =
+                loaded_image_store(&importer, &record, &[255, 0, 0, 255]);
+            let world = app.world_mut().unwrap();
+            world.insert_resource(server);
+            world.insert_resource(images);
+            world.insert_resource(states);
+            world.insert_resource(events);
+            let blocker = image_record_with_id(
+                "aaa.png",
+                StableAssetId::parse_str("20000000-0000-4000-8000-000000000001").unwrap(),
+            );
+            world
+                .resource_mut::<nara_asset::ProjectAssetDatabase>()
+                .insert(blocker.clone())
+                .unwrap();
+            world
+                .resource_mut::<AssetSourceChanges>()
+                .removed(record.path().clone())
+                .unwrap();
+            let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+            drive_image_jobs(&mut runtime);
+            let after_removal = crate::reload::recovery_facts_for_tests(runtime.world(), handle);
+            let settings = ImageImportSettings::new(ImageColorSpace::Linear);
+            let metadata = AssetMeta::new(
+                AssetMetaIdentity::new(
+                    record.stable_id(),
+                    record.path().clone(),
+                    record.source_kind().clone(),
+                ),
+                settings,
+            );
+            fs::write(
+                texture_path.with_extension("png.meta"),
+                metadata.to_json_string().unwrap(),
+            )
+            .unwrap();
+            if seed_failed_recipe {
+                fs::write(&texture_path, b"invalid PNG").unwrap();
+                edit_image_pipeline(
+                    &mut runtime,
+                    ImagePipelineEdit::SourceChange {
+                        path: record.path().clone(),
+                        kind: AssetSourceChangeKind::Modified,
+                    },
+                );
+                drive_image_jobs(&mut runtime);
+            }
+            let before_rejection = crate::reload::recovery_facts_for_tests(runtime.world(), handle);
+            edit_image_pipeline(
+                &mut runtime,
+                ImagePipelineEdit::ReloadRequests(nara_asset::AssetReloadRequests::with_limits(
+                    nara_asset::AssetReloadRequestLimits::new(
+                        ItemLimit::ONE,
+                        if item_limit {
+                            ByteLimit::new(1024 * 1024).unwrap()
+                        } else {
+                            ByteLimit::ONE
+                        },
+                    ),
+                )),
+            );
+            let mut rejected = Vec::new();
+            for _ in 0..2 {
+                if item_limit {
+                    edit_image_pipeline(
+                        &mut runtime,
+                        ImagePipelineEdit::SourceChange {
+                            path: blocker.path().clone(),
+                            kind: AssetSourceChangeKind::Modified,
+                        },
+                    );
+                }
+                edit_image_pipeline(
+                    &mut runtime,
+                    ImagePipelineEdit::SourceChange {
+                        path: record.path().clone(),
+                        kind: AssetSourceChangeKind::Modified,
+                    },
+                );
+                runtime.drive(Duration::ZERO).unwrap();
+                rejected.push((
+                    crate::reload::recovery_facts_for_tests(runtime.world(), handle),
+                    runtime
+                        .world()
+                        .resource::<AssetStates>()
+                        .state(handle.id())
+                        .unwrap()
+                        .load_state()
+                        .clone(),
+                ));
+            }
+            fs::write(&texture_path, rgba_png(1, 1, &[0, 255, 0, 255])).unwrap();
+            edit_image_pipeline(
+                &mut runtime,
+                ImagePipelineEdit::ReloadRequests(nara_asset::AssetReloadRequests::default()),
+            );
+            edit_image_pipeline(
+                &mut runtime,
+                ImagePipelineEdit::SourceChange {
+                    path: record.path().clone(),
+                    kind: AssetSourceChangeKind::Modified,
+                },
+            );
+            drive_image_jobs(&mut runtime);
+            let pixels = runtime
+                .world()
+                .resource::<Assets<ImageAsset>>()
+                .get(handle)
+                .map(|image| image.pixels().to_vec());
+            let after_success = crate::reload::recovery_facts_for_tests(runtime.world(), handle);
+            runtime.finish().unwrap();
+            remove_temp_root(&temp_root);
+
+            assert_eq!(after_removal, (true, false));
+            assert_eq!(before_rejection, (true, seed_failed_recipe));
+            for (facts, load_state) in rejected {
+                assert_eq!(facts, (true, seed_failed_recipe));
+                let code = if item_limit {
+                    "asset.reload-request-item-limit-exceeded"
+                } else {
+                    "asset.reload-request-byte-limit-exceeded"
+                };
+                assert!(matches!(load_state, LoadState::Failed { message } if message == code));
+            }
+            assert_eq!(pixels, Some(vec![0, 255, 0, 255]));
+            assert!(!after_success.0);
+        }
+    }
 }
 
 #[cfg(feature = "serde")]

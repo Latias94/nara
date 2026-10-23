@@ -264,6 +264,8 @@ impl AssetReloadResolutionContext<'_> {
                     source,
                 }
             })?;
+            self.states
+                .bind_image_reload_authority(&registration.authority);
         }
         let previous_state = (
             self.states.state_revision(asset_id),
@@ -274,7 +276,7 @@ impl AssetReloadResolutionContext<'_> {
         let metadata_dirty = metadata_dirty || change_kind == AssetSourceChangeKind::MetaModified;
         let removed = change_kind == AssetSourceChangeKind::Removed;
         if removed && metadata_after_removal {
-            self.states.observe_source_removal(asset_id);
+            self.observe_source_removal(asset_id, record.source_kind());
         }
         if metadata_dirty {
             self.states.observe_metadata_change(asset_id);
@@ -282,7 +284,7 @@ impl AssetReloadResolutionContext<'_> {
         let generation = self.generations.begin_request(asset_id);
         if removed && !metadata_after_removal {
             // Source removal revokes derivation authority before optional cleanup is admitted.
-            self.states.observe_source_removal(asset_id);
+            self.observe_source_removal(asset_id, record.source_kind());
         }
         let image_authority = match (record.source_kind(), self.image_registration) {
             (AssetSourceKind::Image, Some(registration)) => Arc::clone(&registration.authority),
@@ -338,10 +340,18 @@ impl AssetReloadResolutionContext<'_> {
                 return Err(self.reject_request(asset_id, error));
             }
         };
-        let loading_version = self.states.set_loading(asset_id);
+        let loading_version = self.states.set_loading_for_image_reload(asset_id);
         request.set_resolved_state_revision(self.states.state_revision(asset_id));
         debug_assert_eq!(loading_version, expected_version);
         Ok(())
+    }
+
+    fn observe_source_removal(&mut self, id: AssetId, kind: &AssetSourceKind) {
+        if kind == &AssetSourceKind::Image && self.image_registration.is_some() {
+            self.states.observe_image_source_removal(id);
+        } else {
+            self.states.observe_source_removal(id);
+        }
     }
 
     fn reject_known_record_gap(
@@ -367,7 +377,16 @@ impl AssetReloadResolutionContext<'_> {
         asset_id: AssetId,
         error: AssetReloadResolutionError,
     ) -> AssetReloadResolutionError {
-        self.reject_asset(asset_id, error.diagnostic_code());
+        if matches!(&error, AssetReloadResolutionError::RequestAdmission { .. }) {
+            let version = self
+                .states
+                .reject_image_reload_capacity(asset_id, error.diagnostic_code());
+            let _ = self
+                .events
+                .push(asset_id, version, AssetEventKind::ReloadRejected);
+        } else {
+            self.reject_asset(asset_id, error.diagnostic_code());
+        }
         error
     }
 
@@ -478,3 +497,7 @@ pub(super) fn reject_unclaimed_asset_reload_requests(
         diagnostics.push(unclaimed_reload_request_diagnostic(&request));
     }
 }
+
+#[cfg(test)]
+#[path = "tests_recovery_continuity.rs"]
+mod recovery_continuity_tests;

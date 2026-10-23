@@ -6,7 +6,7 @@ use nara_ecs::Resource;
 
 use crate::{
     AssetError, AssetId, AssetPath, AssetRecord, AssetServer, AssetSourceKind, AssetStateRevision,
-    AssetVersion, ImportArtifactDigest, StableAssetId,
+    AssetStates, AssetVersion, ImageRecoveryContinuity, ImportArtifactDigest, StableAssetId,
 };
 
 use super::AssetSourceChangeKind;
@@ -135,6 +135,18 @@ impl std::error::Error for AssetReloadRequestAdmissionError {}
 #[derive(Debug)]
 pub struct ImageReloadConsumer {
     authority: Arc<()>,
+}
+
+impl ImageReloadConsumer {
+    /// Captures state-owner continuity; Image separately admits successful-removal recovery.
+    #[must_use]
+    pub fn recovery_continuity(
+        &self,
+        states: &AssetStates,
+        id: AssetId,
+    ) -> ImageRecoveryContinuity {
+        states.image_recovery_continuity(id, Arc::clone(&self.authority))
+    }
 }
 
 #[derive(Debug, Resource)]

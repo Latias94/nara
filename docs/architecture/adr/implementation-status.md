@@ -29,6 +29,13 @@ root Image Host13, direct/renamed-root Image consumer2 and selected Reference Ga
 with two actual Windows/DX12 Image/Canvas trajectories and a negative constructor doctest. These
 results do not qualify U6 recovery continuity or broaden native/performance claims.
 
+The [post-boundary U6 evidence](../../knowledge/engineering/verification/2026-10/2026-10-23T072629Z-post-boundary-u6-bounded-image-recovery-continuity-qualification-1f48883676614cde8d61d8a59e3cef2d.md)
+qualifies ADR 0037's bounded Image removal-recovery continuity separately from exact attempt
+baselines. Asset/Image/TileSet252, no-default-feature Image78 and selected root Host/Scene37 pass.
+Independent review's post-Spawn unavailable-invalidation counterexample is fixed with exact state
+revision advancement; foreign consumer authority, external writes, empty-slot ABA and replaced
+stores cannot restore eligibility. U7/U8, unmeasured costs and other native platforms remain separate.
+
 The [low-level integration](../../knowledge/engineering/verification/2026-10/2026-10-22T193724Z-u11-low-level-refactor-public-and-native-consumer-integration-ddb983fa80454657955de17ff65d1772.md) qualifies the bounded U1-U11 owner refactor: phase spatial cuts, retained asset intent,
 unique lock/task/close owners, typed codecs, facade derives, World identity operations and exact
 Gameplay success. Final owner329, root267/integration78, independent module77, Reference87/desktop6,

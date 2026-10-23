@@ -135,10 +135,10 @@ impl<T: Asset> Debug for AssetMutationBaseline<T> {
 }
 
 impl<T: Asset> AssetMutationBaseline<T> {
-    #[must_use]
-    pub fn slot_matches(&self, assets: &Assets<T>) -> bool {
-        assets.slot_revision(self.handle) == self.slot
+    pub(crate) const fn handle(&self) -> Handle<T> {
+        self.handle
     }
+
     pub fn validate(
         &self,
         assets: &Assets<T>,

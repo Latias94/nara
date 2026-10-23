@@ -3,7 +3,8 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Amended**: 2026-10-23 for managed mutation baselines, retained desired observations, owned rescan,
-and separate identity, residency ownership and policy
+Image-owned prepared capture and bounded recovery continuity, and separate identity, residency
+ownership and policy
 **Refines**: ADR 0033: Asset Import and Render Resource Preparation Seam
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0050: Asset Root,
 Symlink, Junction, and Package Trust Policy; ADR 0051: Persistent File Envelope, Migration, and
@@ -105,6 +106,27 @@ The accepted identity, ownership and reload contract is:
   catalog, type, state and slot continuity before re-admitting current metadata. It does not grant
   first-load authority or reuse deleted pixels. Metadata-backed recovery requires Image's `serde`
   feature; without it, the existing metadata-support rejection remains explicit.
+- Recovery continuity is distinct from the exact mutation baseline of one attempt. Asset owns one
+  bounded current continuity identity per asset, bound to its state store and registered Image
+  reload owner. Image's private successful-removal record retains only the typed handle, source
+  identity, removal version, exact empty slot and that continuity; it retains no pixels or old
+  attempt baseline. Another App's consumer cannot issue usable continuity for this state store.
+- Ordinary state writes, explicit invalidation even when already unavailable, raw slot changes,
+  replaced stores, invalid metadata and successful superseding publication invalidate recovery.
+  The resolver's admitted Loading and genuine item/byte-capacity Failed transitions preserve only
+  the current continuity while advancing ordinary state revision and generation as before. Image's
+  exactly validated retryable failure may preserve it. These transitions never restore an earlier
+  witness after external interference; diagnostic text is not proof of who performed a write.
+- A registered Image resolver's source-removal observation preserves current recovery continuity
+  while still revoking publication and advancing ordinary state revision. Only a successful exact
+  Remove from a still-eligible start can issue the successor removal receipt. An external state
+  write followed by another Remove cannot mint recovery. Metadata observations invalidate it in
+  either relative order; existing metadata/removal re-admission rules remain separate.
+- Every attempt still validates its exact post-resolution state revision and a fresh shared
+  mutation baseline. Capacity rejection supersedes an older Loading attempt, records Failed and
+  emits ReloadRejected; it is not diagnostic-only. An obsolete success/failure cannot recreate
+  pixels or bless recovery. A retained desired recipe is not evidence that removal recovery remains
+  eligible, so qualification checks that eligibility independently with and without such recipes.
 - Removing authoring source is distinct from unmounting a packaged generation. A runtime may keep
   using a verified mounted artifact even when no authoring tree is present.
 - Source-change translation or scheduling failures produce structured diagnostics; they must not be

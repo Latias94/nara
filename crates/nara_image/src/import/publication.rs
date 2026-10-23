@@ -2,8 +2,7 @@ use std::fmt::{self, Debug, Formatter};
 
 use nara_asset::{
     AssetEvents, AssetMutationBaseline, AssetPath, AssetRecord, AssetServer, AssetStateError,
-    AssetStateRevision, AssetStates, AssetVersion, Assets, Handle, ImportArtifactRecord,
-    StableAssetId,
+    AssetStates, AssetVersion, Assets, Handle, ImportArtifactRecord, StableAssetId,
 };
 use nara_fs::ContentDigest;
 
@@ -64,7 +63,6 @@ pub(crate) struct ImagePublicationSnapshot {
     source_stable_id: StableAssetId,
     source_path: AssetPath,
     expected_version: AssetVersion,
-    expected_state_revision: AssetStateRevision,
     previous_slot: PreviousImageSlot,
     baseline: AssetMutationBaseline<ImageAsset>,
 }
@@ -106,7 +104,6 @@ impl ImagePublicationSnapshot {
             source_stable_id: source.stable_id(),
             source_path: source.path().clone(),
             expected_version,
-            expected_state_revision: states.state_revision(handle.id()),
             previous_slot: PreviousImageSlot::capture_observed(previous),
             baseline,
         })
@@ -243,19 +240,6 @@ impl ImagePublicationSnapshot {
         self.validate_binding(asset_server).is_ok()
             && self.validate_state(states).is_ok()
             && self.validate_baseline(images, states).is_ok()
-    }
-
-    pub(crate) fn matches_previous_state(
-        &self,
-        asset_server: &AssetServer,
-        images: &Assets<ImageAsset>,
-        expected_version: AssetVersion,
-        previous_state_revision: Option<&AssetStateRevision>,
-    ) -> bool {
-        self.validate_binding(asset_server).is_ok()
-            && self.expected_version == expected_version
-            && previous_state_revision == Some(&self.expected_state_revision)
-            && self.baseline.slot_matches(images)
     }
 }
 

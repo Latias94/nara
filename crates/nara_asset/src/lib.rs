@@ -49,7 +49,7 @@ pub use server::{AssetError, AssetServer};
 pub use state::{
     AssetDependencyGraph, AssetEvent, AssetEventKind, AssetEventLimits, AssetEventPushOutcome,
     AssetEvents, AssetPublicationRevision, AssetState, AssetStateError, AssetStateRevision,
-    AssetStates, AssetVersion, LoadState,
+    AssetStates, AssetVersion, ImageRecoveryContinuity, LoadState,
 };
 pub use storage::{
     Asset, AssetMutationBaseline, AssetSlotRevision, Assets, Handle, allocate_anonymous_handle,

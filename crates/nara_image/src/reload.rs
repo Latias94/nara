@@ -19,9 +19,10 @@ use nara_app::{App, CoreStage, Plugin, PluginError, RealTime};
 use nara_asset::AssetMetaIdentityCandidate;
 use nara_asset::{
     AssetEvents, AssetId, AssetLoadGeneration, AssetLoadGenerations, AssetPath,
-    AssetPublicationRevision, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestKind,
-    AssetReloadRequests, AssetServer, AssetSlotRevision, AssetSourceChangeKind, AssetStateError,
-    AssetStateRevision, AssetStates, AssetTaskUpdateSet, Assets, Handle, ImageReloadConsumer,
+    AssetPublicationRevision, AssetRecord, AssetReloadDiagnostics, AssetReloadRequest,
+    AssetReloadRequestKind, AssetReloadRequests, AssetServer, AssetSlotRevision,
+    AssetSourceChangeKind, AssetStateError, AssetStateRevision, AssetStates, AssetTaskUpdateSet,
+    AssetVersion, Assets, Handle, ImageRecoveryContinuity, ImageReloadConsumer,
     ImageReloadDrainError, ImageReloadRegistrationError, register_image_reload_consumer,
 };
 use nara_diagnostic::{
@@ -305,7 +306,7 @@ pub(super) struct ImageReloadAttempt {
     handle: Handle<ImageAsset>,
     publication: ImagePublicationSnapshot,
     settings: Option<ImageImportSettings>,
-    recovering_removed: bool,
+    recovery: Option<RemovedImageRecovery>,
 }
 
 impl ImageReloadAttempt {
@@ -327,7 +328,7 @@ impl ImageReloadAttempt {
             handle,
             publication,
             settings,
-            recovering_removed: false,
+            recovery: None,
         })
     }
 
@@ -385,7 +386,84 @@ struct ReadyImageJobs {
 
 #[derive(Default, Resource)]
 struct RemovedImageRecoveries {
-    images: BTreeMap<AssetId, ImagePublicationSnapshot>,
+    images: BTreeMap<AssetId, RemovedImageRecovery>,
+}
+
+#[derive(Debug, Clone)]
+struct RemovedImageRecovery {
+    handle: Handle<ImageAsset>,
+    record: AssetRecord,
+    removed_version: AssetVersion,
+    empty_slot: AssetSlotRevision,
+    continuity: ImageRecoveryContinuity,
+}
+
+impl RemovedImageRecovery {
+    fn capture(
+        consumer: &ImageReloadConsumer,
+        record: AssetRecord,
+        handle: Handle<ImageAsset>,
+        server: &AssetServer,
+        images: &Assets<ImageAsset>,
+        states: &AssetStates,
+    ) -> Option<Self> {
+        let recovery = Self {
+            handle,
+            record,
+            removed_version: states.version(handle.id())?,
+            empty_slot: images.slot_revision(handle),
+            continuity: consumer.recovery_continuity(states, handle.id()),
+        };
+        recovery
+            .is_current(server, images, states)
+            .then_some(recovery)
+    }
+
+    fn is_current(
+        &self,
+        server: &AssetServer,
+        images: &Assets<ImageAsset>,
+        states: &AssetStates,
+    ) -> bool {
+        self.continuity.is_current(states, self.handle.id())
+            && states.version(self.handle.id()) == Some(self.removed_version)
+            && states
+                .state(self.handle.id())
+                .is_some_and(|state| state.usable_version().is_none())
+            && images.get(self.handle).is_none()
+            && images.slot_revision(self.handle) == self.empty_slot
+            && images.mutation_baseline(self.handle, states).is_ok()
+            && self.record.source_kind() == &nara_asset::AssetSourceKind::Image
+            && server.get_handle::<ImageAsset>(self.handle.id()) == Some(self.handle)
+            && server.stable_id(self.handle.id()) == Some(self.record.stable_id())
+            && server.path(self.handle.id()) == Some(self.record.path().as_str())
+    }
+}
+
+#[derive(Resource)]
+struct ImageReloadAuthority(ImageReloadConsumer);
+
+#[cfg(all(test, feature = "serde"))]
+pub(super) fn recovery_facts_for_tests(
+    world: &nara_ecs::World,
+    handle: Handle<ImageAsset>,
+) -> (bool, bool) {
+    let eligible = world
+        .resource::<RemovedImageRecoveries>()
+        .images
+        .get(&handle.id())
+        .is_some_and(|recovery| {
+            recovery.is_current(
+                world.resource::<AssetServer>(),
+                world.resource::<Assets<ImageAsset>>(),
+                world.resource::<AssetStates>(),
+            )
+        });
+    let retained_recipe = world
+        .resource::<DesiredImageSettings>()
+        .images
+        .contains_key(&handle.id());
+    (eligible, retained_recipe)
 }
 
 #[derive(Default, Resource)]
@@ -525,6 +603,7 @@ impl Plugin for ImagePlugin {
         app.insert_resource(self.importer.clone())?;
         let reload_consumer = register_image_reload_consumer::<ImageAsset>(app)
             .map_err(image_reload_registration_plugin_error)?;
+        app.insert_resource(ImageReloadAuthority(reload_consumer))?;
         app.add_systems(
             CoreStage::TaskUpdate,
             poll_image_reload_results.in_set(AssetTaskUpdateSet::Poll),
@@ -533,6 +612,7 @@ impl Plugin for ImagePlugin {
         app.add_systems(
             CoreStage::TaskUpdate,
             (move |requests: ResMut<AssetReloadRequests>,
+                   authority: Res<ImageReloadAuthority>,
                    importer: Res<ImageImporter>,
                    asset_server: ResMut<AssetServer>,
                    images: Res<Assets<ImageAsset>>,
@@ -549,7 +629,7 @@ impl Plugin for ImagePlugin {
                 spawn_image_reload_jobs(
                     source_directory.as_deref(),
                     requests,
-                    &reload_consumer,
+                    &authority.0,
                     importer,
                     asset_server,
                     images,
@@ -630,14 +710,12 @@ fn spawn_image_reload_jobs(
                 continue;
             }
         };
-        let recovering_removed = previous_recovery.is_some_and(|snapshot| {
-            snapshot.matches_previous_state(
-                &asset_server,
-                &images,
-                request.expected_version(),
-                request.previous_state_revision(),
-            )
+        let previous_recovery = previous_recovery.filter(|recovery| {
+            recovery.is_current(&asset_server, &images, &states)
+                && recovery.removed_version == request.expected_version()
+                && recovery.record == request.record()
         });
+        let recovering_removed = previous_recovery.is_some();
         let mut attempt = match ImageReloadAttempt::capture(request, handle, &images, &states) {
             Ok(attempt) => attempt,
             Err(_) => {
@@ -666,11 +744,9 @@ fn spawn_image_reload_jobs(
         if let Some(recipe) = desired.images.get(&handle.id()) {
             attempt.settings = Some(recipe.settings);
         }
-        attempt.recovering_removed = recovering_removed;
-        if recovering_removed {
-            recoveries
-                .images
-                .insert(handle.id(), attempt.publication.clone());
+        attempt.recovery = previous_recovery.clone();
+        if let Some(recovery) = previous_recovery {
+            recoveries.images.insert(handle.id(), recovery);
         }
         match attempt.request.request_kind() {
             AssetReloadRequestKind::Remove => ready.removals.push(attempt),
@@ -798,7 +874,7 @@ fn accepted_reload_settings(
     match attempt.request.source_change_kind() {
         AssetSourceChangeKind::Modified => match attempt.settings {
             Some(settings) => Ok(settings),
-            None if attempt.recovering_removed => {
+            None if attempt.recovery.is_some() => {
                 admit_metadata_reload_settings(source_directory, record)
             }
             None => Err(ImageReloadError::MissingImportSettings),
@@ -868,6 +944,7 @@ fn poll_image_reload_results(
 
 #[allow(clippy::too_many_arguments)]
 fn apply_image_reload_results(
+    authority: Res<ImageReloadAuthority>,
     mut ready: ResMut<ReadyImageJobs>,
     mut recoveries: ResMut<RemovedImageRecoveries>,
     pending: Res<PendingImageJobs>,
@@ -889,7 +966,7 @@ fn apply_image_reload_results(
             stats.stale = stats.stale.saturating_add(1);
             continue;
         }
-        let restore_eligible = attempt.recovering_removed
+        let restore_eligible = attempt.recovery.is_some()
             || (request.previous_usable_version() == Some(request.expected_version())
                 && images.get(attempt.handle).is_some_and(|image| {
                     image.source().stable_id() == request.stable_id()
@@ -906,19 +983,16 @@ fn apply_image_reload_results(
             Ok(_) => {
                 stats.removed = stats.removed.saturating_add(1);
                 if restore_eligible
-                    && let Some(removed_version) = states.version(request.asset_id())
+                    && let Some(recovery) = RemovedImageRecovery::capture(
+                        &authority.0,
+                        request.record(),
+                        attempt.handle,
+                        &asset_server,
+                        &images,
+                        &states,
+                    )
                 {
-                    recoveries.images.insert(
-                        request.asset_id(),
-                        ImagePublicationSnapshot::capture(
-                            &request.record(),
-                            attempt.handle,
-                            removed_version,
-                            &images,
-                            &states,
-                        )
-                        .expect("successful removal retains its admitted value/state association"),
-                    );
+                    recoveries.images.insert(request.asset_id(), recovery);
                 }
             }
             Err(_) => stats.failed = stats.failed.saturating_add(1),
@@ -987,16 +1061,7 @@ fn apply_image_reload_results(
             ReadyImageImportOutcome::TrackingFailure => Some(ImageReloadError::TaskTracking),
         };
         if let Some(error) = failure {
-            let preserve_recovery = attempt.recovering_removed
-                && !matches!(error, ImageReloadError::MetadataIdentityMismatch);
-            let recovery = preserve_recovery.then(|| {
-                (
-                    attempt.request.record(),
-                    attempt.handle,
-                    attempt.request.expected_version(),
-                )
-            });
-            if record_image_reload_failure(
+            record_image_reload_failure(
                 attempt,
                 error,
                 &asset_server,
@@ -1005,20 +1070,7 @@ fn apply_image_reload_results(
                 &mut events,
                 &mut diagnostics,
                 &mut stats,
-            ) && let Some((record, handle, expected_version)) = recovery
-            {
-                recoveries.images.insert(
-                    handle.id(),
-                    ImagePublicationSnapshot::capture(
-                        &record,
-                        handle,
-                        expected_version,
-                        &images,
-                        &states,
-                    )
-                    .expect("recorded failure retains its admitted value/state association"),
-                );
-            }
+            );
         }
     }
 
@@ -1078,7 +1130,18 @@ pub(super) fn record_image_reload_failure(
     }
     diagnostics.push(image_reload_diagnostic(request.path(), &error));
     let result = match attempt.publication.mutation(images, states) {
-        Ok(baseline) => baseline.record_failure(images, states, events, error.stable_code()),
+        Ok(baseline) => match &attempt.recovery {
+            Some(recovery) if !matches!(error, ImageReloadError::MetadataIdentityMismatch) => {
+                recovery.continuity.record_failure(
+                    baseline,
+                    images,
+                    states,
+                    events,
+                    error.stable_code(),
+                )
+            }
+            _ => baseline.record_failure(images, states, events, error.stable_code()),
+        },
         Err(_) => {
             stats.stale = stats.stale.saturating_add(1);
             return false;
