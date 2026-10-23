@@ -1,5 +1,11 @@
 # Source-built Editor panels
 
+An authoring document owns accepted content, history and persistence. An editor panel presents or
+edits that content: the Inspector, Project Browser and Scene View are panel kinds. A panel instance
+is one open occurrence with its own target and presentation state; the workspace layout arranges
+those instances across editor windows. Closing a panel does not close its document. Scene View
+presents authored content, while Game View presents a running game's output.
+
 Native panel extensions are trusted Rust code compiled into an Editor executable. Opening a
 project does not compile or load its code. Register a panel descriptor and its Dear ImGui state
 factory together through `EditorNativeComposition`:

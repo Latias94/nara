@@ -14,7 +14,8 @@ future Host integrators who need Nara's internal extension architecture vocabula
 
 **Document Role**: Explanatory guide; it introduces no decisions or implementation order.
 
-**Historical Vocabulary**: [Architecture context and earlier terminology](../../CONTEXT.md)
+**Current Navigation**: [Architecture document map](README.md). Earlier package vocabulary remains
+available in Git at `9d50cf9661514b29f3429e1ba5bd7fafaa2d1502:CONTEXT.md`.
 
 **Detailed Designs**: [Source Extension Package Interface Design](source-extension-package-interface-design.md), [Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md), [Asset Import Host Interface Design](asset-import-host-interface-design.md), [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md), [Render Extension Capability Interface Design](render-extension-capability-interface-design.md)
 
@@ -995,7 +996,7 @@ dependencies, conditional import roles, invalid locators, aggregate diagnostics,
 
 ## References
 
-- [Nara Engine Architecture Language](../../CONTEXT.md)
+- [Architecture document map](README.md)
 - [Extension Ecosystem Research](../knowledge/engineering/extension-ecosystem-engine-research.md)
 - [Godot and Unity Package/Extension Lifecycle Research](../knowledge/engineering/godot-unity-package-extension-lifecycle-research.md)
 - [Nara Package and Extension Product Contract](../plans/2026-07-20-001-feat-package-extension-product-contract-plan.md)
