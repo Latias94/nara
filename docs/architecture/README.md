@@ -94,8 +94,9 @@ probes from source-only paths, and proposes bounded owner refactors without chan
 or claiming their implementation is complete.
 Its [replacement design](post-boundary-contract-redesign.md) includes lossless owned driver calls,
 task-disposal custody/outcome, capability-owned write position, post-flush admission, Image-owned
-prepared/recovery facts, and separate Scene ergonomics/full Bevy entry naming. It remains proposed
-until the affected contracts and implementations are adopted and qualified.
+prepared/recovery facts, and separate Scene ergonomics/full Bevy entry naming. Its selected owner
+boundaries have been adopted through the affected Accepted ADRs; the
+[implementation ledger](adr/implementation-status.md) links each unit's actual qualification.
 The [pinned Bevy/Godot comparison](../research/2026-10-23-post-boundary-bevy-godot-comparison.md)
 checks these units against the local reference sources, separates stronger Nara guarantees from
 upstream mechanisms, and retains bounded recovery continuity after challenging a diagnostic-only

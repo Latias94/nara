@@ -49,6 +49,14 @@ ADRs 0002/0044. ECS/derive23, the negative old-alias doctest, both actual rename
 fixtures and workspace all-feature/all-target compilation pass. Independent review found no
 boundary blockers; ordinary preludes, original types, six derives and provenance stay intact.
 
+The [final post-boundary integration and requirement audit](../../knowledge/engineering/verification/2026-10/2026-10-23T075653Z-post-boundary-u1-to-u8-final-integration-and-requirement-audit-c11cf626f4494238bf3d1a2532e40634.md)
+closes the approved U1-U8 plan against runtime source `96461f9`: all-feature libraries2002,
+public Runtime/Host90, complete independent modules77, selected Reference Game38, two-level24 and
+FS contracts37 pass. Five Windows/DX12 native trajectories actually execute, and the current
+positive/negative rustdocs, standalone desktop compilation, scoped lint and eight workspace format
+checks pass. Existing ignored cases, warnings, performance gaps and other native platforms remain
+explicitly unclaimed. Broader partial ADR statuses are not promoted by this bounded completion.
+
 The [low-level integration](../../knowledge/engineering/verification/2026-10/2026-10-22T193724Z-u11-low-level-refactor-public-and-native-consumer-integration-ddb983fa80454657955de17ff65d1772.md) qualifies the bounded U1-U11 owner refactor: phase spatial cuts, retained asset intent,
 unique lock/task/close owners, typed codecs, facade derives, World identity operations and exact
 Gameplay success. Final owner329, root267/integration78, independent module77, Reference87/desktop6,

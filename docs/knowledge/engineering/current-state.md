@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "d77b4580abc0c173a47c8c31cafb35bbf4064ebe1d4baad2102771d2d59d0b18"
+source_fingerprint: "f90bd6b05a27aa101d7b4c9c42edb8383c079fa23a19d33b8b6a93efc8f40909"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "d77b4580abc0c173a47c8c31cafb35bbf4064ebe1d4baad2102771d2d59
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `d77b4580abc0c173a47c8c31cafb35bbf4064ebe1d4baad2102771d2d59d0b18`
-- Immutable records: 850
+- Source fingerprint: `f90bd6b05a27aa101d7b4c9c42edb8383c079fa23a19d33b8b6a93efc8f40909`
+- Immutable records: 860
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,18 +69,18 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Post-boundary U1 to U8 final integration and requirement audit](verification/2026-10/2026-10-23T075653Z-post-boundary-u1-to-u8-final-integration-and-requirement-audit-c11cf626f4494238bf3d1a2532e40634.md) - Verification Evidence for Post-boundary U1 to U8 final integration and requirement audit.
+- **Verification Evidence**: [Post-boundary U8 explicit Bevy ECS entry qualification](verification/2026-10/2026-10-23T075151Z-post-boundary-u8-explicit-bevy-ecs-entry-qualification-b54c09bf3ae54a5dbc48b382336ea785.md) - Verification Evidence for Post-boundary U8 explicit Bevy ECS entry qualification.
+- **Verification Evidence**: [Post-boundary U7 borrowed and exclusive Scene consumer qualification](verification/2026-10/2026-10-23T074124Z-post-boundary-u7-borrowed-and-exclusive-scene-consumer-qualification-24bb1ff684fa45c48abb28ebc9aded12.md) - Verification Evidence for Post-boundary U7 borrowed and exclusive Scene consumer qualification.
+- **Verification Evidence**: [Post-boundary U6 bounded Image recovery continuity qualification](verification/2026-10/2026-10-23T072629Z-post-boundary-u6-bounded-image-recovery-continuity-qualification-1f48883676614cde8d61d8a59e3cef2d.md) - Verification Evidence for Post-boundary U6 bounded Image recovery continuity qualification.
+- **Verification Evidence**: [Post-boundary U5 Image-owned prepared capture qualification](verification/2026-10/2026-10-23T070352Z-post-boundary-u5-image-owned-prepared-capture-qualification-a532b06bf3d94666bc5f1c2748052ef5.md) - Verification Evidence for Post-boundary U5 Image-owned prepared capture qualification.
+- **Work Progress**: [Post-boundary U5 owner capture and consumer migration](progress/2026-10/2026-10-23T065517Z-post-boundary-u5-owner-capture-and-consumer-migration-ed9ce78ba1e54cc0a5d6036ea12bf27f.md) - Work Progress for Post-boundary U5 owner capture and consumer migration.
+- **Session Handoff**: [Post-boundary U1 to U4 delivered U5 red regression next](sessions/2026-10/2026-10-23T061900Z-post-boundary-u1-to-u4-delivered-u5-red-regression-next-595eef43ad4a46f1a6ebcfd1b3c3c540.md) - Goal budget stopped execution after four qualified owner units; U5 through U8 remain unfinished.
+- **Verification Evidence**: [Post-boundary U1 U2 lossless outcomes and disposal-close qualification](verification/2026-10/2026-10-23T055844Z-post-boundary-u1-u2-lossless-outcomes-and-disposal-close-qualification-3f13b79a544a478b974d062c99662a12.md) - Current-source regression, Host bookkeeping, task disposal custody and exact native scope for post-boundary owner repairs.
+- **Verification Evidence**: [Post-boundary U4 post-flush persistent admission qualification](verification/2026-10/2026-10-23T055642Z-post-boundary-u4-post-flush-persistent-admission-qualification-e1266d181d7043a3b9ce33b60697d53c.md) - Post-flush target facts preserve original asset interference guards across direct batch and fresh preparation.
+- **Verification Evidence**: [Post-boundary U3 capability write cursor Windows qualification](verification/2026-10/2026-10-23T054535Z-post-boundary-u3-capability-write-cursor-windows-qualification-89d81288b77f48d79370b7a9dbf9b089.md) - Logical capability write position, exact-handle and lock controls qualified on Windows; other platforms unclaimed.
 - **Verification Evidence**: [ADR boundary and frozen codec execution verification](verification/2026-10/2026-10-23T022246Z-adr-boundary-and-frozen-codec-execution-verification-b210d1cf09c94203b04bffcfa1dbe236.md) - Serial workspace, independent consumer and focused Editor verification for the ADR boundary and frozen codec refactor.
 - **Work Progress**: [Low-level refactor committed with final export trajectory running](progress/2026-10/2026-10-22T202949Z-low-level-refactor-committed-with-final-export-trajectory-running-b22809814890485c88d31cd3107d6623.md) - U4 U5 U10 and all earlier units committed; owner consumer native and cost evidence pass; actual CLI Export and final doc/fmt remain.
-- **Work Progress**: [Low-level final owner and native qualification checkpoint](progress/2026-10/2026-10-22T200735Z-low-level-final-owner-and-native-qualification-checkpoint-cf5df2d75d3446d6bfc48744fce22d6c.md) - U5 and U10 committed; all final owner and five native trajectories pass, U4 costs and integration closure remain.
-- **Verification Evidence**: [U4 immutable spatial cuts and exact hierarchy publication](verification/2026-10/2026-10-22T194451Z-u4-immutable-spatial-cuts-and-exact-hierarchy-publication-4023754775ba445a887c9056715584e0.md) - Phase readers replace transferable globals; real foreign hierarchy order, same-tick edits and measured costs are qualified.
-- **Verification Evidence**: [U5 asset association desired recipe and runtime-owned watch rescan](verification/2026-10/2026-10-22T193928Z-u5-asset-association-desired-recipe-and-runtime-owned-watch-rescan-e081ec487db94262b392fc8b7d7ff3ef.md) - Managed store pairing precedes baseline capture; retained image intent and runtime-owned rescan are independently qualified.
-- **Verification Evidence**: [U11 low-level refactor public and native consumer integration](verification/2026-10/2026-10-22T193724Z-u11-low-level-refactor-public-and-native-consumer-integration-ddb983fa80454657955de17ff65d1772.md) - Serial qualification of the real public games, independent modules and affected Windows Editor trajectories.
-- **Verification Evidence**: [U10 exact gameplay batch success and reporter identity](verification/2026-10/2026-10-22T193136Z-u10-exact-gameplay-batch-success-and-reporter-identity-380c336814b2450abe14023d43cf6253.md) - Success-dependent Capture and Ack join exact generation/tick execution and reporter authority after deferred effects.
-- **Verification Evidence**: [U3 owned file lock capabilities on Windows and Linux](verification/2026-10/2026-10-22T192527Z-u3-owned-file-lock-capabilities-on-windows-and-linux-3ffaeab4142942bd9e4761ce4cf19af4.md) - Unique release owner and borrowed positional readers pass native FS suites plus root persistence and repair consumers.
-- **Verification Evidence**: [U6 typed codec and U8 identity consumer qualification](verification/2026-10/2026-10-22T191516Z-u6-typed-codec-and-u8-identity-consumer-qualification-0c76d56bc4b040118283f1024fe2b788.md) - Typed registry closure and installed identity operations pass owning suites and the independent durable workflow.
-- **Work Progress**: [Low-level implementation integration checkpoint](progress/2026-10/2026-10-22T190500Z-low-level-implementation-integration-checkpoint-536737a5326142e5b1376e520fb0fe30.md) - U1 U2 U7 U9 committed; owned locks identity typed codecs and spatial/gameplay implementations are being qualified serially.
-- **Verification Evidence**: [U7 facade-aware Bundle and SystemParam extraction](verification/2026-10/2026-10-22T190137Z-u7-facade-aware-bundle-and-systemparam-extraction-f14b220201744f71a90a123e476b1769.md) - Exact Bevy 0.20 extraction and executed renamed-root and renamed-ECS contracts with independent review.
-- **Verification Evidence**: [U9 key allocation admission and finite shortest-arc interpolation](verification/2026-10/2026-10-22T183934Z-u9-key-allocation-admission-and-finite-shortest-arc-interpolation-144afcea6c9846dab566ddcfe1eec9a5.md) - Original allocation and numeric regressions reproduced; shared key visitor and endpoint-oriented interpolation repaired.
 
 # Integration Notes
 

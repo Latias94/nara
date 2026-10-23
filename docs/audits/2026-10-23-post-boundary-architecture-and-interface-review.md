@@ -4,7 +4,10 @@
 
 **Source baseline:** `10ccc362f1bd6045d593227af82f0143ccedaf65`.
 
-**Disposition:** Findings and bounded redesign recommendations; no implementation changes.
+**Disposition:** Historical findings and bounded redesign recommendations at the recorded source
+baseline. Subsequent U1-U8 owner repairs and consumer qualification are recorded in the
+[implementation ledger](../architecture/adr/implementation-status.md); this audit preserves its
+original evidence rather than presenting those probes as fresh qualification.
 
 ## Scope and Evidence
 

@@ -2,8 +2,10 @@
 
 **Date:** 2026-10-23.
 
-**Status:** Proposed replacements for the open post-boundary findings. This document does not
-supersede Accepted ADRs or claim implementation/qualification.
+**Status:** Historical design adopted through the amended Accepted ADRs. This document explains
+the alternatives and owner boundaries; it does not supersede those ADRs or independently qualify
+implementation. Unit evidence and remaining platform limits belong in the
+[implementation ledger](adr/implementation-status.md).
 
 **Design baseline:** `efefb40`; the PB1-PB7 evidence baseline remains `10ccc36` in the
 [source audit](../audits/2026-10-23-post-boundary-architecture-and-interface-review.md).
@@ -25,15 +27,16 @@ The design has five rules:
 4. Have an owner construct identity together with the immutable value consumers will reuse.
 5. Make ordinary workflows complete without pretending full Bevy access is backend-independent.
 
-Names and signatures below express the proposed contract, not currently available APIs. Source
-inspection supports the design; no new Cargo command, product test or performance measurement was
-run during this design supplement. The source audit owns all earlier probe results and limits.
+Names and signatures below preserve the design sketches, not an exact current API reference.
+The owning source, rustdoc and current guides define available APIs. No Cargo command, product test
+or performance measurement was run during the original design supplement; later implementation
+evidence is linked from the ledger. The source audit retains its earlier probe results and limits.
 
 The subsequent [pinned Bevy/Godot comparison](../research/2026-10-23-post-boundary-bevy-godot-comparison.md)
 checks every unit against actual local reference sources. It supports the owner corrections without
 claiming equivalent guarantees. An independent challenge of R6's diagnostic-only alternative retains
 bounded recovery continuity as the preferred design, with explicit Loading/supersession controls.
-Those refinements are still proposed, not product test results.
+That comparison is design evidence, not a product test result.
 
 ## R1: Lossless Driver Execution Outcome (PB1)
 
