@@ -12,7 +12,7 @@ use nara::{
     ProductConfiguration, ProductRecipe, SchemaContribution,
     advanced_prelude::{CurrentScene, add_startup_scene_activation_systems},
     app::{PluginCategory, PluginDeclaration, PluginId, PluginSchemaProviderId},
-    ecs::{World, schedule::IntoScheduleConfigs, upstream::system::SystemState},
+    ecs::{World, schedule::IntoScheduleConfigs},
     gameplay::{GameplayCommandSet, add_local_gameplay_command_systems},
     identity::{EntityLookup, SceneEntityId, WorldEntityToken},
     prelude::{App, CoreStage, FixedUpdateSet, Plugin, PluginError, Resource, Transform2d, Vec2},
@@ -200,13 +200,9 @@ fn register(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryErr
 }
 
 fn initialize(world: &mut World) {
-    let content = {
-        let mut access = SystemState::<CurrentScene>::new(world);
-        match access.get(world) {
-            Ok(current) => Content::read(current.source()),
-            Err(error) => Err(error.to_string()),
-        }
-    };
+    let content = CurrentScene::get(world)
+        .ok_or_else(|| "current Scene is unavailable".to_owned())
+        .and_then(|current| Content::read(current.source()));
     match content {
         Ok(content) => {
             world.resource_mut::<Progress>().0.location.anchor = content.checkpoint.clone();
@@ -232,16 +228,10 @@ fn fail(world: &mut World, error: String) {
     session.error = Some(error);
 }
 
-fn player(world: &mut World) -> Option<nara::ecs::Entity> {
-    let id = world
-        .resource::<ActiveLevel>()
-        .content
-        .as_ref()?
-        .player
-        .clone();
-    let mut access = SystemState::<CurrentScene>::new(world);
-    let current = access.get(world).ok()?;
-    match current.receipt().resolve(world, &id) {
+fn player(world: &World) -> Option<nara::ecs::Entity> {
+    let id = &world.resource::<ActiveLevel>().content.as_ref()?.player;
+    let current = CurrentScene::get(world)?;
+    match current.receipt().resolve(world, id) {
         EntityLookup::Resolved(entity) => Some(entity),
         _ => None,
     }
@@ -317,13 +307,8 @@ fn capture(world: &mut World) {
                 .map(|value| value.translation)
         })
         .unwrap_or(Vec2::ZERO);
-    let receipt = {
-        let mut access = SystemState::<CurrentScene>::new(world);
-        access
-            .get(world)
-            .ok()
-            .map(|current| current.receipt().clone())
-    };
+    let current = CurrentScene::get(world);
+    let receipt = current.as_ref().map(|current| current.receipt());
     let progress = &world.resource::<Progress>().0;
     let level = world.resource::<ActiveLevel>();
     let session = world.resource::<Session>();

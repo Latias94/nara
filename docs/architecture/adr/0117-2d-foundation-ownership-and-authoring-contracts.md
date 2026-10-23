@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-10-15
-**Amended**: 2026-10-23 for explicit phase spatial cuts and common asset mutation admission
+**Amended**: 2026-10-23 for explicit phase spatial cuts, common asset mutation admission and
+borrowed/scoped current-Scene access
 **Owner**: game composition, managed execution, content, domain plugins, rendering, and tooling
 **Implementation Plan**: [2D foundation contracts](../../plans/2026-10-15-1636-refactor-2d-foundation-contracts-plan.md)
 
@@ -85,6 +86,14 @@ source and its matching instance receipt. Startup installs that pair; protected 
 data-only replacement advance it together. A read-only view does not expose a clonable candidate
 or grant a competing authority. Hosted content replacement additionally requires concrete resource
 residency preparation and retirement; Scene data transaction success alone is insufficient.
+
+Scheduled `CurrentScene` reads and `CurrentScene::get(&World)` borrow that same private owner.
+The exclusive view carries no independent source lease; borrowed source/receipt access cannot
+coexist with a later mutable World commit. `ProjectScenes::scope` offers the same finite request,
+inspection, cancellation, retry and acknowledgement operations to exclusive callers, using the
+same predicates as the system parameter. It neither removes resources nor implicitly flushes,
+advances, commits or acknowledges. Prepared inspection produces owned game data before an explicit
+exclusive commit; cancelling requests retain their slot until physical return and terminal ack.
 
 For one hosted current Scene, CPU residency uses one staged asset catalogue shared with component
 decoding. Before Scene retirement, prepare exact Image slot/state replacements, owned TileSet

@@ -362,8 +362,8 @@ pub mod advanced_prelude {
 
     #[cfg(feature = "runtime-core")]
     pub use crate::startup_scene::{
-        CurrentScene, STARTUP_SCENE_ACTIVATION_PLUGIN_ID, SceneSource, SceneSourceError,
-        SceneSourceView, StartupSceneActivationPlugin, StartupSceneActivationSet,
+        CurrentScene, CurrentSceneView, STARTUP_SCENE_ACTIVATION_PLUGIN_ID, SceneSource,
+        SceneSourceError, SceneSourceView, StartupSceneActivationPlugin, StartupSceneActivationSet,
         StartupSceneMaterializeError, add_startup_scene_activation_systems,
         materialize_startup_scene, replace_current_scene_with_product,
         restart_current_scene_with_product,

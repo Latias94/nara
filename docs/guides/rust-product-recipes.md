@@ -208,6 +208,11 @@ The root updates source and receipt together; a product's copied receipt is a me
 expected-state guard. `SceneSource` is move-only and `SceneSourceView` does not retain its owner.
 Project-backed restart reuses resident content; direct replacement does not load files.
 
+In an exclusive system, `CurrentScene::get(&world)` borrows that same private source/receipt pair
+without manually constructing a system parameter. The returned `CurrentSceneView` cannot outlive
+the World borrow. Construct any owned game data while inspecting it, then release the borrow before
+replacement or Restart. Its optional `source_view()` remains weak and cannot extend retired content.
+
 Hosted products request startup or a declared delivery root through the `ProjectScenes` system
 parameter. Keep the returned `ProjectSceneRequestId` and observe its state. `Ready` exposes a
 borrowed `prepared(id)` view of the expanded target document, selected path and expected current
@@ -215,6 +220,13 @@ instance. Validate game-owned checkpoint references and prepare owned runtime va
 `commit_prepared_project_scene` at an exclusive simulation boundary. The Host reuses its original
 project/schema authority, loader budget and CPU residency transaction; gameplay does not resolve a
 second RuntimePlan or construct direct sources to bypass resource ownership.
+
+Exclusive callers use `ProjectScenes::scope(world, |scenes| ...)` for that same request interface.
+For example, the scope can turn `scenes.prepared(id)` into owned checkpoint validation data; call
+`commit_prepared_project_scene` only after returning from the scope. It shares scheduled admission,
+cancellation, diagnostics and acknowledgement predicates. Opening or closing the scope does not
+flush, poll, advance, commit, acknowledge or release a cancelling request's slot. Missing resources
+retain the same typed `Unavailable` or `TaskUnavailable` outcome as the system parameter.
 
 For headless games that collect local semantic commands or prepare Scenes in the background, use
 `HeadlessRunIntent::frames(count, real_delta)` with `HeadlessRun::new`. It runs complete managed

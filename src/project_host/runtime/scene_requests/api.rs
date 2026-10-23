@@ -1,5 +1,7 @@
 //! Public finite request surface and explicit owner-thread commit.
 
+use nara_ecs::upstream::system::SystemState;
+
 use super::*;
 
 /// Exact request identity. Runtime and process-wide sequence prevent cross-World replay.
@@ -78,6 +80,8 @@ impl ProjectSceneRequestState {
 /// Read-only target content for preparing ordinary owned game data before commit.
 ///
 /// This view exposes neither a snapshot/source owner nor loading or publication authority.
+/// When obtained through [`ProjectScenes::scope`], it cannot leave the inspection scope. Build
+/// owned game data from it, return that data, then explicitly commit after the scope returns.
 pub struct PreparedProjectSceneView<'a> {
     admission: &'a Admission,
     snapshot: &'a ProjectContentSnapshot,
@@ -112,6 +116,9 @@ impl PreparedProjectSceneView<'_> {
 /// A cancelled request keeps its slot until physical return. Ready content never commits itself;
 /// inspect it, prepare game data, then call [`commit_prepared_project_scene`] at an exclusive
 /// simulation boundary. Request and result identities must match exactly.
+///
+/// Scheduled systems receive this parameter directly. Exclusive callers use [`ProjectScenes::scope`]
+/// with the same operations and request predicates.
 #[derive(SystemParam)]
 pub struct ProjectScenes<'w> {
     owner: Option<ResMut<'w, RequestOwner>>,
@@ -121,6 +128,66 @@ pub struct ProjectScenes<'w> {
 }
 
 impl ProjectScenes<'_> {
+    /// Runs a finite Scene request operation while exclusively borrowing the World.
+    ///
+    /// The callback receives the same request, inspection, cancellation, retry and acknowledgement
+    /// interface as a scheduled system. Missing resources remain optional: [`Self::request`] returns
+    /// [`ProjectSceneRequestError::Unavailable`] or [`ProjectSceneRequestError::TaskUnavailable`]
+    /// according to the existing admission checks, and observations may return `None`.
+    ///
+    /// Resources stay installed throughout the callback. Entering or leaving this scope does not
+    /// flush the World, poll preparation, commit a Scene, acknowledge a result or release a
+    /// cancelling request's slot. Request changes require explicit domain operations; commit
+    /// remains a separate exclusive call after the scope returns.
+    ///
+    /// Construct owned game data while inspecting [`Self::prepared`], then commit outside the scope:
+    ///
+    /// ```no_run
+    /// use nara::{
+    ///     advanced_prelude::commit_prepared_project_scene,
+    ///     core::ItemLimit,
+    ///     ecs::World,
+    ///     project_host::{ProjectSceneRequestId, ProjectScenes},
+    ///     scene::advanced::SceneProductTransactionLimits,
+    /// };
+    ///
+    /// fn inspect_and_commit(world: &mut World, request: ProjectSceneRequestId) {
+    ///     let roots = ProjectScenes::scope(world, |scenes| {
+    ///         scenes.prepared(request).map(|view| view.scene().roots.clone())
+    ///     });
+    ///     if let Some(roots) = roots {
+    ///         let limits = SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::ONE);
+    ///         let report = commit_prepared_project_scene(world, request, limits, &[], |_| {});
+    ///         // Publish owned game data only after accepting the commit result.
+    ///         if !report.diagnostics.has_errors() && report.instance.is_some() {
+    ///             let _ = roots;
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// A prepared view cannot escape the callback:
+    ///
+    /// ```compile_fail
+    /// use nara::{
+    ///     ecs::World,
+    ///     project_host::{PreparedProjectSceneView, ProjectSceneRequestId, ProjectScenes},
+    /// };
+    ///
+    /// fn escape(world: &mut World, request: ProjectSceneRequestId)
+    ///     -> Option<PreparedProjectSceneView<'_>>
+    /// {
+    ///     ProjectScenes::scope(world, |scenes| scenes.prepared(request))
+    /// }
+    /// ```
+    pub fn scope<R>(world: &mut World, operation: impl FnOnce(&mut ProjectScenes<'_>) -> R) -> R {
+        let mut access = SystemState::<ProjectScenes>::new(world);
+        let mut scenes = access
+            .get_mut(world)
+            .expect("ProjectScenes contains only optional, non-conflicting resources");
+        operation(&mut scenes)
+    }
+
     /// Returns the retained participant's progress while a managed travel occupies the slot.
     #[must_use]
     pub fn native_domain_phase(
@@ -169,6 +236,12 @@ impl ProjectScenes<'_> {
             .is_some_and(|owner| owner.cancel(request))
     }
 
+    /// Requests asynchronous preparation of a declared Scene through the original Host authority.
+    ///
+    /// The current source must be project-backed. Missing authority or generation returns
+    /// [`ProjectSceneRequestError::Unavailable`]; a missing I/O pool returns
+    /// [`ProjectSceneRequestError::TaskUnavailable`]. An occupied slot remains
+    /// [`ProjectSceneRequestError::Busy`] until its terminal result is explicitly acknowledged.
     pub fn request(
         &mut self,
         path: ProjectPath,
@@ -194,6 +267,9 @@ impl ProjectScenes<'_> {
             .request(path, generation, current.receipt(), pools)
     }
 
+    /// Observes exactly this request using the current generation and expected-receipt predicates.
+    ///
+    /// Observation does not advance preparation or release its slot.
     #[must_use]
     pub fn state(&self, request: ProjectSceneRequestId) -> Option<ProjectSceneRequestState> {
         let owner = self.owner.as_deref()?;
@@ -216,6 +292,9 @@ impl ProjectScenes<'_> {
         })
     }
 
+    /// Borrows ready content only while its Host, generation and expected receipt still match.
+    ///
+    /// Construct owned game data before ending this borrow and explicitly committing the request.
     #[must_use]
     pub fn prepared(&self, request: ProjectSceneRequestId) -> Option<PreparedProjectSceneView<'_>> {
         let owner = self.owner.as_deref()?;
@@ -251,6 +330,10 @@ impl ProjectScenes<'_> {
         }
     }
 
+    /// Releases exactly this terminal request's slot.
+    ///
+    /// Returns `false` for preparing, cancelling or still-valid ready content. A stale ready
+    /// request is rejected and acknowledged through the same admission checks as scheduled access.
     pub fn acknowledge(&mut self, request: ProjectSceneRequestId) -> bool {
         let generation = self.generation.as_deref().copied();
         let current = self.current.as_deref();

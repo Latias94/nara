@@ -274,8 +274,32 @@ impl fmt::Debug for SceneSourceView {
 /// cannot name or remove, owns source retention. Replacement and Restart update that same pair
 /// before their exclusive caller returns. A cloned receipt is an observation and an expected-state
 /// guard, not independently mutable current-Scene authority.
+///
+/// Scheduled systems receive this parameter directly. Exclusive callers use [`CurrentScene::get`]
+/// to borrow the same source and receipt from a shared [`World`] reference.
 pub struct CurrentScene<'w> {
     owner: Res<'w, CurrentSceneOwner>,
+}
+
+/// Borrowed read-only access to the committed Scene source and its matching instance receipt.
+///
+/// Obtain this view with [`CurrentScene::get`]. Its private owner stays in the World, and the view
+/// retains no strong source reference. References returned by its methods borrow that same owner;
+/// finish inspecting them before mutating the World or committing a replacement.
+///
+/// The World cannot be mutated while a current-Scene borrow is still in use:
+///
+/// ```compile_fail,E0502
+/// use nara::{advanced_prelude::CurrentScene, ecs::World};
+///
+/// fn mutate_while_borrowed(world: &mut World) {
+///     let current = CurrentScene::get(world).unwrap();
+///     world.spawn_empty();
+///     let _ = current.receipt();
+/// }
+/// ```
+pub struct CurrentSceneView<'w> {
+    owner: &'w CurrentSceneOwner,
 }
 
 #[derive(Resource)]
@@ -285,6 +309,17 @@ pub(crate) struct CurrentSceneOwner {
 }
 
 impl CurrentScene<'_> {
+    /// Borrows the committed Scene source and its matching receipt without constructing a system.
+    ///
+    /// Returns `None` before startup activation or when no current Scene is installed. This only
+    /// reads the private owner; it does not activate, advance, flush or commit any work.
+    #[must_use]
+    pub fn get(world: &World) -> Option<CurrentSceneView<'_>> {
+        world
+            .get_resource::<CurrentSceneOwner>()
+            .map(|owner| CurrentSceneView { owner })
+    }
+
     /// Returns the exact immutable source admitted for the active runtime.
     #[must_use]
     pub fn source(&self) -> &SceneDocument {
@@ -303,10 +338,30 @@ impl CurrentScene<'_> {
     /// retirement. Restart keeps this source and publishes a new matching instance receipt.
     #[must_use]
     pub fn source_view(&self) -> SceneSourceView {
-        SceneSourceView {
-            source: Arc::downgrade(&self.owner.source),
-            retained_bytes: self.owner.source.retained_bytes(),
-        }
+        self.owner.source_view()
+    }
+}
+
+impl CurrentSceneView<'_> {
+    /// Returns the exact immutable source admitted for the active runtime.
+    #[must_use]
+    pub fn source(&self) -> &SceneDocument {
+        self.owner.source()
+    }
+
+    /// Returns the successful receipt paired with the admitted source.
+    #[must_use]
+    pub fn receipt(&self) -> &SpawnedSceneInstance {
+        self.owner.receipt()
+    }
+
+    /// Returns a non-owning view of the exact committed source.
+    ///
+    /// This weak view may outlive the World borrow, but cannot retain an old source after
+    /// replacement or runtime retirement. Restart keeps the source with a new matching receipt.
+    #[must_use]
+    pub fn source_view(&self) -> SceneSourceView {
+        self.owner.source_view()
     }
 }
 
@@ -328,6 +383,13 @@ impl CurrentSceneOwner {
 
     pub(crate) const fn receipt(&self) -> &SpawnedSceneInstance {
         &self.receipt
+    }
+
+    fn source_view(&self) -> SceneSourceView {
+        SceneSourceView {
+            source: Arc::downgrade(&self.source),
+            retained_bytes: self.source.retained_bytes(),
+        }
     }
 }
 
@@ -643,7 +705,55 @@ mod replacement_tests;
 mod tests {
     use std::sync::OnceLock;
 
+    use nara_ecs::upstream::system::SystemState;
+
     use super::*;
+
+    #[test]
+    fn borrowed_current_scene_is_absent_without_activation() {
+        let world = World::new();
+        assert!(CurrentScene::get(&world).is_none());
+        assert!(!world.contains_resource::<CurrentSceneOwner>());
+    }
+
+    #[test]
+    fn borrowed_and_scheduled_current_scene_share_owner_without_retaining_source() {
+        let mut world = World::new();
+        let document = Arc::new(SceneDocument::from_ordered_roots([]));
+        let source = Arc::new(
+            SceneSource::direct(Arc::clone(&document), ByteLimit::new(1024).unwrap()).unwrap(),
+        );
+        let mut registry = ComponentRegistry::new();
+        registry.freeze().unwrap();
+        let report = spawn_expanded_scene(&mut world, &registry, &source.candidate, None);
+        assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+        world.insert_resource(CurrentSceneOwner {
+            source,
+            receipt: report.instance.unwrap(),
+        });
+        let mut access = SystemState::<CurrentScene>::new(&mut world);
+        let (source_view, scheduled_view) = {
+            let current = CurrentScene::get(&world).unwrap();
+            let scheduled = access.get(&world).unwrap();
+            assert!(std::ptr::eq(current.source(), document.as_ref()));
+            assert!(std::ptr::eq(current.source(), scheduled.source()));
+            assert!(std::ptr::eq(current.receipt(), scheduled.receipt()));
+            let source_view = current.source_view();
+            let scheduled_view = scheduled.source_view();
+            assert!(Weak::ptr_eq(&source_view.source, &scheduled_view.source));
+            assert_eq!(
+                source_view.with_document(|source| source as *const SceneDocument),
+                Some(current.source() as *const SceneDocument)
+            );
+            assert_eq!(Arc::strong_count(&current.owner.source), 1);
+            (source_view, scheduled_view)
+        };
+
+        drop(world);
+        assert_eq!(source_view.with_document(|_| ()), None);
+        assert_eq!(scheduled_view.with_document(|_| ()), None);
+        assert_eq!(Arc::strong_count(&document), 1);
+    }
 
     #[test]
     fn direct_source_enforces_its_exact_retained_byte_limit() {

@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use nara::{
     advanced_prelude::CurrentScene,
-    ecs::{Component, World, upstream::system::SystemState},
+    ecs::{Component, World},
     hierarchy::{
         HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyRoots,
         HierarchyWriter, Parent,
@@ -88,8 +88,7 @@ pub(in crate::gameplay) fn reconstruct(world: &mut World) -> Result<(), String> 
         .clone()
         .ok_or("active level content is unavailable")?;
     let entities = {
-        let mut access = SystemState::<CurrentScene>::new(world);
-        let current = access.get(world).map_err(|error| error.to_string())?;
+        let current = CurrentScene::get(world).ok_or("current Scene is unavailable")?;
         let mut ids = vec![content.player.clone(), content.checkpoint.clone()];
         ids.extend(content.pickups.keys().cloned());
         ids.into_iter()
@@ -129,8 +128,7 @@ pub(in crate::gameplay) fn hide_collected(world: &mut World) {
         .collect::<BTreeSet<_>>();
     let ids = content.pickups.keys().cloned().collect::<Vec<_>>();
     let entities = {
-        let mut access = SystemState::<CurrentScene>::new(world);
-        let Ok(current) = access.get(world) else {
+        let Some(current) = CurrentScene::get(world) else {
             return;
         };
         ids.into_iter()

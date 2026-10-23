@@ -1,6 +1,7 @@
 use std::{
     fs,
     path::PathBuf,
+    sync::Mutex,
     time::{Duration, Instant},
 };
 
@@ -24,6 +25,7 @@ use crate::project_host::{
     ProjectContentBudgetKind, ProjectContentBudgetSnapshot, ingest_project_manifest,
     resolve_product_recipe,
 };
+use crate::startup_scene::{CurrentScene, StartupSceneActivationPlugin, materialize_startup_scene};
 
 #[test]
 fn direct_world_without_project_owner_needs_no_tasks_or_current_scene() {
@@ -35,6 +37,128 @@ fn direct_world_without_project_owner_needs_no_tasks_or_current_scene() {
         scenes.request(ProjectPath::new("second.scene.json").unwrap()),
         Err(ProjectSceneRequestError::Unavailable)
     );
+    let result = ProjectScenes::scope(&mut world, |scenes| scenes.request(selected()));
+    assert_eq!(result, Err(ProjectSceneRequestError::Unavailable));
+    assert!(CurrentScene::get(&world).is_none());
+    assert!(!world.contains_resource::<RequestOwner>());
+    assert!(!world.contains_resource::<TaskPools>());
+}
+
+#[test]
+fn scoped_requests_keep_cancelling_slot_until_physical_return_and_explicit_acknowledgement() {
+    Fixture::new().with_world(|world| {
+        assert_eq!(
+            ProjectScenes::scope(world, |scenes| scenes.request(selected())),
+            Err(ProjectSceneRequestError::TaskUnavailable)
+        );
+        world.insert_resource(pools());
+        let (gate, control) = TestGate::new(TestPhase::AfterPreparation);
+        world.resource_mut::<RequestOwner>().gate = Some(gate);
+        let request = ProjectScenes::scope(world, |scenes| scenes.request(selected())).unwrap();
+        assert!(control.wait_until_started());
+        ProjectScenes::scope(world, |scenes| {
+            assert_eq!(
+                scenes.state(request),
+                Some(ProjectSceneRequestState::Preparing)
+            );
+            assert!(scenes.prepared(request).is_none());
+            assert!(!scenes.acknowledge(request));
+            assert!(scenes.cancel(request));
+        });
+        let mut access = SystemState::<ProjectScenes>::new(world);
+        {
+            let scenes = access.get_mut(world).unwrap();
+            assert_eq!(
+                scenes.state(request),
+                Some(ProjectSceneRequestState::Cancelling)
+            );
+        }
+        for _ in 0..3 {
+            ProjectScenes::scope(world, |scenes| {
+                assert_eq!(
+                    scenes.state(request),
+                    Some(ProjectSceneRequestState::Cancelling)
+                );
+                assert!(!scenes.cancel(request));
+                assert!(!scenes.acknowledge(request));
+                assert_eq!(
+                    scenes.request(selected()),
+                    Err(ProjectSceneRequestError::Busy)
+                );
+            });
+        }
+        control.release();
+        wait_for_request(world, request, ProjectSceneRequestState::Cancelled);
+        ProjectScenes::scope(world, |scenes| {
+            assert_eq!(
+                scenes.state(request),
+                Some(ProjectSceneRequestState::Cancelled)
+            );
+            assert_eq!(
+                scenes.request(selected()),
+                Err(ProjectSceneRequestError::Busy)
+            );
+        });
+        assert!(access.get_mut(world).unwrap().acknowledge(request));
+        assert_eq!(
+            ProjectScenes::scope(world, |scenes| scenes.state(request)),
+            None
+        );
+        assert!(world.contains_resource::<RequestOwner>());
+        assert!(CurrentScene::get(world).is_some());
+    });
+}
+
+#[test]
+fn scoped_prepared_inspection_preserves_source_receipt_pair_and_scheduled_stale_predicates() {
+    Fixture::new().with_world(|world| {
+        world.insert_resource(pools());
+        let expected = CurrentScene::get(world).unwrap().receipt().clone();
+        let source_view = CurrentScene::get(world).unwrap().source_view();
+        let request = ProjectScenes::scope(world, |scenes| scenes.request(selected())).unwrap();
+        wait_for_request(world, request, ProjectSceneRequestState::Ready);
+        let roots = ProjectScenes::scope(world, |scenes| {
+            let prepared = scenes.prepared(request).unwrap();
+            assert_eq!(prepared.selected_scene_path(), &selected());
+            assert_eq!(prepared.expected_instance(), &expected);
+            prepared.scene().roots.clone()
+        });
+        assert_eq!(roots, [SceneEntityId::new("second").unwrap()]);
+        let current = CurrentScene::get(world).unwrap();
+        assert_eq!(current.receipt(), &expected);
+        assert_eq!(
+            current.source().roots,
+            [SceneEntityId::new("startup").unwrap()]
+        );
+        assert_eq!(
+            source_view.with_document(|source| source as *const SceneDocument),
+            Some(current.source() as *const SceneDocument)
+        );
+
+        let mut access = SystemState::<ProjectScenes>::new(world);
+        {
+            let scenes = access.get_mut(world).unwrap();
+            assert_eq!(scenes.state(request), Some(ProjectSceneRequestState::Ready));
+            let prepared = scenes.prepared(request).unwrap();
+            assert_eq!(prepared.expected_instance(), &expected);
+            assert_eq!(prepared.scene().roots, roots);
+        }
+        world
+            .resource::<RequestOwner>()
+            .closing
+            .store(true, Ordering::Release);
+        let stale = Some(ProjectSceneRequestState::Rejected(
+            ProjectSceneRequestError::Stale,
+        ));
+        assert_eq!(access.get_mut(world).unwrap().state(request), stale);
+        ProjectScenes::scope(world, |scenes| {
+            assert_eq!(scenes.state(request), stale);
+            assert!(scenes.prepared(request).is_none());
+            assert!(scenes.acknowledge(request));
+            assert_eq!(scenes.state(request), None);
+        });
+        assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
+    });
 }
 
 #[test]
@@ -214,6 +338,25 @@ fn finish(
     }
 }
 
+fn wait_for_request(
+    world: &mut World,
+    request: ProjectSceneRequestId,
+    expected: ProjectSceneRequestState,
+) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        poll_project_scene_requests(world);
+        if ProjectScenes::scope(world, |scenes| scenes.state(request)) == Some(expected) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Scene request did not reach {expected:?}"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 fn assert_active_budget(context: &Context, expected: ProjectContentBudgetSnapshot) {
     let actual = context.loader.budget_snapshot();
     assert_eq!(actual.active_generations(), expected.active_generations());
@@ -228,6 +371,63 @@ struct Fixture {
 }
 
 impl Fixture {
+    fn with_world(&self, inspect: impl FnOnce(&mut World) + Send + Sync + 'static) {
+        let context = self.context();
+        let snapshot = context
+            .loader
+            .load(&context.candidate, &context.plan)
+            .unwrap();
+        let inspect = Arc::new(Mutex::new(Some(inspect)));
+        let inspection = Arc::clone(&inspect);
+        let mut app = App::new();
+        app.add_plugins((
+            nara_reflect::ComponentRegistryPlugin,
+            nara_scene::SceneComponentsPlugin,
+            StartupSceneActivationPlugin,
+        ))
+        .unwrap()
+        .add_systems(nara_app::CoreStage::Update, move |world: &mut World| {
+            if let Some(inspect) = inspection.lock().unwrap().take() {
+                inspect(world);
+                if let Some(pools) = world.get_resource::<TaskPools>() {
+                    pools.shutdown_blocking().unwrap();
+                }
+            }
+        })
+        .unwrap();
+        let mut candidate = nara_app::RuntimeAdmissionReservation::try_acquire()
+            .unwrap()
+            .admit(
+                app.seal().unwrap(),
+                nara_app::RuntimeObligationLedger::new(),
+                nara_app::RuntimeClosePolicy::default(),
+            )
+            .unwrap();
+        candidate
+            .with_admission_scope(move |scope| {
+                scope.apply_command(move |world: &mut World| {
+                    materialize_startup_scene(world, snapshot.scene_source()).unwrap();
+                    let closing = Arc::clone(&world.resource::<Closing>().0);
+                    world.insert_resource(RequestOwner {
+                        context,
+                        closing,
+                        slot: None,
+                        gate: None,
+                    });
+                });
+            })
+            .map(|outcome| assert!(outcome.post_operation_fault.is_none()))
+            .unwrap();
+        let mut runtime = candidate.complete_startup().unwrap().promote();
+        runtime.drive(Duration::ZERO).unwrap();
+        assert!(inspect.lock().unwrap().is_none());
+        let mut retirement = runtime.begin_retirement();
+        assert_eq!(
+            retirement.drive_retirement(),
+            nara_app::RuntimeCandidateRetirementState::Retired
+        );
+    }
+
     fn new() -> Self {
         static SEQUENCE: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(

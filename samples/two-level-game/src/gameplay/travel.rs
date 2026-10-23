@@ -10,7 +10,7 @@ use nara::{
         CurrentScene, commit_prepared_project_scene, restart_current_scene_with_product,
     },
     core::ItemLimit,
-    ecs::{World, upstream::system::SystemState},
+    ecs::World,
     gameplay::{GameplayCommandBatch, GameplayCommandValue},
     identity::SceneEntityId,
     prelude::Resource,
@@ -133,8 +133,7 @@ fn retry_current(world: &mut World) -> Result<(), String> {
     let key = world.resource::<ActiveLevel>().key;
     let progress = world.resource::<Progress>().0.clone();
     let (expected, content) = {
-        let mut access = SystemState::<CurrentScene>::new(world);
-        let current = access.get(world).map_err(|error| error.to_string())?;
+        let current = CurrentScene::get(world).ok_or("current Scene is unavailable")?;
         let content = Content::read(current.source())?;
         content.validate_progress(key.level(), &progress)?;
         (current.receipt().clone(), content)
@@ -216,8 +215,7 @@ pub(super) fn advance(world: &mut World) {
         .copied()
         .unwrap_or(pending.target.level());
     if pending.request.is_none() {
-        let mut access = SystemState::<ProjectScenes>::new(world);
-        let result = access.get_mut(world).unwrap().request(level.scene_path());
+        let result = ProjectScenes::scope(world, |scenes| scenes.request(level.scene_path()));
         match result {
             Ok(request) => pending.request = Some(request),
             Err(error) => {
@@ -229,22 +227,16 @@ pub(super) fn advance(world: &mut World) {
         return;
     }
     let request = pending.request.unwrap();
-    let prepared = {
-        let mut access = SystemState::<ProjectScenes>::new(world);
-        let scenes = access.get_mut(world).unwrap();
-        match scenes.state(request) {
-            Some(ProjectSceneRequestState::Ready) => scenes
-                .prepared(request)
-                .map(|view| Content::read(view.scene())),
-            Some(ProjectSceneRequestState::Preparing | ProjectSceneRequestState::Cancelling) => {
-                None
-            }
-            state => Some(Err(format!(
-                "level preparation rejected: {state:?}; {:?}",
-                scenes.diagnostics(request)
-            ))),
-        }
-    };
+    let prepared = ProjectScenes::scope(world, |scenes| match scenes.state(request) {
+        Some(ProjectSceneRequestState::Ready) => scenes
+            .prepared(request)
+            .map(|view| Content::read(view.scene())),
+        Some(ProjectSceneRequestState::Preparing | ProjectSceneRequestState::Cancelling) => None,
+        state => Some(Err(format!(
+            "level preparation rejected: {state:?}; {:?}",
+            scenes.diagnostics(request)
+        ))),
+    });
     let Some(prepared) = prepared else {
         world.resource_mut::<Travel>().pending = Some(pending);
         return;
@@ -329,14 +321,13 @@ fn reject(world: &mut World, error: String) {
     session.error = Some(error);
 }
 fn ack(world: &mut World, request: ProjectSceneRequestId) {
-    let mut access = SystemState::<ProjectScenes>::new(world);
-    access.get_mut(world).unwrap().acknowledge(request);
+    ProjectScenes::scope(world, |scenes| scenes.acknowledge(request));
 }
 fn cancel_ack(world: &mut World, request: ProjectSceneRequestId) {
-    let mut access = SystemState::<ProjectScenes>::new(world);
-    let mut scenes = access.get_mut(world).unwrap();
-    scenes.cancel(request);
-    scenes.acknowledge(request);
+    ProjectScenes::scope(world, |scenes| {
+        scenes.cancel(request);
+        scenes.acknowledge(request);
+    });
 }
 
 #[cfg(test)]

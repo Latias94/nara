@@ -36,6 +36,13 @@ Independent review's post-Spawn unavailable-invalidation counterexample is fixed
 revision advancement; foreign consumer authority, external writes, empty-slot ABA and replaced
 stores cannot restore eligibility. U7/U8, unmeasured costs and other native platforms remain separate.
 
+The [post-boundary U7 evidence](../../knowledge/engineering/verification/2026-10/2026-10-23T074124Z-post-boundary-u7-borrowed-and-exclusive-scene-consumer-qualification-24bb1ff684fa45c48abb28ebc9aded12.md)
+qualifies root-owned borrowed `CurrentScene` and scoped `ProjectScenes` access under ADR 0117.
+The root selected37, three rustdoc examples and independent two-level24 pass, including actual
+travel/Restart and fresh-process Save/restore. Scheduled/scoped predicates and cancelling-slot
+custody remain shared; no independent source lease, implicit flush or reverse Scene dependency is
+introduced. U8 and final integration retain their separate gates.
+
 The [low-level integration](../../knowledge/engineering/verification/2026-10/2026-10-22T193724Z-u11-low-level-refactor-public-and-native-consumer-integration-ddb983fa80454657955de17ff65d1772.md) qualifies the bounded U1-U11 owner refactor: phase spatial cuts, retained asset intent,
 unique lock/task/close owners, typed codecs, facade derives, World identity operations and exact
 Gameplay success. Final owner329, root267/integration78, independent module77, Reference87/desktop6,
