@@ -29,6 +29,12 @@ Names and signatures below express the proposed contract, not currently availabl
 inspection supports the design; no new Cargo command, product test or performance measurement was
 run during this design supplement. The source audit owns all earlier probe results and limits.
 
+The subsequent [pinned Bevy/Godot comparison](../research/2026-10-23-post-boundary-bevy-godot-comparison.md)
+checks every unit against actual local reference sources. It supports the owner corrections without
+claiming equivalent guarantees. An independent challenge of R6's diagnostic-only alternative retains
+bounded recovery continuity as the preferred design, with explicit Loading/supersession controls.
+Those refinements are still proposed, not product test results.
+
 ## R1: Lossless Driver Execution Outcome (PB1)
 
 **Owners:** `crates/nara_app/src/runtime/owner.rs`, `crates/nara_app/src/runtime.rs`, and concrete
@@ -219,36 +225,56 @@ do not add per-frame full-pixel hashing to compensate for a weak constructor.
 
 ## R6: Recovery Continuity Separate from Attempt Baseline (PB7)
 
-**Owners:** Image retains `RemovedImageRecovery`; Asset owns causal state transitions and routing
-rejection. The existing `ImagePublicationSnapshot` remains a one-attempt mutation admission.
+**Owners:** Asset owns source observation, request admission and causal state transitions; Image owns
+successful-removal recovery eligibility and per-attempt publication admission.
 
-Replace the use of that attempt snapshot as long-lived recovery authority. A pixel-free recovery
-record is created only after successful removal of a usable Image. It retains exact catalog/type,
-value/state store association, removal/empty-slot continuity and a causal state-continuity witness.
-It does not retain pixels or grant first-load authority.
+Keep generation supersession, Failed state, diagnostics and ReloadRejected outcomes. Separate the
+long-lived pixel-free recovery record from ImagePublicationSnapshot, which remains an exact
+one-attempt mutation baseline. A successful removal of usable Image content alone can issue the
+recovery record; it never grants first-load authority or retains deleted pixels.
 
-The witness must distinguish known resolver queue-capacity rejection from external writes. An
-opaque per-asset continuity fact owned by `AssetStates` is preferable to Image guessing from numeric
-revision deltas, messages, events, or an unchanged empty slot. Preserve it across the specific
-routing-only rejection transitions; invalidate it on replacement of the state/value store, external
-owner state writes, slot mutation and superseding removal/publication. Keep repeated rejection
-bounded: no transition log or general writer-provenance system. Reuse an existing fact only if it
-proves that distinction; current `AssetStateRevision` alone does not.
+Retain exact catalog/type, value/state store association, empty-slot/removal continuity and a private
+bounded causal witness. Asset's known capacity-rejection transition may preserve that witness while
+advancing the ordinary state revision and reporting failure. Accepted recovery and Image's own
+validated failure path explicitly carry it forward. Public/external state writes, replaced stores,
+raw slot mutation, superseding successful publication and actual revocation invalidate it.
+An allowed transition must start from the exact still-eligible owner state; it cannot bless earlier
+external interference simply because the next operation is a queue rejection.
 
-Each admitted recovery attempt still captures a fresh exact mutation baseline and checks the
-resolver's exact post-resolution state revision. Successful admission and an owner-recorded retryable
-failure explicitly continue the recovery record. A later external write is not legitimized by
-recapturing a baseline. Current metadata is re-admitted before decoding/publication, and wrong
-stable ID, path or kind still rejects. Preserve post-removal metadata-observation behavior and the
-existing `serde` capability boundary.
+The witness is an owner-defined equivalence across a finite set of transitions, not a log of writers,
+diagnostic-message parsing, numeric revision-delta inference or permission to ignore all state
+mismatches. Before choosing its representation, enumerate those transitions and qualify their
+positive/negative pairs. Reuse a current identity only if it actually proves this distinction;
+the present AssetStateRevision alone does not. Keep at most bounded per-asset facts, not a general
+provenance or queue-reservation protocol.
 
-**Delete:** long-lived recovery storage of `ImagePublicationSnapshot` and blanket retention against
-its diagnostic state revision; do not relax the shared mutation-baseline guard.
+Every admitted attempt still captures a fresh exact publication baseline and checks the resolver's
+post-resolution state revision. A post-resolution external write rejects before an attempted receipt
+continuation. Actual metadata identity/settings are re-admitted, with wrong stable ID/path/kind and
+the existing serde capability boundary preserved. Old attempts remain retired and cannot publish.
 
-**Acceptance:** successful Remove followed by one or repeated resolver-capacity rejections and
-source-only retry; real external state/slot writes, raw empty-slot ABA, wrong metadata, replacement
-stores, superseding successful import and stale tasks. Recovery eligibility survives pressure, not
-actual revocation. Existing AF2/AF4/AF5 and post-resolution external-write controls remain mandatory.
+**Why not make capacity rejection diagnostic-only?** It looks smaller for an idle Removed baseline,
+but routing advances generation before capacity checking. A recovering attempt A already in Loading
+can be superseded by a rejected Modified B. Leaving state unchanged strands Loading; writing Failed
+again invalidates the old exact receipt. Preserving A or moving supersession behind queue admission
+changes stale-result policy and expands the admission protocol. That alternative is not established
+as simpler by the Bevy/Godot sources, whose removal/queue contracts differ from Nara's.
+
+It remains a possible separately justified state-contract redesign, not the selected PB7 repair.
+The bounded continuity witness retains current observable state semantics while fixing the missing
+recovery fact. Existing desired recipes can sometimes let a later retry load successfully even when
+the receipt was lost; that masks, rather than proves repair of, continuity.
+
+**Delete:** long-lived recovery storage of ImagePublicationSnapshot and blanket retention against
+its diagnostic state revision. Do not relax the shared mutation-baseline guard or introduce a second
+general asset executor/state machine.
+
+**Acceptance:** successful Remove followed by repeated item/byte rejection and source-only retry;
+Loading recovery A followed by rejected successor B; distinguish receipt eligibility from an already
+retained recipe. Pair each eligible transition with same-version external state/slot-write rejection.
+Include raw empty-slot ABA, metadata/removal order, replaced stores, wrong metadata, public import
+supersession and stale tasks. No ownerless Loading or old pixel resurrection; preserve AF2/AF4/AF5
+and post-resolution external-write controls.
 
 ## E1/E2: Honest ECS Entry and Complete Scene Workflows
 
@@ -317,7 +343,7 @@ This order minimizes regression ambiguity; it is not a request to run concurrent
 | 3 | R3 | Preserve logical write continuation on fresh Windows/Linux owner tests |
 | 4 | R4 | Derive support insertion facts after flush; preserve original asset interference guards |
 | 5 | R5 | Migrate every Image prepared consumer and remove the writable pairing bypass |
-| 6 | R6 | Qualify removal/rejection/retry without admitting genuine external interference |
+| 6 | R6 | Qualify bounded recovery continuity, superseded Loading and genuine external-write rejection |
 | 7 | E1/E2 | Finish the real Scene caller path, then migrate the complete dependency name together |
 
 Naming is deliberately last: mechanical import churn should not obscure high-priority ownership

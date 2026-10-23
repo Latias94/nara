@@ -286,6 +286,12 @@ superseding external writes. State revision alone has no writer/reason/request p
 ignore mismatches or infer authority from an unchanged empty slot. Each actual publication attempt
 still captures and validates its exact baseline and metadata identity.
 
+The later [pinned comparison](../research/2026-10-23-post-boundary-bevy-godot-comparison.md)
+challenges diagnostic-only capacity rejection and retains the bounded owner-continuity design.
+The [replacement design](../architecture/post-boundary-contract-redesign.md#r6-recovery-continuity-separate-from-attempt-baseline-pb7)
+covers superseded Loading and separates actual recovery eligibility from retained recipes that
+could otherwise mask a lost receipt. Neither solution is established merely by upstream similarity.
+
 **Acceptance:** Successful Remove, rejected source-only restoration, restored queue capacity and
 source-only retry must recover. Preserve rejection after genuine intervening state/slot writes,
 wrong metadata identity and stale task completion; never revive deleted pixels.

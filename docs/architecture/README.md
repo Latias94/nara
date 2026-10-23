@@ -96,6 +96,10 @@ Its [replacement design](post-boundary-contract-redesign.md) includes lossless o
 task-disposal custody/outcome, capability-owned write position, post-flush admission, Image-owned
 prepared/recovery facts, and separate Scene ergonomics/full Bevy entry naming. It remains proposed
 until the affected contracts and implementations are adopted and qualified.
+The [pinned Bevy/Godot comparison](../research/2026-10-23-post-boundary-bevy-godot-comparison.md)
+checks these units against the local reference sources, separates stronger Nara guarantees from
+upstream mechanisms, and retains bounded recovery continuity after challenging a diagnostic-only
+capacity-rejection alternative against Loading supersession.
 
 The [spatial affine representation design](spatial-affine-representation-design.md) retains
 post-affine residuals, direct affine and authoring-field alternatives for a future concrete import
