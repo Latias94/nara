@@ -267,7 +267,9 @@ Delete extra physical owners and accidental hardcoded phase knowledge when super
 
 ## R5: Durable Addressing, Prefab Overlays And Projection Lifetime
 
-**Design:** D04, D05. **State:** not started. **Owners:** identity/Schema/Scene and preview Host.
+**Design:** D04, D05. **State:** qualified sub-units are recorded in the
+[implementation ledger](../architecture/adr/implementation-status.md); broader work remains open.
+**Owners:** identity/Schema/Scene and preview Host.
 
 R5a selects address semantics before R2/R3 persistent contracts freeze. R5b replaces durable
 Prefab overlay/rebase semantics before Behavior/Prefab production qualification. R5c projection/
@@ -280,8 +282,10 @@ active preview binding and executable startup selection distinct. Include exact 
 admission, independent Save/Reopen/Close, project shutdown and predecessor failure/cancellation;
 simply disabling document retirement would strand an open slot without its persistence owner.
 The [bounded custody design](../architecture/editor-document-persistence-custody-design.md)
-maps the actual singleton consumers, ordered replacement and failure/native acceptance. It is
-design evidence, not implementation or completion of the broader R5c lifetime work.
+maps the original singleton consumers, ordered replacement and failure/native acceptance. Its
+selected custody, source/preview, refresh, additive Open and Play-source contracts now have
+separately scoped implementation evidence in the ledger. Neither the design nor those bounded
+qualifications complete the broader R5c projection/history lifetime work.
 
 Separate source identity, structured projection chain, durable property and runtime incarnation.
 Select named nested member identity and keyed-item addressing; unkeyed list positions remain
