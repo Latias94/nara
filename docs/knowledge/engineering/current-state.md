@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "f90bd6b05a27aa101d7b4c9c42edb8383c079fa23a19d33b8b6a93efc8f40909"
+source_fingerprint: "a8a74fef82e8ccd370c223c9453463f5b477339fb65994bad635484d3f42709e"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "f90bd6b05a27aa101d7b4c9c42edb8383c079fa23a19d33b8b6a93efc8f
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `f90bd6b05a27aa101d7b4c9c42edb8383c079fa23a19d33b8b6a93efc8f40909`
-- Immutable records: 860
+- Source fingerprint: `a8a74fef82e8ccd370c223c9453463f5b477339fb65994bad635484d3f42709e`
+- Immutable records: 861
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Chat-informed architecture review probes and design constraints](verification/2026-10/2026-10-23T105719Z-chat-informed-architecture-review-probes-and-design-constraints-cc6bbbacdaac48eea3745bc7d36f8d9a.md) - Three public-interface probes distinguish a reproduced control defect from current Identity and Theme contract debt.
 - **Verification Evidence**: [Post-boundary U1 to U8 final integration and requirement audit](verification/2026-10/2026-10-23T075653Z-post-boundary-u1-to-u8-final-integration-and-requirement-audit-c11cf626f4494238bf3d1a2532e40634.md) - Verification Evidence for Post-boundary U1 to U8 final integration and requirement audit.
 - **Verification Evidence**: [Post-boundary U8 explicit Bevy ECS entry qualification](verification/2026-10/2026-10-23T075151Z-post-boundary-u8-explicit-bevy-ecs-entry-qualification-b54c09bf3ae54a5dbc48b382336ea785.md) - Verification Evidence for Post-boundary U8 explicit Bevy ECS entry qualification.
 - **Verification Evidence**: [Post-boundary U7 borrowed and exclusive Scene consumer qualification](verification/2026-10/2026-10-23T074124Z-post-boundary-u7-borrowed-and-exclusive-scene-consumer-qualification-24bb1ff684fa45c48abb28ebc9aded12.md) - Verification Evidence for Post-boundary U7 borrowed and exclusive Scene consumer qualification.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Post-boundary U4 post-flush persistent admission qualification](verification/2026-10/2026-10-23T055642Z-post-boundary-u4-post-flush-persistent-admission-qualification-e1266d181d7043a3b9ce33b60697d53c.md) - Post-flush target facts preserve original asset interference guards across direct batch and fresh preparation.
 - **Verification Evidence**: [Post-boundary U3 capability write cursor Windows qualification](verification/2026-10/2026-10-23T054535Z-post-boundary-u3-capability-write-cursor-windows-qualification-89d81288b77f48d79370b7a9dbf9b089.md) - Logical capability write position, exact-handle and lock controls qualified on Windows; other platforms unclaimed.
 - **Verification Evidence**: [ADR boundary and frozen codec execution verification](verification/2026-10/2026-10-23T022246Z-adr-boundary-and-frozen-codec-execution-verification-b210d1cf09c94203b04bffcfa1dbe236.md) - Serial workspace, independent consumer and focused Editor verification for the ADR boundary and frozen codec refactor.
-- **Work Progress**: [Low-level refactor committed with final export trajectory running](progress/2026-10/2026-10-22T202949Z-low-level-refactor-committed-with-final-export-trajectory-running-b22809814890485c88d31cd3107d6623.md) - U4 U5 U10 and all earlier units committed; owner consumer native and cost evidence pass; actual CLI Export and final doc/fmt remain.
 
 # Integration Notes
 

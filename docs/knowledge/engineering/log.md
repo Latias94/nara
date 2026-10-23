@@ -5,6 +5,7 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-10-23
+* **Verification Evidence**: [Chat-informed architecture review probes and design constraints](verification/2026-10/2026-10-23T105719Z-chat-informed-architecture-review-probes-and-design-constraints-cc6bbbacdaac48eea3745bc7d36f8d9a.md) - Three public-interface probes distinguish a reproduced control defect from current Identity and Theme contract debt.
 * **Verification Evidence**: [Post-boundary U1 to U8 final integration and requirement audit](verification/2026-10/2026-10-23T075653Z-post-boundary-u1-to-u8-final-integration-and-requirement-audit-c11cf626f4494238bf3d1a2532e40634.md) - Verification Evidence for Post-boundary U1 to U8 final integration and requirement audit.
 * **Verification Evidence**: [Post-boundary U8 explicit Bevy ECS entry qualification](verification/2026-10/2026-10-23T075151Z-post-boundary-u8-explicit-bevy-ecs-entry-qualification-b54c09bf3ae54a5dbc48b382336ea785.md) - Verification Evidence for Post-boundary U8 explicit Bevy ECS entry qualification.
 * **Verification Evidence**: [Post-boundary U7 borrowed and exclusive Scene consumer qualification](verification/2026-10/2026-10-23T074124Z-post-boundary-u7-borrowed-and-exclusive-scene-consumer-qualification-24bb1ff684fa45c48abb28ebc9aded12.md) - Verification Evidence for Post-boundary U7 borrowed and exclusive Scene consumer qualification.
@@ -132,4 +133,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Verification Evidence**: [Foundation U14 aggregate input lifetimes and paused restoration](verification/2026-10/2026-10-19-foundation-u14-semantic-lifetimes.md) - One staging owner prevents normalized and synthetic presses from reviving after configuration exits.
 * **Work Progress**: [Foundation correction integration and authoring acceptance](progress/2026-10/2026-10-19-foundation-correction-integration.md) - U1-U9 focused progress, U10-U15 implementation, independent findings and remaining goal gates.
 * **Verification Evidence**: [Foundation U9 shared text content geometry](verification/2026-10/2026-10-19-foundation-u9-text-content-box.md) - Padded text measures and paints one content box while outer interaction geometry remains intact.
-* **Verification Evidence**: [Foundation U6 and U7 schedule admission and managed custom execution](verification/2026-10/2026-10-19-foundation-u6-u7-managed-schedules.md) - Fallible installed-graph sealing and explicit custom schedule driving preserve Runtime authority.

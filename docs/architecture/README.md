@@ -82,6 +82,15 @@ CPU, memory, build size or frame P99.
 
 ## Background Designs
 
+The [chat-informed foundation review](../audits/2026-10-23-chat-informed-engine-architecture-review.md)
+compares the supplied engine-design conversation with the current owners and pinned Bevy/Godot
+sources at `f91466b`. Four independent review lanes and three public-interface probes distinguish
+an observable Stop-result defect, lifetime identity and theme-content contract debt, and concrete
+Application/tool observation gaps from unmeasured preparation costs. The
+[Proposed redesign plan](../plans/2026-10-23-chat-informed-foundation-redesign-plan.md) orders
+bounded owner corrections and explicit lifetime decisions. Neither document changes Accepted ADRs
+or claims a production refactor, native qualification, or a universal extension/execution kernel.
+
 The [ADR boundary and frozen-execution plan](../plans/2026-10-23-adr-boundaries-and-frozen-execution-plan.md)
 refines ADRs 0002/0044/0081 and narrows future spatial/asset representation commitments. Its
 [qualification record](../knowledge/engineering/verification/2026-10/2026-10-23T022246Z-adr-boundary-and-frozen-codec-execution-verification-b210d1cf09c94203b04bffcfa1dbe236.md)
