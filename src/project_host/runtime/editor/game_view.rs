@@ -130,10 +130,12 @@ impl Plugin for EditorGameViewBridgePlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        #[cfg(test)]
+        let apply_driver_input = completion_test_support::apply_driver_input;
+        #[cfg(not(test))]
+        let apply_driver_input = EditorGameViewBridge::apply_driver_input_in_world;
         app.insert_resource(EditorGameViewBridge::new(self.config))?
-            .__register_driver_port::<EditorGameViewBridge>(
-                EditorGameViewBridge::apply_driver_input_in_world,
-            )?
+            .__register_driver_port::<EditorGameViewBridge>(apply_driver_input)?
             .add_systems(CoreStage::Last, capture_editor_game_view_candidate)?;
         Ok(())
     }
@@ -1148,11 +1150,14 @@ fn capture_candidate(
 pub(super) fn take_candidate(
     runtime: &mut nara_app::RuntimeInstance,
 ) -> Result<Option<PendingEditorGameViewCandidate>, EditorGameViewBridgeFailure> {
+    // An issued candidate already owns presentation work. Return it before the Session observes
+    // the Runtime's sticky fault, so its exact completion can still retire that work.
     let output = runtime
         .with_driver_scope(|scope| {
             scope.__apply_port::<EditorGameViewBridge>(EditorGameViewBridgeInput::TakeCandidate)
         })
         .map_err(|_| EditorGameViewBridgeFailure::CandidateBusy)?
+        .output
         .map_err(|_| EditorGameViewBridgeFailure::CandidateBusy)?;
     match output {
         EditorGameViewBridgeOutput::Candidate(candidate) => Ok(Some(candidate)),
@@ -1171,16 +1176,25 @@ pub(super) fn set_capture_enabled(
     runtime: &mut nara_app::RuntimeInstance,
     enabled: bool,
 ) -> Result<(), EditorGameViewBridgeFailure> {
-    let output = runtime
+    let outcome = runtime
         .with_driver_scope(|scope| {
             scope.__apply_port::<EditorGameViewBridge>(
                 EditorGameViewBridgeInput::SetCaptureEnabled(enabled),
             )
         })
-        .map_err(|_| EditorGameViewBridgeFailure::RuntimeUnavailable)?
+        .map_err(|_| EditorGameViewBridgeFailure::RuntimeUnavailable)?;
+    let output = outcome
+        .output
         .map_err(|_| EditorGameViewBridgeFailure::RuntimeUnavailable)?;
     match output {
-        EditorGameViewBridgeOutput::Updated(result) => result,
+        EditorGameViewBridgeOutput::Updated(result) => {
+            result?;
+            if outcome.post_operation_fault.is_some() {
+                Err(EditorGameViewBridgeFailure::RuntimeUnavailable)
+            } else {
+                Ok(())
+            }
+        }
         EditorGameViewBridgeOutput::Candidate(_)
         | EditorGameViewBridgeOutput::Pending
         | EditorGameViewBridgeOutput::Busy
@@ -1196,16 +1210,25 @@ pub(super) fn reconfigure(
     runtime: &mut nara_app::RuntimeInstance,
     config: EditorGameViewCaptureConfig,
 ) -> Result<(), EditorGameViewBridgeFailure> {
-    let output = runtime
+    let outcome = runtime
         .with_driver_scope(|scope| {
             scope.__apply_port::<EditorGameViewBridge>(EditorGameViewBridgeInput::Reconfigure(
                 config,
             ))
         })
-        .map_err(|_| EditorGameViewBridgeFailure::RuntimeUnavailable)?
+        .map_err(|_| EditorGameViewBridgeFailure::RuntimeUnavailable)?;
+    let output = outcome
+        .output
         .map_err(|_| EditorGameViewBridgeFailure::RuntimeUnavailable)?;
     match output {
-        EditorGameViewBridgeOutput::Updated(result) => result,
+        EditorGameViewBridgeOutput::Updated(result) => {
+            result?;
+            if outcome.post_operation_fault.is_some() {
+                Err(EditorGameViewBridgeFailure::RuntimeUnavailable)
+            } else {
+                Ok(())
+            }
+        }
         EditorGameViewBridgeOutput::Candidate(_)
         | EditorGameViewBridgeOutput::Pending
         | EditorGameViewBridgeOutput::Busy
@@ -1222,7 +1245,10 @@ pub(super) fn retirement_blocked(runtime: &mut nara_app::RuntimeInstance) -> boo
         runtime.with_driver_scope(|scope| {
             scope.__apply_port::<EditorGameViewBridge>(EditorGameViewBridgeInput::RetirementBlocked)
         }),
-        Ok(Ok(EditorGameViewBridgeOutput::RetirementBlocked(true)))
+        Ok(nara_app::RuntimeScopeOutcome {
+            output: Ok(EditorGameViewBridgeOutput::RetirementBlocked(true)),
+            ..
+        })
     )
 }
 
@@ -1230,45 +1256,26 @@ pub(super) fn complete_candidate(
     runtime: &mut nara_app::RuntimeInstance,
     completion: EditorGameViewCompletion,
 ) -> Result<(), EditorGameViewCompletion> {
-    let mut owned = Some(completion);
-    let output = runtime.with_driver_scope(|scope| {
-        let input = EditorGameViewBridgeInput::Complete(
-            owned
-                .take()
-                .expect("the completion enters one typed Runtime scope"),
-        );
-        match scope.__apply_owned_port::<EditorGameViewBridge>(input) {
-            Ok(output) => Ok(output),
-            Err((_, EditorGameViewBridgeInput::Complete(completion))) => Err(completion),
-            Err((_, EditorGameViewBridgeInput::TakeCandidate)) => {
-                unreachable!("the owned completion path cannot issue a take request")
-            }
-            Err((_, EditorGameViewBridgeInput::RetirementBlocked)) => {
-                unreachable!("the owned completion path cannot issue a status request")
-            }
-            Err((_, EditorGameViewBridgeInput::SetCaptureEnabled(_))) => {
-                unreachable!("the owned completion path cannot change capture state")
-            }
-            Err((_, EditorGameViewBridgeInput::InvalidateWorldPresentation)) => {
-                unreachable!("the owned completion path cannot invalidate a presentation")
-            }
-            Err((_, EditorGameViewBridgeInput::Reconfigure(_))) => {
-                unreachable!("the owned completion path cannot reconfigure Game View")
-            }
-        }
-    });
+    let output = match runtime.__with_owned_driver_port::<EditorGameViewBridge>(
+        EditorGameViewBridgeInput::Complete(completion),
+    ) {
+        // The Runtime retains the sticky fault. The Session must reconcile the completion before
+        // observing it; an already-consumed native completion must never be retried.
+        Ok(outcome) => outcome.output.map_err(|(_, input)| input),
+        Err((_, input)) => Err(input),
+    };
     match output {
-        Ok(Ok(EditorGameViewBridgeOutput::Completed(result))) => result,
-        Ok(Err(completion)) => Err(completion),
-        Err(_) => Err(owned.expect("a rejected Runtime scope retains the completion")),
-        Ok(Ok(
+        Ok(EditorGameViewBridgeOutput::Completed(result)) => result,
+        Err(EditorGameViewBridgeInput::Complete(completion)) => Err(completion),
+        Err(_) => unreachable!("the owned completion port returns its original input on rejection"),
+        Ok(
             EditorGameViewBridgeOutput::Candidate(_)
             | EditorGameViewBridgeOutput::Pending
             | EditorGameViewBridgeOutput::Busy
             | EditorGameViewBridgeOutput::RetirementBlocked(_)
             | EditorGameViewBridgeOutput::Updated(_)
             | EditorGameViewBridgeOutput::Failed(_),
-        )) => unreachable!("the typed completion port returns a completion outcome"),
+        ) => unreachable!("the typed completion port returns a completion outcome"),
     }
 }
 
@@ -1293,6 +1300,7 @@ pub(super) fn apply_input_batch(
                 )
             })
             .map_err(|_| EditorGameViewBridgeFailure::RuntimeUnavailable)?
+            .output
             .map_err(|_| EditorGameViewBridgeFailure::RuntimeUnavailable)?;
         match output {
             EditorGameViewBridgeOutput::Updated(result) => result?,
@@ -1347,12 +1355,118 @@ pub(super) fn apply_input_batch(
         Ok(())
     });
     match result {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err((event_index, source))) => Err(EditorGameViewBridgeFailure::InputEventRejected {
-            event_index,
-            source,
-        }),
+        Ok(outcome) => {
+            outcome.output.map_err(|(event_index, source)| {
+                EditorGameViewBridgeFailure::InputEventRejected {
+                    event_index,
+                    source,
+                }
+            })?;
+            match outcome.post_operation_fault {
+                Some(fault) => Err(EditorGameViewBridgeFailure::InputScopeRejected {
+                    source: nara_app::RuntimeScopeError::Faulted { fault },
+                }),
+                None => Ok(()),
+            }
+        }
         Err(source) => Err(EditorGameViewBridgeFailure::InputScopeRejected { source }),
+    }
+}
+
+#[cfg(test)]
+mod completion_test_support {
+    use std::cell::Cell;
+
+    use super::*;
+    use crate::project_host::runtime::editor::{EditorProjectSession, EditorRuntimeOwnerState};
+
+    thread_local! {
+        static POST_COMPLETION_FAULT: Cell<Option<RuntimeGeneration>> = const { Cell::new(None) };
+    }
+
+    pub(in crate::project_host::runtime) struct CompletionFaultGuard;
+
+    impl Drop for CompletionFaultGuard {
+        fn drop(&mut self) {
+            POST_COMPLETION_FAULT.set(None);
+        }
+    }
+
+    pub(super) fn apply_driver_input(
+        world: &mut World,
+        input: EditorGameViewBridgeInput,
+    ) -> Result<
+        EditorGameViewBridgeOutput,
+        (nara_app::RuntimeWorldAccessError, EditorGameViewBridgeInput),
+    > {
+        // Inject only after the real port returns, preserving even Completed(Err(completion)).
+        let output = EditorGameViewBridge::apply_driver_input_in_world(world, input);
+        if matches!(&output, Ok(EditorGameViewBridgeOutput::Completed(_)))
+            && POST_COMPLETION_FAULT.get() == world.get_resource::<RuntimeGeneration>().copied()
+            && POST_COMPLETION_FAULT.take().is_some()
+        {
+            world.resource::<nara_app::RuntimeFaultReporter>().report(
+                nara_app::RuntimeFault::engine(
+                    nara_app::RuntimeFaultKind::RequiredService,
+                    "nara.test.game-view-post-completion",
+                ),
+            );
+        }
+        output
+    }
+
+    impl EditorProjectSession {
+        pub(in crate::project_host::runtime) fn test_game_view_runtime(
+            &mut self,
+        ) -> &mut nara_app::RuntimeInstance {
+            self.trusted_compiled_mut()
+                .unwrap()
+                .runtime_host
+                .running_runtime_mut()
+                .unwrap()
+        }
+
+        pub(in crate::project_host::runtime) fn test_fault_after_game_view_completion(
+            &mut self,
+        ) -> CompletionFaultGuard {
+            let generation = self.test_game_view_runtime().generation();
+            assert!(POST_COMPLETION_FAULT.replace(Some(generation)).is_none());
+            CompletionFaultGuard
+        }
+
+        pub(in crate::project_host::runtime) fn test_game_view_in_flight(
+            &self,
+        ) -> Option<EditorGameViewCandidateIdentity> {
+            match &self.trusted_compiled().unwrap().runtime_owner {
+                EditorRuntimeOwnerState::Active {
+                    game: Some(game), ..
+                } => game.in_flight,
+                _ => None,
+            }
+        }
+
+        pub(in crate::project_host::runtime) fn test_game_view_bridge_is_idle(&mut self) -> bool {
+            self.test_game_view_runtime()
+                .world()
+                .resource::<EditorGameViewBridge>()
+                .is_idle()
+        }
+
+        pub(in crate::project_host::runtime) fn test_complete_game_view_bridge(
+            &mut self,
+            completion: EditorGameViewCompletion,
+        ) -> Result<(), EditorGameViewCompletion> {
+            complete_candidate(self.test_game_view_runtime(), completion)
+        }
+    }
+
+    #[cfg(feature = "presentation-ui")]
+    impl EditorGameViewCompletion {
+        pub(in crate::project_host::runtime) fn test_ui_outcomes(
+            &self,
+        ) -> &[UiCompletedBackendOutcome] {
+            &self.outcomes
+        }
     }
 }
 

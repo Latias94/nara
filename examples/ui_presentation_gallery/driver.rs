@@ -95,5 +95,7 @@ pub(super) fn apply(
     runtime: &mut RuntimeInstance,
     input: GalleryDriverInput,
 ) -> Result<GalleryDriverOutput, Box<dyn Error>> {
-    runtime.with_driver_scope(|scope| scope.__apply_port::<GalleryDriverPort>(input))??
+    runtime
+        .with_driver_scope(|scope| scope.__apply_port::<GalleryDriverPort>(input))?
+        .output?
 }

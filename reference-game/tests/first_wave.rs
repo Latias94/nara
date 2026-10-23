@@ -1339,7 +1339,7 @@ fn current_receipt_excludes_foreign_same_shaped_actors_from_simulation_and_snaps
                 scope,
                 movement_command(1, 1, MovementDirection::Left).unwrap(),
             )
-        })
+        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
         .unwrap()
         .unwrap()
         .unwrap();
@@ -1460,7 +1460,7 @@ fn semantic_retry_resets_the_wave_without_a_platform_or_runtime_replacement() {
     runtime
         .with_driver_scope(|scope| {
             submit_gameplay_driver_command(scope, retry_command(fixed_tick + 1, 2).unwrap())
-        })
+        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
         .unwrap()
         .unwrap()
         .unwrap();
@@ -1756,7 +1756,7 @@ fn admit_adapter_candidate_with_edit(
                 assert!(!report.has_errors(), "{report:#?}");
                 edit(world);
             });
-        })
+        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
         .unwrap();
     candidate
 }
@@ -1776,7 +1776,7 @@ fn submit_retry_for_next_tick(runtime: &mut RuntimeInstance, sequence: u64) {
     runtime
         .with_driver_scope(|scope| {
             submit_gameplay_driver_command(scope, retry_command(fixed_tick + 1, sequence).unwrap())
-        })
+        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
         .unwrap()
         .unwrap()
         .unwrap();

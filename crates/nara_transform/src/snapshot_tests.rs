@@ -64,6 +64,10 @@ fn check_world(runtime: &mut RuntimeInstance, check: impl FnOnce(&mut World) + '
     assert!(
         runtime
             .with_driver_scope(|scope| scope.__apply_port::<TestPort>(Box::new(check)))
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .unwrap()
             .is_ok()
     );

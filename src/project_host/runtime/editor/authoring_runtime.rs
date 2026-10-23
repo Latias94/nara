@@ -181,6 +181,8 @@ pub(super) struct EditorAuthoringRuntime {
     image_publication_revision: u64,
     #[cfg(test)]
     next_image_import_gate: Option<EditorImageImportTestGate>,
+    #[cfg(test)]
+    fault_after_next_image_publication: bool,
 }
 
 impl std::fmt::Debug for EditorAuthoringRuntime {
@@ -220,6 +222,8 @@ impl EditorAuthoringRuntime {
             image_publication_revision: 0,
             #[cfg(test)]
             next_image_import_gate: None,
+            #[cfg(test)]
+            fault_after_next_image_publication: false,
         })
     }
 
@@ -256,6 +260,8 @@ impl EditorAuthoringRuntime {
             image_publication_revision: 0,
             #[cfg(test)]
             next_image_import_gate: None,
+            #[cfg(test)]
+            fault_after_next_image_publication: false,
         })
     }
 
@@ -338,6 +344,9 @@ impl EditorAuthoringRuntime {
         self.runtime
             .with_driver_scope(|scope| scope.__apply_port::<EditorImageAdmissionPort>(request))
             .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?
+            // A task may already own the source and captures. Return its owner even if the Runtime
+            // faulted after admission; the Host observes the sticky fault through its normal drive.
+            .output
             .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?
     }
 
@@ -376,15 +385,33 @@ impl EditorAuthoringRuntime {
             .image_publication_revision
             .checked_add(1)
             .ok_or(EditorImageRuntimeFailure::Publication)?;
-        let version = self
+        #[cfg(test)]
+        let inject_fault = std::mem::take(&mut self.fault_after_next_image_publication);
+        #[cfg(test)]
+        let fault_reporter = self.runtime.fault_reporter();
+        let outcome = self
             .runtime
-            .with_driver_scope(|scope| scope.__apply_port::<EditorImagePublicationPort>(imported))
-            .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?
+            .with_driver_scope(|scope| {
+                let output = scope.__apply_port::<EditorImagePublicationPort>(imported);
+                #[cfg(test)]
+                if inject_fault && matches!(&output, Ok(Ok(_))) {
+                    fault_reporter.report(nara_app::RuntimeFault::engine(
+                        nara_app::RuntimeFaultKind::RequiredService,
+                        "nara.test.editor-image-publication-post-operation",
+                    ));
+                }
+                output
+            })
+            .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?;
+        let version = outcome
+            .output
             .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)??;
         #[cfg(feature = "presentation-2d")]
         {
             self.image_publication_revision = successor;
         }
+        // Publication is already committed. Its caller must register this version as last-good
+        // before the normal authoring drive follows the Runtime's sticky fault policy.
         Ok(version)
     }
 
@@ -404,9 +431,12 @@ impl EditorAuthoringRuntime {
                 .image_publication_revision
                 .checked_add(1)
                 .ok_or(EditorImageRuntimeFailure::Publication)?;
-            self.runtime
+            let outcome = self
+                .runtime
                 .with_driver_scope(|scope| scope.__apply_port::<EditorImageRevocationPort>(handles))
-                .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?
+                .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?;
+            outcome
+                .output
                 .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)??;
             #[cfg(feature = "presentation-2d")]
             {
@@ -519,6 +549,14 @@ impl EditorAuthoringRuntime {
     #[cfg(feature = "presentation-2d")]
     pub(super) fn test_exhaust_image_publication_revision(&mut self) {
         self.image_publication_revision = u64::MAX;
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_fault_after_next_image_publication(
+        &mut self,
+    ) -> nara_app::RuntimeFaultReporter {
+        self.fault_after_next_image_publication = true;
+        self.runtime.fault_reporter()
     }
 
     #[cfg(test)]
@@ -1013,6 +1051,7 @@ mod preview_content_tests {
                 preview,
                 image_publication_revision: 0,
                 next_image_import_gate: None,
+                fault_after_next_image_publication: false,
             },
             record,
             handle,

@@ -812,6 +812,10 @@ mod tests {
             .with_driver_scope(|scope| {
                 scope.__apply_port::<ChangedWindowIds>(()).unwrap();
             })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .unwrap();
 
         runtime
@@ -822,6 +826,10 @@ mod tests {
                         window_id: WindowId::PRIMARY,
                     },
                 )
+            })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
             })
             .unwrap()
             .unwrap();
@@ -838,6 +846,10 @@ mod tests {
                         resolution: WindowResolution::new(640, 480),
                     },
                 )
+            })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
             })
             .unwrap()
             .unwrap();
@@ -857,6 +869,10 @@ mod tests {
                         resolution: WindowResolution::new(640, 480),
                     },
                 )
+            })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
             })
             .unwrap()
             .unwrap();

@@ -91,7 +91,8 @@ impl LabRuntime {
         operation: LabOperation,
     ) -> Result<Option<UiPresentationReceipt>, Box<dyn Error>> {
         self.runtime
-            .with_driver_scope(|scope| scope.__apply_port::<LabDriver>(operation))??
+            .with_driver_scope(|scope| scope.__apply_port::<LabDriver>(operation))?
+            .output?
     }
 }
 

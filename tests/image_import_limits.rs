@@ -299,6 +299,10 @@ impl ReloadTestPort {
 
 fn request_reload(app: &mut RuntimeInstance, record: &AssetRecord) {
     app.with_driver_scope(|scope| scope.__apply_port::<ReloadTestPort>(record.path().clone()))
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
 }

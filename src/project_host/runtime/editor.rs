@@ -734,6 +734,8 @@ struct TrustedCompiledEditorLane {
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     pending_step_presentation: Option<EditorStepPresentationState>,
     runtime_edit_result: Option<EditorRuntimeEditResult>,
+    #[cfg(test)]
+    fault_after_next_runtime_edit: bool,
     pending_apply_changes: Option<PendingApplyChanges>,
     apply_changes_result: Option<EditorApplyChangesResult>,
 }
@@ -1585,6 +1587,8 @@ impl EditorProjectSession {
                 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
                 pending_step_presentation: None,
                 runtime_edit_result: None,
+                #[cfg(test)]
+                fault_after_next_runtime_edit: false,
                 pending_apply_changes: None,
                 apply_changes_result: None,
             })),
@@ -2338,6 +2342,23 @@ impl EditorProjectSession {
     }
 
     #[cfg(test)]
+    pub(super) fn test_fault_after_next_image_publication(
+        &mut self,
+    ) -> nara_app::RuntimeFaultReporter {
+        self.authoring_runtime
+            .test_fault_after_next_image_publication()
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_image_import_asset(
+        &self,
+        handle: nara_asset::Handle<nara_image::ImageAsset>,
+        version: nara_asset::AssetVersion,
+    ) -> Option<&nara_image::ImageAsset> {
+        self.authoring_runtime.image_import_asset(handle, version)
+    }
+
+    #[cfg(test)]
     pub(super) fn test_hold_next_image_import_through_shutdown(
         &mut self,
     ) -> authoring_runtime::EditorImageImportTestControl {
@@ -2695,17 +2716,31 @@ impl EditorProjectSession {
         let lane = self
             .trusted_compiled_mut()
             .ok_or(EditorRuntimeEditRejection::InvalidRuntimeState)?;
+        #[cfg(test)]
+        let inject_fault = std::mem::take(&mut lane.fault_after_next_runtime_edit);
         let runtime = lane
             .runtime_host
             .running_runtime_mut()
             .ok_or(EditorRuntimeEditRejection::InvalidRuntimeState)?;
+        #[cfg(test)]
+        let fault_reporter = runtime.fault_reporter();
         let submitted = runtime
             .with_driver_scope(|scope| {
-                scope.__apply_port::<EditorRuntimeBridge>(EditorRuntimeBridgeInput::Submit(
-                    request.clone(),
-                ))
+                let output = scope.__apply_port::<EditorRuntimeBridge>(
+                    EditorRuntimeBridgeInput::Submit(request.clone()),
+                );
+                #[cfg(test)]
+                if inject_fault && matches!(&output, Ok(EditorRuntimeBridgeOutput::Submitted)) {
+                    fault_reporter.report(nara_app::RuntimeFault::engine(
+                        nara_app::RuntimeFaultKind::RequiredService,
+                        "nara.test.editor-runtime-edit-post-operation",
+                    ));
+                }
+                output
             })
             .map_err(|_| EditorRuntimeEditRejection::InvalidRuntimeState)?
+            // Register an accepted request before the normal Host drive observes the sticky fault.
+            .output
             .map_err(|_| EditorRuntimeEditRejection::InvalidRuntimeState)?;
         match submitted {
             EditorRuntimeBridgeOutput::Submitted => {
@@ -2716,6 +2751,20 @@ impl EditorProjectSession {
                 Err(EditorRuntimeEditRejection::Busy)
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_fault_after_next_runtime_edit(&mut self) -> nara_app::RuntimeFaultReporter {
+        let lane = self
+            .trusted_compiled_mut()
+            .expect("the runtime-edit fault gate requires trusted compiled Play");
+        let reporter = lane
+            .runtime_host
+            .running_runtime_mut()
+            .expect("the runtime-edit fault gate requires a running Runtime")
+            .fault_reporter();
+        lane.fault_after_next_runtime_edit = true;
+        reporter
     }
 
     #[cfg(test)]

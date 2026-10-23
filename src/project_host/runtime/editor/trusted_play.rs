@@ -720,10 +720,12 @@ impl EditorProjectSession {
         let Some(runtime) = lane.runtime_host.running_runtime_mut() else {
             return;
         };
-        let Ok(Ok(EditorRuntimeBridgeOutput::Result(Some(result)))) =
-            runtime.with_driver_scope(|scope| {
-                scope.__apply_port::<EditorRuntimeBridge>(EditorRuntimeBridgeInput::TakeResult)
-            })
+        let Ok(nara_app::RuntimeScopeOutcome {
+            output: Ok(EditorRuntimeBridgeOutput::Result(Some(result))),
+            ..
+        }) = runtime.with_driver_scope(|scope| {
+            scope.__apply_port::<EditorRuntimeBridge>(EditorRuntimeBridgeInput::TakeResult)
+        })
         else {
             return;
         };
@@ -746,7 +748,7 @@ impl EditorProjectSession {
                     scope.__apply_port::<EditorRuntimeBridge>(EditorRuntimeBridgeInput::Cancel)
                 })
                 .ok()
-                .and_then(Result::ok)
+                .and_then(|outcome| outcome.output.ok())
         });
         match result {
             Some(EditorRuntimeBridgeOutput::Result(Some(result))) => {
@@ -760,11 +762,10 @@ impl EditorProjectSession {
         let Some(lane) = self.trusted_compiled_mut() else {
             return;
         };
-        let Some(EditorRuntimeEditResult::Pending(request)) = lane.runtime_edit_result.take()
-        else {
-            return;
-        };
-        lane.runtime_edit_result = Some(EditorRuntimeEditResult::Cancelled(request));
+        lane.runtime_edit_result = lane.runtime_edit_result.take().map(|result| match result {
+            EditorRuntimeEditResult::Pending(request) => EditorRuntimeEditResult::Cancelled(request),
+            terminal => terminal,
+        });
     }
 
     fn complete_pending_apply_changes(

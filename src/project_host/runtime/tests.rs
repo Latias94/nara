@@ -10,6 +10,13 @@ mod browser_preparation;
 mod content_residency;
 mod current_scene;
 mod editor_scene_travel;
+#[cfg(all(
+    feature = "tooling",
+    feature = "presentation-2d",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
+mod game_view_outcomes;
 #[cfg(feature = "tooling")]
 mod host_custody;
 #[cfg(feature = "tooling")]

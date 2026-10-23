@@ -699,6 +699,10 @@ mod tests {
                     })
                     .unwrap()
             })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .unwrap()
             .expect_err("non-finite local state must reject the complete candidate");
 
@@ -729,6 +733,10 @@ mod tests {
                         scale: Vec2::ONE,
                     })
                     .unwrap()
+            })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
             })
             .unwrap()
             .expect("a corrected generation should republish the projection");
@@ -835,6 +843,10 @@ mod tests {
                     .__apply_port::<ProjectionEditPort>(ProjectionEdit::RemoveTransform(entity))
                     .unwrap()
             })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .unwrap()
             .unwrap();
 
@@ -854,6 +866,10 @@ mod tests {
                 scope
                     .__apply_port::<ProjectionEditPort>(ProjectionEdit::RemoveTransform(root))
                     .unwrap()
+            })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
             })
             .unwrap()
             .unwrap();
@@ -1039,6 +1055,10 @@ mod tests {
                     })
                     .unwrap()
             })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .unwrap()
             .unwrap();
         runtime.drive(Duration::ZERO).unwrap();
@@ -1146,6 +1166,10 @@ mod tests {
         runtime
             .with_driver_scope(|scope| {
                 scope.__apply_port::<PausedTransformEditPort>(Vec2::new(10.0, 20.0))
+            })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
             })
             .unwrap()
             .unwrap();

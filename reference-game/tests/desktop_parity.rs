@@ -35,7 +35,7 @@ fn physical_desktop_and_direct_headless_commands_remain_equal_through_terminal()
     desktop
         .with_driver_scope(|scope| {
             apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Character('a')))
-        })
+        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
         .unwrap()
         .unwrap();
     desktop.drive(Duration::ZERO).unwrap();
@@ -100,7 +100,7 @@ fn runtime_with_scene(
                     queue.submit(command).unwrap();
                 }
             });
-        })
+        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
         .unwrap();
     runtime.complete_startup().unwrap().promote()
 }

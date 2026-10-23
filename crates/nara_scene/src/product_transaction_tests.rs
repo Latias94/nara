@@ -563,6 +563,10 @@ fn overlay_lifecycle_rejection_preserves_completed_hierarchy_generation() {
                 .__apply_port::<OverlayLifecycleRejectionPort>((registry, document, current, child))
                 .unwrap()
         })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap();
 
     assert!(has_diagnostic(

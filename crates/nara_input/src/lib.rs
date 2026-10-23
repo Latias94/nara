@@ -1401,6 +1401,10 @@ mod tests {
                     apply_mouse_driver_input(scope, ButtonDriverInput::Press(button)).unwrap();
                 }
             })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .unwrap();
         runtime.drive(Duration::ZERO).unwrap();
 
@@ -1761,12 +1765,20 @@ mod tests {
             .with_driver_scope(|scope| {
                 apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Space))
             })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .unwrap()
             .unwrap();
         runtime.drive(Duration::ZERO).unwrap();
         runtime
             .with_driver_scope(|scope| {
                 apply_keyboard_driver_input(scope, ButtonDriverInput::Release(KeyCode::Space))
+            })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
             })
             .unwrap()
             .unwrap();
@@ -1828,12 +1840,20 @@ mod tests {
             .with_driver_scope(|scope| {
                 apply_mouse_driver_input(scope, ButtonDriverInput::Press(MouseButton::Left))
             })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .unwrap()
             .unwrap();
         runtime.drive(Duration::ZERO).unwrap();
         runtime
             .with_driver_scope(|scope| {
                 apply_mouse_driver_input(scope, ButtonDriverInput::Release(MouseButton::Left))
+            })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
             })
             .unwrap()
             .unwrap();

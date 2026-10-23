@@ -4023,6 +4023,10 @@ fn paused_ui_actions_resume_through_the_journal_exactly_once() {
             )?;
             Ok::<(), nara_input::ButtonInputDriverError>(())
         })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
     runtime.drive(Duration::ZERO).unwrap();

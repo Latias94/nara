@@ -369,6 +369,10 @@ fn paused_step_and_authoring_changes_display_current_and_reset_new_entities() {
     let stepped = rendered_center(&runtime, sprite);
     runtime
         .with_driver_scope(|scope| scope.__apply_port::<AuthoringEdit>(sprite))
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
     runtime.drive(Duration::ZERO).unwrap();

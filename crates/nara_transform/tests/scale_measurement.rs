@@ -238,6 +238,10 @@ pub(crate) fn stop_runtime(runtime: nara_app::RuntimeInstance) {
 pub(crate) fn submit_edit(runtime: &mut nara_app::RuntimeInstance, edit: Edit) {
     runtime
         .with_driver_scope(|scope| scope.__apply_port::<EditPort>(edit))
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .expect("measurement edit port should be available")
         .expect("measurement edit should be accepted");
 }
@@ -375,6 +379,10 @@ pub(crate) fn apply_leaf_reparent(
                 .with_driver_scope(|scope| {
                     scope.__apply_port::<HierarchyBatchPort>(vec![operation])
                 })
+                .map(|outcome| {
+                    assert!(outcome.post_operation_fault.is_none());
+                    outcome.output
+                })
                 .expect("independent driver scope should remain available")
                 .expect("independent hierarchy port should be available")
                 .expect("independent hierarchy operation should succeed");
@@ -382,6 +390,10 @@ pub(crate) fn apply_leaf_reparent(
     } else {
         runtime
             .with_driver_scope(|scope| scope.__apply_port::<HierarchyBatchPort>(operations))
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .expect("batch driver scope should remain available")
             .expect("batch hierarchy port should be available")
             .expect("batch hierarchy operation should succeed");

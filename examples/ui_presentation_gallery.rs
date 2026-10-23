@@ -171,7 +171,8 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
                 0,
                 13,
                 ButtonTransitionPhase::Pressed,
-            ))??
+            ))?
+            .output?
             .admitted(),
         1
     );

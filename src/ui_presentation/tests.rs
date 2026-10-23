@@ -333,6 +333,10 @@ fn explicit_winit_accessibility_publication_uses_the_exact_presented_receipt() {
         .expect("the fake backend should commit one exact presentation receipt");
     let updates = runtime
         .with_driver_scope(nara_winit::__private::take_winit_accessibility_updates)
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .expect("the managed runtime should grant its platform driver scope")
         .expect("the explicit contribution should install the platform update port");
     let mut presentations = updates.into_iter().filter_map(|update| match update {

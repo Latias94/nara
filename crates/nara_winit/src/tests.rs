@@ -101,6 +101,7 @@ struct FakeSurfaceState {
 #[derive(Debug, Default, Resource)]
 struct FakeSurfaceBackend {
     surfaces: BTreeMap<WindowId, FakeSurfaceState>,
+    retirement_calls: usize,
 }
 
 impl __RuntimeDriverPort for FakeSurfaceBackend {
@@ -119,6 +120,7 @@ impl __RuntimeDriverPort for FakeSurfaceBackend {
     }
 
     fn apply_driver_input(&mut self, window_ids: Self::Input) -> Self::Output {
+        self.retirement_calls += 1;
         let mut first_error = None;
         for window_id in window_ids {
             let Some(FakeSurfaceState { owner, lease }) = self.surfaces.remove(&window_id) else {
@@ -770,6 +772,100 @@ fn configured_window_requires_exactly_one_runtime_target() {
     let mut multiple = start_runtime(multiple_app);
     assert!(configured_primary_window(&multiple).is_err());
     stop_runtime(&mut multiple);
+}
+
+#[test]
+fn post_retirement_fault_still_waits_for_native_destruction_and_pending_runtime_close() {
+    fn retire_then_fault(
+        world: &mut nara_ecs::World,
+        input: Vec<WindowId>,
+    ) -> Result<
+        Result<(), WindowSurfaceRetirementError>,
+        (nara_app::RuntimeWorldAccessError, Vec<WindowId>),
+    > {
+        let output = world
+            .resource_mut::<FakeSurfaceBackend>()
+            .apply_driver_input(input);
+        world
+            .resource::<nara_app::RuntimeFaultReporter>()
+            .report(RuntimeFault::engine(
+                RuntimeFaultKind::RequiredService,
+                "nara.test.post-retirement-fault",
+            ));
+        Ok(output)
+    }
+
+    let mut app = App::new();
+    app.add_plugin(WindowPlugin::default()).unwrap();
+    let handles = app.world().resource::<BackendWindowHandles>().clone();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    handles
+        .insert(
+            WindowId::PRIMARY,
+            WindowHandleProvider::new(Arc::new(TestWindowSource {
+                events: events.clone(),
+            })),
+        )
+        .unwrap();
+    install_fake_surface_driver(&mut app);
+    add_fake_surface(&mut app, &handles, WindowId::PRIMARY, events.clone());
+    app.__register_driver_port::<FakeSurfaceBackend>(retire_then_fault)
+        .unwrap();
+    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let polls = Arc::new(AtomicUsize::new(0));
+    let mut runtime = start_runtime_with_counted_pending_close(
+        app,
+        released.clone(),
+        polls.clone(),
+        Duration::from_secs(2),
+    );
+    let mut state = WinitApp::new(&mut runtime).unwrap();
+    state.owned_window_ids.insert(WindowId::PRIMARY);
+
+    assert!(matches!(
+        state.begin_shutdown_transition(Instant::now()),
+        EventLoopDirective::WaitUntil(_)
+    ));
+    assert_eq!(state.runtime.state(), RuntimeState::Stopping);
+    assert_eq!(*events.lock().unwrap(), vec!["surface", "provider"]);
+    assert_eq!(
+        handles.snapshot(WindowId::PRIMARY).unwrap().phase,
+        nara_window::backend::WindowTargetPhase::ProviderReleased
+    );
+    handles.mark_native_destroyed(WindowId::PRIMARY).unwrap();
+    assert!(matches!(
+        state.poll_native_shutdown_once(Instant::now()),
+        EventLoopDirective::WaitUntil(_)
+    ));
+    assert!(matches!(
+        state.shutdown,
+        WinitShutdownState::WaitingForNative { .. }
+    ));
+    assert!(polls.load(Ordering::SeqCst) > 0);
+
+    released.store(true, Ordering::SeqCst);
+    assert_eq!(
+        state.poll_native_shutdown_once(Instant::now()),
+        EventLoopDirective::Exit
+    );
+    assert_eq!(state.shutdown, WinitShutdownState::Complete);
+    assert_eq!(state.runtime.state(), RuntimeState::Stopped);
+    assert_eq!(
+        state
+            .runtime
+            .world()
+            .resource::<FakeSurfaceBackend>()
+            .retirement_calls,
+        1
+    );
+    assert!(matches!(
+        state.take_failure(),
+        Some(AppRunError::ManagedRuntime {
+            kind: RuntimeFaultKind::RequiredService,
+            fault_source: "nara.test.post-retirement-fault",
+            ..
+        })
+    ));
 }
 
 #[test]

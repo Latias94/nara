@@ -317,7 +317,7 @@ impl<'runtime> WinitApp<'runtime> {
         Ok(app)
     }
 
-    fn with_driver_scope<R, E>(
+    fn with_driver_scope<R: Copy, E>(
         &mut self,
         operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> Result<R, E>,
     ) -> Result<R, AppRunError> {
@@ -433,8 +433,13 @@ impl<'runtime> WinitApp<'runtime> {
         if !self.accessibility_activation.is_enabled() {
             return Ok(());
         }
-        let updates =
-            self.with_driver_scope(accessibility::__private::take_winit_accessibility_updates)?;
+        let outcome = self
+            .runtime
+            .with_driver_scope(accessibility::__private::take_winit_accessibility_updates)
+            .map_err(runtime_scope_error)?;
+        let updates = outcome
+            .output
+            .map_err(|_| AppRunError::runner("runtime accessibility extraction failed"))?;
         for update in updates {
             let window_id = update.window_id();
             let session = self
@@ -451,6 +456,9 @@ impl<'runtime> WinitApp<'runtime> {
                     "failed to publish native accessibility state: {error}"
                 ))
             })?;
+        }
+        if let Some(fault) = outcome.post_operation_fault {
+            return Err(runtime_fault_error(&fault));
         }
         Ok(())
     }
@@ -525,6 +533,7 @@ impl<'runtime> WinitApp<'runtime> {
                             InputSeatId::PRIMARY,
                             InputWindowEvent::CloseRequested,
                         )
+                        .map(|_| ())
                     })?;
                 }
                 self.with_driver_scope(|scope| {
@@ -550,6 +559,7 @@ impl<'runtime> WinitApp<'runtime> {
                             InputSeatId::PRIMARY,
                             InputWindowEvent::Resized { logical_size },
                         )
+                        .map(|_| ())
                     })?;
                 }
                 self.with_driver_scope(|scope| {
@@ -574,6 +584,7 @@ impl<'runtime> WinitApp<'runtime> {
                             InputSeatId::PRIMARY,
                             InputWindowEvent::ScaleFactorChanged { scale_factor },
                         )
+                        .map(|_| ())
                     })?;
                 }
                 self.with_driver_scope(|scope| {
@@ -613,6 +624,7 @@ impl<'runtime> WinitApp<'runtime> {
                             InputPointerId::PRIMARY,
                             input,
                         )
+                        .map(|_| ())
                     })?;
                 }
             }
@@ -636,20 +648,30 @@ impl<'runtime> WinitApp<'runtime> {
                         InputPointerId::PRIMARY,
                         PointerDriverInput::Moved(position),
                     )
+                    .map(|_| ())
                 })?;
             }
             WinitWindowEvent::CursorLeft { .. } if self.input_timeline_installed() => {
-                let (_, released_mouse_buttons) = self.with_driver_scope(|scope| {
-                    apply_pointer_driver_input_at(
-                        scope,
-                        InputWindowId::new(window_id.get()),
-                        InputSeatId::PRIMARY,
-                        InputPointerId::PRIMARY,
-                        PointerDriverInput::Left,
-                    )
-                })?;
+                let outcome = self
+                    .runtime
+                    .with_driver_scope(|scope| {
+                        apply_pointer_driver_input_at(
+                            scope,
+                            InputWindowId::new(window_id.get()),
+                            InputSeatId::PRIMARY,
+                            InputPointerId::PRIMARY,
+                            PointerDriverInput::Left,
+                        )
+                    })
+                    .map_err(runtime_scope_error)?;
+                let (_, released_mouse_buttons) = outcome
+                    .output
+                    .map_err(|_| AppRunError::runner("runtime pointer release failed"))?;
                 self.input_gate
                     .suppress_mouse_buttons(released_mouse_buttons);
+                if let Some(fault) = outcome.post_operation_fault {
+                    return Err(runtime_fault_error(&fault));
+                }
             }
             _ => {}
         }
@@ -674,6 +696,7 @@ impl<'runtime> WinitApp<'runtime> {
         let input_window_id = InputWindowId::new(self.input_window_id.get());
         self.with_driver_scope(|scope| {
             apply_keyboard_driver_input_at(scope, input_window_id, InputSeatId::PRIMARY, input)
+                .map(|_| ())
         })?;
         Ok(true)
     }
@@ -696,16 +719,25 @@ impl<'runtime> WinitApp<'runtime> {
         if focused {
             self.input_gate.gain_focus();
         } else {
-            let (_, released_keys, released_mouse_buttons) = self.with_driver_scope(|scope| {
-                apply_window_input_driver_event(
-                    scope,
-                    InputWindowId::new(window_id.get()),
-                    InputSeatId::PRIMARY,
-                    InputWindowEvent::Focused(false),
-                )
-            })?;
+            let outcome = self
+                .runtime
+                .with_driver_scope(|scope| {
+                    apply_window_input_driver_event(
+                        scope,
+                        InputWindowId::new(window_id.get()),
+                        InputSeatId::PRIMARY,
+                        InputWindowEvent::Focused(false),
+                    )
+                })
+                .map_err(runtime_scope_error)?;
+            let (_, released_keys, released_mouse_buttons) = outcome
+                .output
+                .map_err(|_| AppRunError::runner("runtime focus release failed"))?;
             self.input_gate
                 .lose_focus(released_keys, released_mouse_buttons);
+            if let Some(fault) = outcome.post_operation_fault {
+                return Err(runtime_fault_error(&fault));
+            }
         }
         if focused {
             self.with_driver_scope(|scope| {
@@ -715,6 +747,7 @@ impl<'runtime> WinitApp<'runtime> {
                     InputSeatId::PRIMARY,
                     InputWindowEvent::Focused(true),
                 )
+                .map(|_| ())
             })?;
         }
         self.with_driver_scope(|scope| {
@@ -755,6 +788,7 @@ impl<'runtime> WinitApp<'runtime> {
                         InputSeatId::PRIMARY,
                         InputWindowEvent::SurfaceRetired,
                     )
+                    .map(|_| ())
                 })?;
             }
             self.with_driver_scope(|scope| {
@@ -816,14 +850,18 @@ impl<'runtime> WinitApp<'runtime> {
             }
             WinitShutdownState::WaitingForNative { .. } => {}
             WinitShutdownState::Running => {
-                if let Err(error) = retire_runtime_targets(
+                match retire_runtime_targets(
                     self.runtime,
                     &self.backend_windows,
                     &self.owned_window_ids,
                 ) {
-                    self.record_native_retirement_failure(error);
-                    self.shutdown = WinitShutdownState::Aborted;
-                    return EventLoopDirective::Exit;
+                    Ok(Some(fault)) => self.record_primary_failure(runtime_fault_error(&fault)),
+                    Ok(None) => {}
+                    Err(error) => {
+                        self.record_native_retirement_failure(error);
+                        self.shutdown = WinitShutdownState::Aborted;
+                        return EventLoopDirective::Exit;
+                    }
                 }
 
                 #[cfg(feature = "platform-accessibility")]
@@ -942,9 +980,14 @@ impl<'runtime> WinitApp<'runtime> {
             )),
         }
         match retirement_result {
-            Ok(()) => self.record_native_retirement_failure(AppRunError::runner(
-                "winit event loop ended before controlled window retirement",
-            )),
+            Ok(fault) => {
+                if let Some(fault) = fault {
+                    self.record_primary_failure(runtime_fault_error(&fault));
+                }
+                self.record_native_retirement_failure(AppRunError::runner(
+                    "winit event loop ended before controlled window retirement",
+                ));
+            }
             Err(error) => self.record_native_retirement_failure(error),
         }
     }
@@ -1091,13 +1134,14 @@ fn retire_runtime_targets(
     runtime: &mut RuntimeInstance,
     backend_windows: &BackendWindowHandles,
     owned_window_ids: &BTreeSet<WindowId>,
-) -> Result<(), AppRunError> {
+) -> Result<Option<RuntimeFault>, AppRunError> {
     let owned_window_ids = owned_window_ids.iter().copied().collect::<Vec<_>>();
     backend_windows
         .request_retirements(&owned_window_ids)
         .map_err(|_| AppRunError::runner("owned native window target is not registered"))?;
+    let mut post_operation_fault = None;
     if runtime.world().contains_resource::<InputTimeline>() {
-        runtime
+        let outcome = runtime
             .with_driver_scope(|scope| {
                 for window_id in owned_window_ids.iter().copied() {
                     apply_window_input_driver_event(
@@ -1109,22 +1153,31 @@ fn retire_runtime_targets(
                 }
                 Ok::<(), ButtonInputDriverError>(())
             })
-            .map_err(runtime_scope_error)?
+            .map_err(runtime_scope_error)?;
+        outcome
+            .output
             .map_err(|_| AppRunError::runner("input route retirement failed"))?;
+        post_operation_fault = outcome.post_operation_fault;
     }
     let retirement_driver = runtime
         .world()
         .get_resource::<WindowSurfaceRetirementDriver>()
         .copied();
     if let Some(retirement_driver) = retirement_driver {
-        runtime
+        let outcome = runtime
             .with_driver_scope(|scope| retirement_driver.retire_targets(scope, &owned_window_ids))
-            .map_err(runtime_scope_error)?
+            .map_err(runtime_scope_error)?;
+        outcome
+            .output
             .map_err(|_| AppRunError::runner("renderer failed to retire owned window surfaces"))?;
+        post_operation_fault = post_operation_fault.or(outcome.post_operation_fault);
     }
     backend_windows
         .release_retired_providers(owned_window_ids.iter().copied())
-        .map_err(|_| AppRunError::runner("renderer did not retire every surface before shutdown"))
+        .map_err(|_| {
+            AppRunError::runner("renderer did not retire every surface before shutdown")
+        })?;
+    Ok(post_operation_fault)
 }
 
 fn configured_primary_window(runtime: &RuntimeInstance) -> Result<Window, AppRunError> {
@@ -1145,14 +1198,22 @@ fn configured_primary_window(runtime: &RuntimeInstance) -> Result<Window, AppRun
     Ok(window)
 }
 
-fn with_runtime_driver_scope<R, E>(
+// This convenience is limited to copyable driver facts. Owned extraction and retirement above
+// reconcile their outputs explicitly before returning a post-operation fault.
+fn with_runtime_driver_scope<R: Copy, E>(
     runtime: &mut RuntimeInstance,
     operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> Result<R, E>,
 ) -> Result<R, AppRunError> {
-    runtime
+    let outcome = runtime
         .with_driver_scope(operation)
-        .map_err(runtime_scope_error)?
-        .map_err(|_| AppRunError::runner("runtime driver operation failed"))
+        .map_err(runtime_scope_error)?;
+    let output = outcome
+        .output
+        .map_err(|_| AppRunError::runner("runtime driver operation failed"))?;
+    if let Some(fault) = outcome.post_operation_fault {
+        return Err(runtime_fault_error(&fault));
+    }
+    Ok(output)
 }
 
 fn runtime_drive_error(error: RuntimeDriveError) -> AppRunError {

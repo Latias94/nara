@@ -299,7 +299,8 @@ fn admit_primary_button(
 fn admit_input(app: &mut LabRuntime, input: __InputDriverEvent) -> Result<(), Box<dyn Error>> {
     let output = app
         .runtime_mut()
-        .with_driver_scope(|scope| scope.__apply_port::<InputTimeline>(input))???;
+        .with_driver_scope(|scope| scope.__apply_port::<InputTimeline>(input))?
+        .output??;
     assert_eq!(output.admission.admitted(), 1);
     Ok(())
 }

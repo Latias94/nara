@@ -147,6 +147,10 @@ fn semantic_runtime() -> (RuntimeInstance, MappingChanges) {
 fn key_edge(runtime: &mut RuntimeInstance, edge: ButtonDriverInput<KeyCode>) {
     runtime
         .with_driver_scope(|scope| apply_keyboard_driver_input(scope, edge))
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
 }
@@ -665,6 +669,10 @@ fn semantic_same_binding_held_by_two_endpoints_survives_one_endpoint_focus_loss(
                 )?;
                 Ok::<(), nara_input::ButtonInputDriverError>(())
             })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .unwrap()
             .unwrap();
     }
@@ -686,6 +694,10 @@ fn semantic_same_binding_held_by_two_endpoints_survives_one_endpoint_focus_loss(
                 InputWindowEvent::Focused(false),
             )
         })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
     runtime.drive(Duration::ZERO).unwrap();
@@ -698,6 +710,10 @@ fn semantic_same_binding_held_by_two_endpoints_survives_one_endpoint_focus_loss(
                 InputSeatId::new(1),
                 InputWindowEvent::Focused(false),
             )
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
         })
         .unwrap()
         .unwrap();

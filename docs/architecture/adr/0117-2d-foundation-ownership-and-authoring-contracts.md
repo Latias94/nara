@@ -28,6 +28,12 @@ Candidate staging and publication remain private; raw App execution is removed a
 production lifecycle after consumers migrate. This refines ADRs 0003/0084 without removing retryable
 task retirement, sticky faults, or generation isolation.
 
+Driver execution preserves a normally returned output independently of a subsequent authority fault.
+The concrete Host reconciles acquired owners and committed bookkeeping before applying fault policy;
+it must not retry an already-consumed native completion. Pre-invocation rejection returns move-only
+input through the typed owned port. This refines scoped execution under ADR 0076, not transaction
+rollback or recovery from arbitrary user panics.
+
 One typed plugin declaration contributes systems, durable component IDs, migrations, and cleanup
 responsibility. Provider/binding receipts remain internal composition facts. Durable owner/type/field
 IDs, owner omission semantics, tombstones, and migration requirements remain unchanged (0046/0081/0098).

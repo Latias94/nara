@@ -66,10 +66,12 @@ impl EditorAuthoringRuntime {
             .image_publication_revision
             .checked_add(1)
             .ok_or(EditorImageRuntimeFailure::Publication)?;
-        let (changed, demands) = self
+        let outcome = self
             .runtime
             .with_driver_scope(|scope| scope.__apply_port::<EditorTileSetPort>(updates))
-            .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?
+            .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?;
+        let (changed, demands) = outcome
+            .output
             .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)??;
         #[cfg(feature = "presentation-2d")]
         if changed {
@@ -77,6 +79,7 @@ impl EditorAuthoringRuntime {
         }
         #[cfg(not(feature = "presentation-2d"))]
         let _ = changed;
+        // The caller still needs these committed demands; Runtime health is observed by its drive.
         Ok(demands)
     }
 }

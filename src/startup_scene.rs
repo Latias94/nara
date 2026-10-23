@@ -742,6 +742,10 @@ mod tests {
                     );
                 });
             })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .unwrap();
         let diagnostics = Arc::try_unwrap(materialization)
             .ok()

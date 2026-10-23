@@ -170,6 +170,10 @@ fn endpoint_projection_preserves_other_seat_keys_after_release_and_focus_loss() 
             }
             Ok::<(), nara_input::ButtonInputDriverError>(())
         })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
     runtime.drive(Duration::ZERO).unwrap();
@@ -181,6 +185,10 @@ fn endpoint_projection_preserves_other_seat_keys_after_release_and_focus_loss() 
                 first_seat,
                 ButtonDriverInput::Release(key),
             )
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
         })
         .unwrap()
         .unwrap();
@@ -198,6 +206,10 @@ fn endpoint_projection_preserves_other_seat_keys_after_release_and_focus_loss() 
                 ButtonDriverInput::Press(key),
             )
         })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
     runtime.drive(Duration::ZERO).unwrap();
@@ -209,6 +221,10 @@ fn endpoint_projection_preserves_other_seat_keys_after_release_and_focus_loss() 
                 first_seat,
                 InputWindowEvent::Focused(false),
             )
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
         })
         .unwrap()
         .unwrap();
@@ -225,6 +241,10 @@ fn endpoint_projection_preserves_other_seat_keys_after_release_and_focus_loss() 
                 second_seat,
                 ButtonDriverInput::Release(key),
             )
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
         })
         .unwrap()
         .unwrap();
@@ -314,6 +334,10 @@ fn endpoint_projection_preserves_other_pointer_buttons_after_release() {
             }
             Ok::<(), nara_input::ButtonInputDriverError>(())
         })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
     runtime.drive(Duration::ZERO).unwrap();
@@ -327,6 +351,10 @@ fn endpoint_projection_preserves_other_pointer_buttons_after_release() {
                 ButtonDriverInput::Release(button),
             )
         })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
     runtime.drive(Duration::ZERO).unwrap();
@@ -337,6 +365,10 @@ fn endpoint_projection_preserves_other_pointer_buttons_after_release() {
     runtime
         .with_driver_scope(|scope| {
             apply_window_input_driver_event(scope, window, seat, InputWindowEvent::Focused(false))
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
         })
         .unwrap()
         .unwrap();
@@ -400,12 +432,20 @@ fn endpoint_projection_keeps_direct_synthetic_and_default_driver_members_separat
         .with_driver_scope(|scope| {
             apply_keyboard_driver_input(scope, ButtonDriverInput::Press(key))
         })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
     runtime.drive(Duration::ZERO).unwrap();
     runtime
         .with_driver_scope(|scope| {
             apply_keyboard_driver_input(scope, ButtonDriverInput::Release(key))
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
         })
         .unwrap()
         .unwrap();
@@ -418,12 +458,20 @@ fn endpoint_projection_keeps_direct_synthetic_and_default_driver_members_separat
         .with_driver_scope(|scope| {
             apply_keyboard_driver_input(scope, ButtonDriverInput::Press(key))
         })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
     runtime.drive(Duration::ZERO).unwrap();
     runtime
         .with_driver_scope(|scope| {
             scope.__apply_port::<ButtonInput<KeyCode>>(ButtonDriverInput::Release(key))
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
         })
         .unwrap()
         .unwrap()
@@ -436,6 +484,10 @@ fn endpoint_projection_keeps_direct_synthetic_and_default_driver_members_separat
     runtime
         .with_driver_scope(|scope| {
             apply_keyboard_driver_input(scope, ButtonDriverInput::Release(key))
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
         })
         .unwrap()
         .unwrap();
@@ -518,6 +570,10 @@ fn exact_step_projects_admitted_key_and_focus_release_before_fixed_simulation() 
             )?;
             Ok::<(), nara_input::ButtonInputDriverError>(())
         })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
         .unwrap();
     for _ in 0..2 {
@@ -539,6 +595,10 @@ fn exact_step_projects_admitted_key_and_focus_release_before_fixed_simulation() 
                 InputSeatId::PRIMARY,
                 InputWindowEvent::Focused(false),
             )
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
         })
         .unwrap()
         .unwrap();
@@ -712,6 +772,10 @@ fn paused_ui_consumption_is_observed_once_and_skipped_by_gameplay_on_resume() {
                 ButtonDriverInput::Press(KeyCode::Enter),
             )?;
             Ok::<(), nara_input::ButtonInputDriverError>(())
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
         })
         .unwrap()
         .unwrap();

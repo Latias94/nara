@@ -620,6 +620,10 @@ mod tests {
                     nara_input::ButtonDriverInput::Press(KeyCode::Enter),
                 )
             })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .unwrap()
             .unwrap();
         runtime.drive(Duration::ZERO).unwrap();
@@ -630,6 +634,10 @@ mod tests {
                     nara_input::ButtonDriverInput::Release(KeyCode::Enter),
                 )
             })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .unwrap()
             .unwrap();
         runtime.drive(Duration::ZERO).unwrap();
@@ -639,6 +647,10 @@ mod tests {
                     scope,
                     nara_input::ButtonDriverInput::Press(KeyCode::Enter),
                 )
+            })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
             })
             .unwrap()
             .unwrap();
@@ -811,6 +823,10 @@ mod tests {
                     nara_input::ButtonDriverInput::Press(KeyCode::Escape),
                 )
             })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .unwrap()
             .unwrap();
         runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
@@ -820,6 +836,10 @@ mod tests {
                     scope,
                     nara_input::ButtonDriverInput::Release(KeyCode::Escape),
                 )
+            })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
             })
             .unwrap()
             .unwrap();

@@ -64,6 +64,10 @@ impl UiTestApp {
         match &mut self.runtime {
             Some(runtime) => runtime
                 .with_driver_scope(|scope| scope.__apply_port::<UiTestDriver>(command))
+                .map(|outcome| {
+                    assert!(outcome.post_operation_fault.is_none());
+                    outcome.output
+                })
                 .unwrap()
                 .unwrap(),
             None => command.apply(self.configuration_world()),

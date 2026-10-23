@@ -876,7 +876,18 @@ impl RuntimeCandidateScope<'_> {
     }
 }
 
-/// Failure returned by a short-lived managed runtime scope.
+/// A normally returned scope output and the fault observed after that operation.
+///
+/// Retain or reconcile `output` before acting on `post_operation_fault`: the operation has already
+/// run, even when it returned a domain error. This is neither rollback nor unwind recovery.
+#[derive(Debug)]
+#[must_use = "reconcile the returned output before applying runtime fault policy"]
+pub struct RuntimeScopeOutcome<R> {
+    pub output: R,
+    pub post_operation_fault: Option<RuntimeFault>,
+}
+
+/// Failure before a short-lived managed runtime scope invokes its operation.
 ///
 /// Healthy scopes verify the canonical fault reporter and fallback error handler around the
 /// operation. Runtime-managed fault resources are unavailable through scoped mutable access.
@@ -1254,7 +1265,7 @@ impl RuntimeCandidate {
     pub fn with_admission_scope<R>(
         &mut self,
         operation: impl FnOnce(&mut RuntimeCandidateScope<'_>) -> R,
-    ) -> Result<R, RuntimeScopeError> {
+    ) -> Result<RuntimeScopeOutcome<R>, RuntimeScopeError> {
         self.owner
             .capture_driver_scope(DriverScopeAuthorityPolicy::Full, |world| {
                 let mut scope = RuntimeCandidateScope { world };
@@ -2273,13 +2284,14 @@ impl RuntimeInstance {
     /// # Errors
     ///
     /// Returns [`RuntimeScopeError::Unavailable`] while stepping or after the runtime is stopped.
-    /// Returns [`RuntimeScopeError::Faulted`] when healthy-scope authority was replaced or the
-    /// operation reports a new canonical runtime fault.
+    /// Returns [`RuntimeScopeError::Faulted`] when entry authority cannot be established. The
+    /// operation is not invoked on either error. A normal return retains its output together with
+    /// any post-operation fault; reconcile the output before following fault policy.
     #[doc(hidden)]
     pub fn with_driver_scope<R>(
         &mut self,
         operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> R,
-    ) -> Result<R, RuntimeScopeError> {
+    ) -> Result<RuntimeScopeOutcome<R>, RuntimeScopeError> {
         let state = self.state();
         if matches!(state, RuntimeState::Stepping | RuntimeState::Stopped) {
             return Err(RuntimeScopeError::Unavailable { state });
@@ -2299,6 +2311,31 @@ impl RuntimeInstance {
                 operation(&mut scope)
             })
             .map_err(|fault| RuntimeScopeError::Faulted { fault })
+    }
+
+    /// Applies a typed port while retaining its input until scope entry succeeds.
+    ///
+    /// The outer error returns an uninvoked input. Once invoked, both a port rejection (including
+    /// its input) and a port output remain inside the returned scope outcome, even after a fault.
+    /// An unwinding operation retains the existing unwind behavior, not an input-return guarantee.
+    #[doc(hidden)]
+    #[allow(clippy::type_complexity)]
+    pub fn __with_owned_driver_port<P: __RuntimeDriverPort>(
+        &mut self,
+        input: P::Input,
+    ) -> Result<
+        RuntimeScopeOutcome<Result<P::Output, (RuntimeWorldAccessError, P::Input)>>,
+        (RuntimeScopeError, P::Input),
+    > {
+        let mut owned = Some(input);
+        match self.with_driver_scope(|scope| {
+            scope.__apply_owned_port::<P>(
+                owned.take().expect("an admitted port takes its input once"),
+            )
+        }) {
+            Ok(outcome) => Ok(outcome),
+            Err(error) => Err((error, owned.expect("an uninvoked scope retains its input"))),
+        }
     }
 
     pub fn request_control(&mut self, control: RuntimeControl) -> RuntimeControlRequestResult {
@@ -2807,6 +2844,163 @@ mod tests {
         Ok(())
     }
 
+    #[derive(Debug)]
+    struct OwnedDriverInput {
+        drops: Arc<AtomicUsize>,
+        reject: bool,
+    }
+
+    impl Drop for OwnedDriverInput {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[derive(Resource)]
+    struct OwnedInputPort;
+
+    impl __RuntimeDriverPort for OwnedInputPort {
+        type Input = Box<OwnedDriverInput>;
+        type Output = Box<OwnedDriverInput>;
+
+        fn apply_driver_input(&mut self, input: Self::Input) -> Self::Output {
+            input
+        }
+    }
+
+    fn fault_after_owned_port_input(
+        world: &mut World,
+        input: Box<OwnedDriverInput>,
+    ) -> Result<Box<OwnedDriverInput>, (RuntimeWorldAccessError, Box<OwnedDriverInput>)> {
+        world
+            .resource::<RuntimeFaultReporter>()
+            .report(RuntimeFault::engine(
+                RuntimeFaultKind::RequiredService,
+                "nara.test.owned-port",
+            ));
+        if input.reject {
+            Err((
+                RuntimeWorldAccessError::MissingResource {
+                    type_name: "fixture",
+                },
+                input,
+            ))
+        } else {
+            Ok(input)
+        }
+    }
+
+    #[test]
+    fn owned_driver_port_retains_success_and_rejection_after_a_fault() {
+        for reject in [false, true] {
+            let mut app = App::new();
+            app.insert_resource(OwnedInputPort).unwrap();
+            app.__register_driver_port::<OwnedInputPort>(fault_after_owned_port_input)
+                .unwrap();
+            let mut runtime = RuntimeInstance::start(app).unwrap();
+            let drops = Arc::new(AtomicUsize::new(0));
+            let input = Box::new(OwnedDriverInput {
+                drops: drops.clone(),
+                reject,
+            });
+            let original = std::ptr::from_ref(&*input);
+
+            let outcome = runtime
+                .__with_owned_driver_port::<OwnedInputPort>(input)
+                .unwrap();
+            let fault = outcome.post_operation_fault.unwrap();
+            let returned = match outcome.output {
+                Ok(input) => {
+                    assert!(!reject);
+                    input
+                }
+                Err((_, input)) => {
+                    assert!(reject);
+                    input
+                }
+            };
+            assert_eq!(original, std::ptr::from_ref(&*returned));
+            assert_eq!(drops.load(Ordering::SeqCst), 0);
+            assert_eq!(fault.kind(), RuntimeFaultKind::RequiredService);
+            assert_eq!(runtime.fault(), Some(&fault));
+            let _ = runtime.finish();
+            drop(returned);
+            assert_eq!(drops.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    #[test]
+    fn owned_driver_port_returns_input_before_invocation_when_entry_authority_is_missing() {
+        let mut app = App::new();
+        app.insert_resource(OwnedInputPort).unwrap();
+        app.__register_driver_port::<OwnedInputPort>(fault_after_owned_port_input)
+            .unwrap();
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        runtime
+            .owner
+            .world
+            .remove_resource::<RuntimeFaultReporter>();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let input = Box::new(OwnedDriverInput {
+            drops: drops.clone(),
+            reject: false,
+        });
+        let original = std::ptr::from_ref(&*input);
+
+        let (error, returned) = runtime
+            .__with_owned_driver_port::<OwnedInputPort>(input)
+            .unwrap_err();
+        let fault = runtime.fault().cloned();
+        let _ = runtime.finish();
+
+        assert_eq!(original, std::ptr::from_ref(&*returned));
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            error.fault().unwrap().kind(),
+            RuntimeFaultKind::FaultReporterAuthority
+        );
+        assert_eq!(
+            fault.unwrap().kind(),
+            RuntimeFaultKind::FaultReporterAuthority
+        );
+        drop(returned);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn driver_scope_retains_owned_output_when_the_operation_reports_a_fault() {
+        #[derive(Debug)]
+        struct Completion(Arc<AtomicUsize>);
+
+        impl Drop for Completion {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let mut runtime = RuntimeInstance::start(App::new()).unwrap();
+        let reporter = runtime.fault_reporter();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let result = runtime.with_driver_scope(|_| {
+            reporter.report(RuntimeFault::engine(
+                RuntimeFaultKind::RequiredService,
+                "nara.test.returned-completion",
+            ));
+            Completion(drops.clone())
+        });
+        let faulted = runtime.fault().is_some();
+        let _ = runtime.finish();
+
+        assert!(
+            result.is_ok(),
+            "a normal return must retain its owned output"
+        );
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        assert!(faulted);
+        drop(result);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
     #[test]
     fn missing_driver_resource_cannot_run_a_configured_world_operation() {
         let mut app = App::new();
@@ -2817,7 +3011,8 @@ mod tests {
 
         let result = runtime
             .with_driver_scope(|scope| scope.__apply_port::<UnconfiguredDriverPort>(called.clone()))
-            .unwrap();
+            .unwrap()
+            .output;
 
         assert_eq!(
             result,
@@ -2838,6 +3033,7 @@ mod tests {
         runtime
             .with_driver_scope(|scope| scope.__apply_port::<UnconfiguredDriverPort>(called.clone()))
             .unwrap()
+            .output
             .unwrap();
 
         assert!(!called.load(Ordering::SeqCst));
@@ -2864,6 +3060,7 @@ mod tests {
         runtime
             .with_driver_scope(|scope| scope.__apply_port::<UnconfiguredDriverPort>(called.clone()))
             .unwrap()
+            .output
             .unwrap();
 
         assert!(called.load(Ordering::SeqCst));
@@ -2894,6 +3091,7 @@ mod tests {
                 scope.__apply_owned_port::<UnconfiguredDriverPort>(input.clone())
             })
             .unwrap()
+            .output
             .unwrap_err();
 
         assert!(Arc::ptr_eq(&input, &returned));
@@ -3024,7 +3222,9 @@ mod tests {
                         }
                     })
                 })
-                .unwrap_err();
+                .unwrap()
+                .post_operation_fault
+                .unwrap();
 
             assert_eq!(failure.kind(), RuntimeFaultKind::FaultReporterAuthority);
             assert_eq!(

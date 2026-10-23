@@ -23,7 +23,7 @@ use nara::{
         RuntimeControlFailure, RuntimeControlRejection, RuntimeControlRequestResult,
         RuntimeControlStatus, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter,
         RuntimeInstance, RuntimeObligationLedger, RuntimePublicationError,
-        RuntimePublicationFailure, RuntimePublicationSlot, RuntimeScopeError, RuntimeState,
+        RuntimePublicationFailure, RuntimePublicationSlot, RuntimeState,
         RuntimeTimeSettings, RuntimeWorldAccessError, SealedApp, StartupStage, VirtualTime,
         drive_runtime_quarantine, runtime_quarantine_status,
     },
@@ -546,6 +546,10 @@ fn exact_step_runs_one_complete_gameplay_command_transaction() {
             )
             .unwrap()
             .unwrap();
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
         })
         .unwrap();
 
@@ -2197,6 +2201,10 @@ fn unpublished_candidate_scope_materializes_host_state_before_startup() {
                 world.insert_resource(CandidateAdmissionProbe(7));
             });
         })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap();
 
     let runtime = candidate.complete_startup().unwrap().promote();
@@ -2209,19 +2217,19 @@ fn unpublished_candidate_scope_rejects_replaced_fault_authority() {
     let app = configured_app(FixedTime::default());
     let mut candidate = admit_candidate(app.seal().unwrap()).unwrap();
 
-    let error = candidate
+    let outcome = candidate
         .with_admission_scope(|scope| {
             scope.apply_command(|world: &mut World| {
                 world.insert_resource(FallbackErrorHandler(ignore_bevy_error));
             });
         })
-        .unwrap_err();
+        .unwrap();
 
-    assert!(matches!(
-        error,
-        RuntimeScopeError::Faulted { ref fault }
-            if fault.kind() == RuntimeFaultKind::FaultReporterAuthority
-    ));
+    let () = outcome.output;
+    assert_eq!(
+        outcome.post_operation_fault.unwrap().kind(),
+        RuntimeFaultKind::FaultReporterAuthority
+    );
     let mut failure = candidate.complete_startup().unwrap_err();
     assert_eq!(
         failure.fault().kind(),
@@ -2270,6 +2278,10 @@ fn submit_runtime_isolation_command(
             )
             .unwrap()
             .unwrap();
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
         })
         .unwrap();
 }
@@ -2871,6 +2883,10 @@ fn faulted_runtime_keeps_typed_retirement_ports_available() {
         .with_driver_scope(|scope| {
             scope.__apply_port::<RetirementMarker>(()).unwrap();
         })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap();
 
     assert_eq!(runtime.world().resource::<RetirementMarker>().0, 1);
@@ -2882,6 +2898,10 @@ fn faulted_runtime_keeps_typed_retirement_ports_available() {
     runtime
         .with_driver_scope(|scope| {
             scope.__apply_port::<RetirementMarker>(()).unwrap();
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
         })
         .unwrap();
     assert_eq!(runtime.world().resource::<RetirementMarker>().0, 2);
@@ -2908,6 +2928,10 @@ fn runtime_authority_fault_does_not_block_typed_retirement_ports() {
     runtime
         .with_driver_scope(|scope| {
             scope.__apply_port::<RetirementMarker>(()).unwrap();
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
         })
         .unwrap();
     assert_eq!(runtime.world().resource::<RetirementMarker>().0, 1);
@@ -3199,6 +3223,10 @@ fn external_submission_rejections_do_not_fault_a_healthy_runtime() {
                 GameplayCommandRejection::Duplicate
             );
         })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap();
     runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
     runtime
@@ -3217,6 +3245,10 @@ fn external_submission_rejections_do_not_fault_a_healthy_runtime() {
             .unwrap()
             .unwrap_err();
             assert!(matches!(rejection, GameplayCommandRejection::Late { .. }));
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
         })
         .unwrap();
 
@@ -3367,6 +3399,10 @@ fn paused_input_edges_are_retained_until_the_next_resolving_frame() {
             apply_keyboard_driver_input(scope, ButtonDriverInput::Release(KeyCode::Enter)).unwrap();
             apply_mouse_driver_input(scope, ButtonDriverInput::Press(MouseButton::Left)).unwrap();
             apply_mouse_driver_input(scope, ButtonDriverInput::Release(MouseButton::Left)).unwrap();
+        })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
         })
         .unwrap();
 

@@ -31,7 +31,7 @@ use super::{
     DriverScopeAuthorityPolicy, RuntimeCandidateRetirementState, RuntimeCloseCause,
     RuntimeCloseEvidence, RuntimeClosePolicy, RuntimeFault, RuntimeFaultBridgeEpoch,
     RuntimeFaultBridgeIdentity, RuntimeFaultBridgeRevision, RuntimeFaultReporter,
-    RuntimeGeneration, RuntimeObligationLedger, RuntimeObligationLedgerError,
+    RuntimeGeneration, RuntimeObligationLedger, RuntimeObligationLedgerError, RuntimeScopeOutcome,
     initialize_runtime_fault_bridge, run_runtime_fault_bridge_maintenance,
     runtime_fault_bridge_authority_fault, validate_runtime_fault_bridge_authority,
     with_runtime_system_fault_capture,
@@ -477,7 +477,7 @@ impl RuntimeOwnerState {
         &mut self,
         authority_policy: DriverScopeAuthorityPolicy,
         operation: impl FnOnce(&mut World) -> R,
-    ) -> Result<R, RuntimeFault> {
+    ) -> Result<RuntimeScopeOutcome<R>, RuntimeFault> {
         let reporter = self.runtime_fault_reporter.clone();
         let fault_before = reporter.fault();
         if authority_policy == DriverScopeAuthorityPolicy::Full {
@@ -496,22 +496,19 @@ impl RuntimeOwnerState {
                 Err(fault) => return Err(reporter.record_canonical(fault)),
             };
 
-        if let Some(bridge_epoch) = bridge_epoch
-            && let Err(fault) = self.validate_fault_bridge_epoch(bridge_epoch)
-        {
-            return Err(reporter.record_canonical(fault));
-        }
-        if authority_policy == DriverScopeAuthorityPolicy::Full
-            && let Err(fault) = self.validate_managed_runtime_authority()
-        {
-            return Err(reporter.record_canonical(fault));
-        }
-        if fault_before.is_none() {
-            if let Some(fault) = reporter.fault() {
-                return Err(fault);
-            }
-        }
-        Ok(result)
+        let post_operation_fault = bridge_epoch
+            .and_then(|epoch| self.validate_fault_bridge_epoch(epoch).err())
+            .or_else(|| {
+                (authority_policy == DriverScopeAuthorityPolicy::Full)
+                    .then(|| self.validate_managed_runtime_authority().err())
+                    .flatten()
+            })
+            .map(|fault| reporter.record_canonical(fault))
+            .or_else(|| fault_before.is_none().then(|| reporter.fault()).flatten());
+        Ok(RuntimeScopeOutcome {
+            output: result,
+            post_operation_fault,
+        })
     }
 
     pub(super) fn close_evidence(&self) -> &RuntimeCloseEvidence {

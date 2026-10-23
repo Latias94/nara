@@ -208,6 +208,10 @@ fn edit_image_pipeline(
 ) -> Option<AssetVersion> {
     runtime
         .with_driver_scope(|scope| scope.__apply_port::<ImagePipelinePort>(edit).unwrap())
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap()
 }
 

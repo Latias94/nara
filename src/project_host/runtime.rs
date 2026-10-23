@@ -724,7 +724,11 @@ impl ProjectHost {
                 epoch,
                 CleanupOwner::Candidate(candidate.begin_retirement()),
             );
-            let diagnostics = match admission.as_ref().err().and_then(|error| error.fault()) {
+            let admission_fault = match &admission {
+                Ok(outcome) => outcome.post_operation_fault.as_ref(),
+                Err(error) => error.fault(),
+            };
+            let diagnostics = match admission_fault {
                 Some(fault) => runtime_scope_failure_report(fault),
                 None => single_error(
                     "project.run.candidate-scope-failed",
@@ -734,7 +738,13 @@ impl ProjectHost {
             return Err(HostFault::new(diagnostics));
         };
         let diagnostics = match materialization {
-            Ok(diagnostics) if admission.is_ok() => diagnostics,
+            Ok(diagnostics)
+                if admission
+                    .as_ref()
+                    .is_ok_and(|outcome| outcome.post_operation_fault.is_none()) =>
+            {
+                diagnostics
+            }
             Err(fault) => {
                 self.install_start_cleanup(
                     epoch,
@@ -747,10 +757,18 @@ impl ProjectHost {
                     epoch,
                     CleanupOwner::Candidate(candidate.begin_retirement()),
                 );
-                return Err(HostFault::new(single_error(
-                    "project.run.candidate-scope-failed",
-                    "Project runtime candidate admission failed",
-                )));
+                let diagnostics = match &admission {
+                    Ok(outcome) => outcome.post_operation_fault.as_ref(),
+                    Err(error) => error.fault(),
+                }
+                .map(runtime_scope_failure_report)
+                .unwrap_or_else(|| {
+                    single_error(
+                        "project.run.candidate-scope-failed",
+                        "Project runtime candidate admission failed",
+                    )
+                });
+                return Err(HostFault::new(diagnostics));
             }
         };
 

@@ -75,6 +75,228 @@ fn editor_tileset_project(name: &str) -> TestProject {
 }
 
 #[test]
+fn editor_runtime_edit_keeps_accepted_request_pending_after_post_operation_fault() {
+    use nara_tooling::{EditorPlayCommand, EditorPlayRequestResult, EditorPlayState};
+    use nara_tooling::{EditorRuntimeEditRequest, EditorRuntimeEditResult};
+
+    let project = TestProject::with_image("editor-runtime-edit-post-operation-fault");
+    let mut editor = super::super::editor::EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        super::super::editor::TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Play),
+        EditorPlayRequestResult::Accepted
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while editor.play_view().state() != EditorPlayState::Running {
+        assert!(Instant::now() < deadline, "the fixture Play did not start");
+        editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let frame = editor.current_frame();
+    let document = frame.workspace().active_document.unwrap();
+    let request = EditorRuntimeEditRequest {
+        generation: frame.play().generation().unwrap(),
+        document_revision: frame.play().current_revision().unwrap(),
+        entity: nara_identity::SceneEntityId::new("player").unwrap(),
+        component: ComponentTypeId::new("nara.sprite.Sprite"),
+        component_version: ComponentSchemaVersion::ONE,
+        field: ComponentFieldId::new("layer"),
+        value: ComponentValue::I64(4),
+    };
+    let reporter = editor.test_fault_after_next_runtime_edit();
+    assert!(reporter.fault().is_none());
+    let submitted = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::RuntimeEdit {
+                document,
+                request: request.clone(),
+            }],
+        ))
+        .unwrap();
+    assert!(matches!(
+        &submitted.outcomes()[0],
+        EditorActionOutcome::RuntimeEdit(Ok(()))
+    ));
+    let fault = reporter
+        .fault()
+        .expect("the accepted port must inject its fault");
+    assert_eq!(fault.kind(), RuntimeFaultKind::RequiredService);
+    assert_eq!(
+        fault.source(),
+        "nara.test.editor-runtime-edit-post-operation"
+    );
+    assert_eq!(
+        editor.runtime_edit_result(),
+        Some(&EditorRuntimeEditResult::Pending(request.clone())),
+        "the Host must register the real Submitted receipt before driving the fault"
+    );
+    assert!(!editor.acknowledge_runtime_edit_result());
+
+    let faulted = editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(faulted.play().state(), EditorPlayState::Faulted);
+    assert_eq!(
+        faulted.runtime_edit_result(),
+        Some(&EditorRuntimeEditResult::Cancelled(request.clone())),
+        "normal fault handling must retain the accepted request in its terminal result"
+    );
+    assert_eq!(
+        editor
+            .drive_editor_frame(Duration::ZERO)
+            .runtime_edit_result(),
+        Some(&EditorRuntimeEditResult::Cancelled(request))
+    );
+    assert!(editor.acknowledge_runtime_edit_result());
+    assert!(editor.runtime_edit_result().is_none());
+
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Stop),
+        EditorPlayRequestResult::Accepted
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while editor.play_view().state() != EditorPlayState::Empty {
+        assert!(Instant::now() < deadline, "the faulted Play did not stop");
+        editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(matches!(
+        drive_editor_close_to_completion(&mut editor),
+        super::super::editor::EditorProjectCloseProgress::Complete(_)
+    ));
+}
+
+#[test]
+fn generic_editor_image_transaction_records_v2_last_good_after_post_operation_fault() {
+    let project = editor_tileset_project("image-transaction-post-operation-fault");
+    let path = AssetPath::new("textures/a.png").unwrap();
+    project.write_canonical_image(
+        path.as_str(),
+        "c58dfd3b-6f62-41c9-9d48-357159936609",
+        ImageImportSettings::default(),
+        include_bytes!("../../../../tests/fixtures/images/valid-rgba-1x1.png"),
+    );
+    write_editor_tileset(&project, AssetRef::path(path.as_str()).unwrap());
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    drive_image_import_host_until_idle(&mut editor);
+    let previous = editor.editor_image_last_good(&path).unwrap().clone();
+    assert_eq!(previous.version().raw(), 1);
+
+    let linear = ImageImportSettings::new(ImageColorSpace::Linear);
+    let reporter = editor.test_fault_after_next_image_publication();
+    assert!(reporter.fault().is_none());
+    assert!(matches!(
+        editor.request_editor_image_import(
+            editor.current_frame().revision(),
+            "assets/textures/a.png",
+            linear,
+        ),
+        super::super::editor::EditorImageImportRequestResult::Started(_)
+    ));
+    let terminal = drive_image_import_to_terminal(&mut editor);
+    assert!(
+        matches!(
+            terminal,
+            super::super::editor::EditorImageImportState::Succeeded { version, .. }
+                if version.raw() == 2
+        ),
+        "{terminal:?}"
+    );
+    drive_image_import_host_until_idle(&mut editor);
+    assert_image_v2_last_good_after_post_operation_fault(&editor, &path, &previous, &reporter);
+    assert!(matches!(
+        drive_editor_close_to_completion(&mut editor),
+        super::super::editor::EditorProjectCloseProgress::Complete(_)
+    ));
+}
+
+#[test]
+fn generic_editor_image_hydration_records_v2_last_good_after_post_operation_fault() {
+    let project = editor_tileset_project("image-hydration-post-operation-fault");
+    let path = AssetPath::new("textures/a.png").unwrap();
+    project.write_canonical_image(
+        path.as_str(),
+        "c58dfd3b-6f62-41c9-9d48-357159936609",
+        ImageImportSettings::default(),
+        include_bytes!("../../../../tests/fixtures/images/valid-rgba-1x1.png"),
+    );
+    write_editor_tileset(&project, AssetRef::path(path.as_str()).unwrap());
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    drive_image_import_host_until_idle(&mut editor);
+    let previous = editor.editor_image_last_good(&path).unwrap().clone();
+    assert_eq!(previous.version().raw(), 1);
+
+    // Preserve the source identity: the refreshed TileSet demand must hydrate a new recipe.
+    let metadata = AssetMeta::new(
+        AssetMetaIdentity::new(previous.stable_id(), path.clone(), AssetSourceKind::Image),
+        ImageImportSettings::new(ImageColorSpace::Linear),
+    );
+    fs::write(
+        project.root.join("assets/textures/a.png.meta"),
+        metadata.to_json_string().unwrap(),
+    )
+    .unwrap();
+    let reporter = editor.test_fault_after_next_image_publication();
+    assert!(reporter.fault().is_none());
+    assert!(editor.request_project_source_index_refresh());
+    drive_image_import_host_until_idle(&mut editor);
+    assert!(
+        matches!(
+            editor.editor_image_import_state(),
+            super::super::editor::EditorImageImportState::Idle
+        ),
+        "hydration must not be replaced by an explicit import transaction"
+    );
+    assert_image_v2_last_good_after_post_operation_fault(&editor, &path, &previous, &reporter);
+    assert!(matches!(
+        drive_editor_close_to_completion(&mut editor),
+        super::super::editor::EditorProjectCloseProgress::Complete(_)
+    ));
+}
+
+fn assert_image_v2_last_good_after_post_operation_fault(
+    editor: &super::super::editor::EditorProjectSession,
+    path: &AssetPath,
+    previous: &super::super::editor::EditorImageLastGood,
+    reporter: &RuntimeFaultReporter,
+) {
+    let fault = reporter
+        .fault()
+        .expect("the real Image publication must inject its fault");
+    assert_eq!(fault.kind(), RuntimeFaultKind::RequiredService);
+    assert_eq!(
+        fault.source(),
+        "nara.test.editor-image-publication-post-operation"
+    );
+    let current = editor
+        .editor_image_last_good(path)
+        .expect("a committed v2 must remain registered as Host last-good after the fault");
+    assert_eq!(current.version().raw(), 2);
+    assert_eq!(current.stable_id(), previous.stable_id());
+    assert_eq!(current.handle(), previous.handle());
+    assert_eq!(current.source_identity(), previous.source_identity());
+    assert_eq!(current.source_digest(), previous.source_digest());
+    let linear = ImageImportSettings::new(ImageColorSpace::Linear);
+    assert_ne!(previous.settings_hash(), linear.settings_hash());
+    assert_eq!(current.settings_hash(), linear.settings_hash());
+    let published = editor
+        .test_image_import_asset(current.handle(), current.version())
+        .expect("last-good v2 must match the actual usable Image publication");
+    assert_eq!(published.source().path(), path);
+    assert_eq!(published.source().stable_id(), current.stable_id());
+    assert_eq!(published.source().settings(), linear);
+    assert_eq!(published.pixels(), &[24, 120, 220, 255]);
+    assert!(
+        editor
+            .test_image_import_asset(previous.handle(), previous.version())
+            .is_none(),
+        "the actual store must no longer expose v1 as usable"
+    );
+}
+
+#[test]
 fn generic_editor_reconciles_tileset_latest_dependency_and_revocation_without_a_visible_scene() {
     let project = editor_tileset_project("generic-tileset-latest-dependency");
     let bytes = fs::read(

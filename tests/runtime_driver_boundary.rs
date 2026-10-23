@@ -70,7 +70,13 @@ fn runtime_core_keeps_its_dependency_direction() {
 #[test]
 fn managed_world_access_is_read_only_and_scopes_do_not_escape() {
     let mut runtime = RuntimeInstance::start(App::new()).unwrap();
-    let marker = runtime.with_driver_scope(|_| 17_u32).unwrap();
+    let marker = runtime
+        .with_driver_scope(|_| 17_u32)
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
+        .unwrap();
     assert_eq!(marker, 17);
     runtime.finish().unwrap();
 

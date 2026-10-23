@@ -788,13 +788,13 @@ mod tests {
         let virtual_time = *runtime.world().resource::<VirtualTime>();
         let frame_execution_start = *runtime.world().resource::<FrameExecutionStart>();
 
-        let scope_error = runtime
+        let scope_outcome = runtime
             .with_driver_scope(|scope| {
                 scope.__apply_port::<RegistryRewrapPort>(()).unwrap();
             })
-            .unwrap_err();
+            .unwrap();
         assert_eq!(
-            scope_error.fault().unwrap().kind(),
+            scope_outcome.post_operation_fault.unwrap().kind(),
             RuntimeFaultKind::RuntimeAuthority
         );
         let error = runtime.drive(Duration::from_millis(1)).unwrap_err();

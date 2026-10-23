@@ -1275,6 +1275,10 @@ mod tests {
             .with_driver_scope(|scope| {
                 retirement_driver.retire_targets(scope, &[WindowId::PRIMARY])
             })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .unwrap()
             .unwrap();
     }

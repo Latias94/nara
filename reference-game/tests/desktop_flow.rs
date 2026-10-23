@@ -455,7 +455,7 @@ fn rejected_physical_local_command_faults_the_managed_runtime() {
                     .unwrap();
                 world.insert_resource(queue);
             });
-        })
+        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
         .unwrap();
     let mut runtime = candidate.complete_startup().unwrap().promote();
 
@@ -514,7 +514,7 @@ fn desktop_runtime_with_context(context: Option<Arc<AtomicBool>>) -> RuntimeInst
                     .expect("the retained desktop scene should materialize");
                 assert!(!report.has_errors(), "{report:#?}");
             });
-        })
+        }).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
         .unwrap();
     candidate.complete_startup().unwrap().promote()
 }
@@ -549,7 +549,7 @@ fn drive_desktop_frames(runtime: &mut RuntimeInstance, frames: usize) {
 
 fn keyboard(runtime: &mut RuntimeInstance, input: ButtonDriverInput<KeyCode>) {
     runtime
-        .with_driver_scope(|scope| apply_keyboard_driver_input(scope, input))
+        .with_driver_scope(|scope| apply_keyboard_driver_input(scope, input)).map(|outcome| { assert!(outcome.post_operation_fault.is_none()); outcome.output })
         .unwrap()
         .unwrap();
 }

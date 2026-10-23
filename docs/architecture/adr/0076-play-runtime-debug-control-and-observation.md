@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-07-21
+**Last Revised**: 2026-10-23
 **Refines**: [ADR 0024](0024-determinism-fixed-update-and-replay-policy.md),
 [ADR 0034](0034-editor-play-mode-world-boundary.md),
 [ADR 0039](0039-main-loop-time-pause-and-runtime-state.md),
@@ -149,6 +149,15 @@ The stable semantic operations are:
 Control commands take effect only at nara-owned main-thread safe points. The first product slice
 does not pause inside an executing Rust system and does not expose render-frame stepping as fixed
 simulation stepping.
+
+Managed driver and candidate admission scopes distinguish entry rejection from execution. An entry
+error means the operation was not invoked. A normally returned operation retains its output together
+with any fault observed by post-operation authority checks; neither a domain error nor a later fault
+implies rollback. A Host reconciles returned task, publication and native completion ownership before
+following fault policy. Typed owned-port entry returns the original input when scope entry rejects;
+port-level rejection remains a returned outcome with its input. Generic closure captures do not have
+that input-return guarantee. Unwinding operations retain their existing behavior, not a new recovery
+promise. Existing sticky fault observation and the bounded retirement/Stop path remain authoritative.
 
 RGF-U5 now supplies the unpublished code-first `RuntimeCandidate` and the published runtime states
 as ADR 0084 trial evidence. RGF-U24 must keep its future start-attempt states and candidate owner

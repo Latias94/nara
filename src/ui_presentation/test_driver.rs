@@ -45,6 +45,10 @@ impl BridgeRuntime {
                     },
                 )
             })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .unwrap()
             .unwrap();
     }
@@ -54,6 +58,10 @@ impl BridgeRuntime {
             .as_mut()
             .unwrap()
             .with_driver_scope(|scope| scope.__apply_port::<BridgeTestDriver>(operation))
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
             .unwrap()
             .unwrap()
     }

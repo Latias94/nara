@@ -94,6 +94,10 @@ fn with_current_scene(inspect: impl FnOnce(&mut World) + Send + 'static) {
                 );
             });
         })
+        .map(|outcome| {
+            assert!(outcome.post_operation_fault.is_none());
+            outcome.output
+        })
         .unwrap();
     assert!(materialization.get().unwrap().is_ok());
     let mut runtime = candidate.complete_startup().unwrap().promote();
