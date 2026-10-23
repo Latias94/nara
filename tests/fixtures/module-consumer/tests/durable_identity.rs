@@ -307,7 +307,8 @@ fn a_persistent_npc_rematerializes_without_reloading_its_scene_owner() {
         saved = ron::from_str(&saved_bytes).unwrap();
         let token = spawn_identity_entity(&mut world).unwrap();
         world.entity_mut(token.entity()).insert(saved.state.clone());
-        let locator = register_persistent_identity(&mut world, token, saved.identity.clone()).unwrap();
+        let locator =
+            register_persistent_identity(&mut world, token, saved.identity.clone()).unwrap();
         let domain = world.resource::<WorldIdentityDomain>();
         if let Some(previous) = &previous_runtime {
             assert_eq!(domain.lookup(&world, previous), EntityLookup::StaleRuntime);
@@ -416,7 +417,8 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
             world
                 .entity_mut(token.entity())
                 .insert(NpcState { visits: 0 });
-            let first = register_persistent_identity(&mut world, token, persistent.clone()).unwrap();
+            let first =
+                register_persistent_identity(&mut world, token, persistent.clone()).unwrap();
             assert_eq!(
                 world
                     .resource::<WorldIdentityDomain>()
