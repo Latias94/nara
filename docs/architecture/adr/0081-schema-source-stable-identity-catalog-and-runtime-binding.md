@@ -330,6 +330,12 @@ the target World under one exclusive borrow. Fresh targets cover real component 
 event-global/component-global Add, Insert, Discard, Remove, and Despawn observers before allocation;
 existing or reserved targets also cover entity and entity+component scopes before mutation.
 
+Support metadata is registered before the permitted flush, but support insertion requirements and
+stable/runtime binding eligibility are derived from the resulting World. Queued first application
+may already have installed those resources; pre-flush absence cannot authorize a second insertion.
+The flush does not renew an original asset baseline: preparation carrying that baseline revalidates
+the captured asset authority, rejecting interference rather than recapturing it as legitimate input.
+
 Private target receipts and a World-global bidirectional stable/runtime binding authority preserve
 identity across target retirement and reject missing authority, collisions, temporal rebinding, and
 cross-World use. Asset preparation separately declares whether it may need `AssetServer`, so an

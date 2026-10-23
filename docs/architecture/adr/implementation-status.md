@@ -10,6 +10,11 @@ continuing writes, including lock/release and exact-handle name replacement. The
 211-test cohort passes, with three pre-existing privileged filesystem cases ignored. This does not
 extend earlier Linux lock evidence to the new cursor implementation or qualify performance.
 
+The [post-boundary U4 evidence](../../knowledge/engineering/verification/2026-10/2026-10-23T055642Z-post-boundary-u4-post-flush-persistent-admission-qualification-e1266d181d7043a3b9ce33b60697d53c.md)
+qualifies ADR 0081's post-flush support insertion facts while retaining original asset baselines.
+Queued first apply, direct/batch conflicts, support hooks and asset interference pass in the
+670-test full-feature root/domain cohort. Existing platform/native limits remain unchanged.
+
 The [low-level integration](../../knowledge/engineering/verification/2026-10/2026-10-22T193724Z-u11-low-level-refactor-public-and-native-consumer-integration-ddb983fa80454657955de17ff65d1772.md) qualifies the bounded U1-U11 owner refactor: phase spatial cuts, retained asset intent,
 unique lock/task/close owners, typed codecs, facade derives, World identity operations and exact
 Gameplay success. Final owner329, root267/integration78, independent module77, Reference87/desktop6,

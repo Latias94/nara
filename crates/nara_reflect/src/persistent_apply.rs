@@ -519,18 +519,19 @@ impl ComponentApplyBatch {
             .map(|component| component.binding.register(world))
             .collect::<Vec<_>>();
         world.register_component::<PersistentApplyReceipts>();
-        let needs_binding_resource =
-            !self.components.is_empty() && !world.contains_resource::<PersistentWorldBindings>();
-        if needs_binding_resource {
+        if !self.components.is_empty() {
             world.register_component::<PersistentWorldBindings>();
         }
-        let needs_asset_server =
-            self.context.asset_server_touched && !world.contains_resource::<AssetServer>();
-        if needs_asset_server {
+        if self.context.asset_server_touched {
             world.register_component::<AssetServer>();
         }
         world.flush();
+        // Flush may publish support resources, but cannot replace the captured asset baseline.
         self.validate_commit(world)?;
+        let needs_binding_resource =
+            !self.components.is_empty() && !world.contains_resource::<PersistentWorldBindings>();
+        let needs_asset_server =
+            self.context.asset_server_touched && !world.contains_resource::<AssetServer>();
         for component in &self.components {
             component.binding.validate(world, Some(component.entity))?;
         }
@@ -754,26 +755,24 @@ pub fn validate_persistent_apply_support_topology(
     has_targets: bool,
     has_persistent_components: bool,
 ) -> Result<(), ComponentCodecError> {
+    batch.validate_commit(world)?;
     let receipt_component =
         has_targets.then(|| world.register_component::<PersistentApplyReceipts>());
-    let needs_binding_resource =
-        has_persistent_components && !world.contains_resource::<PersistentWorldBindings>();
-    if needs_binding_resource {
+    if has_persistent_components {
         world.register_component::<PersistentWorldBindings>();
     }
-    let needs_asset_server =
-        batch.context.asset_server_touched && !world.contains_resource::<AssetServer>();
-    if needs_asset_server {
+    if batch.context.asset_server_touched {
         world.register_component::<AssetServer>();
     }
     world.flush();
+    batch.validate_commit(world)?;
     if receipt_component.is_some() {
         validate_support_component::<PersistentApplyReceipts>(world, None)?;
     }
-    if needs_binding_resource {
+    if has_persistent_components && !world.contains_resource::<PersistentWorldBindings>() {
         validate_support_resource_insertion::<PersistentWorldBindings>(world)?;
     }
-    if needs_asset_server {
+    if batch.context.asset_server_touched && !world.contains_resource::<AssetServer>() {
         validate_support_resource_insertion::<AssetServer>(world)?;
     }
     Ok(())
@@ -798,12 +797,11 @@ pub fn validate_fresh_persistent_component_apply<'a>(
         .iter()
         .map(|(id, binding)| (id.clone(), binding.register(world)))
         .collect::<BTreeMap<_, _>>();
-    let needs_asset_server = may_touch_asset_server && !world.contains_resource::<AssetServer>();
-    if needs_asset_server {
+    if may_touch_asset_server {
         world.register_component::<AssetServer>();
     }
     world.flush();
-    if needs_asset_server {
+    if may_touch_asset_server && !world.contains_resource::<AssetServer>() {
         validate_support_resource_insertion::<AssetServer>(world)?;
     }
     let receipts = bindings
@@ -924,6 +922,354 @@ mod persistent_apply_contract_tests {
                 .unwrap()
                 .unwrap()
         })
+    }
+
+    #[test]
+    fn queued_first_persistent_apply_then_direct_apply_uses_post_flush_bindings() {
+        let mut world = World::new();
+        let queued_target = world.spawn_empty().id();
+        let direct_target = world.spawn_empty().id();
+        let queued = bound_component(ReplaceProbe(1), "nara.test.QueuedProbe");
+        let direct = bound_component(ReplaceProbe(2), "nara.test.QueuedProbe");
+        world.commands().queue(move |world: &mut World| {
+            queued.apply(world, queued_target).unwrap();
+        });
+
+        direct.apply(&mut world, direct_target).unwrap();
+
+        assert_eq!(
+            world.get::<ReplaceProbe>(queued_target),
+            Some(&ReplaceProbe(1))
+        );
+        assert_eq!(
+            world.get::<ReplaceProbe>(direct_target),
+            Some(&ReplaceProbe(2))
+        );
+        let stable_id = ComponentTypeId::new("nara.test.QueuedProbe");
+        let runtime_id = world.component_id::<ReplaceProbe>().unwrap();
+        let bindings = world.resource::<PersistentWorldBindings>();
+        assert_eq!(bindings.by_stable.get(&stable_id), Some(&runtime_id));
+        assert_eq!(bindings.by_runtime.get(&runtime_id), Some(&stable_id));
+        for target in [queued_target, direct_target] {
+            let receipts = world.get::<PersistentApplyReceipts>(target).unwrap();
+            let receipt = &receipts.bindings[&stable_id];
+            assert_eq!(receipt.world_id, world.id());
+            assert_eq!(receipt.runtime_component_id, runtime_id);
+        }
+        assert!(!world.contains_resource::<AssetServer>());
+    }
+
+    #[test]
+    fn queued_first_persistent_apply_then_batch_apply_uses_post_flush_bindings() {
+        let mut world = World::new();
+        let queued_target = world.spawn_empty().id();
+        let first_target = world.spawn_empty().id();
+        let second_target = world.spawn_empty().id();
+        let queued = bound_component(ReplaceProbe(1), "nara.test.QueuedProbe");
+        let batch = ComponentApplyBatch::from_world(&world)
+            .stage(
+                first_target,
+                bound_component(ReplaceProbe(2), "nara.test.QueuedProbe"),
+            )
+            .unwrap()
+            .stage(
+                second_target,
+                bound_component(ReplaceProbe(3), "nara.test.QueuedProbe"),
+            )
+            .unwrap();
+        world.commands().queue(move |world: &mut World| {
+            queued.apply(world, queued_target).unwrap();
+        });
+
+        batch.commit(&mut world).unwrap();
+
+        assert_eq!(
+            world.get::<ReplaceProbe>(queued_target),
+            Some(&ReplaceProbe(1))
+        );
+        assert_eq!(
+            world.get::<ReplaceProbe>(first_target),
+            Some(&ReplaceProbe(2))
+        );
+        assert_eq!(
+            world.get::<ReplaceProbe>(second_target),
+            Some(&ReplaceProbe(3))
+        );
+        let stable_id = ComponentTypeId::new("nara.test.QueuedProbe");
+        let runtime_id = world.component_id::<ReplaceProbe>().unwrap();
+        let bindings = world.resource::<PersistentWorldBindings>();
+        assert_eq!(bindings.by_stable.get(&stable_id), Some(&runtime_id));
+        assert_eq!(bindings.by_runtime.get(&runtime_id), Some(&stable_id));
+        for target in [queued_target, first_target, second_target] {
+            let receipts = world.get::<PersistentApplyReceipts>(target).unwrap();
+            let receipt = &receipts.bindings[&stable_id];
+            assert_eq!(receipt.world_id, world.id());
+            assert_eq!(receipt.runtime_component_id, runtime_id);
+        }
+        assert!(!world.contains_resource::<AssetServer>());
+    }
+
+    #[test]
+    fn queued_first_persistent_apply_rejects_both_binding_conflict_directions() {
+        for use_batch in [false, true] {
+            for stable_conflict in [false, true] {
+                let mut world = World::new();
+                let queued_target = world.spawn_empty().id();
+                let outer_target = world.spawn_empty().id();
+                let queued = direct_probe();
+                let outer = if stable_conflict {
+                    bound_component(OtherProbe, "nara.test.DirectProbe")
+                } else {
+                    bound_component(DirectProbe, "nara.test.OtherStable")
+                };
+                let outer_id = outer.binding.component_id.clone();
+                world.commands().queue(move |world: &mut World| {
+                    queued.apply(world, queued_target).unwrap();
+                });
+
+                let result = if use_batch {
+                    let mut batch = ComponentApplyBatch::from_world(&world);
+                    let _ = stage_scratch_asset(&mut batch, "textures/queued-conflict.png");
+                    batch.stage(outer_target, outer).unwrap().commit(&mut world)
+                } else {
+                    outer.apply(&mut world, outer_target)
+                };
+
+                assert!(matches!(
+                    result.unwrap_err(),
+                    ComponentCodecError::PersistentApplyBindingConflict { component_id }
+                        if component_id == outer_id
+                ));
+                assert!(world.get::<DirectProbe>(queued_target).is_some());
+                assert!(
+                    world
+                        .get::<PersistentApplyReceipts>(queued_target)
+                        .is_some()
+                );
+                assert!(world.get::<DirectProbe>(outer_target).is_none());
+                assert!(world.get::<OtherProbe>(outer_target).is_none());
+                assert!(world.get::<PersistentApplyReceipts>(outer_target).is_none());
+                assert!(!world.contains_resource::<AssetServer>());
+                let bindings = world.resource::<PersistentWorldBindings>();
+                assert_eq!(bindings.by_stable.len(), 1);
+                assert_eq!(bindings.by_runtime.len(), 1);
+                assert_eq!(
+                    bindings
+                        .by_stable
+                        .get(&ComponentTypeId::new("nara.test.DirectProbe")),
+                    world.component_id::<DirectProbe>().as_ref()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn persistent_apply_rejects_asset_changes_during_flush_without_recapturing_baseline() {
+        for use_batch in [false, true] {
+            for (initially_present, remove) in [(false, false), (true, false), (true, true)] {
+                let mut world = World::new();
+                if initially_present {
+                    world.init_resource::<AssetServer>();
+                }
+                let target = world.spawn_empty().id();
+                let mut replacement = world
+                    .get_resource::<AssetServer>()
+                    .cloned()
+                    .unwrap_or_default();
+                replacement
+                    .reserve::<SupportAsset>("textures/arrived-during-flush.png")
+                    .unwrap();
+                let expected = (!remove).then(|| replacement.clone());
+                let component = PreparedComponentCandidate::with_asset_server(|context| {
+                    let _ = context
+                        .resolve_asset_ref::<SupportAsset>(
+                            &AssetRef::path("textures/unpublished-scratch.png").unwrap(),
+                        )
+                        .unwrap();
+                    Ok(DirectProbe)
+                })
+                .erase()
+                .bind(ComponentTypeId::new("nara.test.DirectProbe"));
+                world.commands().queue(move |world: &mut World| {
+                    if remove {
+                        let _ = world.remove_resource::<AssetServer>();
+                    } else {
+                        world.insert_resource(replacement);
+                    }
+                });
+
+                let result = if use_batch {
+                    ComponentApplyBatch::from_world(&world)
+                        .stage(target, component)
+                        .unwrap()
+                        .commit(&mut world)
+                } else {
+                    component.apply(&mut world, target)
+                };
+
+                assert!(matches!(
+                    result,
+                    Err(ComponentCodecError::AssetServerChanged)
+                ));
+                assert_eq!(world.get_resource::<AssetServer>(), expected.as_ref());
+                assert!(world.get::<DirectProbe>(target).is_none());
+                assert!(world.get::<PersistentApplyReceipts>(target).is_none());
+                assert!(!world.contains_resource::<PersistentWorldBindings>());
+            }
+        }
+    }
+
+    #[test]
+    fn support_topology_uses_post_flush_binding_resource_presence() {
+        for initially_present in [false, true] {
+            let mut world = World::new();
+            world.init_resource::<SupportCanary>();
+            if initially_present {
+                world.init_resource::<PersistentWorldBindings>();
+            }
+            let batch = ComponentApplyBatch::from_world(&world);
+            world.commands().queue(move |world: &mut World| {
+                if initially_present {
+                    let _ = world.remove_resource::<PersistentWorldBindings>();
+                } else {
+                    world.init_resource::<PersistentWorldBindings>();
+                }
+                world.add_observer(
+                    |_: On<Add<PersistentWorldBindings>>, mut canary: ResMut<SupportCanary>| {
+                        canary.0 += 1;
+                    },
+                );
+            });
+
+            let result = validate_persistent_apply_support_topology(&mut world, &batch, true, true);
+
+            if initially_present {
+                assert!(matches!(
+                    result,
+                    Err(ComponentCodecError::PersistentApplySupportRejected {
+                        reason: PersistentApplyRejection::Observer {
+                            event: PersistentLifecycleEvent::Add,
+                            scope: PersistentObserverScope::ComponentGlobal,
+                        },
+                    })
+                ));
+            } else {
+                result.unwrap();
+            }
+            assert_eq!(
+                world.contains_resource::<PersistentWorldBindings>(),
+                !initially_present
+            );
+            assert_eq!(world.resource::<SupportCanary>().0, 0);
+        }
+    }
+
+    #[test]
+    fn support_topology_revalidates_original_asset_baseline_after_flush() {
+        let mut world = World::new();
+        world.init_resource::<AssetServer>();
+        let mut batch = ComponentApplyBatch::from_world(&world);
+        let scratch = stage_scratch_asset(&mut batch, "textures/unpublished-scratch.png");
+        world.commands().queue(|world: &mut World| {
+            world
+                .resource_mut::<AssetServer>()
+                .reserve::<SupportAsset>("textures/arrived-during-flush.png")
+                .unwrap();
+        });
+
+        let error =
+            validate_persistent_apply_support_topology(&mut world, &batch, true, true).unwrap_err();
+
+        assert!(matches!(error, ComponentCodecError::AssetServerChanged));
+        assert_ne!(
+            world.get_resource::<AssetServer>(),
+            batch.origin_asset_server.as_ref()
+        );
+        assert!(
+            world
+                .resource::<AssetServer>()
+                .get_handle::<SupportAsset>(scratch.id())
+                .is_none()
+        );
+        assert!(!world.contains_resource::<PersistentWorldBindings>());
+    }
+
+    #[test]
+    fn fresh_preparation_uses_post_flush_asset_server_presence() {
+        for initially_present in [false, true] {
+            let mut world = World::new();
+            world.init_resource::<SupportCanary>();
+            if initially_present {
+                world.init_resource::<AssetServer>();
+            }
+            let component = PreparedComponentCandidate::with_asset_server(|_| Ok(DirectProbe))
+                .erase()
+                .bind(ComponentTypeId::new("nara.test.DirectProbe"));
+            world.commands().queue(move |world: &mut World| {
+                if initially_present {
+                    let _ = world.remove_resource::<AssetServer>();
+                } else {
+                    world.init_resource::<AssetServer>();
+                }
+                world.add_observer(
+                    |_: On<Add<AssetServer>>, mut canary: ResMut<SupportCanary>| {
+                        canary.0 += 1;
+                    },
+                );
+            });
+
+            let result = validate_fresh_persistent_component_apply(&mut world, [&component]);
+
+            if initially_present {
+                assert!(matches!(
+                    result,
+                    Err(ComponentCodecError::PersistentApplySupportRejected {
+                        reason: PersistentApplyRejection::Observer {
+                            event: PersistentLifecycleEvent::Add,
+                            scope: PersistentObserverScope::ComponentGlobal,
+                        },
+                    })
+                ));
+            } else {
+                result.unwrap();
+            }
+            assert_eq!(world.contains_resource::<AssetServer>(), !initially_present);
+            assert_eq!(world.resource::<SupportCanary>().0, 0);
+            assert!(!world.contains_resource::<PersistentWorldBindings>());
+        }
+    }
+
+    #[test]
+    fn queued_support_hook_rejects_direct_apply_before_publication() {
+        for receipt_hook in [false, true] {
+            let mut world = World::new();
+            let target = world.spawn_empty().id();
+            world.commands().queue(move |world: &mut World| {
+                if receipt_hook {
+                    world
+                        .register_component_hooks::<PersistentApplyReceipts>()
+                        .on_add(|_, _| panic!("receipt hook must not run during persistent apply"));
+                } else {
+                    world
+                        .register_component_hooks::<PersistentWorldBindings>()
+                        .on_add(|_, _| panic!("binding hook must not run during persistent apply"));
+                }
+            });
+
+            let error = direct_probe().apply(&mut world, target).unwrap_err();
+
+            assert!(matches!(
+                error,
+                ComponentCodecError::PersistentApplySupportRejected {
+                    reason: PersistentApplyRejection::LifecycleHook {
+                        event: PersistentLifecycleEvent::Add,
+                    },
+                }
+            ));
+            assert!(world.get::<DirectProbe>(target).is_none());
+            assert!(world.get::<PersistentApplyReceipts>(target).is_none());
+            assert!(!world.contains_resource::<PersistentWorldBindings>());
+        }
     }
 
     #[test]
