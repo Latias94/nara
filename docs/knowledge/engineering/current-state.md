@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "6000db445dc0fc007023d5ba58a3c891a94b29d4798ab737e92f0e5616fe82b6"
+source_fingerprint: "80b1584bd60fcf103567785113de8682f3766a32ab65b220cf3b27f590eec99e"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "6000db445dc0fc007023d5ba58a3c891a94b29d4798ab737e92f0e5616f
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `6000db445dc0fc007023d5ba58a3c891a94b29d4798ab737e92f0e5616fe82b6`
-- Immutable records: 866
+- Source fingerprint: `80b1584bd60fcf103567785113de8682f3766a32ab65b220cf3b27f590eec99e`
+- Immutable records: 867
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Common source admission and retained Scene preview qualification](verification/2026-10/2026-10-23T180456Z-common-source-admission-and-retained-scene-preview-qualification-45ffac37614a4edaa792f08d650f292e.md) - Three-domain source exclusion, explicit Scene preview selection, trusted source observation and bounded actual native evidence.
 - **Verification Evidence**: [Per-document persistence custody qualification](verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md) - Typed document file custody, captured Save/Reopen Hosts, exact cleanup isolation and bounded native/public evidence.
 - **Verification Evidence**: [Prepared source editing and non-active entity query qualification](verification/2026-10/2026-10-23T140847Z-prepared-source-editing-and-non-active-entity-query-qualification-d08c0cb5ab2c4f798dd7cd98c2a2e6c5.md) - Owner-bound candidates, replayable inverses, public Scene/Prefab workflow, exact query custody and per-kind Host limitation.
 - **Verification Evidence**: [Workflow-driven foundation waves and R1a owned Application submission qualification](verification/2026-10/2026-10-23T123523Z-workflow-driven-foundation-waves-and-r1a-owned-application-submission-qualification-5e5f6c3eb3b84150bc3a5e06e9862abf.md) - Target owner boundaries, dependency corrections, exact direct dispatch observations, consumer evidence and explicit remaining scope.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Post-boundary U7 borrowed and exclusive Scene consumer qualification](verification/2026-10/2026-10-23T074124Z-post-boundary-u7-borrowed-and-exclusive-scene-consumer-qualification-24bb1ff684fa45c48abb28ebc9aded12.md) - Verification Evidence for Post-boundary U7 borrowed and exclusive Scene consumer qualification.
 - **Verification Evidence**: [Post-boundary U6 bounded Image recovery continuity qualification](verification/2026-10/2026-10-23T072629Z-post-boundary-u6-bounded-image-recovery-continuity-qualification-1f48883676614cde8d61d8a59e3cef2d.md) - Verification Evidence for Post-boundary U6 bounded Image recovery continuity qualification.
 - **Verification Evidence**: [Post-boundary U5 Image-owned prepared capture qualification](verification/2026-10/2026-10-23T070352Z-post-boundary-u5-image-owned-prepared-capture-qualification-a532b06bf3d94666bc5f1c2748052ef5.md) - Verification Evidence for Post-boundary U5 Image-owned prepared capture qualification.
-- **Work Progress**: [Post-boundary U5 owner capture and consumer migration](progress/2026-10/2026-10-23T065517Z-post-boundary-u5-owner-capture-and-consumer-migration-ed9ce78ba1e54cc0a5d6036ea12bf27f.md) - Work Progress for Post-boundary U5 owner capture and consumer migration.
 
 # Integration Notes
 
