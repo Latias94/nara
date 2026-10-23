@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-24 (per-document concrete persistence custody)
+**Last Revised**: 2026-10-24 (source exclusion and retained Scene preview binding)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -57,6 +57,12 @@ case aliases. Existing publication capabilities retain the actual parent directo
 exclusion follows atomic Save replacement and parent-directory renames without global path
 lowercasing or another source registry.
 
+Scene/Prefab exact-source activation uses the Host's project-relative publication path rather
+than raw Workspace locators from different configured source scopes. Browser and anchored Open
+of one Prefab reuse the same slot/history; a different path alias is rejected. Extension duplicate
+Open retains its explicit `SourceAlreadyOpen` result. All three admission paths share exclusion
+over current retained targets, including rechecks immediately before source publication.
+
 Save captures the exact encoded content state. The existing background publication Host and
 linear receipt acknowledgement own disk writes and dirty checkpoint advancement. A later edit
 remains dirty when the older capture saves. Reopen transports only a read-only source capability
@@ -71,9 +77,14 @@ completion and panel retirement through the existing close participant.
 Scene and Prefab file custody is also keyed by the exact open document, using their concrete
 lane types rather than an erased document store. An operation retains its captured Host instead
 of resolving another same-kind lane at completion. Document storage, active navigation, Scene
-preview binding and executable startup are distinct responsibilities. This does not yet adopt
-additive same-kind Open or a new preview-selection policy; those require their own qualified
-workflow rather than following persistence-map iteration order.
+preview binding and executable startup are distinct responsibilities. Scene preview retains the
+last successfully explicitly selected Scene under ADR 0047, published read-only in the same
+immutable frame as its document revision. Tree/Inspector still follow the active document.
+`Back to Scene` uses this binding rather than the first Scene, and explicit selector re-selection
+can restore an empty binding. A bound but inactive Scene may remain displayed; geometric input
+requires explicit activation as well as the existing presented receipt. No bound Scene and no
+active UI Canvas retires the old Scene presentation. Additive same-kind Open remains a separate
+workflow; persistence-map iteration order never supplies navigation authority.
 
 The small independently compiled dialogue consumer and its public tests determine this boundary.
 The [document extension guide](../../guides/editor-documents.md) records the supported workflow

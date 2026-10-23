@@ -62,10 +62,13 @@ impl ImguiAuthoringPanels {
             .and_then(|id| frame.workspace().document(id));
         let editing = !self.read_only && editing_enabled(frame);
         let title = document.map_or("No active document", |document| document.title.as_str());
-        if let Some(_combo) = ui.begin_combo("Document", title) {
+        let combo = ui.begin_combo("Document", title);
+        #[cfg(test)]
+        super::ui_interaction_tests::record_control(ui, "Document selector");
+        if let Some(_combo) = combo {
             for tab in &frame.workspace().documents {
                 let _id = ui.push_id(format!("document:{}", tab.document.raw()).as_str());
-                if ui
+                let clicked = ui
                     .selectable_config(format!(
                         "{}{}",
                         tab.title,
@@ -73,9 +76,13 @@ impl ImguiAuthoringPanels {
                     ))
                     .selected(tab.active)
                     .disabled(self.read_only || frame.workspace_intent().intent().is_some())
-                    .build()
-                    && !tab.active
-                {
+                    .build();
+                #[cfg(test)]
+                super::ui_interaction_tests::record_control(
+                    ui,
+                    format!("document:{}", tab.document.raw()),
+                );
+                if clicked && (!tab.active || tab.kind == EditorDocumentKind::Scene) {
                     actions.push(EditorAction::Navigate(
                         EditorNavigationAction::SetActiveDocument {
                             document: tab.document,
@@ -85,18 +92,12 @@ impl ImguiAuthoringPanels {
             }
         }
         if document.is_some_and(|document| document.kind == EditorDocumentKind::Prefab)
-            && let Some(scene) = frame
-                .workspace()
-                .documents
-                .iter()
-                .find(|document| document.kind == EditorDocumentKind::Scene)
+            && let Some(document) = frame.scene_preview_document()
         {
             ui.same_line();
             if enabled_button(ui, !self.read_only, "Back to Scene") {
                 actions.push(EditorAction::Navigate(
-                    EditorNavigationAction::SetActiveDocument {
-                        document: scene.document,
-                    },
+                    EditorNavigationAction::SetActiveDocument { document },
                 ));
             }
         }
@@ -559,6 +560,7 @@ fn enabled_button(ui: &Ui, enabled: bool, label: &str) -> bool {
     if matches!(
         label,
         "+ Root"
+            | "Back to Scene"
             | "Undo"
             | "Redo"
             | "Save"
@@ -800,6 +802,177 @@ mod tests {
             selection: Default::default(),
             editor: SceneEditorState::new().model(&session, &ComponentRegistry::default(), None),
         }
+    }
+
+    fn document_frame(kind: EditorDocumentKind) -> EditorFrameModel {
+        use nara::{
+            scene::{PrefabAuthoringSession, PrefabDocument},
+            tooling::{
+                EditorAuthoringReadiness, EditorDocumentSourceBinding, EditorFrameClock,
+                EditorPersistenceView, EditorPlayView, EditorProjectContentView,
+                EditorProjectReadinessView, EditorProjectView, EditorWorkspace,
+                EditorWorkspaceIntentView,
+            },
+        };
+
+        let mut workspace = EditorWorkspace::new();
+        for title in ["First Scene", "Second Scene"] {
+            workspace
+                .open_scene_session(title, SceneAuthoringSession::new(SceneDocument::default()))
+                .unwrap();
+        }
+        if kind == EditorDocumentKind::Prefab {
+            workspace
+                .open_prefab_session(
+                    "Ordinary Prefab",
+                    EditorDocumentSourceBinding::new("ordinary.prefab.json"),
+                    PrefabAuthoringSession::new(PrefabDocument::default()),
+                )
+                .unwrap();
+        }
+        EditorFrameClock::new().publish(
+            workspace.model(&ComponentRegistry::default(), None),
+            EditorProjectView::new(
+                EditorProjectReadinessView::new(
+                    EditorAuthoringReadiness::Complete,
+                    EditorRuntimeAvailability::TrustedInProcess,
+                ),
+                Default::default(),
+                EditorPlayView::new(EditorPlayState::Empty, None, None, None, false, None),
+                EditorPersistenceView::new(EditorPersistenceOperation::Idle, None),
+                EditorProjectContentView::NotInstalled,
+                EditorWorkspaceIntentView::new(None, None, None, None, None),
+            ),
+            Default::default(),
+            EditorReopenTarget::Unavailable,
+            None,
+        )
+    }
+
+    fn draw_document_controls(
+        context: &mut dear_imgui_rs::Context,
+        panels: &mut ImguiAuthoringPanels,
+        frame: &EditorFrameModel,
+    ) -> Vec<EditorAction> {
+        super::super::ui_interaction_tests::clear_controls();
+        let ui = context.frame();
+        let mut actions = Vec::new();
+        ui.window("Document navigation")
+            .position([0.0, 0.0], dear_imgui_rs::Condition::Always)
+            .size([900.0, 500.0], dear_imgui_rs::Condition::Always)
+            .build(|| panels.show_document_controls(ui, frame, &mut actions));
+        let _ = context.render_legacy();
+        actions
+    }
+
+    fn click_document_control(
+        context: &mut dear_imgui_rs::Context,
+        panels: &mut ImguiAuthoringPanels,
+        frame: &EditorFrameModel,
+        label: &str,
+    ) -> Vec<EditorAction> {
+        let rect = super::super::ui_interaction_tests::control_rect(label)
+            .unwrap_or_else(|| panic!("the document control {label:?} was not painted"));
+        context.io_mut().add_mouse_pos_event([
+            (rect.min[0] + rect.max[0]) * 0.5,
+            (rect.min[1] + rect.max[1]) * 0.5,
+        ]);
+        let mut actions = draw_document_controls(context, panels, frame);
+        for down in [true, false] {
+            context
+                .io_mut()
+                .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, down);
+            actions.extend(draw_document_controls(context, panels, frame));
+        }
+        actions
+    }
+
+    fn document_context() -> dear_imgui_rs::Context {
+        let mut context = dear_imgui_rs::Context::create();
+        context
+            .set_ini_filename::<std::path::PathBuf>(None)
+            .unwrap();
+        context.io_mut().set_display_size([1000.0, 600.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        context
+    }
+
+    #[test]
+    fn document_selector_reselects_active_scene_without_reselecting_active_prefab() {
+        for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
+            let frame = document_frame(kind);
+            assert_eq!(frame.scene_preview_document(), None);
+            let document = frame.workspace().active_document.unwrap();
+            let mut context = document_context();
+            let mut panels = ImguiAuthoringPanels::default();
+            for _ in 0..3 {
+                assert!(draw_document_controls(&mut context, &mut panels, &frame).is_empty());
+            }
+            assert!(
+                click_document_control(&mut context, &mut panels, &frame, "Document selector")
+                    .is_empty()
+            );
+            for _ in 0..2 {
+                assert!(draw_document_controls(&mut context, &mut panels, &frame).is_empty());
+            }
+            let actions = click_document_control(
+                &mut context,
+                &mut panels,
+                &frame,
+                &format!("document:{}", document.raw()),
+            );
+            if kind == EditorDocumentKind::Scene {
+                assert!(matches!(
+                    actions.as_slice(),
+                    [EditorAction::Navigate(EditorNavigationAction::SetActiveDocument {
+                        document: selected,
+                    })] if *selected == document
+                ));
+            } else {
+                assert!(
+                    actions.is_empty(),
+                    "active Prefab selection must remain a no-op"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn back_to_scene_is_absent_without_a_retained_binding_even_with_open_scenes() {
+        let frame = document_frame(EditorDocumentKind::Prefab);
+        assert_eq!(frame.workspace().scenes.len(), 2);
+        assert_eq!(frame.scene_preview_document(), None);
+        let mut context = document_context();
+        let mut panels = ImguiAuthoringPanels::default();
+        for _ in 0..3 {
+            assert!(draw_document_controls(&mut context, &mut panels, &frame).is_empty());
+        }
+        assert!(super::super::ui_interaction_tests::control_rect("Back to Scene").is_none());
+    }
+
+    #[test]
+    fn back_to_scene_activates_the_bound_scene_instead_of_the_first_open_scene() {
+        let frame = document_frame(EditorDocumentKind::Prefab);
+        let document = frame.workspace().scenes[1].document;
+        assert_ne!(frame.workspace().scenes[0].document, document);
+        let frame = frame.with_scene_preview_document(Some(document));
+        let mut context = document_context();
+        let mut panels = ImguiAuthoringPanels::default();
+        for _ in 0..3 {
+            assert!(draw_document_controls(&mut context, &mut panels, &frame).is_empty());
+        }
+        let actions = click_document_control(&mut context, &mut panels, &frame, "Back to Scene");
+        assert!(matches!(
+            actions.as_slice(),
+            [EditorAction::Navigate(EditorNavigationAction::SetActiveDocument {
+                document: selected,
+            })] if *selected == document
+        ));
     }
 
     #[test]

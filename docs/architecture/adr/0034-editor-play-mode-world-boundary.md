@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-10-24
 **Refined By**: ADR 0047: Editor Workspace and Scene Document State; ADR 0058: Stable Runtime
 Identity and Entity References; ADR 0076: Play Runtime Debug Control and Observation
 **Current ownership and deployment**:
@@ -132,6 +132,9 @@ projections also retain preparation, faults and incomplete cleanup rather than r
 Trusted in-process ownership and observation:
 
 - `nara_scene::SceneAuthoringRevision` is the source revision stamp.
+- While a trusted Runtime retains a document source, its current revision and divergence
+  observation resolve that exact document, not the active Inspector or Scene preview binding.
+  Navigation cannot hide an edit of the running source or compare it with another document.
 - `nara_tooling::EditorPlayCommand` and `EditorPlayView` expose UI-neutral lifecycle control/status.
 - Root `EditorProjectSession` owns preparation, the unpublished start attempt, published runtime,
   controls, close evidence, and retirement for the concrete product path.

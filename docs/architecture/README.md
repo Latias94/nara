@@ -94,8 +94,10 @@ or every recommended ADR amendment has been applied.
 The [per-document persistence-custody design](editor-document-persistence-custody-design.md)
 specifies R5c's concrete replacement for the integrated Host's per-kind file lanes. It separates
 source aliases, document sessions, preview selection and executable startup without an erased
-document store. ADRs 0047/0118 adopt the bounded custody decision; additive Open and the remaining
-source/preview/refresh/Play workflow remain Proposed. Prepared edits or per-document storage alone
+document store. ADRs 0047/0118 adopt custody, common source admission and retained Scene selection;
+0111 owns bound Scene presentation/input and 0034 the exact trusted Running source observation.
+Additive Open, multi-source refresh and cancellation/retirement source continuity remain Proposed.
+Prepared edits or per-document storage alone
 do not qualify public same-kind multi-open.
 
 The [chat-informed foundation review](../audits/2026-10-23-chat-informed-engine-architecture-review.md)

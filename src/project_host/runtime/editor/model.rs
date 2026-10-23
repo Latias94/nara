@@ -138,7 +138,8 @@ impl EditorProjectSession {
                     source_asset_import,
                     self.source_asset_import.has_pending_work(),
                 )
-                .with_document_open(self.document_open_view()),
+                .with_document_open(self.document_open_view())
+                .with_scene_preview_document(self.scene_preview_document),
         );
         #[cfg(feature = "runtime-ui")]
         self.publish_ui_authoring_frame(frame.revision());

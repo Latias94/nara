@@ -612,7 +612,13 @@ impl NativeImgui {
                 self.submit_ui_canvas(application, &authoring, window_packet)?;
         } else {
             self.canvas.retire();
-            if let Some(candidate) = application.take_scene_preview_candidate() {
+            if application
+                .current_frame()
+                .is_none_or(|frame| frame.scene_preview_document().is_none())
+            {
+                self.scene.retire(&mut self.gpu, &mut self.renderer)?;
+                self.scene_presenter.retire();
+            } else if let Some(candidate) = application.take_scene_preview_candidate() {
                 self.scene_presenter.prepare(
                     &mut self.scene,
                     &mut self.gpu,

@@ -24,6 +24,7 @@ mod presentation;
 #[cfg(feature = "presentation-2d")]
 mod preview;
 mod project_browser;
+mod source_admission;
 mod source_asset_import;
 mod trusted_play;
 #[cfg(feature = "runtime-ui")]
@@ -2459,12 +2460,24 @@ impl EditorProjectSession {
                 "project.editor.workspace-intent-pending",
             );
         }
-        match &mut self.execution {
+        let selected_document = match &command {
+            EditorWorkspaceCommand::SetActiveDocument { document } => Some(*document),
+            _ => None,
+        };
+        let report = match &mut self.execution {
             EditorExecutionLane::Authoring(_) => self.workspace.apply_authoring_command(command),
             EditorExecutionLane::TrustedCompiled(lane) => self
                 .workspace
                 .apply_command(lane.plan.schema_validation().registry(), command),
+        };
+        if report.applied
+            && selected_document.is_some_and(|document| {
+                self.workspace.document_kind(document) == Some(EditorDocumentKind::Scene)
+            })
+        {
+            self.scene_preview_document = selected_document;
         }
+        report
     }
 
     pub(crate) fn request_workspace_intent(

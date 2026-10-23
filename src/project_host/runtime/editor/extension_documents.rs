@@ -11,8 +11,9 @@ use nara_tooling::{
     EditorPersistenceFailureStage, EditorPersistenceRejection, EditorPersistenceResult,
 };
 
+use super::EditorProjectSession;
 use super::persistence::RetainedHost;
-use super::{EditorExecutionLane, EditorProjectSession};
+use super::source_admission::SourceAdmissionError;
 use crate::project_host::file_publication::FilePublicationReadSource;
 use crate::project_host::persistence::{
     FilePublicationHost, PersistenceSaveOutcome, editor_digest, publish_editor_checkpoint,
@@ -62,7 +63,6 @@ pub(super) struct ExtensionPersistenceLane {
 pub(super) struct EditorExtensionDocumentsHost {
     registered: BTreeMap<&'static str, Registration>,
     lanes: BTreeMap<EditorDocumentId, ExtensionPersistenceLane>,
-    source_root: Option<DirectoryCapability>,
 }
 
 impl EditorExtensionDocumentsHost {
@@ -89,46 +89,8 @@ impl EditorExtensionDocumentsHost {
         self.lanes.get(&document).cloned()
     }
 
-    pub(super) fn has_source(&self, project_path: &str) -> bool {
-        if self.has_exact_source(project_path) {
-            return true;
-        }
-        if self.lanes.is_empty() {
-            return false;
-        }
-        let Some(root) = &self.source_root else {
-            return true;
-        };
-        let Ok(path) = RelativePath::new(project_path) else {
-            return false;
-        };
-        // Existing boolean callers must refuse Open when alias exclusion cannot be checked.
-        match root.open_file(&path) {
-            Ok(file) => self.has_file(&file).unwrap_or(true),
-            Err(FsError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
-                false
-            }
-            Err(_) => true,
-        }
-    }
-
-    fn has_exact_source(&self, project_path: &str) -> bool {
-        self.lanes
-            .values()
-            .any(|lane| lane.source.locator() == project_path)
-    }
-
-    fn has_file(&self, file: &FileCapability) -> Result<bool, EditorExtensionDocumentHostError> {
-        for lane in self.lanes.values() {
-            let source = lane
-                .host
-                .try_with(|host| host.read_source())
-                .ok_or(EditorExtensionDocumentHostError::Busy)?;
-            if source_aliases(file, source)? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+    pub(super) fn lanes(&self) -> impl Iterator<Item = &ExtensionPersistenceLane> {
+        self.lanes.values()
     }
 
     pub(super) fn retire(&mut self, document: EditorDocumentId) -> bool {
@@ -140,9 +102,6 @@ impl EditorExtensionDocumentsHost {
             return false;
         }
         self.lanes.remove(&document);
-        if self.lanes.is_empty() {
-            self.source_root = None;
-        }
         true
     }
 }
@@ -184,48 +143,17 @@ impl EditorProjectSession {
             .map_err(|_| EditorExtensionDocumentHostError::InvalidSource)?;
         let source = source_path.as_str();
         let binding = EditorDocumentSourceBinding::new(source.to_owned());
-        if self.extension_documents.has_exact_source(source)
-            || self
-                .scene_lanes
-                .values()
-                .any(|lane| lane.project_path.as_ref() == source)
-            || self
-                .prefab_lanes
-                .values()
-                .any(|lane| lane.project_path.as_ref() == source)
-        {
+        if self.exact_source_owner(source).is_some() {
             return Err(EditorExtensionDocumentHostError::SourceAlreadyOpen);
         }
-        let root = match &self.execution {
-            EditorExecutionLane::Authoring(snapshot) => snapshot.project_root(),
-            EditorExecutionLane::TrustedCompiled(lane) => lane.content_loader.project_root(),
-        };
+        let root = self.source_project_root();
         let path = RelativePath::new(source)
             .map_err(|_| EditorExtensionDocumentHostError::InvalidSource)?;
         let file = root
             .open_file(&path)
             .map_err(|_| EditorExtensionDocumentHostError::SourceRead)?;
-        if self.extension_documents.has_file(&file)? {
-            return Err(EditorExtensionDocumentHostError::SourceAlreadyOpen);
-        }
-        for lane in self.scene_lanes.values() {
-            let retained_source = lane
-                .host
-                .try_with(|host| host.read_source())
-                .ok_or(EditorExtensionDocumentHostError::Busy)?;
-            if source_aliases(&file, retained_source)? {
-                return Err(EditorExtensionDocumentHostError::SourceAlreadyOpen);
-            }
-        }
-        for lane in self.prefab_lanes.values() {
-            let retained_source = lane
-                .host
-                .try_with(|host| host.read_source())
-                .ok_or(EditorExtensionDocumentHostError::Busy)?;
-            if source_aliases(&file, retained_source)? {
-                return Err(EditorExtensionDocumentHostError::SourceAlreadyOpen);
-            }
-        }
+        self.exclude_source_aliases(source, &file)
+            .map_err(extension_source_error)?;
         let (owner, publication, digest) = open_source::<D>(&root, source, &file)?;
         // Retain file custody before publishing a document slot, so every visible document has a
         // persistence owner even if opening a later document fails.
@@ -234,6 +162,16 @@ impl EditorProjectSession {
             .host_custody()
             .retain_publication(publication)
             .ok_or(EditorExtensionDocumentHostError::PublicationOpen)?;
+        let check = publication
+            .try_with(|host| host.read_source().open())
+            .ok_or(SourceAdmissionError::HostUnavailable)
+            .and_then(|file| file.map_err(|_| SourceAdmissionError::SourceRead))
+            .and_then(|file| self.exclude_source_aliases(source, &file));
+        if let Err(error) = check {
+            publication.retire();
+            return Err(extension_source_error(error));
+        }
+        let previous_active = self.workspace.active_document();
         let document = match self
             .workspace
             .open_extension_document(binding.clone(), owner)
@@ -250,7 +188,7 @@ impl EditorProjectSession {
             editor_digest(digest),
         );
         if !report.applied {
-            let _ = self.workspace.__discard_document(document);
+            self.discard_unpublished_document(document, previous_active);
             publication.retire();
             return Err(EditorExtensionDocumentHostError::PublicationOpen);
         }
@@ -263,23 +201,16 @@ impl EditorProjectSession {
                 decode,
             },
         );
-        self.extension_documents.source_root = Some(root);
         self.publish_editor_frame(false);
         Ok(document)
     }
 }
 
-fn source_aliases(
-    file: &FileCapability,
-    source: FilePublicationReadSource,
-) -> Result<bool, EditorExtensionDocumentHostError> {
-    // Resolve through retained parent custody and observe the current atomic-save replacement.
-    match source.open() {
-        Ok(current) => Ok(current.identity() == file.identity()),
-        Err(FsError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
-            Ok(false)
-        }
-        Err(_) => Err(EditorExtensionDocumentHostError::SourceRead),
+fn extension_source_error(error: SourceAdmissionError) -> EditorExtensionDocumentHostError {
+    match error {
+        SourceAdmissionError::AlreadyOpen => EditorExtensionDocumentHostError::SourceAlreadyOpen,
+        SourceAdmissionError::HostUnavailable => EditorExtensionDocumentHostError::Busy,
+        SourceAdmissionError::SourceRead => EditorExtensionDocumentHostError::SourceRead,
     }
 }
 

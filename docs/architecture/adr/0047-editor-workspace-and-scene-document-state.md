@@ -107,6 +107,14 @@ Rules:
   Reopen retains the original Host and verifies that the document still owns that exact Host
   before native admission, document publication and baseline reconciliation. This custody decision
   does not by itself change the integrated Host's existing same-kind Open/retarget policy.
+- Scene preview retains the last successfully explicitly selected Scene document. Startup and
+  successful Scene Open/activation bind it; selecting Prefab/extension documents and non-active
+  query/edit/Save/Reopen leave it unchanged. Only successful Close of the bound Scene clears it,
+  without selecting another map entry. An explicit re-selection of an already active Scene may
+  restore an empty binding. Project replacement starts with its own startup binding.
+  Failed source publication removes only its candidate and restores the document active
+  immediately before publication, without routing that rollback through explicit Scene selection.
+  Preview selection never chooses executable startup or a retained Play source.
 - Each private Scene/Prefab lane retains one concrete file Host for its entire lifetime, including
   idle periods after an operation failed. Its runtime retirement registration is independent of
   task results and remains accountable for temporary cleanup after session abandonment. Operations

@@ -11,6 +11,8 @@ mod browser_preparation;
 mod closing_session;
 mod content_residency;
 mod current_scene;
+#[cfg(feature = "tooling")]
+mod document_sources;
 mod editor_scene_travel;
 #[cfg(all(
     feature = "tooling",

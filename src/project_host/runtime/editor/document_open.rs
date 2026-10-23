@@ -3,6 +3,8 @@ use super::*;
 use crate::project_host::authoring::{AdmittedAuthoringDocument, AuthoringDocumentKind};
 
 use super::persistence::RetainedHost;
+use super::source_admission::SourceAdmissionError;
+use nara_fs::FileCapability;
 use nara_scene::{AuthoringSchemaBasis, SceneAuthoringRevision};
 use nara_tooling::{EditorDocumentDigest, EditorDocumentSourceBinding};
 use nara_tooling::{
@@ -57,6 +59,38 @@ enum PreparedHost {
 pub(super) struct PreparedAuthoringDocumentOpen {
     document: Option<PreparedDocument>,
     host: Option<PreparedHost>,
+}
+
+impl PreparedAuthoringDocumentOpen {
+    fn current_source(&self) -> Result<(&str, FileCapability), SourceAdmissionError> {
+        let (path, source) = match self
+            .document
+            .as_ref()
+            .ok_or(SourceAdmissionError::HostUnavailable)?
+        {
+            PreparedDocument::Scene {
+                relative_path,
+                host,
+                ..
+            } => (
+                relative_path.as_ref(),
+                host.try_with(|host| host.read_source()),
+            ),
+            PreparedDocument::Prefab {
+                relative_path,
+                host,
+                ..
+            } => (
+                relative_path.as_ref(),
+                host.try_with(|host| host.read_source()),
+            ),
+        };
+        let file = source
+            .ok_or(SourceAdmissionError::HostUnavailable)?
+            .open()
+            .map_err(|_| SourceAdmissionError::SourceRead)?;
+        Ok((path, file))
+    }
 }
 
 impl Drop for PreparedAuthoringDocumentOpen {
@@ -180,18 +214,22 @@ impl EditorProjectSession {
             return rejected("project.editor.document-index-stale");
         }
 
-        if let Some(document) = self.bound_document(relative_path, kind) {
-            let report = self.workspace.activate_document(document);
+        if let Some(document) = self.exact_source_owner(relative_path) {
+            let expected_kind = match kind {
+                AuthoringDocumentKind::Scene => EditorDocumentKind::Scene,
+                AuthoringDocumentKind::Prefab => EditorDocumentKind::Prefab,
+            };
+            if self.workspace.document_kind(document) != Some(expected_kind) {
+                return rejected("project.editor.document-source-already-open");
+            }
+            let report = self
+                .apply_workspace_command(EditorWorkspaceCommand::SetActiveDocument { document });
             return if report.applied {
                 EditorDocumentOpenRequestResult::Activated { document }
             } else {
                 rejected("project.editor.document-activation-failed")
             };
         }
-        if self.extension_documents.has_source(relative_path) {
-            return rejected("project.editor.document-source-already-open");
-        }
-
         let relative_path: Arc<str> = Arc::from(relative_path);
         let captured = match project.capture_indexed_document(
             Arc::clone(&index),
@@ -201,6 +239,9 @@ impl EditorProjectSession {
             Ok(captured) => captured,
             Err(error) => return rejected(error.code()),
         };
+        if let Err(error) = self.exclude_project_source_aliases(&relative_path) {
+            return rejected(error.code());
+        }
         let Some(next) = self.next_document_open_request.checked_add(1) else {
             return rejected("project.editor.document-open-id-exhausted");
         };
@@ -226,21 +267,6 @@ impl EditorProjectSession {
             cancelled: false,
         });
         EditorDocumentOpenRequestResult::Preparing { request }
-    }
-
-    fn bound_document(
-        &self,
-        relative_path: &str,
-        kind: AuthoringDocumentKind,
-    ) -> Option<EditorDocumentId> {
-        match kind {
-            AuthoringDocumentKind::Scene => self.scene_lanes.values().find_map(|lane| {
-                (lane.project_path.as_ref() == relative_path).then_some(lane.document)
-            }),
-            AuthoringDocumentKind::Prefab => self.prefab_lanes.values().find_map(|lane| {
-                (lane.project_path.as_ref() == relative_path).then_some(lane.document)
-            }),
-        }
     }
 
     fn capture_replacing_document(&self, kind: AuthoringDocumentKind) -> Option<ReplacingDocument> {
@@ -282,7 +308,11 @@ impl EditorProjectSession {
         })
     }
 
-    fn validate_document_open(&self, admission: &OpenAdmission) -> Result<(), &'static str> {
+    fn validate_document_open(
+        &self,
+        admission: &OpenAdmission,
+        prepared: &PreparedAuthoringDocumentOpen,
+    ) -> Result<(), &'static str> {
         if !self.accepts_new_work() {
             return Err("project.editor.document-open-busy");
         }
@@ -292,9 +322,11 @@ impl EditorProjectSession {
         if !Arc::ptr_eq(&current, &admission.index) {
             return Err("project.editor.document-index-stale");
         }
-        if self.extension_documents.has_source(&admission.path) {
-            return Err("project.editor.document-source-already-open");
-        }
+        let (path, current) = prepared
+            .current_source()
+            .map_err(SourceAdmissionError::code)?;
+        self.exclude_source_aliases(path, &current)
+            .map_err(SourceAdmissionError::code)?;
         match (
             &admission.replacing,
             self.capture_replacing_document(admission.kind),
@@ -407,7 +439,7 @@ impl EditorProjectSession {
             return true;
         }
         let prepared = match completion.and_then(|prepared| {
-            self.validate_document_open(&admission)
+            self.validate_document_open(&admission, &prepared)
                 .map(|()| prepared)
                 .map_err(preparation::DocumentOpenFailure::from_code)
         }) {
@@ -448,6 +480,7 @@ impl EditorProjectSession {
     pub(super) fn admit_document_open_retirement(&mut self) -> bool {
         let Some(PendingDocumentOpen::AwaitingClose {
             admission,
+            prepared,
             retirement_admitted,
             ..
         }) = self.pending_document_open.as_ref()
@@ -457,7 +490,7 @@ impl EditorProjectSession {
         if *retirement_admitted {
             return true;
         }
-        if let Err(code) = self.validate_document_open(admission) {
+        if let Err(code) = self.validate_document_open(admission, prepared) {
             self.reject_pending_document_open(code);
             if let Some(pending) = self.pending_workspace_intent.take() {
                 self.workspace_intent_result = Some(EditorWorkspaceIntentResult::Rejected {
@@ -529,6 +562,12 @@ impl EditorProjectSession {
         if !self.accepts_new_work() {
             return Err("project.editor.document-open-busy");
         }
+        let (path, current) = prepared
+            .current_source()
+            .map_err(SourceAdmissionError::code)?;
+        self.exclude_source_aliases(path, &current)
+            .map_err(SourceAdmissionError::code)?;
+        let previous_active = self.workspace.active_document();
         let result = match prepared
             .document
             .take()
@@ -558,7 +597,7 @@ impl EditorProjectSession {
                     digest,
                 );
                 if !binding.applied {
-                    let _ = self.workspace.__discard_document(document);
+                    self.discard_unpublished_document(document, previous_active);
                     return Err("project.editor.scene-persistence-binding-failed");
                 }
                 let _ = self.diagnostics.extend(diagnostics);
@@ -597,7 +636,7 @@ impl EditorProjectSession {
                     digest,
                 );
                 if !binding.applied {
-                    let _ = self.workspace.__discard_document(document);
+                    self.discard_unpublished_document(document, previous_active);
                     return Err("project.editor.prefab-persistence-binding-failed");
                 }
                 let _ = self.diagnostics.extend(diagnostics);

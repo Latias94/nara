@@ -1080,11 +1080,16 @@ fn paint_authoring_view(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) 
         context.output.scene_extent = canvas.desired_extent;
         context.output.canvas_pick_uv = canvas.pick_uv;
     } else {
+        let frame = context.input.frame;
+        let editing = !context.input.read_only
+            && frame
+                .scene_preview_document()
+                .is_some_and(|document| frame.workspace().active_document == Some(document));
         let scene = context.widgets.scene_view.show(
             ui,
             context.input.scene,
             context.input.canvas_presented,
-            !context.input.read_only,
+            editing,
         );
         context.output.scene_extent = scene.desired_extent;
         context.output.scene_mapping = scene.mapping;

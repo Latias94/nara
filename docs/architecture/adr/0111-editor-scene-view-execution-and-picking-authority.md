@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-16
-**Last Revised**: 2026-08-17
+**Last Revised**: 2026-10-24
 **Owner**: Editor Host, `nara_render`, and `nara_render_wgpu`
 **Refines**: [ADR 0017](0017-render-graph-policy.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md),
@@ -92,6 +92,14 @@ must bind document revision, preview generation, image target generation, textur
 generation, window surface generation, backend instance, device epoch, and composite presentation
 generation. A current candidate is display work, not input authority, until the composite receipt
 exists.
+
+Scene image and picking receipts identify the Host's retained Scene preview binding and that
+document's exact revision in the same immutable frame, not the active Inspector document (which
+may be a Prefab or extension). Showing a retained inactive Scene does not grant selection or
+mutation authority: geometry input is disabled until that Scene is explicitly active. Switching
+to an ordinary Prefab must not invalidate an otherwise current Scene receipt merely by comparing
+it with the Prefab identity. Closing the bound source without another explicit binding retires
+the old Scene image; UI Prefab Canvas keeps its separate existing authority and priority.
 
 ### Failure and replacement
 

@@ -116,6 +116,7 @@ impl EditorFrameClock {
             source_asset_import: None,
             source_asset_import_work_pending: false,
             document_open: Default::default(),
+            scene_preview_document: None,
         }
     }
 }
@@ -281,9 +282,24 @@ pub struct EditorFrameModel {
     source_asset_import: Option<crate::EditorSourceAssetImportView>,
     source_asset_import_work_pending: bool,
     document_open: crate::EditorDocumentOpenView,
+    scene_preview_document: Option<EditorDocumentId>,
 }
 
 impl EditorFrameModel {
+    /// Returns the explicitly bound Scene source, independently of the active Inspector document.
+    /// Its revision belongs to this frame's Workspace Scene tab; this is not picking authority.
+    #[must_use]
+    pub const fn scene_preview_document(&self) -> Option<EditorDocumentId> {
+        self.scene_preview_document
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_scene_preview_document(mut self, document: Option<EditorDocumentId>) -> Self {
+        self.scene_preview_document = document;
+        self
+    }
+
     #[doc(hidden)]
     #[must_use]
     pub fn with_source_asset_import(

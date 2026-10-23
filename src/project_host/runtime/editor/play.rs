@@ -4,10 +4,19 @@ impl EditorProjectSession {
     #[must_use]
     #[doc(hidden)]
     pub(crate) fn play_view(&self) -> EditorPlayView {
-        let current_revision = self
-            .workspace
-            .active_scene()
-            .map(nara_tooling::EditorSceneSlot::revision);
+        let play_document = self
+            .trusted_compiled()
+            .and_then(|lane| lane.runtime_owner.document());
+        let current_revision = match play_document {
+            Some(document) => self
+                .workspace
+                .scene(document)
+                .map(nara_tooling::EditorSceneSlot::revision),
+            None => self
+                .workspace
+                .active_scene()
+                .map(nara_tooling::EditorSceneSlot::revision),
+        };
         let Some(lane) = self.trusted_compiled() else {
             let view = EditorPlayView::new(
                 EditorPlayState::Empty,

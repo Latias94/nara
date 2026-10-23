@@ -1,3 +1,4 @@
+use super::source_admission::SourceAdmissionError;
 use super::*;
 
 mod background;
@@ -173,20 +174,36 @@ impl EditorProjectSession {
                 lane.content_candidate.settings().paths.prefabs.as_str()
             }
         };
-        if self
-            .extension_documents
-            .has_source(&format!("{prefab_directory}/{}", source_binding.locator()))
-        {
+        let project_path: Arc<str> =
+            Arc::from(format!("{prefab_directory}/{}", source_binding.locator()));
+        if let Some(document) = self.exact_source_owner(&project_path) {
+            return if self.workspace.document_kind(document) == Some(EditorDocumentKind::Prefab) {
+                self.workspace.activate_document(document)
+            } else {
+                editor_workspace_command_rejected(
+                    self.workspace.active_document(),
+                    "project.editor.document-source-already-open",
+                )
+            };
+        }
+        let exclusion = match &self.execution {
+            EditorExecutionLane::Authoring(_) => self.exclude_project_source_aliases(&project_path),
+            EditorExecutionLane::TrustedCompiled(lane) => {
+                RelativePath::new(source_binding.locator())
+                    .map_err(|_| SourceAdmissionError::SourceRead)
+                    .and_then(|path| {
+                        lane.prefab_root
+                            .open_file(&path)
+                            .map_err(|_| SourceAdmissionError::SourceRead)
+                    })
+                    .and_then(|file| self.exclude_source_aliases(&project_path, &file))
+            }
+        };
+        if let Err(error) = exclusion {
             return editor_workspace_command_rejected(
                 self.workspace.active_document(),
-                "project.editor.document-source-already-open",
+                error.code(),
             );
-        }
-        if let Some(document) = self
-            .workspace
-            .document_for_source_binding(EditorDocumentKind::Prefab, &source_binding)
-        {
-            return self.workspace.activate_document(document);
         }
         if !self.prefab_lanes.is_empty() {
             return editor_workspace_command_rejected(
@@ -221,14 +238,19 @@ impl EditorProjectSession {
                 );
             }
         };
-        let project_path = self
-            .trusted_compiled()
-            .map(|lane| lane.content_candidate.settings().paths.prefabs.as_str())
-            .map_or_else(
-                || Arc::from(source_binding.locator()),
-                |root| Arc::from(format!("{root}/{}", source_binding.locator())),
+        if let Err(error) = host
+            .read_source()
+            .open()
+            .map_err(|_| SourceAdmissionError::SourceRead)
+            .and_then(|file| self.exclude_source_aliases(&project_path, &file))
+        {
+            return editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                error.code(),
             );
+        }
         let title = source_binding.locator().to_owned();
+        let previous_active = self.workspace.active_document();
         let report = match self
             .workspace
             .open_prefab_session(title, source_binding, session)
@@ -249,14 +271,14 @@ impl EditorProjectSession {
         };
         let binding = self.bind_opened_prefab_source_digest(document, digest);
         if !binding.applied {
-            let _ = self.workspace.__discard_document(document);
+            self.discard_unpublished_document(document, previous_active);
             return editor_workspace_command_rejected(
                 self.workspace.active_document(),
                 "project.editor.prefab-persistence-binding-failed",
             );
         }
         let Some(host) = self.authoring_runtime.host_custody().retain_prefab(host) else {
-            let _ = self.workspace.__discard_document(document);
+            self.discard_unpublished_document(document, previous_active);
             return editor_workspace_command_rejected(
                 self.workspace.active_document(),
                 "project.editor.document-open-busy",
@@ -387,7 +409,19 @@ impl EditorProjectSession {
             prefab_directory.as_str(),
             source_binding.locator()
         ));
+        if let Err(error) = host
+            .read_source()
+            .open()
+            .map_err(|_| SourceAdmissionError::SourceRead)
+            .and_then(|file| self.exclude_source_aliases(&project_path, &file))
+        {
+            return editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                error.code(),
+            );
+        }
         let title = source_binding.locator().to_owned();
+        let previous_active = self.workspace.active_document();
         let report = match self
             .workspace
             .open_prefab_session(title, source_binding, session)
@@ -408,7 +442,7 @@ impl EditorProjectSession {
         };
         let binding = self.bind_opened_prefab_source_digest(document, opened_digest);
         if !binding.applied {
-            let _ = self.workspace.__discard_document(document);
+            self.discard_unpublished_document(document, previous_active);
             return editor_workspace_command_rejected(
                 self.workspace.active_document(),
                 "project.editor.prefab-persistence-binding-failed",
@@ -420,7 +454,7 @@ impl EditorProjectSession {
             AuthoringPrefabSourceObservation::new(identity, content_digest),
         );
         let Some(host) = self.authoring_runtime.host_custody().retain_prefab(host) else {
-            let _ = self.workspace.__discard_document(document);
+            self.discard_unpublished_document(document, previous_active);
             return editor_workspace_command_rejected(
                 self.workspace.active_document(),
                 "project.editor.document-open-busy",

@@ -18,6 +18,7 @@ static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
 
 struct Fixture {
     root: PathBuf,
+    capability: DirectoryCapability,
 }
 
 impl Fixture {
@@ -45,10 +46,15 @@ impl Fixture {
             SceneDocument::default().to_json_string().unwrap(),
         )
         .unwrap();
-        Self { root }
+        let capability = Self::open_capability(&root);
+        Self { root, capability }
     }
 
     fn capability(&self) -> DirectoryCapability {
+        self.capability.share()
+    }
+
+    fn open_capability(root: &std::path::Path) -> DirectoryCapability {
         #[cfg(windows)]
         let file = {
             use std::os::windows::fs::OpenOptionsExt;
@@ -56,11 +62,11 @@ impl Fixture {
                 .read(true)
                 .share_mode(7)
                 .custom_flags(0x0200_0000 | 0x0020_0000)
-                .open(&self.root)
+                .open(root)
                 .unwrap()
         };
         #[cfg(target_os = "linux")]
-        let file = fs::File::open(&self.root).unwrap();
+        let file = fs::File::open(root).unwrap();
         DirectoryCapability::from_host_handle(
             file,
             nara_fs::HostCapabilityOptions::new(
@@ -650,4 +656,439 @@ fn held_cleanup_keeps_only_its_document_open_while_another_owner_can_save() {
         assert_eq!(editor.workspace.document_kind(b), None);
         close(&mut editor);
     }
+}
+
+#[test]
+fn explicit_scene_selection_owns_preview_binding_and_close_never_falls_back() {
+    use nara_tooling::{EditorAction, EditorActionBatch, EditorNavigationAction};
+    let fixture = Fixture::new();
+    let mut editor = fixture.editor();
+    let a = editor.scene_preview_document.unwrap();
+    let b = fixture.add(&mut editor, EditorDocumentKind::Scene, "second.json");
+    let prefab = fixture.add(&mut editor, EditorDocumentKind::Prefab, "inspected.json");
+    let select = |editor: &mut EditorProjectSession, document| {
+        let frame = editor.drive_editor_frame(Duration::ZERO);
+        editor
+            .dispatch_editor_actions(EditorActionBatch::new(
+                frame.revision(),
+                [EditorAction::Navigate(
+                    EditorNavigationAction::SetActiveDocument { document },
+                )],
+            ))
+            .unwrap();
+    };
+    select(&mut editor, b);
+    let bound_b = editor.scene_preview_document;
+    let bound_frame = editor.drive_editor_frame(Duration::ZERO);
+    select(&mut editor, prefab);
+    let retained_b = editor.scene_preview_document;
+    let prefab_frame = editor.drive_editor_frame(Duration::ZERO);
+    select(&mut editor, a);
+    assert_eq!(
+        editor.request_workspace_intent(EditorWorkspaceIntent::CloseDocument { document: a }),
+        EditorWorkspaceIntentRequestResult::Accepted
+    );
+    editor.advance_workspace_retirement();
+    let after_close = editor.scene_preview_document;
+    let active_after_close = editor.workspace.active_document();
+    assert!(editor.acknowledge_workspace_intent_result());
+    select(&mut editor, b);
+    let reselected_b = editor.scene_preview_document;
+    close(&mut editor);
+    assert_eq!(bound_b, Some(b));
+    assert_eq!(retained_b, Some(b));
+    assert_eq!(bound_frame.scene_preview_document(), Some(b));
+    assert_eq!(prefab_frame.scene_preview_document(), Some(b));
+    assert_eq!(
+        prefab_frame.workspace().active_scene.as_ref().unwrap().kind,
+        EditorDocumentKind::Prefab
+    );
+    assert_eq!(after_close, None);
+    assert_eq!(active_after_close, Some(b));
+    assert_eq!(reselected_b, Some(b));
+}
+
+struct SourceProbe {
+    bytes: Box<[u8]>,
+    state: nara_core::DocumentContentState,
+}
+
+fn probe_error() -> nara_tooling::EditorExtensionDocumentError {
+    nara_tooling::EditorExtensionDocumentError::new(
+        nara_diagnostic::DiagnosticCode::new("custody.probe-read-only").unwrap(),
+        nara_diagnostic::SafeSummary::new("The source probe has no editable commands").unwrap(),
+    )
+}
+
+impl nara_tooling::EditorExtensionDocument for SourceProbe {
+    type Command = ();
+    type View = ();
+    const TYPE_ID: &'static str = "nara.test.SourceProbe";
+    fn title(&self) -> &str {
+        "Source probe"
+    }
+    fn content_state(&self) -> nara_core::DocumentContentState {
+        self.state
+    }
+    fn history_status(&self) -> nara_core::DocumentHistoryStatus {
+        Default::default()
+    }
+    fn view(&self) {}
+    fn apply(&mut self, _: &()) -> Result<(), nara_tooling::EditorExtensionDocumentError> {
+        Err(probe_error())
+    }
+    fn undo(&mut self) -> Result<(), nara_tooling::EditorExtensionDocumentError> {
+        Err(probe_error())
+    }
+    fn redo(&mut self) -> Result<(), nara_tooling::EditorExtensionDocumentError> {
+        Err(probe_error())
+    }
+    fn encode(&self) -> Result<Vec<u8>, nara_tooling::EditorExtensionDocumentError> {
+        Ok(self.bytes.to_vec())
+    }
+    fn decode(bytes: &[u8]) -> Result<Self, nara_tooling::EditorExtensionDocumentError> {
+        Ok(Self {
+            bytes: bytes.into(),
+            state: nara_core::DocumentRevision::initial().content_state(),
+        })
+    }
+}
+
+impl Fixture {
+    fn add_probe(&self, editor: &mut EditorProjectSession, name: &str) -> EditorDocumentId {
+        fs::create_dir_all(self.root.join("probes")).unwrap();
+        let source = format!("probes/{name}");
+        fs::write(
+            self.root.join(&source),
+            SceneDocument::default().to_json_string().unwrap(),
+        )
+        .unwrap();
+        editor
+            .open_extension_document::<SourceProbe>(&source)
+            .unwrap()
+    }
+}
+
+#[test]
+fn source_exclusion_checks_later_owners_across_every_source_domain() {
+    use nara_tooling::EditorExtensionDocument;
+    for kind in [
+        EditorDocumentKind::Scene,
+        EditorDocumentKind::Prefab,
+        EditorDocumentKind::Extension(SourceProbe::TYPE_ID),
+    ] {
+        let fixture = Fixture::new();
+        let mut editor = fixture.editor();
+        let source = match kind {
+            EditorDocumentKind::Scene | EditorDocumentKind::Prefab => {
+                fixture.add(&mut editor, kind, "first.json");
+                fixture.add(&mut editor, kind, "owner.json");
+                format!(
+                    "{}/owner.json",
+                    if kind == EditorDocumentKind::Scene {
+                        "scenes"
+                    } else {
+                        "prefabs"
+                    }
+                )
+            }
+            EditorDocumentKind::Extension(_) => {
+                editor.register_extension_document::<SourceProbe>().unwrap();
+                fixture.add_probe(&mut editor, "first.json");
+                fixture.add_probe(&mut editor, "owner.json");
+                "probes/owner.json".to_owned()
+            }
+        };
+        let active = editor.workspace.active_document();
+        for alias in [
+            "scenes/alias.scene.json",
+            "prefabs/alias.prefab.json",
+            "alias.extension.json",
+        ] {
+            fs::hard_link(fixture.root.join(&source), fixture.root.join(alias)).unwrap();
+            let current = fixture
+                .capability()
+                .open_file(&RelativePath::new(alias).unwrap())
+                .unwrap();
+            assert_eq!(
+                editor.exclude_source_aliases(alias, &current),
+                Err(SourceAdmissionError::AlreadyOpen),
+                "owner: {kind:?}, candidate: {alias}"
+            );
+            assert_eq!(editor.workspace.active_document(), active);
+        }
+        close(&mut editor);
+    }
+}
+
+#[test]
+fn source_exclusion_refuses_busy_or_retired_hosts_in_every_domain() {
+    use nara_tooling::EditorExtensionDocument;
+    for kind in [
+        EditorDocumentKind::Scene,
+        EditorDocumentKind::Prefab,
+        EditorDocumentKind::Extension(SourceProbe::TYPE_ID),
+    ] {
+        let fixture = Fixture::new();
+        let mut editor = fixture.editor();
+        let document = if matches!(kind, EditorDocumentKind::Extension(_)) {
+            editor.register_extension_document::<SourceProbe>().unwrap();
+            fixture.add_probe(&mut editor, "busy.json")
+        } else {
+            fixture.add(&mut editor, kind, "busy.json")
+        };
+        fs::write(fixture.root.join("candidate.json"), b"unclaimed").unwrap();
+        let current = fixture
+            .capability()
+            .open_file(&RelativePath::new("candidate.json").unwrap())
+            .unwrap();
+        let lane = editor.capture_persistence_lane(document).unwrap();
+        let result = match &lane {
+            PersistenceLane::Scene(lane) => lane
+                .host
+                .try_with(|_| editor.exclude_source_aliases("candidate.json", &current))
+                .unwrap(),
+            PersistenceLane::Prefab(lane) => lane
+                .host
+                .try_with(|_| editor.exclude_source_aliases("candidate.json", &current))
+                .unwrap(),
+            PersistenceLane::Extension(lane) => lane
+                .host
+                .try_with(|_| editor.exclude_source_aliases("candidate.json", &current))
+                .unwrap(),
+        };
+        assert_eq!(result, Err(SourceAdmissionError::HostUnavailable));
+        match &lane {
+            PersistenceLane::Scene(lane) => assert!(lane.host.retire()),
+            PersistenceLane::Prefab(lane) => assert!(lane.host.retire()),
+            PersistenceLane::Extension(lane) => assert!(lane.host.retire()),
+        }
+        assert_eq!(
+            editor.exclude_source_aliases("candidate.json", &current),
+            Err(SourceAdmissionError::HostUnavailable)
+        );
+        close(&mut editor);
+    }
+}
+
+#[test]
+fn source_exclusion_observes_atomic_replacement_and_retained_parent_rename() {
+    for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
+        let fixture = Fixture::new();
+        let mut editor = fixture.editor();
+        let document = fixture.add(&mut editor, kind, "saved.json");
+        let directory = if kind == EditorDocumentKind::Scene {
+            "scenes"
+        } else {
+            "prefabs"
+        };
+        let source = fixture.root.join(directory).join("saved.json");
+        fs::hard_link(&source, fixture.root.join("old.json")).unwrap();
+        edit(&mut editor, document, "new-source");
+        assert_eq!(
+            editor.request_persistence(EditorPersistenceCommand::Save {
+                document: Some(document)
+            }),
+            EditorPersistenceRequestResult::Accepted
+        );
+        assert!(matches!(
+            settle(&mut editor),
+            EditorPersistenceResult::Saved { .. }
+        ));
+        let old = fixture
+            .capability()
+            .open_file(&RelativePath::new("old.json").unwrap())
+            .unwrap();
+        assert_eq!(editor.exclude_source_aliases("old.json", &old), Ok(()));
+        fs::hard_link(&source, fixture.root.join("current.json")).unwrap();
+        let current = fixture
+            .capability()
+            .open_file(&RelativePath::new("current.json").unwrap())
+            .unwrap();
+        fs::rename(fixture.root.join(directory), fixture.root.join("moved")).unwrap();
+        assert_eq!(
+            editor.exclude_source_aliases("current.json", &current),
+            Err(SourceAdmissionError::AlreadyOpen)
+        );
+        close(&mut editor);
+    }
+}
+
+#[test]
+fn trusted_play_divergence_follows_its_source_while_inspecting_a_prefab() {
+    let fixture = Fixture::new();
+    let mut editor = fixture.editor();
+    let source = editor.scene_preview_document.unwrap();
+    let prefab = fixture.add(&mut editor, EditorDocumentKind::Prefab, "inspected.json");
+    assert!(
+        editor
+            .apply_workspace_command(EditorWorkspaceCommand::SetActiveDocument { document: source })
+            .applied
+    );
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Play),
+        EditorPlayRequestResult::Accepted
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while editor.play_view().state() != EditorPlayState::Running {
+        assert!(
+            Instant::now() < deadline,
+            "trusted Play did not reach Running: {:?}",
+            editor.play_view()
+        );
+        editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        editor
+            .apply_workspace_command(EditorWorkspaceCommand::SetActiveDocument { document: prefab })
+            .applied
+    );
+    edit(&mut editor, source, "source-changed");
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    let out_of_date = frame.play().is_out_of_date();
+    let observed_revision = frame.play().current_revision();
+    let expected_revision = editor.workspace.document_revision(source);
+    let _ = editor.request_play(EditorPlayCommand::AcknowledgeResult);
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Stop),
+        EditorPlayRequestResult::Accepted
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while editor.play_view().state() != EditorPlayState::Empty {
+        assert!(Instant::now() < deadline, "trusted Stop did not retire");
+        editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    close(&mut editor);
+    assert!(
+        out_of_date,
+        "navigation must not hide a later edit of the retained Play source"
+    );
+    assert_eq!(observed_revision, expected_revision);
+}
+
+#[test]
+fn failed_prefab_publication_restores_the_exact_active_document_and_preview() {
+    use nara_tooling::{
+        EditorAction, EditorActionBatch, EditorActionOutcome, EditorNavigationAction,
+    };
+    let fixture = Fixture::new();
+    let anchor_id = SceneEntityId::new("anchor").unwrap();
+    let mut anchor = SceneEntityRecord::new(anchor_id.clone());
+    anchor.prefab = Some(nara_scene::PrefabInstance {
+        source: nara_asset::AssetRef::path("rollback.prefab.json").unwrap(),
+        overrides: Default::default(),
+    });
+    fs::write(
+        fixture.root.join("scenes/startup.scene.json"),
+        SceneDocument::from_ordered_roots([anchor])
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join("prefabs/rollback.prefab.json"),
+        PrefabDocument::default().to_json_string().unwrap(),
+    )
+    .unwrap();
+    let mut editor = fixture.editor();
+    let scene = editor.workspace.active_document().unwrap();
+    assert!(
+        editor
+            .apply_workspace_command(EditorWorkspaceCommand::SelectEntity {
+                document: scene,
+                entity: Some(anchor_id.clone())
+            })
+            .applied
+    );
+    let active = fixture.add(&mut editor, EditorDocumentKind::Scene, "active.json");
+    assert!(
+        editor
+            .apply_workspace_command(EditorWorkspaceCommand::SetActiveDocument { document: active })
+            .applied
+    );
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    editor.test_reject_next_prefab_source_binding();
+    let report = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Navigate(
+                EditorNavigationAction::OpenPrefabSource {
+                    document: scene,
+                    base_revision: editor.workspace.document_revision(scene).unwrap(),
+                    entity: anchor_id,
+                },
+            )],
+        ))
+        .unwrap();
+    let after = editor.drive_editor_frame(Duration::ZERO);
+    let binding = editor.scene_preview_document;
+    close(&mut editor);
+    assert!(
+        matches!(&report.outcomes()[0], EditorActionOutcome::Workspace(report) if !report.applied)
+    );
+    assert_eq!(after.workspace(), frame.workspace());
+    assert_eq!(after.workspace().active_document, Some(active));
+    assert_eq!(binding, Some(active));
+}
+
+#[test]
+fn trusted_anchor_open_uses_its_retained_prefab_directory_after_rename() {
+    use nara_tooling::{
+        EditorAction, EditorActionBatch, EditorActionOutcome, EditorNavigationAction,
+    };
+    let fixture = Fixture::new();
+    let anchor_id = SceneEntityId::new("anchor").unwrap();
+    let mut anchor = SceneEntityRecord::new(anchor_id.clone());
+    anchor.prefab = Some(nara_scene::PrefabInstance {
+        source: nara_asset::AssetRef::path("retained.prefab.json").unwrap(),
+        overrides: Default::default(),
+    });
+    fs::write(
+        fixture.root.join("scenes/startup.scene.json"),
+        SceneDocument::from_ordered_roots([anchor])
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        fixture.root.join("prefabs/retained.prefab.json"),
+        PrefabDocument::default().to_json_string().unwrap(),
+    )
+    .unwrap();
+    let mut editor = fixture.editor();
+    let scene = editor.workspace.active_document().unwrap();
+    assert!(
+        editor
+            .apply_workspace_command(EditorWorkspaceCommand::SelectEntity {
+                document: scene,
+                entity: Some(anchor_id.clone())
+            })
+            .applied
+    );
+    fs::rename(
+        fixture.root.join("prefabs"),
+        fixture.root.join("moved-prefabs"),
+    )
+    .unwrap();
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    let result = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Navigate(
+                EditorNavigationAction::OpenPrefabSource {
+                    document: scene,
+                    base_revision: editor.workspace.document_revision(scene).unwrap(),
+                    entity: anchor_id,
+                },
+            )],
+        ))
+        .unwrap();
+    close(&mut editor);
+    assert!(
+        matches!(&result.outcomes()[0], EditorActionOutcome::Workspace(report) if report.applied && report.opened_document.is_some()),
+        "{:?}",
+        result.outcomes()
+    );
 }

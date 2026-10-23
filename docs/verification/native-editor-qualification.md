@@ -72,6 +72,18 @@ retired by their existing owners. Allow up to ten minutes for build/READY on a c
 ## Broader Qualification
 
 When the change affects image/Canvas workflows, project opening, docking/layout, or supervised builds, also execute the corresponding ignored native tests.
+For retained Scene source selection and ordinary Prefab/Canvas navigation, execute:
+
+```powershell
+cargo +1.95.0 nextest run -p nara-editor --lib --locked --run-ignored only -E 'test(native_retained_scene_receipt_survives_prefab_navigation_and_bound_close) | test(native_ui_canvas_priority_survives_closing_retained_scene)' --test-threads=1
+```
+
+These hidden-window trajectories qualify the retained Scene's exact presentation receipt while
+an ordinary Prefab is active, disabled inactive-Scene picking, explicit return to the bound Scene,
+and retirement when that Scene closes. The second trajectory separately preserves active UI
+Prefab Canvas priority through Scene Close and retires it after its own source closes. They do
+not qualify additive same-kind Open or multiple simultaneous preview Runtimes.
+
 The full native platform group can be selected with:
 
 ```powershell
