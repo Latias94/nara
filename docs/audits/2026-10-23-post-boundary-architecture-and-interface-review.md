@@ -13,6 +13,11 @@ This pass follows the completed
 It does not reopen the repaired L01-L10, SF1-SF5 or AF1-AF5 counterexamples in the
 [earlier follow-ups](2026-10-23-low-level-refactor-review-followups.md).
 
+The subsequent [replacement design](../architecture/post-boundary-contract-redesign.md) analyzes
+PB1-PB7 together with E1/E2 below, including the user's ECS naming follow-up at `efefb40`. It selects
+bounded owner corrections and deletion targets; it does not change the evidence baseline or mark
+these findings implemented.
+
 Three independent Codex reviewers traced App/Runtime/Tasks, Asset/Image/Watcher/Render/Transform,
 and Reflect/Scene/Hierarchy/Identity. The integrating reviewer traced filesystem capabilities and
 real two-level-game consumers, challenged findings, and ran focused probes. Specific counterarguments
@@ -285,7 +290,9 @@ still captures and validates its exact baseline and metadata identity.
 source-only retry must recover. Preserve rejection after genuine intervening state/slot writes,
 wrong metadata identity and stale task completion; never revive deleted pixels.
 
-## Consumer Ergonomics: Exclusive Scene Access
+## Interface Design Debts
+
+### E1: Exclusive Scene Access
 
 The two-level game repeatedly constructs `SystemState<CurrentScene>` or `SystemState<ProjectScenes>`
 inside exclusive `&mut World` workflows:
@@ -302,6 +309,31 @@ the SystemParam implementation and preserve private owners, request-slot custody
 source/receipt association. Compare it with caching SystemState in the existing exclusive system
 before selecting an interface. Do not expose internal resources or create a generic World facade.
 Acceptance is a simpler real game with unchanged travel, save, restart and cancellation behavior.
+
+### E2: Full ECS Access Uses a Relational Name Instead of the Dependency Name
+
+**Classification:** interface clarity, not an additional correctness finding or P1/P2 defect.
+
+The [complete substrate entry](../../crates/nara_ecs/src/lib.rs#L39) is a direct Bevy ECS
+re-export named `upstream`. ADRs 0002/0044 correctly separate selected Nara authoring, complete
+version-coupled dependency access, and hidden generated/internal support. That split remains useful.
+The alias itself is less explicit at call sites: it says the dependency is upstream but not which
+dependency or what scope is exposed.
+
+Select `nara_ecs::bevy_ecs` and `nara::ecs::bevy_ecs` as the full dependency entry when this design
+is implemented. Keep ordinary authoring imports and the six adapted derives unchanged. This exposes
+existing coupling honestly; it does not create backend independence or give unadapted Bevy macros
+the Nara-only dependency guarantee. `bevy`, `raw` and `advanced` communicate scope less accurately;
+requiring a direct dependency is unnecessary for access to Nara's selected Bevy version.
+
+Remove the public `upstream` alias during adoption, with ADR 0002/0044 reconciliation and precise
+root/direct/renamed-consumer migration. Do not maintain two canonical names in this unreleased
+project. Preserve historical reports and the derive provenance directory, where upstream describes
+actual lineage rather than a current public import.
+
+E2 does not repair E1. Do not merely shorten `SystemState` imports or expand the ordinary prelude
+to hide domain access choreography. The replacement design provides borrowed current-Scene access
+and scoped exclusive request access while retaining the SystemParam path and private owners.
 
 ## Architectural Interpretation and Refactor Order
 
@@ -337,6 +369,7 @@ Recommended bounded order, if implementation is selected:
 | R5 | PB6 Image prepared association | Make caches consume owner-coherent data | Public/code-first consumers, UI planner, warm-cache GPU readback |
 | R6 | PB7 durable recovery authority | Stop treating queue rejection as revocation | Complete removal/rejection/retry plus stale-write/metadata controls |
 | E1 | Exclusive Scene access, after contract repairs | Reduce actual caller choreography | Two-level game and renamed public consumer; no performance claim without measurement |
+| E2 | Explicit `bevy_ecs` entry, with E1 settled | Make the full dependency contract self-explanatory | Original type identity, adapted derives, full access and direct/root/renamed import coverage |
 
 ADRs 0052, 0070, 0081 and 0033/0037 already own these responsibilities; implementation should clarify
 their affected clauses where the chosen contract changes. Runtime lifecycle/Host scope decisions

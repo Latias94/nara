@@ -92,6 +92,10 @@ records open driver-output, task-disposal, filesystem-cursor, post-flush admissi
 association/recovery findings against `10ccc36`. It separates current-source and cached-artifact
 probes from source-only paths, and proposes bounded owner refactors without changing Accepted ADRs
 or claiming their implementation is complete.
+Its [replacement design](post-boundary-contract-redesign.md) includes lossless owned driver calls,
+task-disposal custody/outcome, capability-owned write position, post-flush admission, Image-owned
+prepared/recovery facts, and separate Scene ergonomics/full Bevy entry naming. It remains proposed
+until the affected contracts and implementations are adopted and qualified.
 
 The [spatial affine representation design](spatial-affine-representation-design.md) retains
 post-affine residuals, direct affine and authoring-field alternatives for a future concrete import
