@@ -4,6 +4,11 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-10-23
+* **Work Registration**: [ADR boundaries and frozen execution complete](registry/2026-10/2026-10-23T034220Z-adr-frozen-execution-codex-root-20261023-da3b57d858534440984ed927e02c6b9c.md) - Work Registration for ADR boundaries and frozen execution complete.
+* **Verification Evidence**: [ADR boundary and frozen codec execution verification](verification/2026-10/2026-10-23T022246Z-adr-boundary-and-frozen-codec-execution-verification-b210d1cf09c94203b04bffcfa1dbe236.md) - Serial workspace, independent consumer and focused Editor verification for the ADR boundary and frozen codec refactor.
+* **Work Registration**: [ADR boundaries and frozen execution](registry/2026-10/2026-10-23T011808Z-adr-frozen-execution-codex-root-20261023-703d17a303c94174bf947e98eb93ad62.md) - Work Registration for ADR boundaries and frozen execution.
+
 ## 2026-10-22
 * **Work Registration**: [Low-level fearless refactor qualified](registry/2026-10/2026-10-22T203958Z-low-level-contract-refactor-codex-root-20261023-ad4959c965c747e6a005503f43da6847.md) - Work Registration for Low-level fearless refactor qualified.
 * **Work Progress**: [Low-level refactor committed with final export trajectory running](progress/2026-10/2026-10-22T202949Z-low-level-refactor-committed-with-final-export-trajectory-running-b22809814890485c88d31cd3107d6623.md) - U4 U5 U10 and all earlier units committed; owner consumer native and cost evidence pass; actual CLI Export and final doc/fmt remain.
@@ -130,6 +135,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 ## 2026-10-18
 * **Verification Evidence**: [Component plugin and asset contract refactor](verification/2026-10/2026-10-18T164837Z-component-plugin-and-asset-contract-refactor-b4c2497eff5d4bdb90cebe1de995ceb3.md) - Checked runtime identities and typed claims, schema closure, exact TileSet admission, and consumer migration.
 * **Verification Evidence**: [F11 hierarchy candidate cost refactor](verification/2026-10/2026-10-18T095114Z-f11-hierarchy-candidate-cost-refactor-8570db0da1ef433dbab5368a9d0f59e6.md) - Sparse candidate overlay and private validated baseline reduce measured hierarchy transaction cost while preserving raw-dirty and lifecycle contracts.
-* **Verification Evidence**: [Foundation contract refactor scoped completion](verification/2026-10/2026-10-18T064513Z-foundation-contract-refactor-scoped-completion-299571832cbc4aa28cc9d5d3743bd527.md) - Final closure, durable references, real multi-owner reconciliation and measured scale evidence complete the required foundation slice.
-* **Work Progress**: [Foundation U3 effective values and reference closure](progress/2026-10/2026-10-18T053959Z-u3-effective-closure.md) - Effective default materialization, scene/prefab/export closure, asset collection limits, and Inspector projection landed after U2.
-* **Work Progress**: [Foundation identity residency, input endpoint and font ownership repairs](progress/2026-10/2026-10-18T040444Z-foundation-identity-input-font-repairs.md) - U5, U11 and U14 code and consumer proof, remaining recursive-schema work, serial test evidence and limits.

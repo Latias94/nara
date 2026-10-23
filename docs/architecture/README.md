@@ -82,6 +82,16 @@ CPU, memory, build size or frame P99.
 
 ## Background Designs
 
+The [ADR boundary and frozen-execution plan](../plans/2026-10-23-adr-boundaries-and-frozen-execution-plan.md)
+refines ADRs 0002/0044/0081 and narrows future spatial/asset representation commitments. Its
+[qualification record](../knowledge/engineering/verification/2026-10/2026-10-23T022246Z-adr-boundary-and-frozen-codec-execution-verification-b210d1cf09c94203b04bffcfa1dbe236.md)
+binds implementation `05531a0` to executed owner, public-consumer and selected native evidence.
+
+The [spatial affine representation design](spatial-affine-representation-design.md) retains
+post-affine residuals, direct affine and authoring-field alternatives for a future concrete import
+or world-preserving edit workflow. ADR 0097 accepts domain boundaries and the supported 2D model;
+it no longer fixes future 3D schema fields, residual normalization or a no-format-change promise.
+
 The [asset extension Host interface design](asset-extension-host-interface-design.md) compares
 pinned Bevy/Godot and Unity resource-import seams, then proposes operation-specific typed domain
 contributions coordinated by Nara's Check, Play, and source-carrying Export Hosts. ADR 0103 now

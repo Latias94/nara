@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "d05a8b7bbe1ae29e90df7d46662cda86dcf4c5cc9d26a8d88de54b188bf87e6c"
+source_fingerprint: "d77b4580abc0c173a47c8c31cafb35bbf4064ebe1d4baad2102771d2d59d0b18"
 ---
 
 # Current State
@@ -12,12 +12,13 @@ source_fingerprint: "d05a8b7bbe1ae29e90df7d46662cda86dcf4c5cc9d26a8d88de54b188bf
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `d05a8b7bbe1ae29e90df7d46662cda86dcf4c5cc9d26a8d88de54b188bf87e6c`
-- Immutable records: 847
+- Source fingerprint: `d77b4580abc0c173a47c8c31cafb35bbf4064ebe1d4baad2102771d2d59d0b18`
+- Immutable records: 850
 - Active lane heads: 1
 
 # Active Registrations
 
+- [ADR boundaries and frozen execution complete](registry/2026-10/2026-10-23T034220Z-adr-frozen-execution-codex-root-20261023-da3b57d858534440984ed927e02c6b9c.md): `completed` (adr-frozen-execution-codex-root-20261023; producer `codex-root`)
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
 - [Authoring S1 corrections complete; S2 remains proposed](registry/2026-10/2026-10-19T144026Z-authoring-workflow-s1-codex-root-2fbf60933b96475b84d9483c6acb0d3e.md): `completed` (authoring-workflow-s1-codex-root; producer `codex-root`)
 - [Authoring S2 field editing workflow complete](registry/2026-10/2026-10-19T154515Z-authoring-workflow-s2-codex-root-3cac208816154dd2b1c31ddf0272824b.md): `complete` (authoring-workflow-s2-codex-root; producer `codex-root`)
@@ -68,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [ADR boundary and frozen codec execution verification](verification/2026-10/2026-10-23T022246Z-adr-boundary-and-frozen-codec-execution-verification-b210d1cf09c94203b04bffcfa1dbe236.md) - Serial workspace, independent consumer and focused Editor verification for the ADR boundary and frozen codec refactor.
 - **Work Progress**: [Low-level refactor committed with final export trajectory running](progress/2026-10/2026-10-22T202949Z-low-level-refactor-committed-with-final-export-trajectory-running-b22809814890485c88d31cd3107d6623.md) - U4 U5 U10 and all earlier units committed; owner consumer native and cost evidence pass; actual CLI Export and final doc/fmt remain.
 - **Work Progress**: [Low-level final owner and native qualification checkpoint](progress/2026-10/2026-10-22T200735Z-low-level-final-owner-and-native-qualification-checkpoint-cf5df2d75d3446d6bfc48744fce22d6c.md) - U5 and U10 committed; all final owner and five native trajectories pass, U4 costs and integration closure remain.
 - **Verification Evidence**: [U4 immutable spatial cuts and exact hierarchy publication](verification/2026-10/2026-10-22T194451Z-u4-immutable-spatial-cuts-and-exact-hierarchy-publication-4023754775ba445a887c9056715584e0.md) - Phase readers replace transferable globals; real foreign hierarchy order, same-tick edits and measured costs are qualified.
@@ -79,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Low-level implementation integration checkpoint](progress/2026-10/2026-10-22T190500Z-low-level-implementation-integration-checkpoint-536737a5326142e5b1376e520fb0fe30.md) - U1 U2 U7 U9 committed; owned locks identity typed codecs and spatial/gameplay implementations are being qualified serially.
 - **Verification Evidence**: [U7 facade-aware Bundle and SystemParam extraction](verification/2026-10/2026-10-22T190137Z-u7-facade-aware-bundle-and-systemparam-extraction-f14b220201744f71a90a123e476b1769.md) - Exact Bevy 0.20 extraction and executed renamed-root and renamed-ECS contracts with independent review.
 - **Verification Evidence**: [U9 key allocation admission and finite shortest-arc interpolation](verification/2026-10/2026-10-22T183934Z-u9-key-allocation-admission-and-finite-shortest-arc-interpolation-144afcea6c9846dab566ddcfe1eec9a5.md) - Original allocation and numeric regressions reproduced; shared key visitor and endpoint-oriented interpolation repaired.
-- **Verification Evidence**: [U2 task return and physical running accounting](verification/2026-10/2026-10-22T181737Z-u2-task-return-and-physical-running-accounting-ce30f14820ee4350931de3355bb0c955.md) - Executor return observer replaces local preparation flags; gated disposal and panic regressions qualify its scope.
 
 # Integration Notes
 
