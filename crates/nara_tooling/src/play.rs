@@ -257,11 +257,16 @@ impl EditorPlayView {
         self.generation
     }
 
+    /// The admitted trusted snapshot's incarnation/revision, retained through cancellation and
+    /// physical retirement. Its presence does not imply an active Runtime or edit authority.
+    /// External Play reports its saved-source basis through [`Self::external`] instead.
     #[must_use]
     pub const fn source_revision(&self) -> Option<SceneAuthoringRevision> {
         self.source_revision
     }
 
+    /// The current revision of the retained trusted source, independent of active navigation.
+    /// Without a trusted owner, the Host may project the active Scene as next-Play context.
     #[must_use]
     pub const fn current_revision(&self) -> Option<SceneAuthoringRevision> {
         self.current_revision

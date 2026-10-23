@@ -902,7 +902,7 @@ impl EditorProjectSession {
         let actual_document = self
             .trusted_compiled()
             .and_then(|lane| match &lane.runtime_owner {
-                EditorRuntimeOwnerState::Active { document, .. } => Some(*document),
+                EditorRuntimeOwnerState::Active { source, .. } => Some(source.document),
                 _ => None,
             });
         if actual_document != Some(document) {

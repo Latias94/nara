@@ -150,6 +150,15 @@ Rules:
   merge, save-as, or keep-local actions, but these are explicit workspace commands.
 - Play Mode is anchored to a document snapshot and workspace mode state. Stop Play still discards
   runtime changes by default; Apply Changes flows back through document patches and normal undo.
+  Trusted Play retains its exact source document/incarnation/revision through Starting, Game target
+  handoff, cancellation and physical retirement, including incomplete cleanup and retry. Closing
+  another document restores that owner unchanged and proceeds with only the closing document's
+  own persistence and cleanup obligations. It must not cancel a start reservation, consume a Game
+  activation, replace a pending control/result or stop an unrelated Runtime. Closing the associated
+  source, or whole-session Exit, still waits for its actual cancellation/Stop and physical return.
+  A prepared Game activation already handed out must finish its exact handoff before associated
+  Close can stop the Runtime. This source-local Close policy does not relax the current global
+  trusted Scene Reopen-versus-Play exclusion, including completion-time admission.
 - Workspace commands are explicit data values. UI adapters render workspace models and submit
   commands; they do not mutate documents or sessions through private paths.
 - Under ADR 0104, the process Host constructs and owns the workspace. No runtime plugin installs it

@@ -135,6 +135,16 @@ Trusted in-process ownership and observation:
 - While a trusted Runtime retains a document source, its current revision and divergence
   observation resolve that exact document, not the active Inspector or Scene preview binding.
   Navigation cannot hide an edit of the running source or compare it with another document.
+- One private source value binds the originating document and admitted source incarnation/revision
+  throughout preparation, the unconsumed start reservation, Game target handoff, cancellation,
+  published execution and physical retirement, including incomplete cleanup and retry. Only actual
+  Empty ownership may use the active Scene as context for the next Play. A failed or cancelled
+  operation retains its original terminal outcome until the physical owner has returned; cleanup
+  completion does not rewrite Start failure as Play success.
+- Retained source observations are not execution authority. Runtime Edit and Apply Changes still
+  require an Active owner, legal Runtime state and exact generation/source checks. The private
+  move-transition marker is neither an observable lifecycle phase nor evidence that a document
+  can close. This contract adds no second source registry or public generation domain.
 - `nara_tooling::EditorPlayCommand` and `EditorPlayView` expose UI-neutral lifecycle control/status.
 - Root `EditorProjectSession` owns preparation, the unpublished start attempt, published runtime,
   controls, close evidence, and retirement for the concrete product path.

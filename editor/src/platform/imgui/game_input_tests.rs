@@ -1,6 +1,7 @@
 #![cfg(target_os = "windows")]
 
 mod canvas;
+mod source_continuity;
 
 use canvas::{install_canvas_button, observe_canvas_button};
 

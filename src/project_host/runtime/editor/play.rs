@@ -4,13 +4,13 @@ impl EditorProjectSession {
     #[must_use]
     #[doc(hidden)]
     pub(crate) fn play_view(&self) -> EditorPlayView {
-        let play_document = self
+        let play_source = self
             .trusted_compiled()
-            .and_then(|lane| lane.runtime_owner.document());
-        let current_revision = match play_document {
-            Some(document) => self
+            .and_then(|lane| lane.runtime_owner.source());
+        let current_revision = match play_source {
+            Some(source) => self
                 .workspace
-                .scene(document)
+                .scene(source.document)
                 .map(nara_tooling::EditorSceneSlot::revision),
             None => self
                 .workspace
@@ -70,27 +70,20 @@ impl EditorProjectSession {
                 .with_external(external)
             });
         };
-        let (state, source_revision) = match &lane.runtime_owner {
-            EditorRuntimeOwnerState::Empty => (EditorPlayState::Empty, None),
-            EditorRuntimeOwnerState::Preparing { revision, .. } => {
-                (EditorPlayState::PreparingPlay, Some(*revision))
-            }
-            EditorRuntimeOwnerState::Starting { revision, .. } => {
-                (EditorPlayState::Starting, Some(*revision))
-            }
+        let source_revision = play_source.map(|source| source.revision);
+        let state = match &lane.runtime_owner {
+            EditorRuntimeOwnerState::Empty => EditorPlayState::Empty,
+            EditorRuntimeOwnerState::Preparing { .. } => EditorPlayState::PreparingPlay,
+            EditorRuntimeOwnerState::Starting { .. } => EditorPlayState::Starting,
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-            EditorRuntimeOwnerState::AwaitingGameTarget { revision, .. }
-            | EditorRuntimeOwnerState::CommittingGameTarget { revision, .. } => {
-                (EditorPlayState::Starting, Some(*revision))
-            }
+            EditorRuntimeOwnerState::AwaitingGameTarget { .. }
+            | EditorRuntimeOwnerState::CommittingGameTarget { .. } => EditorPlayState::Starting,
             EditorRuntimeOwnerState::CancellingStart { .. }
-            | EditorRuntimeOwnerState::RetiringPlay { .. } => (EditorPlayState::RetiringPlay, None),
+            | EditorRuntimeOwnerState::RetiringPlay { .. } => EditorPlayState::RetiringPlay,
             EditorRuntimeOwnerState::RetirementIncomplete { .. } => {
-                (EditorPlayState::RetirementIncomplete, None)
+                EditorPlayState::RetirementIncomplete
             }
-            EditorRuntimeOwnerState::Active {
-                source_revision, ..
-            } => {
+            EditorRuntimeOwnerState::Active { .. } => {
                 let state = match lane.runtime_host.running_runtime_state() {
                     Some(RuntimeState::Running) => EditorPlayState::Running,
                     Some(RuntimeState::Paused) => EditorPlayState::Paused,
@@ -120,7 +113,7 @@ impl EditorProjectSession {
                 } else {
                     projected
                 };
-                (projected, Some(*source_revision))
+                projected
             }
             EditorRuntimeOwnerState::Transitioning => {
                 unreachable!("editor runtime state is not observed during a transition")
@@ -237,13 +230,11 @@ impl EditorProjectSession {
                     let reason = self.runtime_unavailable_rejection();
                     return EditorPlayRequestResult::Rejected(reason);
                 };
-                let state = std::mem::replace(
-                    &mut lane.runtime_owner,
-                    EditorRuntimeOwnerState::Transitioning,
-                );
+                let state = lane.runtime_owner.take();
                 match state {
-                    EditorRuntimeOwnerState::RetirementIncomplete { terminal } => {
-                        lane.runtime_owner = EditorRuntimeOwnerState::RetiringPlay { terminal };
+                    EditorRuntimeOwnerState::RetirementIncomplete { source, terminal } => {
+                        lane.runtime_owner =
+                            EditorRuntimeOwnerState::RetiringPlay { source, terminal };
                         self.play_result = Some(EditorPlayOperationResult::Pending {
                             operation: EditorPlayOperation::RetryRetirement,
                         });
@@ -317,8 +308,7 @@ impl EditorProjectSession {
             return EditorPlayRequestResult::Rejected(self.runtime_unavailable_rejection());
         };
         lane.runtime_owner = EditorRuntimeOwnerState::Preparing {
-            document,
-            revision,
+            source: EditorPlaySource { document, revision },
             operation: EditorPlayOperation::Play,
         };
         self.play_result = Some(EditorPlayOperationResult::Pending {

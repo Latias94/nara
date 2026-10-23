@@ -95,10 +95,11 @@ The [per-document persistence-custody design](editor-document-persistence-custod
 specifies R5c's concrete replacement for the integrated Host's per-kind file lanes. It separates
 source aliases, document sessions, preview selection and executable startup without an erased
 document store. ADRs 0047/0118 adopt custody, common source admission and retained Scene selection;
-0111 owns bound Scene presentation/input and 0034 the exact trusted Running source observation.
+0111 owns bound Scene presentation/input and 0034 the exact trusted Play source observation.
 0113 owns the source-keyed refresh obligations and complete successor validation.
 ADRs 0047/0118 also adopt additive Open independently of explicit Close;
-cancellation/retirement Play-source continuity remains Proposed.
+0034/0047/0084 retain Play source association through cancellation and physical retirement and
+distinguish associated-source/whole-session Close from unrelated document Close.
 Prepared edits or per-document storage alone
 do not qualify public same-kind multi-open.
 

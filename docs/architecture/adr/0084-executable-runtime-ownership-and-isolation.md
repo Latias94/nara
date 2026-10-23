@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-10-22 (physical close evidence and ordinary product launch custody)
+**Last Revised**: 2026-10-24 (physical custody and source-local Editor document Close)
 **Owner**: `nara_app` and concrete executable hosts
 **Refined By**: [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): 2D Foundation Ownership and Authoring Contracts
 **Admission Trigger**: RGD-U2 through RGD-U6 replaced the plan/World behavior split, removed
@@ -413,9 +413,13 @@ operation result: Pending | Applied | Failed
   remain separately observable after ownership reaches `Stopped`. Abnormal Drop may transfer an unfinished owner to process-owned
   quarantine, but that fallback is never clean-stop evidence.
 - `Drop` is best effort and cannot be used as product evidence that a runtime stopped cleanly.
-- Editor Close Scene, external reload, Restart, a second Start Play, and editor exit all obey
-  stop-first. Failure retains the faulted or incomplete owner and diagnostics instead of silently
-  removing it.
+- Closing a trusted Play's associated source, external reload, Restart, a second Start Play, and
+  editor exit obey stop-first. Failure retains the faulted or incomplete owner and diagnostics
+  instead of silently removing it. Under ADRs 0034/0047, closing an unrelated Editor document does
+  not replace that Runtime and preserves its complete owner, including pending start/cancellation,
+  Game activation, control, failure and retirement state. Source association survives until physical
+  retirement completes; active navigation is not association. The current global trusted Scene
+  Reopen-versus-Play exclusion remains stricter than this source-local Close policy.
 - A fresh restart contains none of the old mutable world, queue, task, time, service, backend, or
   identity-domain state.
 - This ADR owns retirement of runtime-scoped sessions and host-issued candidate leases. ADR 0082

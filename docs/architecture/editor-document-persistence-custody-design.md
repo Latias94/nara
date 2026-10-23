@@ -1,7 +1,7 @@
 ---
 title: Per-Document Editor Persistence Custody
 date: 2026-10-23
-status: Custody, source admission, retained preview, multi-source refresh and additive Open accepted; Play retirement Proposed
+status: Custody, source admission, retained preview, multi-source refresh, additive Open and Play source continuity accepted
 ---
 
 # Per-Document Editor Persistence Custody
@@ -23,7 +23,8 @@ per-document custody, common source admission and retained Scene preview decisio
 and input admission; [0034](adr/0034-editor-play-mode-world-boundary.md) owns trusted Play source
 observation; [0113](adr/0113-editor-ui-prefab-authoring-and-canvas-authority.md) owns complete
 saved-source refresh obligations. ADRs 0047/0118 also adopt additive Open and its separation from
-explicit Close; Play-retirement source continuity remains Proposed. The implementation ledger owns actual
+explicit Close; ADRs 0034/0047/0084 adopt Play source continuity through physical retirement.
+The implementation ledger owns actual
 qualification; neither prepared edits nor map storage alone establish public same-kind multi-open.
 
 ## Ownership And Alternatives
@@ -139,13 +140,14 @@ source, retire the old Scene presentation. None of these choices changes executa
 Keep the current global Scene Reopen-versus-Play exclusion until a separately qualified policy
 replaces it.
 
-Trusted Running/Stop divergence observations resolve the retained runtime owner's exact Scene,
-not an active Prefab Inspector's revision. This bounded observation correction does not retain
-that source through cancellation or physical retirement.
-
-Trusted Play's cancelling/retiring states still need to retain their exact source before document
-Close can use source-local isolation throughout retirement. This is a follow-up replacement,
-not a claim that document storage, refresh obligations or Running observations have fixed it.
+One private Copy source value binds document and admitted incarnation/revision in every real
+non-Empty trusted Play owner, including cancellation and incomplete physical retirement. Current
+revision observations resolve that Scene even while a Prefab Inspector is active. The source-less
+move marker cannot be taken, observed or driven; it is not Empty or an unrelated-Close release proof.
+Unrelated Close restores the exact owner unchanged; associated Close/Exit retains cancellation,
+exact Game activation handoff and Stop-before-physical-return policy. Retained source does not
+admit Runtime Edit or Apply Changes outside Active. No sidecar source registry, duplicate digest
+or Runtime-per-document abstraction is introduced.
 
 ## Ordered Change Set
 
@@ -162,10 +164,9 @@ not a claim that document storage, refresh obligations or Running observations h
 
 The removed shared anchored-Prefab gate limited both Authoring and TrustedCompiled execution.
 Trusted multi-Prefab admission depends on the qualified multi-source refresh obligation owner;
-a data-only additive consumer cannot prove trusted saved-content refresh. Exact Play
-source retention is required before claiming unrelated document Close stays source-local during
-cancellation/retirement. Until then, the existing conservative global wait is not evidence that
-the retiring Runtime has no source.
+a data-only additive consumer cannot prove trusted saved-content refresh. Source-local Close
+through cancellation/retirement requires its own public/native evidence, not the earlier additive
+Open or Running-only observations. The implementation ledger records that qualification separately.
 
 Primary owners are `runtime/editor.rs`, `document_open.rs` and its preparation module,
 `persistence.rs`, `persistence/reopen.rs`, `extension_documents.rs`, `content_refresh.rs`,

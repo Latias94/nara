@@ -497,69 +497,84 @@ impl ActiveEditorGameView {
     }
 }
 
+#[derive(Clone, Copy)]
+struct EditorPlaySource {
+    document: EditorDocumentId,
+    revision: nara_scene::SceneAuthoringRevision,
+}
+
 enum EditorRuntimeOwnerState {
     Empty,
     Preparing {
-        document: EditorDocumentId,
-        revision: nara_scene::SceneAuthoringRevision,
+        source: EditorPlaySource,
         operation: EditorPlayOperation,
     },
     Starting {
-        document: EditorDocumentId,
-        revision: nara_scene::SceneAuthoringRevision,
+        source: EditorPlaySource,
         operation: EditorPlayOperation,
         attempt: super::RuntimeStartAttempt,
     },
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     AwaitingGameTarget {
-        document: EditorDocumentId,
-        revision: nara_scene::SceneAuthoringRevision,
+        source: EditorPlaySource,
         operation: EditorPlayOperation,
         request: EditorGameStartRequest,
         prepared: super::PreparedRuntimeStart,
     },
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     CommittingGameTarget {
-        document: EditorDocumentId,
-        revision: nara_scene::SceneAuthoringRevision,
+        source: EditorPlaySource,
         operation: EditorPlayOperation,
         request: EditorGameStartRequest,
         prepared: super::PreparedRuntimeStart,
     },
     CancellingStart {
+        source: EditorPlaySource,
         terminal: EditorPlayOperationResult,
         attempt: super::RuntimeStartAttempt,
     },
     RetiringPlay {
+        source: EditorPlaySource,
         terminal: EditorPlayOperationResult,
     },
     Active {
-        document: EditorDocumentId,
-        source_revision: nara_scene::SceneAuthoringRevision,
+        source: EditorPlaySource,
         #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
         game: Option<ActiveEditorGameView>,
     },
     RetirementIncomplete {
+        source: EditorPlaySource,
         terminal: EditorPlayOperationResult,
     },
     Transitioning,
 }
 
 impl EditorRuntimeOwnerState {
-    fn document(&self) -> Option<EditorDocumentId> {
+    fn source(&self) -> Option<EditorPlaySource> {
         match self {
-            Self::Preparing { document, .. }
-            | Self::Starting { document, .. }
-            | Self::Active { document, .. } => Some(*document),
+            Self::Preparing { source, .. }
+            | Self::Starting { source, .. }
+            | Self::CancellingStart { source, .. }
+            | Self::RetiringPlay { source, .. }
+            | Self::RetirementIncomplete { source, .. }
+            | Self::Active { source, .. } => Some(*source),
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-            Self::AwaitingGameTarget { document, .. }
-            | Self::CommittingGameTarget { document, .. } => Some(*document),
-            Self::Empty
-            | Self::CancellingStart { .. }
-            | Self::RetiringPlay { .. }
-            | Self::RetirementIncomplete { .. }
-            | Self::Transitioning => None,
+            Self::AwaitingGameTarget { source, .. } | Self::CommittingGameTarget { source, .. } => {
+                Some(*source)
+            }
+            Self::Empty => None,
+            Self::Transitioning => {
+                unreachable!("an Editor Runtime source is not observed during a transition")
+            }
         }
+    }
+
+    fn take(&mut self) -> Self {
+        assert!(
+            !matches!(self, Self::Transitioning),
+            "an Editor Runtime owner cannot be taken during a transition"
+        );
+        std::mem::replace(self, Self::Transitioning)
     }
 }
 
@@ -1248,10 +1263,7 @@ impl EditorProjectSession {
 
     fn take_trusted_runtime_owner(&mut self) -> Option<EditorRuntimeOwnerState> {
         let lane = self.trusted_compiled_mut()?;
-        Some(std::mem::replace(
-            &mut lane.runtime_owner,
-            EditorRuntimeOwnerState::Transitioning,
-        ))
+        Some(lane.runtime_owner.take())
     }
 
     fn install_trusted_runtime_owner(&mut self, state: EditorRuntimeOwnerState) -> bool {
@@ -1706,21 +1718,16 @@ impl EditorProjectSession {
         let EditorExecutionLane::TrustedCompiled(lane) = &mut self.execution else {
             return Err(EditorGameViewBridgeFailure::RuntimeUnavailable);
         };
-        let state = std::mem::replace(
-            &mut lane.runtime_owner,
-            EditorRuntimeOwnerState::Transitioning,
-        );
+        let state = lane.runtime_owner.take();
         match state {
             EditorRuntimeOwnerState::AwaitingGameTarget {
-                document,
-                revision,
+                source,
                 operation,
                 request,
                 prepared,
             } if request == expected => {
                 lane.runtime_owner = EditorRuntimeOwnerState::CommittingGameTarget {
-                    document,
-                    revision,
+                    source,
                     operation,
                     request,
                     prepared,
@@ -1745,13 +1752,9 @@ impl EditorProjectSession {
             return;
         };
         let expected = activation.into_request();
-        let state = std::mem::replace(
-            &mut lane.runtime_owner,
-            EditorRuntimeOwnerState::Transitioning,
-        );
+        let state = lane.runtime_owner.take();
         let EditorRuntimeOwnerState::CommittingGameTarget {
-            document,
-            revision,
+            source,
             operation,
             request,
             prepared,
@@ -1773,8 +1776,7 @@ impl EditorProjectSession {
         });
         lane.pending_step_presentation = None;
         lane.runtime_owner = EditorRuntimeOwnerState::Active {
-            document,
-            source_revision: revision,
+            source,
             game: Some(ActiveEditorGameView::new(request)),
         };
     }
@@ -1788,21 +1790,19 @@ impl EditorProjectSession {
         let EditorExecutionLane::TrustedCompiled(lane) = &mut self.execution else {
             return Err(EditorGameViewBridgeFailure::RuntimeUnavailable);
         };
-        let state = std::mem::replace(
-            &mut lane.runtime_owner,
-            EditorRuntimeOwnerState::Transitioning,
-        );
+        let state = lane.runtime_owner.take();
         match state {
             EditorRuntimeOwnerState::AwaitingGameTarget {
+                source,
                 operation,
                 request,
                 prepared,
-                ..
             } if request == expected => {
                 lane.runtime_host.abort_prepared_start(prepared);
                 lane.pending_step_presentation = None;
                 self.play_result = Some(EditorPlayOperationResult::Pending { operation });
                 lane.runtime_owner = EditorRuntimeOwnerState::RetiringPlay {
+                    source,
                     terminal: EditorPlayOperationResult::Failed {
                         operation,
                         failure: EditorPlayFailure::Start,
@@ -2687,7 +2687,7 @@ impl EditorProjectSession {
                 {
                     return Err(EditorRuntimeEditRejection::Busy);
                 }
-                let EditorRuntimeOwnerState::Active { document, .. } = &lane.runtime_owner else {
+                let EditorRuntimeOwnerState::Active { source, .. } = &lane.runtime_owner else {
                     return Err(EditorRuntimeEditRejection::InvalidRuntimeState);
                 };
                 if !matches!(
@@ -2700,7 +2700,7 @@ impl EditorProjectSession {
                     .runtime_host
                     .running_runtime_generation()
                     .ok_or(EditorRuntimeEditRejection::InvalidRuntimeState)?;
-                (*document, generation)
+                (source.document, generation)
             }
         };
         if request.generation != generation {
@@ -2810,12 +2810,7 @@ impl EditorProjectSession {
                 {
                     return Err(EditorApplyChangesRejection::Busy);
                 }
-                let EditorRuntimeOwnerState::Active {
-                    document,
-                    source_revision,
-                    ..
-                } = &lane.runtime_owner
-                else {
+                let EditorRuntimeOwnerState::Active { source, .. } = &lane.runtime_owner else {
                     return Err(EditorApplyChangesRejection::InvalidRuntimeState);
                 };
                 if !matches!(
@@ -2828,7 +2823,7 @@ impl EditorProjectSession {
                     .runtime_host
                     .running_runtime_generation()
                     .ok_or(EditorApplyChangesRejection::InvalidRuntimeState)?;
-                (*document, *source_revision, generation)
+                (source.document, source.revision, generation)
             }
         };
         let document_revision = self
@@ -2891,8 +2886,8 @@ impl EditorProjectSession {
         };
         if close_document.is_some_and(|pending_document| {
             state
-                .document()
-                .is_some_and(|document| document != pending_document)
+                .source()
+                .is_some_and(|source| source.document != pending_document)
         }) {
             let _ = self.install_trusted_runtime_owner(state);
             self.finish_workspace_intent_document();
@@ -2910,18 +2905,22 @@ impl EditorProjectSession {
                 self.finish_workspace_intent_document();
             }
             EditorRuntimeOwnerState::Starting {
-                operation, attempt, ..
+                source,
+                operation,
+                attempt,
             } => {
                 self.cancel_pending_runtime_edit();
                 self.cancel_pending_apply_changes();
                 let _ =
                     self.install_trusted_runtime_owner(EditorRuntimeOwnerState::CancellingStart {
+                        source,
                         terminal: EditorPlayOperationResult::Cancelled { operation },
                         attempt,
                     });
             }
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
             EditorRuntimeOwnerState::AwaitingGameTarget {
+                source,
                 operation,
                 prepared,
                 ..
@@ -2930,6 +2929,7 @@ impl EditorProjectSession {
                     lane.runtime_host.abort_prepared_start(prepared);
                 }
                 let _ = self.install_trusted_runtime_owner(EditorRuntimeOwnerState::RetiringPlay {
+                    source,
                     terminal: EditorPlayOperationResult::Cancelled { operation },
                 });
             }
@@ -2962,9 +2962,11 @@ impl EditorProjectSession {
             }
             state @ (EditorRuntimeOwnerState::CancellingStart { .. }
             | EditorRuntimeOwnerState::RetiringPlay { .. }
-            | EditorRuntimeOwnerState::RetirementIncomplete { .. }
-            | EditorRuntimeOwnerState::Transitioning) => {
+            | EditorRuntimeOwnerState::RetirementIncomplete { .. }) => {
                 let _ = self.install_trusted_runtime_owner(state);
+            }
+            EditorRuntimeOwnerState::Transitioning => {
+                unreachable!("an Editor Runtime transition cannot drive document Close")
             }
         }
     }

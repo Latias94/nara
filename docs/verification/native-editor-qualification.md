@@ -86,6 +86,19 @@ and UI Prefabs together, preserves Canvas priority through unrelated Prefab and 
 retires it after its own source closes. These are bounded same-kind Open/navigation trajectories,
 not qualification of multiple simultaneous preview Runtimes or every persistence combination.
 
+For trusted Play source association and source-local document Close, also execute:
+
+```powershell
+cargo +1.95.0 nextest run -p nara-editor --lib --locked --run-ignored only -E 'test(native_unrelated_prefab_close_preserves_presented_play_source_until_source_close)' --test-threads=1
+```
+
+This hidden-window DX12 trajectory opens and closes an anchored Prefab while Game continues
+through exact submitted/composite receipts with the same source, Runtime generation and target.
+Closing the associated Scene retains it while Stop is pending; completed native frames then
+observe exact Stop and target retirement before reporting source removal. It does not prove
+intra-frame ordering or the held cancellation/failed-start cleanup paths; public Host tests own
+those separate trajectories.
+
 The full native platform group can be selected with:
 
 ```powershell

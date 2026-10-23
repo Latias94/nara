@@ -36,8 +36,7 @@ impl EditorProjectSession {
             ));
         };
         lane.runtime_owner = EditorRuntimeOwnerState::Preparing {
-            document,
-            revision,
+            source: EditorPlaySource { document, revision },
             operation,
         };
         self.play_result = Some(EditorPlayOperationResult::Pending { operation });
@@ -57,10 +56,13 @@ impl EditorProjectSession {
                 EditorPlayRequestResult::Accepted
             }
             EditorRuntimeOwnerState::Starting {
-                operation, attempt, ..
+                source,
+                operation,
+                attempt,
             } => {
                 let _ =
                     self.install_trusted_runtime_owner(EditorRuntimeOwnerState::CancellingStart {
+                        source,
                         terminal: EditorPlayOperationResult::Cancelled { operation },
                         attempt,
                     });
@@ -71,6 +73,7 @@ impl EditorProjectSession {
             }
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
             EditorRuntimeOwnerState::AwaitingGameTarget {
+                source,
                 operation,
                 prepared,
                 ..
@@ -79,6 +82,7 @@ impl EditorProjectSession {
                     lane.runtime_host.abort_prepared_start(prepared);
                 }
                 let _ = self.install_trusted_runtime_owner(EditorRuntimeOwnerState::RetiringPlay {
+                    source,
                     terminal: EditorPlayOperationResult::Cancelled { operation },
                 });
                 self.play_result = Some(EditorPlayOperationResult::Pending {
@@ -195,77 +199,71 @@ impl EditorProjectSession {
         };
         let next = match state {
             EditorRuntimeOwnerState::Empty => EditorRuntimeOwnerState::Empty,
-            EditorRuntimeOwnerState::Preparing {
-                document,
-                revision,
-                operation,
-            } => self.drive_preparing(document, revision, operation),
+            EditorRuntimeOwnerState::Preparing { source, operation } => {
+                self.drive_preparing(source, operation)
+            }
             EditorRuntimeOwnerState::Starting {
-                document,
-                revision,
+                source,
                 operation,
                 attempt,
-            } => self.drive_starting(document, revision, operation, attempt),
+            } => self.drive_starting(source, operation, attempt),
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
             EditorRuntimeOwnerState::AwaitingGameTarget {
-                document,
-                revision,
+                source,
                 operation,
                 request,
                 prepared,
             } => EditorRuntimeOwnerState::AwaitingGameTarget {
-                document,
-                revision,
+                source,
                 operation,
                 request,
                 prepared,
             },
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
             EditorRuntimeOwnerState::CommittingGameTarget {
-                document,
-                revision,
+                source,
                 operation,
                 request,
                 prepared,
             } => EditorRuntimeOwnerState::CommittingGameTarget {
-                document,
-                revision,
+                source,
                 operation,
                 request,
                 prepared,
             },
-            EditorRuntimeOwnerState::CancellingStart { terminal, attempt } => {
-                self.drive_cancelled_start(terminal, attempt)
+            EditorRuntimeOwnerState::CancellingStart {
+                terminal, attempt, ..
+            } => self.drive_cancelled_start(terminal, attempt),
+            EditorRuntimeOwnerState::RetiringPlay { source, terminal } => {
+                self.drive_start_retirement(source, terminal)
             }
-            EditorRuntimeOwnerState::RetiringPlay { terminal } => {
-                self.drive_start_retirement(terminal)
-            }
-            EditorRuntimeOwnerState::RetirementIncomplete { terminal } => {
-                EditorRuntimeOwnerState::RetirementIncomplete { terminal }
-            }
+            state @ EditorRuntimeOwnerState::RetirementIncomplete { .. } => state,
             EditorRuntimeOwnerState::Active {
-                document,
-                source_revision,
+                source,
                 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
                 game,
             } => self.drive_active(
-                document,
-                source_revision,
+                source,
                 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
                 game,
                 real_delta,
             ),
-            EditorRuntimeOwnerState::Transitioning => EditorRuntimeOwnerState::Transitioning,
+            EditorRuntimeOwnerState::Transitioning => {
+                unreachable!("an Editor Runtime transition cannot be driven")
+            }
         };
         let _ = self.install_trusted_runtime_owner(next);
     }
 
     fn drive_preparing(
         &mut self,
-        document: EditorDocumentId,
-        requested_revision: nara_scene::SceneAuthoringRevision,
+        source: EditorPlaySource,
         operation: EditorPlayOperation,
     ) -> EditorRuntimeOwnerState {
+        let EditorPlaySource {
+            document,
+            revision: requested_revision,
+        } = source;
         if !self.play_source_is_current() {
             self.play_result = Some(EditorPlayOperationResult::Rejected {
                 operation,
@@ -345,8 +343,7 @@ impl EditorProjectSession {
         };
         match started {
             Ok(attempt) => EditorRuntimeOwnerState::Starting {
-                document,
-                revision,
+                source,
                 operation,
                 attempt,
             },
@@ -363,8 +360,7 @@ impl EditorProjectSession {
 
     fn drive_starting(
         &mut self,
-        document: EditorDocumentId,
-        revision: nara_scene::SceneAuthoringRevision,
+        source: EditorPlaySource,
         operation: EditorPlayOperation,
         mut attempt: super::super::RuntimeStartAttempt,
     ) -> EditorRuntimeOwnerState {
@@ -387,10 +383,14 @@ impl EditorProjectSession {
                     .trusted_compiled()
                     .and_then(|lane| lane.game_view_config)
                 {
-                    let request = game_view::start_request(config, document, revision, &prepared);
+                    let request = game_view::start_request(
+                        config,
+                        source.document,
+                        source.revision,
+                        &prepared,
+                    );
                     return EditorRuntimeOwnerState::AwaitingGameTarget {
-                        document,
-                        revision,
+                        source,
                         operation,
                         request,
                         prepared,
@@ -419,8 +419,7 @@ impl EditorProjectSession {
                     generation,
                 });
                 EditorRuntimeOwnerState::Active {
-                    document,
-                    source_revision: revision,
+                    source,
                     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
                     game: None,
                 }
@@ -436,7 +435,7 @@ impl EditorProjectSession {
                     .is_some_and(|lane| lane.runtime_host.has_cleanup_owner())
                 {
                     self.play_result = Some(EditorPlayOperationResult::Pending { operation });
-                    EditorRuntimeOwnerState::RetiringPlay { terminal }
+                    EditorRuntimeOwnerState::RetiringPlay { source, terminal }
                 } else {
                     self.play_result = Some(terminal);
                     EditorRuntimeOwnerState::Empty
@@ -447,6 +446,7 @@ impl EditorProjectSession {
 
     fn drive_start_retirement(
         &mut self,
+        source: EditorPlaySource,
         terminal: EditorPlayOperationResult,
     ) -> EditorRuntimeOwnerState {
         let Some(outcome) = self
@@ -474,10 +474,10 @@ impl EditorProjectSession {
                 EditorRuntimeOwnerState::Empty
             }
             super::super::CleanupDriveOutcome::Retiring => {
-                EditorRuntimeOwnerState::RetiringPlay { terminal }
+                EditorRuntimeOwnerState::RetiringPlay { source, terminal }
             }
             super::super::CleanupDriveOutcome::RetirementIncomplete => {
-                EditorRuntimeOwnerState::RetirementIncomplete { terminal }
+                EditorRuntimeOwnerState::RetirementIncomplete { source, terminal }
             }
         }
     }
@@ -494,13 +494,16 @@ impl EditorProjectSession {
 
     fn drive_active(
         &mut self,
-        document: EditorDocumentId,
-        source_revision: nara_scene::SceneAuthoringRevision,
+        source: EditorPlaySource,
         #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))] game: Option<
             ActiveEditorGameView,
         >,
         real_delta: Duration,
     ) -> EditorRuntimeOwnerState {
+        let EditorPlaySource {
+            document,
+            revision: source_revision,
+        } = source;
         let driven = match self.trusted_compiled_mut() {
             Some(lane) => lane.runtime_host.drive_running_runtime(real_delta),
             None => return EditorRuntimeOwnerState::Empty,
@@ -524,8 +527,7 @@ impl EditorProjectSession {
                 }
             }
             return EditorRuntimeOwnerState::Active {
-                document,
-                source_revision,
+                source,
                 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
                 game,
             };
@@ -600,8 +602,7 @@ impl EditorProjectSession {
                 let revision = slot.revision();
                 self.play_result = Some(EditorPlayOperationResult::Pending { operation });
                 return EditorRuntimeOwnerState::Preparing {
-                    document,
-                    revision,
+                    source: EditorPlaySource { document, revision },
                     operation,
                 };
             }
@@ -635,8 +636,7 @@ impl EditorProjectSession {
                 });
             }
             return EditorRuntimeOwnerState::Active {
-                document,
-                source_revision,
+                source,
                 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
                 game,
             };
@@ -697,8 +697,7 @@ impl EditorProjectSession {
             }
         }
         EditorRuntimeOwnerState::Active {
-            document,
-            source_revision,
+            source,
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
             game,
         }

@@ -2,6 +2,8 @@
 
 #[path = "support/editor_action_driver.rs"]
 mod editor_action_driver;
+#[path = "support/play_source_continuity.rs"]
+mod play_source_continuity;
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
@@ -15,6 +17,8 @@ use std::{
 };
 
 use editor_action_driver as editor_driver;
+#[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+use nara::project_host::EditorGameViewBridgeFailure;
 use nara::{
     ProductConfiguration, ProductRecipe,
     app::{
@@ -27,12 +31,11 @@ use nara::{
     diagnostic::{DiagnosticReport, DiagnosticValueRef},
     ecs::{Commands, Entity, Query, Res, Resource, schedule::IntoScheduleConfigs},
     project_host::{
-        EditorGameViewBridgeFailure, EditorGameViewCompletion, EditorProjectSession,
-        TrustedCompiledEditorProjectIntent,
+        EditorProjectSession, TrustedCompiledEditorProjectIntent,
         advanced::{RuntimeProbe, open_trusted_compiled_editor_with_probe},
     },
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
-    render::{Camera2d, Extent2d},
+    render::Camera2d,
     scene::{
         SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
         ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
@@ -46,6 +49,13 @@ use nara::{
     },
     transform::{PresentedSpatialSnapshot2d, Transform2d},
 };
+#[cfg(all(
+    feature = "presentation-2d",
+    feature = "presentation-ui",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
+use nara::{project_host::EditorGameViewCompletion, render::Extent2d};
 use project_content_fixture::TestProject;
 
 const DELAYED_CLOSE_PLUGIN_ID: PluginId = PluginId::new("nara.test.editor-delayed-close");
@@ -2245,11 +2255,13 @@ fn failed_start_retains_retirement_owner_until_retry_completes() {
         editor.current_frame().play().state(),
         EditorPlayState::RetiringPlay
     );
+    let retiring_source_revision = editor.current_frame().play().source_revision();
     editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(
         editor.current_frame().play().state(),
         EditorPlayState::RetirementIncomplete
     );
+    let incomplete_source_revision = editor.current_frame().play().source_revision();
     assert!(editor.current_frame().workspace().scene(document).is_some());
     assert_eq!(editor.current_frame().play().generation(), None);
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
@@ -2305,6 +2317,8 @@ fn failed_start_retains_retirement_owner_until_retry_completes() {
             .revision,
         original_revision
     );
+    assert_eq!(retiring_source_revision, Some(original_revision));
+    assert_eq!(incomplete_source_revision, Some(original_revision));
 }
 
 #[test]
