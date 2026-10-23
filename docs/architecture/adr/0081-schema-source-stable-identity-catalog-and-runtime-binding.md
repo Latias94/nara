@@ -1,7 +1,7 @@
 # ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding
 
 **Status**: Accepted
-**Last Revised**: 2026-10-20
+**Last Revised**: 2026-10-23
 **Date**: 2026-07-12
 **Implemented Slices**: RGF-U1 canonical catalog and native binding boundary on 2026-07-12; RGF-U2
 native Rust derive authoring and public headless consumer on 2026-07-13; RGF-U12 World-independent
@@ -238,6 +238,15 @@ stateDiagram-v2
   causes normal fallible plugin finish failure.
 - Frozen registries expose no unchecked mutable Bevy type registry, codec table, migration table,
   schema, or capability path.
+- Native codec execution belongs to the immutable frozen snapshot. Registration and freeze remain
+  on the registry; a building registry exposes no encode or preflight operation. Obtaining a
+  snapshot before freeze returns `NotFrozen`, and freeze rejects missing native bindings before
+  publishing an execution authority. A retained snapshot keeps its exact validated definition;
+  taking or using it does not certify the current target World's registry or lifecycle topology.
+- Preflight returns a prepared component or an explicit execution error. Encoding returns an
+  encoded value, actual entity/component absence, or an explicit execution error. Unknown schema,
+  unavailable native binding and codec failure must not collapse into the same absence result.
+  Context-aware operations preserve one caller-owned decode/encode context for the complete batch.
 - A structural catalog change builds and validates a fresh `RuntimeInstance`; an active runtime is
   never unfrozen or modified in place. Presentation-only UI state may live outside the frozen
   catalog, but catalog aliases themselves change only in a new catalog generation.
@@ -308,8 +317,8 @@ return one `ComponentValue`; only the registry reports component absence. Contex
 also receive read-only `World` and asset export context, so resource-dependent references do not
 require repeated component lookup. This does not authorize codecs to mutate the target World.
 
-A frozen `ComponentRegistry` alone may bind the candidate's stable component identity into
-`PreparedComponent`. Building registries expose no applicable candidate, and compile-fail coverage
+A frozen `ComponentRegistrySnapshot` alone may bind the candidate's stable component identity into
+`PreparedComponent`. Building registries expose no executable codec interface, and compile-fail coverage
 prevents external construction of the bound type. Deferred preparation still shares one scratch
 `AssetServer` for the entire batch. A failed later candidate publishes neither earlier components
 nor scratch assets; commit revalidates the target World, lifecycle topology and captured asset

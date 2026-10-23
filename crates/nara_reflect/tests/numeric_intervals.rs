@@ -371,14 +371,15 @@ fn native_preflight_rejects_interval_failure_before_calling_a_codec() {
         )
         .unwrap();
     registry.freeze().unwrap();
+    let snapshot = registry.snapshot().unwrap();
     let invalid = ComponentValue::map([("value", ComponentValue::f64(f64::MIN_POSITIVE).unwrap())]);
     assert!(matches!(
-        registry.preflight_component(&id, &invalid).unwrap(),
+        snapshot.preflight_component(&id, &invalid),
         Err(ComponentCodecError::Domain(_))
     ));
     assert_eq!(calls.load(Ordering::Relaxed), 0);
     let valid = ComponentValue::map([("value", ComponentValue::f64(0.5).unwrap())]);
-    registry.preflight_component(&id, &valid).unwrap().unwrap();
+    snapshot.preflight_component(&id, &valid).unwrap();
     assert_eq!(calls.load(Ordering::Relaxed), 1);
 }
 

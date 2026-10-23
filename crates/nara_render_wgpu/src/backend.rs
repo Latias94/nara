@@ -2905,7 +2905,7 @@ mod tests {
 
     #[test]
     fn device_loss_revokes_runtime_and_editor_world_before_render_or_registration() {
-        use nara_ecs::{World, system::SystemState};
+        use nara_ecs::{World, upstream::system::SystemState};
         use nara_render::{
             __private::prepare_world_presentation, ViewLoadOp, ViewMapping2d, WorldPointer,
         };

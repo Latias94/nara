@@ -66,6 +66,7 @@ fn generated_nested_reference_codecs_round_trip_through_native_registry() {
         .register_persistent_component::<NestedReferenceProbe>()
         .unwrap();
     registry.freeze().unwrap();
+    let snapshot = registry.snapshot().unwrap();
     let component_id = ComponentTypeId::new("nara.test.NestedReferenceProbe");
     let schema = registry.schema(&component_id).unwrap();
     assert!(schema.fields().iter().all(|field| field.is_required()));
@@ -107,9 +108,8 @@ fn generated_nested_reference_codecs_round_trip_through_native_registry() {
     let expected = nested_probe();
     let mut source = World::new();
     let source_entity = source.spawn(expected.clone()).id();
-    let encoded = registry
+    let encoded = snapshot
         .encode_component(&component_id, &source, source_entity)
-        .unwrap()
         .unwrap()
         .unwrap();
     assert_eq!(encoded.field("fallback").unwrap(), &ComponentValue::Null);
@@ -126,9 +126,8 @@ fn generated_nested_reference_codecs_round_trip_through_native_registry() {
 
     let mut target = World::new();
     let target_entity = target.spawn_empty().id();
-    registry
+    snapshot
         .preflight_component(&component_id, &encoded)
-        .unwrap()
         .unwrap()
         .apply(&mut target, target_entity)
         .unwrap();

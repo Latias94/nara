@@ -13,8 +13,8 @@ use nara_app::{
 };
 use nara_asset::Handle;
 use nara_ecs::{
-    Component, Entity, Mut, Resource, World, error::BevyError, lifecycle::HookContext,
-    schedule::IntoScheduleConfigs, world::DeferredWorld,
+    Component, Entity, Mut, Resource, World, schedule::IntoScheduleConfigs,
+    upstream::error::BevyError, upstream::lifecycle::HookContext, upstream::world::DeferredWorld,
 };
 use nara_identity::EntityLookup;
 use nara_image::{

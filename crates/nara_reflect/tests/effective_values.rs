@@ -58,13 +58,13 @@ fn required_default_is_effective_before_native_preflight() {
         )
         .unwrap();
     registry.freeze().unwrap();
+    let snapshot = registry.snapshot().unwrap();
     let omitted = ComponentValue::Map(Default::default());
     let source = omitted.clone();
     assert!(validate_component_value(&schema, &omitted).is_ok());
 
-    let prepared = registry
+    let prepared = snapshot
         .preflight_component(&component, &omitted)
-        .expect("the frozen registry has a native codec")
         .expect("native preflight must receive the admitted schema default");
     let mut world = World::new();
     let entity = world.spawn_empty().id();
@@ -596,26 +596,25 @@ fn decode_context_budget_rejects_before_the_native_callback() {
         )
         .unwrap();
     registry.freeze().unwrap();
+    let snapshot = registry.snapshot().unwrap();
     let omitted = ComponentValue::map([] as [(&str, ComponentValue); 0]);
     let exact = materialization_limits(2, 14, 2);
     let small = materialization_limits(1, 14, 2);
     let mut context = ComponentDecodeContext::new().with_materialization_limits(small);
     assert_eq!(context.materialization_limits(), small);
-    assert!(
-        registry
-            .preflight_component_with_context(&component, &omitted, &mut context)
-            .unwrap()
-            .is_err()
-    );
+    assert!(matches!(
+        snapshot.preflight_component_with_context(&component, &omitted, &mut context),
+        Err(nara_reflect::ComponentCodecError::Message(message))
+            if message.contains("materialization")
+    ));
     assert!(validate_component_value_with_limits(&schema, &omitted, small).is_err());
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     context.set_materialization_limits(exact);
     assert_eq!(context.materialization_limits(), exact);
     assert!(validate_component_value_with_limits(&schema, &omitted, exact).is_ok());
     assert!(
-        registry
+        snapshot
             .preflight_component_with_context(&component, &omitted, &mut context)
-            .unwrap()
             .is_ok()
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);

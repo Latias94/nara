@@ -17,8 +17,8 @@ are copied.
 
 The changes are deliberately limited:
 
-- Accept the already resolved Nara ECS `syn::Path` instead of discovering Bevy
-  through `BevyManifest`.
+- Accept a `syn::Path` to the facade's hidden complete substrate support instead
+  of discovering Bevy through `BevyManifest`.
 - Move proc-macro entry points to Nara's existing derive crate and return Bundle
   parse errors through `syn::Result`.
 - Include lifetime and const generic parameters in Bundle's precise RPIT capture
@@ -30,8 +30,21 @@ registration, deferred application, read-only delegation and SystemParamBuilder
 behavior remain upstream-owned semantics. Do not rewrite generated token strings
 or introduce a second ECS implementation.
 
+The derive entry points resolve the direct `nara_ecs` or `nara` dependency by
+package identity, including renamed dependencies, and append
+`::__private::bevy_ecs`. That hidden re-export supplies every upstream module
+needed by generated code without making those modules part of the ordinary
+authoring surface. Advanced source consumers use the public `upstream` path;
+generated code uses the hidden support path.
+
 Keep these sources synchronized with `bevy_ecs`, `bevy_ecs_macro_logic` and
 `bevy_macro_utils`. Any dependency upgrade must review the exact new released
 source, compare both extractions and execute the renamed-root and renamed-ECS
 derive fixtures, including const generics and deferred commands. A development
 checkout of Bevy is not an interchangeable patch baseline.
+
+At this pinned release, `bevy_ecs_macro_logic` provides path-parameterized
+Component/Resource expansion and `bevy_macro_utils` provides label expansion.
+Bundle/SystemParam do not expose equivalent helpers, which is why only those
+two derive implementations are extracted here. These are implementation choices
+for the pinned release, not requirements on a future upstream macro API.

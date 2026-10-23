@@ -10,10 +10,10 @@ use nara_engine::{
     core::ItemLimit,
     ecs::{
         Component, Entity, Resource, World,
-        lifecycle::{Despawn, HookContext},
-        observer::On,
-        system::SystemState,
-        world::DeferredWorld,
+        upstream::lifecycle::{Despawn, HookContext},
+        upstream::observer::On,
+        upstream::system::SystemState,
+        upstream::world::DeferredWorld,
     },
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode},
     identity::{EntityLookup, SpawnedSceneInstance, spawn_identity_entity},
@@ -304,7 +304,7 @@ impl ManagedSceneDomainAttempt for Attempt {
         self.control.effects.lock().unwrap().retirement_calls[self.domain] += 1;
         if self.domain == 0 && self.control.scenario == Scenario::DeferredAssetMutation {
             world.commands().queue(|world: &mut World| {
-                let mut state = nara_ecs::system::SystemState::<(
+                let mut state = nara_ecs::upstream::system::SystemState::<(
                     nara_engine::ecs::ResMut<nara_engine::asset::ProjectAssetDatabase>,
                 )>::new(world);
                 state
@@ -502,8 +502,10 @@ fn maintenance(world: &mut World) {
             } else {
                 let observer = world
                     .spawn(
-                        nara_engine::ecs::observer::Observer::new(|_: On<Despawn<()>>| {})
-                            .with_entity(scratch),
+                        nara_engine::ecs::upstream::observer::Observer::new(
+                            |_: On<Despawn<()>>| {},
+                        )
+                        .with_entity(scratch),
                     )
                     .id();
                 world.flush();
@@ -515,7 +517,7 @@ fn maintenance(world: &mut World) {
             Scenario::GlobalDespawnObserver | Scenario::CancelWithGlobalDespawnObserver
         ) {
             world.commands().queue(|world: &mut World| {
-                world.spawn(nara_engine::ecs::observer::Observer::new(
+                world.spawn(nara_engine::ecs::upstream::observer::Observer::new(
                     |_: On<Despawn<()>>| {},
                 ));
             });

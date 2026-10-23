@@ -299,17 +299,20 @@ fn preflight_scene_with_context_options(
 ) -> PreparedScene {
     let (placement, mut diagnostics) =
         validate_scene_structure_with_operation(document, operation_index);
-    if !registry.is_frozen() {
-        diagnostics.push(diagnostic_error(
-            "scene.component-registry-not-frozen",
-            "Scene validation requires a frozen component registry",
-        ));
-        return PreparedScene {
-            roots: Vec::new(),
-            entities: Vec::new(),
-            diagnostics,
-        };
-    }
+    let execution = match registry.snapshot() {
+        Ok(snapshot) => snapshot,
+        Err(_) => {
+            diagnostics.push(diagnostic_error(
+                "scene.component-registry-not-frozen",
+                "Scene validation requires a frozen component registry",
+            ));
+            return PreparedScene {
+                roots: Vec::new(),
+                entities: Vec::new(),
+                diagnostics,
+            };
+        }
+    };
 
     for entity in &document.entities {
         if let Some(prefab) = &entity.prefab
@@ -581,21 +584,12 @@ fn preflight_scene_with_context_options(
                 continue;
             }
 
-            match registry.preflight_component_with_context(component_id, &effective, context) {
-                Some(Ok(prepared)) => prepared_components.push(PreparedSceneComponent {
+            match execution.preflight_component_with_context(component_id, &effective, context) {
+                Ok(prepared) => prepared_components.push(PreparedSceneComponent {
                     id: component_id.clone(),
                     prepared,
                 }),
-                Some(Err(error)) => {
-                    let diagnostic = component_payload_diagnostic(
-                        entity.id.as_str(),
-                        component_id,
-                        &error,
-                        registry,
-                    );
-                    push_with_operation_index(&mut diagnostics, diagnostic, operation_index);
-                }
-                None => push_with_operation_index(
+                Err(ComponentCodecError::MissingNativeBinding { .. }) => push_with_operation_index(
                     &mut diagnostics,
                     with_public_locator(
                         with_public_locator(
@@ -611,6 +605,15 @@ fn preflight_scene_with_context_options(
                     ),
                     operation_index,
                 ),
+                Err(error) => {
+                    let diagnostic = component_payload_diagnostic(
+                        entity.id.as_str(),
+                        component_id,
+                        &error,
+                        registry,
+                    );
+                    push_with_operation_index(&mut diagnostics, diagnostic, operation_index);
+                }
             }
         }
 

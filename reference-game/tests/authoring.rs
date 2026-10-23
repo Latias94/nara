@@ -301,9 +301,9 @@ fn generated_catalog_preserves_stable_ids_across_rename_and_deletion() {
     );
     let mut world = World::new();
     let entity = world.spawn_empty().id();
-    registry
+    let snapshot = registry.snapshot().unwrap();
+    snapshot
         .preflight_component(&id, &migrated.value)
-        .unwrap()
         .unwrap()
         .apply(&mut world, entity)
         .unwrap();
@@ -445,6 +445,7 @@ fn reference_game_catalog_preserves_v1_through_v4_and_matches_the_v5_successor()
 #[test]
 fn weapon_v1_migrates_to_v2_without_persisting_runtime_cooldown() {
     let registry = frozen_reference_game_successor();
+    let snapshot = registry.snapshot().unwrap();
     let weapon_id = ComponentTypeId::new("reference_game.Weapon");
     let legacy_value = ComponentValue::map([
         ("cooldown-ticks", ComponentValue::U64(3)),
@@ -464,9 +465,8 @@ fn weapon_v1_migrates_to_v2_without_persisting_runtime_cooldown() {
 
     let mut current_world = World::new();
     let current_entity = current_world.spawn_empty().id();
-    registry
+    snapshot
         .preflight_component(&weapon_id, &migrated.value)
-        .unwrap()
         .unwrap()
         .apply(&mut current_world, current_entity)
         .unwrap();
@@ -670,20 +670,19 @@ fn assert_round_trip<T>(expected: T, id: &str, registry: &ComponentRegistry)
 where
     T: nara::prelude::Component + Clone + PartialEq + std::fmt::Debug,
 {
+    let snapshot = registry.snapshot().unwrap();
     let mut source = World::new();
     let source_entity = source.spawn(expected.clone()).id();
     let component_id = ComponentTypeId::new(id);
-    let encoded = registry
+    let encoded = snapshot
         .encode_component(&component_id, &source, source_entity)
-        .unwrap()
         .unwrap()
         .unwrap();
 
     let mut target = World::new();
     let target_entity = target.spawn_empty().id();
-    registry
+    snapshot
         .preflight_component(&component_id, &encoded)
-        .unwrap()
         .unwrap()
         .apply(&mut target, target_entity)
         .unwrap();
@@ -730,9 +729,9 @@ where
 {
     let mut world = World::new();
     let entity = world.spawn(component).id();
-    let value = registry
+    let snapshot = registry.snapshot().unwrap();
+    let value = snapshot
         .encode_component(component_id, &world, entity)
-        .unwrap()
         .unwrap()
         .unwrap();
     SceneComponentRecord::new(registry.schema(component_id).unwrap().version(), value)

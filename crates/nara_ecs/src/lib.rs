@@ -1,47 +1,73 @@
-//! ECS substrate for nara.
+//! Native Bevy ECS types with Nara's selected authoring surface.
 //!
-//! nara intentionally uses `bevy_ecs` for archetype storage, queries,
-//! schedules, commands, change detection, and derives. This crate is the
-//! narrow public boundary where nara can add conventions without pretending to
-//! own a separate ECS implementation.
+//! Use the crate root or [`prelude`] for ordinary components, resources, queries, commands and
+//! system composition. The six selected derives resolve a direct `nara` or `nara_ecs` dependency,
+//! including renamed dependencies, without requiring a direct Bevy dependency.
+//!
+//! [`upstream`] exposes the complete substrate for advanced integration. Its API follows the
+//! bound Bevy version; upstream derives outside the selected six do not receive Nara's dependency
+//! resolution guarantee. All re-exported runtime types are the original Bevy types.
 
-pub use nara_ecs_derive::{Bundle, Component, Resource, ScheduleLabel, SystemSet};
+// The explicit type list is separate so facade derives can shadow the upstream macros while
+// retaining the traits with the same names.
+mod authoring {
+    pub use bevy_ecs::{
+        bundle::Bundle,
+        change_detection::{DetectChanges, DetectChangesMut, Mut, Ref},
+        component::Component,
+        entity::Entity,
+        query::{Added, AnyOf, Changed, Has, Or, QueryState, With, Without},
+        resource::Resource,
+        schedule::{
+            IntoScheduleConfigs, IntoSystemSet, Schedule, ScheduleLabel, SystemCondition, SystemSet,
+        },
+        system::{
+            Command, Commands, EntityCommand, EntityCommands, In, IntoSystem, Local, NonSend,
+            NonSendMut, ParamSet, Populated, Query, Res, ResMut, Single, SystemParam,
+        },
+        world::{EntityMut, EntityRef, EntityWorldMut, FromWorld, World},
+    };
+}
 
-pub use bevy_ecs::{
-    change_detection, component, entity, error, event, hierarchy, lifecycle, message, name,
-    observer, query, relationship, resource, schedule, world,
-};
+pub use prelude::*;
 
-pub use bevy_ecs::prelude::*;
+/// The complete Bevy ECS substrate, coupled to the version selected by Nara.
+///
+/// Use this path for component metadata, custom parameter implementations, observers, messages,
+/// raw scheduling configuration and other advanced integration. Upgrades can require upstream
+/// API migrations even when the selected Nara authoring imports remain unchanged.
+pub use bevy_ecs as upstream;
 
 /// Bundles and their facade-aware derive.
 pub mod bundle {
-    pub use bevy_ecs::bundle::*;
-    pub use nara_ecs_derive::Bundle;
+    pub use crate::Bundle;
 }
 
-/// Systems and their facade-aware parameter derive.
+/// Common system authoring types, traits and the facade-aware parameter derive.
 pub mod system {
-    pub use bevy_ecs::system::*;
-    pub use nara_ecs_derive::SystemParam;
+    pub use crate::{
+        Command, Commands, EntityCommand, EntityCommands, In, IntoSystem, Local, NonSend,
+        NonSendMut, ParamSet, Populated, Query, Res, ResMut, Single, SystemParam,
+    };
 }
 
-pub use system::SystemParam;
-
-#[doc(hidden)]
-pub use bevy_ecs::{__macro_exports, ptr};
+/// Ordinary schedule composition and facade-aware label derives.
+pub mod schedule {
+    pub use crate::{
+        IntoScheduleConfigs, IntoSystemSet, Schedule, ScheduleLabel, SystemCondition, SystemSet,
+    };
+}
 
 #[doc(hidden)]
 pub mod __private;
 
 mod transaction;
 
-pub use transaction::{
-    LifecycleFreeDespawn, LifecycleFreeDespawnError, LifecycleFreeInsertion,
-    LifecycleFreeInsertionError, LifecycleFreeInsertionPlan, prepare_lifecycle_free_despawn,
-};
-
+/// Nara's maintained ordinary ECS authoring surface.
+///
+/// This is an explicit selection, independent of additions to Bevy's prelude. Advanced substrate
+/// APIs remain available through [`crate::upstream`].
 pub mod prelude {
-    pub use crate::{Bundle, Component, Resource, ScheduleLabel, SystemParam, SystemSet};
-    pub use bevy_ecs::prelude::*;
+    pub use crate::authoring::*;
+    pub use nara_ecs_derive::{Bundle, Component, Resource, ScheduleLabel, SystemParam, SystemSet};
 }

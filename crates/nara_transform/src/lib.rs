@@ -15,7 +15,7 @@ pub use snapshot::{
 
 use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext};
 use nara_core::{Mat3, Vec2};
-use nara_ecs::{Component, schedule::IntoScheduleConfigs, system::ScheduleSystem};
+use nara_ecs::{Component, schedule::IntoScheduleConfigs, upstream::system::ScheduleSystem};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
@@ -394,14 +394,14 @@ mod tests {
         let mut registry = ComponentRegistry::new();
         register_transform_components(&mut registry).unwrap();
         registry.freeze().unwrap();
+        let snapshot = registry.snapshot().unwrap();
         let schema = registry
             .schema(&ComponentTypeId::new("nara.transform.Transform2d"))
             .unwrap();
         let mut world = nara_ecs::World::new();
         let entity = world.spawn_empty().id();
-        registry
+        snapshot
             .preflight_component(schema.id(), schema.authoring_initial_value().unwrap())
-            .unwrap()
             .unwrap()
             .apply(&mut world, entity)
             .unwrap();

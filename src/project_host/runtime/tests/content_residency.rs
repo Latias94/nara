@@ -8,7 +8,9 @@ use nara_asset::{
     SourceHash,
 };
 use nara_core::{ByteLimit, ItemLimit, Vec2};
-use nara_ecs::{On, Remove, ResMut, system::SystemState};
+use nara_ecs::{
+    ResMut, upstream::lifecycle::Remove, upstream::observer::On, upstream::system::SystemState,
+};
 use nara_identity::SpawnedSceneInstance;
 use nara_image::{ImageExtent, ImageFormat, ImageSourceMetadata};
 use nara_project::ProjectPath;

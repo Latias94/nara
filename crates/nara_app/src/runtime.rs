@@ -9,14 +9,15 @@ use std::{
     time::Duration,
 };
 
-use bevy_ecs::error::{BevyError, ErrorHandler, FallbackErrorHandler};
 use nara_ecs::{
     Command, Mut, Resource, World,
-    change_detection::Tick,
-    component::Mutable,
-    lifecycle::HookContext,
-    schedule::{InternedScheduleLabel, ScheduleLabel},
-    world::DeferredWorld,
+    schedule::ScheduleLabel,
+    upstream::change_detection::Tick,
+    upstream::component::Mutable,
+    upstream::error::{BevyError, ErrorHandler, FallbackErrorHandler},
+    upstream::lifecycle::HookContext,
+    upstream::schedule::InternedScheduleLabel,
+    upstream::world::DeferredWorld,
 };
 use thiserror::Error;
 
@@ -2678,7 +2679,7 @@ fn with_runtime_system_fault_capture<R>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_ecs::{Event, On};
+    use nara_ecs::{upstream::event::Event, upstream::observer::On};
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{
         atomic::{AtomicBool, AtomicUsize},
@@ -2914,7 +2915,7 @@ mod tests {
             .unwrap();
         let mut app = App::new();
         app.world_mut().unwrap().add_observer(
-            |_: On<nara_ecs::lifecycle::Add<nara_ecs::observer::Observer>>| {
+            |_: On<nara_ecs::upstream::lifecycle::Add<nara_ecs::upstream::observer::Observer>>| {
                 panic!("injected pending observer initialization panic");
             },
         );
@@ -2996,7 +2997,7 @@ mod tests {
 
     #[test]
     fn managed_scope_maintenance_cannot_hide_restored_fault_bridge_mutation() {
-        fn ignored_handler(_: BevyError, _: nara_ecs::error::ErrorContext) {}
+        fn ignored_handler(_: BevyError, _: nara_ecs::upstream::error::ErrorContext) {}
 
         for mutation in 0..2 {
             let mut runtime = RuntimeInstance::start(App::new()).unwrap();

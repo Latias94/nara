@@ -1,5 +1,12 @@
 //! Internal workspace contracts coupled to the selected Bevy ECS version.
 
+pub use bevy_ecs;
+
+pub use crate::transaction::{
+    LifecycleFreeDespawn, LifecycleFreeDespawnError, LifecycleFreeInsertion,
+    LifecycleFreeInsertionError, LifecycleFreeInsertionPlan, prepare_lifecycle_free_despawn,
+};
+
 use bevy_ecs::{
     component::{Component, ComponentId},
     entity::Entity,
@@ -498,7 +505,7 @@ pub fn validate_lifecycle_free_relationship_despawn<R>(
     world: &mut World,
     entities: &[Entity],
     relationship_targets: &[Entity],
-) -> Result<(), crate::LifecycleFreeDespawnError>
+) -> Result<(), LifecycleFreeDespawnError>
 where
     R: Relationship,
     R::RelationshipTarget: RelationshipTarget<Relationship = R>,

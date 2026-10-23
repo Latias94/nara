@@ -1291,7 +1291,8 @@ fn publish_snapshot_tilesets(
             "Project runtime TileSet publication owner is unavailable",
         )));
     }
-    let mut access = nara_ecs::system::SystemState::<nara_tilemap::TileSetContent>::new(world);
+    let mut access =
+        nara_ecs::upstream::system::SystemState::<nara_tilemap::TileSetContent>::new(world);
     let mut tilesets = access.get_mut(world).map_err(|_| {
         HostFault::new(single_error(
             "project.run.tileset-resources-missing",

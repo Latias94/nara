@@ -222,14 +222,14 @@ mod tests {
         let mut registry = ComponentRegistry::new();
         register_scene_components(&mut registry).unwrap();
         registry.freeze().unwrap();
+        let snapshot = registry.snapshot().unwrap();
         let mut world = nara_ecs::World::new();
         let entity = world.spawn_empty().id();
         for schema in &current.components {
             assert_eq!(schema.version(), ComponentSchemaVersion::ONE);
             assert_eq!(registry.schema(schema.id()), Some(schema));
-            registry
+            snapshot
                 .preflight_component(schema.id(), schema.authoring_initial_value().unwrap())
-                .unwrap()
                 .unwrap()
                 .apply(&mut world, entity)
                 .unwrap();

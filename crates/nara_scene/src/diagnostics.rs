@@ -290,6 +290,12 @@ pub(crate) fn with_codec_error(
     schema: Option<&ComponentSchema>,
 ) -> Diagnostic {
     match error {
+        ComponentCodecError::UnknownComponent { .. } => {
+            with_public_identifier(diagnostic, "codec-error-kind", "unknown-component")
+        }
+        ComponentCodecError::MissingNativeBinding { .. } => {
+            with_public_identifier(diagnostic, "codec-error-kind", "missing-native-binding")
+        }
         ComponentCodecError::Domain(error) => {
             let mut domain = Diagnostic::new(error.code(), diagnostic.severity(), error.summary());
             for field in diagnostic.fields() {

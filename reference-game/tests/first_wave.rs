@@ -25,11 +25,11 @@ use nara::{
     core::ByteLimit,
     ecs::{
         Entity, Resource, With, Without,
-        component::ComponentId,
-        lifecycle::{Add, Despawn},
-        observer::{Observer, On},
         schedule::IntoScheduleConfigs,
-        system::SystemState,
+        upstream::component::ComponentId,
+        upstream::lifecycle::{Add, Despawn},
+        upstream::observer::{Observer, On},
+        upstream::system::SystemState,
     },
     gameplay::{GameplayCommandSet, submit_gameplay_driver_command},
     identity::{

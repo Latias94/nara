@@ -41,7 +41,7 @@ fn root_prelude_derives_execute_without_a_bevy_dependency() {
     let mut world = ecs::World::new();
     world.init_resource::<RootResource>();
     let entity = world.spawn(RootBundle(RenamedRoot { value: 4 })).id();
-    let mut state = ecs::system::SystemState::<RootParams>::new(&mut world);
+    let mut state = ecs::upstream::system::SystemState::<RootParams>::new(&mut world);
     state.get_mut(&mut world).unwrap().value.0 += 1;
     assert_eq!(world.resource::<RootResource>().0, 1);
     assert_eq!(world.get::<RenamedRoot>(entity).unwrap().value, 4);

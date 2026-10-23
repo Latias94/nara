@@ -1,4 +1,6 @@
-use nara_ecs::{Component, Resource, World, lifecycle::HookContext, world::DeferredWorld};
+use nara_ecs::{
+    Component, Resource, World, upstream::lifecycle::HookContext, upstream::world::DeferredWorld,
+};
 use nara_identity::{EntityReference, SceneEntityId};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
@@ -184,6 +186,7 @@ fn generated_scalar_provider_round_trips_native_components_and_declares_numeric_
         .register_persistent_component::<ScalarProbe>()
         .unwrap();
     registry.freeze().unwrap();
+    let snapshot = registry.snapshot().unwrap();
     let id = ComponentTypeId::new("nara.test.ScalarProbe");
     let schema = registry.schema(&id).unwrap();
     for (field_id, kind, domain) in [
@@ -240,17 +243,15 @@ fn generated_scalar_provider_round_trips_native_components_and_declares_numeric_
     let expected = scalar_probe();
     let mut source = World::new();
     let source_entity = source.spawn(expected.clone()).id();
-    let value = registry
+    let value = snapshot
         .encode_component(&id, &source, source_entity)
-        .unwrap()
         .unwrap()
         .unwrap();
     validate_component_value(schema, &value).unwrap();
     let mut target = World::new();
     let target_entity = target.spawn_empty().id();
-    registry
+    snapshot
         .preflight_component(&id, &value)
-        .unwrap()
         .unwrap()
         .apply(&mut target, target_entity)
         .unwrap();
@@ -266,6 +267,7 @@ fn generated_scalar_codecs_reject_wrong_kinds_and_narrowing_overflow() {
         .register_persistent_component::<ScalarProbe>()
         .unwrap();
     registry.freeze().unwrap();
+    let snapshot = registry.snapshot().unwrap();
     for (field, invalid) in [
         ("enabled", ComponentValue::U64(1)),
         ("label", ComponentValue::Bool(true)),
@@ -298,10 +300,10 @@ fn generated_scalar_codecs_reject_wrong_kinds_and_narrowing_overflow() {
             "data validator accepted {field}: {value:?}"
         );
         assert!(
-            registry
-                .preflight_component(schema.id(), &value)
-                .unwrap()
-                .is_err(),
+            matches!(
+                snapshot.preflight_component(schema.id(), &value),
+                Err(ComponentCodecError::InvalidField { .. })
+            ),
             "runtime preflight accepted {field}: {value:?}"
         );
     }
@@ -456,6 +458,7 @@ fn generated_provider_registers_schema_and_round_trips_component() {
         .register_persistent_component::<GeneratedProbe>()
         .unwrap();
     registry.freeze().unwrap();
+    let snapshot = registry.snapshot().unwrap();
 
     let schema = registry.schema(&component_id).unwrap();
     assert_eq!(schema.aliases(), &["Generated probe"]);
@@ -483,17 +486,15 @@ fn generated_provider_registers_schema_and_round_trips_component() {
     };
     let mut source = World::new();
     let source_entity = source.spawn(expected.clone()).id();
-    let value = registry
+    let value = snapshot
         .encode_component(&component_id, &source, source_entity)
-        .unwrap()
         .unwrap()
         .unwrap();
 
     let mut target = World::new();
     let target_entity = target.spawn_empty().id();
-    registry
+    snapshot
         .preflight_component(&component_id, &value)
-        .unwrap()
         .unwrap()
         .apply(&mut target, target_entity)
         .unwrap();
@@ -512,6 +513,7 @@ fn generated_empty_markers_register_and_round_trip_empty_maps() {
         .register_persistent_component::<EnemyRole>()
         .unwrap();
     registry.freeze().unwrap();
+    let snapshot = registry.snapshot().unwrap();
 
     for component_id in [&player_id, &enemy_id] {
         let schema = registry.schema(component_id).unwrap();
@@ -522,14 +524,12 @@ fn generated_empty_markers_register_and_round_trip_empty_maps() {
     let mut source = World::new();
     let player_entity = source.spawn(PlayerRole {}).id();
     let enemy_entity = source.spawn(EnemyRole {}).id();
-    let encoded_player = registry
+    let encoded_player = snapshot
         .encode_component(&player_id, &source, player_entity)
         .unwrap()
-        .unwrap()
         .unwrap();
-    let encoded_enemy = registry
+    let encoded_enemy = snapshot
         .encode_component(&enemy_id, &source, enemy_entity)
-        .unwrap()
         .unwrap()
         .unwrap();
     assert_eq!(encoded_player, ComponentValue::Map(Default::default()));
@@ -537,15 +537,13 @@ fn generated_empty_markers_register_and_round_trip_empty_maps() {
 
     let mut target = World::new();
     let target_entity = target.spawn_empty().id();
-    registry
+    snapshot
         .preflight_component(&player_id, &encoded_player)
-        .unwrap()
         .unwrap()
         .apply(&mut target, target_entity)
         .unwrap();
-    registry
+    snapshot
         .preflight_component(&enemy_id, &encoded_enemy)
-        .unwrap()
         .unwrap()
         .apply(&mut target, target_entity)
         .unwrap();
@@ -556,9 +554,8 @@ fn generated_empty_markers_register_and_round_trip_empty_maps() {
     assert_eq!(target.get::<EnemyRole>(target_entity), Some(&EnemyRole {}));
 
     let unknown_value = ComponentValue::map([("unknown", ComponentValue::Bool(true))]);
-    let error = registry
+    let error = snapshot
         .preflight_component(&player_id, &unknown_value)
-        .unwrap()
         .err()
         .expect("empty marker schemas must reject unknown values");
     assert!(error.to_string().contains("unknown"));

@@ -936,9 +936,9 @@ requested = ["runtime-2d", "runtime-ui"]
     ) -> SceneComponentRecord {
         let component = ComponentTypeId::new(component);
         let schema = registry.schema(&component).unwrap();
-        let value = registry
+        let snapshot = registry.snapshot().unwrap();
+        let value = snapshot
             .encode_component(&component, world, entity)
-            .expect("the selected runtime plan registers the UI component codec")
             .expect("the first-party UI component must encode")
             .expect("the fixture entity contains the selected UI component");
         SceneComponentRecord::new(schema.version, value)

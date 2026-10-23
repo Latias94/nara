@@ -335,9 +335,9 @@ mod tests {
     use nara_core::ItemLimit;
     use nara_ecs::{
         Resource,
-        lifecycle::{Despawn, HookContext},
-        observer::On,
-        world::DeferredWorld,
+        upstream::lifecycle::{Despawn, HookContext},
+        upstream::observer::On,
+        upstream::world::DeferredWorld,
     };
     use nara_identity::{
         EntityLookup, PersistentRuntimeId, PersistentRuntimeNamespaceId,

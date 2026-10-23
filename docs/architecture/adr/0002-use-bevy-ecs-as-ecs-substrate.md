@@ -17,9 +17,10 @@ change detection, and parallel execution without leaking unsoundness into user c
 
 Use `bevy_ecs` as nara's Phase 1 ECS substrate.
 
-`nara_ecs` should be a thin product-facing layer over `bevy_ecs`, not an independent ECS
-implementation. nara may re-export common authoring types such as `World`, `Entity`, `Query`,
-`Res`, `ResMut`, `Commands`, `Component`, `Resource`, and `Schedule` through `nara::prelude::*`.
+`nara_ecs` is a selected product-facing layer over `bevy_ecs`, not an independent ECS
+implementation. Its ordinary authoring surface uses the original Bevy runtime types, including
+`World`, `Entity`, `Query`, `Res`, `ResMut`, `Commands`, `Component`, `Resource`, and `Schedule`.
+The root gameplay prelude selects from that surface according to ADR 0044.
 
 The boundary is:
 
@@ -41,6 +42,27 @@ nara owns the product layer around the ECS:
 - `nara_tooling` owns inspector and AI-facing metadata.
 - `nara_render` owns extraction and renderer backend seams.
 
+### Authoring And Upstream Responsibility
+
+The ECS facade separates three responsibilities:
+
+- The crate root and ECS prelude maintain an explicit selection for ordinary component/resource
+  authoring, queries, commands, change detection and system/schedule composition. Common authoring
+  traits are included so ordinary callers can compose native systems without learning an advanced
+  import path. This selection does not automatically grow with Bevy's prelude or enabled features.
+- `nara_ecs::upstream`, also available as `nara::ecs::upstream`, exposes the complete Bevy ECS
+  substrate. Component metadata, custom parameter implementations, observer internals and raw
+  schedule configuration use this explicitly version-coupled path. Its names and semantics follow
+  the bound Bevy version, and callers accept the corresponding upgrade migrations.
+- Hidden `__private` support is for generated code and internal cross-crate composition.
+  Lifecycle-free transaction primitives belong there, not in the ordinary root or prelude. Hidden
+  support is not an extension API or a promise of compatibility.
+
+Selected authoring exports and `upstream` share the same types and system model. Do not wrap
+`World`, `Query` or other substrate types to simulate an independent ECS. Nara remains responsible
+for reviewing authoring behavior and documenting migrations when the substrate changes; a
+maintained selection does not promise to make upstream semantics version-independent.
+
 ### Facade Derives
 
 The supported authoring derives are `Component`, `Resource`, `Bundle`,
@@ -51,26 +73,25 @@ dependency. Consumers do not need a direct `bevy_ecs` dependency or a local
 `system::SystemParam` module paths expose the adapted derives alongside the
 upstream traits.
 
-This is a selected public surface, not a claim that every re-exported Bevy macro
-supports Nara-only dependencies. Derives outside this set need their own path
+This is a selected public surface, not a claim that every macro available through
+`upstream` supports Nara-only dependencies. Derives outside this set need their own path
 adaptation and generated-code qualification before receiving that guarantee.
 
-Bevy 0.20.0 provides path-parameterized helpers for component/resource expansion
-and schedule labels, but not for Bundle or SystemParam. The latter two use
-bounded private extractions of the exact published macro source in the existing
-`nara_ecs_derive` crate, with upstream license and source provenance. They retain
-Bevy's storage, pointer movement, access registration, parameter validation and
-deferred application semantics. Bundle's precise return-type capture also
-includes const and lifetime generic parameters, which the released source's
-type-only list omits.
+The selected derives preserve upstream storage, access, validation and deferred application
+semantics, including supported generic, const and lifetime parameters. Generated implementation
+paths use hidden substrate support rather than requiring ordinary exports of every upstream
+module.
 
-The runtime, macro helper dependencies and extracted sources are one upgrade
-unit. The exact published source must be reviewed on upgrades; the renamed
-dependency fixtures must compile and execute generic/const bundles and system
-parameters, ignored fields, nested bundles and deferred commands. Hidden
-`ptr`/`__macro_exports` re-exports support generated code and are not a separate
-stable authoring API. Token string replacement and a second implementation of
-ECS runtime semantics are excluded.
+The runtime and derive implementation are one upgrade responsibility. Each substrate upgrade must
+review its generated-code assumptions and qualify independent Nara-only and renamed-dependency
+consumers. Selected derives must interoperate with the original runtime types; adapting dependency
+paths must not create a second implementation of ECS semantics.
+
+The current dependency versions, bounded source adaptations, provenance and concrete upgrade
+checks are implementation records in the
+[derive source notes](../../../crates/nara_ecs_derive/upstream/bevy-0.20.0/README.md).
+Those details do not fix a substrate version or macro implementation strategy as a durable
+architecture contract.
 
 ## Alternatives Considered
 
@@ -136,7 +157,7 @@ integration with Rust derives and reflection.
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | nara becomes a Bevy facade instead of its own engine | High | Medium | Do not adopt `bevy_app`, `bevy_render`, or `bevy_asset` by default |
-| Public API leaks too many Bevy-specific names | Medium | Medium | Re-export intentionally through `nara_ecs` and document what is stable |
-| Bevy ECS version churn affects nara users | Medium | Medium | Pin versions, expose migration notes, and keep nara examples as compatibility tests |
+| Public API leaks too many Bevy-specific names | Medium | Medium | Keep ordinary exports explicit and complete substrate access under `upstream` |
+| Bevy ECS version churn affects nara users | Medium | Medium | Review runtime and derives together; qualify ordinary consumers and document upstream migrations |
 | Self-built placeholder code diverges from the chosen substrate | High | Medium | Replace placeholder ECS code early with a thin `bevy_ecs` layer |
 

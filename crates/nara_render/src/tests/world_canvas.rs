@@ -1,5 +1,5 @@
 use super::*;
-use nara_ecs::system::SystemState;
+use nara_ecs::upstream::system::SystemState;
 
 use crate::__private::prepare_world_presentation;
 
@@ -467,7 +467,7 @@ fn capture_retains_the_configuration_that_produced_the_views() {
 
 #[test]
 fn window_event_batches_revoke_even_when_final_geometry_matches_the_presented_frame() {
-    use nara_ecs::system::RunSystemOnce;
+    use nara_ecs::upstream::system::RunSystemOnce;
     use nara_window::{WindowEvent, WindowEvents};
 
     let mut world = World::new();

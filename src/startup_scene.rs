@@ -24,15 +24,15 @@ use nara_core::ByteLimit;
 use nara_diagnostic::{Diagnostic, DiagnosticCode, DiagnosticReport, SafeSummary};
 use nara_ecs::{
     Res, ResMut, Resource, SystemSet, World,
-    change_detection::Tick,
-    component::ComponentId,
-    error::BevyError,
     schedule::IntoScheduleConfigs,
-    system::{
-        ReadOnlySystemParam, ScheduleSystem, SystemAccess, SystemMeta, SystemParam,
-        SystemParamValidationError,
+    system::SystemParam,
+    upstream::change_detection::Tick,
+    upstream::component::ComponentId,
+    upstream::error::BevyError,
+    upstream::system::{
+        ReadOnlySystemParam, ScheduleSystem, SystemAccess, SystemMeta, SystemParamValidationError,
     },
-    world::unsafe_world_cell::UnsafeWorldCell,
+    upstream::world::unsafe_world_cell::UnsafeWorldCell,
 };
 use nara_identity::SpawnedSceneInstance;
 use nara_reflect::{ComponentRegistry, component_registry, validate_component_registry_authority};

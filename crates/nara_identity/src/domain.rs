@@ -6,12 +6,13 @@ use std::{
 
 use nara_core::ItemLimit;
 use nara_ecs::{
+    __private::prepare_lifecycle_free_despawn,
     __private::{
         validate_registered_persistent_component_apply, validate_resource_insertion,
         validate_resource_scope,
     },
-    Component, Entity, Resource, World, prepare_lifecycle_free_despawn,
-    world::WorldId,
+    Component, Entity, Resource, World,
+    upstream::world::WorldId,
 };
 use thiserror::Error;
 
@@ -232,9 +233,9 @@ pub fn validate_identity_support_topology(
 mod identity_support_topology_tests {
     use nara_ecs::{
         Resource,
-        lifecycle::{Add, Despawn, Insert},
-        observer::{Observer, On},
         system::ResMut,
+        upstream::lifecycle::{Add, Despawn, Insert},
+        upstream::observer::{Observer, On},
     };
 
     use super::*;

@@ -84,8 +84,10 @@ use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, Mut, Resource, World};
 use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity, RelativePath};
 use nara_image::ImageImportSettings;
+#[cfg(test)]
+use nara_reflect::ComponentRegistry;
 use nara_reflect::{
-    ComponentCapability, ComponentRegistry, component_registry,
+    ComponentCapability, ComponentRegistrySnapshot, component_registry,
     report_component_registry_authority_fault,
 };
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
@@ -265,8 +267,7 @@ fn apply_editor_runtime_edit(world: &mut World) {
         }
         let registry = component_registry(world)
             .ok_or(())
-            .and_then(|registry| registry.snapshot().map_err(|_| ()))
-            .map(ComponentRegistry::from_snapshot);
+            .and_then(|registry| registry.snapshot().map_err(|_| ()));
         let mut result = match registry {
             Ok(registry) => apply_runtime_edit(world, &registry, pending.request()),
             Err(_) => EditorRuntimeEditResult::Rejected {
@@ -286,7 +287,7 @@ fn apply_editor_runtime_edit(world: &mut World) {
 
 fn apply_runtime_edit(
     world: &mut World,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     request: &EditorRuntimeEditRequest,
 ) -> EditorRuntimeEditResult {
     let mut target = None;
@@ -343,12 +344,20 @@ fn apply_runtime_edit(
             reason: EditorRuntimeEditRejection::NotEditable,
         };
     }
-    let Some(Ok(Some(mut value))) = registry.encode_component(&request.component, world, entity)
-    else {
-        return EditorRuntimeEditResult::Rejected {
-            request: request.clone(),
-            reason: EditorRuntimeEditRejection::MissingComponent,
-        };
+    let mut value = match registry.encode_component(&request.component, world, entity) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return EditorRuntimeEditResult::Rejected {
+                request: request.clone(),
+                reason: EditorRuntimeEditRejection::MissingComponent,
+            };
+        }
+        Err(_) => {
+            return EditorRuntimeEditResult::Rejected {
+                request: request.clone(),
+                reason: EditorRuntimeEditRejection::InvalidValue,
+            };
+        }
     };
     if value.set_path(field.path(), request.value.clone()).is_err() {
         return EditorRuntimeEditResult::Rejected {
@@ -356,7 +365,7 @@ fn apply_runtime_edit(
             reason: EditorRuntimeEditRejection::InvalidValue,
         };
     }
-    let Some(Ok(prepared)) = registry.preflight_component(&request.component, &value) else {
+    let Ok(prepared) = registry.preflight_component(&request.component, &value) else {
         return EditorRuntimeEditResult::Rejected {
             request: request.clone(),
             reason: EditorRuntimeEditRejection::InvalidValue,
@@ -3249,6 +3258,80 @@ mod tests {
     }
 
     #[test]
+    fn runtime_edit_distinguishes_failed_encoding_from_a_missing_component() {
+        let mut registry = ComponentRegistry::new();
+        let component = ComponentTypeId::new("nara.test.EncodingFailure");
+        let schema = ComponentSchema::new(
+            component.clone(),
+            "Encoding failure",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("value"),
+            "Value",
+            ComponentFieldPath::from_fields(["value"]),
+            ComponentValueKind::I64,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
+        registry
+            .register_persistent_component_with_codec::<FieldReadOnlyProbe, _, _>(
+                schema,
+                |value| {
+                    Ok(FieldReadOnlyProbe {
+                        value: value.field_i64("value")?,
+                    })
+                },
+                |_| {
+                    Err(nara_reflect::ComponentCodecError::invalid_field(
+                        "value",
+                        "encodable",
+                    ))
+                },
+            )
+            .unwrap();
+        registry.freeze().unwrap();
+        let execution = registry.snapshot().unwrap();
+        let entity_id = SceneEntityId::new("encoding-failure").unwrap();
+        let mut world = World::new();
+        let entity = world
+            .spawn((
+                scene_source(1, entity_id.clone()),
+                FieldReadOnlyProbe { value: 7 },
+            ))
+            .id();
+        let request = EditorRuntimeEditRequest {
+            generation: 1,
+            document_revision: nara_scene::SceneAuthoringSession::new(
+                nara_scene::SceneDocument::default(),
+            )
+            .revision(),
+            entity: entity_id,
+            component,
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("value"),
+            value: ComponentValue::I64(99),
+        };
+        assert!(matches!(
+            apply_runtime_edit(&mut world, &execution, &request),
+            EditorRuntimeEditResult::Rejected {
+                reason: EditorRuntimeEditRejection::InvalidValue,
+                ..
+            }
+        ));
+        assert_eq!(world.get::<FieldReadOnlyProbe>(entity).unwrap().value, 7);
+
+        world.entity_mut(entity).remove::<FieldReadOnlyProbe>();
+        assert!(matches!(
+            apply_runtime_edit(&mut world, &execution, &request),
+            EditorRuntimeEditResult::Rejected {
+                reason: EditorRuntimeEditRejection::MissingComponent,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn runtime_edit_rejects_components_and_fields_without_edit_capability() {
         let component_read_only = ComponentTypeId::new("nara.test.ComponentReadOnlyProbe");
         let field_read_only = ComponentTypeId::new("nara.test.FieldReadOnlyProbe");
@@ -3270,6 +3353,7 @@ mod tests {
             |value| FieldReadOnlyProbe { value },
         );
         registry.freeze().unwrap();
+        let execution = registry.snapshot().unwrap();
         let revision =
             nara_scene::SceneAuthoringSession::new(nara_scene::SceneDocument::default()).revision();
 
@@ -3303,7 +3387,7 @@ mod tests {
                 value: ComponentValue::I64(99),
             };
             assert!(matches!(
-                apply_runtime_edit(&mut world, &registry, &request),
+                apply_runtime_edit(&mut world, &execution, &request),
                 EditorRuntimeEditResult::Rejected {
                     reason: EditorRuntimeEditRejection::NotEditable,
                     ..

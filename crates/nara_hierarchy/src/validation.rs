@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use nara_ecs::{Entity, QueryState, With, World, entity::EntityHashMap};
+use nara_ecs::{Entity, QueryState, With, World, upstream::entity::EntityHashMap};
 
 use crate::{Children, HierarchyError, HierarchyRoots, Parent, relation::HierarchyMember};
 

@@ -12,7 +12,7 @@ use nara::{
     ProductConfiguration, ProductRecipe, SchemaContribution,
     advanced_prelude::{CurrentScene, add_startup_scene_activation_systems},
     app::{PluginCategory, PluginDeclaration, PluginId, PluginSchemaProviderId},
-    ecs::{World, schedule::IntoScheduleConfigs, system::SystemState},
+    ecs::{World, schedule::IntoScheduleConfigs, upstream::system::SystemState},
     gameplay::{GameplayCommandSet, add_local_gameplay_command_systems},
     identity::{EntityLookup, SceneEntityId, WorldEntityToken},
     prelude::{App, CoreStage, FixedUpdateSet, Plugin, PluginError, Resource, Transform2d, Vec2},

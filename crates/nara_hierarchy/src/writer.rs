@@ -1,12 +1,13 @@
 use nara_ecs::{
+    __private::LifecycleFreeDespawnError,
     __private::{
         PersistentLifecycleEvent, validate_entity_despawn_with_allowed_component_hooks,
         validate_entity_despawn_with_claimed_component_hooks,
         validate_registered_component_metadata, validate_registered_component_observers,
         validate_resource_insertion, validate_resource_scope,
     },
-    Commands, Entity, LifecycleFreeDespawnError, World,
-    entity::{EntityHashMap, EntityHashSet},
+    Commands, Entity, World,
+    upstream::entity::{EntityHashMap, EntityHashSet},
 };
 
 use crate::{
@@ -241,7 +242,7 @@ pub(crate) fn validate_hierarchy_retirement_despawn_with_claimed_components(
     world: &World,
     entities: &[Entity],
     affected_entities: &[Entity],
-    claimed_component_ids: &[nara_ecs::component::ComponentId],
+    claimed_component_ids: &[nara_ecs::upstream::component::ComponentId],
 ) -> Result<(), LifecycleFreeDespawnError> {
     let allowed_hooks = [
         PersistentLifecycleEvent::Insert,

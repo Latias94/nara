@@ -16,13 +16,11 @@ use std::{
 
 use nara_ecs::{
     Resource, World,
-    error::{ErrorHandler, FallbackErrorHandler},
-    observer::IntoObserver,
-    schedule::{
-        InternedScheduleLabel, InternedSystemSet, IntoScheduleConfigs, Schedule,
-        ScheduleBuildSettings, ScheduleLabel, SystemSet,
-    },
-    system::ScheduleSystem,
+    schedule::{IntoScheduleConfigs, Schedule, ScheduleLabel, SystemSet},
+    upstream::error::{ErrorHandler, FallbackErrorHandler},
+    upstream::observer::IntoObserver,
+    upstream::schedule::{InternedScheduleLabel, InternedSystemSet, ScheduleBuildSettings},
+    upstream::system::ScheduleSystem,
 };
 use thiserror::Error;
 
@@ -1242,7 +1240,7 @@ impl App {
 
     pub fn init_resource<R>(&mut self) -> Result<&mut Self, PluginError>
     where
-        R: Resource + nara_ecs::world::FromWorld,
+        R: Resource + nara_ecs::upstream::world::FromWorld,
     {
         self.ensure_mutation_allowed()?;
         self.owner.world.init_resource::<R>();
@@ -2096,9 +2094,9 @@ fn stage_runs_while_paused(stage: CoreStage) -> bool {
 mod tests {
     use super::*;
     use nara_ecs::{
-        Commands, Component, DetectChanges, DetectChangesMut, Query, Ref, RemovedComponents, Res,
-        ResMut, Resource,
-        error::{BevyError, ErrorContext},
+        Commands, Component, DetectChanges, DetectChangesMut, Query, Ref, Res, ResMut, Resource,
+        upstream::error::{BevyError, ErrorContext},
+        upstream::lifecycle::RemovedComponents,
     };
     use std::sync::{
         Arc,
@@ -3579,7 +3577,8 @@ mod tests {
             .schedules
             .get_mut(CoreStage::FixedUpdate)
             .expect("FixedUpdate is an engine-owned schedule")
-            .remove_build_pass::<nara_ecs::schedule::passes::AutoInsertApplyDeferredPass>();
+            .remove_build_pass::<nara_ecs::upstream::schedule::passes::AutoInsertApplyDeferredPass>(
+            );
 
         run_frame(&mut app, FixedTime::DEFAULT_TIMESTEP).unwrap();
 

@@ -1047,16 +1047,23 @@ fn building_registry_does_not_expose_runtime_query_surface() {
 #[test]
 fn building_registry_cannot_prepare_an_applicable_component() {
     let mut registry = ComponentRegistry::new();
-    let schema = position_schema("x", "Position X");
+    let mut schema = position_schema("x", "Position X");
+    schema.fields[1] = schema.fields[1]
+        .clone()
+        .with_capabilities(authoring_capabilities());
     let id = schema.id().clone();
     registry.register_component_schema(schema).unwrap();
     register_position_binding(&mut registry, &id).unwrap();
     let value = ComponentValue::map([("x", ComponentValue::f64(1.0).unwrap())]);
 
-    assert!(registry.preflight_component(&id, &value).is_none());
+    assert!(matches!(
+        registry.snapshot(),
+        Err(ComponentRegistryError::NotFrozen)
+    ));
 
     registry.freeze().unwrap();
-    assert!(registry.preflight_component(&id, &value).is_some());
+    let snapshot = registry.snapshot().unwrap();
+    assert!(snapshot.preflight_component(&id, &value).is_ok());
 }
 
 #[test]
@@ -1453,9 +1460,9 @@ fn schema_coverage_rejects_unregistered_payload_and_codec_fields() {
         ("x", ComponentValue::f64(1.0).unwrap()),
         ("ignored", ComponentValue::String("lost".to_owned())),
     ]);
-    let input_error = registry
+    let snapshot = registry.snapshot().unwrap();
+    let input_error = snapshot
         .preflight_component(&id, &unexpected_input)
-        .unwrap()
         .err()
         .expect("unexpected schema field must fail preflight");
     assert!(input_error.to_string().contains("not declared by schema"));
@@ -1467,10 +1474,7 @@ fn schema_coverage_rejects_unregistered_payload_and_codec_fields() {
             debug_label: "lost".to_owned(),
         })
         .id();
-    let output_error = registry
-        .encode_component(&id, &world, entity)
-        .unwrap()
-        .unwrap_err();
+    let output_error = snapshot.encode_component(&id, &world, entity).unwrap_err();
     assert!(output_error.to_string().contains("not declared by schema"));
 }
 
@@ -1520,7 +1524,8 @@ fn schema_coverage_preserves_declared_container_and_nested_field_semantics() {
         ),
         ("settings", ComponentValue::Map(Default::default())),
     ]);
-    assert!(registry.preflight_component(&id, &valid).unwrap().is_ok());
+    let snapshot = registry.snapshot().unwrap();
+    assert!(snapshot.preflight_component(&id, &valid).is_ok());
 
     let undeclared_sibling = ComponentValue::map([
         ("opaque", ComponentValue::Map(Default::default())),
@@ -1529,9 +1534,8 @@ fn schema_coverage_preserves_declared_container_and_nested_field_semantics() {
             ComponentValue::map([("undeclared", ComponentValue::Bool(true))]),
         ),
     ]);
-    let error = registry
+    let error = snapshot
         .preflight_component(&id, &undeclared_sibling)
-        .unwrap()
         .err()
         .expect("undeclared nested sibling must be rejected");
     assert!(error.to_string().contains("settings.undeclared"));
@@ -1540,12 +1544,10 @@ fn schema_coverage_preserves_declared_container_and_nested_field_semantics() {
         ("opaque", ComponentValue::Map(Default::default())),
         ("settings", ComponentValue::Bool(true)),
     ]);
-    assert!(
-        registry
-            .preflight_component(&id, &scalar_ancestor)
-            .unwrap()
-            .is_err()
-    );
+    assert!(matches!(
+        snapshot.preflight_component(&id, &scalar_ancestor),
+        Err(ComponentCodecError::InvalidField { .. })
+    ));
 }
 
 #[test]

@@ -19,7 +19,8 @@ use nara::{
         RuntimeGeneration, RuntimeWorldAccessError,
     },
     ecs::{
-        Entity, Mut, Resource, With, lifecycle::Add, observer::On, schedule::IntoScheduleConfigs,
+        Entity, Mut, Resource, With, schedule::IntoScheduleConfigs, upstream::lifecycle::Add,
+        upstream::observer::On,
     },
     gameplay::{GameplayCommandBatch, GameplayCommandSet, add_local_gameplay_command_systems},
     identity::{EntityLookup, WorldIdentityDomain},

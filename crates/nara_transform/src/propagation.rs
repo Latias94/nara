@@ -3,9 +3,8 @@ use nara_app::{
     StartupStage,
 };
 use nara_ecs::{
-    Entity, FromWorld, Mut, QueryState, Resource, World,
-    error::BevyError,
-    schedule::{ApplyDeferred, IntoScheduleConfigs},
+    Entity, FromWorld, Mut, QueryState, Resource, World, schedule::IntoScheduleConfigs,
+    upstream::error::BevyError, upstream::schedule::ApplyDeferred,
 };
 use nara_hierarchy::{HierarchyOrder, Parent};
 

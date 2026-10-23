@@ -1,4 +1,4 @@
-use crate::ecs::{self, prelude::*, system::SystemState};
+use crate::ecs::{self, prelude::*, upstream::system::SystemState};
 use std::{
     marker::PhantomData,
     sync::{
@@ -146,12 +146,18 @@ fn system_params_rebind_generics_and_apply_deferred_commands() {
         params.counter.0 += params.values.iter().count();
         *params.calls += 1;
         assert_eq!(*params.calls, 1);
-        deferred_entity = params.commands.spawn((Value(8_u32), Samples([1, 2, 3]))).id();
+        deferred_entity = params
+            .commands
+            .spawn((Value(8_u32), Samples([1, 2, 3])))
+            .id();
     }
     assert!(world.get::<Value<u32>>(deferred_entity).is_none());
     state.apply(&mut world);
     assert_eq!(world.get::<Value<u32>>(deferred_entity).unwrap().0, 8);
-    assert_eq!(world.get::<Samples<3>>(deferred_entity).unwrap().0, [1, 2, 3]);
+    assert_eq!(
+        world.get::<Samples<3>>(deferred_entity).unwrap().0,
+        [1, 2, 3]
+    );
     assert_eq!(*state.get_mut(&mut world).unwrap().calls, 1);
 
     let mut readonly = SystemState::<ReadParams<u32, 3>>::new(&mut world);
@@ -162,7 +168,7 @@ fn system_params_rebind_generics_and_apply_deferred_commands() {
 
 #[test]
 fn system_param_builders_and_schedules_keep_upstream_semantics() {
-    use ecs::system::{ParamBuilder, SystemParamBuilder};
+    use ecs::upstream::system::{ParamBuilder, SystemParamBuilder};
 
     let mut world = World::new();
     world.insert_resource(Counter::<2>(3));
@@ -197,7 +203,11 @@ fn validation_keeps_the_custom_field_error_message() {
         Ok(_) => panic!("a missing required resource must fail parameter validation"),
         Err(error) => error,
     };
-    assert!(error.to_string().contains("the fixture counter must be installed"));
+    assert!(
+        error
+            .to_string()
+            .contains("the fixture counter must be installed")
+    );
 }
 
 #[test]
@@ -207,8 +217,9 @@ fn system_params_over_the_tuple_limit_preserve_local_state() {
     {
         let params = state.get_mut(&mut world).unwrap();
         for mut local in [
-            params.a, params.b, params.c, params.d, params.e, params.f, params.g, params.h, params.i,
-            params.j, params.k, params.l, params.m, params.n, params.o, params.p, params.q,
+            params.a, params.b, params.c, params.d, params.e, params.f, params.g, params.h,
+            params.i, params.j, params.k, params.l, params.m, params.n, params.o, params.p,
+            params.q,
         ] {
             *local += 1;
         }

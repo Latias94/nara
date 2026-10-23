@@ -5,9 +5,9 @@ use nara_app::App;
 use nara_core::ItemLimit;
 use nara_ecs::{
     Component, Entity, Mut, Resource, World,
-    lifecycle::{Add, Despawn},
-    observer::{Observer, On},
     system::ResMut,
+    upstream::lifecycle::{Add, Despawn},
+    upstream::observer::{Observer, On},
 };
 use nara_hierarchy::{
     __private::completed_topology_generation, HierarchyOperation, HierarchyPlacement,

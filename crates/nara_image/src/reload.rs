@@ -28,7 +28,9 @@ use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
     SafeSummary,
 };
-use nara_ecs::{Res, ResMut, Resource, SystemSet, error::BevyError, schedule::IntoScheduleConfigs};
+use nara_ecs::{
+    Res, ResMut, Resource, SystemSet, schedule::IntoScheduleConfigs, upstream::error::BevyError,
+};
 use nara_tasks::{
     OrderedTaskReadySnapshot, OrderedTaskResults, TaskCancellation, TaskCancellationReason,
     TaskCoalesceKey, TaskCompletionCutoff, TaskCompletionCutoffError, TaskDomainKey, TaskFailure,

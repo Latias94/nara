@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use nara_ecs::{Component, Entity, Resource, entity::EntityHashMap};
+use nara_ecs::{Component, Entity, Resource, upstream::entity::EntityHashMap};
 
 static NEXT_ROOT_EPOCH: AtomicU64 = AtomicU64::new(1);
 

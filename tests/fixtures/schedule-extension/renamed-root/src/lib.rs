@@ -16,8 +16,8 @@ mod tests {
         },
         ecs::{
             Commands, Component, Query, Res, ResMut, Resource, ScheduleLabel, SystemSet,
-            error::{BevyError, ErrorContext, FallbackErrorHandler},
             schedule::{IntoScheduleConfigs, ScheduleLabel as ScheduleLabelTrait},
+            upstream::error::{BevyError, ErrorContext, FallbackErrorHandler},
         },
         gameplay::{
             GameplayCommandBatch, GameplayCommandDraft, GameplayCommandIngressSource,

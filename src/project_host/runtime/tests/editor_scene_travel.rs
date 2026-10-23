@@ -4,7 +4,7 @@ use super::*;
 
 use nara_app::CoreStage;
 use nara_core::ItemLimit;
-use nara_ecs::system::SystemState;
+use nara_ecs::upstream::system::SystemState;
 use nara_identity::SpawnedSceneInstance;
 use nara_project::ProjectPath;
 use nara_scene::advanced::SceneProductTransactionLimits;

@@ -1095,6 +1095,7 @@ mod tests {
         );
         assert_eq!(current.components[0].version(), ComponentSchemaVersion::ONE);
         let registry = frozen_sprite_registry();
+        let snapshot = registry.snapshot().unwrap();
         let schema = registry
             .schema(&ComponentTypeId::new("nara.sprite.Sprite"))
             .unwrap();
@@ -1104,9 +1105,8 @@ mod tests {
         }
         let mut world = World::new();
         let entity = world.spawn_empty().id();
-        registry
+        snapshot
             .preflight_component(schema.id(), value)
-            .unwrap()
             .unwrap()
             .apply(&mut world, entity)
             .unwrap();
@@ -1175,20 +1175,19 @@ mod tests {
     #[test]
     fn sprite_codec_preserves_y_sort_anchor_and_explicit_group() {
         let registry = frozen_sprite_registry();
+        let snapshot = registry.snapshot().unwrap();
         let mut world = World::new();
         let original = Sprite::from_color(Vec2::ONE, Color::WHITE)
             .with_layer(3)
             .with_sort_key(-7)
             .with_y_sort_anchor(Vec2::new(2.0, -4.0));
         let entity = world.spawn(original.clone()).id();
-        let value = registry
+        let value = snapshot
             .encode_component(&sprite_type_id(), &world, entity)
             .unwrap()
-            .unwrap()
             .unwrap();
-        let prepared = registry
+        let prepared = snapshot
             .preflight_component(&sprite_type_id(), &value)
-            .unwrap()
             .unwrap();
         let restored = world.spawn_empty().id();
 
@@ -1206,14 +1205,14 @@ mod tests {
             let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
                 .with_project_asset_database(&database);
             let registry = frozen_sprite_registry();
+            let snapshot = registry.snapshot().unwrap();
 
-            let prepared = registry
+            let prepared = snapshot
                 .preflight_component_with_context(
                     &sprite_type_id(),
                     &sprite_value(AssetRef::StableId(stable_id)),
                     &mut context,
                 )
-                .unwrap()
                 .unwrap();
             assert!(context.asset_server_touched());
             prepared
@@ -1238,14 +1237,13 @@ mod tests {
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
             .with_project_asset_database(&database);
         let registry = frozen_sprite_registry();
+        let snapshot = registry.snapshot().unwrap();
 
-        let result = registry
-            .preflight_component_with_context(
-                &sprite_type_id(),
-                &sprite_value(AssetRef::StableId(unknown_stable_id)),
-                &mut context,
-            )
-            .unwrap();
+        let result = snapshot.preflight_component_with_context(
+            &sprite_type_id(),
+            &sprite_value(AssetRef::StableId(unknown_stable_id)),
+            &mut context,
+        );
 
         assert!(matches!(
             result,
@@ -1274,14 +1272,13 @@ mod tests {
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
             .with_project_asset_database(&database);
         let registry = frozen_sprite_registry();
+        let snapshot = registry.snapshot().unwrap();
 
-        let result = registry
-            .preflight_component_with_context(
-                &sprite_type_id(),
-                &sprite_value(AssetRef::StableId(stable_id)),
-                &mut context,
-            )
-            .unwrap();
+        let result = snapshot.preflight_component_with_context(
+            &sprite_type_id(),
+            &sprite_value(AssetRef::StableId(stable_id)),
+            &mut context,
+        );
 
         assert!(matches!(
             result,
@@ -1296,14 +1293,13 @@ mod tests {
         let database = test_database(stable_id, "textures/player.png");
         let mut context = ComponentDecodeContext::new().with_project_asset_database(&database);
         let registry = frozen_sprite_registry();
+        let snapshot = registry.snapshot().unwrap();
 
-        let result = registry
-            .preflight_component_with_context(
-                &sprite_type_id(),
-                &sprite_value(AssetRef::path("textures/missing.png").unwrap()),
-                &mut context,
-            )
-            .unwrap();
+        let result = snapshot.preflight_component_with_context(
+            &sprite_type_id(),
+            &sprite_value(AssetRef::path("textures/missing.png").unwrap()),
+            &mut context,
+        );
 
         assert!(matches!(
             result,

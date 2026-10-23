@@ -134,10 +134,8 @@ pub fn export_scene_with_options(
     let mut diagnostics = DiagnosticReport::default();
     let mut exported_value_nodes = 0_usize;
     let mut exported_value_bytes = 0_usize;
-    let schemas = match registry.schemas() {
-        Ok(schemas) => schemas
-            .filter(|schema| schema.has_capability(ComponentCapability::Scene))
-            .collect::<Vec<_>>(),
+    let execution = match registry.snapshot() {
+        Ok(snapshot) => snapshot,
         Err(_) => {
             diagnostics.push(diagnostic_error(
                 "scene.component-registry-not-frozen",
@@ -149,6 +147,12 @@ pub fn export_scene_with_options(
             };
         }
     };
+    let schemas = execution
+        .catalog()
+        .components
+        .iter()
+        .filter(|schema| schema.has_capability(ComponentCapability::Scene))
+        .collect::<Vec<_>>();
     let Some(domain) = world.get_resource::<WorldIdentityDomain>() else {
         diagnostics.push(diagnostic_error(
             "scene.export-identity-domain-missing",
@@ -302,14 +306,12 @@ pub fn export_scene_with_options(
 
         let mut components = BTreeMap::new();
         for schema in &schemas {
-            let Some(encoded) = registry.encode_component_with_context(
+            let encoded = execution.encode_component_with_context(
                 &schema.id,
                 world,
                 export_entity.entity,
                 &encode_context,
-            ) else {
-                continue;
-            };
+            );
             match encoded {
                 Ok(Some(value)) => {
                     let value = match effective_component_value_owned(

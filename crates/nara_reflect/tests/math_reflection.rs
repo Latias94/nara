@@ -108,11 +108,11 @@ fn persistent_vec2_declares_one_closed_numeric_shape_and_keeps_xy_wire_encoding(
         .register_persistent_component::<MotionPath>()
         .unwrap();
     registry.freeze().unwrap();
+    let snapshot = registry.snapshot().unwrap();
     let mut world = World::new();
     let entity = world.spawn_empty().id();
-    registry
+    snapshot
         .preflight_component(&ComponentTypeId::new("math.MotionPath"), &encoded)
-        .unwrap()
         .unwrap()
         .apply(&mut world, entity)
         .unwrap();

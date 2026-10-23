@@ -2,7 +2,7 @@ use std::{error::Error, fmt};
 
 use nara::{
     app::RuntimeFaultReporter,
-    ecs::{Entity, With, error::BevyError, system::SystemParam},
+    ecs::{Entity, With, system::SystemParam, upstream::error::BevyError},
     prelude::{FixedTime, Query, Res, ResMut, Resource, Transform2d, Vec2},
     scene::{SceneEntitySource, advanced::SceneProductResource},
     transform::FixedSpatialSnapshot2d,

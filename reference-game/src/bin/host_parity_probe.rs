@@ -17,7 +17,7 @@ use nara::{
         PluginId,
     },
     diagnostic::{Diagnostic, DiagnosticReport, DiagnosticSeverity},
-    ecs::{error::BevyError, schedule::IntoScheduleConfigs},
+    ecs::{schedule::IntoScheduleConfigs, upstream::error::BevyError},
     gameplay::{
         GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandKey,
         GameplayCommandPayload, GameplayCommandQueue, GameplayCommandRejection, GameplayCommandSet,

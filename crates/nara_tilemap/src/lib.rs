@@ -1200,20 +1200,19 @@ mod tests {
     #[test]
     fn tilemap_codec_preserves_y_sort_anchor_and_explicit_group() {
         let registry = frozen_tilemap_registry();
+        let snapshot = registry.snapshot().unwrap();
         let mut world = World::new();
         let original = Tilemap::new(Vec2::ONE)
             .with_layer(3)
             .with_sort_key(-7)
             .with_y_sort_anchor(Vec2::new(2.0, -4.0));
         let entity = world.spawn(original.clone()).id();
-        let value = registry
+        let value = snapshot
             .encode_component(&tilemap_type_id(), &world, entity)
             .unwrap()
-            .unwrap()
             .unwrap();
-        let prepared = registry
+        let prepared = snapshot
             .preflight_component(&tilemap_type_id(), &value)
-            .unwrap()
             .unwrap();
         let restored = world.spawn_empty().id();
 
@@ -1225,14 +1224,13 @@ mod tests {
     #[test]
     fn tilemap_codec_rejects_duplicate_cell_coordinates() {
         let registry = frozen_tilemap_registry();
+        let snapshot = registry.snapshot().unwrap();
         let value = tilemap_value_with_cells(
             Vec2::new(16.0, 16.0),
             vec![tile_cell_value(2, 3, 1), tile_cell_value(2, 3, 2)],
         );
 
-        let result = registry
-            .preflight_component(&tilemap_type_id(), &value)
-            .unwrap();
+        let result = snapshot.preflight_component(&tilemap_type_id(), &value);
 
         assert!(matches!(
             result,
@@ -1244,6 +1242,7 @@ mod tests {
     #[test]
     fn tilemap_codec_rejects_non_positive_tile_size() {
         let registry = frozen_tilemap_registry();
+        let snapshot = registry.snapshot().unwrap();
         for (width, height, expected_field) in [
             (0.0, 16.0, "tile_size.x"),
             (-1.0, 16.0, "tile_size.x"),
@@ -1263,9 +1262,7 @@ mod tests {
                 ("tileset", ComponentValue::Null),
                 ("cells", ComponentValue::List(Vec::new())),
             ]);
-            let result = registry
-                .preflight_component(&tilemap_type_id(), &value)
-                .unwrap();
+            let result = snapshot.preflight_component(&tilemap_type_id(), &value);
 
             assert!(matches!(
                 result,
@@ -1305,14 +1302,14 @@ mod tests {
             let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
                 .with_project_asset_database(&database);
             let registry = frozen_tilemap_registry();
+            let snapshot = registry.snapshot().unwrap();
 
-            let prepared = registry
+            let prepared = snapshot
                 .preflight_component_with_context(
                     &tilemap_type_id(),
                     &tilemap_value(AssetRef::StableId(stable_id)),
                     &mut context,
                 )
-                .unwrap()
                 .unwrap();
             assert!(context.asset_server_touched());
             prepared
@@ -1340,14 +1337,13 @@ mod tests {
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
             .with_project_asset_database(&database);
         let registry = frozen_tilemap_registry();
+        let snapshot = registry.snapshot().unwrap();
 
-        let result = registry
-            .preflight_component_with_context(
-                &tilemap_type_id(),
-                &tilemap_value(AssetRef::StableId(unknown_stable_id)),
-                &mut context,
-            )
-            .unwrap();
+        let result = snapshot.preflight_component_with_context(
+            &tilemap_type_id(),
+            &tilemap_value(AssetRef::StableId(unknown_stable_id)),
+            &mut context,
+        );
 
         assert!(matches!(
             result,
@@ -1376,14 +1372,13 @@ mod tests {
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
             .with_project_asset_database(&database);
         let registry = frozen_tilemap_registry();
+        let snapshot = registry.snapshot().unwrap();
 
-        let result = registry
-            .preflight_component_with_context(
-                &tilemap_type_id(),
-                &tilemap_value(AssetRef::StableId(stable_id)),
-                &mut context,
-            )
-            .unwrap();
+        let result = snapshot.preflight_component_with_context(
+            &tilemap_type_id(),
+            &tilemap_value(AssetRef::StableId(stable_id)),
+            &mut context,
+        );
 
         assert!(matches!(
             result,
@@ -1398,14 +1393,13 @@ mod tests {
         let database = test_database(stable_id, "tilesets/terrain.ron");
         let mut context = ComponentDecodeContext::new().with_project_asset_database(&database);
         let registry = frozen_tilemap_registry();
+        let snapshot = registry.snapshot().unwrap();
 
-        let result = registry
-            .preflight_component_with_context(
-                &tilemap_type_id(),
-                &tilemap_value(AssetRef::path("tilesets/missing.ron").unwrap()),
-                &mut context,
-            )
-            .unwrap();
+        let result = snapshot.preflight_component_with_context(
+            &tilemap_type_id(),
+            &tilemap_value(AssetRef::path("tilesets/missing.ron").unwrap()),
+            &mut context,
+        );
 
         assert!(matches!(
             result,

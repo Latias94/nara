@@ -5,7 +5,7 @@ use std::{
 };
 
 use nara_core::ItemLimit;
-use nara_ecs::system::SystemState;
+use nara_ecs::upstream::system::SystemState;
 use nara_fs::{
     CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode,
 };

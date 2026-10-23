@@ -255,7 +255,7 @@ impl AssetWatchTranslator {
 /// Call `complete` only after reconciliation; the runtime retains events collected during it.
 #[must_use]
 pub struct AssetWatchRescan {
-    world: nara_ecs::world::WorldId,
+    world: nara_ecs::upstream::world::WorldId,
     root: PathBuf,
     session: Weak<Mutex<Option<PendingWatchRescan>>>,
 }

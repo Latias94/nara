@@ -7,7 +7,8 @@ use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Entity, World};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentEncodeContext, ComponentMigrationError,
-    ComponentRegistry, ComponentSchema, ComponentTypeId, PersistentApplyRejection,
+    ComponentRegistry, ComponentRegistrySnapshot, ComponentSchema, ComponentTypeId,
+    PersistentApplyRejection,
 };
 use nara_scene::{
     SceneAuthoringRevision, SceneAuthoringSession, SceneComponentRecord, SceneEntityId,
@@ -513,6 +514,17 @@ pub fn __export_apply_changes_from_world(
         };
     }
 
+    let execution = match registry.snapshot() {
+        Ok(snapshot) => snapshot,
+        Err(_) => {
+            return apply_changes_error_report(
+                Some(source_revision),
+                current_revision,
+                "tooling.apply-changes-registry-not-frozen",
+                "Apply Changes requires a frozen component registry",
+            );
+        }
+    };
     let context =
         ComponentEncodeContext::new().with_asset_ref_export_policy(request.asset_ref_export_policy);
     let mut seen_components = BTreeSet::new();
@@ -540,6 +552,7 @@ pub fn __export_apply_changes_from_world(
             runtime_entity,
             document_entity,
             registry,
+            &execution,
             component,
             &context,
         );
@@ -635,6 +648,7 @@ fn export_component_change(
     play_entity: Entity,
     document_entity: &SceneEntityRecord,
     registry: &ComponentRegistry,
+    execution: &ComponentRegistrySnapshot,
     component: &ComponentTypeId,
     context: &ComponentEncodeContext<'_>,
 ) -> ExportedComponentChange {
@@ -672,46 +686,29 @@ fn export_component_change(
         };
     }
 
-    let Some(encoded) =
-        registry.encode_component_with_context(component, world, play_entity, context)
-    else {
-        return ExportedComponentChange {
-            report: rejected_component_report(
-                &document_entity.id,
-                component,
-                component_error(
-                    "tooling.apply-changes-missing-component-codec",
-                    "Apply Changes targets a component without an encode codec",
-                    &document_entity.id,
-                    component,
-                ),
-            ),
-            operation: None,
-        };
-    };
-
-    let runtime_value = match encoded {
-        Ok(value) => value,
-        Err(error) => {
-            return ExportedComponentChange {
-                report: rejected_component_report(
-                    &document_entity.id,
-                    component,
-                    with_codec_error(
-                        component_error(
-                            "tooling.apply-changes-component-encode-failed",
-                            "Apply Changes could not encode the runtime component",
-                            &document_entity.id,
-                            component,
+    let runtime_value =
+        match execution.encode_component_with_context(component, world, play_entity, context) {
+            Ok(value) => value,
+            Err(error) => {
+                return ExportedComponentChange {
+                    report: rejected_component_report(
+                        &document_entity.id,
+                        component,
+                        with_codec_error(
+                            component_error(
+                                "tooling.apply-changes-component-encode-failed",
+                                "Apply Changes could not encode the runtime component",
+                                &document_entity.id,
+                                component,
+                            ),
+                            &error,
+                            Some(schema),
                         ),
-                        &error,
-                        Some(schema),
                     ),
-                ),
-                operation: None,
-            };
-        }
-    };
+                    operation: None,
+                };
+            }
+        };
 
     let document_component = match document_entity.components.get(component) {
         Some(component_record) => match registry.migrate_component_value(
@@ -817,6 +814,12 @@ fn with_codec_error(
     schema: Option<&ComponentSchema>,
 ) -> Diagnostic {
     match error {
+        ComponentCodecError::UnknownComponent { .. } => {
+            diagnostic::with_public_identifier(entry, "codec-error-kind", "unknown-component")
+        }
+        ComponentCodecError::MissingNativeBinding { .. } => {
+            diagnostic::with_public_identifier(entry, "codec-error-kind", "missing-native-binding")
+        }
         ComponentCodecError::Domain(error) => {
             let mut domain = Diagnostic::new(error.code(), entry.severity(), error.summary());
             for field in entry.fields() {

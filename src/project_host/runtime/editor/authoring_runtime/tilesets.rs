@@ -116,7 +116,7 @@ fn apply_in_world(
     Result<(bool, Vec<AssetRef>), EditorImageRuntimeFailure>,
     (RuntimeWorldAccessError, Vec<EditorTileSetSourceUpdate>),
 > {
-    let mut access = nara_ecs::system::SystemState::<TileSetContent>::new(world);
+    let mut access = nara_ecs::upstream::system::SystemState::<TileSetContent>::new(world);
     let mut content = match access.get_mut(world) {
         Ok(content) => content,
         Err(_) => {

@@ -14,10 +14,10 @@ use nara_diagnostic::{
 };
 use nara_ecs::{
     Commands, Component, Entity, Mut, Resource, World,
-    lifecycle::{Add, Despawn, HookContext, Insert, Remove},
-    observer::{Observer, On},
     system::ResMut,
-    world::DeferredWorld,
+    upstream::lifecycle::{Add, Despawn, HookContext, Insert, Remove},
+    upstream::observer::{Observer, On},
+    upstream::world::DeferredWorld,
 };
 use nara_hierarchy::{
     Children, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyRoots,

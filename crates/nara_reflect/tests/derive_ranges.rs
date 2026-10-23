@@ -70,6 +70,7 @@ fn typed_range_literals_and_aliases_reach_shared_validation() {
     let mut registry = ComponentRegistry::new();
     inventory::register(&mut registry).unwrap();
     registry.freeze().unwrap();
+    let snapshot = registry.snapshot().unwrap();
     for (seconds, offset, count, valid) in [
         (0.0, -9, 0, true),
         (30.0, 10, 4, true),
@@ -84,15 +85,12 @@ fn typed_range_literals_and_aliases_reach_shared_validation() {
         ]);
         assert_eq!(validate_component_value(&schema, &value).is_ok(), valid);
         assert_eq!(
-            registry
-                .preflight_component(&schema.id, &value)
-                .unwrap()
-                .is_ok(),
+            snapshot.preflight_component(&schema.id, &value).is_ok(),
             valid
         );
         if !valid {
             assert!(matches!(
-                registry.preflight_component(&schema.id, &value).unwrap(),
+                snapshot.preflight_component(&schema.id, &value),
                 Err(ComponentCodecError::Domain(_))
             ));
         }

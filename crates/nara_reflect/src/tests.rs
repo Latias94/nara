@@ -4,9 +4,9 @@ use nara_asset::{AssetRef, AssetServer};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_ecs::{
     Component, Resource, World,
-    lifecycle::{Add, HookContext},
-    observer::On,
-    world::DeferredWorld,
+    upstream::lifecycle::{Add, HookContext},
+    upstream::observer::On,
+    upstream::world::DeferredWorld,
 };
 use nara_identity::{
     PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference, SceneEntityId,
@@ -672,7 +672,8 @@ fn preflights_applies_and_encodes_scene_component() {
         ("x", ComponentValue::f64(2.0).unwrap()),
         ("y", ComponentValue::f64(3.0).unwrap()),
     ]);
-    let prepared = registry.preflight_component(&id, &value).unwrap().unwrap();
+    let execution = registry.snapshot().unwrap();
+    let prepared = execution.preflight_component(&id, &value).unwrap();
     let mut world = World::new();
     let entity = world.spawn_empty().id();
 
@@ -680,10 +681,7 @@ fn preflights_applies_and_encodes_scene_component() {
 
     assert_eq!(world.get::<Position>(entity).unwrap().x, 2.0);
     assert_eq!(
-        registry
-            .encode_component(&id, &world, entity)
-            .unwrap()
-            .unwrap(),
+        execution.encode_component(&id, &world, entity).unwrap(),
         Some(value)
     );
 }
@@ -705,6 +703,79 @@ fn failed_prepared_component_does_not_mutate_existing_world_state() {
     assert!(result.is_err());
     assert_eq!(world.resource::<ExistingApplyState>().0, 1);
     assert!(world.get::<Position>(entity).is_none());
+}
+
+#[test]
+fn frozen_execution_distinguishes_unknown_schema_from_component_absence() {
+    let registry = frozen_apply_probe_registry();
+    let execution = registry.snapshot().unwrap();
+    let mut world = World::new();
+    let entity = world.spawn_empty().id();
+    let unknown = ComponentTypeId::new("nara.test.Unknown");
+
+    assert!(matches!(
+        execution.preflight_component(&unknown, &apply_probe_value(7)),
+        Err(ComponentCodecError::UnknownComponent { component_id }) if component_id == unknown
+    ));
+    assert!(matches!(
+        execution.encode_component(&unknown, &world, entity),
+        Err(ComponentCodecError::UnknownComponent { component_id }) if component_id == unknown
+    ));
+    assert_eq!(
+        execution.encode_component(
+            &ComponentTypeId::new("nara.test.ApplyProbe"),
+            &world,
+            entity
+        ),
+        Ok(None)
+    );
+}
+
+#[test]
+fn missing_native_binding_prevents_execution_snapshot_publication() {
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_component_schema(apply_probe_schema())
+        .unwrap();
+    assert!(matches!(
+        registry.freeze(),
+        Err(ComponentRegistryError::MissingNativeBinding { component_id })
+            if component_id == ComponentTypeId::new("nara.test.ApplyProbe")
+    ));
+    assert!(matches!(
+        registry.snapshot(),
+        Err(ComponentRegistryError::NotFrozen)
+    ));
+}
+
+#[test]
+fn retained_execution_uses_its_exact_frozen_definition_after_registry_drop() {
+    let registry = frozen_apply_probe_registry();
+    let execution = registry.snapshot().unwrap();
+    assert!(execution.ptr_eq(&registry.snapshot().unwrap()));
+    assert!(!execution.ptr_eq(&frozen_apply_probe_registry().snapshot().unwrap()));
+    drop(registry);
+
+    let id = ComponentTypeId::new("nara.test.ApplyProbe");
+    let invalid = execution
+        .preflight_component(&id, &ComponentValue::Map(BTreeMap::new()))
+        .err()
+        .expect("invalid component data must fail, rather than look absent");
+    assert!(
+        matches!(invalid, ComponentCodecError::MissingField { .. }),
+        "unexpected data failure: {invalid:?}"
+    );
+    let mut world = World::new();
+    let entity = world.spawn_empty().id();
+    execution
+        .preflight_component(&id, &apply_probe_value(73))
+        .unwrap()
+        .apply(&mut world, entity)
+        .unwrap();
+    assert_eq!(
+        execution.encode_component(&id, &world, entity),
+        Ok(Some(apply_probe_value(73)))
+    );
 }
 
 #[test]
@@ -733,6 +804,7 @@ fn custom_encoder_receives_the_selected_component_and_skips_missing_targets() {
         )
         .unwrap();
     registry.freeze().unwrap();
+    let execution = registry.snapshot().unwrap();
     let mut world = World::new();
     let missing = world.spawn(Velocity { dx: 1.0, dy: 2.0 }).id();
     let selected = world.spawn(ApplyProbe(37)).id();
@@ -740,15 +812,12 @@ fn custom_encoder_receives_the_selected_component_and_skips_missing_targets() {
     world.despawn(retired);
 
     for entity in [missing, retired] {
-        assert_eq!(
-            registry.encode_component(&id, &world, entity),
-            Some(Ok(None))
-        );
+        assert_eq!(execution.encode_component(&id, &world, entity), Ok(None));
     }
     assert_eq!(calls.load(Ordering::Relaxed), 0);
     assert_eq!(
-        registry.encode_component(&id, &world, selected),
-        Some(Ok(Some(apply_probe_value(37)))),
+        execution.encode_component(&id, &world, selected),
+        Ok(Some(apply_probe_value(37))),
     );
     assert_eq!(calls.load(Ordering::Relaxed), 1);
 }
@@ -764,9 +833,9 @@ fn deferred_dynamic_hook_rejects_existing_target_before_component_mutation() {
 
     let registry = frozen_apply_probe_registry();
     let id = ComponentTypeId::new("nara.test.ApplyProbe");
-    let prepared = registry
+    let execution = registry.snapshot().unwrap();
+    let prepared = execution
         .preflight_component(&id, &apply_probe_value(7))
-        .unwrap()
         .unwrap();
     let mut world = World::new();
     world.init_resource::<HookCanary>();
@@ -800,9 +869,9 @@ fn entity_component_observer_rejects_existing_target_before_component_mutation()
 
     let registry = frozen_apply_probe_registry();
     let id = ComponentTypeId::new("nara.test.ApplyProbe");
-    let prepared = registry
+    let execution = registry.snapshot().unwrap();
+    let prepared = execution
         .preflight_component(&id, &apply_probe_value(8))
-        .unwrap()
         .unwrap();
     let mut world = World::new();
     world.init_resource::<ObserverCanary>();

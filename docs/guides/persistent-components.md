@@ -73,9 +73,11 @@ actual provider receipts. Missing declarations or registrations reject before sc
 is published. Several plugins may select the same provider, and a recipe may register it on
 their behalf. Standalone `ComponentRegistry` users can still register and freeze directly.
 
-Only a frozen registry may turn codec output into an applicable component. A building registry
-returns no runtime preflight result, so plugin preparation cannot publish a value before the final
-schema, native binding, and stable identity are fixed.
+Codec execution uses the `ComponentRegistrySnapshot` returned by `registry.snapshot()` after a
+successful freeze. The building registry has no encode or preflight methods, and requesting its
+snapshot returns `ComponentRegistryError::NotFrozen`. Freeze rejects missing native bindings before
+publishing a snapshot. Retain one snapshot for a complete operation or batch so all component work
+uses the same validated schema and native definition.
 
 The inventory generates `schemas`, `initial_catalog` and `register` callbacks from one explicit
 list of type identifiers. Import or alias qualified component types into the invocation module
@@ -179,7 +181,29 @@ fn register_health(registry: &mut ComponentRegistry) -> Result<(), ComponentRegi
 }
 ```
 
-The same registration and a frozen-registry decode, guarded apply, and native-value encode round
+After registration, execute through the frozen snapshot:
+
+```rust
+let mut registry = ComponentRegistry::new();
+register_health(&mut registry)?;
+registry.freeze()?;
+let execution = registry.snapshot()?;
+
+let component_id = ComponentTypeId::new("example.Health");
+let source = ComponentValue::map([("current", ComponentValue::I64(42))]);
+let prepared = execution.preflight_component(&component_id, &source)?;
+let mut world = nara::ecs::World::new();
+let entity = world.spawn_empty().id();
+prepared.apply(&mut world, entity)?;
+let encoded = execution.encode_component(&component_id, &world, entity)?;
+```
+
+Preflight returns a prepared component or an explicit error. Encoding returns `Ok(None)` only
+when the entity or selected native component is absent. Unknown schema, missing native binding and
+codec failures return errors. A retained snapshot keeps its exact definition; it does not certify
+the current target World's lifecycle topology, asset baseline or installed runtime authority.
+
+The same registration and a frozen-snapshot decode, guarded apply, and native-value encode round
 trip compile in the independent
 [`manual_component_codec` consumer](../../tests/fixtures/module-consumer/tests/manual_component_codec.rs).
 Production composition places this registration in the provider callback described above.
@@ -198,7 +222,7 @@ Choose the candidate constructor by the work it can perform:
 
 The distinction is enforced by the closure signature. Do not use the asset-server constructor for
 an asset-free value: fresh-scene admission must know every resource insertion that may occur before
-it allocates targets. A candidate becomes a `PreparedComponent` only through a frozen registry;
+it allocates targets. A candidate becomes a `PreparedComponent` only through a frozen snapshot;
 game code never constructs the bound apply value directly.
 
 Persistent components describe the complete stored component set. They may not declare Bevy

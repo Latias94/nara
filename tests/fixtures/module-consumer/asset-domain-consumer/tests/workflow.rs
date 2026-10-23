@@ -19,7 +19,7 @@ use nara::{
     },
     asset::{AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, StableAssetId},
     core::ItemLimit,
-    ecs::{Component, Mut, Res, ResMut, Resource, World, system::SystemState},
+    ecs::{Component, Mut, Res, ResMut, Resource, World, upstream::system::SystemState},
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode},
     project::ProjectPath,
     project_host::{

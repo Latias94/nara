@@ -695,6 +695,27 @@ struct RegistryData {
 }
 
 impl RegistryData {
+    fn schema(&self, id: &ComponentTypeId) -> Option<&ComponentSchema> {
+        self.type_index
+            .get(id)
+            .and_then(|index| self.catalog.components.get(*index))
+    }
+
+    fn resolve_field(
+        &self,
+        component_id: &ComponentTypeId,
+        field_id: &ComponentFieldId,
+    ) -> Option<&ComponentFieldSchema> {
+        self.field_index
+            .get(&(component_id.clone(), field_id.clone()))
+            .and_then(|(component_index, field_index)| {
+                self.catalog
+                    .components
+                    .get(*component_index)
+                    .and_then(|schema| schema.fields.get(*field_index))
+            })
+    }
+
     fn first_generation() -> Self {
         Self::with_catalog(ComponentSchemaCatalog::default(), None)
     }
@@ -775,6 +796,30 @@ impl Default for ComponentRegistry {
     }
 }
 
+/// Immutable schema and native codec execution authority published by a successful freeze.
+///
+/// A snapshot retains its exact definition independently of the registry that published it.
+/// Target-World and asset admission still happen when a prepared component is applied.
+///
+/// Codec execution is unavailable on a building registry:
+///
+/// ```compile_fail,E0599
+/// use nara_reflect::{ComponentRegistry, ComponentTypeId, ComponentValue};
+/// let registry = ComponentRegistry::new();
+/// let _ = registry.preflight_component(
+///     &ComponentTypeId::new("example.Health"),
+///     &ComponentValue::I64(42),
+/// );
+/// ```
+///
+/// ```compile_fail,E0599
+/// use nara_ecs::World;
+/// use nara_reflect::{ComponentRegistry, ComponentTypeId};
+/// let registry = ComponentRegistry::new();
+/// let mut world = World::new();
+/// let entity = world.spawn_empty().id();
+/// let _ = registry.encode_component(&ComponentTypeId::new("example.Health"), &world, entity);
+/// ```
 #[derive(Clone)]
 pub struct ComponentRegistrySnapshot(Arc<RegistryData>);
 
@@ -800,6 +845,20 @@ impl ComponentRegistrySnapshot {
     #[must_use]
     pub fn catalog(&self) -> &ComponentSchemaCatalog {
         &self.0.catalog
+    }
+
+    #[must_use]
+    pub fn schema(&self, id: &ComponentTypeId) -> Option<&ComponentSchema> {
+        self.0.schema(id)
+    }
+
+    #[must_use]
+    pub fn resolve_field(
+        &self,
+        component_id: &ComponentTypeId,
+        field_id: &ComponentFieldId,
+    ) -> Option<&ComponentFieldSchema> {
+        self.0.resolve_field(component_id, field_id)
     }
 
     pub fn contribution_receipts(
@@ -875,6 +934,91 @@ impl ComponentRegistrySnapshot {
 
     pub(crate) fn witness(&self) -> ComponentRegistrySnapshotWitness {
         ComponentRegistrySnapshotWitness(Arc::downgrade(&self.0))
+    }
+
+    /// Decodes and binds one component using this exact frozen definition.
+    pub fn preflight_component(
+        &self,
+        id: &ComponentTypeId,
+        value: &ComponentValue,
+    ) -> Result<PreparedComponent, ComponentCodecError> {
+        let mut context = ComponentDecodeContext::new();
+        self.preflight_component_with_context(id, value, &mut context)
+    }
+
+    /// Shares the caller's preparation context across a complete component batch.
+    pub fn preflight_component_with_context(
+        &self,
+        id: &ComponentTypeId,
+        value: &ComponentValue,
+        context: &mut ComponentDecodeContext<'_>,
+    ) -> Result<PreparedComponent, ComponentCodecError> {
+        let (schema, binding) = self.execution_binding(id)?;
+        validate_schema_capabilities(schema, [ComponentCapability::Scene])
+            .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
+        let path_index = self
+            .0
+            .path_indexes
+            .get(id)
+            .ok_or_else(missing_schema_path_index_error)?;
+        let effective = effective_component_value(schema, value, context.materialization_limits())?;
+        validate_component_value_coverage(schema, path_index, effective.as_ref())?;
+        binding
+            .codec
+            .preflight_with_context(effective.as_ref(), context)
+            .map(|prepared| prepared.bind(id.clone()))
+    }
+
+    /// Encodes the selected component, returning `None` only for entity/component absence.
+    pub fn encode_component(
+        &self,
+        id: &ComponentTypeId,
+        world: &World,
+        entity: Entity,
+    ) -> Result<Option<ComponentValue>, ComponentCodecError> {
+        let context = ComponentEncodeContext::new();
+        self.encode_component_with_context(id, world, entity, &context)
+    }
+
+    pub fn encode_component_with_context(
+        &self,
+        id: &ComponentTypeId,
+        world: &World,
+        entity: Entity,
+        context: &ComponentEncodeContext<'_>,
+    ) -> Result<Option<ComponentValue>, ComponentCodecError> {
+        let (schema, binding) = self.execution_binding(id)?;
+        validate_schema_capabilities(schema, [ComponentCapability::Scene])
+            .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
+        let encoded = binding.codec.encode_with_context(world, entity, context)?;
+        if let Some(value) = &encoded {
+            let path_index = self
+                .0
+                .path_indexes
+                .get(id)
+                .ok_or_else(missing_schema_path_index_error)?;
+            validate_component_value_coverage(schema, path_index, value)?;
+        }
+        Ok(encoded)
+    }
+
+    fn execution_binding(
+        &self,
+        id: &ComponentTypeId,
+    ) -> Result<(&ComponentSchema, &NativeComponentBinding), ComponentCodecError> {
+        let schema = self
+            .schema(id)
+            .ok_or_else(|| ComponentCodecError::UnknownComponent {
+                component_id: id.clone(),
+            })?;
+        let binding =
+            self.0
+                .bindings
+                .get(id)
+                .ok_or_else(|| ComponentCodecError::MissingNativeBinding {
+                    component_id: id.clone(),
+                })?;
+        Ok((schema, binding))
     }
 }
 
@@ -1501,10 +1645,7 @@ impl ComponentRegistry {
     #[must_use]
     pub fn schema(&self, id: &ComponentTypeId) -> Option<&ComponentSchema> {
         match &self.state {
-            RegistryState::Frozen(data) => data
-                .type_index
-                .get(id)
-                .and_then(|index| data.catalog.components.get(*index)),
+            RegistryState::Frozen(data) => data.schema(id),
             RegistryState::Building(_) => None,
             RegistryState::Transitioning => unreachable!(),
         }
@@ -1540,15 +1681,7 @@ impl ComponentRegistry {
         field_id: &ComponentFieldId,
     ) -> Option<&ComponentFieldSchema> {
         match &self.state {
-            RegistryState::Frozen(data) => data
-                .field_index
-                .get(&(component_id.clone(), field_id.clone()))
-                .and_then(|(component_index, field_index)| {
-                    data.catalog
-                        .components
-                        .get(*component_index)
-                        .and_then(|schema| schema.fields.get(*field_index))
-                }),
+            RegistryState::Frozen(data) => data.resolve_field(component_id, field_id),
             RegistryState::Building(_) => None,
             RegistryState::Transitioning => unreachable!(),
         }
@@ -1593,26 +1726,7 @@ impl ComponentRegistry {
         let Some(schema) = self.schema(id) else {
             return Err(ComponentProjectionError::UnknownComponentId(id.clone()));
         };
-        for capability in capabilities {
-            if !schema.has_capability(capability) {
-                return Err(ComponentProjectionError::MissingComponentCapability {
-                    component_id: id.clone(),
-                    capability,
-                });
-            }
-            if let Some(field) = schema
-                .fields
-                .iter()
-                .find(|field| !field.has_capability(capability))
-            {
-                return Err(ComponentProjectionError::ProjectionRequired {
-                    component_id: id.clone(),
-                    field_id: field.id.clone(),
-                    capability,
-                });
-            }
-        }
-        Ok(())
+        validate_schema_capabilities(schema, capabilities)
     }
 
     pub fn migrate_component_value(
@@ -1688,84 +1802,6 @@ impl ComponentRegistry {
             version: current_version,
             value: current_value,
         })
-    }
-
-    pub fn preflight_component(
-        &self,
-        id: &ComponentTypeId,
-        value: &ComponentValue,
-    ) -> Option<Result<PreparedComponent, ComponentCodecError>> {
-        let mut context = ComponentDecodeContext::new();
-        self.preflight_component_with_context(id, value, &mut context)
-    }
-
-    pub fn preflight_component_with_context(
-        &self,
-        id: &ComponentTypeId,
-        value: &ComponentValue,
-        context: &mut ComponentDecodeContext<'_>,
-    ) -> Option<Result<PreparedComponent, ComponentCodecError>> {
-        let data = match &self.state {
-            RegistryState::Frozen(data) => data,
-            RegistryState::Building(_) => return None,
-            RegistryState::Transitioning => {
-                unreachable!("component registry transition is synchronous")
-            }
-        };
-        let binding = data.bindings.get(id)?;
-        let schema = data
-            .type_index
-            .get(id)
-            .and_then(|index| data.catalog.components.get(*index))?;
-        let path_index = data.path_indexes.get(id);
-        Some(
-            self.validate_whole_value_capabilities(id, [ComponentCapability::Scene])
-                .map_err(|error| ComponentCodecError::Message(error.to_string()))
-                .and_then(|()| {
-                    let path_index = path_index.ok_or_else(missing_schema_path_index_error)?;
-                    let effective =
-                        effective_component_value(schema, value, context.materialization_limits())?;
-                    validate_component_value_coverage(schema, path_index, effective.as_ref())?;
-                    binding
-                        .codec
-                        .preflight_with_context(effective.as_ref(), context)
-                })
-                .map(|prepared| prepared.bind(id.clone())),
-        )
-    }
-
-    pub fn encode_component(
-        &self,
-        id: &ComponentTypeId,
-        world: &World,
-        entity: Entity,
-    ) -> Option<Result<Option<ComponentValue>, ComponentCodecError>> {
-        let context = ComponentEncodeContext::new();
-        self.encode_component_with_context(id, world, entity, &context)
-    }
-
-    pub fn encode_component_with_context(
-        &self,
-        id: &ComponentTypeId,
-        world: &World,
-        entity: Entity,
-        context: &ComponentEncodeContext<'_>,
-    ) -> Option<Result<Option<ComponentValue>, ComponentCodecError>> {
-        let binding = self.data().bindings.get(id)?;
-        let schema = self.schema(id)?;
-        let path_index = self.data().path_indexes.get(id);
-        Some(
-            self.validate_whole_value_capabilities(id, [ComponentCapability::Scene])
-                .map_err(|error| ComponentCodecError::Message(error.to_string()))
-                .and_then(|()| binding.codec.encode_with_context(world, entity, context))
-                .and_then(|encoded| {
-                    if let Some(value) = &encoded {
-                        let path_index = path_index.ok_or_else(missing_schema_path_index_error)?;
-                        validate_component_value_coverage(schema, path_index, value)?;
-                    }
-                    Ok(encoded)
-                }),
-        )
     }
 
     fn data(&self) -> &RegistryData {
@@ -1971,6 +2007,32 @@ fn merge_owner_candidate(aggregate: &mut RegistryData, candidate: RegistryData) 
     aggregate.migrations.extend(migrations);
     aggregate.path_indexes.extend(path_indexes);
     aggregate.type_tombstone_index.extend(type_tombstone_index);
+}
+
+fn validate_schema_capabilities(
+    schema: &ComponentSchema,
+    capabilities: impl IntoIterator<Item = ComponentCapability>,
+) -> Result<(), ComponentProjectionError> {
+    for capability in capabilities {
+        if !schema.has_capability(capability) {
+            return Err(ComponentProjectionError::MissingComponentCapability {
+                component_id: schema.id.clone(),
+                capability,
+            });
+        }
+        if let Some(field) = schema
+            .fields
+            .iter()
+            .find(|field| !field.has_capability(capability))
+        {
+            return Err(ComponentProjectionError::ProjectionRequired {
+                component_id: schema.id.clone(),
+                field_id: field.id.clone(),
+                capability,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn validate_native_binding<T: Component>(

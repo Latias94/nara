@@ -1,7 +1,7 @@
 use nara::{
     advanced_prelude::*,
     diagnostic::DiagnosticValueRef,
-    ecs::{lifecycle::Add, observer::On, system::ResMut},
+    ecs::{system::ResMut, upstream::lifecycle::Add, upstream::observer::On},
     scene::{
         SceneExportOptions, SceneSpawnReport, export_scene_with_options,
         spawn_prefab_with_asset_database, spawn_prefab_with_patch,
@@ -169,6 +169,7 @@ fn asset_free_sprite_does_not_claim_or_insert_an_asset_server() {
 #[test]
 fn sprite_codec_round_trip_preserves_anchor() {
     let registry = component_registry();
+    let snapshot = registry.snapshot().unwrap();
     let sprite_id = ComponentTypeId::new("nara.sprite.Sprite");
     let expected_anchor = SpriteAnchor {
         normalized: Vec2::new(-0.5, 0.75),
@@ -178,15 +179,11 @@ fn sprite_codec_round_trip_preserves_anchor() {
     sprite.anchor = expected_anchor;
     let source_entity = source_world.spawn(sprite).id();
 
-    let encoded = registry
+    let encoded = snapshot
         .encode_component(&sprite_id, &source_world, source_entity)
         .unwrap()
-        .unwrap()
         .unwrap();
-    let prepared = registry
-        .preflight_component(&sprite_id, &encoded)
-        .unwrap()
-        .unwrap();
+    let prepared = snapshot.preflight_component(&sprite_id, &encoded).unwrap();
     let mut target_world = World::new();
     let target_entity = target_world.spawn_empty().id();
     prepared.apply(&mut target_world, target_entity).unwrap();

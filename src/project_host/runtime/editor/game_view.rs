@@ -1360,7 +1360,7 @@ pub(super) fn apply_input_batch(
 mod world_presentation_tests {
     use super::*;
     use nara_core::{Color, Mat3, Vec2};
-    use nara_ecs::{Entity, system::SystemState};
+    use nara_ecs::{Entity, upstream::system::SystemState};
     use nara_render::{
         ExtractedView, RenderTarget, ViewLoadOp, ViewMapping2d, ViewportRect, WorldCanvas,
         WorldPointer,

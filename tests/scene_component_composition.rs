@@ -1,9 +1,9 @@
 use nara::{
     ecs::{
-        lifecycle::{Add, HookContext, Remove},
-        observer::On,
         system::ResMut,
-        world::DeferredWorld,
+        upstream::lifecycle::{Add, HookContext, Remove},
+        upstream::observer::On,
+        upstream::world::DeferredWorld,
     },
     identity::{EntityLookup, WorldIdentityDomain},
     prelude::{
@@ -236,12 +236,12 @@ fn every_public_authoring_route_materializes_only_the_explicit_persistent_set() 
 
     let mut direct_world = World::new();
     let direct_entity = direct_world.spawn_empty().id();
-    registry
+    let snapshot = registry.snapshot().unwrap();
+    snapshot
         .preflight_component(
             &component_id(),
             &ComponentValue::map([("value", ComponentValue::I64(14))]),
         )
-        .unwrap()
         .unwrap()
         .apply(&mut direct_world, direct_entity)
         .unwrap();
@@ -334,12 +334,12 @@ fn late_required_component_metadata_rejects_public_apply_before_persistent_mutat
     let mut direct_world = World::new();
     let target = direct_world.spawn_empty().id();
     direct_world.register_required_components::<CompositionProbe, ImplicitDependency>();
-    let prepared = registry
+    let snapshot = registry.snapshot().unwrap();
+    let prepared = snapshot
         .preflight_component(
             &component_id(),
             &ComponentValue::map([("value", ComponentValue::I64(23))]),
         )
-        .unwrap()
         .unwrap();
 
     let error = prepared.apply(&mut direct_world, target).unwrap_err();
@@ -379,12 +379,12 @@ fn post_publication_runtime_observer_runs_but_blocks_the_next_persistent_apply()
     world.entity_mut(entity).remove::<CompositionProbe>();
     assert_eq!(world.resource::<HookCanary>().0, 1);
 
-    let prepared = registry
+    let snapshot = registry.snapshot().unwrap();
+    let prepared = snapshot
         .preflight_component(
             &component_id(),
             &ComponentValue::map([("value", ComponentValue::I64(32))]),
         )
-        .unwrap()
         .unwrap();
     let error = prepared.apply(&mut world, entity).unwrap_err();
     assert!(matches!(

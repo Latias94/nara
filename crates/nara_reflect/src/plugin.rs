@@ -10,7 +10,7 @@ use nara_app::{
     PluginDomainError, PluginError, PluginId, PluginPreflightContext, PluginPreflightResource,
     RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter, RuntimeGeneration,
 };
-use nara_ecs::{Resource, World, lifecycle::HookContext, world::DeferredWorld};
+use nara_ecs::{Resource, World, upstream::lifecycle::HookContext, upstream::world::DeferredWorld};
 
 use crate::{ComponentRegistry, ComponentRegistrySnapshot, ComponentSchemaProviderDefinition};
 

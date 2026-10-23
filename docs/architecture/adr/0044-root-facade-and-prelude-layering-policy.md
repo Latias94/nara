@@ -49,8 +49,19 @@ Rules:
   path. Renaming the `nara` or `nara_ecs` dependency must not require a hidden Bevy dependency
   or alias. Module imports `nara::ecs::bundle::Bundle` and
   `nara::ecs::system::SystemParam` select those same facade-aware derives. This selected
-  guarantee does not imply that every upstream derive re-export is adapted; source coupling
+  guarantee does not imply that every derive exposed through `upstream` is adapted; source coupling
   and generated support paths follow [ADR 0002](0002-use-bevy-ecs-as-ecs-substrate.md#facade-derives).
+- `nara::ecs` and its prelude expose an explicit ordinary authoring selection using original
+  Bevy runtime types and common composition/change-detection traits. The `bundle`, `system` and
+  `schedule` paths are selected authoring imports, not wholesale upstream modules. The root
+  gameplay prelude remains a smaller, gameplay-first selection.
+- Complete substrate access is explicit through `nara::ecs::upstream` or
+  `nara_ecs::upstream`. Advanced consumers follow the bound Bevy version and its migrations.
+  This path does not expand the ordinary prelude or grant unadapted upstream macros the selected
+  Nara-only dependency guarantee.
+- Hidden `__private` exports serve generated code and internal cross-crate composition only.
+  Lifecycle-free transaction primitives are not ordinary authoring exports. Internal consumers
+  migrate with the owning implementation rather than relying on a public compatibility alias.
 - `runtime-2d` may add sprite, tilemap, camera, image, and material authoring exports;
   `runtime-ui` may add runtime UI authoring exports. Enabling one capability must not expose items
   from the other, and unavailable domains must be absent from root modules and all preludes.

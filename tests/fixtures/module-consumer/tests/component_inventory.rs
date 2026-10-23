@@ -429,6 +429,7 @@ fn public_data_only_editor_creates_edits_rejects_saves_reopens_and_passes_compil
 #[test]
 fn historical_values_migrate_without_clamping_and_strict_check_uses_the_same_recipe() {
     let registry = current_registry();
+    let snapshot = registry.snapshot().unwrap();
     let id = ComponentTypeId::new(COOLDOWN);
     let original = ComponentValue::map([("seconds", ComponentValue::f64(3.1).unwrap())]);
     let migrated = registry
@@ -438,20 +439,17 @@ fn historical_values_migrate_without_clamping_and_strict_check_uses_the_same_rec
     assert_eq!(migrated.value, original);
     let mut world = World::new();
     let entity = world.spawn_empty().id();
-    registry
+    snapshot
         .preflight_component(&id, &migrated.value)
-        .unwrap()
         .unwrap()
         .apply(&mut world, entity)
         .unwrap();
     assert_eq!(world.get::<Cooldown>(entity).unwrap().seconds, 3.1_f32);
     let invalid = ComponentValue::map([("seconds", ComponentValue::f64(31.0).unwrap())]);
-    assert!(
-        registry
-            .preflight_component(&id, &invalid)
-            .unwrap()
-            .is_err()
-    );
+    assert!(matches!(
+        snapshot.preflight_component(&id, &invalid),
+        Err(nara_engine::reflect::ComponentCodecError::Domain(_))
+    ));
     assert!(
         registry
             .migrate_component_value(&id, ComponentSchemaVersion::ONE, &invalid)

@@ -1,7 +1,9 @@
 use nara_ecs::{
     Component, World,
-    component::{Immutable, StorageType},
-    entity::EntityCloner,
+    upstream::{
+        component::{Immutable, StorageType},
+        entity::EntityCloner,
+    },
 };
 
 #[derive(Component)]

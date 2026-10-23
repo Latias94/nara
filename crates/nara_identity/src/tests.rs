@@ -6,9 +6,9 @@ use std::{
 
 use nara_ecs::{
     Entity, Resource, World,
-    lifecycle::{Despawn, Insert, Remove},
-    observer::{Observer, On},
     system::ResMut,
+    upstream::lifecycle::{Despawn, Insert, Remove},
+    upstream::observer::{Observer, On},
 };
 
 use crate::__private::{

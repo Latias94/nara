@@ -26,6 +26,8 @@ Every implementation unit that changes a public API, persistent shape, cache con
 
 | Migration ID | Unit | Commit | Kind | Affected contract | Required action |
 |---|---|---|---|---|---|
+| ABFE-1 | ADR boundary refinement | See linked verification | `rust-api` | Frozen component codec execution | Obtain one `ComponentRegistrySnapshot` after freeze; execute preflight/encode on that snapshot. Handle execution errors separately from actual entity/component absence. |
+| ABFE-2 | ADR boundary refinement | See linked verification | `rust-api` | ECS authoring, upstream and internal imports | Keep ordinary types and the six adapted derives on the ECS root/prelude. Move advanced Bevy API imports to `ecs::upstream`; internal transaction helpers no longer belong to the ordinary root. |
 | LLC-U4 | Low-level U4 | `89fdf6f` | `rust-api/behavior` | World-space spatial consumption | Replace Global Component queries and completion-token joins with Historical, Fixed or Presented snapshot readers. Resolve uses the fixed helper; Gameplay Capture reads Fixed directly in Finalize. A non-spatial direct parent ends inheritance. |
 | LLC-U5 | Low-level U5 | `fb6af18` | `rust-api/behavior` | Managed asset mutation and watcher reconciliation | Capture `Assets<T>::mutation_baseline` before delayed effects; consume it for success, failure or removal. Retain desired settings independently of last-good values. Complete an owned watcher rescan only after Host reconciliation; draining a rescan error does not acknowledge coverage. |
 | LLC-U10 | Low-level U10 | `cfde813` | `behavior` | Gameplay Capture and acknowledgement | Keep command consumers in Consume and success-dependent snapshots in Capture. Managed consumer/Simulate/deferred failure skips Capture and Ack; Capture failure skips Ack. Observe the fault and close/reconstruct explicitly; do not assume rollback, schedule abort, or automatic replay. |
@@ -88,6 +90,87 @@ Each migration entry contains:
 8. **Compatibility window**: normally `none (unreleased canonical replacement)`; otherwise link the authorizing ADR.
 9. **Rollback**: how to recover source data or revert the code commit without relying on a compatibility shim.
 10. **Verification anchors**: tests, fixtures, examples, and stale-symbol searches proving the replacement is complete.
+
+## ABFE-1: Frozen Component Codec Execution
+
+**Removed contract**: `ComponentRegistry::{preflight_component, preflight_component_with_context,
+encode_component, encode_component_with_context}` and their outer `Option` result. That result
+conflated registry readiness, unknown identity and unavailable execution.
+
+**Canonical replacement**: register and freeze through `ComponentRegistry`, then retain the existing
+`ComponentRegistrySnapshot` for the complete codec operation or batch. No second registry type or
+compatibility wrapper is introduced.
+
+Before:
+
+```rust
+registry.freeze()?;
+let prepared = registry.preflight_component(&id, &value).unwrap()?;
+let encoded = registry.encode_component(&id, &world, entity).unwrap()?;
+```
+
+After:
+
+```rust
+registry.freeze()?;
+let execution = registry.snapshot()?;
+let prepared = execution.preflight_component(&id, &value)?;
+let encoded = execution.encode_component(&id, &world, entity)?;
+```
+
+Preflight returns `Result<PreparedComponent, ComponentCodecError>`; encoding returns
+`Result<Option<ComponentValue>, ComponentCodecError>`. Only actual entity/component absence is
+`Ok(None)`. Unknown schema, missing native binding and codec failures are explicit errors. A missing
+native binding prevents successful freeze and snapshot publication. Context-aware variants share
+the caller's existing decode/encode context. Snapshot retention does not replace current target-World,
+lifecycle or asset-baseline admission during apply.
+
+**Affected consumers**: Scene preflight/export, Tooling Apply Changes, Editor runtime editing,
+component registration tests, independent manual codec/inventory fixtures and reference-game
+authoring tests. The [component guide](../guides/persistent-components.md) shows the complete manual
+codec registration and execution path.
+
+**User action**: move codec calls to a retained snapshot and update result matches. Source action:
+`none`; cache action: `keep`; compatibility window: `none (unreleased canonical replacement)`.
+Rollback restores the code revision; no project-source or cache rewrite is required.
+
+**Verification anchors**: snapshot execution and target-World rejection tests in `nara_reflect`,
+building-registry compile-fail documentation, Scene/Tooling/root tests, independent manual codecs
+and the [qualification record](../knowledge/engineering/verification/2026-10/2026-10-23T022246Z-adr-boundary-and-frozen-codec-execution-verification-b210d1cf09c94203b04bffcfa1dbe236.md).
+
+## ABFE-2: Explicit ECS Imports
+
+**Removed contract**: wholesale Bevy prelude/module re-exports from the ECS root, plus ordinary root
+exports of lifecycle-free transaction primitives.
+
+**Canonical replacement**: `nara_ecs` and `nara::ecs` maintain selected authoring imports and the six
+adapted derives (`Component`, `Resource`, `Bundle`, `SystemParam`, `ScheduleLabel`, `SystemSet`).
+Advanced APIs use the complete version-bound `upstream` path. Runtime types remain original Bevy
+types; this does not create a replacement ECS.
+
+Before:
+
+```rust
+use nara::ecs::{component::ComponentId, world::DeferredWorld};
+```
+
+After:
+
+```rust
+use nara::ecs::upstream::{component::ComponentId, world::DeferredWorld};
+```
+
+The ordinary `bundle`, `system` and `schedule` modules contain selected authoring names. Hidden
+`__private` support is for generated code and internal cross-crate composition; it is not a public
+extension API. Upstream macros outside the six adapted derives retain Bevy's own dependency/path
+requirements. For example, `nara_app` keeps a direct test-only Bevy dependency for its `Event` derive.
+
+**Affected consumers**: App/runtime, built-in domain modules, root Hosts, public game samples and
+independent renamed ECS/root/schedule fixtures. **User action**: update advanced imports and stop
+depending on internal transaction helpers as ordinary authoring APIs. Source action: `none`; cache
+action: `keep`; compatibility window: `none (unreleased canonical replacement)`. Rollback restores
+the code revision without rewriting project source data. The authoring-surface test, renamed
+consumers and qualification record linked above cover these paths.
 
 ## NUI-U2-1: Host-Owned Editor Workspace
 

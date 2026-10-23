@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use nara::{
     advanced_prelude::CurrentScene,
-    ecs::{Component, World, system::SystemState},
+    ecs::{Component, World, upstream::system::SystemState},
     hierarchy::{
         HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyRoots,
         HierarchyWriter, Parent,

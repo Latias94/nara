@@ -5,8 +5,9 @@ use std::{
 
 use nara_core::ItemLimit;
 use nara_ecs::{
-    Component, Entity, LifecycleFreeInsertionPlan, Resource, World,
-    component::{ComponentId, Mutable},
+    __private::LifecycleFreeInsertionPlan,
+    Component, Entity, Resource, World,
+    upstream::component::{ComponentId, Mutable},
 };
 use nara_hierarchy::{Children, Parent};
 use nara_identity::SceneEntityId;

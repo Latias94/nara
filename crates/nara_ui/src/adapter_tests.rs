@@ -540,6 +540,7 @@ fn legacy_brush_migrations_preserve_roles_and_expose_image_asset_references() {
 #[test]
 fn legacy_root_and_defaulted_node_shapes_are_rejected() {
     let registry = frozen_ui_registry();
+    let snapshot = registry.snapshot().unwrap();
 
     let legacy_root = ComponentValue::map([
         (
@@ -548,28 +549,25 @@ fn legacy_root_and_defaulted_node_shapes_are_rejected() {
         ),
         ("order", ComponentValue::I64(0)),
     ]);
-    assert!(
-        registry
-            .preflight_component(&ComponentTypeId::new("nara.ui.UiRoot"), &legacy_root)
-            .expect("UiRoot should have a registered codec")
-            .is_err()
-    );
+    assert!(matches!(
+        snapshot.preflight_component(&ComponentTypeId::new("nara.ui.UiRoot"), &legacy_root),
+        Err(nara_reflect::ComponentCodecError::MissingField { field }) if field == "layer"
+    ));
 
     let defaulted_node = ComponentValue::map([(
         "style",
         ComponentValue::map([("visible", ComponentValue::Bool(true))]),
     )]);
-    assert!(
-        registry
-            .preflight_component(&ComponentTypeId::new("nara.ui.UiNode"), &defaulted_node)
-            .expect("UiNode should have a registered codec")
-            .is_err()
-    );
+    assert!(matches!(
+        snapshot.preflight_component(&ComponentTypeId::new("nara.ui.UiNode"), &defaulted_node),
+        Err(nara_reflect::ComponentCodecError::MissingField { .. })
+    ));
 }
 
 #[test]
 fn button_visual_roles_round_trip_as_canonical_scene_data() {
     let registry = frozen_ui_registry();
+    let snapshot = registry.snapshot().unwrap();
     let component_id = ComponentTypeId::new("nara.ui.UiButtonVisuals");
     let expected = UiButtonVisuals::new()
         .with_normal_text(UiColorRole::SecondaryText)
@@ -580,14 +578,12 @@ fn button_visual_roles_round_trip_as_canonical_scene_data() {
         .with_disabled(UiColorRole::Disabled, UiColorRole::SecondaryText);
     let mut source = World::new();
     let source_entity = source.spawn(expected).id();
-    let encoded = registry
+    let encoded = snapshot
         .encode_component(&component_id, &source, source_entity)
-        .expect("button visuals should have a registered codec")
         .expect("button visuals should encode")
         .expect("the source entity should contain button visuals");
-    let prepared = registry
+    let prepared = snapshot
         .preflight_component(&component_id, &encoded)
-        .expect("button visuals should have a registered codec")
         .expect("encoded button visuals should preflight");
     let mut target = World::new();
     let target_entity = target.spawn_empty().id();

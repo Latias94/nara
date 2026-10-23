@@ -16,6 +16,12 @@ use nara_asset::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComponentCodecError {
+    UnknownComponent {
+        component_id: ComponentTypeId,
+    },
+    MissingNativeBinding {
+        component_id: ComponentTypeId,
+    },
     Domain(ComponentDomainError),
     MissingField {
         field: String,
@@ -85,6 +91,18 @@ impl ComponentCodecError {
 impl Display for ComponentCodecError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnknownComponent { component_id } => {
+                write!(
+                    formatter,
+                    "component '{component_id}' is not in the frozen schema"
+                )
+            }
+            Self::MissingNativeBinding { component_id } => {
+                write!(
+                    formatter,
+                    "component '{component_id}' has no native binding"
+                )
+            }
             Self::Domain(error) => Display::fmt(error, formatter),
             Self::MissingField { field } => write!(formatter, "missing component field '{field}'"),
             Self::InvalidField { field, expected } => {

@@ -10,7 +10,7 @@ use nara::{
         CurrentScene, commit_prepared_project_scene, restart_current_scene_with_product,
     },
     core::ItemLimit,
-    ecs::{World, system::SystemState},
+    ecs::{World, upstream::system::SystemState},
     gameplay::{GameplayCommandBatch, GameplayCommandValue},
     identity::SceneEntityId,
     prelude::Resource,

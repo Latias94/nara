@@ -438,9 +438,9 @@ where
 {
     let mut world = World::new();
     let entity = world.spawn(component).id();
-    let value = registry
+    let snapshot = registry.snapshot().unwrap();
+    let value = snapshot
         .encode_component(component_id, &world, entity)
-        .unwrap()
         .unwrap()
         .unwrap();
     SceneComponentRecord::new(registry.schema(component_id).unwrap().version(), value)

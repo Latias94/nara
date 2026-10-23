@@ -1,6 +1,6 @@
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use bevy_ecs::error::{BevyError, ErrorContext, ErrorHandler, Severity, match_severity};
+use nara_ecs::upstream::error::{BevyError, ErrorContext, ErrorHandler, Severity, match_severity};
 
 use super::{RuntimeExecutionError, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter};
 

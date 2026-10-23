@@ -881,13 +881,14 @@ impl EditorImagePublicationPort {
             },
         );
         if result.is_ok() {
-            let mut database = world.resource_mut::<nara_asset::ProjectAssetDatabase>();
-            if database.record_for_path(record.path()) != Some(&record) {
-                database
-                    .insert(record.clone())
-                    .expect("exclusive image identity admission was preflighted");
+            {
+                let mut database = world.resource_mut::<nara_asset::ProjectAssetDatabase>();
+                if database.record_for_path(record.path()) != Some(&record) {
+                    database
+                        .insert(record.clone())
+                        .expect("exclusive image identity admission was preflighted");
+                }
             }
-            drop(database);
             #[cfg(feature = "presentation-2d")]
             super::preview::publish_authoring_image_identity(world, record);
         }
@@ -950,16 +951,17 @@ fn publish_authoring_image_records(
     snapshot: &AuthoringProjectSessionSnapshot,
 ) -> Result<(), DiagnosticReport> {
     world.insert_resource((*snapshot.asset_database()).clone());
-    let mut server = world.resource_mut::<AssetServer>();
-    for record in snapshot
-        .asset_records()
-        .filter(|record| record.source_kind() == &AssetSourceKind::Image)
     {
-        server
-            .reserve_record::<ImageAsset>(record)
-            .map_err(|_| runtime_error("project.editor.preview-image-identity-failed"))?;
+        let mut server = world.resource_mut::<AssetServer>();
+        for record in snapshot
+            .asset_records()
+            .filter(|record| record.source_kind() == &AssetSourceKind::Image)
+        {
+            server
+                .reserve_record::<ImageAsset>(record)
+                .map_err(|_| runtime_error("project.editor.preview-image-identity-failed"))?;
+        }
     }
-    drop(server);
     tilesets::publish_initial(world, snapshot)
 }
 

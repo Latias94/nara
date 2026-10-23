@@ -71,7 +71,7 @@ fn nested_durable_values_do_not_require_live_residency_in_the_schema_visitor() {
         unreachable!()
     };
     world.resource_scope(
-        |world, mut domain: nara_ecs::change_detection::Mut<WorldIdentityDomain>| {
+        |world, mut domain: nara_ecs::upstream::change_detection::Mut<WorldIdentityDomain>| {
             domain
                 .register_persistent(world, token, logical.clone())
                 .unwrap();
@@ -206,11 +206,9 @@ fn typed_deferred_codec_preserves_durable_reference_and_reads_encode_context() {
         )
         .unwrap();
     registry.freeze().unwrap();
+    let snapshot = registry.snapshot().unwrap();
     let input = ComponentValue::map([("target", ComponentValue::EntityReference(reference()))]);
-    let prepared = registry
-        .preflight_component(&component_id, &input)
-        .unwrap()
-        .unwrap();
+    let prepared = snapshot.preflight_component(&component_id, &input).unwrap();
     drop(input);
     let mut world = World::new();
     world.insert_resource(SavedReference(reference()));
@@ -218,10 +216,10 @@ fn typed_deferred_codec_preserves_durable_reference_and_reads_encode_context() {
     prepared.apply(&mut world, target).unwrap();
     assert_eq!(world.get::<DurableLink>(target).unwrap().0, reference());
     assert_eq!(
-        registry.encode_component(&component_id, &world, target),
-        Some(Ok(Some(ComponentValue::map([(
+        snapshot.encode_component(&component_id, &world, target),
+        Ok(Some(ComponentValue::map([(
             "target",
             ComponentValue::EntityReference(reference())
-        ),])))),
+        ),]))),
     );
 }

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use nara_ecs::{Entity, LifecycleFreeDespawnError, World};
+use nara_ecs::{__private::LifecycleFreeDespawnError, Entity, World};
 use nara_hierarchy::{
     __private::{retirement_operations, validate_retirement_despawn},
     Children, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyRoots,
@@ -56,7 +56,7 @@ pub(crate) fn validate_scene_entity_retirement_admission(
     world: &mut World,
     entities: &[Entity],
     hierarchy: &PreparedSceneHierarchyRetirement,
-    claimed_component_ids: &[nara_ecs::component::ComponentId],
+    claimed_component_ids: &[nara_ecs::upstream::component::ComponentId],
 ) -> Result<(), LifecycleFreeDespawnError> {
     nara_hierarchy::__private::validate_retirement_despawn_with_claimed_components(
         world,

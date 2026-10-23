@@ -7,8 +7,9 @@ pub use publication::PreparedSceneReplacement;
 use nara_asset::ProjectAssetDatabase;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{
-    __private::validate_registered_persistent_component_apply, Component, Entity,
-    LifecycleFreeInsertionPlan, World, component::ComponentId, prepare_lifecycle_free_despawn,
+    __private::LifecycleFreeInsertionPlan, __private::prepare_lifecycle_free_despawn,
+    __private::validate_registered_persistent_component_apply, Component, Entity, World,
+    upstream::component::ComponentId,
 };
 use nara_hierarchy::{
     __private::{prepare_construction_batch, prepare_mutation_baseline},

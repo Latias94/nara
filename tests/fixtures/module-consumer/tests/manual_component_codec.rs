@@ -74,12 +74,12 @@ fn documented_manual_codec_round_trips_through_the_public_registry() {
     registry
         .freeze()
         .expect("manual component schema should freeze");
+    let snapshot = registry.snapshot().unwrap();
 
     let component_id = ComponentTypeId::new("example.Health");
     let source = ComponentValue::map([("current", ComponentValue::I64(42))]);
-    let prepared = registry
+    let prepared = snapshot
         .preflight_component(&component_id, &source)
-        .expect("frozen registry should expose the manual codec")
         .expect("stored Health should decode");
     let mut world = World::new();
     let entity = world.spawn_empty().id();
@@ -89,9 +89,8 @@ fn documented_manual_codec_round_trips_through_the_public_registry() {
     assert_eq!(world.get::<Health>(entity).unwrap().current, 42);
 
     world.get_mut::<Health>(entity).unwrap().current = 17;
-    let encoded = registry
+    let encoded = snapshot
         .encode_component(&component_id, &world, entity)
-        .expect("manual encoder should be registered")
         .expect("native Health should encode")
         .expect("entity should contain Health");
     assert_eq!(
@@ -100,9 +99,8 @@ fn documented_manual_codec_round_trips_through_the_public_registry() {
     );
 
     let restored = world.spawn_empty().id();
-    registry
+    snapshot
         .preflight_component(&component_id, &encoded)
-        .unwrap()
         .unwrap()
         .apply(&mut world, restored)
         .expect("encoded native value should decode and apply again");
@@ -238,6 +236,7 @@ fn typed_asset_codecs_own_inputs_and_share_one_batch_asset_server() {
     use nara_asset::AssetServer;
 
     let registry = asset_codec_registry();
+    let snapshot = registry.snapshot().unwrap();
     for eager_decode in [false, true] {
         for fail in [false, true] {
             let mut world = World::new();
@@ -248,22 +247,20 @@ fn typed_asset_codecs_own_inputs_and_share_one_batch_asset_server() {
             let portrait_value = asset_codec_value("portrait");
             let portrait = if eager_decode {
                 batch.with_decode_context(None, |context| {
-                    registry.preflight_component_with_context(
+                    snapshot.preflight_component_with_context(
                         &portrait_id,
                         &portrait_value,
                         context,
                     )
                 })
             } else {
-                registry.preflight_component(&portrait_id, &portrait_value)
+                snapshot.preflight_component(&portrait_id, &portrait_value)
             }
-            .unwrap()
             .unwrap();
             let text = if fail { "reject" } else { "Welcome" };
             let dialogue_value = asset_codec_value(text);
-            let dialogue = registry
+            let dialogue = snapshot
                 .preflight_component(&dialogue_id, &dialogue_value)
-                .unwrap()
                 .unwrap();
             drop(portrait_value);
             drop(dialogue_value);
@@ -287,12 +284,12 @@ fn typed_asset_codecs_own_inputs_and_share_one_batch_asset_server() {
             assert_eq!(portrait.0.id(), dialogue.portrait.id());
             assert_eq!(dialogue.text, text);
             assert_eq!(
-                registry.encode_component(&dialogue_id, &world, target),
-                Some(Ok(Some(asset_codec_value(text)))),
+                snapshot.encode_component(&dialogue_id, &world, target),
+                Ok(Some(asset_codec_value(text))),
             );
             assert_eq!(
-                registry.encode_component(&portrait_id, &world, target),
-                Some(Ok(Some(asset_codec_value("portrait")))),
+                snapshot.encode_component(&portrait_id, &world, target),
+                Ok(Some(asset_codec_value("portrait"))),
             );
         }
     }

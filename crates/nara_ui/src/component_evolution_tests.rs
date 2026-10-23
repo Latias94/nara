@@ -99,6 +99,7 @@ fn text_size_successor_preserves_the_generation_two_catalog_and_other_components
 #[test]
 fn shared_text_size_rules_match_native_f32_materialization_at_both_boundaries() {
     let registry = text_registry();
+    let snapshot = registry.snapshot().unwrap();
     let text_id = ComponentTypeId::new(TEXT_ID);
     let schema = registry.schema(&text_id).unwrap();
     let above_limit = f64::from(f32::from_bits(256.0_f32.to_bits() + 1));
@@ -125,10 +126,7 @@ fn shared_text_size_rules_match_native_f32_materialization_at_both_boundaries() 
             "{authored_size:?}"
         );
         assert_eq!(
-            registry
-                .preflight_component(&text_id, &value)
-                .unwrap()
-                .is_ok(),
+            snapshot.preflight_component(&text_id, &value).is_ok(),
             expected,
             "{authored_size:?}"
         );

@@ -10,11 +10,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bevy_ecs::error::ErrorHandler;
 use nara_ecs::{
     World,
-    observer::Observer,
-    schedule::{IntoScheduleConfigs, Schedule, Schedules},
+    schedule::{IntoScheduleConfigs, Schedule},
+    upstream::error::ErrorHandler,
+    upstream::observer::Observer,
+    upstream::schedule::Schedules,
 };
 
 use crate::{

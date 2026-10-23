@@ -1,6 +1,6 @@
 use super::*;
 use nara_core::Mat3;
-use nara_ecs::system::RunSystemOnce;
+use nara_ecs::upstream::system::RunSystemOnce;
 use nara_material::{Material2dDefinition, Material2dDefinitions, Material2dInput};
 
 #[test]
