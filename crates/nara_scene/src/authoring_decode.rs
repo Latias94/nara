@@ -364,6 +364,9 @@ pub struct AuthoringRecordFact {
     schema_declared_asset_references: Vec<DeclaredAssetReference>,
 }
 
+/// Maximum ordered operations in one mixed source-authoring transaction.
+/// Field edits retain their separate, smaller write/value budgets.
+pub const MAX_AUTHORING_EDIT_OPERATIONS: usize = 256;
 pub const MAX_AUTHORING_FIELD_WRITES: usize = 8;
 const MAX_AUTHORING_FIELD_VALUE_NODES: usize = 256;
 const MAX_AUTHORING_FIELD_LOGICAL_BYTES: usize = 64 * 1024;
@@ -1238,6 +1241,7 @@ impl AuthoringDocumentState {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct PreparedSceneAuthoringPatch {
     pub(crate) document: SceneDocument,
     pub(crate) state: AuthoringDocumentState,
@@ -1245,6 +1249,7 @@ pub(crate) struct PreparedSceneAuthoringPatch {
     pub(crate) report: ScenePatchReport,
 }
 
+#[derive(Debug)]
 pub(crate) struct PreparedPrefabAuthoringPatch {
     pub(crate) document: PrefabDocument,
     pub(crate) state: AuthoringDocumentState,
@@ -2175,14 +2180,16 @@ pub(crate) fn prepare_scene_authoring_patch(
     patch: &ScenePatchDocument,
     history: bool,
 ) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
-    if patch.operations.iter().any(|operation| {
-        !matches!(
-            operation,
-            ScenePatchOperation::SetField { .. }
-                | ScenePatchOperation::SetAssetRefField { .. }
-                | ScenePatchOperation::RemoveField { .. }
-        )
-    }) {
+    if patch.operations.len() > MAX_AUTHORING_EDIT_OPERATIONS {
+        return Err(authoring_structure_rejection(
+            "Authoring transaction has too many operations",
+        ));
+    }
+    if patch
+        .operations
+        .iter()
+        .any(|operation| !is_authoring_field_operation(operation))
+    {
         return prepare_scene_authoring_structure(document, state, patch, history);
     }
     let edits = field_edits_from_patch(patch)?;
@@ -2227,14 +2234,16 @@ pub(crate) fn prepare_prefab_authoring_patch(
     patch: &ScenePatchDocument,
     history: bool,
 ) -> Result<PreparedPrefabAuthoringPatch, ScenePatchReport> {
-    if patch.operations.iter().any(|operation| {
-        !matches!(
-            operation,
-            ScenePatchOperation::SetField { .. }
-                | ScenePatchOperation::SetAssetRefField { .. }
-                | ScenePatchOperation::RemoveField { .. }
-        )
-    }) {
+    if patch.operations.len() > MAX_AUTHORING_EDIT_OPERATIONS {
+        return Err(authoring_structure_rejection(
+            "Authoring transaction has too many operations",
+        ));
+    }
+    if patch
+        .operations
+        .iter()
+        .any(|operation| !is_authoring_field_operation(operation))
+    {
         let prepared =
             prepare_scene_authoring_structure(&document.instantiate(), state, patch, history)?;
         let candidate = PrefabDocument::new(prepared.document.roots, prepared.document.entities);
@@ -2305,21 +2314,35 @@ struct AuthoringFieldChange {
     value: Option<ComponentValue>,
 }
 
+fn is_authoring_field_operation(operation: &ScenePatchOperation) -> bool {
+    matches!(
+        operation,
+        ScenePatchOperation::SetField { .. }
+            | ScenePatchOperation::SetAssetRefField { .. }
+            | ScenePatchOperation::RemoveField { .. }
+    )
+}
+
 fn field_edits_from_patch(
     patch: &ScenePatchDocument,
 ) -> Result<Vec<AuthoringFieldChange>, ScenePatchReport> {
-    if patch.format_version != ScenePatchDocument::CURRENT_FORMAT_VERSION
-        || patch.is_empty()
-        || patch.operations.len() > MAX_AUTHORING_FIELD_WRITES
-    {
+    if patch.format_version != ScenePatchDocument::CURRENT_FORMAT_VERSION {
+        return Err(authoring_field_patch_rejection());
+    }
+    field_edits_from_operations(patch.operations.iter())
+}
+
+fn field_edits_from_operations<'a>(
+    operations: impl Iterator<Item = &'a ScenePatchOperation> + Clone,
+) -> Result<Vec<AuthoringFieldChange>, ScenePatchReport> {
+    let count = operations.clone().count();
+    if count == 0 || count > MAX_AUTHORING_FIELD_WRITES {
         return Err(authoring_field_patch_rejection());
     }
     let mut fields = BTreeSet::new();
     let mut value_nodes = 0usize;
     let mut logical_bytes = 0usize;
-    patch
-        .operations
-        .iter()
+    operations
         .map(|operation| {
             let asset_value;
             let (entity, component, component_version, field, value) = match operation {
@@ -2355,7 +2378,12 @@ fn field_edits_from_patch(
                 _ => return Err(authoring_field_patch_rejection()),
             };
             if let Some(value) = &value {
-                let cost = value.cost();
+                let cost = value
+                    .cost_up_to(
+                        MAX_AUTHORING_FIELD_VALUE_NODES.saturating_sub(value_nodes),
+                        MAX_AUTHORING_FIELD_LOGICAL_BYTES.saturating_sub(logical_bytes),
+                    )
+                    .ok_or_else(authoring_field_patch_rejection)?;
                 value_nodes = value_nodes.saturating_add(cost.nodes());
                 logical_bytes = logical_bytes.saturating_add(cost.logical_bytes());
             }
@@ -2405,7 +2433,7 @@ fn prepare_field_edits(
 }
 
 fn prepare_field_edit(
-    mut candidate: SceneDocument,
+    candidate: SceneDocument,
     state: &AuthoringDocumentState,
     edit: &AuthoringFieldChange,
 ) -> Result<(SceneDocument, ScenePatchDocument), ScenePatchReport> {
@@ -2424,7 +2452,14 @@ fn prepare_field_edit(
             "Authoring field edit requires an Available direct component record",
         ));
     }
+    prepare_admitted_field_edit(candidate, state, edit)
+}
 
+fn prepare_admitted_field_edit(
+    mut candidate: SceneDocument,
+    state: &AuthoringDocumentState,
+    edit: &AuthoringFieldChange,
+) -> Result<(SceneDocument, ScenePatchDocument), ScenePatchReport> {
     let Some(schema_entry) = state.basis.schemas.get(&edit.component) else {
         return Err(field_edit_rejection(
             edit,

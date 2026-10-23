@@ -132,42 +132,100 @@ impl ComponentValue {
 
     #[must_use]
     pub fn cost(&self) -> ComponentValueCost {
+        let mut cost = ComponentValueCost::ZERO;
+        self.cost_up_to_impl(usize::MAX, usize::MAX, &mut cost);
+        cost
+    }
+
+    /// Returns the same saturating cost as [`Self::cost`] if both inclusive ceilings hold.
+    ///
+    /// Returns `None` as soon as either ceiling is provably exceeded, including from a
+    /// container's known minimum node count. Zero ceilings are valid: every value costs at
+    /// least one node, while nulls, empty containers, and empty strings can have zero logical
+    /// bytes. Traversal borrows the value and keeps one iterator frame per open container.
+    #[must_use]
+    pub fn cost_up_to(
+        &self,
+        max_nodes: usize,
+        max_logical_bytes: usize,
+    ) -> Option<ComponentValueCost> {
+        let mut cost = ComponentValueCost::ZERO;
+        self.cost_up_to_impl(max_nodes, max_logical_bytes, &mut cost)
+            .then_some(cost)
+    }
+
+    fn cost_up_to_impl(
+        &self,
+        max_nodes: usize,
+        max_logical_bytes: usize,
+        cost: &mut ComponentValueCost,
+    ) -> bool {
         const PERSISTENT_RUNTIME_ID_BYTES: usize = 16;
 
-        let mut pending = vec![self];
-        let mut cost = ComponentValueCost::ZERO;
-        while let Some(value) = pending.pop() {
+        enum Frame<'a> {
+            List(std::slice::Iter<'a, ComponentValue>),
+            Map(std::collections::btree_map::Iter<'a, String, ComponentValue>),
+        }
+
+        if max_nodes == 0 {
+            return false;
+        }
+
+        let mut pending = Vec::new();
+        let mut current = Some((0_usize, self));
+        // Count visited nodes and all known children, including unvisited ancestor siblings.
+        let mut minimum_nodes = 1_usize;
+        while let Some((key_bytes, value)) = current {
             cost.nodes = cost.nodes.saturating_add(1);
-            match value {
-                Self::Null => {}
-                Self::Bool(_) => {
-                    cost.logical_bytes = cost.logical_bytes.saturating_add(1);
-                }
-                Self::I64(_) | Self::U64(_) | Self::F64(_) => {
-                    cost.logical_bytes = cost.logical_bytes.saturating_add(8);
-                }
-                Self::String(value) => {
-                    cost.logical_bytes = cost.logical_bytes.saturating_add(value.len());
-                }
-                Self::List(values) => pending.extend(values),
-                Self::Map(values) => {
-                    for (key, value) in values {
-                        cost.logical_bytes = cost.logical_bytes.saturating_add(key.len());
-                        pending.push(value);
-                    }
-                }
+            cost.logical_bytes = cost.logical_bytes.saturating_add(key_bytes);
+            let (logical_bytes, children) = match value {
+                Self::Null => (0, 0),
+                Self::Bool(_) => (1, 0),
+                Self::I64(_) | Self::U64(_) | Self::F64(_) => (8, 0),
+                Self::String(value) => (value.len(), 0),
+                Self::List(values) => (0, values.len()),
+                Self::Map(values) => (0, values.len()),
                 Self::EntityReference(EntityReference::SceneLocal { entity }) => {
-                    cost.logical_bytes = cost.logical_bytes.saturating_add(entity.as_str().len());
+                    (entity.as_str().len(), 0)
                 }
-                Self::EntityReference(EntityReference::Persistent { entity }) => {
-                    cost.logical_bytes = cost
-                        .logical_bytes
-                        .saturating_add(entity.namespace.as_str().len())
-                        .saturating_add(PERSISTENT_RUNTIME_ID_BYTES);
+                Self::EntityReference(EntityReference::Persistent { entity }) => (
+                    entity
+                        .namespace
+                        .as_str()
+                        .len()
+                        .saturating_add(PERSISTENT_RUNTIME_ID_BYTES),
+                    0,
+                ),
+            };
+            cost.logical_bytes = cost.logical_bytes.saturating_add(logical_bytes);
+            minimum_nodes = minimum_nodes.saturating_add(children);
+            if minimum_nodes > max_nodes || cost.logical_bytes > max_logical_bytes {
+                return false;
+            }
+
+            if children != 0 {
+                match value {
+                    Self::List(values) => pending.push(Frame::List(values.iter())),
+                    Self::Map(values) => pending.push(Frame::Map(values.iter())),
+                    _ => {}
                 }
             }
+
+            current = loop {
+                let next = match pending.last_mut() {
+                    Some(Frame::List(values)) => values.next().map(|value| (0, value)),
+                    Some(Frame::Map(values)) => {
+                        values.next().map(|(key, value)| (key.len(), value))
+                    }
+                    None => break None,
+                };
+                if next.is_some() {
+                    break next;
+                }
+                pending.pop();
+            };
         }
-        cost
+        true
     }
 
     #[must_use]
@@ -537,3 +595,74 @@ impl Display for ComponentValueError {
 }
 
 impl Error for ComponentValueError {}
+
+#[cfg(test)]
+mod cost_traversal_tests {
+    use super::{ComponentValue, ComponentValueCost};
+
+    #[test]
+    fn wide_containers_reject_before_visiting_children() {
+        let width = 1_024;
+        let values = [
+            ComponentValue::List(vec![ComponentValue::Null; width]),
+            ComponentValue::map((0..width).map(|index| (index.to_string(), ComponentValue::Null))),
+        ];
+
+        for value in values {
+            let mut visited_cost = ComponentValueCost::ZERO;
+            assert!(!value.cost_up_to_impl(0, usize::MAX, &mut visited_cost));
+            assert_eq!(visited_cost.nodes(), 0);
+            assert!(!value.cost_up_to_impl(width, usize::MAX, &mut visited_cost));
+            assert_eq!(visited_cost.nodes(), 1);
+        }
+    }
+
+    #[test]
+    fn unbounded_cost_accumulation_preserves_saturation() {
+        let value = ComponentValue::List(vec![ComponentValue::Bool(true), ComponentValue::U64(7)]);
+        let mut cost = ComponentValueCost {
+            nodes: usize::MAX - 1,
+            logical_bytes: usize::MAX - 1,
+        };
+
+        assert!(value.cost_up_to_impl(usize::MAX, usize::MAX, &mut cost));
+        assert_eq!(cost.nodes(), usize::MAX);
+        assert_eq!(cost.logical_bytes(), usize::MAX);
+    }
+
+    #[test]
+    fn minimum_nodes_include_unvisited_ancestor_siblings() {
+        let value = ComponentValue::List(vec![
+            ComponentValue::List(vec![ComponentValue::Null; 3]),
+            ComponentValue::Null,
+        ]);
+
+        let mut visited_cost = ComponentValueCost::ZERO;
+        assert!(!value.cost_up_to_impl(5, usize::MAX, &mut visited_cost));
+        assert_eq!(visited_cost.nodes(), 2);
+    }
+
+    #[test]
+    fn logical_byte_rejection_does_not_visit_later_siblings() {
+        let value = ComponentValue::List(vec![
+            ComponentValue::String("too large".to_owned()),
+            ComponentValue::List(vec![ComponentValue::Null; 1_024]),
+        ]);
+
+        let mut visited_cost = ComponentValueCost::ZERO;
+        assert!(!value.cost_up_to_impl(usize::MAX, 8, &mut visited_cost));
+        assert_eq!(visited_cost.nodes(), 2);
+    }
+
+    #[test]
+    fn map_key_rejection_does_not_visit_child_container_contents() {
+        let value = ComponentValue::map([(
+            "too large",
+            ComponentValue::List(vec![ComponentValue::Null; 1_024]),
+        )]);
+
+        let mut visited_cost = ComponentValueCost::ZERO;
+        assert!(!value.cost_up_to_impl(usize::MAX, 8, &mut visited_cost));
+        assert_eq!(visited_cost.nodes(), 2);
+    }
+}

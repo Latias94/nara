@@ -119,6 +119,16 @@ pub use runtime::{
     EditorAcceptedPreview, EditorPresentationError, EditorPresentationImage, EditorPresentedToken,
     EditorPreviewPresentation,
 };
+#[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
+#[doc(hidden)]
+pub use runtime::{
+    EditorEditPreparationError, EditorProjectCloseProgress, EditorProjectCloseReceipt,
+    EditorProjectOpenAttempt, EditorProjectOpenError, EditorProjectOpenFailure,
+    EditorProjectOpenFailureImpact, EditorProjectOpenFailureSource, EditorProjectOpenHost,
+    EditorProjectOpenPhase, EditorProjectOpenProgress, EditorProjectSession,
+    SupervisedDesktopSourceAdmissionError, SupervisedDesktopSourceAuthority,
+    TrustedCompiledEditorProjectIntent, admit_supervised_desktop_source_receipt,
+};
 #[cfg(all(
     feature = "runtime-2d",
     feature = "serde",
@@ -138,16 +148,6 @@ pub use runtime::{
     feature = "presentation-2d"
 ))]
 pub use runtime::{EditorPreviewCandidate, EditorPreviewContentStamp, EditorPreviewHit};
-#[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
-#[doc(hidden)]
-pub use runtime::{
-    EditorProjectCloseProgress, EditorProjectCloseReceipt, EditorProjectOpenAttempt,
-    EditorProjectOpenError, EditorProjectOpenFailure, EditorProjectOpenFailureImpact,
-    EditorProjectOpenFailureSource, EditorProjectOpenHost, EditorProjectOpenPhase,
-    EditorProjectOpenProgress, EditorProjectSession, SupervisedDesktopSourceAdmissionError,
-    SupervisedDesktopSourceAuthority, TrustedCompiledEditorProjectIntent,
-    admit_supervised_desktop_source_receipt,
-};
 #[cfg(all(
     feature = "runtime-2d",
     feature = "serde",

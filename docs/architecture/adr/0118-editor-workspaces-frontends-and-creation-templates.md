@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-23 (owned direct Application submission observations)
+**Last Revised**: 2026-10-23 (owned submissions, prepared document editing and explicit source queries)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -162,6 +162,18 @@ workspace and whole-batch rejection are distinguished from domain outcomes for a
 dispatched. Later submissions, frame advances and project retirement cannot overwrite a retained
 result. The owner moves its existing report into the return value rather than introducing a
 mutable latest-result slot, diagnostic lookup, polling ticket or second execution route.
+
+Direct Application preparation retains the document owner's move-only candidate, forward patch
+and inverse without publication. Commit consumes it through the same document/history owner and
+rechecks project lifetime and specialized document-domain admission. Closing and replacement do
+not redirect an old candidate to a new workspace. These prepared document edits are distinct from
+the frontend's paint/presentation submission and do not grant a panel a private workspace getter.
+
+Named-document entity queries use the existing action/outcome and panel observation routing.
+Their continuation binds the exact workspace, document kind, source incarnation, revision and
+Schema admission. Querying a non-active source never changes navigation or selection. Bounded
+direct-record enumeration is not expanded Prefab/field/project query support or a latency bound
+for normal frame publication.
 
 This completion means dispatch, not eventual Save/Play completion. Several actions remain ordered;
 same-basis document writes can conflict and are never silently rebased. A cohesive multi-field

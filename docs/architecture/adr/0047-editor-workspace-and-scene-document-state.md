@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-20
+**Last Revised**: 2026-10-23
 **Amended**: 2026-08-15 to make selection single-owner and separate monotonic revision from
 receipt-backed content state
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
@@ -61,6 +61,21 @@ Rules:
 - Document mutations, Undo, and Redo target a non-optional document identity and exact base
   `SceneAuthoringRevision`. Active-document state is presentation/navigation context, never a
   mutation fallback.
+- Read-only queries of an explicitly named open document do not change active tabs, selection,
+  history or dirty state. Bounded entity enumeration binds continuation to its document,
+  incarnation, revision and retained Schema admission. Scan work and returned row limits are
+  distinct; truncating an eagerly constructed Inspector is not bounded query execution.
+- Prepared edits remain owned by the document session. Workspace/Editor adapters carry their
+  exact target and operation result without rebuilding validation, inverse or history logic.
+- Once physical Session close begins, ordinary mutations, Undo/Redo, gesture publication and
+  prepared commits all reject new work at their owning ingress. Retained document observations
+  do not reopen mutation admission while file Hosts and pending cleanup retire. Gesture rejection
+  precedes draft consumption; explicit cancellation and existing retirement controls remain
+  available. Application filtering does not replace the common Session workspace fence.
+- Runtime Edit and Apply Changes cannot acquire new authoring work after that fence. A queued
+  but unpublished Apply Changes request returns its explicit closing refusal instead of exporting
+  or publishing later through a private bypass. This is distinct from already-admitted filesystem
+  persistence, whose physical completion remains advanced and retained by the close owner.
 - Stable field/widget identity is distinct from that mutation basis. Under ADR 0118, frontend
   drafts retain exact revision/schema/source facts independently; unrelated document changes
   require deliberate conflict recovery rather than destroying input or silently rebasing it.

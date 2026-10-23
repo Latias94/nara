@@ -7,6 +7,8 @@ mod authoring_images;
 
 #[cfg(feature = "tooling")]
 mod browser_preparation;
+#[cfg(feature = "tooling")]
+mod closing_session;
 mod content_residency;
 mod current_scene;
 mod editor_scene_travel;

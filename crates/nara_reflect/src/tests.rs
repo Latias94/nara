@@ -126,6 +126,167 @@ fn component_value_cost_counts_nodes_and_logical_bytes_deterministically() {
 
     assert_eq!(cost.nodes(), 5);
     assert_eq!(cost.logical_bytes(), 20);
+    assert_eq!(value.cost_up_to(5, 20), Some(cost));
+    assert_eq!(value.cost_up_to(4, usize::MAX), None);
+    assert_eq!(value.cost_up_to(usize::MAX, 19), None);
+    assert_eq!(value.cost_up_to(usize::MAX, usize::MAX), Some(cost));
+}
+
+#[test]
+fn component_value_bounded_cost_preserves_scalar_accounting() {
+    let cases = [
+        (ComponentValue::Null, 0),
+        (ComponentValue::Bool(false), 1),
+        (ComponentValue::Bool(true), 1),
+        (ComponentValue::I64(-7), 8),
+        (ComponentValue::U64(7), 8),
+        (ComponentValue::f64(1.5).unwrap(), 8),
+        (ComponentValue::String(String::new()), 0),
+        (ComponentValue::String("abc".to_owned()), 3),
+        (ComponentValue::String("\u{e9}".to_owned()), 2),
+    ];
+
+    for (value, logical_bytes) in cases {
+        let cost = value.cost();
+        assert_eq!(cost.nodes(), 1);
+        assert_eq!(cost.logical_bytes(), logical_bytes);
+        assert_eq!(value.cost_up_to(1, logical_bytes), Some(cost));
+        assert_eq!(value.cost_up_to(0, usize::MAX), None);
+        if logical_bytes != 0 {
+            assert_eq!(value.cost_up_to(1, logical_bytes - 1), None);
+        }
+    }
+}
+
+#[test]
+fn component_value_bounded_cost_accepts_zero_ceilings_without_ignoring_positive_costs() {
+    for value in [
+        ComponentValue::Null,
+        ComponentValue::String(String::new()),
+        ComponentValue::List(Vec::new()),
+        ComponentValue::Map(BTreeMap::new()),
+    ] {
+        assert_eq!(value.cost_up_to(0, 0), None);
+        assert_eq!(value.cost_up_to(0, usize::MAX), None);
+        assert_eq!(value.cost_up_to(1, 0), Some(value.cost()));
+    }
+
+    assert_eq!(ComponentValue::Bool(false).cost_up_to(1, 0), None);
+    let empty_key = ComponentValue::map([("", ComponentValue::Null)]);
+    assert_eq!(empty_key.cost_up_to(2, 0), Some(empty_key.cost()));
+    assert_eq!(empty_key.cost_up_to(1, 0), None);
+    assert_eq!(
+        ComponentValue::map([("key", ComponentValue::Null)]).cost_up_to(2, 0),
+        None
+    );
+}
+
+#[test]
+fn component_value_bounded_cost_resumes_nested_list_siblings() {
+    let value = ComponentValue::List(vec![
+        ComponentValue::List(vec![ComponentValue::Bool(true), ComponentValue::Null]),
+        ComponentValue::List(Vec::new()),
+        ComponentValue::I64(-7),
+        ComponentValue::String("\u{e9}".to_owned()),
+    ]);
+    let cost = value.cost();
+
+    assert_eq!(cost.nodes(), 7);
+    assert_eq!(cost.logical_bytes(), 11);
+    assert_eq!(value.cost_up_to(7, 11), Some(cost));
+    assert_eq!(value.cost_up_to(6, usize::MAX), None);
+    assert_eq!(value.cost_up_to(usize::MAX, 10), None);
+    assert_eq!(value.cost_up_to(8, 12), Some(cost));
+}
+
+#[test]
+fn component_value_bounded_cost_counts_map_keys_and_resumes_mixed_containers() {
+    let value = ComponentValue::map([
+        (
+            "items",
+            ComponentValue::List(vec![
+                ComponentValue::map([("flag", ComponentValue::Bool(true))]),
+                ComponentValue::Null,
+            ]),
+        ),
+        ("tail", ComponentValue::String("\u{e9}".to_owned())),
+    ]);
+    let cost = value.cost();
+
+    assert_eq!(cost.nodes(), 6);
+    assert_eq!(cost.logical_bytes(), 16);
+    assert_eq!(value.cost_up_to(6, 16), Some(cost));
+    assert_eq!(value.cost_up_to(5, usize::MAX), None);
+    assert_eq!(value.cost_up_to(usize::MAX, 15), None);
+    assert_eq!(value.cost_up_to(usize::MAX, usize::MAX), Some(cost));
+
+    let unicode_key = ComponentValue::map([("\u{e9}", ComponentValue::Null)]);
+    assert_eq!(unicode_key.cost().logical_bytes(), 2);
+    assert_eq!(unicode_key.cost_up_to(2, 2), Some(unicode_key.cost()));
+    assert_eq!(unicode_key.cost_up_to(2, 1), None);
+}
+
+#[test]
+fn component_value_bounded_cost_handles_wide_lists_and_maps() {
+    let width = 1_024;
+    let values = [
+        ComponentValue::List(vec![ComponentValue::Null; width]),
+        ComponentValue::map((0..width).map(|index| (index.to_string(), ComponentValue::Null))),
+    ];
+
+    for value in values {
+        let cost = value.cost();
+        assert_eq!(cost.nodes(), width + 1);
+        assert_eq!(value.cost_up_to(width, usize::MAX), None);
+        assert_eq!(
+            value.cost_up_to(width + 1, cost.logical_bytes()),
+            Some(cost)
+        );
+    }
+}
+
+#[test]
+fn component_value_bounded_cost_does_not_impose_a_separate_depth_limit() {
+    let depth = 256;
+    let mut value = ComponentValue::Null;
+    for _ in 0..depth {
+        value = ComponentValue::List(vec![value]);
+    }
+    let cost = value.cost();
+
+    assert_eq!(cost.nodes(), depth + 1);
+    assert_eq!(cost.logical_bytes(), 0);
+    assert_eq!(value.cost_up_to(depth + 1, 0), Some(cost));
+    assert_eq!(value.cost_up_to(depth, 0), None);
+}
+
+#[test]
+fn component_value_bounded_cost_preserves_entity_reference_accounting() {
+    let cases = [
+        (
+            ComponentValue::EntityReference(scene_reference("root/player")),
+            11,
+        ),
+        (
+            ComponentValue::EntityReference(EntityReference::Persistent {
+                entity: PersistentRuntimeReference::new(
+                    PersistentRuntimeNamespaceId::new("save").unwrap(),
+                    PersistentRuntimeId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap(),
+                ),
+            }),
+            20,
+        ),
+    ];
+
+    for (value, logical_bytes) in cases {
+        let cost = value.cost();
+        assert_eq!(cost.nodes(), 1);
+        assert_eq!(cost.logical_bytes(), logical_bytes);
+        assert_eq!(value.cost_up_to(1, logical_bytes), Some(cost));
+        assert_eq!(value.cost_up_to(0, logical_bytes), None);
+        assert_eq!(value.cost_up_to(1, logical_bytes - 1), None);
+        assert_eq!(value.cost_up_to(usize::MAX, usize::MAX), Some(cost));
+    }
 }
 
 #[test]

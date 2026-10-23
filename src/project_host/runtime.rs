@@ -82,6 +82,16 @@ pub use editor::{
     EditorAcceptedPreview, EditorPresentationError, EditorPresentationImage, EditorPresentedToken,
     EditorPreviewPresentation,
 };
+#[cfg(feature = "tooling")]
+#[doc(hidden)]
+pub use editor::{
+    EditorEditPreparationError, EditorProjectCloseProgress, EditorProjectCloseReceipt,
+    EditorProjectOpenAttempt, EditorProjectOpenError, EditorProjectOpenFailure,
+    EditorProjectOpenFailureImpact, EditorProjectOpenFailureSource, EditorProjectOpenHost,
+    EditorProjectOpenPhase, EditorProjectOpenProgress, EditorProjectSession,
+    SupervisedDesktopSourceAdmissionError, SupervisedDesktopSourceAuthority,
+    TrustedCompiledEditorProjectIntent, admit_supervised_desktop_source_receipt,
+};
 #[cfg(all(
     feature = "tooling",
     any(feature = "presentation-2d", feature = "presentation-ui")
@@ -94,16 +104,6 @@ pub use editor::{
 };
 #[cfg(all(feature = "tooling", feature = "presentation-2d"))]
 pub use editor::{EditorPreviewCandidate, EditorPreviewContentStamp, EditorPreviewHit};
-#[cfg(feature = "tooling")]
-#[doc(hidden)]
-pub use editor::{
-    EditorProjectCloseProgress, EditorProjectCloseReceipt, EditorProjectOpenAttempt,
-    EditorProjectOpenError, EditorProjectOpenFailure, EditorProjectOpenFailureImpact,
-    EditorProjectOpenFailureSource, EditorProjectOpenHost, EditorProjectOpenPhase,
-    EditorProjectOpenProgress, EditorProjectSession, SupervisedDesktopSourceAdmissionError,
-    SupervisedDesktopSourceAuthority, TrustedCompiledEditorProjectIntent,
-    admit_supervised_desktop_source_receipt,
-};
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
 pub use editor::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
 

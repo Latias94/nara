@@ -89,6 +89,9 @@ impl EditorProjectSession {
     ) -> EditorActionOutcome {
         match action {
             EditorAction::Navigate(action) => self.dispatch_navigation(frame, action),
+            EditorAction::QueryDocumentEntities(query) => {
+                EditorActionOutcome::DocumentEntities(self.workspace.query_document_entities(query))
+            }
             EditorAction::Mutate(action) => self.dispatch_document_mutation(action),
             EditorAction::Extension(action) => {
                 if let Err(rejection) =
@@ -344,7 +347,8 @@ impl EditorProjectSession {
                     EditorFieldFeedbackReason::StaleAction,
                 ));
             }
-            EditorActionOutcome::Persistence(_)
+            EditorActionOutcome::DocumentEntities(_)
+            | EditorActionOutcome::Persistence(_)
             | EditorActionOutcome::ProjectBrowser(_)
             | EditorActionOutcome::ImageImport(_)
             | EditorActionOutcome::SourceAssetImport(_)
@@ -367,6 +371,12 @@ impl EditorProjectSession {
         if let Err(rejection) = self.verify_document_revision(document, base_revision) {
             return EditorActionOutcome::Rejected(rejection);
         }
+        if !self.accepts_new_work() {
+            return EditorActionOutcome::Workspace(super::editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                "project.editor.workspace-intent-pending",
+            ));
+        }
         if let EditorDocumentMutation::ApplyPrefabFieldEdit { edit } = &action
             && !self.ui_authoring_document_field_edit_matches(edit)
         {
@@ -384,19 +394,9 @@ impl EditorProjectSession {
             );
         }
         if let EditorDocumentMutation::ApplyPrefabPatch { patch, .. } = &action
-            && (self.prefab_uses_ui_authoring_domain(document)
-                || prefab_patch_uses_ui_domain(patch))
-            && patch.operations.iter().any(|operation| {
-                !matches!(
-                    operation,
-                    nara_scene::ScenePatchOperation::SetField { .. }
-                        | nara_scene::ScenePatchOperation::SetAssetRefField { .. }
-                )
-            })
+            && let Err(rejection) = self.verify_prepared_patch_contract(document, patch)
         {
-            return EditorActionOutcome::Rejected(
-                EditorActionRejection::StructureContractMismatch { document },
-            );
+            return EditorActionOutcome::Rejected(rejection);
         }
         if let EditorDocumentMutation::ApplyInspectorCommand {
             command: nara_tooling::SceneInspectorCommand::MoveEntity { .. },
@@ -508,6 +508,12 @@ impl EditorProjectSession {
         frame: &EditorFrameModel,
         action: EditorGestureAction,
     ) -> EditorActionOutcome {
+        if !self.accepts_new_work() && !matches!(&action, EditorGestureAction::Cancel { .. }) {
+            return EditorActionOutcome::Workspace(super::editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                "project.editor.workspace-intent-pending",
+            ));
+        }
         match action {
             EditorGestureAction::Begin { baseline } => {
                 let target = baseline.target();
@@ -948,7 +954,7 @@ fn prefab_command_uses_ui_domain(command: &nara_tooling::PrefabCompositionComman
     }
 }
 
-fn prefab_patch_uses_ui_domain(patch: &nara_scene::ScenePatchDocument) -> bool {
+pub(super) fn prefab_patch_uses_ui_domain(patch: &nara_scene::ScenePatchDocument) -> bool {
     use nara_scene::ScenePatchOperation;
     let mut pending = patch.operations.iter().collect::<Vec<_>>();
     while let Some(operation) = pending.pop() {

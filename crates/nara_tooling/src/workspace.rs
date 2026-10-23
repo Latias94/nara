@@ -25,17 +25,23 @@ use crate::composition::{
     prepare_generic_composition, prepare_prefab_composition, prepare_scene_composition,
 };
 use crate::diagnostic;
+use crate::entity_query::{
+    EditorEntityCursor, EditorEntityPage, EditorEntityQuery, EditorEntityQueryOwner,
+    EditorEntityQueryPosition, EditorEntityQueryRejection,
+};
 use crate::inspector::{SceneInspectorCommand, SceneInspectorCommandReport};
 use crate::play::{SceneEditorModel, SceneEditorState};
 use crate::snapshot::WorldIdentitySnapshot;
 use crate::{EditorAtomicFieldEdit, EditorFieldTarget};
 
 mod extension;
+mod prepared_edit;
 pub use extension::{
     EditorExtensionCommand, EditorExtensionDocument, EditorExtensionDocumentCandidate,
     EditorExtensionDocumentError, EditorExtensionDocumentView,
 };
 use extension::{ErasedExtensionDocument, TypedExtensionDocument};
+pub use prepared_edit::PreparedEditorDocumentEdit;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EditorDocumentId(u64);
@@ -276,6 +282,7 @@ impl WorkspaceDocumentContext {
 #[derive(Debug, Default)]
 pub struct EditorWorkspace {
     persistence_identity: Arc<EditorWorkspacePersistenceIdentity>,
+    entity_query_owner: EditorEntityQueryOwner,
     next_document_id: u64,
     active_document: Option<EditorDocumentId>,
     documents: BTreeMap<EditorDocumentId, EditorDocumentSlot>,
@@ -562,6 +569,82 @@ impl EditorWorkspace {
         self.documents
             .get(&document)
             .map(EditorDocumentSlot::revision)
+    }
+
+    /// Enumerates a bounded page of direct source entity identities without changing selection,
+    /// active document, history or dirty state, or constructing an Inspector.
+    ///
+    /// Admission checks workspace ownership, document/kind, source/revision, then exact Schema
+    /// admission. Continuations are replayable and never silently rebase. Only the requested
+    /// records are visited; no Prefab expansion, field query or Runtime projection is performed.
+    pub fn query_document_entities(
+        &self,
+        query: EditorEntityQuery,
+    ) -> Result<EditorEntityPage, EditorEntityQueryRejection> {
+        let (basis, expected_kind, next_record) = match query.position {
+            EditorEntityQueryPosition::Start(basis) => (basis, None, 0),
+            EditorEntityQueryPosition::Continue(cursor) => {
+                if cursor.owner != self.entity_query_owner {
+                    return Err(EditorEntityQueryRejection::WrongWorkspace);
+                }
+                (cursor.basis, Some(cursor.kind), cursor.next_record)
+            }
+        };
+        let slot = self.documents.get(&basis.document).ok_or(
+            EditorEntityQueryRejection::DocumentNotOpen {
+                document: basis.document,
+            },
+        )?;
+        let kind = slot.kind();
+        let records = match slot {
+            EditorDocumentSlot::Scene(slot) => &slot.session.document().entities,
+            EditorDocumentSlot::Prefab(slot) => &slot.session.document().entities,
+            EditorDocumentSlot::Extension(_) => {
+                return Err(EditorEntityQueryRejection::UnsupportedDocumentKind { kind });
+            }
+        };
+        if let Some(expected) = expected_kind
+            && expected != kind
+        {
+            return Err(EditorEntityQueryRejection::DocumentKindChanged {
+                expected,
+                actual: kind,
+            });
+        }
+        let revision = slot.revision();
+        if basis.revision.source_id() != revision.source_id() {
+            return Err(EditorEntityQueryRejection::StaleIncarnation);
+        }
+        if basis.revision != revision {
+            return Err(EditorEntityQueryRejection::StaleRevision);
+        }
+        if basis.schema != slot.authoring_schema_basis() {
+            return Err(EditorEntityQueryRejection::StaleSchema);
+        }
+        let remaining = records
+            .get(next_record..)
+            .ok_or(EditorEntityQueryRejection::InvalidContinuation)?;
+        let scanned_records = remaining
+            .len()
+            .min(query.limits.max_scan_records())
+            .min(query.limits.max_rows());
+        let entities = remaining[..scanned_records]
+            .iter()
+            .map(|record| record.id.clone())
+            .collect();
+        let next_record = next_record + scanned_records;
+        let next = (next_record < records.len()).then(|| EditorEntityCursor {
+            owner: self.entity_query_owner.clone(),
+            basis: basis.clone(),
+            kind,
+            next_record,
+        });
+        Ok(EditorEntityPage {
+            basis,
+            entities,
+            scanned_records,
+            next,
+        })
     }
 
     #[must_use]
@@ -3427,6 +3510,408 @@ mod tests {
         PrefabCompositionCommand, PrefabCompositionEntityDraft, PrefabCompositionOutcome,
         SceneCompositionEntityKind,
     };
+
+    mod entity_queries {
+        use super::*;
+        use crate::{
+            EditorEntityQueryBasis, EditorEntityQueryLimits, MAX_EDITOR_ENTITY_QUERY_ROWS,
+            MAX_EDITOR_ENTITY_QUERY_SCAN_RECORDS,
+        };
+
+        fn start(
+            workspace: &EditorWorkspace,
+            document: EditorDocumentId,
+            scan: usize,
+            rows: usize,
+        ) -> EditorEntityQuery {
+            let slot = workspace.documents.get(&document).unwrap();
+            EditorEntityQuery {
+                position: EditorEntityQueryPosition::Start(EditorEntityQueryBasis {
+                    document,
+                    revision: slot.revision(),
+                    schema: slot.authoring_schema_basis(),
+                }),
+                limits: EditorEntityQueryLimits::new(scan, rows).unwrap(),
+            }
+        }
+
+        fn resume(cursor: EditorEntityCursor, scan: usize, rows: usize) -> EditorEntityQuery {
+            EditorEntityQuery {
+                position: EditorEntityQueryPosition::Continue(cursor),
+                limits: EditorEntityQueryLimits::new(scan, rows).unwrap(),
+            }
+        }
+
+        fn records() -> Vec<SceneEntityRecord> {
+            ["a", "b", "c", "d", "e"]
+                .map(|id| SceneEntityRecord::new(entity_id(id)))
+                .into()
+        }
+
+        fn facts(
+            workspace: &EditorWorkspace,
+            document: EditorDocumentId,
+        ) -> (
+            SceneAuthoringRevision,
+            DocumentContentState,
+            DocumentHistoryStatus,
+            EditorSelectionSet,
+            bool,
+        ) {
+            let slot = workspace.documents.get(&document).unwrap();
+            let (content, selection) = match slot {
+                EditorDocumentSlot::Scene(slot) => {
+                    (slot.session().content_state(), slot.selection().clone())
+                }
+                EditorDocumentSlot::Prefab(slot) => {
+                    (slot.session().content_state(), slot.selection().clone())
+                }
+                EditorDocumentSlot::Extension(_) => panic!("expected an entity document"),
+            };
+            (
+                slot.revision(),
+                content,
+                slot.history_status(),
+                selection,
+                slot.is_dirty(),
+            )
+        }
+
+        #[test]
+        fn scan_and_row_limits_page_scene_and_prefab_source_records_and_replay_exactly() {
+            for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
+                let mut workspace = EditorWorkspace::new();
+                let document = match kind {
+                    EditorDocumentKind::Scene => open_scene(
+                        &mut workspace,
+                        "scene",
+                        SceneDocument::from_ordered_roots(records()),
+                    ),
+                    EditorDocumentKind::Prefab => open_prefab(
+                        &mut workspace,
+                        "prefab",
+                        PrefabDocument::from_ordered_roots(records()),
+                    ),
+                    EditorDocumentKind::Extension(_) => unreachable!(),
+                };
+                let first = workspace
+                    .query_document_entities(start(&workspace, document, 2, 4))
+                    .unwrap();
+                assert_eq!(first.entities, [entity_id("a"), entity_id("b")]);
+                assert_eq!(first.scanned_records, 2);
+                let request = resume(first.next.unwrap(), 4, 1);
+                let middle = workspace.query_document_entities(request.clone()).unwrap();
+                assert_eq!(middle.entities, [entity_id("c")]);
+                assert_eq!(middle.scanned_records, 1);
+                assert_eq!(workspace.query_document_entities(request).unwrap(), middle);
+                let last = workspace
+                    .query_document_entities(resume(middle.next.unwrap(), 4, 4))
+                    .unwrap();
+                assert_eq!(last.entities, [entity_id("d"), entity_id("e")]);
+                assert_eq!(last.scanned_records, 2);
+                assert!(last.next.is_none());
+            }
+        }
+
+        #[test]
+        fn zero_and_over_cap_limits_reject_while_exact_caps_are_valid() {
+            for (scan, rows) in [
+                (0, 1),
+                (1, 0),
+                (MAX_EDITOR_ENTITY_QUERY_SCAN_RECORDS + 1, 1),
+                (1, MAX_EDITOR_ENTITY_QUERY_ROWS + 1),
+                (usize::MAX, usize::MAX),
+            ] {
+                assert_eq!(
+                    EditorEntityQueryLimits::new(scan, rows),
+                    Err(EditorEntityQueryRejection::InvalidLimits {
+                        max_scan_records: scan,
+                        max_rows: rows,
+                    })
+                );
+            }
+            assert!(
+                EditorEntityQueryLimits::new(
+                    MAX_EDITOR_ENTITY_QUERY_SCAN_RECORDS,
+                    MAX_EDITOR_ENTITY_QUERY_ROWS,
+                )
+                .is_ok()
+            );
+        }
+
+        #[test]
+        fn empty_sources_complete_and_unknown_documents_reject_without_falling_back_to_active() {
+            let mut workspace = EditorWorkspace::new();
+            for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
+                let document = match kind {
+                    EditorDocumentKind::Scene => {
+                        open_scene(&mut workspace, "empty", SceneDocument::default())
+                    }
+                    EditorDocumentKind::Prefab => {
+                        open_prefab(&mut workspace, "empty", PrefabDocument::default())
+                    }
+                    EditorDocumentKind::Extension(_) => unreachable!(),
+                };
+                let before = facts(&workspace, document);
+                let request = start(&workspace, document, 1, 1);
+                let page = workspace.query_document_entities(request.clone()).unwrap();
+                assert!(page.entities.is_empty());
+                assert_eq!(page.scanned_records, 0);
+                assert!(page.next.is_none());
+                assert_eq!(facts(&workspace, document), before);
+                let unknown = EditorDocumentId::from_raw(u64::MAX);
+                let EditorEntityQueryPosition::Start(mut basis) = request.position else {
+                    unreachable!();
+                };
+                basis.document = unknown;
+                assert_eq!(
+                    workspace.query_document_entities(EditorEntityQuery {
+                        position: EditorEntityQueryPosition::Start(basis),
+                        limits: request.limits,
+                    }),
+                    Err(EditorEntityQueryRejection::DocumentNotOpen { document: unknown })
+                );
+                assert_eq!(workspace.active_document(), Some(document));
+                assert_eq!(facts(&workspace, document), before);
+            }
+        }
+
+        #[test]
+        fn querying_non_active_scene_and_prefab_preserves_both_selections_and_document_state() {
+            let registry = frozen_empty_registry();
+            for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
+                let mut workspace = EditorWorkspace::new();
+                let a = open_scene(
+                    &mut workspace,
+                    "a",
+                    scene_with_entity(entity_id("selected-a")),
+                );
+                let b = match kind {
+                    EditorDocumentKind::Scene => open_scene(
+                        &mut workspace,
+                        "b",
+                        SceneDocument::from_ordered_roots(records()),
+                    ),
+                    EditorDocumentKind::Prefab => open_prefab(
+                        &mut workspace,
+                        "b",
+                        PrefabDocument::from_ordered_roots(records()),
+                    ),
+                    EditorDocumentKind::Extension(_) => unreachable!(),
+                };
+                for (document, entity) in [(a, "selected-a"), (b, "c")] {
+                    assert!(
+                        workspace
+                            .apply_command(
+                                &registry,
+                                EditorWorkspaceCommand::SelectEntity {
+                                    document,
+                                    entity: Some(entity_id(entity)),
+                                },
+                            )
+                            .applied
+                    );
+                }
+                assert!(workspace.activate_document(a).applied);
+                let before = [facts(&workspace, a), facts(&workspace, b)];
+                let mut page = workspace
+                    .query_document_entities(start(&workspace, b, 2, 2))
+                    .unwrap();
+                while let Some(cursor) = page.next {
+                    page = workspace
+                        .query_document_entities(resume(cursor, 2, 2))
+                        .unwrap();
+                }
+                assert_eq!(workspace.active_document(), Some(a));
+                assert_eq!([facts(&workspace, a), facts(&workspace, b)], before);
+            }
+        }
+
+        #[test]
+        fn foreign_owner_rejects_before_document_lookup_even_for_matching_raw_document_ids() {
+            let mut original = EditorWorkspace::new();
+            let document = open_scene(
+                &mut original,
+                "original",
+                SceneDocument::from_ordered_roots(records()),
+            );
+            let cursor = original
+                .query_document_entities(start(&original, document, 1, 1))
+                .unwrap()
+                .next
+                .unwrap();
+            let mut other = EditorWorkspace::new();
+            assert_eq!(
+                other.query_document_entities(resume(cursor.clone(), 1, 1)),
+                Err(EditorEntityQueryRejection::WrongWorkspace)
+            );
+            let other_document = open_scene(&mut other, "other", SceneDocument::default());
+            assert_eq!(document, other_document);
+            assert_eq!(
+                other.query_document_entities(resume(cursor, 1, 1)),
+                Err(EditorEntityQueryRejection::WrongWorkspace)
+            );
+        }
+
+        #[test]
+        fn changes_to_a_do_not_invalidate_b_but_b_edit_and_undo_do() {
+            let registry = frozen_empty_registry();
+            let mut workspace = EditorWorkspace::new();
+            let a = open_scene(&mut workspace, "a", SceneDocument::default());
+            let b = open_scene(
+                &mut workspace,
+                "b",
+                SceneDocument::from_ordered_roots(records()),
+            );
+            let original_b = workspace.scene(b).unwrap().session().document().clone();
+            let cursor = workspace
+                .query_document_entities(start(&workspace, b, 1, 1))
+                .unwrap()
+                .next
+                .unwrap();
+            assert!(apply_patch(&mut workspace, &registry, a, add_entity_patch("new-a")).applied);
+            assert!(workspace.activate_document(a).applied);
+            let before_a = facts(&workspace, a);
+            let before_b = facts(&workspace, b);
+            assert!(
+                workspace
+                    .query_document_entities(resume(cursor.clone(), 1, 1))
+                    .is_ok()
+            );
+            assert_eq!(facts(&workspace, a), before_a);
+            assert_eq!(facts(&workspace, b), before_b);
+            assert!(apply_patch(&mut workspace, &registry, b, add_entity_patch("new-b")).applied);
+            let edited_b = facts(&workspace, b);
+            assert_eq!(
+                workspace.query_document_entities(resume(cursor.clone(), 1, 1)),
+                Err(EditorEntityQueryRejection::StaleRevision)
+            );
+            assert_eq!(facts(&workspace, b), edited_b);
+            assert!(undo(&mut workspace, &registry, b).applied);
+            assert_eq!(
+                workspace.scene(b).unwrap().session().document(),
+                &original_b
+            );
+            assert_eq!(
+                workspace.query_document_entities(resume(cursor, 1, 1)),
+                Err(EditorEntityQueryRejection::StaleRevision)
+            );
+            assert_eq!(workspace.active_document(), Some(a));
+        }
+
+        #[test]
+        fn closed_document_and_same_slot_replacement_do_not_silently_rebase_continuations() {
+            let registry = frozen_empty_registry();
+            let mut workspace = EditorWorkspace::new();
+            let document = open_scene(
+                &mut workspace,
+                "b",
+                SceneDocument::from_ordered_roots(records()),
+            );
+            let request = start(&workspace, document, 1, 1);
+            let cursor = workspace
+                .query_document_entities(request.clone())
+                .unwrap()
+                .next
+                .unwrap();
+            let revision = workspace.document_revision(document).unwrap();
+            workspace
+                .reload_external_session(
+                    document,
+                    revision,
+                    SceneAuthoringSession::new(SceneDocument::from_ordered_roots(records())),
+                )
+                .unwrap();
+            let before = facts(&workspace, document);
+            assert_eq!(
+                workspace.query_document_entities(resume(cursor.clone(), 1, 1)),
+                Err(EditorEntityQueryRejection::StaleIncarnation)
+            );
+            assert_eq!(
+                workspace.query_document_entities(request),
+                Err(EditorEntityQueryRejection::StaleIncarnation)
+            );
+            assert_eq!(facts(&workspace, document), before);
+            assert!(
+                workspace
+                    .apply_command(
+                        &registry,
+                        EditorWorkspaceCommand::CloseDocument { document },
+                    )
+                    .applied
+            );
+            assert_eq!(
+                workspace.query_document_entities(resume(cursor, 1, 1)),
+                Err(EditorEntityQueryRejection::DocumentNotOpen { document })
+            );
+        }
+
+        #[test]
+        fn schema_admission_is_exact_and_source_revision_checks_precede_it() {
+            let bundle = authoring_basis_bundle("same catalog");
+            let mut workspace = EditorWorkspace::new();
+            let first = workspace
+                .open_authoring_scene_document(
+                    "first",
+                    EditorDocumentSourceBinding::new("scenes/first.scene.json"),
+                    published_basis_scene(&bundle),
+                )
+                .unwrap()
+                .opened_document
+                .unwrap();
+            let second = workspace
+                .open_authoring_scene_document(
+                    "second",
+                    EditorDocumentSourceBinding::new("scenes/second.scene.json"),
+                    published_basis_scene(&bundle),
+                )
+                .unwrap()
+                .opened_document
+                .unwrap();
+            assert!(
+                workspace
+                    .query_document_entities(start(&workspace, first, 1, 1))
+                    .is_ok()
+            );
+            let mut request = start(&workspace, first, 1, 1);
+            let EditorEntityQueryPosition::Start(basis) = &mut request.position else {
+                unreachable!();
+            };
+            basis.schema = workspace
+                .scene(second)
+                .unwrap()
+                .session()
+                .authoring_schema_basis();
+            assert_eq!(
+                workspace.query_document_entities(request.clone()),
+                Err(EditorEntityQueryRejection::StaleSchema)
+            );
+            let EditorEntityQueryPosition::Start(basis) = &mut request.position else {
+                unreachable!();
+            };
+            basis.schema = None;
+            assert_eq!(
+                workspace.query_document_entities(request.clone()),
+                Err(EditorEntityQueryRejection::StaleSchema)
+            );
+            let EditorEntityQueryPosition::Start(basis) = &mut request.position else {
+                unreachable!();
+            };
+            basis.revision = basis.revision.next();
+            assert_eq!(
+                workspace.query_document_entities(request.clone()),
+                Err(EditorEntityQueryRejection::StaleRevision)
+            );
+            let EditorEntityQueryPosition::Start(basis) = &mut request.position else {
+                unreachable!();
+            };
+            basis.revision = workspace.document_revision(second).unwrap();
+            assert_eq!(
+                workspace.query_document_entities(request),
+                Err(EditorEntityQueryRejection::StaleIncarnation)
+            );
+        }
+    }
 
     #[test]
     fn composition_commands_form_one_ordered_atomic_authoring_trajectory() {

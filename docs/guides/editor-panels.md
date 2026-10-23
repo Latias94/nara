@@ -179,3 +179,77 @@ The separately compiled consumer at
 `tests/fixtures/module-consumer/editor-panel-consumer` contains an ordinary native runner and a
 selection-summary panel with a local note draft. This is a source extension interface, not a
 stable dynamic plugin ABI or a toolkit-independent widget framework.
+
+## Prepare A Direct Document Edit
+
+Direct Application consumers can preview an edit of an explicitly named open Scene or Prefab
+without changing its tab or selection:
+
+```rust,ignore
+let tab = frame.workspace().document(document).unwrap();
+let prepared = application.prepare_authoring_edit(document, tab.revision, &patch)?;
+preview_changes(prepared.patch(), prepared.inverse());
+let submission = application.commit_authoring_edit(prepared, Duration::ZERO);
+observe_dispatch(submission.actions());
+```
+
+`PreparedEditorDocumentEdit` is move-only. The document owner retains the exact candidate and
+inverse inspected by the caller. Dropping the value publishes nothing. Commit rechecks the
+original document/session, revision and Schema admission; an edit, Undo/Redo, Reopen or project
+replacement cannot silently rebase it. Specialized UI Prefab structure still requires its domain
+contract. The result uses the existing owned Application submission, not a result ticket.
+
+Mixed construction admits one bounded ordered patch: create empty direct entities, add admitted
+component templates and edit their fields/references. Final classification and forward/inverse
+history admission precede publication. One accepted patch is one Undo/Redo entry. A valid forward
+value is insufficient if its inverse cannot be replayed under the same field limits.
+`MAX_AUTHORING_EDIT_OPERATIONS` bounds mixed operations; `MAX_AUTHORING_FIELD_WRITES` and the
+existing field-value limits remain separate. This is not cross-document atomicity or atomic
+multi-file Save.
+
+This first interface uses explicit persistent `SceneEntityId` values and declared component
+templates. It does not yet provide transaction-local ID allocation/remapping, a rename-stable
+nested-property format, or a panel-context prepared-edit hook. Panels can submit ordinary atomic
+patches through the existing mutation action; direct Application clients use the retained
+candidate interface above. No compatibility wrapper or second Undo authority is required.
+
+## Query A Non-Active Document
+
+`EditorAction::QueryDocumentEntities` enumerates direct source-record IDs from an explicitly
+named open Scene or Prefab. Obtain the document revision and exact optional Schema basis from
+its public tab facts, not from the active Inspector:
+
+```rust,ignore
+let query = EditorEntityQuery {
+    position: EditorEntityQueryPosition::Start(EditorEntityQueryBasis {
+        document: tab.document,
+        revision: tab.revision,
+        schema: tab.authoring_schema_basis.clone(),
+    }),
+    limits: EditorEntityQueryLimits::new(64, 16)?,
+};
+let submission = application.submit_and_drive(
+    EditorActionBatch::new(frame.revision(), [EditorAction::QueryDocumentEntities(query)]),
+    Duration::ZERO,
+);
+```
+
+The owned `DocumentEntities` outcome is available through direct submissions and the same panel
+`action_finished` routing. Neither query changes active tabs, selection, history or dirty state.
+The page's opaque continuation captures workspace identity, document kind, source incarnation,
+revision and Schema admission. Reusing a current continuation repeats a read-only page; it does
+not advance shared server state. Navigation, Save and edits of another document do not invalidate
+it, while edits/Undo/Redo/Reopen of its target do. A query-only batch uses the document basis
+rather than requiring a fresh geometry frame; mixed batches retain ordinary frame admission.
+
+Scan-record and returned-row caps are independently checked. This concrete enumeration emits
+one ID for each inspected record; it does not first construct a complete Inspector. These caps
+do not bound ID bytes, total work across a batch, or the subsequent normal Application drive.
+Expanded Prefab identities, field queries, unopened sources and project-wide indexing are not
+part of this interface.
+
+The Workspace can hold multiple slots, but the current integrated Host still owns one Scene
+file lane and one Prefab file lane. Opening another source of the same kind replaces that lane
+through its existing dirty-close/physical-retirement workflow. The qualified non-active workflow
+uses a Scene and a Prefab together; arbitrary same-kind multi-open needs per-document file-Host
+ownership and must not be implemented by leaving an unhosted tab behind.

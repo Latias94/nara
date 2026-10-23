@@ -838,6 +838,72 @@ impl EditorApplication {
         dispatch.into_submission(update)
     }
 
+    /// Prepares an edit of a named open document without changing selection or publishing work.
+    pub fn prepare_authoring_edit(
+        &self,
+        document: nara::tooling::EditorDocumentId,
+        base_revision: nara::scene::SceneAuthoringRevision,
+        patch: &nara::scene::ScenePatchDocument,
+    ) -> Result<
+        nara::tooling::PreparedEditorDocumentEdit,
+        nara::project_host::EditorEditPreparationError,
+    > {
+        use nara::project_host::EditorEditPreparationError;
+        if self.session_retirement.is_some() {
+            return Err(EditorEditPreparationError::Closing);
+        }
+        match &self.state {
+            EditorProductState::AuthoringReady(project)
+            | EditorProductState::AuthoringDegraded(project) => project
+                .session
+                .prepare_authoring_edit(document, base_revision, patch),
+            EditorProductState::OpeningReplacement(OpeningReplacementState::Closing { .. }) => {
+                Err(EditorEditPreparationError::Closing)
+            }
+            _ => Err(EditorEditPreparationError::WorkspaceUnavailable),
+        }
+    }
+
+    /// Commits the exact prepared candidate and returns its owned outcome plus drive flags.
+    pub fn commit_authoring_edit(
+        &mut self,
+        prepared: nara::tooling::PreparedEditorDocumentEdit,
+        real_delta: Duration,
+    ) -> EditorApplicationSubmission {
+        let action = match &mut self.state {
+            EditorProductState::AuthoringReady(project)
+            | EditorProductState::AuthoringDegraded(project)
+                if self.session_retirement.is_none()
+                    && project
+                        .session
+                        .current_frame()
+                        .workspace_intent()
+                        .intent()
+                        .is_none() =>
+            {
+                EditorApplicationActionDispatch::Dispatched(
+                    project.session.commit_authoring_edit(prepared),
+                )
+            }
+            EditorProductState::AuthoringReady(_)
+            | EditorProductState::AuthoringDegraded(_)
+            | EditorProductState::OpeningReplacement(OpeningReplacementState::Closing { .. }) => {
+                EditorApplicationActionDispatch::NotDispatched(
+                    EditorApplicationActionNotDispatched::Closing,
+                )
+            }
+            _ => EditorApplicationActionDispatch::NotDispatched(
+                EditorApplicationActionNotDispatched::WorkspaceUnavailable,
+            ),
+        };
+        let observed = matches!(action, EditorApplicationActionDispatch::Dispatched(_));
+        let update = self.drive_editor_frame(real_delta, observed, true);
+        EditorApplicationSubmission {
+            update,
+            actions: vec![action],
+        }
+    }
+
     pub(crate) fn dispatch_editor_actions(
         &mut self,
         batch: EditorActionBatch,

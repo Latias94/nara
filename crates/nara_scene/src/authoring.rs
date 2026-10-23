@@ -18,6 +18,11 @@ use crate::{
     spawn::{SceneInstanceRetirementTransactionError, retire_scene_instance_exact},
 };
 
+#[cfg(feature = "serde")]
+mod prepared;
+#[cfg(feature = "serde")]
+pub use prepared::{PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit};
+
 pub use nara_core::{
     DocumentContentState as SceneAuthoringContentState,
     DocumentHistoryStatus as SceneAuthoringHistoryStatus,
@@ -276,15 +281,20 @@ impl AuthoringHistory {
             return report;
         }
 
-        let Some(inverse) = report.inverse.clone() else {
-            return reject_history_publication(
-                report,
-                "scene.authoring-history-inverse-missing",
-                "accepted authoring patch did not produce an inverse",
-            );
+        let (report, cost) = match self.admit_forward_report(patch, report) {
+            Ok(admitted) => admitted,
+            Err(report) => return report,
         };
-        let cost = SceneAuthoringHistoryCost::for_patch(patch)
-            .max(SceneAuthoringHistoryCost::for_patch(&inverse));
+        self.publish_forward(document, candidate, report, cost)
+    }
+
+    fn publish_forward<D>(
+        &mut self,
+        document: &mut D,
+        candidate: D,
+        report: ScenePatchReport,
+        cost: SceneAuthoringHistoryCost,
+    ) -> ScenePatchReport {
         if !self.entry_is_admissible(cost) {
             return reject_history_publication(
                 report,
@@ -292,6 +302,10 @@ impl AuthoringHistory {
                 "authoring patch exceeds the per-entry history limit",
             );
         }
+        let inverse = report
+            .inverse
+            .clone()
+            .expect("admitted history owns its inverse");
 
         let before_state = self.content_state;
         *document = candidate;
@@ -306,6 +320,30 @@ impl AuthoringHistory {
             cost,
         });
         report
+    }
+
+    fn admit_forward_report(
+        &self,
+        patch: &ScenePatchDocument,
+        report: ScenePatchReport,
+    ) -> Result<(ScenePatchReport, SceneAuthoringHistoryCost), ScenePatchReport> {
+        let Some(inverse) = report.inverse.as_ref() else {
+            return Err(reject_history_publication(
+                report,
+                "scene.authoring-history-inverse-missing",
+                "accepted authoring patch did not produce an inverse",
+            ));
+        };
+        let cost = SceneAuthoringHistoryCost::for_patch(patch)
+            .max(SceneAuthoringHistoryCost::for_patch(inverse));
+        if !self.entry_is_admissible(cost) {
+            return Err(reject_history_publication(
+                report,
+                "scene.authoring-history-entry-limit-exceeded",
+                "authoring patch exceeds the per-entry history limit",
+            ));
+        }
+        Ok((report, cost))
     }
 
     fn apply_history<D>(
@@ -640,7 +678,8 @@ impl PrefabAuthoringSession {
     }
 
     #[cfg(feature = "serde")]
-    pub(crate) fn from_published_authoring_document_with_history_limits(
+    /// Creates a data-authoring owner with fixed, explicit two-way history limits.
+    pub fn from_published_authoring_document_with_history_limits(
         published: crate::PublishedAuthoringPrefabDocument,
         history_limits: SceneAuthoringHistoryLimits,
     ) -> Self {
@@ -881,31 +920,11 @@ impl PrefabAuthoringSession {
     /// Commits one admitted data transaction while preserving unavailable source records.
     #[cfg(feature = "serde")]
     pub fn apply_authoring_patch(&mut self, patch: &ScenePatchDocument) -> ScenePatchReport {
-        let Some(state) = self.authority.published() else {
-            return authoring_field_edit_session_rejection();
-        };
-        let prepared = match crate::authoring_decode::prepare_prefab_authoring_patch(
-            &self.document,
-            state,
-            patch,
-            false,
-        ) {
+        let prepared = match self.prepare_authoring_edit(self.revision(), patch) {
             Ok(prepared) => prepared,
             Err(report) => return report,
         };
-        let crate::authoring_decode::PreparedPrefabAuthoringPatch {
-            document,
-            state,
-            patch,
-            report,
-        } = prepared;
-        let report = self
-            .history
-            .apply_forward(&mut self.document, &patch, Ok((document, report)));
-        if report.applied {
-            self.authority = AuthoringSessionAuthority::Published(state);
-        }
-        report
+        self.commit_authoring_edit(prepared)
     }
 
     /// Applies one history step while retaining the Prefab source kind.
@@ -1105,7 +1124,8 @@ impl SceneAuthoringSession {
     }
 
     #[cfg(feature = "serde")]
-    pub(crate) fn from_published_authoring_document_with_history_limits(
+    /// Creates a data-authoring owner with fixed, explicit two-way history limits.
+    pub fn from_published_authoring_document_with_history_limits(
         published: crate::PublishedAuthoringSceneDocument,
         history_limits: SceneAuthoringHistoryLimits,
     ) -> Self {
@@ -1377,32 +1397,11 @@ impl SceneAuthoringSession {
     /// Commits one admitted data transaction while preserving unavailable source records.
     #[cfg(feature = "serde")]
     pub fn apply_authoring_patch(&mut self, patch: &ScenePatchDocument) -> ScenePatchReport {
-        let Some(state) = self.authority.published() else {
-            return authoring_field_edit_session_rejection();
-        };
-        let prepared = match crate::authoring_decode::prepare_scene_authoring_patch(
-            &self.document,
-            state,
-            patch,
-            false,
-        ) {
+        let prepared = match self.prepare_authoring_edit(self.revision(), patch) {
             Ok(prepared) => prepared,
             Err(report) => return report,
         };
-        let crate::authoring_decode::PreparedSceneAuthoringPatch {
-            document,
-            state,
-            patch,
-            report,
-        } = prepared;
-        let report = self
-            .history
-            .apply_forward(&mut self.document, &patch, Ok((document, report)));
-        if report.applied {
-            self.authority = AuthoringSessionAuthority::Published(state);
-            self.live_dirty = true;
-        }
-        report
+        self.commit_authoring_edit(prepared)
     }
 
     #[cfg(feature = "serde")]

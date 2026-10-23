@@ -18,6 +18,7 @@ mod model;
 mod open;
 mod persistence;
 mod play;
+mod prepared_edit;
 #[cfg(feature = "presentation-2d")]
 mod presentation;
 #[cfg(feature = "presentation-2d")]
@@ -60,6 +61,7 @@ pub use open::{
 };
 #[cfg(test)]
 pub(crate) use persistence::{ReopenTestPhase, SaveTestPhase};
+pub use prepared_edit::EditorEditPreparationError;
 #[cfg(feature = "presentation-2d")]
 pub use presentation::{
     EditorAcceptedPreview, EditorPresentationError, EditorPresentationImage, EditorPresentedToken,
@@ -2444,7 +2446,7 @@ impl EditorProjectSession {
                 "project.editor.close-requires-workspace-intent",
             );
         }
-        if self.pending_workspace_intent.is_some() {
+        if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
             return editor_workspace_command_rejected(
                 self.workspace.active_document(),
                 "project.editor.workspace-intent-pending",
@@ -2672,7 +2674,7 @@ impl EditorProjectSession {
         &mut self,
         request: EditorRuntimeEditRequest,
     ) -> Result<(), EditorRuntimeEditRejection> {
-        if self.pending_workspace_intent.is_some() {
+        if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
             return Err(EditorRuntimeEditRejection::Busy);
         }
         let (document, generation) = match &self.execution {
@@ -2791,7 +2793,7 @@ impl EditorProjectSession {
         &mut self,
         request: SceneApplyChangesRequest,
     ) -> Result<(), EditorApplyChangesRejection> {
-        if self.pending_workspace_intent.is_some() {
+        if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
             return Err(EditorApplyChangesRejection::Busy);
         }
         let (document, source_revision, generation) = match &self.execution {

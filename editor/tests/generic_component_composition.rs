@@ -19,7 +19,7 @@ use nara::{
     },
     scene::{
         PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
-        ScenePlacement, ScenePlacementOwner,
+        ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentKind,
@@ -210,6 +210,17 @@ fn ordinary_prefab_composition_cannot_bypass_specialized_ui_structure_admission(
     let revision = model.revision;
     let history = model.editor.inspector.history;
     let source = fs::read(project.source(EditorDocumentKind::Prefab)).unwrap();
+    assert!(matches!(
+        app.prepare_authoring_edit(
+            document,
+            revision,
+            &ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                entity: SceneEntityRecord::new(SceneEntityId::new("unqualified-ui-node").unwrap()),
+                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            }])
+        ),
+        Err(nara::project_host::EditorEditPreparationError::StructureContractMismatch { .. })
+    ));
     let commands = [
         PrefabCompositionCommand::CreateEntity {
             draft: PrefabCompositionEntityDraft::new(Default::default()).unwrap(),

@@ -585,6 +585,8 @@ pub enum EditorPlayAction {
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditorAction {
     Navigate(EditorNavigationAction),
+    /// Reads direct source entity identities at an explicit open-document basis.
+    QueryDocumentEntities(crate::EditorEntityQuery),
     Mutate(EditorDocumentMutation),
     Extension(crate::EditorExtensionCommand),
     Persistence(EditorPersistenceAction),
@@ -627,6 +629,7 @@ impl EditorAction {
             ),
             Self::Play(action) => matches!(action, EditorPlayAction::Play { .. }),
             Self::Mutate(_)
+            | Self::QueryDocumentEntities(_)
             | Self::Extension(_)
             | Self::Persistence(_)
             | Self::ProjectContent(_)
@@ -789,6 +792,8 @@ fn inspector_field_target(
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditorActionOutcome {
     Workspace(EditorWorkspaceCommandReport),
+    /// Owned read-only page or exact query rejection; not a document mutation result.
+    DocumentEntities(Result<crate::EditorEntityPage, crate::EditorEntityQueryRejection>),
     Persistence(EditorPersistenceRequestResult),
     ProjectBrowser(EditorProjectBrowserActionOutcome),
     ImageImport(EditorImageImportActionOutcome),
@@ -801,6 +806,45 @@ pub enum EditorActionOutcome {
     ApplyChanges(Result<(), EditorApplyChangesRejection>),
     Acknowledged(EditorActionAcknowledgement),
     Rejected(EditorActionRejection),
+}
+
+#[cfg(test)]
+mod entity_query_tests {
+    use super::*;
+    use crate::{
+        EditorEntityQuery, EditorEntityQueryBasis, EditorEntityQueryLimits,
+        EditorEntityQueryPosition,
+    };
+
+    #[test]
+    fn query_uses_document_basis_but_mixed_navigation_batch_keeps_frame_admission() {
+        let document = EditorDocumentId::from_raw(1);
+        let query = EditorAction::QueryDocumentEntities(EditorEntityQuery {
+            position: EditorEntityQueryPosition::Start(EditorEntityQueryBasis {
+                document,
+                revision: SceneAuthoringRevision::initial(),
+                schema: None,
+            }),
+            limits: EditorEntityQueryLimits::new(1, 1).unwrap(),
+        });
+        assert!(!query.requires_current_frame());
+        assert!(query.field_target().is_none());
+        let frame_revision = EditorFrameRevision {
+            source_id: 1,
+            generation: 0,
+        };
+        assert!(!EditorActionBatch::new(frame_revision, [query.clone()]).requires_current_frame());
+        assert!(
+            EditorActionBatch::new(
+                frame_revision,
+                [
+                    query,
+                    EditorAction::Navigate(EditorNavigationAction::SetActiveDocument { document }),
+                ],
+            )
+            .requires_current_frame()
+        );
+    }
 }
 
 /// Outcomes for an ordered action batch, retaining its originating frame context.

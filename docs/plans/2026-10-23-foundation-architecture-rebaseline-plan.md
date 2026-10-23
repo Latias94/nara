@@ -172,7 +172,8 @@ Delete duplicated validation/result inference in consumers; no second Undo or do
 
 ## R2: Owner-Owned Prepared Editing And Selection-Independent Queries
 
-**Design:** D04, D17. **State:** not started. **Owners:** Scene/Prefab authoring and tooling adapters.
+**Design:** D04, D17. **Owners:** Scene/Prefab authoring and tooling adapters. Qualified
+implementation scopes and remaining gaps belong in the ADR ledger and engineering evidence.
 
 Expose bounded prepare/diff/commit over the same validated candidate and inverse; allow a
 single-document entity construction plus multiple components/fields using transaction-local
@@ -186,6 +187,13 @@ current action choreography and record preparation/commit costs.
 
 Delete standalone dry-run validators, tool-built inverse logic and batch-as-transaction usage.
 Amend 0026/0047/0118 for the selected contract, not an imagined universal document framework.
+
+The first concrete interface uses explicitly named source entities, admitted templates and
+direct entity-ID enumeration of open documents. Its owner-bound candidate and inverse are shared
+by preview/commit and ordinary direct apply. This does not close the transaction-local reference
+allocation, nested durable-property identity, full field query, panel-preparation ergonomics or
+preparation-cost comparison obligations above. Do not turn process-local incarnation counters
+into durable allocated identities merely to complete the first consumer.
 
 ## R3: Behavior Representation And Immutable Module Publications
 
@@ -264,6 +272,16 @@ Delete extra physical owners and accidental hardcoded phase knowledge when super
 R5a selects address semantics before R2/R3 persistent contracts freeze. R5b replaces durable
 Prefab overlay/rebase semantics before Behavior/Prefab production qualification. R5c projection/
 history lifetime proceeds independently of language and package choices; it need not wait for R3.
+
+R5c also owns the integrated Host's per-kind persistence-lane limitation exposed by the public
+non-active editing consumer. Replace the singleton Scene/Prefab file lanes with concrete
+per-document custody before claiming arbitrary same-kind multi-open. Keep source file Hosts,
+active preview binding and executable startup selection distinct. Include exact file-alias
+admission, independent Save/Reopen/Close, project shutdown and predecessor failure/cancellation;
+simply disabling document retirement would strand an open slot without its persistence owner.
+The [bounded custody design](../architecture/editor-document-persistence-custody-design.md)
+maps the actual singleton consumers, ordered replacement and failure/native acceptance. It is
+design evidence, not implementation or completion of the broader R5c lifetime work.
 
 Separate source identity, structured projection chain, durable property and runtime incarnation.
 Select named nested member identity and keyed-item addressing; unkeyed list positions remain

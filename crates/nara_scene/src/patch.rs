@@ -820,7 +820,9 @@ fn unsupported_patch_tree_format_version(patch: &ScenePatchDocument) -> Option<u
 
 enum ValueCostNode<'a> {
     Entity(&'a SceneEntityRecord),
+    Entities(std::slice::Iter<'a, SceneEntityRecord>),
     Patch(&'a ScenePatchDocument),
+    Operations(std::slice::Iter<'a, ScenePatchOperation>),
     Value(&'a ComponentValue),
 }
 
@@ -859,7 +861,9 @@ pub(crate) fn scene_entity_component_value_cost(entity: &SceneEntityRecord) -> C
 pub(crate) fn scene_entities_source_value_cost(
     entities: &[SceneEntityRecord],
 ) -> ComponentValueCost {
-    tree_cost(entities.iter().map(ValueCostNode::Entity).collect()).value_cost()
+    tree_cost(vec![ValueCostNode::Entities(entities.iter())], None)
+        .expect("unbounded cost traversal always completes")
+        .value_cost()
 }
 
 pub(crate) fn scene_patch_value_cost(patch: &ScenePatchDocument) -> ComponentValueCost {
@@ -867,10 +871,22 @@ pub(crate) fn scene_patch_value_cost(patch: &ScenePatchDocument) -> ComponentVal
 }
 
 pub(crate) fn scene_patch_cost(patch: &ScenePatchDocument) -> ScenePatchCost {
-    tree_cost(vec![ValueCostNode::Patch(patch)])
+    tree_cost(vec![ValueCostNode::Patch(patch)], None)
+        .expect("unbounded cost traversal always completes")
 }
 
-fn tree_cost(mut pending: Vec<ValueCostNode<'_>>) -> ScenePatchCost {
+#[cfg(feature = "serde")]
+pub(crate) fn bounded_scene_patch_cost(
+    patch: &ScenePatchDocument,
+    limits: ScenePatchApplyLimits,
+) -> Option<ScenePatchCost> {
+    tree_cost(vec![ValueCostNode::Patch(patch)], Some(limits))
+}
+
+fn tree_cost(
+    mut pending: Vec<ValueCostNode<'_>>,
+    limits: Option<ScenePatchApplyLimits>,
+) -> Option<ScenePatchCost> {
     let mut cost = ScenePatchCost::default();
     while let Some(node) = pending.pop() {
         match node {
@@ -880,6 +896,11 @@ fn tree_cost(mut pending: Vec<ValueCostNode<'_>>) -> ScenePatchCost {
                     .saturating_add(1)
                     .saturating_add(entity.children.len())
                     .saturating_add(entity.components.len());
+                if limits
+                    .is_some_and(|limits| cost.operation_count > limits.validation_work().get())
+                {
+                    return None;
+                }
                 cost.structural_logical_bytes = cost
                     .structural_logical_bytes
                     .saturating_add(entity.id.as_str().len())
@@ -889,9 +910,9 @@ fn tree_cost(mut pending: Vec<ValueCostNode<'_>>) -> ScenePatchCost {
                     .saturating_add(entity.components.keys().fold(0usize, |bytes, component| {
                         bytes.saturating_add(component.as_str().len())
                     }));
-                cost.value_cost = cost
-                    .value_cost
-                    .saturating_add(scene_entity_component_value_cost(entity));
+                for component in entity.components.values() {
+                    add_patch_value_cost(&mut cost, &component.value, limits)?;
+                }
                 if let Some(prefab) = &entity.prefab {
                     cost.operation_count = cost.operation_count.saturating_add(1);
                     cost.structural_logical_bytes = cost
@@ -900,9 +921,24 @@ fn tree_cost(mut pending: Vec<ValueCostNode<'_>>) -> ScenePatchCost {
                     pending.push(ValueCostNode::Patch(&prefab.overrides));
                 }
             }
+            ValueCostNode::Entities(mut entities) => {
+                if let Some(entity) = entities.next() {
+                    pending.push(ValueCostNode::Entities(entities));
+                    pending.push(ValueCostNode::Entity(entity));
+                }
+            }
             ValueCostNode::Patch(patch) => {
                 cost.operation_count = cost.operation_count.saturating_add(patch.operations.len());
-                for operation in &patch.operations {
+                if limits
+                    .is_some_and(|limits| cost.operation_count > limits.validation_work().get())
+                {
+                    return None;
+                }
+                pending.push(ValueCostNode::Operations(patch.operations.iter()));
+            }
+            ValueCostNode::Operations(mut operations) => {
+                if let Some(operation) = operations.next() {
+                    pending.push(ValueCostNode::Operations(operations));
                     match operation {
                         ScenePatchOperation::AddEntity { entity, placement } => {
                             add_placement_cost(&mut cost, placement);
@@ -915,7 +951,7 @@ fn tree_cost(mut pending: Vec<ValueCostNode<'_>>) -> ScenePatchCost {
                         } => {
                             add_placement_cost(&mut cost, placement);
                             pending.push(ValueCostNode::Entity(entity));
-                            pending.extend(descendants.iter().map(ValueCostNode::Entity));
+                            pending.push(ValueCostNode::Entities(descendants.iter()));
                         }
                         ScenePatchOperation::RemoveEntity { entity, from } => {
                             add_scene_entity_id_cost(&mut cost, entity);
@@ -976,19 +1012,80 @@ fn tree_cost(mut pending: Vec<ValueCostNode<'_>>) -> ScenePatchCost {
                             add_scene_entity_id_cost(&mut cost, entity);
                             add_component_type_id_cost(&mut cost, component);
                             add_component_field_id_cost(&mut cost, field);
-                            cost.value_cost = cost
-                                .value_cost
-                                .saturating_add(asset_ref_value(asset_ref).cost());
+                            add_patch_value_cost(&mut cost, &asset_ref_value(asset_ref), limits)?;
                         }
                     }
                 }
             }
             ValueCostNode::Value(value) => {
-                cost.value_cost = cost.value_cost.saturating_add(value.cost());
+                add_patch_value_cost(&mut cost, value, limits)?;
             }
         }
     }
-    cost
+    Some(cost)
+}
+
+fn add_patch_value_cost(
+    cost: &mut ScenePatchCost,
+    value: &ComponentValue,
+    limits: Option<ScenePatchApplyLimits>,
+) -> Option<()> {
+    let value_cost = match limits {
+        Some(limits) => value.cost_up_to(
+            limits
+                .validation_value_nodes()
+                .get()
+                .saturating_sub(cost.value_cost.nodes()),
+            limits
+                .validation_value_bytes()
+                .get()
+                .saturating_sub(cost.value_cost.logical_bytes()),
+        )?,
+        None => value.cost(),
+    };
+    cost.value_cost = cost.value_cost.saturating_add(value_cost);
+    Some(())
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod bounded_cost_tests {
+    use super::*;
+
+    #[test]
+    fn structural_replay_cost_has_exact_independent_inclusive_ceilings() {
+        let root = SceneEntityId::new("r").unwrap();
+        let child = SceneEntityId::new("c").unwrap();
+        let patch = ScenePatchDocument::new([ScenePatchOperation::RestoreEntity {
+            entity: SceneEntityRecord::new(root)
+                .with_children([child.clone()])
+                .with_component(
+                    ComponentTypeId::new("game.Note"),
+                    SceneComponentRecord::new(
+                        ComponentSchemaVersion::ONE,
+                        ComponentValue::map([("v", ComponentValue::String("abc".into()))]),
+                    ),
+                ),
+            descendants: vec![SceneEntityRecord::new(child)],
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+        }]);
+        let limits = ScenePatchApplyLimits::default()
+            .with_validation_work(ItemLimit::new(5).unwrap())
+            .with_validation_value_nodes(ItemLimit::new(2).unwrap())
+            .with_validation_value_bytes(ByteLimit::new(4).unwrap());
+        let cost = bounded_scene_patch_cost(&patch, limits).unwrap();
+        assert_eq!(cost.operation_count(), 5);
+        assert_eq!(cost.value_cost().nodes(), 2);
+        assert_eq!(cost.value_cost().logical_bytes(), 4);
+        assert_eq!(cost.logical_bytes(), 16);
+        assert_eq!(cost, scene_patch_cost(&patch));
+        for insufficient in [
+            limits.with_validation_work(ItemLimit::new(4).unwrap()),
+            limits.with_validation_value_nodes(ItemLimit::new(1).unwrap()),
+            limits.with_validation_value_bytes(ByteLimit::new(3).unwrap()),
+        ] {
+            assert!(bounded_scene_patch_cost(&patch, insufficient).is_none());
+        }
+    }
 }
 
 fn add_scene_entity_id_cost(cost: &mut ScenePatchCost, entity: &SceneEntityId) {

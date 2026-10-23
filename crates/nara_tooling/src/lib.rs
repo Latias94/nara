@@ -2,6 +2,7 @@
 
 mod composition;
 mod diagnostic;
+mod entity_query;
 mod frame;
 mod gesture;
 mod image_import;
@@ -16,6 +17,11 @@ mod workspace;
 pub use composition::{
     PrefabCompositionCommand, PrefabCompositionDraftError, PrefabCompositionEntityDraft,
     PrefabCompositionOutcome, SceneCompositionCommand, SceneCompositionEntityKind,
+};
+pub use entity_query::{
+    EditorEntityCursor, EditorEntityPage, EditorEntityQuery, EditorEntityQueryBasis,
+    EditorEntityQueryLimits, EditorEntityQueryPosition, EditorEntityQueryRejection,
+    MAX_EDITOR_ENTITY_QUERY_ROWS, MAX_EDITOR_ENTITY_QUERY_SCAN_RECORDS,
 };
 #[doc(hidden)]
 pub use frame::EditorFrameClock;
@@ -97,6 +103,7 @@ pub use workspace::{
     EditorPrefabSessionPublicationError, EditorPrefabSlot, EditorSceneModel,
     EditorSceneSessionPublicationError, EditorSceneSlot, EditorSceneTabModel, EditorSelectionSet,
     EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceModel,
+    PreparedEditorDocumentEdit,
 };
 #[doc(hidden)]
 pub use workspace::{

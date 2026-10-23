@@ -279,6 +279,13 @@ benefit; a simpler epoch rebuild may win for structural changes.
 
 ## D05: Durable Properties And Prefab Overlays
 
+The first public non-active editing consumer also exposed a concrete Host constraint: Workspace
+supports multiple slots, while the integrated project owns only one Scene and one Prefab file
+lane. Opening a second source of the same kind retires/replaces its predecessor. R5c must separate
+per-document persistence custody from active preview and executable-startup bindings before
+arbitrary same-kind multi-open is supported. A retained tab without its file Host is not a valid
+replacement. The bounded Scene-plus-Prefab consumer does not qualify that later ownership change.
+
 Topics: T05, T07. ADRs: 0006, 0011, 0038, 0043, 0083, 0090, 0101.
 
 **Pressure.** `PrefabInstance.overrides` currently stores `ScenePatchDocument`; `MoveEntity`

@@ -28,13 +28,15 @@ mod product_transaction_tests;
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "serde")]
-pub use authoring::AuthoringSessionReplacementError;
 pub use authoring::{
     AuthoringSessionAuthorityError, PrefabAuthoringSession, SceneAuthoringClearReport,
     SceneAuthoringContentState, SceneAuthoringHistoryLimits, SceneAuthoringHistoryStatus,
     SceneAuthoringHistoryUsage, SceneAuthoringRevision, SceneAuthoringSession,
     SceneAuthoringSourceId, SceneAuthoringSyncReport,
+};
+#[cfg(feature = "serde")]
+pub use authoring::{
+    AuthoringSessionReplacementError, PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit,
 };
 #[cfg(feature = "serde")]
 pub use authoring_decode::{
@@ -43,8 +45,8 @@ pub use authoring_decode::{
     AuthoringDocumentSource, AuthoringFieldEdit, AuthoringFieldEditError, AuthoringFieldWrite,
     AuthoringPatchRecordSlot, AuthoringPatchTargetKind, AuthoringRecordFact,
     AuthoringRecordLocation, AuthoringRecordOwnerClaim, AuthoringRecordReadiness,
-    AuthoringSchemaBasis, AuthoringSessionReopenError, MAX_AUTHORING_FIELD_WRITES,
-    PrefabAuthoringDocumentCandidate, PublishedAuthoringPrefabDocument,
+    AuthoringSchemaBasis, AuthoringSessionReopenError, MAX_AUTHORING_EDIT_OPERATIONS,
+    MAX_AUTHORING_FIELD_WRITES, PrefabAuthoringDocumentCandidate, PublishedAuthoringPrefabDocument,
     PublishedAuthoringSceneDocument, SceneAuthoringDocumentCandidate, UnavailableEntityReference,
     UnavailablePatchTarget, UnavailableRecord, UnavailableRecordManifest,
     UnavailableRecordManifestEntry, UnavailableValuePathSegment,

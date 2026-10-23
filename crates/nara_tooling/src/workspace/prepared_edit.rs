@@ -1,0 +1,142 @@
+//! Prepared edits preserve the document owner's candidate and publication authority.
+
+use super::{
+    EditorDocumentId, EditorDocumentKind, EditorDocumentSlot, EditorWorkspace,
+    EditorWorkspaceCommandReport, WorkspaceDocumentContext, authoring_command_error_report,
+    authoring_document_error_report, report_for_document, report_for_document_patch,
+    workspace_document_error_report, workspace_revision_error_report,
+};
+use nara_scene::{
+    PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit, SceneAuthoringRevision,
+    ScenePatchDocument,
+};
+
+/// A move-only edit of one explicitly named open document; it owns no workspace or selection.
+#[derive(Debug)]
+pub struct PreparedEditorDocumentEdit {
+    document: EditorDocumentId,
+    edit: PreparedDocumentEdit,
+}
+
+#[derive(Debug)]
+enum PreparedDocumentEdit {
+    Scene(PreparedSceneAuthoringEdit),
+    Prefab(PreparedPrefabAuthoringEdit),
+}
+
+impl PreparedEditorDocumentEdit {
+    #[must_use]
+    pub const fn document(&self) -> EditorDocumentId {
+        self.document
+    }
+
+    #[must_use]
+    pub fn document_kind(&self) -> EditorDocumentKind {
+        match self.edit {
+            PreparedDocumentEdit::Scene(_) => EditorDocumentKind::Scene,
+            PreparedDocumentEdit::Prefab(_) => EditorDocumentKind::Prefab,
+        }
+    }
+
+    #[must_use]
+    pub fn base_revision(&self) -> SceneAuthoringRevision {
+        match &self.edit {
+            PreparedDocumentEdit::Scene(edit) => edit.base_revision(),
+            PreparedDocumentEdit::Prefab(edit) => edit.base_revision(),
+        }
+    }
+
+    #[must_use]
+    pub fn patch(&self) -> &ScenePatchDocument {
+        match &self.edit {
+            PreparedDocumentEdit::Scene(edit) => edit.patch(),
+            PreparedDocumentEdit::Prefab(edit) => edit.patch(),
+        }
+    }
+
+    #[must_use]
+    pub fn inverse(&self) -> &ScenePatchDocument {
+        match &self.edit {
+            PreparedDocumentEdit::Scene(edit) => edit.inverse(),
+            PreparedDocumentEdit::Prefab(edit) => edit.inverse(),
+        }
+    }
+}
+
+impl EditorWorkspace {
+    /// Prepares a data-authoring edit without changing navigation, selection or saved state.
+    pub fn prepare_authoring_edit(
+        &self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        patch: &ScenePatchDocument,
+    ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
+        let context = WorkspaceDocumentContext::new(self.active_document, Some(document));
+        let Some(slot) = self.documents.get(&document) else {
+            return Err(workspace_document_error_report(context, document));
+        };
+        if slot.revision() != base_revision {
+            return Err(workspace_revision_error_report(
+                context,
+                document,
+                base_revision,
+                slot.revision(),
+            ));
+        }
+        if slot.authoring_readiness().is_none() {
+            return Err(authoring_document_error_report(
+                self.active_document,
+                document,
+            ));
+        }
+        let prepared = match slot {
+            EditorDocumentSlot::Scene(slot) => slot
+                .session
+                .prepare_authoring_edit(base_revision, patch)
+                .map(PreparedDocumentEdit::Scene),
+            EditorDocumentSlot::Prefab(slot) => slot
+                .session
+                .prepare_authoring_edit(base_revision, patch)
+                .map(PreparedDocumentEdit::Prefab),
+            EditorDocumentSlot::Extension(_) => {
+                return Err(authoring_command_error_report(
+                    self.active_document,
+                    document,
+                ));
+            }
+        };
+        prepared
+            .map(|edit| PreparedEditorDocumentEdit { document, edit })
+            .map_err(|patch_report| {
+                let mut report = report_for_document(document, self.active_document, slot);
+                report.applied = false;
+                let _ = report.diagnostics.extend(patch_report.diagnostics.clone());
+                report.patch_report = Some(patch_report);
+                report
+            })
+    }
+
+    /// Commits only to the original document/session and retains ordinary selection repair.
+    pub fn commit_authoring_edit(
+        &mut self,
+        prepared: PreparedEditorDocumentEdit,
+    ) -> EditorWorkspaceCommandReport {
+        let document = prepared.document();
+        let (active, slot) = match self
+            .resolve_exact_authoring_document_mutation_slot(document, prepared.base_revision())
+        {
+            Ok(exact) => exact,
+            Err(report) => return report,
+        };
+        let report = match (&mut *slot, prepared.edit) {
+            (EditorDocumentSlot::Scene(slot), PreparedDocumentEdit::Scene(edit)) => {
+                slot.session.commit_authoring_edit(edit)
+            }
+            (EditorDocumentSlot::Prefab(slot), PreparedDocumentEdit::Prefab(edit)) => {
+                slot.session.commit_authoring_edit(edit)
+            }
+            _ => return authoring_command_error_report(active, document),
+        };
+        report_for_document_patch(document, active, slot, report)
+    }
+}

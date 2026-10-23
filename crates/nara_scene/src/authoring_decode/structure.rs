@@ -3,8 +3,9 @@ use super::{
     PreparedSceneAuthoringPatch, SceneDocument, ScenePatchDocument, ScenePatchOperation,
     ScenePatchReport, UnavailableRecordManifest, UnavailableRecordManifestEntry,
     classify_scene_document, component_allows_composition, diagnostic_error,
+    is_authoring_field_operation,
 };
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 pub(super) fn prepare_scene_authoring_structure(
     document: &SceneDocument,
@@ -12,27 +13,210 @@ pub(super) fn prepare_scene_authoring_structure(
     patch: &ScenePatchDocument,
     history: bool,
 ) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
-    // Structural commands are one operation. Field-only transactions retain their existing
-    // bounded multi-write contract, and history never broadens the public mutation vocabulary.
     if patch.format_version != ScenePatchDocument::CURRENT_FORMAT_VERSION
-        || patch.operations.len() != 1
+        || patch.is_empty()
+        || patch.operations.len() > super::MAX_AUTHORING_EDIT_OPERATIONS
     {
         return Err(authoring_structure_rejection(
-            "Authoring composition requires one explicit structural operation",
+            "Authoring composition requires a bounded nonempty transaction",
         ));
     }
-    let operation = &patch.operations[0];
+    for operation in &patch.operations {
+        validate_operation_shape(operation, history)?;
+    }
+    let field_operations = patch
+        .operations
+        .iter()
+        .filter(|operation| is_authoring_field_operation(operation));
+    let fields = if field_operations.clone().next().is_some() {
+        super::field_edits_from_operations(field_operations)?
+    } else {
+        Vec::new()
+    };
+    admit_replay_cost(patch)?;
+    let mut fields = fields.iter();
+    let mut candidate = document.clone();
+    let mut created = BTreeSet::new();
+    let mut inverses = Vec::with_capacity(patch.operations.len());
+    for (operation_index, operation) in patch.operations.iter().enumerate() {
+        if is_authoring_field_operation(operation) {
+            let edit = fields
+                .next()
+                .expect("each field operation has one parsed edit");
+            let (next, inverse) =
+                if created.contains(&(edit.entity.clone(), edit.component.clone())) {
+                    super::prepare_admitted_field_edit(candidate, state, edit)?
+                } else {
+                    super::prepare_field_edit(candidate, state, edit)?
+                };
+            candidate = next;
+            inverses.push(inverse.operations);
+            continue;
+        }
+        validate_structure_operation(&candidate, state, operation, history, &created)?;
+        let inverse = crate::patch::apply_authoring_structure_operation(
+            &mut candidate,
+            operation,
+            operation_index,
+        )
+        .map_err(|diagnostic| {
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(diagnostic);
+            ScenePatchReport {
+                applied: false,
+                inverse: None,
+                diagnostics,
+            }
+        })?;
+        match operation {
+            ScenePatchOperation::AddComponent {
+                entity, component, ..
+            } => {
+                created.insert((entity.clone(), component.clone()));
+            }
+            ScenePatchOperation::RemoveComponent { entity, component } => {
+                created.remove(&(entity.clone(), component.clone()));
+            }
+            ScenePatchOperation::RestoreEntity {
+                entity,
+                descendants,
+                ..
+            } => {
+                // Only owner-created history can restore records. Their fields still cross
+                // the ordinary schema/version/capability checks before any further edit.
+                for record in std::iter::once(entity).chain(descendants.iter()) {
+                    created.extend(
+                        record
+                            .components
+                            .keys()
+                            .cloned()
+                            .map(|component| (record.id.clone(), component)),
+                    );
+                }
+            }
+            ScenePatchOperation::RemoveEntity { .. } => {
+                if !created.is_empty() {
+                    for operation in &inverse {
+                        if let ScenePatchOperation::RestoreEntity {
+                            entity,
+                            descendants,
+                            ..
+                        } = operation
+                        {
+                            for record in std::iter::once(entity).chain(descendants.iter()) {
+                                for component in record.components.keys() {
+                                    created.remove(&(record.id.clone(), component.clone()));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        inverses.push(inverse);
+    }
+    if crate::format::validate_scene_publication_shape(&candidate, state.limits).is_err() {
+        return Err(authoring_structure_rejection(
+            "Authoring structure exceeds the persistent format boundary",
+        ));
+    }
+    candidate.canonicalize();
+    let candidate_state = classify_scene_document(
+        &candidate,
+        state.source.clone(),
+        state.kind,
+        Arc::clone(&state.basis),
+        state.limits,
+    )
+    .map_err(|error| ScenePatchReport {
+        applied: false,
+        inverse: None,
+        diagnostics: error.into_diagnostics(),
+    })?;
+    let expected_manifest = if patch.operations.iter().any(|operation| {
+        matches!(
+            operation,
+            ScenePatchOperation::AddEntity { .. }
+                | ScenePatchOperation::RemoveEntity { .. }
+                | ScenePatchOperation::RestoreEntity { .. }
+                | ScenePatchOperation::MoveEntity { .. }
+        )
+    }) {
+        manifest_after_topology(&state.unavailable_manifest, &candidate)
+    } else {
+        state.unavailable_manifest.clone()
+    };
+    if candidate_state.unavailable_manifest != expected_manifest {
+        return Err(authoring_structure_rejection(
+            "Authoring structure changed the complete unavailable-record manifest",
+        ));
+    }
+    let inverse = ScenePatchDocument::new(inverses.into_iter().rev().flatten());
+    admit_replay_cost(&inverse)?;
+    if inverse.operations.iter().any(is_authoring_field_operation) {
+        super::field_edits_from_operations(
+            inverse
+                .operations
+                .iter()
+                .filter(|operation| is_authoring_field_operation(operation)),
+        )?;
+    }
+    Ok(PreparedSceneAuthoringPatch {
+        document: candidate,
+        state: candidate_state,
+        patch: patch.clone(),
+        report: ScenePatchReport {
+            applied: true,
+            inverse: Some(inverse),
+            diagnostics: DiagnosticReport::default(),
+        },
+    })
+}
+
+fn admit_replay_cost(patch: &ScenePatchDocument) -> Result<(), ScenePatchReport> {
+    crate::patch::bounded_scene_patch_cost(patch, crate::ScenePatchApplyLimits::default())
+        .map(|_| ())
+        .ok_or_else(|| {
+            authoring_structure_rejection(
+                "Authoring construction or its inverse exceeds the replay work budget",
+            )
+        })
+}
+
+fn validate_operation_shape(
+    operation: &ScenePatchOperation,
+    history: bool,
+) -> Result<(), ScenePatchReport> {
     match operation {
-        ScenePatchOperation::AddEntity { entity, .. } => {
+        ScenePatchOperation::AddEntity { entity, .. }
             if !entity.components.is_empty()
                 || !entity.children.is_empty()
-                || entity.prefab.is_some()
-            {
-                return Err(authoring_structure_rejection(
-                    "Generic authoring creates only an empty entity",
-                ));
-            }
+                || entity.prefab.is_some() =>
+        {
+            Err(authoring_structure_rejection(
+                "Generic authoring creates only an empty entity",
+            ))
         }
+        ScenePatchOperation::RestoreEntity { .. } if !history => Err(
+            authoring_structure_rejection("Only owner-created history can restore records"),
+        ),
+        ScenePatchOperation::ReplaceComponent { .. } => Err(authoring_structure_rejection(
+            "Whole-record replacement is unavailable for generic authoring",
+        )),
+        _ => Ok(()),
+    }
+}
+
+fn validate_structure_operation(
+    document: &SceneDocument,
+    state: &AuthoringDocumentState,
+    operation: &ScenePatchOperation,
+    history: bool,
+    created: &BTreeSet<(crate::SceneEntityId, nara_reflect::ComponentTypeId)>,
+) -> Result<(), ScenePatchReport> {
+    match operation {
+        ScenePatchOperation::AddEntity { .. } => {}
         ScenePatchOperation::MoveEntity { .. } => {}
         ScenePatchOperation::RemoveEntity { entity, .. } => {
             let empty_history_inverse = history
@@ -74,7 +258,7 @@ pub(super) fn prepare_scene_authoring_structure(
             }
         }
         ScenePatchOperation::RemoveComponent { entity, component } => {
-            let available = state.record_facts.iter().any(|fact| {
+            let available = created.contains(&(entity.clone(), component.clone())) || state.record_facts.iter().any(|fact| {
                 fact.readiness.is_available() && &fact.component == component
                     && matches!(&fact.location, AuthoringRecordLocation::EntityComponent { entity: owner } if owner == entity)
             });
@@ -96,61 +280,7 @@ pub(super) fn prepare_scene_authoring_structure(
             ));
         }
     }
-    let mut candidate = document.clone();
-    let inverse = crate::patch::apply_authoring_structure_operation(&mut candidate, operation, 0)
-        .map_err(|diagnostic| {
-        let mut diagnostics = DiagnosticReport::default();
-        diagnostics.push(diagnostic);
-        ScenePatchReport {
-            applied: false,
-            inverse: None,
-            diagnostics,
-        }
-    })?;
-    if crate::format::validate_scene_publication_shape(&candidate, state.limits).is_err() {
-        return Err(authoring_structure_rejection(
-            "Authoring structure exceeds the persistent format boundary",
-        ));
-    }
-    candidate.canonicalize();
-    let candidate_state = classify_scene_document(
-        &candidate,
-        state.source.clone(),
-        state.kind,
-        Arc::clone(&state.basis),
-        state.limits,
-    )
-    .map_err(|error| ScenePatchReport {
-        applied: false,
-        inverse: None,
-        diagnostics: error.into_diagnostics(),
-    })?;
-    let expected_manifest = if matches!(
-        operation,
-        ScenePatchOperation::AddEntity { .. }
-            | ScenePatchOperation::RemoveEntity { .. }
-            | ScenePatchOperation::RestoreEntity { .. }
-            | ScenePatchOperation::MoveEntity { .. }
-    ) {
-        manifest_after_topology(&state.unavailable_manifest, &candidate)
-    } else {
-        state.unavailable_manifest.clone()
-    };
-    if candidate_state.unavailable_manifest != expected_manifest {
-        return Err(authoring_structure_rejection(
-            "Authoring structure changed the complete unavailable-record manifest",
-        ));
-    }
-    Ok(PreparedSceneAuthoringPatch {
-        document: candidate,
-        state: candidate_state,
-        patch: patch.clone(),
-        report: ScenePatchReport {
-            applied: true,
-            inverse: Some(ScenePatchDocument::new(inverse)),
-            diagnostics: DiagnosticReport::default(),
-        },
-    })
+    Ok(())
 }
 
 fn authoring_deletion_closure_is_complete(
@@ -212,6 +342,155 @@ mod tests {
     };
     use nara_asset::AssetRef;
     use nara_reflect::AuthoringSchemaBundle;
+
+    #[test]
+    fn oversized_structural_inverse_is_refused_even_with_larger_history_limits() {
+        use super::super::{
+            AuthoringClassificationBasis, AuthoringDocumentKind, PrefabAuthoringDocumentCandidate,
+            SceneAuthoringDocumentCandidate, classify_scene_document,
+        };
+        use crate::{
+            PrefabAuthoringSession, PrefabDocument, SceneComponentRecord, SceneFileLimits,
+        };
+        use nara_core::{ByteLimit, DepthLimit, ItemLimit, SerdeShapeLimits};
+        use nara_reflect::{
+            AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId, ComponentFieldPath,
+            ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
+            ComponentTypeId, ComponentValue, ComponentValueKind, PersistentComponentSchemaOwnerId,
+        };
+        use std::sync::Arc;
+
+        let component = ComponentTypeId::new("game.LargeNote");
+        let owner = AuthoringSchemaBundleOwner::new(
+            PersistentComponentSchemaOwnerId::try_new("game.notes").unwrap(),
+            ComponentSchemaCatalog {
+                components: vec![
+                    ComponentSchema::new(
+                        component.clone(),
+                        "Large Note",
+                        ComponentSchemaVersion::ONE,
+                    )
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                    .with_fields([ComponentFieldSchema::required(
+                        ComponentFieldId::new("text"),
+                        "Text",
+                        ComponentFieldPath::from_fields(["text"]),
+                        ComponentValueKind::String,
+                    )
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING)]),
+                ],
+                ..Default::default()
+            },
+            None,
+        );
+        let adapter =
+            super::super::AuthoringAdapterReceipt::from_schema_owner(&owner, &Default::default())
+                .unwrap();
+        let bundle = AuthoringSchemaBundle::new([owner]).unwrap();
+        let basis = Arc::new(AuthoringClassificationBasis::new(&bundle, &[adapter]).unwrap());
+        let root = SceneEntityId::new("root").unwrap();
+        let child = SceneEntityId::new("child").unwrap();
+        let document = SceneDocument::new(
+            [root.clone()],
+            [
+                SceneEntityRecord::new(root.clone())
+                    .with_children([child.clone()])
+                    .with_component(
+                        component.clone(),
+                        SceneComponentRecord::new(
+                            ComponentSchemaVersion::ONE,
+                            ComponentValue::map([(
+                                "text",
+                                ComponentValue::String("x".repeat(65 * 1024 * 1024)),
+                            )]),
+                        ),
+                    ),
+                SceneEntityRecord::new(child),
+            ],
+        );
+        let file_limits = SceneFileLimits::default()
+            .with_encoded_bytes(ByteLimit::new(128 * 1024 * 1024).unwrap())
+            .with_shape(SerdeShapeLimits::new(
+                DepthLimit::new(64).unwrap(),
+                ItemLimit::new(1024).unwrap(),
+                ItemLimit::new(1024).unwrap(),
+                ByteLimit::new(128 * 1024 * 1024).unwrap(),
+                ByteLimit::new(128 * 1024 * 1024).unwrap(),
+            ))
+            .with_component_value_bytes(ByteLimit::new(128 * 1024 * 1024).unwrap());
+        let history_limits = SceneAuthoringHistoryLimits::new(
+            8,
+            1024,
+            1024,
+            256 * 1024 * 1024,
+            1024,
+            1024,
+            128 * 1024 * 1024,
+        )
+        .unwrap();
+        for kind in [AuthoringDocumentKind::Scene, AuthoringDocumentKind::Prefab] {
+            for remove_entity in [false, true] {
+                // Construct already-classified source facts here to avoid a 65 MiB wire fixture.
+                // Forward removal is tiny; only its retained inverse crosses the replay limit.
+                let state = classify_scene_document(
+                    &document,
+                    AuthoringDocumentSource::new(AssetRef::path("large-source.json").unwrap()),
+                    kind,
+                    Arc::clone(&basis),
+                    file_limits,
+                )
+                .unwrap();
+                let patch = ScenePatchDocument::new([if remove_entity {
+                    ScenePatchOperation::RemoveEntity {
+                        entity: root.clone(),
+                        from: ScenePlacement::current(&document, &root).unwrap(),
+                    }
+                } else {
+                    ScenePatchOperation::RemoveComponent {
+                        entity: root.clone(),
+                        component: component.clone(),
+                    }
+                }]);
+                let (rejected, unchanged) = match kind {
+                    AuthoringDocumentKind::Scene => {
+                        let session = SceneAuthoringSession::from_published_authoring_document_with_history_limits(
+                            SceneAuthoringDocumentCandidate { document: document.clone(), state }.publish(),
+                            history_limits,
+                        );
+                        let revision = session.revision();
+                        let rejected = session.prepare_authoring_edit(revision, &patch).is_err();
+                        (
+                            rejected,
+                            session.document() == &document
+                                && session.revision() == revision
+                                && session.history_status().undo_depth == 0,
+                        )
+                    }
+                    AuthoringDocumentKind::Prefab => {
+                        let prefab =
+                            PrefabDocument::new(document.roots.clone(), document.entities.clone());
+                        let session = PrefabAuthoringSession::from_published_authoring_document_with_history_limits(
+                            PrefabAuthoringDocumentCandidate { document: prefab.clone(), state }.publish(),
+                            history_limits,
+                        );
+                        let revision = session.revision();
+                        let rejected = session.prepare_authoring_edit(revision, &patch).is_err();
+                        (
+                            rejected,
+                            session.document() == &prefab
+                                && session.revision() == revision
+                                && session.history_status().undo_depth == 0,
+                        )
+                    }
+                };
+                assert!(unchanged);
+                assert!(
+                    rejected,
+                    "{kind:?}, remove entity={remove_entity}: accepted an unreplayable inverse"
+                );
+            }
+        }
+    }
 
     #[test]
     fn subtree_deletion_refuses_an_oversized_inverse_without_publishing() {

@@ -214,6 +214,48 @@ fn direct_submission_without_workspace_returns_observations_without_replaying_ac
 }
 
 #[test]
+fn prepared_application_commits_are_not_dispatched_during_close_or_after_retirement() {
+    let project = StarterProject::new("prepared-close-admission");
+    let mut application = open_ordinary(project.root());
+    dirty_active_scene(&mut application);
+    let before = current_frame(&application);
+    let scene = before.workspace().active_scene.as_ref().unwrap();
+    let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+        entity: SceneEntityRecord::new(SceneEntityId::new("never-published").unwrap()),
+        placement: ScenePlacement::last(ScenePlacementOwner::Root),
+    }]);
+    let closing = application
+        .prepare_authoring_edit(scene.document, scene.revision, &patch)
+        .unwrap();
+    let retired = application
+        .prepare_authoring_edit(scene.document, scene.revision, &patch)
+        .unwrap();
+    application.request_exit();
+    let blocked = application.commit_authoring_edit(closing, Duration::ZERO);
+    let after_blocked = current_frame(&application);
+    close_direct_application(&mut application);
+    let unavailable = application.commit_authoring_edit(retired, Duration::ZERO);
+    assert_eq!(
+        blocked.actions(),
+        &[EditorApplicationActionDispatch::NotDispatched(
+            EditorApplicationActionNotDispatched::Closing
+        )]
+    );
+    assert_eq!(
+        after_blocked.workspace().documents,
+        before.workspace().documents
+    );
+    assert_eq!(
+        unavailable.actions(),
+        &[EditorApplicationActionDispatch::NotDispatched(
+            EditorApplicationActionNotDispatched::WorkspaceUnavailable
+        )]
+    );
+    assert!(!unavailable.update().actions_observed());
+    assert!(application.current_frame().is_none());
+}
+
+#[test]
 fn direct_submission_keeps_request_admission_distinct_from_failed_save_completion() {
     use nara::tooling::{
         EditorPersistenceAction, EditorPersistenceRequestResult, EditorPersistenceResult,

@@ -781,6 +781,16 @@ impl EditorProjectSession {
         else {
             return;
         };
+        if !self.accepts_new_work() {
+            if let Some(lane) = self.trusted_compiled_mut() {
+                lane.apply_changes_result = Some(EditorApplyChangesResult::Rejected {
+                    request: pending.request,
+                    reason: EditorApplyChangesRejection::Busy,
+                    report: None,
+                });
+            }
+            return;
+        }
         let running_generation = self
             .trusted_compiled()
             .and_then(|lane| lane.runtime_host.running_runtime_generation());
@@ -852,17 +862,11 @@ impl EditorProjectSession {
             }
             return;
         };
-        let patch_report = match &mut self.execution {
-            EditorExecutionLane::Authoring(_) => return,
-            EditorExecutionLane::TrustedCompiled(lane) => self.workspace.apply_command(
-                lane.plan.schema_validation().registry(),
-                EditorWorkspaceCommand::ApplyScenePatch {
-                    document,
-                    base_revision: pending.document_revision,
-                    patch,
-                },
-            ),
-        };
+        let patch_report = self.apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
+            document,
+            base_revision: pending.document_revision,
+            patch,
+        });
         let Some(scene_patch_report) = patch_report.patch_report else {
             if let Some(lane) = self.trusted_compiled_mut() {
                 lane.apply_changes_result = Some(EditorApplyChangesResult::Rejected {

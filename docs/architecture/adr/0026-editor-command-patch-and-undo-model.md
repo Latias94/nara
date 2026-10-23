@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-18
+**Last Revised**: 2026-10-23
 **Amended**: 2026-08-15 to require exact mutation preconditions and independently bounded,
 branch-aware authoring history
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
@@ -44,7 +44,22 @@ Rules:
   Undo, Redo, and divergent branches so returning to saved content does not require document
   hashing or revision rollback.
 - Diagnostics are returned for validation and application failures.
-- Patch paths are stable and schema-aware: `SceneEntityId + ComponentTypeId + field path`.
+- A data-authoring owner can prepare an owned, move-only edit without publishing document,
+  revision, history or dirty state. The prepared edit retains the accepted candidate, forward
+  changes, inverse and exact source incarnation/revision/Schema basis. Its read-only preview is
+  the same candidate later consumed by commit, not a second dry-run implementation.
+- Commit rejects a foreign, superseded or reopened basis before publication and admits the
+  complete two-way history cost before changing the document. Direct apply uses this same
+  preparation/commit path. Dropping a prepared edit cancels it without compensating mutations.
+- History storage limits do not substitute for replay limits: the complete forward and inverse
+  must fit their actual operation/value admission before publication, even when a session admits
+  larger source files or retained history. Cheap format/arity rejection precedes value traversal;
+  bounded logical-cost admission stops when its ceiling is provably exceeded.
+- A batch of Editor actions remains ordered dispatch, not a document transaction. Mixed
+  authoring construction must validate one unpublished candidate and publish one history entry.
+- Patch paths are schema-aware: `SceneEntityId + ComponentTypeId + field path`. Root field
+  identity follows the declared Schema contract; nested member names and unkeyed indices are
+  revision-local locators, not promises of rename/reorder-stable persistent identity.
 - Patches should be serializable so AI tools, editor UI, and tests can share the same mutation format.
 
 ```mermaid
