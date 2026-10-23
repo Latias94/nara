@@ -670,3 +670,206 @@ fn an_independent_tool_queries_and_commits_non_active_scene_and_prefab_without_s
         assert!(app.close(), "the independent Editor owner did not retire");
     }
 }
+
+#[test]
+fn browser_prefab_persistence_round_trips_through_a_fresh_anchored_document() {
+    use nara_tooling::{
+        EditorPersistenceResult, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
+    };
+    for prefab_directory in ["prefabs", "content/prefabs"] {
+        for reopen_source in [false, true] {
+            let project = text_project::TextProject::new();
+            let manifest_path = project.root.join("nara.toml");
+            let manifest = fs::read_to_string(&manifest_path).unwrap();
+            assert!(manifest.contains("prefabs = \"prefabs\""));
+            fs::write(
+                manifest_path,
+                manifest.replace(
+                    "prefabs = \"prefabs\"",
+                    &format!("prefabs = \"{prefab_directory}\""),
+                ),
+            )
+            .unwrap();
+            fs::create_dir_all(project.root.join(prefab_directory)).unwrap();
+            fs::write(
+                project.root.join("schema/authoring.bundle.json"),
+                bundle().to_json_string().unwrap(),
+            )
+            .unwrap();
+            let relative_path = format!("{prefab_directory}/shared.prefab.json");
+            let prefab_path = project.root.join(&relative_path);
+            fs::write(
+                &prefab_path,
+                PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("original"))])
+                    .to_json_string()
+                    .unwrap(),
+            )
+            .unwrap();
+            let mut anchor = SceneEntityRecord::new(id("anchor"));
+            anchor.prefab = Some(nara::scene::PrefabInstance {
+                source: nara::asset::AssetRef::path("shared.prefab.json").unwrap(),
+                overrides: Default::default(),
+            });
+            fs::write(
+                project.root.join("scenes/startup.scene.json"),
+                SceneDocument::from_ordered_roots([anchor])
+                    .to_json_string()
+                    .unwrap(),
+            )
+            .unwrap();
+            let mut app = Application(EditorApplication::new(EditorLaunchOptions::new(
+                &project.root,
+            )));
+            app.native_shell_ready();
+            wait(&mut app, |frame| {
+                !frame.project_browser().has_pending_work()
+            });
+            let scene = frame(&app).workspace().active_document.unwrap();
+            submit(
+                &mut app,
+                EditorAction::ProjectBrowser(EditorProjectBrowserAction::Open {
+                    relative_path: relative_path.into(),
+                }),
+            );
+            wait(&mut app, |frame| frame.document_open().result().is_some());
+            let EditorDocumentOpenResult::Opened { request, document } =
+                frame(&app).document_open().result().unwrap()
+            else {
+                panic!("Browser Open did not publish a Prefab");
+            };
+            submit(
+                &mut app,
+                EditorAction::ProjectBrowser(EditorProjectBrowserAction::AcknowledgeOpen {
+                    request,
+                }),
+            );
+            let revision = basis(&app, document).revision;
+            let action = if reopen_source {
+                fs::write(
+                    &prefab_path,
+                    PrefabDocument::from_ordered_roots([
+                        SceneEntityRecord::new(id("original")),
+                        SceneEntityRecord::new(id("published")),
+                    ])
+                    .to_json_string()
+                    .unwrap(),
+                )
+                .unwrap();
+                EditorPersistenceAction::Reopen {
+                    target: EditorReopenTarget::OpenDocument {
+                        document,
+                        base_revision: revision,
+                    },
+                }
+            } else {
+                let prepared = app
+                    .prepare_authoring_edit(
+                        document,
+                        revision,
+                        &ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                            entity: SceneEntityRecord::new(id("published")),
+                            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                        }]),
+                    )
+                    .unwrap();
+                let committed = app.commit_authoring_edit(prepared, Duration::ZERO);
+                assert!(
+                    matches!(committed.actions(), [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))] if report.applied)
+                );
+                EditorPersistenceAction::Save {
+                    document,
+                    base_revision: basis(&app, document).revision,
+                }
+            };
+            let persistence = submit(&mut app, EditorAction::Persistence(action));
+            assert!(matches!(
+                persistence.actions(),
+                [EditorApplicationActionDispatch::Dispatched(
+                    EditorActionOutcome::Persistence(
+                        nara_tooling::EditorPersistenceRequestResult::Accepted
+                    )
+                )]
+            ));
+            settle_persistence(&mut app);
+            let result = frame(&app).persistence().result();
+            assert!(
+                if reopen_source {
+                    matches!(result, Some(EditorPersistenceResult::Opened { .. }))
+                } else {
+                    matches!(result, Some(EditorPersistenceResult::Saved { .. }))
+                },
+                "{result:?}"
+            );
+            submit(
+                &mut app,
+                EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            );
+            let closed = submit(
+                &mut app,
+                EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Request(
+                    EditorWorkspaceIntent::CloseDocument { document },
+                )),
+            );
+            assert!(matches!(
+                closed.actions(),
+                [EditorApplicationActionDispatch::Dispatched(
+                    EditorActionOutcome::WorkspaceIntent(
+                        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+                    )
+                )]
+            ));
+            wait(&mut app, |frame| {
+                frame.workspace().document(document).is_none()
+            });
+            submit(
+                &mut app,
+                EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::AcknowledgeResult),
+            );
+            submit(
+                &mut app,
+                EditorAction::Navigate(EditorNavigationAction::SetActiveDocument {
+                    document: scene,
+                }),
+            );
+            submit(
+                &mut app,
+                EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                    document: scene,
+                    entity: Some(id("anchor")),
+                }),
+            );
+            let scene_revision = basis(&app, scene).revision;
+            let opened = submit(
+                &mut app,
+                EditorAction::Navigate(EditorNavigationAction::OpenPrefabSource {
+                    document: scene,
+                    base_revision: scene_revision,
+                    entity: id("anchor"),
+                }),
+            );
+            let [
+                EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report)),
+            ] = opened.actions()
+            else {
+                panic!("{opened:?}");
+            };
+            assert!(report.applied, "{:?}", report.diagnostics);
+            let reopened = report.opened_document.unwrap();
+            assert_ne!(reopened, document);
+            let query_basis = basis(&app, reopened);
+            let first = page(&mut app, EditorEntityQueryPosition::Start(query_basis)).unwrap();
+            assert_eq!(first.entities, [id("original")]);
+            let next = first
+                .next
+                .expect("the bounded query must retain its second source record");
+            let second = page(&mut app, EditorEntityQueryPosition::Continue(next)).unwrap();
+            assert_eq!(second.entities, [id("published")]);
+            assert!(second.next.is_none());
+            assert_eq!(frame(&app).scene_preview_document(), Some(scene));
+            assert!(
+                app.close(),
+                "the independent publication owners did not retire"
+            );
+        }
+    }
+}

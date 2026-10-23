@@ -785,7 +785,7 @@ impl ProjectContentLoader {
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
-        self.load_inner(candidate, plan, None, None, None, None)
+        self.load_inner(candidate, plan, None, None, BTreeMap::new(), None)
     }
 
     /// Loads one Scene path relative to the configured Scenes directory.
@@ -798,7 +798,7 @@ impl ProjectContentLoader {
         plan: &RuntimePlan,
         scene: &nara_project::ProjectPath,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
-        self.load_inner(candidate, plan, Some(scene), None, None, None)
+        self.load_inner(candidate, plan, Some(scene), None, BTreeMap::new(), None)
     }
 
     pub(crate) fn load_with_runtime_agreement(
@@ -807,7 +807,14 @@ impl ProjectContentLoader {
         plan: &RuntimePlan,
         agreement: PreparedRuntimeSchemaAgreement,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
-        self.load_inner(candidate, plan, None, None, None, Some(agreement))
+        self.load_inner(
+            candidate,
+            plan,
+            None,
+            None,
+            BTreeMap::new(),
+            Some(agreement),
+        )
     }
 
     pub(crate) fn load_with_expected_startup_scene_digest_and_runtime_agreement(
@@ -822,29 +829,43 @@ impl ProjectContentLoader {
             plan,
             None,
             Some(expected_startup_scene_digest),
-            None,
+            BTreeMap::new(),
             Some(agreement),
         )
     }
 
-    pub(crate) fn load_with_expected_prefab_digest_and_runtime_agreement(
+    pub(crate) fn load_with_expected_prefab_digests_and_runtime_agreement<'source>(
         &self,
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
-        path: AssetPath,
-        digest: ContentDigest,
+        expected_sources: impl IntoIterator<Item = (&'source AssetPath, ContentDigest)>,
         agreement: PreparedRuntimeSchemaAgreement,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
+        let mut expectation_budget = self.budget_host.reserve();
+        let mut expected_prefabs = BTreeMap::new();
+        for (path, digest) in expected_sources {
+            let work = checked_plan_sum(
+                ProjectContentBudgetKind::WorkBytes,
+                [
+                    size_of::<(AssetPath, ContentDigest)>(),
+                    BTREE_ENTRY_OVERHEAD,
+                    path.as_str()
+                        .len()
+                        .checked_add(STRING_ALLOCATION_OVERHEAD)
+                        .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?,
+                ],
+            )?;
+            expectation_budget
+                .add(ProjectContentBudgetKind::WorkBytes, work)
+                .map_err(ProjectContentError::budget)?;
+            expected_prefabs.insert(path.clone(), digest);
+        }
         self.load_inner(
             candidate,
             plan,
             None,
             None,
-            Some(ExpectedPrefabSource {
-                path,
-                digest,
-                observed: false,
-            }),
+            expected_prefabs,
             Some(agreement),
         )
     }
@@ -855,7 +876,7 @@ impl ProjectContentLoader {
         plan: &RuntimePlan,
         selected_scene: Option<&nara_project::ProjectPath>,
         expected_startup_scene_digest: Option<ContentDigest>,
-        expected_prefab: Option<ExpectedPrefabSource>,
+        expected_prefabs: BTreeMap<AssetPath, ContentDigest>,
         runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
         self.load_inner_with_delivery_catalogue(
@@ -863,7 +884,7 @@ impl ProjectContentLoader {
             plan,
             selected_scene,
             expected_startup_scene_digest,
-            expected_prefab,
+            expected_prefabs,
             runtime_agreement,
             None,
             false,
@@ -883,7 +904,7 @@ impl ProjectContentLoader {
             plan,
             None,
             expected_startup_scene_digest,
-            None,
+            BTreeMap::new(),
             Some(agreement),
             None,
             true,
@@ -903,7 +924,7 @@ impl ProjectContentLoader {
             plan,
             Some(scene),
             None,
-            None,
+            BTreeMap::new(),
             None,
             catalogue,
             capture_catalogue,
@@ -916,7 +937,7 @@ impl ProjectContentLoader {
         plan: &RuntimePlan,
         selected_scene: Option<&nara_project::ProjectPath>,
         expected_startup_scene_digest: Option<ContentDigest>,
-        expected_prefab: Option<ExpectedPrefabSource>,
+        expected_prefabs: BTreeMap<AssetPath, ContentDigest>,
         runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
         delivery_catalogue: Option<&DeliveryCatalogue>,
         capture_delivery_catalogue: bool,
@@ -950,7 +971,7 @@ impl ProjectContentLoader {
             validation,
             &plan.asset_domains,
             expected_startup_scene_digest,
-            expected_prefab,
+            expected_prefabs,
             candidate.manifest_digest(),
             runtime_agreement,
             delivery_catalogue,
@@ -1036,7 +1057,7 @@ struct LoadContext<'a> {
     budget: Option<BudgetTicket>,
     source_upgrade_required: bool,
     expected_startup_scene_digest: Option<ContentDigest>,
-    expected_prefab: Option<ExpectedPrefabSource>,
+    expected_prefabs: BTreeMap<AssetPath, ContentDigest>,
     runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
     content_closure: Option<ProjectContentClosureBuilder>,
     content_closure_work_bytes: usize,
@@ -1046,12 +1067,6 @@ struct LoadContext<'a> {
     catalogue_roots: Option<[nara_project::ProjectPath; 2]>,
     capture_delivery_catalogue: bool,
     completed_delivery_catalogue: Option<DeliveryCatalogue>,
-}
-
-struct ExpectedPrefabSource {
-    path: AssetPath,
-    digest: ContentDigest,
-    observed: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1066,7 +1081,7 @@ impl<'a> LoadContext<'a> {
         validation: &'a SchemaValidationInput,
         domains: &'a ProjectAssetDomains,
         expected_startup_scene_digest: Option<ContentDigest>,
-        expected_prefab: Option<ExpectedPrefabSource>,
+        expected_prefabs: BTreeMap<AssetPath, ContentDigest>,
         manifest_digest: ContentDigest,
         runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
         delivery_catalogue: Option<&DeliveryCatalogue>,
@@ -1094,7 +1109,7 @@ impl<'a> LoadContext<'a> {
             budget: Some(budget),
             source_upgrade_required: false,
             expected_startup_scene_digest,
-            expected_prefab,
+            expected_prefabs,
             runtime_agreement,
             content_closure: Some(ProjectContentClosureBuilder::new(manifest_digest)?),
             content_closure_work_bytes,
@@ -1177,15 +1192,13 @@ impl<'a> LoadContext<'a> {
         for path in loaded_prefabs.keys() {
             self.admit_prefab_metadata(&prefabs, &settings.paths.prefabs, path)?;
         }
-        if let Some(expected) = &self.expected_prefab
-            && !expected.observed
-        {
+        if let Some(path) = self.expected_prefabs.keys().next() {
             return Err(ProjectContentError::with_identifier(
                 ProjectContentErrorKind::HostAuthorityRejected,
                 "project.content.saved-prefab-outside-closure",
                 "Saved Prefab is no longer a member of the startup content closure",
                 "prefab",
-                expected.path.as_str(),
+                path.as_str(),
             ));
         }
         let expansion_work = prefab_expansion_work_plan(self.loader.limits.prefab_expansion())?;
@@ -1567,19 +1580,16 @@ impl<'a> LoadContext<'a> {
             path.as_str(),
             self.loader.limits.scene_file().encoded_bytes().get(),
         )?;
-        if let Some(expected) = self.expected_prefab.as_mut()
-            && expected.path == *path
+        if let Some(expected) = self.expected_prefabs.remove(path)
+            && expected != digest
         {
-            expected.observed = true;
-            if expected.digest != digest {
-                return Err(ProjectContentError::with_identifier(
-                    ProjectContentErrorKind::HostAuthorityRejected,
-                    "project.content.saved-prefab-source-changed",
-                    "Saved Prefab bytes do not match the accepted persistence receipt",
-                    "prefab",
-                    path.as_str(),
-                ));
-            }
+            return Err(ProjectContentError::with_identifier(
+                ProjectContentErrorKind::HostAuthorityRejected,
+                "project.content.saved-prefab-source-changed",
+                "Saved Prefab bytes do not match the accepted persistence receipt",
+                "prefab",
+                path.as_str(),
+            ));
         }
         self.record_member(
             ProjectContentMemberKind::Prefab,

@@ -480,15 +480,6 @@ enum PendingSave {
     Extension(nara_tooling::EditorPersistenceCheckpoint),
 }
 
-#[derive(Clone)]
-struct PendingProjectContentRefresh {
-    document: EditorDocumentId,
-    revision: nara_scene::SceneAuthoringRevision,
-    prefab: nara_asset::AssetPath,
-    saved_digest: nara_tooling::EditorDocumentDigest,
-    expected_digest: ContentDigest,
-}
-
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 #[derive(Clone, Copy)]
 struct ActiveEditorGameView {
@@ -751,8 +742,8 @@ pub struct EditorProjectSession {
     execution: EditorExecutionLane,
     project_content: EditorProjectContentView,
     next_project_content_generation: u64,
-    pending_content_refresh: Option<PendingProjectContentRefresh>,
-    failed_content_refresh: Option<PendingProjectContentRefresh>,
+    prefab_content_refresh:
+        BTreeMap<nara_asset::AssetPath, content_refresh::PrefabContentRefreshObligation>,
     prefab_lanes: BTreeMap<EditorDocumentId, EditorPrefabPersistenceLane>,
     extension_documents: extension_documents::EditorExtensionDocumentsHost,
     pending_document_open: Option<document_open::PendingDocumentOpen>,
@@ -1364,8 +1355,7 @@ impl EditorProjectSession {
             execution: EditorExecutionLane::Authoring(parts.snapshot),
             project_content: EditorProjectContentView::NotInstalled,
             next_project_content_generation: 1,
-            pending_content_refresh: None,
-            failed_content_refresh: None,
+            prefab_content_refresh: BTreeMap::new(),
             prefab_lanes: BTreeMap::new(),
             extension_documents: extension_documents::EditorExtensionDocumentsHost::default(),
             pending_document_open: None,
@@ -1606,8 +1596,7 @@ impl EditorProjectSession {
                 generation: initial_content_generation,
             },
             next_project_content_generation: 2,
-            pending_content_refresh: None,
-            failed_content_refresh: None,
+            prefab_content_refresh: BTreeMap::new(),
             prefab_lanes: BTreeMap::new(),
             extension_documents: extension_documents::EditorExtensionDocumentsHost::default(),
             pending_document_open: None,

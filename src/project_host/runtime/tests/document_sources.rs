@@ -5,6 +5,97 @@ use crate::project_host::authoring::AuthoringDocumentKind;
 use nara_scene::{PrefabDocument, PrefabInstance};
 
 #[test]
+fn browser_prefab_save_and_reopen_keep_the_anchor_source_observation_after_close() {
+    for reopen_source in [false, true] {
+        let project = TestProject::new("browser-prefab-saved-observation");
+        fs::write(
+            project.root.join("prefabs/shared.prefab.json"),
+            PrefabDocument::from_ordered_roots([editable_name_entity("original")])
+                .to_json_string()
+                .unwrap(),
+        )
+        .unwrap();
+        let anchor_id = nara_identity::SceneEntityId::new("anchor").unwrap();
+        let mut anchor = SceneEntityRecord::new(anchor_id.clone());
+        anchor.prefab = Some(PrefabInstance {
+            source: AssetRef::path("shared.prefab.json").unwrap(),
+            overrides: Default::default(),
+        });
+        fs::write(
+            project.root.join("scenes/startup.scene.json"),
+            SceneDocument::from_ordered_roots([anchor])
+                .to_json_string()
+                .unwrap(),
+        )
+        .unwrap();
+        let mut editor = open_generic_editor_with_ready_index(&project);
+        let scene = editor.workspace().active_document().unwrap();
+        let index = editor.project_source_index_snapshot().unwrap();
+        let prefab = opened_document(editor.open_indexed_authoring_document(
+            index,
+            "prefabs/shared.prefab.json",
+            AuthoringDocumentKind::Prefab,
+        ));
+        let command = if reopen_source {
+            fs::write(
+                project.root.join("prefabs/shared.prefab.json"),
+                PrefabDocument::from_ordered_roots([editable_name_entity("saved-through-browser")])
+                    .to_json_string()
+                    .unwrap(),
+            )
+            .unwrap();
+            EditorPersistenceCommand::Reopen {
+                document: Some(prefab),
+            }
+        } else {
+            make_authoring_name_dirty(&mut editor, prefab, "saved-through-browser");
+            EditorPersistenceCommand::Save {
+                document: Some(prefab),
+            }
+        };
+        assert_eq!(
+            editor.request_persistence(command),
+            nara_tooling::EditorPersistenceRequestResult::Accepted
+        );
+        drive_persistence_to_terminal(&mut editor);
+        let result = editor.persistence_view().result();
+        assert!(
+            if reopen_source {
+                matches!(result, Some(EditorPersistenceResult::Opened { .. }))
+            } else {
+                matches!(result, Some(EditorPersistenceResult::Saved { .. }))
+            },
+            "{result:?}"
+        );
+        assert_eq!(
+            editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+            nara_tooling::EditorPersistenceRequestResult::Accepted
+        );
+        assert_eq!(
+            editor.request_workspace_intent(EditorWorkspaceIntent::CloseDocument {
+                document: prefab
+            }),
+            nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while editor.workspace().prefab(prefab).is_some() {
+            assert!(Instant::now() < deadline, "the saved Prefab did not close");
+            editor.drive_editor_frame(Duration::ZERO);
+        }
+        let reopened = open_prefab_from_scene(&mut editor, scene, &anchor_id);
+        let content = reopened.opened_document.and_then(|document| {
+            editor
+                .workspace()
+                .prefab(document)
+                .map(|slot| slot.session().document().to_json_string().unwrap())
+        });
+        drive_editor_close_to_completion(&mut editor);
+        assert!(reopened.applied, "{:?}", reopened.diagnostics);
+        assert!(content.is_some_and(|content| content.contains("saved-through-browser")));
+    }
+}
+
+#[test]
 fn indexed_file_alias_cannot_replace_the_open_source_or_its_unsaved_history() {
     for kind in [AuthoringDocumentKind::Scene, AuthoringDocumentKind::Prefab] {
         let project = TestProject::new("indexed-source-alias");

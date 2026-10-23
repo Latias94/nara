@@ -1,28 +1,33 @@
 use nara_asset::AssetPath;
 use nara_fs::ContentDigest;
 use nara_tooling::{
-    EditorDocumentDigest, EditorDocumentId, EditorProjectContentAction,
-    EditorProjectContentRefreshFailure, EditorProjectContentRefreshRejection,
-    EditorProjectContentRefreshRequestResult, EditorProjectContentView,
+    EditorDocumentId, EditorProjectContentAction, EditorProjectContentRefreshFailure,
+    EditorProjectContentRefreshRejection, EditorProjectContentRefreshRequestResult,
+    EditorProjectContentView,
 };
 
+use crate::project_host::persistence::editor_digest;
 use crate::project_host::runtime_agreement::prepare_runtime_schema_agreement;
 use crate::project_host::{ProjectContentError, ProjectContentErrorKind, ProjectContentMemberKind};
 
 use super::{
     EditorPersistenceReceipt, EditorProjectContentGeneration, EditorProjectSession,
-    EditorRuntimeOwnerState, PendingProjectContentRefresh, single_error,
+    EditorRuntimeOwnerState, single_error,
 };
+
+#[derive(Clone, Copy)]
+pub(super) struct PrefabContentRefreshObligation {
+    document: EditorDocumentId,
+    revision: nara_scene::SceneAuthoringRevision,
+    expected_digest: ContentDigest,
+}
 
 impl EditorProjectSession {
     pub(super) fn schedule_prefab_content_refresh(&mut self, evidence: EditorPersistenceReceipt) {
         let document = evidence.document();
-        let prefab = self
-            .workspace
-            .prefab(document)
-            .expect("an accepted Prefab save still belongs to its exact workspace slot");
-        let path = AssetPath::new(prefab.source_binding().locator().to_owned())
-            .expect("a Host-normalized Prefab source remains a valid asset path");
+        let path = self
+            .prefab_source_key(document)
+            .expect("a Runtime Prefab Host publishes inside the configured Prefab domain");
         let saved_digest = evidence
             .published_digest()
             .expect("an accepted Prefab save carries verified published bytes");
@@ -30,7 +35,6 @@ impl EditorProjectSession {
             document,
             evidence.revision(),
             path,
-            saved_digest,
             ContentDigest::from_parts(saved_digest.encoded_bytes(), saved_digest.hash()),
         );
     }
@@ -39,11 +43,12 @@ impl EditorProjectSession {
         &mut self,
         document: EditorDocumentId,
         revision: nara_scene::SceneAuthoringRevision,
-        path: AssetPath,
-        digest: EditorDocumentDigest,
         content_digest: ContentDigest,
     ) {
-        self.queue_prefab_content_refresh(document, revision, path, digest, content_digest);
+        let path = self
+            .prefab_source_key(document)
+            .expect("a Runtime Prefab Host reopens inside the configured Prefab domain");
+        self.queue_prefab_content_refresh(document, revision, path, content_digest);
     }
 
     fn queue_prefab_content_refresh(
@@ -51,30 +56,29 @@ impl EditorProjectSession {
         document: EditorDocumentId,
         revision: nara_scene::SceneAuthoringRevision,
         prefab: AssetPath,
-        saved_digest: EditorDocumentDigest,
         expected_digest: ContentDigest,
     ) {
         let Some(current_generation) = self.project_content.current_generation() else {
             return;
         };
         if self.current_snapshot_has_prefab_digest(&prefab, expected_digest) {
-            self.pending_content_refresh = None;
-            self.failed_content_refresh = None;
-            self.project_content = EditorProjectContentView::Current {
-                generation: current_generation,
-            };
-            return;
+            self.prefab_content_refresh.remove(&prefab);
+        } else {
+            self.prefab_content_refresh.insert(
+                prefab,
+                PrefabContentRefreshObligation {
+                    document,
+                    revision,
+                    expected_digest,
+                },
+            );
         }
-        let request = PendingProjectContentRefresh {
-            document,
-            revision,
-            prefab,
-            saved_digest,
-            expected_digest,
-        };
-        self.project_content = refresh_pending_view(current_generation, &request);
-        self.pending_content_refresh = Some(request);
-        self.failed_content_refresh = None;
+        self.project_content = self.prefab_content_refresh.values().next().map_or(
+            EditorProjectContentView::Current {
+                generation: current_generation,
+            },
+            |request| refresh_pending_view(current_generation, request),
+        );
     }
 
     fn current_snapshot_has_prefab_digest(
@@ -118,7 +122,10 @@ impl EditorProjectSession {
         match action {
             EditorProjectContentAction::RetryRefresh => {}
         }
-        if self.pending_content_refresh.is_some() {
+        if matches!(
+            self.project_content,
+            EditorProjectContentView::RefreshPending { .. }
+        ) {
             return EditorProjectContentRefreshRequestResult::Rejected(
                 EditorProjectContentRefreshRejection::RefreshPending,
             );
@@ -133,7 +140,7 @@ impl EditorProjectSession {
                 EditorProjectContentRefreshRejection::RetryNotAvailable,
             );
         }
-        let Some(request) = self.failed_content_refresh.take() else {
+        let Some(request) = self.prefab_content_refresh.values().next() else {
             return EditorProjectContentRefreshRequestResult::Rejected(
                 EditorProjectContentRefreshRejection::RetryNotAvailable,
             );
@@ -143,8 +150,7 @@ impl EditorProjectSession {
                 EditorProjectContentRefreshRejection::RetryNotAvailable,
             );
         };
-        self.project_content = refresh_pending_view(current_generation, &request);
-        self.pending_content_refresh = Some(request);
+        self.project_content = refresh_pending_view(current_generation, request);
         EditorProjectContentRefreshRequestResult::Accepted
     }
 
@@ -165,32 +171,34 @@ impl EditorProjectSession {
         if !matches!(&lane.runtime_owner, EditorRuntimeOwnerState::Empty)
             || lane.runtime_host.running_content_revision().is_some()
             || lane.runtime_host.has_cleanup_owner()
-            || self.pending_content_refresh.is_some()
         {
             return;
         }
-        let Some(request) = self.failed_content_refresh.take() else {
+        let Some(request) = self.prefab_content_refresh.values().next() else {
             return;
         };
         let Some(current_generation) = self.project_content.current_generation() else {
-            self.failed_content_refresh = Some(request);
             return;
         };
-        self.project_content = refresh_pending_view(current_generation, &request);
-        self.pending_content_refresh = Some(request);
+        self.project_content = refresh_pending_view(current_generation, request);
     }
 
     pub(super) fn advance_project_content_refresh(&mut self) {
         // Transfer the lifetime Host owner only when no operation still borrows its runtime.
-        if !self.accepts_new_work() || self.pending_persistence.is_some() {
+        if !self.accepts_new_work()
+            || self.pending_persistence.is_some()
+            || !matches!(
+                self.project_content,
+                EditorProjectContentView::RefreshPending { .. }
+            )
+        {
             return;
         }
-        let Some(request) = self.pending_content_refresh.take() else {
+        let Some(request) = self.prefab_content_refresh.values().next().copied() else {
             return;
         };
         let (successor, current_revision, preview_registry) = {
             let Some(lane) = self.trusted_compiled() else {
-                self.failed_content_refresh = Some(request);
                 return;
             };
             let runtime_agreement = match prepare_runtime_schema_agreement(
@@ -210,11 +218,12 @@ impl EditorProjectSession {
             };
             let successor = match lane
                 .content_loader
-                .load_with_expected_prefab_digest_and_runtime_agreement(
+                .load_with_expected_prefab_digests_and_runtime_agreement(
                     &lane.content_candidate,
                     &lane.plan,
-                    request.prefab.clone(),
-                    request.expected_digest,
+                    self.prefab_content_refresh
+                        .iter()
+                        .map(|(path, obligation)| (path, obligation.expected_digest)),
                     runtime_agreement,
                 ) {
                 Ok(successor) => successor,
@@ -243,7 +252,7 @@ impl EditorProjectSession {
                 return;
             };
             self.project_content = EditorProjectContentView::Current { generation };
-            self.failed_content_refresh = None;
+            self.prefab_content_refresh.clear();
             return;
         }
 
@@ -340,26 +349,24 @@ impl EditorProjectSession {
         }
         self.next_project_content_generation = next_generation;
         self.project_content = EditorProjectContentView::Current { generation };
-        self.failed_content_refresh = None;
+        self.prefab_content_refresh.clear();
     }
 
     fn reject_project_content_refresh(
         &mut self,
-        request: PendingProjectContentRefresh,
+        request: PrefabContentRefreshObligation,
         failure: EditorProjectContentRefreshFailure,
     ) {
         let Some(current_generation) = self.project_content.current_generation() else {
-            self.failed_content_refresh = Some(request);
             return;
         };
         self.project_content = EditorProjectContentView::Stale {
             current_generation,
             document: request.document,
             revision: request.revision,
-            saved_digest: request.saved_digest,
+            saved_digest: editor_digest(request.expected_digest),
             failure,
         };
-        self.failed_content_refresh = Some(request);
     }
 
     fn classify_refresh_error(
@@ -420,12 +427,12 @@ impl EditorProjectSession {
 
 fn refresh_pending_view(
     current_generation: EditorProjectContentGeneration,
-    request: &PendingProjectContentRefresh,
+    request: &PrefabContentRefreshObligation,
 ) -> EditorProjectContentView {
     EditorProjectContentView::RefreshPending {
         current_generation,
         document: request.document,
         revision: request.revision,
-        saved_digest: request.saved_digest,
+        saved_digest: editor_digest(request.expected_digest),
     }
 }

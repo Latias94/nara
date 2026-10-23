@@ -14,6 +14,8 @@ use nara_scene::{
 
 use super::*;
 
+mod content_refresh;
+
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
 
 struct Fixture {
@@ -83,6 +85,33 @@ impl Fixture {
             super::super::TrustedCompiledEditorProjectIntent::new(),
         )
         .unwrap()
+    }
+
+    fn two_prefabs(&self) -> (EditorProjectSession, [EditorDocumentId; 2]) {
+        let anchors = ["p.json", "q.json"].map(|path| {
+            fs::write(
+                self.root.join("prefabs").join(path),
+                PrefabDocument::default().to_json_string().unwrap(),
+            )
+            .unwrap();
+            let mut anchor = SceneEntityRecord::new(SceneEntityId::new(path).unwrap());
+            anchor.prefab = Some(nara_scene::PrefabInstance {
+                source: nara_asset::AssetRef::path(path).unwrap(),
+                overrides: Default::default(),
+            });
+            anchor
+        });
+        fs::write(
+            self.root.join("scenes/startup.scene.json"),
+            SceneDocument::from_ordered_roots(anchors)
+                .to_json_string()
+                .unwrap(),
+        )
+        .unwrap();
+        let mut editor = self.editor();
+        let documents = ["p.json", "q.json"]
+            .map(|name| self.add(&mut editor, EditorDocumentKind::Prefab, name));
+        (editor, documents)
     }
 
     fn add(
@@ -1031,6 +1060,235 @@ fn failed_prefab_publication_restores_the_exact_active_document_and_preview() {
     assert_eq!(after.workspace(), frame.workspace());
     assert_eq!(after.workspace().active_document, Some(active));
     assert_eq!(binding, Some(active));
+}
+
+#[test]
+fn later_prefab_refresh_cannot_erase_a_failed_closed_source_obligation() {
+    for reopen_current_source in [false, true] {
+        let fixture = Fixture::new();
+        let (mut editor, [p, q]) = fixture.two_prefabs();
+        let original_content = editor.trusted_compiled().unwrap().snapshot.revision();
+        edit(&mut editor, p, "saved-p");
+        assert_eq!(
+            editor.request_persistence(EditorPersistenceCommand::Save { document: Some(p) }),
+            EditorPersistenceRequestResult::Accepted
+        );
+        assert!(matches!(
+            settle(&mut editor),
+            EditorPersistenceResult::Saved { .. }
+        ));
+        acknowledge(&mut editor);
+        let saved_p = fs::read(fixture.root.join("prefabs/p.json")).unwrap();
+        let mut external_p = saved_p.clone();
+        external_p.extend_from_slice(b"\n");
+        fs::write(fixture.root.join("prefabs/p.json"), external_p).unwrap();
+        editor.advance_project_content_refresh();
+        assert!(matches!(
+            editor.project_content,
+            EditorProjectContentView::Stale { .. }
+        ));
+        assert_eq!(
+            editor.request_workspace_intent(EditorWorkspaceIntent::CloseDocument { document: p }),
+            EditorWorkspaceIntentRequestResult::Accepted
+        );
+        editor.advance_workspace_retirement();
+        assert!(editor.workspace.prefab(p).is_none());
+        assert!(editor.acknowledge_workspace_intent_result());
+
+        let command = if reopen_current_source {
+            EditorPersistenceCommand::Reopen { document: Some(q) }
+        } else {
+            edit(&mut editor, q, "saved-q");
+            EditorPersistenceCommand::Save { document: Some(q) }
+        };
+        assert_eq!(
+            editor.request_persistence(command),
+            EditorPersistenceRequestResult::Accepted
+        );
+        assert!(matches!(
+            settle(&mut editor),
+            EditorPersistenceResult::Saved { .. } | EditorPersistenceResult::Opened { .. }
+        ));
+        acknowledge(&mut editor);
+        editor.advance_project_content_refresh();
+        let after_q = editor.project_content;
+        let retained_content = editor.trusted_compiled().unwrap().snapshot.revision();
+
+        fs::write(fixture.root.join("prefabs/p.json"), saved_p).unwrap();
+        assert_eq!(
+            editor.request_persistence(EditorPersistenceCommand::Reopen { document: Some(q) }),
+            EditorPersistenceRequestResult::Accepted
+        );
+        assert!(matches!(
+            settle(&mut editor),
+            EditorPersistenceResult::Opened { .. }
+        ));
+        acknowledge(&mut editor);
+        editor.advance_project_content_refresh();
+        let reconciled = editor.project_content;
+        close(&mut editor);
+
+        assert!(
+            matches!(
+                after_q,
+                EditorProjectContentView::Stale {
+                    failure: nara_tooling::EditorProjectContentRefreshFailure::SavedSourceChanged,
+                    ..
+                }
+            ),
+            "Q must not erase P's failed obligation after P closes: {after_q:?}; Reopen: {reopen_current_source}"
+        );
+        assert_eq!(retained_content, original_content);
+        assert!(
+            reconciled.is_current(),
+            "all retained obligations should now match: {reconciled:?}"
+        );
+    }
+}
+
+#[test]
+fn refresh_checks_later_sources_and_supersedes_only_the_same_source_obligation() {
+    let fixture = Fixture::new();
+    let (mut editor, [p, q]) = fixture.two_prefabs();
+    let original_content = editor.trusted_compiled().unwrap().snapshot.revision();
+    for (document, entity) in [(p, "p-first"), (q, "q-saved"), (p, "p-later")] {
+        edit(&mut editor, document, entity);
+        assert_eq!(
+            editor.request_persistence(EditorPersistenceCommand::Save {
+                document: Some(document)
+            }),
+            EditorPersistenceRequestResult::Accepted
+        );
+        assert!(matches!(
+            settle(&mut editor),
+            EditorPersistenceResult::Saved { .. }
+        ));
+        acknowledge(&mut editor);
+    }
+    let saved_q = fs::read(fixture.root.join("prefabs/q.json")).unwrap();
+    let mut external_q = saved_q.clone();
+    external_q.extend_from_slice(b"\n");
+    fs::write(fixture.root.join("prefabs/q.json"), external_q).unwrap();
+    editor.advance_project_content_refresh();
+    let changed_source = editor.project_content;
+    let changed_content = editor.trusted_compiled().unwrap().snapshot.revision();
+    fs::write(fixture.root.join("prefabs/q.json"), saved_q).unwrap();
+    let scene = fixture.root.join("scenes/startup.scene.json");
+    let startup = fs::read(&scene).unwrap();
+    let mut anchor = SceneEntityRecord::new(SceneEntityId::new("p.json").unwrap());
+    anchor.prefab = Some(nara_scene::PrefabInstance {
+        source: nara_asset::AssetRef::path("p.json").unwrap(),
+        overrides: Default::default(),
+    });
+    fs::write(
+        &scene,
+        SceneDocument::from_ordered_roots([anchor])
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Reopen { document: Some(p) }),
+        EditorPersistenceRequestResult::Accepted
+    );
+    assert!(matches!(
+        settle(&mut editor),
+        EditorPersistenceResult::Opened { .. }
+    ));
+    acknowledge(&mut editor);
+    editor.advance_project_content_refresh();
+    let missing_source = editor.project_content;
+    let missing_content = editor.trusted_compiled().unwrap().snapshot.revision();
+    let missing_diagnostic = editor.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "project.content.saved-prefab-outside-closure"
+    });
+    fs::write(scene, startup).unwrap();
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Reopen { document: Some(p) }),
+        EditorPersistenceRequestResult::Accepted
+    );
+    assert!(matches!(
+        settle(&mut editor),
+        EditorPersistenceResult::Opened { .. }
+    ));
+    acknowledge(&mut editor);
+    editor.advance_project_content_refresh();
+    let reconciled = editor.project_content;
+    close(&mut editor);
+    for state in [changed_source, missing_source] {
+        assert!(
+            matches!(state, EditorProjectContentView::Stale {
+            document,
+            failure: nara_tooling::EditorProjectContentRefreshFailure::SavedSourceChanged,
+            ..
+        } if document == p),
+            "the representative is P but Q must still reject the complete refresh: {state:?}"
+        );
+    }
+    assert_eq!(changed_content, original_content);
+    assert_eq!(missing_content, original_content);
+    assert!(missing_diagnostic);
+    assert!(
+        reconciled.is_current(),
+        "the latest P and saved Q must reconcile together: {reconciled:?}"
+    );
+}
+
+#[test]
+fn expected_prefab_copy_is_budgeted_before_consuming_the_remaining_inputs() {
+    use crate::project_host::{
+        ProjectContentBudgetKind, ProjectContentErrorKind, ProjectContentLimits,
+        ProjectContentLoader,
+    };
+    use std::cell::Cell;
+    for (limit, expected_visits) in [(1, 1), (512, 2)] {
+        let fixture = Fixture::new();
+        let mut editor = fixture.editor();
+        let lane = editor.trusted_compiled().unwrap();
+        let limits = ProjectContentLimits::default()
+            .with_limit(ProjectContentBudgetKind::WorkBytes, limit)
+            .unwrap();
+        let loader = ProjectContentLoader::with_limits(fixture.capability(), limits).unwrap();
+        let agreement = crate::project_host::runtime_agreement::prepare_runtime_schema_agreement(
+            &fixture.capability(),
+            &lane.content_candidate,
+            &lane.plan,
+        )
+        .unwrap();
+        let paths = ["first.json", "second.json", "third.json"].map(|file| {
+            nara_asset::AssetPath::new(format!("{}{}", "nested/".repeat(30), file)).unwrap()
+        });
+        let visited = Cell::new(0);
+        let result = loader.load_with_expected_prefab_digests_and_runtime_agreement(
+            &lane.content_candidate,
+            &lane.plan,
+            paths.iter().map(|path| {
+                visited.set(visited.get() + 1);
+                (path, ContentDigest::of_bytes(b"expected"))
+            }),
+            agreement,
+        );
+        let snapshot = loader.budget_snapshot();
+        close(&mut editor);
+        assert_eq!(
+            result.err().unwrap().kind(),
+            ProjectContentErrorKind::BudgetExceeded
+        );
+        assert_eq!(
+            visited.get(),
+            expected_visits,
+            "budget rejection must not eagerly copy the entire source set"
+        );
+        assert_eq!(snapshot.active_reservations(), 0);
+        assert_eq!(snapshot.active_generations(), 0);
+        for kind in ProjectContentBudgetKind::ALL {
+            assert_eq!(snapshot.active(*kind), 0, "{kind:?} charge leaked");
+        }
+        assert_eq!(
+            snapshot.high_water(ProjectContentBudgetKind::WorkBytes) > 0,
+            limit > 1
+        );
+    }
 }
 
 #[test]

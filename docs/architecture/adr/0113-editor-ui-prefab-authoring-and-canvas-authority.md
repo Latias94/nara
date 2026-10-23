@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-17
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-10-24
 **Amended**: 2026-08-18 to make the exact U2 authoring projection the single Canvas source
 authority, separate receipt-backed Prefab persistence from immutable project-content generation
 publication, admit source-local ordered entity structure through ordinary Prefab history, and close
@@ -124,6 +124,20 @@ replace the current `ProjectContentSnapshot`. The project Host uses the receipt'
 Prefab path and published digest to load and validate a complete successor content closure through
 ordinary capabilities. Only a successful full load may atomically replace the Editor snapshot and
 its Scene/UI preview owners with a non-reused content generation.
+
+The Host retains outstanding saved-source digest obligations by normalized Prefab-domain path,
+independently of open document slots. A later verified Save or Reopen may replace only the same
+source's obligation; closing its document or observing another already-current source does not
+clear it. One successor load must satisfy every retained obligation, including membership in
+the startup closure, before publishing `Current`. A failed load or preview replacement retains
+the entire obligation set and last-good generation. The Loader reserves the existing work budget
+before copying each expectation and releases those transient charges on every return path.
+
+`RefreshPending` and `Stale` carry one deterministic representative obligation, not a complete
+source list or a claim that its originating document is still open. A refresh failure concerns
+the complete successor; diagnostics identify an offending source when applicable. Retrying or
+resuming after Runtime retirement revalidates the full retained set rather than only that
+representative. This is not an atomic cross-document Save or a second dependency graph.
 
 The current Editor snapshot, every immutable Runtime snapshot, and a successor candidate share one
 content budget host. At most two distinct content revisions may remain retained. A third-generation

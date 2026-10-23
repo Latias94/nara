@@ -145,6 +145,21 @@ impl EditorProjectSession {
         };
         lane.ok_or(EditorPersistenceRejection::SourceBindingMismatch)
     }
+
+    pub(super) fn prefab_source_key(&self, document: EditorDocumentId) -> Option<AssetPath> {
+        let lane = self.prefab_lanes.get(&document)?;
+        let directory = match &self.execution {
+            EditorExecutionLane::Authoring(snapshot) => snapshot.settings().paths.prefabs.as_str(),
+            EditorExecutionLane::TrustedCompiled(lane) => {
+                lane.content_candidate.settings().paths.prefabs.as_str()
+            }
+        };
+        let source = lane
+            .project_path
+            .strip_prefix(directory)?
+            .strip_prefix('/')?;
+        AssetPath::new(source.to_owned()).ok()
+    }
     /// Opens or activates the one path-bound Prefab lane owned by this Editor session.
     #[doc(hidden)]
     pub(super) fn open_prefab_source(
@@ -1051,25 +1066,12 @@ impl EditorProjectSession {
                     .revision
                     .expect("a reopened Prefab reports its authoring revision");
                 if refresh_runtime_content {
-                    let path = AssetPath::new(
-                        self.workspace
-                            .prefab(document)
-                            .expect("a reopened Prefab remains in its exact workspace slot")
-                            .source_binding()
-                            .locator()
-                            .to_owned(),
-                    )
-                    .expect("a Host-normalized Prefab source remains a valid asset path");
                     self.schedule_reopened_prefab_content_refresh(
                         document,
                         revision,
-                        path,
-                        digest,
                         content_digest,
                     );
-                } else if let Some(path) = self.workspace.prefab(document).and_then(|slot| {
-                    AssetPath::new(slot.source_binding().locator().to_owned()).ok()
-                }) {
+                } else if let Some(path) = self.prefab_source_key(document) {
                     self.authoring_prefab_source_observations.insert(
                         path,
                         AuthoringPrefabSourceObservation::new(identity, content_digest),
@@ -1099,11 +1101,7 @@ impl EditorProjectSession {
         document: EditorDocumentId,
         evidence: EditorPersistenceReceipt,
     ) {
-        let Some(path) = self
-            .workspace
-            .prefab(document)
-            .and_then(|slot| AssetPath::new(slot.source_binding().locator().to_owned()).ok())
-        else {
+        let Some(path) = self.prefab_source_key(document) else {
             return;
         };
         let (Some(identity), Some(digest)) =

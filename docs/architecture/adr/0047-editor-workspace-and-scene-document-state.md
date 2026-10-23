@@ -115,6 +115,12 @@ Rules:
   Failed source publication removes only its candidate and restores the document active
   immediately before publication, without routing that rollback through explicit Scene selection.
   Preview selection never chooses executable startup or a retained Play source.
+- Prefab Save/Reopen source observations use the configured Prefab-domain path derived from the
+  retained lane's project-relative publication path, not an arbitrary Workspace locator. Browser
+  and anchored sources therefore share the same observation key. Browser documents outside that
+  configured root remain independently persistent documents without an invented asset-domain key.
+  ADR 0113 owns the outstanding saved-source obligations for trusted project-content refresh;
+  document Close does not erase those obligations.
 - Each private Scene/Prefab lane retains one concrete file Host for its entire lifetime, including
   idle periods after an operation failed. Its runtime retirement registration is independent of
   task results and remains accountable for temporary cleanup after session abandonment. Operations

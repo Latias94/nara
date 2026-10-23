@@ -96,7 +96,8 @@ specifies R5c's concrete replacement for the integrated Host's per-kind file lan
 source aliases, document sessions, preview selection and executable startup without an erased
 document store. ADRs 0047/0118 adopt custody, common source admission and retained Scene selection;
 0111 owns bound Scene presentation/input and 0034 the exact trusted Running source observation.
-Additive Open, multi-source refresh and cancellation/retirement source continuity remain Proposed.
+0113 owns the source-keyed refresh obligations and complete successor validation.
+Additive Open and cancellation/retirement source continuity remain Proposed.
 Prepared edits or per-document storage alone
 do not qualify public same-kind multi-open.
 

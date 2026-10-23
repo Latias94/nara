@@ -1,7 +1,7 @@
 ---
 title: Per-Document Editor Persistence Custody
 date: 2026-10-23
-status: Custody, source admission and retained preview accepted; remaining R5c workflow Proposed
+status: Custody, source admission, retained preview and multi-source refresh accepted; additive Open and Play retirement Proposed
 ---
 
 # Per-Document Editor Persistence Custody
@@ -21,7 +21,8 @@ durable-addressing, history-expiry or Prefab-overlay redesign. ADRs
 per-document custody, common source admission and retained Scene preview decisions. ADR
 [0111](adr/0111-editor-scene-view-execution-and-picking-authority.md) owns bound Scene presentation
 and input admission; [0034](adr/0034-editor-play-mode-world-boundary.md) owns trusted Play source
-observation. Additive Open, multi-source refresh and Play-retirement source continuity remain
+observation; [0113](adr/0113-editor-ui-prefab-authoring-and-canvas-authority.md) owns complete
+saved-source refresh obligations. Additive Open and Play-retirement source continuity remain
 Proposed. The implementation ledger owns actual
 qualification; neither prepared edits nor map storage alone establish public same-kind multi-open.
 
@@ -98,14 +99,21 @@ Reopen also binds its original Host, document incarnation/revision, source bindi
 Native callbacks remain in owner admission; background work does not gain executable authority.
 Use existing retained-handle identity rather than another public generation system.
 
-Prefab source observations need one canonical source-domain key: anchored Open currently uses
-Prefab-relative asset paths, while Browser slots may carry project-relative locators. Choose
-the domain key at admission rather than copying an arbitrary Workspace locator into refresh
-state. Content refresh must retain
-each saved source's outstanding digest obligation. A small source-keyed collection is sufficient:
-a later verified save may supersede the same source, not another source. Closing a tab does not
-erase an outstanding saved-content obligation. Publish `Current` only after the successor closure
-has satisfied every retained obligation; do not introduce a general dependency-graph framework.
+Prefab source observations use one canonical source-domain key derived from the retained lane's
+project-relative publication path and admitted Prefab root. Browser and anchored Workspace locators
+may differ in scope; neither is copied unqualified into refresh state. Sources outside the configured
+Prefab root retain ordinary document persistence without claiming an asset-domain observation.
+Content refresh retains each saved source's outstanding digest obligation in one concrete map.
+A later verified Save or Reopen may supersede the same source, not another source. Closing a tab
+does not erase an outstanding saved-content obligation. Publish `Current` only after the same
+successor closure has satisfied every retained obligation, including source membership.
+
+Pending/stale public facts expose a deterministic representative obligation, which may outlive its
+tab and need not be the failing source; diagnostics describe an offending source when applicable.
+The phase remains in the existing freshness state, not separate pending/failed request slots.
+The Loader copies the expected digest set only after reserving each entry's existing work budget;
+failure disposes that attempt's copy without draining Host obligations. No general dependency
+graph or second source registry is introduced.
 
 ### Close, Project Handoff And Preview
 
@@ -135,11 +143,9 @@ Trusted Running/Stop divergence observations resolve the retained runtime owner'
 not an active Prefab Inspector's revision. This bounded observation correction does not retain
 that source through cancellation or physical retirement.
 
-Two further owner obligations remain explicit. The current content-refresh owner has one
-pending/failed obligation, so a later source must not be allowed to erase an earlier source's
-unsatisfied refresh. Trusted Play's cancelling/retiring states also need to retain their exact
-source before document Close can use source-local isolation throughout retirement. These are
-follow-up replacements, not claims that map storage has already fixed them.
+Trusted Play's cancelling/retiring states still need to retain their exact source before document
+Close can use source-local isolation throughout retirement. This is a follow-up replacement,
+not a claim that document storage, refresh obligations or Running observations have fixed it.
 
 ## Ordered Change Set
 

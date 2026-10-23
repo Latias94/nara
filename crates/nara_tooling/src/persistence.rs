@@ -84,15 +84,23 @@ impl EditorProjectContentRefreshFailure {
 pub enum EditorProjectContentView {
     /// No Runtime project-content lane is installed for this Authoring session.
     NotInstalled,
+    /// The published closure satisfies every retained saved-source obligation.
     Current {
         generation: EditorProjectContentGeneration,
     },
+    /// Refreshes the complete outstanding source set. These fields identify one representative
+    /// obligation, not an exhaustive source list or the latest persistence operation.
+    /// Its originating document may already be closed.
     RefreshPending {
         current_generation: EditorProjectContentGeneration,
         document: EditorDocumentId,
         revision: SceneAuthoringRevision,
         saved_digest: EditorDocumentDigest,
     },
+    /// Retains the last-good closure and all outstanding obligations after a failed refresh.
+    /// These fields identify a representative obligation, possibly from a closed document, not
+    /// necessarily the failing source. The failure concerns the complete refresh; diagnostics
+    /// identify offending sources.
     Stale {
         current_generation: EditorProjectContentGeneration,
         document: EditorDocumentId,
