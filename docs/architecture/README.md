@@ -87,6 +87,12 @@ refines ADRs 0002/0044/0081 and narrows future spatial/asset representation comm
 [qualification record](../knowledge/engineering/verification/2026-10/2026-10-23T022246Z-adr-boundary-and-frozen-codec-execution-verification-b210d1cf09c94203b04bffcfa1dbe236.md)
 binds implementation `05531a0` to executed owner, public-consumer and selected native evidence.
 
+The subsequent [post-boundary interface review](../audits/2026-10-23-post-boundary-architecture-and-interface-review.md)
+records open driver-output, task-disposal, filesystem-cursor, post-flush admission and Image
+association/recovery findings against `10ccc36`. It separates current-source and cached-artifact
+probes from source-only paths, and proposes bounded owner refactors without changing Accepted ADRs
+or claiming their implementation is complete.
+
 The [spatial affine representation design](spatial-affine-representation-design.md) retains
 post-affine residuals, direct affine and authoring-field alternatives for a future concrete import
 or world-preserving edit workflow. ADR 0097 accepts domain boundaries and the supported 2D model;
