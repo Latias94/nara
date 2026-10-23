@@ -7,6 +7,14 @@ use nara_core::{ItemLimit, TimeLimit};
 
 use super::*;
 
+struct PanicOnDrop;
+
+impl Drop for PanicOnDrop {
+    fn drop(&mut self) {
+        panic!("intentional test drop panic");
+    }
+}
+
 fn items(value: usize) -> ItemLimit {
     ItemLimit::new(value).expect("test limits are non-zero")
 }

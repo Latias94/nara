@@ -4,6 +4,70 @@ use nara_tooling::{
     EditorDocumentId, EditorPersistenceRejection, EditorPersistenceRequestResult,
     EditorPlayCommand, EditorPlayRejection, EditorPlayRequestResult,
 };
+
+#[test]
+fn real_task_cleanup_failure_reaches_the_host_after_physical_retirement() {
+    struct FailedCleanup(Arc<AtomicUsize>);
+    impl Drop for FailedCleanup {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            panic!("injected Host-owned task result cleanup failure");
+        }
+    }
+
+    let project = TestProject::new("host-task-cleanup-failure");
+    let (snapshot, plan) = project.snapshot_and_plan(false);
+    let mut host = ProjectHost::new(RuntimeClosePolicy::new(Duration::ZERO));
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    host.complete_start(&mut attempt).unwrap();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let drops = Arc::new(AtomicUsize::new(0));
+    let output_drops = drops.clone();
+    let task = host
+        .running_runtime_mut()
+        .unwrap()
+        .world()
+        .resource::<TaskPools>()
+        .spawn(
+            TaskPoolKind::Io,
+            TaskSpawnRequest::new(1, TaskDomainKey::new(24)),
+            move |_| {
+                started_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                FailedCleanup(output_drops)
+            },
+        )
+        .into_handle()
+        .unwrap();
+    let returned = task.return_observer();
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    drop(task);
+
+    let failure = host.stop_running().unwrap_err();
+    assert!(report_has_code(
+        &failure.diagnostics,
+        "project.run.cleanup-incomplete"
+    ));
+    assert!(host.has_cleanup_owner());
+    release_tx.send(()).unwrap();
+    let (failed, diagnostics) = drive_host_cleanup_to_completion(&mut host);
+
+    assert!(failed);
+    assert_eq!(returned.state(), nara_tasks::TaskReturnState::CleanupFailed);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+    assert!(report_has_code(&diagnostics, "project.run.cleanup-failed"));
+    assert_eq!(
+        identifier_field(
+            &diagnostics,
+            "project.run.cleanup-participant-error",
+            "failure-code"
+        ),
+        Some("nara.tasks.cleanup-failed")
+    );
+    assert!(!host.has_cleanup_owner());
+    assert!(matches!(host.slot, ProjectHostSlot::Empty));
+}
 #[cfg(windows)]
 use nara_tooling::{
     EditorDocumentKind, EditorPersistenceFailureStage, EditorPersistenceRequestKind,

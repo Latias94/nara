@@ -13,14 +13,6 @@ use crate::runtime::default_worker_allocation;
 
 use super::*;
 
-struct PanicOnDrop;
-
-impl Drop for PanicOnDrop {
-    fn drop(&mut self) {
-        panic!("intentional test drop panic");
-    }
-}
-
 fn config_with_compute_workers(pending: usize, workers: usize) -> TaskPoolConfig {
     test_config(pending)
         .with_kind(
@@ -389,7 +381,10 @@ fn task_panics_fail_only_the_handle_and_the_worker_survives() {
     ));
     assert!(matches!(next.try_take(), Some(TaskTerminal::Completed(9))));
     assert_eq!(pools.stats().for_kind(TaskPoolKind::Compute).failed, 1);
-    let _ = pools.shutdown_blocking().unwrap();
+    let report = pools.shutdown_blocking().unwrap();
+    assert!(report.is_complete());
+    // A body panic and a capture destructor panic share the execution unwind boundary.
+    assert!(report.has_cleanup_failure());
 }
 
 #[test]
@@ -444,7 +439,9 @@ fn cancelled_result_drop_panics_do_not_kill_the_worker() {
         }))
     ));
     assert!(matches!(next.try_take(), Some(TaskTerminal::Completed(4))));
-    let _ = pools.shutdown_blocking().unwrap();
+    let report = pools.shutdown_blocking().unwrap();
+    assert!(report.is_complete());
+    assert!(report.has_cleanup_failure());
     assert_eq!(returned.state(), TaskReturnState::CleanupFailed);
 }
 
@@ -528,6 +525,9 @@ fn task_return_reports_capture_cleanup_panic_and_does_not_retain_delivered_outpu
     drop(terminal);
     assert_eq!(drops.load(Ordering::SeqCst), 1);
     assert_eq!(returned.state(), TaskReturnState::Returned);
+    let report = pools.shutdown_blocking().unwrap();
+    assert!(report.is_complete());
+    assert!(report.has_cleanup_failure());
 }
 
 #[test]

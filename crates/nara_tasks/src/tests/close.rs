@@ -1,6 +1,6 @@
 use std::{
     sync::{
-        Arc,
+        Arc, Barrier,
         atomic::{AtomicUsize, Ordering},
         mpsc,
     },
@@ -11,7 +11,8 @@ use std::{
 use nara_app::{
     AddPluginsError, App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
     PluginLifecycleState, PluginPlan, RuntimeAdmissionReservation, RuntimeCandidateRetirementState,
-    RuntimeClosePolicy, RuntimeControl, RuntimeControlRequestResult, RuntimeInstance,
+    RuntimeCloseCause, RuntimeCloseErrorDisposition, RuntimeClosePolicy, RuntimeControl,
+    RuntimeControlFailure, RuntimeControlRequestResult, RuntimeControlStatus, RuntimeInstance,
     RuntimeObligationLedger, RuntimeState,
 };
 
@@ -200,6 +201,187 @@ fn shutdown_retains_an_uncooperative_worker_and_completes_on_retry() {
     drop(pools);
     assert!(drop_started.elapsed() < Duration::from_millis(50));
     thread::sleep(Duration::from_millis(20));
+}
+
+fn check_close_waits_for_submitter_disposal(coalesce: bool) {
+    let pools = Arc::new(TaskPools::try_new(test_config(1)).unwrap());
+    let (started_tx, started_rx) = mpsc::channel();
+    let (finish_tx, finish_rx) = mpsc::channel::<()>();
+    let _finish_guard = PendingDropReleaseGuard(finish_tx.clone());
+    let _running = accepted(pools.spawn(TaskPoolKind::Io, request(1), move |_| {
+        started_tx.send(()).unwrap();
+        let _ = finish_rx.recv_timeout(Duration::from_secs(10));
+    }));
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+
+    let (drop_started_tx, drop_started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let (retired_tx, retired_rx) = mpsc::channel();
+    let _release_guard = PendingDropReleaseGuard(release_tx.clone());
+    let capture = (
+        BlockingPendingDrop {
+            started: drop_started_tx,
+            release: release_rx,
+            retired: retired_tx,
+        },
+        if coalesce { Some(PanicOnDrop) } else { None },
+    );
+    let spawn_request = if coalesce {
+        request(2).with_overload(TaskOverloadPolicy::CoalescePending(TaskCoalesceKey::new(7)))
+    } else {
+        request(2)
+    };
+    let old = accepted(pools.spawn(TaskPoolKind::Io, spawn_request, move |_| {
+        let _capture = &capture;
+    }));
+    let returned = old.return_observer();
+    if !coalesce {
+        assert!(old.cancel());
+    }
+    let submitter_pools = Arc::clone(&pools);
+    let submitter =
+        thread::spawn(move || submitter_pools.spawn(TaskPoolKind::Io, spawn_request, |_| ()));
+    drop_started_rx
+        .recv_timeout(Duration::from_secs(10))
+        .unwrap();
+    assert!(old.is_finished());
+    assert_eq!(returned.state(), TaskReturnState::Pending);
+    finish_tx.send(()).unwrap();
+
+    let incomplete = pools.shutdown_blocking().unwrap();
+    assert!(!incomplete.is_complete());
+    let io = incomplete.for_kind(TaskPoolKind::Io);
+    assert_eq!(io.joined_workers, 1);
+    assert!(io.join_timed_out);
+    assert!(!incomplete.has_cleanup_failure());
+    assert_eq!(returned.state(), TaskReturnState::Pending);
+
+    release_tx.send(()).unwrap();
+    retired_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let _replacement = accepted(submitter.join().unwrap());
+    assert_eq!(
+        returned.state(),
+        if coalesce {
+            TaskReturnState::CleanupFailed
+        } else {
+            TaskReturnState::Returned
+        }
+    );
+    let complete = pools.shutdown_blocking().unwrap();
+    assert!(complete.is_complete());
+    assert_eq!(complete.has_cleanup_failure(), coalesce);
+    assert_eq!(complete.for_kind(TaskPoolKind::Io).joined_workers, 1);
+    assert_eq!(pools.shutdown_blocking().unwrap(), complete);
+    assert_eq!(pools.stats().for_kind(TaskPoolKind::Io).shutdowns, 1);
+}
+
+#[test]
+fn close_retains_coalesced_cleanup_failure_after_workers_join_and_retry() {
+    check_close_waits_for_submitter_disposal(true);
+}
+
+#[test]
+fn close_waits_for_pressure_reclamation_after_workers_join_and_retry() {
+    check_close_waits_for_submitter_disposal(false);
+}
+
+#[test]
+fn rejected_submission_after_close_does_not_reopen_the_drain_set() {
+    let pools = Arc::new(TaskPools::try_new(test_config(1)).unwrap());
+    let (running_tx, running_rx) = mpsc::channel();
+    let (finish_tx, finish_rx) = mpsc::channel::<()>();
+    let _finish_guard = PendingDropReleaseGuard(finish_tx.clone());
+    let _running = accepted(pools.spawn(TaskPoolKind::Io, request(1), move |_| {
+        running_tx.send(()).unwrap();
+        let _ = finish_rx.recv_timeout(Duration::from_secs(10));
+    }));
+    running_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert!(!pools.shutdown_blocking().unwrap().is_complete());
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let (retired_tx, retired_rx) = mpsc::channel();
+    let _release_guard = PendingDropReleaseGuard(release_tx.clone());
+    let capture = BlockingPendingDrop {
+        started: started_tx,
+        release: release_rx,
+        retired: retired_tx,
+    };
+    let submitter_pools = Arc::clone(&pools);
+    let submitter = thread::spawn(move || {
+        submitter_pools.spawn(TaskPoolKind::Io, request(1), move |_| {
+            let _capture = &capture;
+        })
+    });
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    finish_tx.send(()).unwrap();
+    let complete = pools.shutdown_blocking().unwrap();
+    assert!(complete.is_complete());
+    assert!(!complete.has_cleanup_failure());
+    release_tx.send(()).unwrap();
+    retired_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert!(matches!(
+        submitter.join().unwrap(),
+        TaskSpawnOutcome::Rejected(TaskRejection {
+            reason: TaskRejectReason::PoolClosed,
+            return_state: TaskReturnState::Returned,
+            ..
+        })
+    ));
+    assert_eq!(pools.shutdown_blocking().unwrap(), complete);
+    let capture = PanicOnDrop;
+    assert!(matches!(
+        pools.spawn(TaskPoolKind::Io, request(2), move |_| {
+            let _capture = &capture;
+        }),
+        TaskSpawnOutcome::Rejected(TaskRejection {
+            return_state: TaskReturnState::CleanupFailed,
+            ..
+        })
+    ));
+    assert_eq!(pools.shutdown_blocking().unwrap(), complete);
+}
+
+#[test]
+fn close_reports_reaper_cleanup_failure_without_retaining_live_custody() {
+    let pools = inline_pools(1);
+    let capture = PanicOnDrop;
+    let handle = accepted(pools.spawn(TaskPoolKind::Io, request(1), move |_| {
+        let _capture = &capture;
+    }));
+    let returned = handle.return_observer();
+    let report = pools.shutdown_blocking().unwrap();
+    assert!(report.is_complete());
+    assert!(report.has_cleanup_failure());
+    assert!(report.for_kind(TaskPoolKind::Io).cleanup_failed);
+    assert_eq!(returned.state(), TaskReturnState::CleanupFailed);
+    assert_eq!(pools.shutdown_blocking().unwrap(), report);
+
+    let healthy = inline_pools(1);
+    let mut business_failure = accepted(healthy.spawn(TaskPoolKind::Io, request(1), |_| {
+        Err::<(), _>("ordinary task error")
+    }));
+    let _ = healthy.run_pending_for_tests();
+    assert!(matches!(
+        business_failure.try_take(),
+        Some(TaskTerminal::Completed(Err("ordinary task error")))
+    ));
+    let healthy_report = healthy.shutdown_blocking().unwrap();
+    assert!(healthy_report.is_complete());
+    assert!(!healthy_report.has_cleanup_failure());
+}
+
+#[test]
+fn reaper_receipt_retains_cleanup_failure_after_physical_return() {
+    let mut harness = super::runtime::TaskOwnerReaperHarness::new();
+    let receipt = harness.retain_pending_drops(vec![Box::new(|| {
+        panic!("intentional reaper drop panic");
+    })]);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !receipt.is_complete() && Instant::now() < deadline {
+        thread::yield_now();
+    }
+    assert!(receipt.is_complete());
+    assert!(receipt.cleanup_failed());
 }
 
 #[test]
@@ -669,6 +851,168 @@ fn managed_close_reaps_pending_jobs_off_the_driver_thread_before_completing() {
             .for_kind(TaskPoolKind::Io)
             .cancelled_pending,
         1
+    );
+}
+
+#[test]
+fn managed_close_cleanup_failure_completes_with_terminal_evidence_and_failed_stop() {
+    let config = test_config(1)
+        .with_shutdown_policy(TaskShutdownPolicy::new(
+            TimeLimit::MIN,
+            time(Duration::from_secs(1)),
+            time(Duration::from_secs(1)),
+        ))
+        .unwrap();
+    let mut app = App::new();
+    app.add_plugin(TaskPlugin::new(config)).unwrap();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let _release_guard = PendingDropReleaseGuard(release_tx.clone());
+    let _running = accepted(app.world().resource::<TaskPools>().spawn(
+        TaskPoolKind::Io,
+        request(1),
+        move |_| {
+            started_tx.send(()).unwrap();
+            let _ = release_rx.recv_timeout(Duration::from_secs(10));
+        },
+    ));
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let capture = PanicOnDrop;
+    let pending = accepted(app.world().resource::<TaskPools>().spawn(
+        TaskPoolKind::Io,
+        request(2),
+        move |_| {
+            let _capture = &capture;
+        },
+    ));
+    let returned = pending.return_observer();
+    let mut runtime = start_runtime(app, Duration::from_secs(5));
+    let RuntimeControlRequestResult::Accepted(ticket) =
+        runtime.request_control(RuntimeControl::Stop)
+    else {
+        panic!("Stop must be admitted");
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while returned.state() == TaskReturnState::Pending && Instant::now() < deadline {
+        runtime.drive(Duration::ZERO).unwrap();
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(returned.state(), TaskReturnState::CleanupFailed);
+    release_tx.send(()).unwrap();
+    drive_until_state(&mut runtime, RuntimeState::Stopped);
+
+    let report = runtime.world().resource::<TaskShutdownReport>();
+    assert!(report.is_complete());
+    assert!(report.has_cleanup_failure());
+    assert!(!runtime.world().contains_resource::<TaskPools>());
+    assert!(runtime.close_evidence().has_terminal_failure());
+    assert!(runtime.close_evidence().causes().iter().any(|cause| {
+        matches!(
+            cause,
+            RuntimeCloseCause::ParticipantError {
+                code: "nara.tasks.cleanup-failed",
+                disposition: RuntimeCloseErrorDisposition::Terminal,
+                ..
+            }
+        )
+    }));
+    assert!(runtime.close_evidence().pending_participants().is_empty());
+    assert_eq!(
+        runtime.control_status(ticket),
+        Some(RuntimeControlStatus::Failed(
+            RuntimeControlFailure::CloseFailed
+        ))
+    );
+}
+
+#[test]
+fn managed_close_snapshot_result_drop_failure_fails_stop_after_worker_returned() {
+    struct CompletedResult {
+        returned: TaskReturnObserver,
+        dropped: mpsc::Sender<(TaskReturnState, thread::ThreadId)>,
+    }
+
+    impl Drop for CompletedResult {
+        fn drop(&mut self) {
+            let _ = self
+                .dropped
+                .send((self.returned.state(), thread::current().id()));
+            panic!("intentional completed-result drop panic");
+        }
+    }
+
+    let config = test_config(1)
+        .with_shutdown_policy(TaskShutdownPolicy::new(
+            TimeLimit::MIN,
+            time(Duration::from_secs(1)),
+            time(Duration::from_secs(1)),
+        ))
+        .unwrap();
+    let mut app = App::new();
+    app.add_plugin(TaskPlugin::new(config)).unwrap();
+    let release = Arc::new(Barrier::new(2));
+    let worker_release = Arc::clone(&release);
+    let (started_tx, started_rx) = mpsc::channel();
+    let (observer_tx, observer_rx) = mpsc::channel();
+    let (dropped_tx, dropped_rx) = mpsc::channel();
+    let pools = app.world().resource::<TaskPools>();
+    let handle = accepted(pools.spawn(TaskPoolKind::Io, request(1), move |_| {
+        started_tx.send(()).unwrap();
+        worker_release.wait();
+        CompletedResult {
+            returned: observer_rx.recv_timeout(Duration::from_secs(10)).unwrap(),
+            dropped: dropped_tx,
+        }
+    }));
+    let returned = handle.return_observer();
+    observer_tx.send(returned.clone()).unwrap();
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    drop(handle);
+    pools.set_after_running_snapshot_worker_exit_hook_for_tests(TaskPoolKind::Io, move || {
+        release.wait();
+    });
+
+    let driver_thread = thread::current().id();
+    let mut runtime = start_runtime(app, Duration::from_secs(5));
+    let RuntimeControlRequestResult::Accepted(ticket) =
+        runtime.request_control(RuntimeControl::Stop)
+    else {
+        panic!("Stop must be admitted");
+    };
+    drive_until_state(&mut runtime, RuntimeState::Stopped);
+
+    // The worker returned successfully. Only the close snapshot owned this completed result.
+    assert_eq!(
+        dropped_rx.recv_timeout(Duration::from_secs(10)).unwrap(),
+        (TaskReturnState::Returned, driver_thread)
+    );
+    assert_eq!(returned.state(), TaskReturnState::Returned);
+    assert!(dropped_rx.try_recv().is_err());
+    let report = runtime.world().resource::<TaskShutdownReport>();
+    assert!(report.is_complete());
+    assert!(report.has_cleanup_failure());
+    let io = report.for_kind(TaskPoolKind::Io);
+    assert_eq!(io.joined_workers, 1);
+    assert_eq!(io.cancelled_pending, 0);
+    assert_eq!(io.cancellation_requests, 1);
+    assert!(!runtime.world().contains_resource::<TaskPools>());
+    assert!(runtime.close_evidence().has_terminal_failure());
+    assert!(runtime.close_evidence().pending_participants().is_empty());
+    assert!(runtime.close_evidence().causes().iter().any(|cause| {
+        matches!(
+            cause,
+            RuntimeCloseCause::ParticipantError {
+                code: "nara.tasks.cleanup-failed",
+                disposition: RuntimeCloseErrorDisposition::Terminal,
+                ..
+            }
+        )
+    }));
+    assert_eq!(
+        runtime.control_status(ticket),
+        Some(RuntimeControlStatus::Failed(
+            RuntimeControlFailure::CloseFailed
+        ))
     );
 }
 

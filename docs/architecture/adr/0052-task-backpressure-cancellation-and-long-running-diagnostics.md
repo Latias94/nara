@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-20
+**Last Revised**: 2026-10-23
 **Refines**: ADR 0008, ADR 0042, ADR 0048
 **Refined By**: ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
@@ -123,6 +123,18 @@ flowchart TD
   pending/running handles in bounded batches, and joins only workers already known to have exited.
   All three pool kinds begin closing together rather than serially consuming three complete timeout
   budgets.
+- Removing previously admitted work for coalescing, reclamation or disposal transfers its custody
+  under the queue lock before removal becomes visible. Destructors run outside that lock. Physical
+  close also waits for these disposals to return, including on a submitting thread after workers
+  have joined; timeout retains the same close owner for retry. A submission rejected after close
+  disposes its own input synchronously but cannot reopen or expand the admitted close work set.
+- Physical completion and successful cleanup are independent. A caught admitted cleanup unwind
+  leaves bounded sticky failure evidence after custody ends, including close-owned control/result
+  destruction and completed reaper receipts. The typed shutdown report retains that evidence;
+  managed close completes physically with a terminal error, fails Stop and remains diagnosable by
+  its Host. A normal task business `Err` alone is not cleanup failure. The existing unwind boundary
+  cannot distinguish a task-body panic from captured-value destruction panic, so either prevents
+  proving successful cleanup; no panic text or unbounded provenance log is retained.
 - Reaching a drain, cancel, or join deadline records the historical timeout and yields an incomplete
   close while retaining the same owner and `JoinHandle` values. `RetryClose` polls only unfinished
   work; it does not repeat cancellation, increment shutdown counts, or invoke plugin shutdown
