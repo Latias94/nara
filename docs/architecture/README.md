@@ -100,6 +100,9 @@ The [pinned Bevy/Godot comparison](../research/2026-10-23-post-boundary-bevy-god
 checks these units against the local reference sources, separates stronger Nara guarantees from
 upstream mechanisms, and retains bounded recovery continuity after challenging a diagnostic-only
 capacity-rejection alternative against Loading supersession.
+The [implementation plan](../plans/2026-10-23-1305-refactor-post-boundary-contracts-plan.md)
+orders owner repairs, real consumer migration and fresh qualification; its presence does not mark
+the proposed units implemented.
 
 The [spatial affine representation design](spatial-affine-representation-design.md) retains
 post-affine residuals, direct affine and authoring-field alternatives for a future concrete import
