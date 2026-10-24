@@ -166,6 +166,95 @@ This question must be settled in a complete direct/file-backed public trial, not
 fallback. Full importer publication, package governance and multi-file migration are not prerequisites
 to that bounded identity trial.
 
+### Executable Owner Experiment
+
+The separately compiled [source-context experiment](../../tests/fixtures/module-consumer/tests/source_context_trial.rs)
+and its [private prototype owner](../../tests/fixtures/module-consumer/tests/support/source_context_trial.rs)
+exercise an explicit carrier and one flat native-document workflow. They use ordinary Scene
+candidate, replacement and exact-end APIs; they do not change production materialization, project
+configuration or shared UI behavior. The prototype owns its World and active occurrence table
+together. It is not a product-side registry to retain after the Scene owner adopts this contract.
+
+The carrier under experiment is a dedicated, authored, non-nil `project.source_universe` UUID and
+a required `content.native_document_identity` choice: `project_location` or `stable_metadata`.
+The fixture's `TrialManifest` is intentionally not the current `ProjectManifest`. No default,
+metadata-first fallback or load-time ID creation is used. Source equality is structured:
+
+| Origin | Equality coordinates |
+| --- | --- |
+| Explicit Rust declaration | Universe, named source, product |
+| Stable asset | Stable asset ID, product; not the receiving project's universe |
+| Deliberate native location | Universe, complete project-relative path, product |
+
+The flat file case loads and publishes actual canonical Scene files and metadata. The location
+policy refuses competing adjacent metadata. Stable path requests and stable-ID requests resolve
+to the same admitted asset identity; metadata is required for both. An explicitly opened path
+outside the prototype's initial scan root is admitted directly before its stable-ID alias is used.
+Moving the project root and clearing disposable cache content do not change location identity;
+renaming the location does. Stable source relocation retains identity after its authored metadata
+path is updated. Loading does not write source files.
+
+The occurrence experiment covers same-source simultaneous slots, changing a slot's source,
+empty-instance replacement/end, stale replacement-intent/end rejection, and failed Scene admission that
+retains its predecessor. Source is the claim's value, not part of its uniqueness key. It borrows an
+immutable source candidate without exposing independently replaceable document/provenance inputs.
+An intent is bound to its receiving World, but an initially vacant-slot intent describes current
+vacancy, not a historical vacancy generation. It is not an already decoded Scene candidate.
+
+This is evidence for a carrier/owner direction, not the complete trial's exit gate. In particular:
+
+- The real selected-Scene Loader, Browser Open, closure observations, retention leases and Editor
+  preview have not adopted these fields or types. The prototype's scan is deliberately narrow;
+  it does not establish complete discovery or filesystem alias/capture consistency.
+- Prefab canonical resolver results, nested projection chains and their source association remain
+  unimplemented. A bare `AssetRef` request must not become canonical provenance by stringification.
+- The product coordinate is distinguished as data, but no named imported Scene product is decoded
+  or published by this experiment. Native files use `Primary` only.
+- The typed trial payload has an exact tagged byte encoding for cost inspection. It is not a
+  current `UiPersistentIdentity`, a durable file format or an ADR 0102 refreeze. Comparing its size
+  with the public kernel limit does not prove Runtime/Canvas key admission or UI state isolation.
+- The pre-commit stage only admits and captures a placement intent. Scene decode/preparation still
+  runs inside commit through the existing public operation. Timing that first stage is not a
+  measurement of engine preparation, and this does not qualify prepared Scene publication,
+  cancellation or preview reuse. Native completion, public panel preparation and product
+  performance remain separate obligations.
+
+The public prepared replacement entry currently requires explicit asset bindings, native
+retirement claims, overlay limits, additional retirements and a product callback; it may own scratch
+World entities that require explicit discard. That is a provisional native-product integration
+interface, not proof of an ergonomic ordinary source-placement prepare/preview/commit workflow.
+The production trial must compare a source-owned preparation that delays World allocation with
+an explicitly retained World-bound preparation, including failure and cancellation custody. Do not
+relocate this work into a caller's second candidate or cleanup system merely to keep the old API.
+
+### Native Policy Decision Before Production Adoption
+
+A required project-level enum is smaller than a second per-document location list, but it applies
+to all native document admission, not merely configured Scene/Prefab directories. The existing
+[mixed-source rename consumer](../../src/project_host/authoring/mod.rs) has a metadata-free Scene
+and a stable-metadata Prefab. It proves a real mixed-loading workflow, not that the Scene must
+permanently retain location identity. Before freezing the enum, either migrate this workflow to
+fully stable native identity with explicit authored Scene metadata, or establish a named need for
+deliberately mixed identity policies. Do not add an exception inventory merely to retain an
+unreleased incidental input shape, or silently remove the stable Prefab rename workflow.
+
+The ordinary integrated-project recommendation is fully stable native identity; a deliberately
+location-authored project remains an explicit alternative, not fallback on missing metadata.
+Creating metadata is an explicit authoring/creation operation, never a side effect of loading.
+Changing policy is an identity change and requires explicit source readmission, not a profile
+override. Imported products retain their own admitted stable source/product identity rather than
+inherit the receiving native-document policy.
+
+Neither an enum nor an exception list can infer that arbitrary bytes copied into a location-authored
+project used to have metadata somewhere else. The guarantee is refusal under the declared current
+policy, not a permanent provenance history service. Whole-project Duplicate also needs explicit
+stable-asset ID remapping: changing the universe alone separates named/location origins only.
+Current catalogue paths are domain-relative; the fixture uses full project-relative native paths.
+Production admission must reconcile those coordinate systems and canonical spelling at the source
+owner. Appending unscoped Scene records to the existing asset database, or lowercasing names in UI,
+would not prove alias equality. The fixture does not qualify filesystem case/symlink/hardlink aliases
+or cross-file capture consistency.
+
 ## Continuity And Failure Rules
 
 | Operation | Source / placement | Logical occurrence | Runtime activation |

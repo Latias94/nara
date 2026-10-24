@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "b7528cc20e120ef7ad71613e8e0d6f1c1b366fedbfb8d60d366687f639893d83"
+source_fingerprint: "c1a01210884df08c035bcf0ddeb5f287275d36f177d3084383ee4e53548aa134"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "b7528cc20e120ef7ad71613e8e0d6f1c1b366fedbfb8d60d366687f6398
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `b7528cc20e120ef7ad71613e8e0d6f1c1b366fedbfb8d60d366687f639893d83`
-- Immutable records: 877
+- Source fingerprint: `c1a01210884df08c035bcf0ddeb5f287275d36f177d3084383ee4e53548aa134`
+- Immutable records: 878
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Source-context owner experiment and production entry gaps](verification/2026-10/2026-10-24T034432Z-source-context-owner-experiment-and-production-entry-gaps-b9598e00692a49e8ac835a63a3d4384a.md) - Flat direct/file source and World-bound occurrence intent evidence; production Scene preparation, canonical Prefab and shared UI adoption remain open.
 - **Verification Evidence**: [Public exact Scene instance end and source-context design review](verification/2026-10/2026-10-24T031111Z-public-exact-scene-instance-end-and-source-context-design-review-a91caf241959454f8674b9b04eabc141.md) - Qualified empty-instance public retirement and shared authoring path; source origin carrier trial and occurrence integration remain open.
 - **Verification Evidence**: [Cross-document UI source identity counterexample and next owner boundary](verification/2026-10/2026-10-24T025346Z-cross-document-ui-source-identity-counterexample-and-next-owner-boundary-c8f1cd178d8249a1824d61a363bbcf12.md) - Public same-World two-Scene characterization confirms missing containing source identity; source context and logical occurrence replacement remains Proposed.
 - **Verification Evidence**: [R5a final owner diagnostics and workspace qualification](verification/2026-10/2026-10-24T024954Z-r5a-final-owner-diagnostics-and-workspace-qualification-f58a0ab130cb47a8bc2829e32f1d0a86.md) - Qualified Schema-relative addressing, owner edits, v3 fixtures and safe diagnostic recovery; broader source identity and panel workflows remain open.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Additive Scene and Prefab Open qualification](verification/2026-10/2026-10-23T202313Z-additive-scene-and-prefab-open-qualification-d0b1fc894dd2419fa1cf43c9e39eb79d.md) - Removes same-kind predecessor retirement, retains per-document Host custody, and qualifies explicit Close and public/native multi-document workflows.
 - **Verification Evidence**: [Multi-source Prefab refresh obligation qualification](verification/2026-10/2026-10-23T192721Z-multi-source-prefab-refresh-obligation-qualification-47f6266123094e7bb2ea046f42131843.md) - Complete source-keyed refresh, canonical Prefab observations, budgeted loader admission and bounded recovery/native evidence.
 - **Verification Evidence**: [Common source admission and retained Scene preview qualification](verification/2026-10/2026-10-23T180456Z-common-source-admission-and-retained-scene-preview-qualification-45ffac37614a4edaa792f08d650f292e.md) - Three-domain source exclusion, explicit Scene preview selection, trusted source observation and bounded actual native evidence.
-- **Verification Evidence**: [Per-document persistence custody qualification](verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md) - Typed document file custody, captured Save/Reopen Hosts, exact cleanup isolation and bounded native/public evidence.
 
 # Integration Notes
 

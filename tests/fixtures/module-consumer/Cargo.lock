@@ -2012,8 +2012,12 @@ dependencies = [
  "nara_tasks",
  "nara_tooling",
  "nara_transform",
+ "nara_ui_kernel",
  "ron",
  "serde",
+ "tempfile",
+ "toml",
+ "uuid",
 ]
 
 [[package]]
