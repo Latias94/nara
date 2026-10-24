@@ -3,7 +3,7 @@ use thiserror::Error;
 const HARD_MAX_ROOTS: usize = 64;
 const HARD_MAX_NODES: usize = 4_096;
 const HARD_MAX_DEPTH: usize = 64;
-const HARD_MAX_KEY_BYTES: usize = 256;
+const HARD_MAX_KEY_BYTES: usize = crate::identity::MAX_UI_KEY_BYTES;
 const HARD_MAX_PAINT_PRIMITIVES: usize = 8_192;
 const HARD_MAX_DIAGNOSTICS: usize = 64;
 const HARD_MAX_CACHE_ROOTS: usize = 64;
@@ -53,6 +53,12 @@ impl Default for UiLimits {
 }
 
 impl UiLimits {
+    /// Root capacity that adapters admit before constructing excess root identities or bodies.
+    #[must_use]
+    pub const fn max_roots(self) -> usize {
+        self.max_roots
+    }
+
     pub(crate) const fn snapshot_profile(self) -> UiSnapshotProfile {
         UiSnapshotProfile {
             max_roots: self.max_roots,

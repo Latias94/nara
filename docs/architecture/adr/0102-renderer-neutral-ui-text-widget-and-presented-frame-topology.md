@@ -2,8 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Last Revised**: 2026-10-18
-**Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline; 2026-08-10 by the UIF-U5 public-inventory and Host-authority audit; 2026-08-12 by the UIFD immutable dynamic-text projection correction
+**Last Revised**: 2026-10-25
+**Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline; 2026-08-10 by the UIF-U5 public-inventory and Host-authority audit; 2026-08-12 by the UIFD immutable dynamic-text projection correction; 2026-10-25 by the complete source/occurrence/placement key adoption
 **Owner**: UI authoring, text, widget behavior, input routing, presentation packets, and platform adapters
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0025](0025-runtime-ui-system.md),
@@ -19,7 +19,7 @@
 **Refined By**: [ADR 0107](0107-shared-ui-foundation-and-independent-product-layers.md),
 [ADR 0108](0108-ui-surface-presented-session-and-atomic-interaction.md), and
 [ADR 0109](0109-root-local-ui-compilation-and-presentation-closure.md)
-**Implementation Plans**: completed [UI Foundation Correction](../../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md) lineage and the current [Runtime UI Product Slice](../../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md); unit activation belongs to the plan registration rather than this ADR
+**Implementation Plans**: completed [UI Foundation Correction](../../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md) lineage and the current [Runtime UI Product Slice](../../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md); the complete-key replacement follows the [foundation rebaseline](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md); execution continuity belongs in engineering memory rather than this ADR
 
 ## Context
 
@@ -87,11 +87,30 @@ flowchart LR
   presented-frame dispatch. Normalized IR, layout nodes, caches, fragments, and lifecycle stages
   remain private.
 - Every root and stateful or interactive node has an exact stable logical key. Persistent Scene
-  keys derive from an opaque `SceneEntityId` plus an opaque, structured `PrefabProjectionPath`;
-  the path carries source asset/product, instance-anchor, source-entity, and nested projection
-  segments without string-concatenating source identity with location. Runtime-created roots and
+  keys include canonical containing-document source, declared logical occurrence and complete
+  authored placement, including source-local entity and canonical nested Prefab ancestry. Lookup
+  request spelling is diagnostic evidence, not equality. Each node retains its complete address:
+  a UI root is not a Scene-context boundary, and legal cross-source/runtime children do not inherit
+  or omit identity axes. Runtime-created roots and
   nodes require explicit domain keys. Runtime entity bits, query order, sibling indexes, source
   locations, and `SceneInstanceId` are invalid logical identities.
+- Kernel consumes bounded opaque binary context and placement values, not Scene/ECS types or a
+  public Prefab-path model. Adapters own tagged, length-delimited canonical lowering, preserve
+  original UTF-8 and raw UUID bytes, and explicitly share context during a projection. Persistent
+  identity requires both values; there is no identity-free or implicit-root fallback. Root/local
+  equality is content-based and independent of Arc sharing. Scoping clones complete typed
+  addresses without allocating a new segmented local, interning globally or changing extraction
+  and reconstruction semantics. The [storage comparison](../../benchmarks/2026-10-25-ui-key-storage.md)
+  selects that initial representation without claiming a complete engine performance result.
+- Exact key cost uses one canonical framing: root-only costs `3 + R`; scoped costs
+  `7 + R + L - P`, with identity tags and two-byte field lengths included in the complete address
+  lengths R/L and content-defined longest common prefix P. The 256-byte hard ceiling is unchanged.
+  A complete identity encodes its tag, first-field length, first-field bytes, final-field bytes and
+  trailing final-field length. The enclosing address length frames that final field. A variable
+  leaf length must not precede and destroy otherwise shared placement bytes.
+  Admission, `encoded_len` and reduced owner limits use the same function; storage shape cannot
+  change eligibility. Canonical cost is not allocator footprint, and this internal representation
+  does not promise a stable persistent/wire format or admission of every 32-step Prefab path.
 - One immutable `UiFrame` owns resolved logical geometry, root layers, stacking, clipping, paint
   order, reverse hit order, focus/navigation facts, semantics, diagnostics, and its environment
   revision. Root compilation is bounded and failure-atomic.
@@ -187,7 +206,9 @@ flowchart LR
 - After that checkpoint, the Reference Game consumes the frozen baseline; a shared gap stops for
   independent evidence and a focused plan amendment instead of silently widening the engine.
 - Runtime and future Editor adapters share text, kernel, widget state machines, semantic
-  vocabulary, and presentation infrastructure. They do not share persistent authoring identity,
+  vocabulary, canonical logical-address equality and presentation infrastructure. Equal complete
+  coordinates lower to equal logical keys; raw Prefab Canvas and Scene-instanced placement are
+  different coordinates. Adapters do not share document/source ownership, runtime activation,
   session persistence, Host authority, or domain commands.
 - The semantic tree and typed accessibility actions are part of the formal `UiFrame` contract.
   AccessKit integration is a bounded desktop-adapter trial; AccessKit types and availability never

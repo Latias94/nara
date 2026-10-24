@@ -128,6 +128,13 @@ the exact admitted definition and its authority. This is not a promise to retain
 residency or every ProjectAssetDatabase revision. The advanced native-retirement integration owns
 target-bound scratch entities and still requires its explicit `discard(world)` lifecycle.
 
+In an `App`, materialize initial Scenes from `StartupStage::Scene`, after the managed definition
+has been sealed. Read `component_registry(world)`, obtain its frozen `snapshot()`, and use
+`ComponentRegistry::from_snapshot` for the Scene operation. Do not substitute a separately frozen
+registry during App configuration, even for an empty Scene. The
+[interaction lab](../../crates/nara_ui/examples/interaction_lab/fixture.rs) demonstrates this path
+and publishes its entity handles only after successful materialization.
+
 The [independently compiled consumer](../../tests/fixtures/module-consumer/tests/scene_preparation.rs)
 exercises prepare/cancel, reverse-order commits, exact replacement, and retained-state rejection.
 

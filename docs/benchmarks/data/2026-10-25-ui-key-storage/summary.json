@@ -1,0 +1,428 @@
+{
+  "experiment": "ui-key-storage-lifecycle",
+  "version": 1,
+  "source": "docs/benchmarks/fixtures/ui-key-storage-trial.rs",
+  "source_sha256_lf": "934fc875ef90a49a9ec47dffbdc579f60074a3114b668cfe7cc9f523f5e1c356",
+  "basis_commit": "a3c667491a47c49548a911591d7ecee9d81564d7",
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "platform": "Windows x86_64",
+  "optimization": "opt-level=3, debuginfo=0",
+  "processes": 3,
+  "scope": "System allocation requests, including tracked containers and Arc metadata; not allocator usable sizes, RSS or engine timings",
+  "results": [
+    {
+      "model": "complete",
+      "case": "shared-context",
+      "population": 32,
+      "with_snapshot_requested_bytes": 7032,
+      "without_snapshot_requested_bytes": 6784,
+      "peak_requested_bytes": 7032,
+      "validation_allocation_calls": 0,
+      "compile_allocation_calls": 2,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        12600,
+        13100,
+        13300
+      ],
+      "construction_ns_median": 13100,
+      "canonical_compare_ns_samples": [
+        54900,
+        53000,
+        54100
+      ],
+      "canonical_compare_ns_median": 54100
+    },
+    {
+      "model": "typed-context",
+      "case": "shared-context",
+      "population": 32,
+      "with_snapshot_requested_bytes": 3424,
+      "without_snapshot_requested_bytes": 3176,
+      "peak_requested_bytes": 3424,
+      "validation_allocation_calls": 0,
+      "compile_allocation_calls": 2,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        9800,
+        9300,
+        9800
+      ],
+      "construction_ns_median": 9800,
+      "canonical_compare_ns_samples": [
+        60600,
+        57600,
+        59900
+      ],
+      "canonical_compare_ns_median": 59900
+    },
+    {
+      "model": "segmented",
+      "case": "shared-context",
+      "population": 32,
+      "with_snapshot_requested_bytes": 6653,
+      "without_snapshot_requested_bytes": 3285,
+      "peak_requested_bytes": 8352,
+      "validation_allocation_calls": 30,
+      "compile_allocation_calls": 32,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        17200,
+        17100,
+        17900
+      ],
+      "construction_ns_median": 17200,
+      "canonical_compare_ns_samples": [
+        61100,
+        58500,
+        57800
+      ],
+      "canonical_compare_ns_median": 58500
+    },
+    {
+      "model": "complete",
+      "case": "shared-placement",
+      "population": 32,
+      "with_snapshot_requested_bytes": 7032,
+      "without_snapshot_requested_bytes": 6784,
+      "peak_requested_bytes": 7032,
+      "validation_allocation_calls": 0,
+      "compile_allocation_calls": 2,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        10900,
+        10800,
+        11200
+      ],
+      "construction_ns_median": 10900,
+      "canonical_compare_ns_samples": [
+        52800,
+        49900,
+        54000
+      ],
+      "canonical_compare_ns_median": 52800
+    },
+    {
+      "model": "typed-context",
+      "case": "shared-placement",
+      "population": 32,
+      "with_snapshot_requested_bytes": 5904,
+      "without_snapshot_requested_bytes": 5656,
+      "peak_requested_bytes": 5904,
+      "validation_allocation_calls": 0,
+      "compile_allocation_calls": 2,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        7700,
+        7300,
+        8000
+      ],
+      "construction_ns_median": 7700,
+      "canonical_compare_ns_samples": [
+        59700,
+        58200,
+        59200
+      ],
+      "canonical_compare_ns_median": 59200
+    },
+    {
+      "model": "segmented",
+      "case": "shared-placement",
+      "population": 32,
+      "with_snapshot_requested_bytes": 6653,
+      "without_snapshot_requested_bytes": 3285,
+      "peak_requested_bytes": 8352,
+      "validation_allocation_calls": 30,
+      "compile_allocation_calls": 32,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        11600,
+        11100,
+        11300
+      ],
+      "construction_ns_median": 11300,
+      "canonical_compare_ns_samples": [
+        60800,
+        52400,
+        54400
+      ],
+      "canonical_compare_ns_median": 54400
+    },
+    {
+      "model": "complete",
+      "case": "foreign-context",
+      "population": 32,
+      "with_snapshot_requested_bytes": 7032,
+      "without_snapshot_requested_bytes": 6784,
+      "peak_requested_bytes": 7032,
+      "validation_allocation_calls": 0,
+      "compile_allocation_calls": 2,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        9600,
+        9200,
+        9600
+      ],
+      "construction_ns_median": 9600,
+      "canonical_compare_ns_samples": [
+        22500,
+        21800,
+        22100
+      ],
+      "canonical_compare_ns_median": 22100
+    },
+    {
+      "model": "typed-context",
+      "case": "foreign-context",
+      "population": 32,
+      "with_snapshot_requested_bytes": 7640,
+      "without_snapshot_requested_bytes": 7392,
+      "peak_requested_bytes": 7640,
+      "validation_allocation_calls": 0,
+      "compile_allocation_calls": 2,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        9200,
+        8700,
+        9300
+      ],
+      "construction_ns_median": 9200,
+      "canonical_compare_ns_samples": [
+        30900,
+        28900,
+        30000
+      ],
+      "canonical_compare_ns_median": 30000
+    },
+    {
+      "model": "segmented",
+      "case": "foreign-context",
+      "population": 32,
+      "with_snapshot_requested_bytes": 8152,
+      "without_snapshot_requested_bytes": 7904,
+      "peak_requested_bytes": 8152,
+      "validation_allocation_calls": 0,
+      "compile_allocation_calls": 2,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        9900,
+        9900,
+        10000
+      ],
+      "construction_ns_median": 9900,
+      "canonical_compare_ns_samples": [
+        28400,
+        32500,
+        28900
+      ],
+      "canonical_compare_ns_median": 28900
+    },
+    {
+      "model": "complete",
+      "case": "shared-context",
+      "population": 4096,
+      "with_snapshot_requested_bytes": 905176,
+      "without_snapshot_requested_bytes": 872416,
+      "peak_requested_bytes": 905176,
+      "validation_allocation_calls": 0,
+      "compile_allocation_calls": 2,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        1189100,
+        1181100,
+        1175100
+      ],
+      "construction_ns_median": 1181100,
+      "canonical_compare_ns_samples": [
+        7602200,
+        7279900,
+        7816300
+      ],
+      "canonical_compare_ns_median": 7602200
+    },
+    {
+      "model": "typed-context",
+      "case": "shared-context",
+      "population": 4096,
+      "with_snapshot_requested_bytes": 426080,
+      "without_snapshot_requested_bytes": 393320,
+      "peak_requested_bytes": 426080,
+      "validation_allocation_calls": 0,
+      "compile_allocation_calls": 2,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        981000,
+        964900,
+        1010700
+      ],
+      "construction_ns_median": 981000,
+      "canonical_compare_ns_samples": [
+        8068200,
+        7920200,
+        7796600
+      ],
+      "canonical_compare_ns_median": 7920200
+    },
+    {
+      "model": "segmented",
+      "case": "shared-context",
+      "population": 4096,
+      "with_snapshot_requested_bytes": 867997,
+      "without_snapshot_requested_bytes": 409461,
+      "peak_requested_bytes": 1073008,
+      "validation_allocation_calls": 4094,
+      "compile_allocation_calls": 4096,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        1718900,
+        1595600,
+        1668600
+      ],
+      "construction_ns_median": 1668600,
+      "canonical_compare_ns_samples": [
+        7492600,
+        7493000,
+        7592800
+      ],
+      "canonical_compare_ns_median": 7493000
+    },
+    {
+      "model": "complete",
+      "case": "shared-placement",
+      "population": 4096,
+      "with_snapshot_requested_bytes": 905176,
+      "without_snapshot_requested_bytes": 872416,
+      "peak_requested_bytes": 905176,
+      "validation_allocation_calls": 0,
+      "compile_allocation_calls": 2,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        1087100,
+        1096700,
+        1079400
+      ],
+      "construction_ns_median": 1087100,
+      "canonical_compare_ns_samples": [
+        7456300,
+        7359400,
+        7350900
+      ],
+      "canonical_compare_ns_median": 7359400
+    },
+    {
+      "model": "typed-context",
+      "case": "shared-placement",
+      "population": 4096,
+      "with_snapshot_requested_bytes": 753680,
+      "without_snapshot_requested_bytes": 720920,
+      "peak_requested_bytes": 753680,
+      "validation_allocation_calls": 0,
+      "compile_allocation_calls": 2,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        1099300,
+        1051000,
+        1079200
+      ],
+      "construction_ns_median": 1079200,
+      "canonical_compare_ns_samples": [
+        8105300,
+        7469600,
+        8210800
+      ],
+      "canonical_compare_ns_median": 8105300
+    },
+    {
+      "model": "segmented",
+      "case": "shared-placement",
+      "population": 4096,
+      "with_snapshot_requested_bytes": 867997,
+      "without_snapshot_requested_bytes": 409461,
+      "peak_requested_bytes": 1073008,
+      "validation_allocation_calls": 4094,
+      "compile_allocation_calls": 4096,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        1690400,
+        1689100,
+        1703300
+      ],
+      "construction_ns_median": 1690400,
+      "canonical_compare_ns_samples": [
+        7452600,
+        7731200,
+        7212500
+      ],
+      "canonical_compare_ns_median": 7452600
+    },
+    {
+      "model": "complete",
+      "case": "foreign-context",
+      "population": 4096,
+      "with_snapshot_requested_bytes": 905176,
+      "without_snapshot_requested_bytes": 872416,
+      "peak_requested_bytes": 905176,
+      "validation_allocation_calls": 0,
+      "compile_allocation_calls": 2,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        1166300,
+        1176500,
+        1164900
+      ],
+      "construction_ns_median": 1166300,
+      "canonical_compare_ns_samples": [
+        3104500,
+        2811100,
+        2750100
+      ],
+      "canonical_compare_ns_median": 2811100
+    },
+    {
+      "model": "typed-context",
+      "case": "foreign-context",
+      "population": 4096,
+      "with_snapshot_requested_bytes": 983000,
+      "without_snapshot_requested_bytes": 950240,
+      "peak_requested_bytes": 983000,
+      "validation_allocation_calls": 0,
+      "compile_allocation_calls": 2,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        1046800,
+        1059600,
+        1101300
+      ],
+      "construction_ns_median": 1059600,
+      "canonical_compare_ns_samples": [
+        4083400,
+        4180900,
+        4024200
+      ],
+      "canonical_compare_ns_median": 4083400
+    },
+    {
+      "model": "segmented",
+      "case": "foreign-context",
+      "population": 4096,
+      "with_snapshot_requested_bytes": 1048536,
+      "without_snapshot_requested_bytes": 1015776,
+      "peak_requested_bytes": 1048536,
+      "validation_allocation_calls": 0,
+      "compile_allocation_calls": 2,
+      "key_handle_bytes": 16,
+      "construction_ns_samples": [
+        1108100,
+        1148700,
+        1189100
+      ],
+      "construction_ns_median": 1148700,
+      "canonical_compare_ns_samples": [
+        3856600,
+        3795200,
+        3755900
+      ],
+      "canonical_compare_ns_median": 3795200
+    }
+  ]
+}

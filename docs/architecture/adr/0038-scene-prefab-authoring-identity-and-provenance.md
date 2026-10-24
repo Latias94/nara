@@ -5,6 +5,7 @@
 **Amended**: 2026-10-24 by production source admission, required Prefab/containing-source binding
 and Scene-owned logical occurrence
 **Amended**: 2026-10-25 by owned unbound ordinary Scene preparation
+and complete Runtime/Canvas logical-key lowering
 **Refines**: ADR 0006: Scene and Prefab Data Model
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References;
@@ -36,9 +37,11 @@ Scene/prefab authoring identity is document-relative and provenance-aware.
 - Existing Scene projection may continue to expose the deterministic `anchor/source_entity`
   namespace as a transitional instance-local locator. It is not a durable source identity and no
   new UI, session, semantics, selection, or persistence key may parse or extend that encoding.
-- New projection-aware consumers receive the opaque source `SceneEntityId` and a separate
-  structured `PrefabProjectionPath`. ADR 0102 admits this minimum separation for UI; ADR 0083
-  remains Proposed for the complete asset/product/document identity migration.
+- Projection-aware Scene adapters receive the source `SceneEntityId` and a separate structured
+  `PrefabProjectionPath`. ADR 0102 requires the UI adapter to lower canonical containing source,
+  explicit logical occurrence and complete authored placement into opaque binary keys. The
+  ECS-independent kernel does not expose Scene path types, inherit context from a root, or use
+  lookup aliases as identity. ADR 0083 remains Proposed for broader asset/product identity.
 - Persistent overrides are `ScenePatchDocument` values applied relative to source prefab entity IDs
   before expansion.
 - Runtime `Entity` values never become authoring identity.

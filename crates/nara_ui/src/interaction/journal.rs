@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt};
 
 use nara_ecs::Resource;
 use nara_ui_kernel::{
-    UiActionId, UiActivationSource, UiKey, UiKeyError, UiOpaqueId, UiRouteStamp, UiSurfaceId,
+    UiActionId, UiActivationSource, UiKey, UiKeyAtom, UiKeyError, UiRouteStamp, UiSurfaceId,
 };
 use thiserror::Error;
 
@@ -11,11 +11,11 @@ pub const MAX_UI_ACTION_CONSUMERS: usize = 16;
 
 /// Stable identity for one semantic UI-action consumer.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UiActionConsumerId(UiOpaqueId);
+pub struct UiActionConsumerId(UiKeyAtom);
 
 impl UiActionConsumerId {
     pub fn new(value: impl Into<String>) -> Result<Self, UiKeyError> {
-        Ok(Self(UiOpaqueId::new(value)?))
+        Ok(Self(UiKeyAtom::new(value)?))
     }
 
     #[must_use]

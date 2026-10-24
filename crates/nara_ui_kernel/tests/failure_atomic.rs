@@ -1,8 +1,8 @@
 use nara_text::bundled_font_face;
 use nara_ui_kernel::{
     UiAuthoringSnapshotBuilder, UiCompileError, UiCompiler, UiEnvironment, UiInteraction, UiLayer,
-    UiLimits, UiLocalKey, UiNode, UiPoint, UiRoot, UiRootKey, UiRootStatus, UiSemanticRole,
-    UiSemantics, UiStyle, UiSurfaceId, UiTheme, UiVisual,
+    UiLimits, UiLocalKey, UiNode, UiOpaqueId, UiPersistentIdentity, UiPoint, UiRoot, UiRootKey,
+    UiRootStatus, UiSemanticRole, UiSemantics, UiStyle, UiSurfaceId, UiTheme, UiVisual,
 };
 
 fn environment(scale: f32) -> UiEnvironment {
@@ -100,6 +100,79 @@ fn failed_root_retains_only_environment_compatible_visuals() {
         retained_after_rejection.root_outcomes()[0].status(),
         UiRootStatus::RetainedVisual
     );
+}
+
+#[test]
+fn persistent_fallback_cannot_cross_complete_contexts_with_equal_local_placement() {
+    let root = |context: &[u8], invalid| {
+        let context = UiOpaqueId::new(context).unwrap();
+        let root_key = UiRootKey::persistent(UiPersistentIdentity::new(
+            context.clone(),
+            UiOpaqueId::new("root").unwrap(),
+        ))
+        .unwrap();
+        let local = UiLocalKey::persistent(UiPersistentIdentity::new(
+            context,
+            UiOpaqueId::new("retry").unwrap(),
+        ))
+        .unwrap();
+        let child = UiNode::new(UiStyle::absolute(10.0, 10.0, 80.0, 40.0))
+            .with_key(local)
+            .with_visual(UiVisual::solid(nara_ui_kernel::UiColor::rgba(
+                1.0, 1.0, 1.0, 1.0,
+            )))
+            .with_interaction(UiInteraction::focus_target());
+        let root = UiRoot::new(root_key, UiLayer::Modal, UiStyle::fill());
+        if invalid {
+            root.with_children([child.clone(), child])
+        } else {
+            root.with_child(child)
+        }
+    };
+    for other_context in [b"source-b/slot-1".as_slice(), b"source-a/slot-2"] {
+        let mut compiler =
+            UiCompiler::new(bundled_font_face().unwrap(), Default::default()).unwrap();
+        let valid = UiAuthoringSnapshotBuilder::new(1)
+            .with_root(root(b"source-a/slot-1", false))
+            .build()
+            .unwrap();
+        let first = compiler
+            .compile(&valid, environment(1.0), UiTheme::default())
+            .unwrap();
+        assert_eq!(first.root_outcomes()[0].status(), UiRootStatus::Published);
+        assert!(!first.paint().is_empty());
+
+        let compatible = UiAuthoringSnapshotBuilder::new(2)
+            .with_root(root(b"source-a/slot-1", true))
+            .build()
+            .unwrap();
+        let retained = compiler
+            .compile(&compatible, environment(1.0), UiTheme::default())
+            .unwrap();
+        assert_eq!(
+            retained.root_outcomes()[0].status(),
+            UiRootStatus::RetainedVisual
+        );
+        assert_eq!(retained.paint(), first.paint());
+        assert!(retained.hit_regions().is_empty());
+
+        let foreign_root = root(other_context, true);
+        let foreign_key = foreign_root.key().clone();
+        let foreign = UiAuthoringSnapshotBuilder::new(3)
+            .with_root(foreign_root)
+            .build()
+            .unwrap();
+        assert!(matches!(
+            compiler.compile(&foreign, environment(1.0), UiTheme::default()),
+            Err(UiCompileError::ModalFallbackUnavailable { key }) if key == foreign_key
+        ));
+        let after_rejection = compiler
+            .compile(&compatible, environment(1.0), UiTheme::default())
+            .unwrap();
+        assert_eq!(after_rejection.revision().get(), 3);
+        assert_eq!(after_rejection.paint(), first.paint());
+        assert!(after_rejection.hit_regions().is_empty());
+    }
 }
 
 #[test]

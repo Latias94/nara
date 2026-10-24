@@ -7,6 +7,7 @@ mod authoring_model;
 mod canvas;
 mod codec;
 mod interaction;
+mod persistent_key;
 mod runtime;
 mod style;
 

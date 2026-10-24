@@ -125,7 +125,7 @@ and specifies the direct/file-backed trial and ADR 0102 refreeze boundary. Sourc
 canonical Prefab binding, required containing-source materialization and Scene-owned active
 occurrence have scoped qualification. [Ordinary unbound preparation](../knowledge/engineering/verification/2026-10/2026-10-24T164025Z-owned-ordinary-scene-preparation-and-complete-support-admission-qualification-e94d2a95cbf94dd7a0cbbd371aedf55c.md)
 now has separate owner/public/independent and selected Windows/DX12 qualification. Complete
-Runtime/Canvas key adoption remains Proposed;
+Runtime/Canvas key adoption is in qualification, with its successor conformance checkpoint pending;
 neither source ownership nor the ordinary preparation API completes that shared UI checkpoint.
 
 The [chat-informed foundation review](../audits/2026-10-23-chat-informed-engine-architecture-review.md)

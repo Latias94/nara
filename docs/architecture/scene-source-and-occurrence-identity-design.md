@@ -1,26 +1,27 @@
 ---
 title: Scene Source Context And Logical Occurrence
 date: 2026-10-24
-status: Native source admission, required Scene/Prefab binding, active occurrence and ordinary preparation qualified; shared UI adoption remains Proposed
+status: Source/occurrence and ordinary preparation qualified; complete shared UI identity is implemented in qualification, with conformance refreeze pending
 ---
 
 # Scene Source Context And Logical Occurrence
 
-## Problem And Evidence
+## Original Problem And Evidence
 
-The [public Scene/UI consumer](../../crates/nara_ui/tests/source_identity.rs) materializes two
-different documents with separate `SceneInstanceId` values into one World. Distinct local UI root
-IDs produce two compiled roots. Making both local IDs `root` produces `root-key-duplicate` and no
-candidate frame. This is a qualified counterexample to complete source identity, not evidence of
+The original [public Scene/UI consumer](../../crates/nara_ui/tests/source_identity.rs) materialized
+two different documents with separate `SceneInstanceId` values into one World. Distinct local UI
+root IDs produced two compiled roots. Making both local IDs `root` produced `root-key-duplicate`
+and no candidate frame. This was a qualified counterexample to complete source identity, not evidence of
 incorrect runtime instance allocation or action misrouting.
 
 The duplicate-key failure remains correct under [ADR 0109](adr/0109-root-local-ui-compilation-and-presentation-closure.md).
 The original missing boundary was upstream: `SceneEntitySource` had no containing source-document
-context. The required-binding implementation now carries it, but
-[UI projection](../../crates/nara_ui/src/runtime/projection.rs) still lowers only the local source
-entity plus an optional Prefab chain. Two equal anchors and chains in
-different containing Scenes have the same structural omission. Adding document identity alone
-would still not distinguish two simultaneous occurrences of the same complete source.
+context. Before the replacement, [UI projection](../../crates/nara_ui/src/runtime/projection.rs)
+lowered only the local source entity plus an optional Prefab chain. Equal anchors and chains in
+different containing Scenes had the same structural omission. Document identity alone would
+still not distinguish two simultaneous occurrences of the same complete source. The current
+[selected seam](#selected-kernel-and-adapter-seam) includes both axes; the consumer now asserts
+successful independent roots rather than preserving the original rejection expectation.
 
 The [R5a property selector](durable-property-addressing-design.md) remains Schema-relative. It
 does not own this outer source/occurrence contract. The
@@ -334,9 +335,9 @@ one canonical entry and retains no historical source records. The separate
 [public consumer](../../tests/fixtures/module-consumer/tests/prefab_sources.rs) exercises canonical
 alias replacement, cycle refusal without mutation and successful re-expansion. Containing-Scene
 source binding and logical occurrence have scoped qualification; the shared UI contract remains separate.
-In particular,
-the existing Runtime UI lowering still encodes lookup requests; provenance's derived `Eq` includes
-diagnostic request context and is not canonical placement equality.
+The pre-adoption Runtime UI lowering encoded lookup requests. Provenance's derived `Eq` includes
+diagnostic request context and is not canonical placement equality; the selected lowering uses
+each step's canonical source instead.
 
 ### Native Policy Decision Before Production Adoption
 
@@ -347,8 +348,9 @@ neither can disappear through defaulting/empty serialization or vary by profile.
 `nara_project`. Explicit creation prepares the universe and startup Scene metadata once and
 retains their exact member bytes/digests. The unreleased manifest remains schema 1 and replaces
 the old shape without a compatibility reader. The subsequent production admission checkpoint
-enforces native loader policy and canonical Prefab provenance. The next owning implementation adds
-Scene occurrence claims and per-opened-document source admission; shared UI keys remain unimplemented.
+enforces native loader policy and canonical Prefab provenance. Scene occurrence claims and
+per-opened-document source admission have subsequent scoped qualification. Complete shared UI
+keys are implemented under the selected seam; their successor conformance remains a separate gate.
 
 A required project-level enum is smaller than a second per-document location list, but it applies
 to all native document admission, not merely configured Scene/Prefab directories. The existing
@@ -541,22 +543,22 @@ Scene-instance end. The duplicate `direct_expanded` constructor is removed. Bare
 for editing, validation and serialization; they must not remain an identity-free persistent-spawn
 shortcut. Do not add a transient fallback without a concrete consumer and explicit semantics.
 
-### Runtime/Canvas Lowering Follow-up Findings
+### Historical Runtime/Canvas Lowering Findings
 
-The next key-adoption unit remains separate from ordinary preparation. Read-only inspection of
-`nara_ui/src/runtime/projection.rs` identifies missing containing-source and occurrence axes plus
-request-string encoding instead of canonical Prefab source. Canvas currently compiles a raw Prefab
-with local entity identity only; its source/occurrence must enter both the compile input and cache
-basis. Document/revision/gesture/image generation still fence presentation and picking, not
+These findings describe the pre-adoption baseline, not the selected implementation below.
+Read-only inspection of `nara_ui/src/runtime/projection.rs` identified missing containing-source
+and occurrence axes plus request-string encoding instead of canonical Prefab source. Canvas
+compiled a raw Prefab with local entity identity only; source/occurrence had to enter both the
+compile input and cache basis. Document/revision/gesture/image generation fence presentation and picking, not
 persistent logical equality. Full provenance-derived equality includes diagnostic alias requests
 and must not become the semantic placement comparison.
 
-`nara_ui_kernel/src/identity.rs` currently admits a scoped key with `2 + root + local` bytes but
-reports `encoded_len()` as `1 + root + local`. The replacement must establish one consistent cost
-model. The present hard ceiling is 256 bytes: naively repeating complete context in both root and
+The baseline `nara_ui_kernel/src/identity.rs` admitted a scoped key with `2 + root + local` bytes but
+reported `encoded_len()` as `1 + root + local`. The replacement establishes one consistent cost
+model. The hard ceiling is 256 bytes: naively repeating complete context in both root and
 local identities can exhaust it after only a few Prefab steps. Exact bounded opaque carriers,
-shared immutable context and explicit scope-relative representations need comparison before
-refreeze. Do not silently truncate, use hash-only equality, or preserve a malformed key by raising
+shared immutable context and explicit scope-relative representations required comparison before
+selection. Do not silently truncate, use hash-only equality, or preserve a malformed key by raising
 a limit without a supported-workflow and memory-cost argument. Kernel remains ECS/Scene-independent.
 
 Acceptance must distinguish logical continuity from exact runtime incarnation and retained
@@ -570,7 +572,7 @@ Runtime projection and [Editor Canvas](../../crates/nara_ui/src/canvas.rs) migra
 do not establish different meanings for persistent UI equality. Retained-source leases and move-only
 candidate custody remain intact. Do not install source fields in a second post-publication pass.
 
-### Bounded Key-Representation Experiment
+### Key-Representation Comparison
 
 A UI root is not a source-context boundary. `HierarchyWriter::move_entity` can move a node from
 another Scene occurrence under that root without changing its `SceneEntitySource`. Runtime UI
@@ -580,7 +582,8 @@ a same-source restriction to make the key cheaper. `UiLocalKey` equality is inde
 observable through its public accessor and widget reconstruction; silently interpreting the old
 local constructor as an address relative to an implicit root would change that contract.
 
-Compare these concrete alternatives before changing ADR 0102:
+The bounded comparison considered these alternatives. This section preserves the trial questions;
+the selected representation and actual measured limits follow under the selected seam.
 
 | Representation | Benefit | Cost or failure mode |
 | --- | --- | --- |
@@ -588,7 +591,7 @@ Compare these concrete alternatives before changing ADR 0102:
 | Root context plus genuinely relative local address | Compact same-context children | Cross-source and runtime children need explicit absolute cases; construction, equality and round-trip extraction acquire a root basis |
 | Complete semantic addresses with exact context/prefix sharing | Independent lowering and mixed-context correctness, with no repeated shared prefix in the scoped representation | Requires content-defined cost and equality independent of storage shape; real storage savings must be demonstrated |
 
-The third is a candidate for a disposable experiment, not an accepted storage format. A simpler
+The third was a candidate for a disposable experiment, not an accepted storage format. A simpler
 typed shared-context representation must be compared against arbitrary byte-prefix compression:
 the latter is not justified merely because it can charge fewer bytes. Follow the addresses through
 retained authoring snapshots, widget descriptions and compiled frame keys; sharing one compiled
@@ -612,7 +615,7 @@ carrier is a logical key representation, not a persistent document format or exe
 
 For an illustrative flat prefix encoding with a tag and three two-byte lengths, scoped cost is
 `7 + R + L - P`, where `P` is the exact common prefix of complete root/local addresses. Root-only
-cost is `3 + R`. This is an experiment's framing, not a selected public encoding. Identical values
+cost is `3 + R`. The selected seam adopts this exact cost, not a persistent/wire format. Identical values
 constructed independently must have the same admission and cost as pointer-shared values. An
 unrelated source with no common prefix still pays both addresses and may legitimately exceed the
 unchanged ceiling. Encoded cost, live payload bytes, allocation count and allocator/RSS costs are
@@ -637,8 +640,41 @@ clones before and after snapshot disposal, without first integrating layout or r
 segmented storage cannot beat typed context on its most favorable long-prefix case, or needs
 extra round-trip allocations without a corresponding benefit, delete that storage candidate.
 
-Delete the losing experiment after selection. Amend the owning ADR and neutral public conformance
-inventory with the selected representation and measured limits before claiming shared UI adoption.
+Only the selected representation enters production. Keep decision-local comparison controls as
+research evidence, not alternate supported implementations. Amend the owning ADR and neutral
+public conformance inventory with the selected representation and measured limits before claiming
+shared UI adoption.
+
+### Selected Kernel And Adapter Seam
+
+The [three-process allocation comparison](../benchmarks/2026-10-25-ui-key-storage.md) selects complete
+typed addresses with explicit context sharing and allocation-free scoping. It does not establish
+an engine frame-time or RSS improvement. Segmented storage can win a long-placement-tail steady
+case, but raises peak and validation allocation work in that experiment; it remains outside the
+production replacement pending an actual workload that needs it.
+
+Kernel no longer needs a Scene-flavored public projection-path model. Its persistent Interface is
+`UiPersistentIdentity::new(context, placement)`, with both coordinates required `UiOpaqueId` binary
+values. The adapter owns canonical tags and lengths. Context contains the complete containing
+document and explicit namespace/slot; placement contains the local entity and optional ordered
+anchor/canonical-source/source-entity chain. Kernel's typed pair preserves exact independent
+root/local equality, while canonical prefix encoding supplies the shared byte cost. Action,
+image, consumer and runtime-domain textual IDs retain their distinct validated text carrier.
+
+One construction-local Runtime map shares context for equal source/occurrence pairs; it borrows
+current source facts and is dropped with projection construction. It neither resolves sources nor
+retains occurrence history. Canonical lowering uses raw UUID bytes and original UTF-8, never
+diagnostic AssetRef spelling. Canvas calls that same lowering with its admitted Prefab source and
+explicit `nara.editor`/`ui-canvas` occurrence. The source comes from the existing concrete Prefab
+persistence lane, not a locator reconstruction or a new Tooling/source registry. Complete source
+and occurrence enter the Canvas compile/cache basis before cache lookup; document/revision/
+gesture/image/profile facts and exact composite picking authority remain independent fences.
+
+Whole-key budgets include ready and rejected root envelopes. Root-count admission precedes excess
+identity/context construction, and node-count admission still precedes body projection. A shared
+opaque context is not permission to omit foreign child identity, evade a reduced limit or revive
+an old activation. Required complete-key Runtime/Canvas, neutral/public, interaction and native
+qualification must close before ADR 0102's successor conformance checkpoint is recorded as frozen.
 
 ## Pinned Reference Findings
 

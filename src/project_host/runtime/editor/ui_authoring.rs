@@ -222,6 +222,17 @@ impl EditorProjectSession {
         let revision = slot.revision();
         let source_binding = slot.source_binding().clone();
         let selection = slot.selection().clone();
+        #[cfg(feature = "presentation-ui")]
+        let Some(canvas_source) = self
+            .prefab_lanes
+            .get(&document)
+            .map(|lane| &lane.source_key)
+        else {
+            self.ui_authoring_frame = None;
+            self.ui_authoring_projection_cache = None;
+            self.ui_preview.retire();
+            return;
+        };
         let mut gesture = self.gestures.active().cloned();
         if gesture.as_ref().is_some_and(|gesture| {
             gesture.baseline().target().document() != document
@@ -321,6 +332,7 @@ impl EditorProjectSession {
                     .map(crate::product::AcceptedPrimaryUiSurfaceProfile::from_effective);
                 let canvas = self.ui_preview.prepare(
                     document,
+                    canvas_source,
                     revision,
                     gesture.as_ref().map(EditorGestureView::stamp),
                     projection.as_ref(),

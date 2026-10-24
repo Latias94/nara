@@ -4,14 +4,39 @@ use thiserror::Error;
 
 pub const MAX_UI_KEY_BYTES: usize = 256;
 const MAX_UI_KEY_ATOM_BYTES: usize = MAX_UI_KEY_BYTES;
-const MAX_PROJECTION_STEPS: usize = 32;
 
-/// An exact, opaque identity atom supplied by an owning adapter.
+/// Bounded textual identifier. Binary source coordinates use [`UiOpaqueId`] instead.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UiKeyAtom(String);
 
-/// Semantic alias used when an atom represents an identity owned outside the kernel.
-pub type UiOpaqueId = UiKeyAtom;
+/// Exact bounded identity bytes supplied by an owning adapter, without text interpretation.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct UiOpaqueId(Arc<[u8]>);
+
+impl UiOpaqueId {
+    pub fn new(value: impl AsRef<[u8]>) -> Result<Self, UiKeyError> {
+        let value = value.as_ref();
+        if value.is_empty() {
+            return Err(UiKeyError::EmptyAtom);
+        }
+        if value.len() > MAX_UI_KEY_ATOM_BYTES {
+            return Err(UiKeyError::AtomTooLong {
+                actual: value.len(),
+                maximum: MAX_UI_KEY_ATOM_BYTES,
+            });
+        }
+        Ok(Self(Arc::from(value)))
+    }
+
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    fn encoded_len(&self) -> usize {
+        self.0.len()
+    }
+}
 
 impl UiKeyAtom {
     pub fn new(value: impl Into<String>) -> Result<Self, UiKeyError> {
@@ -41,123 +66,34 @@ impl UiKeyAtom {
     }
 }
 
-/// One exact source-document/source-entity step in a projection path.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UiProjectionStep {
-    source_document: UiOpaqueId,
-    source_entity: UiOpaqueId,
-}
-
-impl UiProjectionStep {
-    #[must_use]
-    pub const fn new(source_document: UiOpaqueId, source_entity: UiOpaqueId) -> Self {
-        Self {
-            source_document,
-            source_entity,
-        }
-    }
-
-    #[must_use]
-    pub const fn source_document(&self) -> &UiOpaqueId {
-        &self.source_document
-    }
-
-    #[must_use]
-    pub const fn source_entity(&self) -> &UiOpaqueId {
-        &self.source_entity
-    }
-
-    fn encoded_len(&self) -> usize {
-        2 + self.source_document.encoded_len() + self.source_entity.encoded_len()
-    }
-}
-
-/// A structured projection location kept separate from the projected source entity.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UiProjectionPath {
-    root_anchor: UiOpaqueId,
-    source_chain: Vec<UiProjectionStep>,
-}
-
-impl UiProjectionPath {
-    #[must_use]
-    pub const fn new(root_anchor: UiOpaqueId) -> Self {
-        Self {
-            root_anchor,
-            source_chain: Vec::new(),
-        }
-    }
-
-    pub fn with_step(mut self, step: UiProjectionStep) -> Result<Self, UiKeyError> {
-        if self.source_chain.len() == MAX_PROJECTION_STEPS {
-            return Err(UiKeyError::ProjectionDepthExceeded {
-                maximum: MAX_PROJECTION_STEPS,
-            });
-        }
-        self.source_chain.push(step);
-        Ok(self)
-    }
-
-    #[must_use]
-    pub const fn root_anchor(&self) -> &UiOpaqueId {
-        &self.root_anchor
-    }
-
-    #[must_use]
-    pub fn source_chain(&self) -> &[UiProjectionStep] {
-        &self.source_chain
-    }
-
-    fn encoded_len(&self) -> usize {
-        2 + self.root_anchor.encoded_len()
-            + self
-                .source_chain
-                .iter()
-                .map(UiProjectionStep::encoded_len)
-                .sum::<usize>()
-    }
-}
-
-/// Persistent source identity, optionally located through a structured projection path.
+/// Complete adapter-owned persistent address, independent of its eventual UI root.
+///
+/// Context and placement are required exact values. The adapter owns their canonical structure;
+/// the kernel neither interprets Scene paths nor inherits missing context from a root key.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UiPersistentIdentity {
-    source_entity: UiOpaqueId,
-    projection: Option<UiProjectionPath>,
+    context: UiOpaqueId,
+    placement: UiOpaqueId,
 }
 
 impl UiPersistentIdentity {
     #[must_use]
-    pub const fn local(source_entity: UiOpaqueId) -> Self {
-        Self {
-            source_entity,
-            projection: None,
-        }
+    pub const fn new(context: UiOpaqueId, placement: UiOpaqueId) -> Self {
+        Self { context, placement }
     }
 
     #[must_use]
-    pub const fn projected(source_entity: UiOpaqueId, projection: UiProjectionPath) -> Self {
-        Self {
-            source_entity,
-            projection: Some(projection),
-        }
+    pub const fn context(&self) -> &UiOpaqueId {
+        &self.context
     }
 
     #[must_use]
-    pub const fn source_entity(&self) -> &UiOpaqueId {
-        &self.source_entity
-    }
-
-    #[must_use]
-    pub const fn projection(&self) -> Option<&UiProjectionPath> {
-        self.projection.as_ref()
+    pub const fn placement(&self) -> &UiOpaqueId {
+        &self.placement
     }
 
     fn encoded_len(&self) -> usize {
-        2 + self.source_entity.encoded_len()
-            + self
-                .projection
-                .as_ref()
-                .map_or(0, UiProjectionPath::encoded_len)
+        4 + self.context.encoded_len() + self.placement.encoded_len()
     }
 }
 
@@ -173,7 +109,7 @@ impl UiRuntimeIdentity {
     }
 
     fn encoded_len(&self) -> usize {
-        2 + self.domain.encoded_len() + self.local.encoded_len()
+        4 + self.domain.encoded_len() + self.local.encoded_len()
     }
 }
 
@@ -189,6 +125,43 @@ impl UiIdentity {
             Self::Persistent(identity) => identity.encoded_len(),
             Self::Runtime(identity) => identity.encoded_len(),
         }
+    }
+
+    fn canonical_bytes(&self) -> [u8; MAX_UI_KEY_BYTES] {
+        debug_assert!(self.encoded_len() <= MAX_UI_KEY_BYTES);
+        let (tag, first, second) = match self {
+            Self::Persistent(identity) => (
+                0,
+                identity.context.as_bytes(),
+                identity.placement.as_bytes(),
+            ),
+            Self::Runtime(identity) => (
+                1,
+                identity.domain.as_str().as_bytes(),
+                identity.local.as_str().as_bytes(),
+            ),
+        };
+        let mut output = [0; MAX_UI_KEY_BYTES];
+        output[0] = tag;
+        output[1..3].copy_from_slice(&(first.len() as u16).to_le_bytes());
+        let end_first = 3 + first.len();
+        output[3..end_first].copy_from_slice(first);
+        let end_second = end_first + second.len();
+        output[end_first..end_second].copy_from_slice(second);
+        // The outer address length frames the final field. Its length belongs after its bytes:
+        // placing it first would erase shared path prefixes whenever leaf lengths differ.
+        output[end_second..end_second + 2].copy_from_slice(&(second.len() as u16).to_le_bytes());
+        output
+    }
+
+    fn common_prefix_len(&self, other: &Self) -> usize {
+        let left = self.canonical_bytes();
+        let right = other.canonical_bytes();
+        left[..self.encoded_len()]
+            .iter()
+            .zip(&right[..other.encoded_len()])
+            .take_while(|(left, right)| left == right)
+            .count()
     }
 }
 
@@ -212,12 +185,12 @@ impl UiRootKey {
     }
 
     fn admit(identity: UiIdentity) -> Result<Self, UiKeyError> {
-        validate_key_len(identity.encoded_len())?;
+        validate_key_len(3 + identity.encoded_len())?;
         Ok(Self(Arc::new(identity)))
     }
 
     pub(crate) fn encoded_len(&self) -> usize {
-        self.0.encoded_len()
+        3 + self.0.encoded_len()
     }
 }
 
@@ -259,16 +232,18 @@ pub struct UiKey {
 
 impl UiKey {
     pub fn root(root: UiRootKey) -> Result<Self, UiKeyError> {
-        validate_key_len(1 + root.encoded_len())?;
-        Ok(Self { root, local: None })
+        let key = Self { root, local: None };
+        validate_key_len(key.encoded_len())?;
+        Ok(key)
     }
 
     pub fn scoped(root: UiRootKey, local: UiLocalKey) -> Result<Self, UiKeyError> {
-        validate_key_len(2 + root.encoded_len() + local.encoded_len())?;
-        Ok(Self {
+        let key = Self {
             root,
             local: Some(local),
-        })
+        };
+        validate_key_len(key.encoded_len())?;
+        Ok(key)
     }
 
     #[must_use]
@@ -281,8 +256,19 @@ impl UiKey {
         self.local.as_ref()
     }
 
-    pub(crate) fn encoded_len(&self) -> usize {
-        1 + self.root.encoded_len() + self.local.as_ref().map_or(0, UiLocalKey::encoded_len)
+    /// Exact canonical cost used by admission and owner-local reduced key limits.
+    ///
+    /// Shared content is charged once in the canonical scoped representation, regardless of
+    /// pointer sharing. This is not an allocator or stable wire-format size promise.
+    #[must_use]
+    pub fn encoded_len(&self) -> usize {
+        match &self.local {
+            None => self.root.encoded_len(),
+            Some(local) => {
+                7 + self.root.0.encoded_len() + local.encoded_len()
+                    - self.root.0.common_prefix_len(&local.0)
+            }
+        }
     }
 }
 
@@ -303,11 +289,11 @@ impl UiActionId {
 
 /// Opaque image identity retained by the kernel without importing an asset or renderer handle.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UiImageId(UiOpaqueId);
+pub struct UiImageId(UiKeyAtom);
 
 impl UiImageId {
     pub fn new(value: impl Into<String>) -> Result<Self, UiKeyError> {
-        Ok(Self(UiOpaqueId::new(value)?))
+        Ok(Self(UiKeyAtom::new(value)?))
     }
 
     #[must_use]

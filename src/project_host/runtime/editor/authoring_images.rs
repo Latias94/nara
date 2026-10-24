@@ -399,6 +399,117 @@ pub(super) enum EditorAuthoringImageCatalogError {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "presentation-ui")]
+    #[test]
+    fn ui_canvas_source_switch_rejects_invalid_projection_without_reusing_cache() {
+        use nara_ecs::World;
+        use nara_project::{EffectivePrimaryUiSurface, EffectiveUiSafeArea};
+        use nara_reflect::{ComponentTypeId, ComponentValue};
+        use nara_scene::{
+            PrefabDocument, SceneAuthoringRevision, SceneComponentRecord, SceneEntityId,
+            SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
+        };
+        use nara_tooling::EditorDocumentId;
+        use nara_ui::__private::{
+            UiAuthoringCanvasProjection, UiAuthoringDiagnostic, project_prefab_authoring,
+        };
+        use nara_ui::{UiNode, UiRoot};
+
+        use crate::product::AcceptedPrimaryUiSurfaceProfile;
+        use crate::project_host::runtime::editor::ui_preview::EditorUiPreviewSession;
+
+        let images = EditorAuthoringImageCatalogCandidate::capture(
+            &AssetServer::new(),
+            &Assets::<ImageAsset>::default(),
+            &AssetStates::default(),
+        )
+        .unwrap()
+        .into_receipt(UiImageChoiceGeneration::new(
+            INITIAL_IMAGE_CATALOG_GENERATION,
+        ))
+        .unwrap();
+        let registry = crate::project_host::authoring::first_party_authoring_preview_registry(
+            crate::project_host::composition::built_in_schema_providers(),
+        )
+        .unwrap();
+        let mut world = World::new();
+        let entity = world.spawn((UiRoot::default(), UiNode::default())).id();
+        let encode = |component: &ComponentTypeId| {
+            SceneComponentRecord::new(
+                registry.schema(component).unwrap().version,
+                registry
+                    .encode_component(component, &world, entity)
+                    .unwrap()
+                    .unwrap(),
+            )
+        };
+        let root_id = SceneEntityId::new("shared-local-root").unwrap();
+        let root_type = ComponentTypeId::new("nara.ui.UiRoot");
+        let node_type = ComponentTypeId::new("nara.ui.UiNode");
+        let valid = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(root_id.clone())
+            .with_component(root_type.clone(), encode(&root_type))
+            .with_component(node_type.clone(), encode(&node_type))]);
+        let valid_projection = project_prefab_authoring(&valid).unwrap();
+        let mut invalid = valid.clone();
+        invalid.entities[0]
+            .components
+            .get_mut(&root_type)
+            .unwrap()
+            .value = ComponentValue::Null;
+        let invalid_projection = project_prefab_authoring(&invalid)
+            .expect("malformed component values remain projectable for authoring");
+        let [first_source, second_source] = ["first-canvas", "second-canvas"].map(|name| {
+            SourceDocumentKey::named(
+                "72011426-37e2-48ba-bc06-78841468889a".parse().unwrap(),
+                name,
+                SourceDocumentKind::Prefab,
+            )
+            .unwrap()
+        });
+        let document = EditorDocumentId::from_raw(1);
+        let revision = SceneAuthoringRevision::initial();
+        let profile = Some(AcceptedPrimaryUiSurfaceProfile::from_effective(
+            EffectivePrimaryUiSurface {
+                logical_width: 320,
+                logical_height: 180,
+                safe_area: EffectiveUiSafeArea::default(),
+            },
+        ));
+        let mut session = EditorUiPreviewSession::new().unwrap();
+        let UiAuthoringCanvasProjection::Ready(canvas) = session.prepare(
+            document,
+            &first_source,
+            revision,
+            None,
+            &valid_projection,
+            &images,
+            profile,
+        ) else {
+            panic!("the valid source must populate the Canvas cache");
+        };
+        assert_eq!(canvas.facts().len(), 1);
+        assert_eq!(canvas.facts()[0].entity(), &root_id);
+        assert!(session.geometry_generation().is_some());
+
+        let switched = session.prepare(
+            document,
+            &second_source,
+            revision,
+            None,
+            &invalid_projection,
+            &images,
+            profile,
+        );
+        assert_eq!(
+            switched,
+            UiAuthoringCanvasProjection::Rejected(vec![
+                UiAuthoringDiagnostic::canvas_compilation_rejected(),
+            ])
+        );
+        assert_eq!(session.geometry_generation(), None);
+        assert!(session.take_candidate().is_none());
+    }
+
     #[test]
     fn authoring_image_choice_preflight_rejects_an_unbounded_project_path() {
         let stable_id = StableAssetId::parse_str("f903fcca-cc66-420d-a962-5724e9e55b58").unwrap();

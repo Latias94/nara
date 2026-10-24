@@ -17,9 +17,8 @@ pub(super) struct LabRuntime {
 }
 
 impl LabRuntime {
-    pub(super) fn start(mut app: App, entities: LabEntities) -> Result<Self, Box<dyn Error>> {
+    pub(super) fn start(mut app: App) -> Result<Self, Box<dyn Error>> {
         app.insert_resource(LabDriver {
-            entities,
             presenter: HeadlessInteractionPresenter::new(),
         })?;
         app.__register_driver_port::<LabDriver>(LabDriver::apply_driver_input_in_world)?;
@@ -108,7 +107,6 @@ enum LabOperation {
 
 #[derive(Resource)]
 struct LabDriver {
-    entities: LabEntities,
     presenter: HeadlessInteractionPresenter,
 }
 
@@ -135,14 +133,12 @@ impl LabDriver {
                     return driver.presenter.present(world, frame, epoch).map(Some);
                 }
                 LabOperation::SetPrimaryButton(button) => {
-                    world
-                        .entity_mut(driver.entities.primary_button)
-                        .insert(button);
+                    let entity = world.resource::<LabEntities>().primary_button;
+                    world.entity_mut(entity).insert(button);
                 }
                 LabOperation::SetOverlayLayer(layer) => {
-                    world
-                        .entity_mut(driver.entities.scene_overlay)
-                        .insert(UiRoot::new(layer));
+                    let entity = world.resource::<LabEntities>().scene_overlay;
+                    world.entity_mut(entity).insert(UiRoot::new(layer));
                 }
                 LabOperation::Accessibility(input) => {
                     assert!(matches!(

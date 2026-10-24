@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use nara_app::{App, CoreStage};
+use nara_app::{App, CoreStage, StartupStage};
 use nara_ecs::{Entity, Res, ResMut, Resource, World};
 use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
@@ -9,7 +9,7 @@ use nara_input::{
     ActionId as InputActionId, ActionMap, ActionOutcomes, ActionPhase, InputPointerId, InputSeatId,
     InputWindowId, KeyCode,
 };
-use nara_reflect::{ComponentRegistry, ComponentRegistryPlugin};
+use nara_reflect::{ComponentRegistry, ComponentRegistryPlugin, component_registry};
 use nara_scene::{SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource};
 use nara_ui::{
     advanced::{
@@ -24,6 +24,7 @@ use nara_ui::{
 
 use super::{DOMAIN, GAMEPLAY_ACTION, PRIMARY_ACTION};
 
+#[derive(Resource)]
 pub(super) struct LabEntities {
     pub(super) primary_button: Entity,
     pub(super) scene_overlay: Entity,
@@ -48,7 +49,7 @@ impl GameplayProbe {
     }
 }
 
-pub(super) fn build_lab() -> Result<(App, LabEntities), Box<dyn Error>> {
+pub(super) fn build_lab() -> Result<App, Box<dyn Error>> {
     let mut app = App::new();
     app.add_plugins((
         ComponentRegistryPlugin,
@@ -72,7 +73,6 @@ pub(super) fn build_lab() -> Result<(App, LabEntities), Box<dyn Error>> {
         surface_slot(surface_id(2), InputWindowId::new(12), 1.25)?,
     )?;
 
-    let scene_overlay = spawn_scene_overlay(app.world_mut()?)?;
     let world = app.world_mut()?;
     let root = world
         .spawn((
@@ -117,13 +117,16 @@ pub(super) fn build_lab() -> Result<(App, LabEntities), Box<dyn Error>> {
         },
     ])?;
 
-    Ok((
-        app,
-        LabEntities {
+    app.add_systems(StartupStage::Scene, move |world: &mut World| {
+        let scene_overlay =
+            spawn_scene_overlay(world).expect("managed Scene overlay should materialize");
+        world.insert_resource(LabEntities {
             primary_button,
             scene_overlay,
-        },
-    ))
+        });
+    })?;
+
+    Ok(app)
 }
 
 fn surface_slot(
@@ -150,8 +153,11 @@ fn capture_gameplay_outcome(outcomes: Res<ActionOutcomes>, mut probe: ResMut<Gam
 }
 
 fn spawn_scene_overlay(world: &mut World) -> Result<Entity, Box<dyn Error>> {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze()?;
+    let registry = ComponentRegistry::from_snapshot(
+        component_registry(world)
+            .ok_or("the managed component registry is unavailable")?
+            .snapshot()?,
+    );
     let source_id = SceneEntityId::new("scene-overlay")?;
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(source_id.clone())]);
     let report = nara_scene::spawn_scene(
@@ -169,12 +175,15 @@ fn spawn_scene_overlay(world: &mut World) -> Result<Entity, Box<dyn Error>> {
         "neutral Scene authoring should materialize: {:?}",
         report.diagnostics
     );
+    let instance = report
+        .instance
+        .expect("materialized Scene should have an instance");
     let entity = world
         .iter_entities()
         .find(|entity| {
-            entity
-                .get::<SceneEntitySource>()
-                .is_some_and(|source| source.entity_id == source_id)
+            entity.get::<SceneEntitySource>().is_some_and(|source| {
+                source.instance_id == instance.instance_id() && source.entity_id == source_id
+            })
         })
         .expect("materialized Scene root should retain provenance")
         .id();

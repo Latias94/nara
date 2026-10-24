@@ -3,12 +3,12 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use nara_reflect::{ComponentCodecError, ComponentSchemaVersion, ComponentTypeId, ComponentValue};
-use nara_scene::{SceneComponentRecord, SceneEntityId};
+use nara_scene::{SceneComponentRecord, SceneEntityId, SceneOccurrenceKey, SourceDocumentKey};
 use nara_text::bundled_font_face;
 use nara_ui_kernel::{
     UiAuthoringError, UiAuthoringSnapshotBuilder, UiCompileError, UiCompiler, UiEnvironment,
-    UiEnvironmentError, UiFrame, UiKey, UiKeyError, UiLocalKey, UiOpaqueId, UiPersistentIdentity,
-    UiRootKey, UiRootStatus, UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId,
+    UiEnvironmentError, UiFrame, UiKey, UiKeyError, UiLocalKey, UiOpaqueId, UiRootKey,
+    UiRootStatus, UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId,
     UiTheme as KernelTheme,
 };
 use nara_ui_widgets::{UiButton as KernelButton, UiButtonState};
@@ -18,6 +18,7 @@ use crate::authoring_model::{
     UiAuthoringCanvasFact, UiAuthoringCanvasReady, UiAuthoringComponentKind,
     UiAuthoringHierarchyNode, UiAuthoringProjection,
 };
+use crate::persistent_key::{persistent_identity, source_context};
 use crate::{authoring::resolve_controlled_button_visual, codec};
 
 const AUTHORING_CANVAS_SURFACE_ID: u64 = 1;
@@ -76,9 +77,12 @@ impl UiAuthoringCanvasCompiler {
     pub fn compile(
         &mut self,
         projection: &UiAuthoringProjection,
+        source: &SourceDocumentKey,
+        occurrence: &SceneOccurrenceKey,
         source_revision: u64,
         request: UiAuthoringCanvasCompileRequest,
     ) -> Result<UiAuthoringCanvasCandidate, UiAuthoringCanvasCompileError> {
+        let context = source_context(source, occurrence)?;
         let roots = projection
             .hierarchy()
             .iter()
@@ -107,7 +111,8 @@ impl UiAuthoringCanvasCompiler {
         let mut source_by_key = BTreeMap::new();
         let mut builder = UiAuthoringSnapshotBuilder::new(source_revision);
         for root in roots {
-            builder = builder.with_root(build_root(root, projection, &mut source_by_key)?);
+            builder =
+                builder.with_root(build_root(root, &context, projection, &mut source_by_key)?);
         }
         let snapshot = builder.build()?;
         let frame = self.compiler.compile(&snapshot, environment, theme)?;
@@ -169,6 +174,7 @@ fn select_theme(
 
 fn build_root(
     node: &UiAuthoringHierarchyNode,
+    context: &UiOpaqueId,
     projection: &UiAuthoringProjection,
     source_by_key: &mut BTreeMap<UiKey, SceneEntityId>,
 ) -> Result<nara_ui_kernel::UiRoot, UiAuthoringCanvasCompileError> {
@@ -190,7 +196,7 @@ fn build_root(
         UiAuthoringComponentKind::Node,
         codec::decode_node,
     )?;
-    let root_key = UiRootKey::persistent(persistent_identity(entity)?)?;
+    let root_key = UiRootKey::persistent(persistent_identity(context, entity, None)?)?;
     let source_key = UiKey::root(root_key.clone())?;
     insert_source_key(source_by_key, source_key, entity)?;
 
@@ -220,12 +226,13 @@ fn build_root(
     )? {
         authored = authored.with_semantics(semantics.kernel());
     }
-    let children = build_children(entity, projection, &root_key, source_by_key)?;
+    let children = build_children(entity, context, projection, &root_key, source_by_key)?;
     Ok(authored.with_children(children))
 }
 
 fn build_children(
     parent: &SceneEntityId,
+    context: &UiOpaqueId,
     projection: &UiAuthoringProjection,
     root_key: &UiRootKey,
     source_by_key: &mut BTreeMap<UiKey, SceneEntityId>,
@@ -236,13 +243,20 @@ fn build_children(
         .iter()
         .filter(|child| child.parent() == Some(parent))
     {
-        children.push(build_node(child, projection, root_key, source_by_key)?);
+        children.push(build_node(
+            child,
+            context,
+            projection,
+            root_key,
+            source_by_key,
+        )?);
     }
     Ok(children)
 }
 
 fn build_node(
     hierarchy_node: &UiAuthoringHierarchyNode,
+    context: &UiOpaqueId,
     projection: &UiAuthoringProjection,
     root_key: &UiRootKey,
     source_by_key: &mut BTreeMap<UiKey, SceneEntityId>,
@@ -254,10 +268,10 @@ fn build_node(
         UiAuthoringComponentKind::Node,
         codec::decode_node,
     )?;
-    let local_key = UiLocalKey::persistent(persistent_identity(entity)?)?;
+    let local_key = UiLocalKey::persistent(persistent_identity(context, entity, None)?)?;
     let source_key = UiKey::scoped(root_key.clone(), local_key.clone())?;
     insert_source_key(source_by_key, source_key.clone(), entity)?;
-    let children = build_children(entity, projection, root_key, source_by_key)?;
+    let children = build_children(entity, context, projection, root_key, source_by_key)?;
 
     let Some(button) = decode_optional(
         projection,
@@ -340,14 +354,6 @@ fn insert_source_key(
         });
     }
     Ok(())
-}
-
-fn persistent_identity(
-    entity: &SceneEntityId,
-) -> Result<UiPersistentIdentity, UiAuthoringCanvasCompileError> {
-    Ok(UiPersistentIdentity::local(UiOpaqueId::new(
-        entity.as_str(),
-    )?))
 }
 
 fn component<'a>(
@@ -533,9 +539,16 @@ mod tests {
             1,
         );
 
-        let candidate = UiAuthoringCanvasCompiler::new()
-            .unwrap()
-            .compile(&projection, 9, request)
+        let source = SourceDocumentKey::named(
+            "72011426-37e2-48ba-bc06-78841468889a".parse().unwrap(),
+            "canvas",
+            nara_scene::SourceDocumentKind::Prefab,
+        )
+        .unwrap();
+        let occurrence = SceneOccurrenceKey::new("tests", "canvas").unwrap();
+        let mut compiler = UiAuthoringCanvasCompiler::new().unwrap();
+        let candidate = compiler
+            .compile(&projection, &source, &occurrence, 9, request)
             .unwrap();
 
         assert_eq!(candidate.frame().source_revision().get(), 9);
@@ -548,6 +561,82 @@ mod tests {
                 && fact.rect().size().width() == 80.0
                 && fact.rect().size().height() == 24.0
         }));
+
+        let first_root = candidate.frame().root_outcomes()[0].key();
+        let rebuilt = compiler
+            .compile(&projection, &source, &occurrence, 10, request)
+            .unwrap();
+        assert_eq!(first_root, rebuilt.frame().root_outcomes()[0].key());
+        let other_slot = SceneOccurrenceKey::new("tests", "other").unwrap();
+        let other = compiler
+            .compile(&projection, &source, &other_slot, 10, request)
+            .unwrap();
+        assert_ne!(first_root, other.frame().root_outcomes()[0].key());
+        let other_source = SourceDocumentKey::named(
+            "72011426-37e2-48ba-bc06-78841468889a".parse().unwrap(),
+            "other-canvas",
+            nara_scene::SourceDocumentKind::Prefab,
+        )
+        .unwrap();
+        let switched = compiler
+            .compile(&projection, &other_source, &occurrence, 10, request)
+            .unwrap();
+        assert_ne!(first_root, switched.frame().root_outcomes()[0].key());
+
+        let mut app = nara_app::App::new();
+        app.add_plugins((
+            nara_reflect::ComponentRegistryPlugin,
+            nara_hierarchy::HierarchyPlugin,
+            nara_input::InputPlugin,
+            crate::UiPlugin::default(),
+        ))
+        .unwrap();
+        let surface = UiSurfaceId::new(7).unwrap();
+        crate::install_ui_surface(
+            app.world_mut().unwrap(),
+            crate::UiSurfaceSlot::new(
+                surface,
+                crate::UiSurfaceEndpoint::new(
+                    nara_input::InputWindowId::new(11),
+                    nara_input::InputSeatId::PRIMARY,
+                    nara_input::InputPointerId::PRIMARY,
+                ),
+                UiSurfaceContentTransform::direct(logical_size, 1.0).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        app.add_systems(
+            nara_app::StartupStage::Scene,
+            move |world: &mut nara_ecs::World| {
+                let registry = nara_reflect::ComponentRegistry::from_snapshot(
+                    nara_reflect::component_registry(world)
+                        .unwrap()
+                        .snapshot()
+                        .unwrap(),
+                );
+                let bound = nara_scene::ExpandedSceneCandidate::plain(
+                    source.clone(),
+                    Arc::new(prefab.instantiate()),
+                );
+                let report = nara_scene::spawn_scene(world, &registry, &bound, &occurrence, None);
+                assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+            },
+        )
+        .unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(std::time::Duration::ZERO).unwrap();
+        let frame = crate::latest_ui_frame(runtime.world(), surface).unwrap();
+        runtime.finish().unwrap();
+        let frame = frame.expect("the equal-coordinate Runtime projection must compile");
+        let keys = |frame: &UiFrame| {
+            frame
+                .layouts()
+                .iter()
+                .filter_map(|layout| layout.key().cloned())
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        assert_eq!(keys(candidate.frame()), keys(&frame));
     }
 
     #[test]

@@ -2,17 +2,17 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use nara_ecs::{Entity, World};
 use nara_hierarchy::Children;
-use nara_scene::{PrefabProjectionPath, SceneEntitySource};
+use nara_scene::SceneEntitySource;
 use nara_ui_kernel::{
-    UiAuthoringSnapshot, UiAuthoringSnapshotBuilder, UiKey, UiKeyError, UiLocalKey, UiOpaqueId,
-    UiPersistentIdentity, UiProjectionPath, UiProjectionStep, UiRootDiagnostic, UiRootKey,
+    UiAuthoringSnapshot, UiAuthoringSnapshotBuilder, UiKey, UiKeyError, UiLocalKey,
+    UiRootDiagnostic, UiRootKey,
 };
 use nara_ui_widgets::{UiButton as KernelButton, UiButtonState, UiWidgetError};
 use thiserror::Error;
 
 use crate::{
     UiButton, UiButtonVisuals, UiNode, UiRoot, UiRuntimeKey, UiSemantics, UiText, UiTheme,
-    UiVisual, authoring::resolve_controlled_button_visual,
+    UiVisual, authoring::resolve_controlled_button_visual, persistent_key::PersistentKeyProjection,
 };
 
 use super::{UiAdapterDiagnostic, push_diagnostic};
@@ -28,6 +28,8 @@ enum ProjectionError {
     Widget(#[from] UiWidgetError),
     #[error("UI root projection exceeded the adapter depth ceiling {maximum}")]
     DepthLimitExceeded { maximum: usize },
+    #[error("UI projection exceeded the root ceiling {maximum}")]
+    RootLimitExceeded { maximum: usize },
     #[error("UI root projection exceeded its remaining node budget {maximum}")]
     NodeLimitExceeded { maximum: usize },
     #[error("a controlled UI button is missing its stable runtime or persistent key")]
@@ -61,11 +63,24 @@ pub(super) fn project_authoring(
 ) -> Option<UiProjectedAuthoring> {
     let mut roots = Vec::new();
     let mut root_keys = BTreeSet::new();
+    let mut identities = PersistentKeyProjection::default();
+    let maximum_roots = nara_ui_kernel::UiLimits::default().max_roots();
     for entity in ordered_entities.iter().copied() {
         let Some(root) = world.get::<UiRoot>(entity).copied() else {
             continue;
         };
-        let root_key = match project_root_key(world, entity) {
+        if roots.len() == maximum_roots {
+            push_diagnostic(
+                diagnostics,
+                "snapshot-capacity-rejected",
+                &ProjectionError::RootLimitExceeded {
+                    maximum: maximum_roots,
+                }
+                .to_string(),
+            );
+            return None;
+        }
+        let root_key = match project_root_key(world, &mut identities, entity) {
             Ok(Some(key)) => key,
             Ok(None) => {
                 push_diagnostic(
@@ -131,6 +146,7 @@ pub(super) fn project_authoring(
         let mut root_nodes = 0usize;
         match project_root(
             world,
+            &mut identities,
             entity,
             root,
             node,
@@ -228,8 +244,9 @@ pub(super) fn select_theme(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn project_root(
-    world: &World,
+fn project_root<'a>(
+    world: &'a World,
+    identities: &mut PersistentKeyProjection<'a>,
     entity: Entity,
     root: UiRoot,
     node: UiNode,
@@ -262,6 +279,7 @@ fn project_root(
     }
     let children = project_children(
         world,
+        identities,
         entity,
         root_key,
         reducer_states,
@@ -275,8 +293,9 @@ fn project_root(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn project_children(
-    world: &World,
+fn project_children<'a>(
+    world: &'a World,
+    identities: &mut PersistentKeyProjection<'a>,
     parent: Entity,
     root_key: &UiRootKey,
     reducer_states: &BTreeMap<UiKey, UiButtonState>,
@@ -303,9 +322,10 @@ fn project_children(
             continue;
         };
         admit_projected_node(projected_nodes, maximum_nodes)?;
-        let local_key = project_local_key(world, child)?;
+        let local_key = project_local_key(world, identities, child)?;
         let descendants = project_children(
             world,
+            identities,
             child,
             root_key,
             reducer_states,
@@ -398,9 +418,14 @@ fn admit_projected_node(
     Ok(())
 }
 
-fn project_root_key(world: &World, entity: Entity) -> Result<Option<UiRootKey>, UiKeyError> {
+fn project_root_key<'a>(
+    world: &'a World,
+    identities: &mut PersistentKeyProjection<'a>,
+    entity: Entity,
+) -> Result<Option<UiRootKey>, UiKeyError> {
     if let Some(source) = world.get::<SceneEntitySource>(entity) {
-        return persistent_identity(source)
+        return identities
+            .identity(source)
             .and_then(UiRootKey::persistent)
             .map(Some);
     }
@@ -410,9 +435,14 @@ fn project_root_key(world: &World, entity: Entity) -> Result<Option<UiRootKey>, 
         .transpose()
 }
 
-fn project_local_key(world: &World, entity: Entity) -> Result<Option<UiLocalKey>, UiKeyError> {
+fn project_local_key<'a>(
+    world: &'a World,
+    identities: &mut PersistentKeyProjection<'a>,
+    entity: Entity,
+) -> Result<Option<UiLocalKey>, UiKeyError> {
     if let Some(source) = world.get::<SceneEntitySource>(entity) {
-        return persistent_identity(source)
+        return identities
+            .identity(source)
             .and_then(UiLocalKey::persistent)
             .map(Some);
     }
@@ -420,24 +450,4 @@ fn project_local_key(world: &World, entity: Entity) -> Result<Option<UiLocalKey>
         .get::<UiRuntimeKey>(entity)
         .map(|key| UiLocalKey::runtime(key.domain(), key.local()))
         .transpose()
-}
-
-fn persistent_identity(source: &SceneEntitySource) -> Result<UiPersistentIdentity, UiKeyError> {
-    let source_entity = UiOpaqueId::new(source.source_entity_id.as_str())?;
-    match source.projection_path.as_ref() {
-        None => Ok(UiPersistentIdentity::local(source_entity)),
-        Some(path) => project_prefab_path(path)
-            .map(|projection| UiPersistentIdentity::projected(source_entity, projection)),
-    }
-}
-
-fn project_prefab_path(path: &PrefabProjectionPath) -> Result<UiProjectionPath, UiKeyError> {
-    let mut projected = UiProjectionPath::new(UiOpaqueId::new(path.root_anchor().as_str())?);
-    for step in path.source_chain() {
-        projected = projected.with_step(UiProjectionStep::new(
-            UiOpaqueId::new(step.source_document().to_string())?,
-            UiOpaqueId::new(step.source_entity().as_str())?,
-        ))?;
-    }
-    Ok(projected)
 }

@@ -48,8 +48,8 @@ pub use geometry::{
     UiSurfaceContentTransform, UiSurfaceContentTransformError,
 };
 pub use identity::{
-    UiActionId, UiImageId, UiKey, UiKeyError, UiLocalKey, UiOpaqueId, UiPersistentIdentity,
-    UiProjectionPath, UiProjectionStep, UiRootKey,
+    MAX_UI_KEY_BYTES, UiActionId, UiImageId, UiKey, UiKeyAtom, UiKeyError, UiLocalKey, UiOpaqueId,
+    UiPersistentIdentity, UiRootKey,
 };
 pub use interaction::{
     UiAccessibilityInput, UiAccessibilityRequest, UiActivationSource, UiButtonPhase,

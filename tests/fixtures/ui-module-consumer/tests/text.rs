@@ -35,3 +35,75 @@ fn direct_consumer_compiles_a_controlled_button_without_private_presentation_aut
         .unwrap();
     assert_eq!(semantics.actions(), &[UiActionId::new("retry").unwrap()]);
 }
+
+#[test]
+fn direct_consumer_owns_complete_binary_persistent_context_without_scene_types() {
+    use nara_ui_kernel::{
+        UiAuthoringSnapshotBuilder, UiCompiler, UiEnvironment, UiKey, UiLayer, UiLocalKey,
+        UiOpaqueId, UiPersistentIdentity, UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiTheme,
+    };
+    use nara_ui_widgets::UiButton;
+
+    let mut builder = UiAuthoringSnapshotBuilder::new(1);
+    let mut buttons = Vec::new();
+    for slot in [1, 2] {
+        // This consumer owns its source/slot vocabulary; it does not encode Nara Scene bytes.
+        let context = UiOpaqueId::new([0, 7, slot]).unwrap();
+        let root = UiRootKey::persistent(UiPersistentIdentity::new(
+            context.clone(),
+            UiOpaqueId::new("root").unwrap(),
+        ))
+        .unwrap();
+        let local = UiLocalKey::persistent(UiPersistentIdentity::new(
+            context,
+            UiOpaqueId::new("retry").unwrap(),
+        ))
+        .unwrap();
+        let key = UiKey::scoped(root.clone(), local).unwrap();
+        let button = UiButton::new(key, "Retry", UiActionId::new("retry").unwrap()).unwrap();
+        builder = builder.with_root(
+            UiRoot::new(root.clone(), UiLayer::Base, UiStyle::fill()).with_child(
+                button
+                    .authored_node(
+                        &root,
+                        UiStyle::absolute(f32::from(slot) * 100.0, 10.0, 80.0, 40.0),
+                        nara_ui_kernel::UiVisual::role(nara_ui_kernel::UiColorRole::Accent),
+                        nara_ui_kernel::UiBrush::Role(nara_ui_kernel::UiColorRole::PrimaryText),
+                        16.0,
+                    )
+                    .unwrap(),
+            ),
+        );
+        buttons.push(button);
+    }
+    let snapshot = builder.build().unwrap();
+    let mut compiler =
+        UiCompiler::new(nara_text::bundled_font_face().unwrap(), Default::default()).unwrap();
+    let environment =
+        UiEnvironment::new(UiSurfaceId::new(9).unwrap(), 320.0, 180.0, 1.0, 1, 1, 1, 1).unwrap();
+    let frame = compiler
+        .compile(&snapshot, environment, UiTheme::default())
+        .unwrap();
+    assert_eq!(frame.root_outcomes().len(), 2);
+    assert_ne!(buttons[0].key(), buttons[1].key());
+    for button in buttons {
+        assert!(
+            frame
+                .focus_order()
+                .iter()
+                .any(|fact| fact.key() == button.key())
+        );
+        let semantic = frame
+            .semantics()
+            .iter()
+            .find(|node| node.key() == button.key())
+            .unwrap();
+        assert_eq!(semantic.actions(), &[UiActionId::new("retry").unwrap()]);
+        let recomposed = UiKey::scoped(
+            button.key().root_key().clone(),
+            button.key().local_key().unwrap().clone(),
+        )
+        .unwrap();
+        assert_eq!(recomposed, *button.key());
+    }
+}

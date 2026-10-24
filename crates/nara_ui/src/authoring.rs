@@ -431,6 +431,9 @@ impl UiTheme {
 }
 
 /// Explicit caller-owned identity for runtime-created roots or nodes.
+///
+/// A real `SceneEntitySource` takes precedence. This key neither overrides persistent identity
+/// nor supplies a fallback when its complete source address cannot be admitted.
 #[derive(Debug, Clone, PartialEq, Eq, Component)]
 pub struct UiRuntimeKey {
     domain: String,

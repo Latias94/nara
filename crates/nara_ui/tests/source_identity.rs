@@ -11,8 +11,12 @@ use nara_ui::{
 use nara_ui_kernel::{UiLayer, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform, UiSurfaceId};
 
 #[test]
-fn independent_scenes_collide_only_when_their_document_local_ui_roots_match() {
-    for second_root in ["different-root", "root"] {
+fn source_and_occurrence_keep_equal_document_local_ui_roots_independent() {
+    for (second_root, second_source) in [
+        ("different-root", "second-document"),
+        ("root", "second-document"),
+        ("root", "first-document"),
+    ] {
         let mut app = App::new();
         app.add_plugins((
             ComponentRegistryPlugin,
@@ -50,7 +54,11 @@ fn independent_scenes_collide_only_when_their_document_local_ui_roots_match() {
                     world,
                     &registry,
                     &nara_scene::ExpandedSceneCandidate::plain(
-                        scene_source_key(marker),
+                        scene_source_key(if marker == "first-document" {
+                            marker
+                        } else {
+                            second_source
+                        }),
                         std::sync::Arc::new((document).clone()),
                     ),
                     &scene_occurrence(marker),
@@ -82,26 +90,18 @@ fn independent_scenes_collide_only_when_their_document_local_ui_roots_match() {
         let diagnostics = runtime
             .world()
             .resource::<UiAdapterDiagnostics>()
-            .as_slice();
-        if second_root == "root" {
-            assert!(frame.is_none());
-            assert!(
-                diagnostics
-                    .iter()
-                    .any(|item| item.code() == "root-key-duplicate")
-            );
-        } else {
-            let frame = frame.expect("different local roots must compile in the same World");
-            assert_eq!(frame.root_outcomes().len(), 2);
-            assert_ne!(
-                frame.root_outcomes()[0].key(),
-                frame.root_outcomes()[1].key()
-            );
-            assert!(diagnostics.is_empty());
-        }
+            .as_slice()
+            .to_vec();
         runtime
             .finish()
             .expect("the window-free UI runtime must retire");
+        let frame = frame.expect("complete source/occurrence coordinates must distinguish roots");
+        assert_eq!(frame.root_outcomes().len(), 2);
+        assert_ne!(
+            frame.root_outcomes()[0].key(),
+            frame.root_outcomes()[1].key()
+        );
+        assert!(diagnostics.is_empty());
     }
 }
 
@@ -112,6 +112,199 @@ fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {
         nara_scene::SourceDocumentKind::Scene,
     )
     .unwrap()
+}
+
+#[test]
+fn canonical_prefab_alias_rebuild_preserves_keys_but_a_containing_source_switch_does_not() {
+    use nara_asset::AssetRef;
+    use nara_scene::{
+        InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, ScenePatchDocument,
+    };
+    use nara_ui::UiText;
+
+    let local = |name| SceneEntityId::new(name).unwrap();
+    let prefab = PrefabDocument::new(
+        [local("root")],
+        [
+            SceneEntityRecord::new(local("root")).with_children([local("label")]),
+            SceneEntityRecord::new(local("label")),
+        ],
+    );
+    let first_request = AssetRef::path("prefabs/first.ron").unwrap();
+    let alias = AssetRef::path("prefabs/alias.ron").unwrap();
+    let canonical = |name| {
+        nara_scene::SourceDocumentKey::named(
+            "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+            name,
+            nara_scene::SourceDocumentKind::Prefab,
+        )
+        .unwrap()
+    };
+    let middle = AssetRef::path("prefabs/middle.ron").unwrap();
+    let leaf = AssetRef::path("prefabs/leaf.ron").unwrap();
+    let nested = |name, request: AssetRef| {
+        let mut anchor = SceneEntityRecord::new(local(name));
+        anchor.prefab = Some(PrefabInstance {
+            source: request,
+            overrides: ScenePatchDocument::default(),
+        });
+        anchor
+    };
+    let outer = PrefabDocument::from_ordered_roots([
+        nested("left", middle.clone()),
+        nested("right", middle.clone()),
+    ]);
+    let resolver = InMemoryPrefabSourceResolver::new()
+        .with_prefab(leaf.clone(), canonical("panel"), prefab)
+        .with_prefab(
+            middle,
+            canonical("middle"),
+            PrefabDocument::from_ordered_roots([nested("inner", leaf)]),
+        )
+        .with_prefab(first_request.clone(), canonical("outer"), outer.clone())
+        .with_prefab(alias.clone(), canonical("outer"), outer);
+    let mut registry = ComponentRegistry::new();
+    registry.freeze().unwrap();
+    let candidates = [
+        (first_request, "first"),
+        (alias.clone(), "first"),
+        (alias, "other"),
+    ]
+    .into_iter()
+    .map(|(request, containing)| {
+        let mut anchor = SceneEntityRecord::new(local("anchor"));
+        anchor.prefab = Some(PrefabInstance {
+            source: request,
+            overrides: ScenePatchDocument::default(),
+        });
+        let expanded =
+            SceneDocument::from_ordered_roots([anchor]).expand_prefabs(&registry, &resolver);
+        assert!(!expanded.diagnostics.has_errors());
+        expanded
+            .candidate
+            .unwrap()
+            .bind_source(scene_source_key(containing))
+    })
+    .collect::<Vec<_>>();
+    let mut app = App::new();
+    app.add_plugins((
+        ComponentRegistryPlugin,
+        nara_hierarchy::HierarchyPlugin,
+        nara_input::InputPlugin,
+        UiPlugin::default(),
+    ))
+    .unwrap();
+    let surface = UiSurfaceId::new(7).unwrap();
+    let size = UiSize::new(200.0, 100.0).unwrap();
+    install_ui_surface(
+        app.world_mut().unwrap(),
+        UiSurfaceSlot::new(
+            surface,
+            UiSurfaceEndpoint::new(
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+            ),
+            UiSurfaceContentTransform::new(size, size, UiSafeAreaInsets::default(), 1.0).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let mut current = None;
+    let mut index = 0;
+    app.add_systems(
+        nara_app::CoreStage::Update,
+        move |world: &mut nara_ecs::World| {
+            let Some(candidate) = candidates.get(index) else {
+                return;
+            };
+            let registry = ComponentRegistry::from_snapshot(
+                component_registry(world).unwrap().snapshot().unwrap(),
+            );
+            let prepared = match current.as_ref() {
+                Some(current) => nara_scene::prepare_scene_replacement(
+                    world, &registry, candidate, current, None,
+                ),
+                None => nara_scene::prepare_scene(
+                    world,
+                    &registry,
+                    candidate,
+                    &scene_occurrence("alias"),
+                    None,
+                ),
+            }
+            .unwrap();
+            let report = prepared.commit(world);
+            assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+            let instance = report.instance.unwrap();
+            let entities = world
+                .iter_entities()
+                .filter_map(|entity| {
+                    entity
+                        .get::<SceneEntitySource>()
+                        .filter(|source| source.instance_id == instance.instance_id())
+                        .map(|source| (entity.id(), source.source_entity_id.clone()))
+                })
+                .collect::<Vec<_>>();
+            for (entity, source) in entities {
+                if source.as_str() == "root" {
+                    world
+                        .entity_mut(entity)
+                        .insert((UiRoot::new(UiLayer::Base), UiNode::new(UiStyle::fill())));
+                } else if source.as_str() == "label" {
+                    world.entity_mut(entity).insert((
+                        UiNode::new(UiStyle::absolute(0.0, 0.0, 80.0, 30.0)),
+                        UiText::new("Panel", 16.0).unwrap(),
+                    ));
+                }
+            }
+            current = Some(instance);
+            index += 1;
+        },
+    )
+    .unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    let mut observations = Vec::new();
+    for _ in 0..3 {
+        runtime.drive(Duration::ZERO).unwrap();
+        let frame = latest_ui_frame(runtime.world(), surface).unwrap();
+        let source = runtime
+            .world()
+            .iter_entities()
+            .filter_map(|entity| entity.get::<SceneEntitySource>())
+            .find(|source| source.source_entity_id.as_str() == "root")
+            .unwrap();
+        observations.push((
+            frame,
+            source.instance_id,
+            source.projection_path.as_ref().unwrap().source_chain()[0]
+                .source_document()
+                .clone(),
+            source
+                .projection_path
+                .as_ref()
+                .unwrap()
+                .source_chain()
+                .len(),
+        ));
+    }
+    runtime.finish().unwrap();
+    let keys = |frame: &Option<std::sync::Arc<nara_ui_kernel::UiFrame>>| {
+        frame
+            .as_ref()
+            .expect("the source-bound UI must compile")
+            .layouts()
+            .iter()
+            .filter_map(|layout| layout.key().cloned())
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    assert_eq!(observations[0].0.as_ref().unwrap().root_outcomes().len(), 2);
+    assert_eq!(keys(&observations[0].0).len(), 4);
+    assert_eq!(keys(&observations[0].0), keys(&observations[1].0));
+    assert_ne!(keys(&observations[1].0), keys(&observations[2].0));
+    assert_ne!(observations[0].1, observations[1].1);
+    assert_ne!(observations[0].2, observations[1].2);
+    assert!(observations.iter().all(|observation| observation.3 == 3));
 }
 
 fn scene_occurrence(slot: &str) -> nara_scene::SceneOccurrenceKey {

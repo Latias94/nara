@@ -10,7 +10,7 @@ use nara_render::{
     Color, Extent2d, ExtractedView, ExtractedViews, RenderFramePacket, RenderImage2d, RenderTarget,
     ViewLoadOp, ViewMapping2d, ViewportRect,
 };
-use nara_scene::SceneAuthoringRevision;
+use nara_scene::{SceneAuthoringRevision, SceneOccurrenceKey, SourceDocumentKey};
 use nara_tooling::{EditorDocumentId, EditorGestureStamp};
 use nara_ui::__private::{
     UiAuthoringCanvasCompileError, UiAuthoringCanvasCompileRequest, UiAuthoringCanvasCompiler,
@@ -88,6 +88,7 @@ impl EditorUiPreviewCandidate {
 
 /// Private producer for one mutually-exclusive Editor Authoring UI Canvas.
 pub(super) struct EditorUiPreviewSession {
+    occurrence: SceneOccurrenceKey,
     compiler: UiAuthoringCanvasCompiler,
     planner: UiPresentationPlanner,
     render_generation: EditorRenderGeneration,
@@ -101,8 +102,10 @@ pub(super) struct EditorUiPreviewSession {
     candidate: Option<EditorUiPreviewCandidate>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct EditorUiPreviewKey {
+    source: SourceDocumentKey,
+    occurrence: SceneOccurrenceKey,
     document: EditorDocumentId,
     revision: SceneAuthoringRevision,
     gesture: Option<EditorGestureStamp>,
@@ -128,6 +131,8 @@ impl EditorUiPreviewSession {
         let render_generation = EditorRenderGeneration::try_acquire()
             .ok_or(UiPreviewError::RenderGenerationExhausted)?;
         Ok(Self {
+            occurrence: SceneOccurrenceKey::new("nara.editor", "ui-canvas")
+                .expect("the Editor Canvas declares a nonempty logical occurrence"),
             compiler,
             planner: UiPresentationPlanner::default(),
             render_generation,
@@ -147,24 +152,36 @@ impl EditorUiPreviewSession {
     pub(super) fn prepare(
         &mut self,
         document: EditorDocumentId,
+        source: &SourceDocumentKey,
         revision: SceneAuthoringRevision,
         gesture: Option<EditorGestureStamp>,
         projection: &UiAuthoringProjection,
         images: &EditorAuthoringImageCatalogReceipt,
         profile: Option<AcceptedPrimaryUiSurfaceProfile>,
     ) -> UiAuthoringCanvasProjection {
-        let key = EditorUiPreviewKey {
-            document,
-            revision,
-            gesture,
-            image_generation: images.generation(),
-            profile,
-        };
-        let unchanged_source = self.key == Some(key);
+        let image_generation = images.generation();
+        let unchanged_source = self.key.as_ref().is_some_and(|key| {
+            &key.source == source
+                && key.occurrence == self.occurrence
+                && key.document == document
+                && key.revision == revision
+                && key.gesture == gesture
+                && key.image_generation == image_generation
+                && key.profile == profile
+        });
         if unchanged_source && !self.rebuild_requested {
             return self.projection.clone();
         }
-        self.key = Some(key);
+        let key = EditorUiPreviewKey {
+            source: source.clone(),
+            occurrence: self.occurrence.clone(),
+            document,
+            revision,
+            gesture,
+            image_generation,
+            profile,
+        };
+        self.key = Some(key.clone());
         self.rebuild_requested = false;
         let Some(profile) = profile else {
             self.candidate = None;
@@ -216,7 +233,13 @@ impl EditorUiPreviewSession {
         let request = UiAuthoringCanvasCompileRequest::new(transform, compile_generation);
         let canvas_candidate = self
             .compiler
-            .compile(projection, compile_generation, request)
+            .compile(
+                projection,
+                &key.source,
+                &key.occurrence,
+                compile_generation,
+                request,
+            )
             .map_err(UiPreviewError::Compile)?;
 
         let target = RenderTarget::Image(self.target);

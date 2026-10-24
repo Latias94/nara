@@ -30,9 +30,9 @@ const UPDATED_ACTION: &str = "gallery.updated";
 const GAMEPLAY_ACTION: &str = "gallery.pass-through";
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let (mut app, entities) = build_lab()?;
+    let mut app = build_lab()?;
     let (fast_cursor, paused_cursor) = register_consumers(app.world_mut()?)?;
-    let mut app = LabRuntime::start(app, entities)?;
+    let mut app = LabRuntime::start(app)?;
     app.tick()?;
 
     let primary_surface = surface_id(1);

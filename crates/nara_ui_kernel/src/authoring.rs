@@ -644,3 +644,48 @@ pub enum UiAuthoringError {
     #[error("UI semantic node exceeds {maximum} actions")]
     SemanticActionLimitExceeded { maximum: usize },
 }
+
+#[cfg(test)]
+mod root_budget_tests {
+    use super::*;
+
+    #[test]
+    fn compiler_rechecks_complete_root_cost_even_for_an_absent_body() {
+        let root = UiRoot::new(
+            crate::UiRootKey::runtime("a", "b").unwrap(),
+            crate::UiLayer::Base,
+            crate::UiStyle::fill(),
+        )
+        .with_child(
+            crate::UiNode::new(crate::UiStyle::fill())
+                .with_text(crate::UiText::new("unkeyed", 16.0).unwrap()),
+        );
+        let mut snapshot = UiAuthoringSnapshotBuilder::new(1)
+            .with_root(root)
+            .build()
+            .unwrap();
+        assert!(snapshot.roots().is_empty());
+        let limits = crate::UiLimits::default().with_max_key_bytes(9).unwrap();
+        snapshot.profile = limits.snapshot_profile();
+        let mut compiler =
+            crate::UiCompiler::new(nara_text::bundled_font_face().unwrap(), limits).unwrap();
+        let environment = crate::UiEnvironment::new(
+            crate::UiSurfaceId::new(1).unwrap(),
+            200.0,
+            100.0,
+            1.0,
+            1,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+        assert!(matches!(
+            compiler.compile(&snapshot, environment, crate::UiTheme::default()),
+            Err(crate::UiCompileError::SnapshotKeyLimitExceeded {
+                actual: 10,
+                maximum: 9
+            })
+        ));
+    }
+}

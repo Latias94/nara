@@ -4153,7 +4153,10 @@ fn repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance() 
     app.configuration()
         .add_systems(nara_app::StartupStage::Scene, move |world: &mut World| {
             let registry = ComponentRegistry::from_snapshot(
-                nara_reflect::component_registry(world).unwrap().snapshot().unwrap(),
+                nara_reflect::component_registry(world)
+                    .unwrap()
+                    .snapshot()
+                    .unwrap(),
             );
             let expansion = document.expand_prefabs(&registry, &resolver);
             assert!(
@@ -4161,29 +4164,32 @@ fn repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance() 
                 "{:?}",
                 expansion.diagnostics
             );
-            let candidate = expansion.candidate.unwrap().bind_source(scene_source_key(
-                "repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance/source",
-            ));
+            let candidate = expansion
+                .candidate
+                .unwrap()
+                .bind_source(scene_source_key("repeated-roots"));
             let report = nara_scene::spawn_scene(
                 world,
                 &registry,
                 &candidate,
-                &scene_occurrence(
-                    "repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance/report",
-                ),
+                &scene_occurrence("roots"),
                 None,
             );
             assert!(!report.diagnostics.has_errors());
 
-            let projected = world.iter_entities().filter_map(|entity| {
-                entity.get::<SceneEntitySource>()
-                    .filter(|source| source.source_entity_id.as_str() == "root")
-                    .map(|_| entity.id())
-            }).collect::<Vec<_>>();
+            let projected = world
+                .iter_entities()
+                .filter_map(|entity| {
+                    entity
+                        .get::<SceneEntitySource>()
+                        .filter(|source| source.source_entity_id.as_str() == "root")
+                        .map(|_| entity.id())
+                })
+                .collect::<Vec<_>>();
             for entity in projected {
-                world.entity_mut(entity).insert((
-                    UiRoot::new(UiLayer::Base), UiNode::new(UiStyle::fill()),
-                ));
+                world
+                    .entity_mut(entity)
+                    .insert((UiRoot::new(UiLayer::Base), UiNode::new(UiStyle::fill())));
             }
         })
         .unwrap();
@@ -4203,16 +4209,9 @@ fn repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance() 
     for (_, source) in &projected {
         assert_eq!(
             source.containing_source(),
-            &scene_source_key(
-                "repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance/source"
-            ),
+            &scene_source_key("repeated-roots"),
         );
-        assert_eq!(
-            source.occurrence(),
-            &scene_occurrence(
-                "repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance/report"
-            ),
-        );
+        assert_eq!(source.occurrence(), &scene_occurrence("roots"),);
     }
     assert!(
         projected
@@ -4252,6 +4251,463 @@ fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {
     )
     .unwrap()
 }
+
+#[test]
+fn root_capacity_is_admitted_before_constructing_the_excess_root_identity() {
+    let mut app = ui_app();
+    let world = app.configuration_world();
+    install_test_surface(world);
+    for index in 0..65 {
+        let root = world
+            .spawn((UiRoot::new(UiLayer::Base), UiNode::new(UiStyle::fill())))
+            .id();
+        if index < 64 {
+            world
+                .entity_mut(root)
+                .insert(UiRuntimeKey::new("capacity", format!("root-{index}")).unwrap());
+        }
+        place_ui_tree(world, root, &[]);
+    }
+    app.update().unwrap();
+    let diagnostics = app
+        .world()
+        .resource::<crate::UiAdapterDiagnostics>()
+        .as_slice()
+        .to_vec();
+    let absent = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .is_none();
+    drop(app);
+    assert!(absent);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code() == "snapshot-capacity-rejected")
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code() != "root-key-missing")
+    );
+}
+
+#[test]
+fn persistent_sources_and_occurrences_isolate_presented_focus_press_and_actions() {
+    let mut app = ui_app();
+    install_test_surface(app.configuration_world());
+    app.configuration()
+        .add_systems(nara_app::StartupStage::Scene, |world: &mut World| {
+            let registry = ComponentRegistry::from_snapshot(
+                nara_reflect::component_registry(world)
+                    .unwrap()
+                    .snapshot()
+                    .unwrap(),
+            );
+            let mut roots = Vec::new();
+            let mut buttons = Vec::new();
+            for (index, (source, slot)) in [("panel", "one"), ("panel", "two"), ("other", "three")]
+                .into_iter()
+                .enumerate()
+            {
+                let document = SceneDocument::new(
+                    [scene_id("root")],
+                    [
+                        SceneEntityRecord::new(scene_id("root")).with_children([scene_id("retry")]),
+                        SceneEntityRecord::new(scene_id("retry")),
+                    ],
+                );
+                let candidate = nara_scene::ExpandedSceneCandidate::plain(
+                    scene_source_key(source),
+                    Arc::new(document),
+                );
+                let report = nara_scene::spawn_scene(
+                    world,
+                    &registry,
+                    &candidate,
+                    &scene_occurrence(slot),
+                    None,
+                );
+                assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+                let instance = report.instance.unwrap();
+                let entities = world
+                    .iter_entities()
+                    .filter_map(|entity| {
+                        entity
+                            .get::<SceneEntitySource>()
+                            .filter(|source| source.instance_id == instance.instance_id())
+                            .map(|source| (entity.id(), source.source_entity_id.clone()))
+                    })
+                    .collect::<Vec<_>>();
+                for (entity, local) in entities {
+                    if local.as_str() == "root" {
+                        roots.push(entity);
+                        world.entity_mut(entity).insert((
+                            UiRoot::new(UiLayer::Base),
+                            UiNode::new(UiStyle::fill()),
+                            UiRuntimeKey::new(TEST_DOMAIN, "root").unwrap(),
+                        ));
+                    } else {
+                        buttons.push(entity);
+                        world.entity_mut(entity).insert(button_bundle(
+                            "retry",
+                            "retry-action",
+                            UiColor::rgba(0.2, 0.4, 0.8, 1.0),
+                        ));
+                        world
+                            .entity_mut(entity)
+                            .insert(UiNode::new(UiStyle::absolute(
+                                (index % 2) as f32 * 100.0,
+                                (index / 2) as f32 * 50.0,
+                                100.0,
+                                50.0,
+                            )));
+                    }
+                }
+            }
+            let foreign = buttons[2];
+            let previous = HierarchyPlacement::current(world, foreign).unwrap();
+            HierarchyWriter::new(world)
+                .move_entity(foreign, previous, child_last(roots[0]))
+                .unwrap();
+            let runtime_child = world
+                .spawn(button_bundle(
+                    "retry",
+                    "retry-action",
+                    UiColor::rgba(0.2, 0.4, 0.8, 1.0),
+                ))
+                .id();
+            world
+                .entity_mut(runtime_child)
+                .insert(UiNode::new(UiStyle::absolute(100.0, 50.0, 100.0, 50.0)));
+            HierarchyWriter::new(world)
+                .apply(HierarchyOperation::Place {
+                    entity: runtime_child,
+                    placement: child_last(roots[0]),
+                })
+                .unwrap();
+            let runtime_root = world
+                .spawn((
+                    UiRoot::new(UiLayer::Base),
+                    UiNode::new(UiStyle::fill()),
+                    UiRuntimeKey::new(TEST_DOMAIN, "mixed-root").unwrap(),
+                ))
+                .id();
+            place_ui_tree(world, runtime_root, &[]);
+            let previous = HierarchyPlacement::current(world, buttons[1]).unwrap();
+            HierarchyWriter::new(world)
+                .move_entity(buttons[1], previous, child_last(runtime_root))
+                .unwrap();
+        })
+        .unwrap();
+    app.update().unwrap();
+    let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    assert_eq!(frame.root_outcomes().len(), 4);
+    assert_eq!(frame.focus_order().len(), 4);
+    let points = [
+        UiPoint::new(10.0, 10.0),
+        UiPoint::new(110.0, 10.0),
+        UiPoint::new(10.0, 60.0),
+        UiPoint::new(110.0, 60.0),
+    ];
+    let keys = points
+        .iter()
+        .map(|point| {
+            frame
+                .semantics()
+                .iter()
+                .find(|node| node.name() == "retry" && node.rect().contains(*point))
+                .unwrap()
+                .key()
+                .clone()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        keys.iter().collect::<std::collections::BTreeSet<_>>().len(),
+        4
+    );
+    let cursor = app
+        .register_consumer(UiActionConsumerId::new("source-isolation").unwrap())
+        .unwrap();
+    let receipt = app.present_frame(Arc::clone(&frame), 1).unwrap();
+    let route = UiRouteStamp::from_receipt(receipt);
+    for (index, point) in points.into_iter().enumerate() {
+        for event in [
+            UiInputEvent::PointerMoved {
+                seat: UiSeatId::PRIMARY,
+                pointer: UiPointerId::PRIMARY,
+                position: point,
+            },
+            UiInputEvent::PointerButton {
+                seat: UiSeatId::PRIMARY,
+                pointer: UiPointerId::PRIMARY,
+                button: UiPointerButton::Primary,
+                phase: UiButtonPhase::Pressed,
+                position: Some(point),
+            },
+        ] {
+            assert!(matches!(
+                app.dispatch_input(route, event),
+                UiRouteDisposition::Consumed(_)
+            ));
+        }
+        let semantic = ui_semantic_snapshot(app.world(), receipt, UiSeatId::PRIMARY).unwrap();
+        assert_eq!(
+            semantic
+                .nodes()
+                .iter()
+                .filter(|node| node.name() == "retry")
+                .map(|node| node.key())
+                .collect::<std::collections::BTreeSet<_>>(),
+            keys.iter().collect::<std::collections::BTreeSet<_>>()
+        );
+        for node in semantic
+            .nodes()
+            .iter()
+            .filter(|node| node.name() == "retry")
+        {
+            assert_eq!(node.state().pressed(), node.key() == &keys[index]);
+            assert_eq!(node.state().focused(), node.key() == &keys[index]);
+        }
+        if index == 0 {
+            app.update().unwrap();
+            let pressed = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+            let color = |frame: &nara_ui_kernel::UiFrame, key: &UiKey| {
+                frame
+                    .paint()
+                    .iter()
+                    .find_map(|primitive| match primitive {
+                        UiPaintPrimitive::Rect {
+                            key: Some(actual),
+                            brush: Some(UiResolvedBrush::Solid(color)),
+                            ..
+                        } if actual == key => Some(*color),
+                        _ => None,
+                    })
+                    .expect("each controlled button should have a solid rectangle")
+            };
+            for (key_index, key) in keys.iter().enumerate() {
+                if key_index == index {
+                    assert_eq!(color(&pressed, key), UiTheme::default().palette().positive);
+                    assert_ne!(color(&pressed, key), color(&frame, key));
+                } else {
+                    assert_eq!(color(&pressed, key), color(&frame, key));
+                }
+            }
+        }
+        assert!(matches!(
+            app.dispatch_input(
+                route,
+                UiInputEvent::PointerButton {
+                    seat: UiSeatId::PRIMARY,
+                    pointer: UiPointerId::PRIMARY,
+                    button: UiPointerButton::Primary,
+                    phase: UiButtonPhase::Released,
+                    position: Some(point),
+                }
+            ),
+            UiRouteDisposition::Consumed(_)
+        ));
+    }
+    let events = app
+        .world()
+        .resource::<UiActionJournal>()
+        .pending(&cursor)
+        .unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event.target())
+            .collect::<Vec<_>>(),
+        keys.iter().collect::<Vec<_>>()
+    );
+    assert!(
+        events
+            .iter()
+            .all(|event| event.action().as_str() == "retry-action")
+    );
+    let last = events.last().unwrap().sequence();
+    app.acknowledge(cursor, last);
+}
+
+#[test]
+fn persistent_rebuild_keeps_keys_but_not_runtime_or_unpresented_behavior_authority() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Resource)]
+    struct CurrentScene(nara_scene::SpawnedSceneInstance);
+
+    let mut app = ui_app();
+    install_test_surface(app.configuration_world());
+    let requested_step = Arc::new(AtomicUsize::new(0));
+    let requested = Arc::clone(&requested_step);
+    let mut current = None;
+    let mut applied_step = None;
+    app.configuration()
+        .add_systems(CoreStage::Update, move |world: &mut World| {
+            let step = requested.load(Ordering::Relaxed);
+            if applied_step == Some(step) {
+                return;
+            }
+            let registry = ComponentRegistry::from_snapshot(
+                nara_reflect::component_registry(world)
+                    .unwrap()
+                    .snapshot()
+                    .unwrap(),
+            );
+            let candidate = nara_scene::ExpandedSceneCandidate::plain(
+                scene_source_key(if step == 2 { "other" } else { "panel" }),
+                Arc::new(SceneDocument::new(
+                    [scene_id("root")],
+                    [
+                        SceneEntityRecord::new(scene_id("root")).with_children([scene_id("retry")]),
+                        SceneEntityRecord::new(scene_id("retry")),
+                    ],
+                )),
+            );
+            let prepared = match &current {
+                Some(current) => nara_scene::prepare_scene_replacement(
+                    world, &registry, &candidate, current, None,
+                ),
+                None => nara_scene::prepare_scene(
+                    world,
+                    &registry,
+                    &candidate,
+                    &scene_occurrence("rebuild"),
+                    None,
+                ),
+            }
+            .unwrap();
+            let report = prepared.commit(world);
+            assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+            let instance = report.instance.unwrap();
+            let entities = world
+                .iter_entities()
+                .filter_map(|entity| {
+                    entity
+                        .get::<SceneEntitySource>()
+                        .filter(|source| source.instance_id == instance.instance_id())
+                        .map(|source| (entity.id(), source.source_entity_id.clone()))
+                })
+                .collect::<Vec<_>>();
+            for (entity, local) in entities {
+                if local.as_str() == "root" {
+                    world
+                        .entity_mut(entity)
+                        .insert((UiRoot::new(UiLayer::Base), UiNode::new(UiStyle::fill())));
+                } else {
+                    world.entity_mut(entity).insert(button_bundle(
+                        "retry",
+                        if step == 0 {
+                            "old-action"
+                        } else {
+                            "new-action"
+                        },
+                        UiColor::rgba(0.2, 0.4, 0.8, 1.0),
+                    ));
+                }
+            }
+            world.insert_resource(CurrentScene(instance.clone()));
+            current = Some(instance);
+            applied_step = Some(step);
+        })
+        .unwrap();
+    app.update().unwrap();
+    let original = app.world().resource::<CurrentScene>().0.clone();
+    let live = original.resolve(app.world(), &scene_id("retry"));
+    let first = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    let key = first.semantics()[0].key().clone();
+    let receipt = app.present_frame(first, 1).unwrap();
+    let cursor = app
+        .register_consumer(UiActionConsumerId::new("persistent-rebuild").unwrap())
+        .unwrap();
+
+    requested_step.store(1, Ordering::Relaxed);
+    app.update().unwrap();
+    let successor = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    assert_eq!(successor.semantics()[0].key(), &key);
+    assert_ne!(original.resolve(app.world(), &scene_id("retry")), live);
+    let current = &app.world().resource::<CurrentScene>().0;
+    assert_ne!(current.instance_id(), original.instance_id());
+    assert_ne!(
+        original.resolve(app.world(), &scene_id("retry")),
+        current.resolve(app.world(), &scene_id("retry"))
+    );
+    assert!(matches!(
+        app.dispatch_accessibility(UiAccessibilityInput::semantic_action(
+            receipt,
+            UiSeatId::PRIMARY,
+            key.clone(),
+            UiActionId::new("old-action").unwrap(),
+        )),
+        UiRouteDisposition::Consumed(_)
+    ));
+    assert!(matches!(
+        app.present_frame(successor, 2),
+        Err(UiAdapterError::FrameNotLatest { surface: 7 })
+    ));
+    app.update().unwrap();
+    let successor = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    assert_eq!(successor.semantics()[0].key(), &key);
+    let successor_receipt = app.present_frame(successor, 2).unwrap();
+    assert!(matches!(
+        app.dispatch_accessibility(UiAccessibilityInput::semantic_action(
+            successor_receipt,
+            UiSeatId::PRIMARY,
+            key.clone(),
+            UiActionId::new("new-action").unwrap(),
+        )),
+        UiRouteDisposition::Consumed(_)
+    ));
+
+    requested_step.store(2, Ordering::Relaxed);
+    app.update().unwrap();
+    let switched = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    let switched_key = switched.semantics()[0].key().clone();
+    assert_ne!(switched_key, key);
+    let switched_receipt = app.present_frame(switched, 3).unwrap();
+    assert!(matches!(
+        app.dispatch_accessibility(UiAccessibilityInput::semantic_action(
+            switched_receipt,
+            UiSeatId::PRIMARY,
+            key.clone(),
+            UiActionId::new("new-action").unwrap(),
+        )),
+        UiRouteDisposition::RejectedClosed(UiRouteRejection::NonActivation(
+            UiNonActivation::TargetRetired { .. }
+        ))
+    ));
+    assert!(matches!(
+        app.dispatch_accessibility(UiAccessibilityInput::semantic_action(
+            switched_receipt,
+            UiSeatId::PRIMARY,
+            switched_key,
+            UiActionId::new("new-action").unwrap(),
+        )),
+        UiRouteDisposition::Consumed(_)
+    ));
+    let actions = app
+        .world()
+        .resource::<UiActionJournal>()
+        .pending(&cursor)
+        .unwrap();
+    assert_eq!(actions.len(), 3);
+    assert_eq!(actions[0].target(), &key);
+    assert_eq!(actions[0].action().as_str(), "old-action");
+    assert_eq!(actions[1].action().as_str(), "new-action");
+    let last = actions.last().unwrap().sequence();
+    app.acknowledge(cursor, last);
+    app.retire_surface(surface_id()).unwrap().unwrap();
+    assert!(matches!(
+        app.dispatch_accessibility(UiAccessibilityInput::semantic_action(
+            receipt,
+            UiSeatId::PRIMARY,
+            key,
+            UiActionId::new("old-action").unwrap(),
+        )),
+        UiRouteDisposition::RejectedClosed(UiRouteRejection::RetiredSurface { surface: 7 })
+    ));
+}
+
 fn scene_occurrence(slot: &str) -> nara_scene::SceneOccurrenceKey {
     nara_scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }
