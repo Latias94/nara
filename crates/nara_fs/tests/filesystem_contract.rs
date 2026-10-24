@@ -207,6 +207,180 @@ fn portable_read_write(root: &TestRoot) -> DirectoryCapability {
     .unwrap()
 }
 
+#[cfg(any(windows, target_os = "linux"))]
+fn assert_spelling_rejected<T: std::fmt::Debug>(result: Result<T, FsError>) {
+    match result.unwrap_err() {
+        FsError::ExactSpellingMismatch { .. } => {}
+        // A directory with native case-sensitive lookup rejects the alias before verification.
+        FsError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {}
+        error => panic!("expected an exact-spelling rejection, got {error:?}"),
+    }
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn exact_spelling_opens_nested_directories_and_the_verified_file() {
+    let root = TestRoot::new();
+    fs::create_dir_all(root.path().join("Assets/Scenes")).unwrap();
+    fs::write(
+        root.path().join("Assets/Scenes/startup.scene.json"),
+        b"scene",
+    )
+    .unwrap();
+
+    for trust in [
+        TrustMode::TrustedLocal,
+        TrustMode::Untrusted,
+        TrustMode::Recovery,
+    ] {
+        let capability = DirectoryCapability::from_host_handle(
+            host_directory(root.path()),
+            HostCapabilityOptions::new(CapabilityRights::ReadOnly, trust).with_generation(17),
+        )
+        .unwrap();
+        let path = relative("Assets/Scenes/startup.scene.json");
+        let file = capability.open_file_exact(&path).unwrap();
+        assert_eq!(
+            file.identity(),
+            capability.open_file(&path).unwrap().identity()
+        );
+        assert_eq!(file.read_to_end_bounded(5).unwrap(), b"scene");
+        assert_eq!(file.identity().generation().get(), 17);
+
+        let directories = relative("Assets/Scenes");
+        let directory = capability.open_directory_exact(&directories).unwrap();
+        assert_eq!(
+            directory.identity(),
+            capability.open_directory(&directories).unwrap().identity()
+        );
+        assert_eq!(directory.options().rights(), CapabilityRights::ReadOnly);
+        assert_eq!(directory.options().trust(), trust);
+        assert_eq!(directory.resolution_tier(), capability.resolution_tier());
+        assert_eq!(
+            directory
+                .open_file_exact(&relative("startup.scene.json"))
+                .unwrap()
+                .identity(),
+            file.identity()
+        );
+    }
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn exact_spelling_rejects_aliases_in_every_directory_and_filename_component() {
+    let root = TestRoot::new();
+    fs::create_dir_all(root.path().join("Assets/Scenes")).unwrap();
+    fs::write(
+        root.path().join("Assets/Scenes/startup.scene.json"),
+        b"scene",
+    )
+    .unwrap();
+    let capability = portable_read_only(&root);
+
+    for path in [
+        "assets/Scenes/startup.scene.json",
+        "Assets/scenes/startup.scene.json",
+        "Assets/Scenes/STARTUP.scene.json",
+        "ASSETS/SCENES/STARTUP.SCENE.JSON",
+    ] {
+        assert_spelling_rejected(capability.open_file_exact(&relative(path)));
+    }
+    for path in ["assets", "assets/Scenes", "Assets/scenes", "ASSETS/SCENES"] {
+        assert_spelling_rejected(capability.open_directory_exact(&relative(path)));
+    }
+    assert!(
+        capability
+            .open_file_exact(&relative("Assets/Scenes/startup.scene.json"))
+            .is_ok()
+    );
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn exact_spelling_compares_unicode_without_casefolding_or_normalization() {
+    let root = TestRoot::new();
+    fs::create_dir_all(root.path().join("\u{00c4}rt/Scenes")).unwrap();
+    fs::write(
+        root.path().join("\u{00c4}rt/Scenes/caf\u{00e9}.scene.json"),
+        b"scene",
+    )
+    .unwrap();
+    let capability = portable_read_only(&root);
+
+    assert!(
+        capability
+            .open_directory_exact(&relative("\u{00c4}rt/Scenes"))
+            .is_ok()
+    );
+    assert!(
+        capability
+            .open_file_exact(&relative("\u{00c4}rt/Scenes/caf\u{00e9}.scene.json"))
+            .is_ok()
+    );
+    assert_spelling_rejected(capability.open_directory_exact(&relative("\u{00e4}rt/Scenes")));
+    for path in [
+        "\u{00e4}rt/Scenes/caf\u{00e9}.scene.json",
+        "\u{00c4}rt/Scenes/caf\u{00c9}.scene.json",
+        "\u{00c4}rt/Scenes/cafe\u{0301}.scene.json",
+    ] {
+        assert_spelling_rejected(capability.open_file_exact(&relative(path)));
+    }
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn exact_spelling_does_not_relax_strict_single_link_admission() {
+    let root = TestRoot::new();
+    fs::write(root.path().join("startup.scene.json"), b"scene").unwrap();
+    fs::hard_link(
+        root.path().join("startup.scene.json"),
+        root.path().join("alias.scene.json"),
+    )
+    .unwrap();
+    let capability = portable_read_only(&root);
+
+    for name in ["startup.scene.json", "alias.scene.json"] {
+        assert!(matches!(
+            capability.open_file_exact(&relative(name)),
+            Err(FsError::MultipleLinks { links: 2 })
+        ));
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+#[test]
+fn exact_spelling_fails_closed_without_a_unix_stored_name_verifier() {
+    let root = TestRoot::new();
+    fs::create_dir(root.path().join("Assets")).unwrap();
+    fs::write(root.path().join("Assets/startup.scene.json"), b"scene").unwrap();
+    let capability = DirectoryCapability::from_host_handle(
+        host_directory(root.path()),
+        HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::TrustedLocal),
+    )
+    .unwrap();
+    let path = relative("Assets/startup.scene.json");
+    assert!(capability.open_file(&path).is_ok());
+    assert!(matches!(
+        capability.open_file_exact(&path),
+        Err(FsError::Unsupported {
+            operation: nara_fs::FsOperation::OpenFile,
+            ..
+        })
+    ));
+    assert!(matches!(
+        capability.open_directory_exact(&relative("Assets")),
+        Err(FsError::Unsupported {
+            operation: nara_fs::FsOperation::OpenDirectory,
+            ..
+        })
+    ));
+    assert!(matches!(
+        capability.open_file_exact(&relative("missing.scene.json")),
+        Err(FsError::Unsupported { .. })
+    ));
+}
+
 #[cfg(target_os = "linux")]
 fn strict_read_write(root: &TestRoot) -> DirectoryCapability {
     DirectoryCapability::from_host_handle(

@@ -185,6 +185,43 @@ pub(crate) fn open_file(
     imp::open_file(parent, component, strict)
 }
 
+pub(crate) fn preflight_exact_spelling(operation: crate::FsOperation) -> Result<(), FsError> {
+    #[cfg(any(windows, target_os = "linux"))]
+    {
+        let _ = operation;
+        Ok(())
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        Err(FsError::Unsupported {
+            operation,
+            capability: "handle-bound exact stored spelling verification",
+        })
+    }
+}
+
+pub(crate) fn verify_exact_spelling(
+    parent: &File,
+    file: &File,
+    component: &RelativeComponent,
+    operation: crate::FsOperation,
+) -> Result<(), FsError> {
+    #[cfg(windows)]
+    {
+        let _ = parent;
+        imp::verify_exact_spelling(file, component, operation)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        imp::verify_exact_spelling(parent, file, component, operation)
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = (parent, file, component);
+        preflight_exact_spelling(operation)
+    }
+}
+
 pub(crate) fn child_exists(
     parent: &File,
     component: &RelativeComponent,

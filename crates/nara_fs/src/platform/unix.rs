@@ -147,6 +147,66 @@ pub(crate) fn next_directory_entry(
 }
 
 #[cfg(target_os = "linux")]
+pub(crate) fn verify_exact_spelling(
+    parent: &File,
+    file: &File,
+    component: &RelativeComponent,
+    operation: FsOperation,
+) -> Result<(), FsError> {
+    verify_exact_spelling_with_observer(parent, file, component, operation, 65_536, || {})
+}
+
+#[cfg(target_os = "linux")]
+fn verify_exact_spelling_with_observer(
+    parent: &File,
+    file: &File,
+    component: &RelativeComponent,
+    operation: FsOperation,
+    max_entries: usize,
+    mut before_join: impl FnMut(),
+) -> Result<(), FsError> {
+    use rustix::fs::{AtFlags, statat};
+
+    // Lookup can be case-folded even on Linux. Observe the exact native directory entry, then
+    // join it to the already opened object without reopening a path or retaining sibling names.
+    let mut cursor = begin_directory_enumeration(parent)?;
+    let mut observed = 0;
+    for entry in &mut cursor.entries {
+        let entry = entry.map_err(|error| super::rustix_io(operation, error))?;
+        let name = entry.file_name().to_bytes();
+        if matches!(name, b"." | b"..") {
+            continue;
+        }
+        if observed == max_entries {
+            return Err(FsError::DirectoryEnumerationEntryLimitExceeded { limit: max_entries });
+        }
+        observed += 1;
+        if name != component.as_os_str().as_encoded_bytes() {
+            continue;
+        }
+        let entry_inode = entry.ino();
+        if entry_inode == 0 {
+            return Err(FsError::Unproven {
+                operation,
+                proof: "the exact native entry did not provide inode association evidence",
+            });
+        }
+        before_join();
+        let named = statat(parent, component.as_os_str(), AtFlags::SYMLINK_NOFOLLOW)
+            .map_err(|error| super::rustix_io(operation, error))?;
+        let opened = fstat(file).map_err(|error| super::rustix_io(operation, error))?;
+        if named.st_dev != opened.st_dev
+            || named.st_ino != opened.st_ino
+            || entry_inode != opened.st_ino as u64
+        {
+            return Err(FsError::CapabilityIdentityDrift { operation });
+        }
+        return Ok(());
+    }
+    Err(FsError::ExactSpellingMismatch { operation })
+}
+
+#[cfg(target_os = "linux")]
 pub(crate) fn resolution_tier(file: &File) -> ResolutionTier {
     match openat2(
         file,
@@ -671,6 +731,110 @@ fn parse_mount_filesystem(mountinfo: &[u8], expected_mount_id: u64) -> Option<&s
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
+
+    struct ExactFixture(std::path::PathBuf);
+
+    impl ExactFixture {
+        fn new() -> Self {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+            let root = std::env::temp_dir().join(format!(
+                "nara_fs_exact_{}_{}",
+                std::process::id(),
+                SEQUENCE.fetch_add(1, Ordering::Relaxed),
+            ));
+            std::fs::create_dir(&root).unwrap();
+            Self(root)
+        }
+    }
+
+    impl Drop for ExactFixture {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    #[test]
+    fn exact_entry_join_rejects_a_replacement_even_if_named_and_opened_inodes_match() {
+        let fixture = ExactFixture::new();
+        let requested = fixture.0.join("VALUE");
+        let original = fixture.0.join("original");
+        std::fs::write(&requested, b"placeholder").unwrap();
+        std::fs::write(&original, b"original").unwrap();
+        let parent = File::open(&fixture.0).unwrap();
+        let opened = File::open(&original).unwrap();
+        let error = verify_exact_spelling_with_observer(
+            &parent,
+            &opened,
+            &RelativeComponent::new("VALUE").unwrap(),
+            FsOperation::OpenFile,
+            8,
+            || {
+                std::fs::remove_file(&requested).unwrap();
+                std::fs::rename(&original, &requested).unwrap();
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, FsError::CapabilityIdentityDrift { .. }));
+    }
+
+    #[test]
+    fn exact_entry_scan_is_bounded_and_distinguishes_exhaustion_from_absence() {
+        let fixture = ExactFixture::new();
+        for name in ["a", "b", "c"] {
+            std::fs::write(fixture.0.join(name), b"value").unwrap();
+        }
+        let parent = File::open(&fixture.0).unwrap();
+        let opened = File::open(fixture.0.join("a")).unwrap();
+        let component = RelativeComponent::new("missing").unwrap();
+        let check = |limit| {
+            verify_exact_spelling_with_observer(
+                &parent,
+                &opened,
+                &component,
+                FsOperation::OpenFile,
+                limit,
+                || {},
+            )
+        };
+        assert!(matches!(
+            check(2),
+            Err(FsError::DirectoryEnumerationEntryLimitExceeded { limit: 2 })
+        ));
+        assert!(matches!(
+            check(3),
+            Err(FsError::ExactSpellingMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn nested_exact_name_observation_holds_three_additional_descriptors() {
+        let fixture = ExactFixture::new();
+        std::fs::create_dir(fixture.0.join("nested")).unwrap();
+        std::fs::write(fixture.0.join("nested/value"), b"value").unwrap();
+        let descriptor_count = || {
+            std::fs::read_dir("/proc/self/fd")
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter_map(|entry| std::fs::read_link(entry.path()).ok())
+                .filter(|target| target.starts_with(&fixture.0))
+                .count()
+        };
+        assert_eq!(descriptor_count(), 0);
+        let parent = File::open(fixture.0.join("nested")).unwrap();
+        let opened = File::open(fixture.0.join("nested/value")).unwrap();
+        verify_exact_spelling_with_observer(
+            &parent,
+            &opened,
+            &RelativeComponent::new("value").unwrap(),
+            FsOperation::OpenFile,
+            8,
+            || assert_eq!(descriptor_count(), 3),
+        )
+        .unwrap();
+        drop((parent, opened));
+        assert_eq!(descriptor_count(), 0);
+    }
 
     #[test]
     fn directory_publication_native_failures_keep_collision_and_proof_distinct() {

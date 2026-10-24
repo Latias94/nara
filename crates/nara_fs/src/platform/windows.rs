@@ -13,10 +13,11 @@ use std::{
 use windows_sys::Wdk::{
     Foundation::OBJECT_ATTRIBUTES,
     Storage::FileSystem::{
-        FILE_CREATE, FILE_DIRECTORY_FILE, FILE_ID_BOTH_DIR_INFORMATION, FILE_NON_DIRECTORY_FILE,
-        FILE_OPEN, FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT, FileFsDeviceInformation,
-        FileIdBothDirectoryInformation, FileRenameInformationEx, NtCreateFile, NtOpenFile,
-        NtQueryDirectoryFileEx, NtQueryVolumeInformationFile, NtSetInformationFile,
+        FILE_CREATE, FILE_DIRECTORY_FILE, FILE_ID_BOTH_DIR_INFORMATION, FILE_NAME_INFORMATION,
+        FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT,
+        FileFsDeviceInformation, FileIdBothDirectoryInformation, FileNormalizedNameInformation,
+        FileRenameInformationEx, NtCreateFile, NtOpenFile, NtQueryDirectoryFileEx,
+        NtQueryInformationFile, NtQueryVolumeInformationFile, NtSetInformationFile,
     },
     System::SystemServices::{RtlGetVersion, SL_RESTART_SCAN, SL_RETURN_SINGLE_ENTRY},
 };
@@ -52,6 +53,7 @@ use crate::{
 };
 
 const OBJ_CASE_INSENSITIVE: u32 = 0x40;
+const EXACT_NAME_BUFFER_BYTES: usize = 65_536;
 const FILE_REMOTE_DEVICE: u32 = 0x10;
 const FILE_RENAME_REPLACE_IF_EXISTS: u32 = 0x1;
 const FILE_RENAME_POSIX_SEMANTICS: u32 = 0x2;
@@ -551,6 +553,93 @@ pub(crate) fn open_file(
         FILE_NON_DIRECTORY_FILE,
         FsOperation::OpenFile,
     )
+}
+
+pub(crate) fn verify_exact_spelling(
+    file: &File,
+    component: &RelativeComponent,
+    operation: FsOperation,
+) -> Result<(), FsError> {
+    if !matches!(
+        volume_semantics(file),
+        WindowsVolumeSemantics::LocalNtfs | WindowsVolumeSemantics::LocalRefs
+    ) {
+        return Err(FsError::Unproven {
+            operation,
+            proof: "exact spelling requires local NTFS/ReFS normalized-name semantics",
+        });
+    }
+
+    // Clearing OBJ_CASE_INSENSITIVE alone is insufficient under Windows' global compatibility
+    // policy. Query the opened link's stored long name instead ([MS-FSA] FileNormalizedNameInformation).
+    // The fixed allocation and single call deliberately reject overflow without a growing retry.
+    let mut storage = vec![0_u32; EXACT_NAME_BUFFER_BYTES / size_of::<u32>()];
+    let info = storage.as_mut_ptr().cast::<FILE_NAME_INFORMATION>();
+    let mut status_block = IO_STATUS_BLOCK::default();
+    // SAFETY: `file` is live; `storage` is aligned for FILE_NAME_INFORMATION and remains writable
+    // for exactly the supplied byte count throughout this synchronous query.
+    let status = unsafe {
+        NtQueryInformationFile(
+            raw_handle(file),
+            &mut status_block,
+            info.cast(),
+            EXACT_NAME_BUFFER_BYTES as u32,
+            FileNormalizedNameInformation,
+        )
+    };
+    if status != 0 {
+        return Err(FsError::Unproven {
+            operation,
+            proof: "the opened handle did not provide a complete normalized name within 64 KiB",
+        });
+    }
+
+    let offset = offset_of!(FILE_NAME_INFORMATION, FileName);
+    // SAFETY: the fixed allocation contains the initialized header even if a faulty provider
+    // returned too little data. Validate both reported lengths before accessing trailing units.
+    let name_bytes = unsafe { (*info).FileNameLength as usize };
+    let returned = status_block.Information;
+    if returned > EXACT_NAME_BUFFER_BYTES
+        || returned < offset
+        || name_bytes == 0
+        || name_bytes % size_of::<u16>() != 0
+        || name_bytes > returned - offset
+    {
+        return Err(FsError::Unproven {
+            operation,
+            proof: "normalized-name query returned incomplete or invalid name evidence",
+        });
+    }
+    // SAFETY: `info` is suitably aligned; the checked byte range lies entirely in `storage`.
+    let name = unsafe {
+        std::slice::from_raw_parts(
+            ptr::addr_of!((*info).FileName).cast::<u16>(),
+            name_bytes / size_of::<u16>(),
+        )
+    };
+    verify_normalized_leaf(name, component, operation)
+}
+
+fn verify_normalized_leaf(
+    name: &[u16],
+    component: &RelativeComponent,
+    operation: FsOperation,
+) -> Result<(), FsError> {
+    if name.first() != Some(&u16::from(b'\\')) || name.last() == Some(&u16::from(b'\\')) {
+        return Err(FsError::Unproven {
+            operation,
+            proof: "normalized-name evidence is not an absolute file name",
+        });
+    }
+    let leaf = name
+        .rsplit(|unit| *unit == u16::from(b'\\'))
+        .next()
+        .unwrap_or_default();
+    if leaf.iter().copied().eq(component.as_os_str().encode_wide()) {
+        Ok(())
+    } else {
+        Err(FsError::ExactSpellingMismatch { operation })
+    }
 }
 
 pub(crate) fn open_child(
@@ -1079,6 +1168,60 @@ fn raw_handle(file: &File) -> *mut core::ffi::c_void {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_normalized_leaf_uses_raw_utf16_long_name_spelling() {
+        let name = "\\Host\\Assets\\caf\u{00e9}.scene.json"
+            .encode_utf16()
+            .collect::<Vec<_>>();
+        let operation = FsOperation::OpenFile;
+        assert!(
+            verify_normalized_leaf(
+                &name,
+                &RelativeComponent::new("caf\u{00e9}.scene.json").unwrap(),
+                operation,
+            )
+            .is_ok()
+        );
+        for alias in [
+            "CAF\u{00c9}.SCENE.JSON",
+            "cafe\u{0301}.scene.json",
+            "CAFE~1.JSO",
+        ] {
+            assert!(matches!(
+                verify_normalized_leaf(&name, &RelativeComponent::new(alias).unwrap(), operation),
+                Err(FsError::ExactSpellingMismatch {
+                    operation: FsOperation::OpenFile
+                })
+            ));
+        }
+        // No lossy UTF-16 -> UTF-8 conversion: a native unpaired surrogate is preserved too.
+        let component = OsString::from_wide(&[0xd800, u16::from(b'x')]);
+        let native_name = [u16::from(b'\\'), 0xd800, u16::from(b'x')];
+        assert!(
+            verify_normalized_leaf(
+                &native_name,
+                &RelativeComponent::new(component).unwrap(),
+                operation,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn exact_normalized_leaf_rejects_missing_absolute_name_evidence() {
+        let component = RelativeComponent::new("value.txt").unwrap();
+        for name in ["", "value.txt", "\\", "\\Host\\"] {
+            assert!(matches!(
+                verify_normalized_leaf(
+                    &name.encode_utf16().collect::<Vec<_>>(),
+                    &component,
+                    FsOperation::OpenFile,
+                ),
+                Err(FsError::Unproven { .. })
+            ));
+        }
+    }
 
     #[test]
     fn directory_publication_never_requests_replacement() {

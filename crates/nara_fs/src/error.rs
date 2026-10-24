@@ -109,6 +109,8 @@ pub enum FsError {
         operation: FsOperation,
         proof: &'static str,
     },
+    #[error("{operation} rejected a component whose stored spelling differs from the request")]
+    ExactSpellingMismatch { operation: FsOperation },
     #[error("a read-only directory capability cannot perform {operation}")]
     ReadOnlyCapability { operation: FsOperation },
     #[error("host-issued handle is not a directory")]

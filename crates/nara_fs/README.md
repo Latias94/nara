@@ -15,6 +15,58 @@ The Host opens a directory handle and imports it with explicit rights, trust and
 code then uses validated `RelativeComponent` and `RelativePath` values. No public operation accepts
 or returns a native path as authorization.
 
+## Exact Stored Spelling
+
+`DirectoryCapability::open_file_exact` and `open_directory_exact` opt into exact stored spelling
+for **every** requested descendant component, not only the leaf. The ordinary open methods keep
+their existing native lookup behavior. Canonical source admission can use the exact methods
+without lowercasing names, normalizing Unicode or recovering path authority:
+
+```rust,ignore
+let path = nara_fs::RelativePath::new("Assets/Scenes/startup.scene.json")?;
+let source = project_directory.open_file_exact(&path)?;
+let bytes = source.read_to_end_bounded(max_encoded_bytes)?;
+```
+
+On local Windows NTFS/ReFS, each component is opened relative to the preceding capability and
+passes the existing object-kind, reparse, volume and trust-specific identity/link checks. Before
+using that handle, the adapter queries `FileNormalizedNameInformation` on the **same** handle and
+compares its final long-name component as raw UTF-16 units. This rejects case, Unicode-spelling
+and DOS short-name aliases without reopening the returned name. The query uses a fixed 64 KiB
+buffer, once per component, with no growing retry or directory enumeration. `RelativePath` already
+bounds traversal to 256 components and 32,767 native units. The 64 KiB temporary name allocation is
+released before the next component; kernel I/O latency and internal allocations are not bounded
+by that output-buffer limit.
+
+A mismatch returns `FsError::ExactSpellingMismatch`. Unsupported volume semantics, a failed query,
+overflow (including a long Host-root prefix), or incomplete name evidence returns `Unproven`.
+
+Linux does not assume that `openat`/`openat2` imply case-sensitive stored names. It uses an
+independent handle-bound directory cursor to compare native entry bytes exactly, then joins the
+matching entry's inode and no-follow `statat` device/inode to the already opened handle. The scan stops
+at the match and retains no sibling list; it rejects after 65,536 entries per component. This is
+bounded linear sibling work, unlike the Windows constant-query path, and can reject very large
+directories. Windows and WSL Linux filesystem cohorts execute separately; they do not qualify
+casefold-volume behavior or native product loading. Other targets currently return `Unsupported`
+before opening descendants. There is no permissive fallback.
+
+Verification starts below the Host-issued root; it does not certify that root's ambient spelling.
+Like ordinary capability opens, it retains the opened object, not an atomic namespace/content
+snapshot: an external rename can invalidate an earlier component's observed name. Strict trust
+still rejects multi-link regular files. Exact spelling alone is not persistent source identity or
+protection from subsequent content changes.
+
+Native design references: Microsoft's [global case-sensitivity caveat](https://devblogs.microsoft.com/commandline/per-directory-case-sensitivity-and-wsl/)
+rules out relying only on clearing `OBJ_CASE_INSENSITIVE`;
+[`FileNormalizedNameInformation`](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/3d5c68f8-fbc5-4f94-a51d-3600a319fd45)
+uses [`BuildRelativeName`](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/280d599a-e920-4710-9e7c-611b64d5a15e)
+and the opened link's stored name rather than its separate short-name alias. Linux's
+[ext4 documentation](https://www.kernel.org/doc/html/v6.16/admin-guide/ext4.html) documents
+per-directory case-insensitive Unicode lookup; a Unix compile target is not exact-name evidence.
+These references explain the mechanism, not a claim of executed platform qualification.
+
+## Directory Publication
+
 Directory publication is a move-only transaction:
 
 1. The caller supplies a validated same-parent staging name and

@@ -180,6 +180,32 @@ impl DirectoryCapability {
     }
 
     pub fn open_directory(&self, path: &RelativePath) -> Result<Self, FsError> {
+        self.open_directory_with_spelling(path, false)
+    }
+
+    /// Opens a descendant directory only when every component has its exact stored spelling.
+    ///
+    /// This preserves the authority and traversal checks of [`Self::open_directory`]. Each
+    /// component is verified on its opened handle before traversal continues; case folding,
+    /// Unicode normalization and alternate short names do not count as exact matches.
+    ///
+    /// Windows NTFS/ReFS uses one normalized-name query per component with a fixed 64 KiB buffer.
+    /// Linux observes at most 65,536 native directory entries per component, joining the matching
+    /// stored name to the opened object's device/inode. Neither adapter reopens a returned path.
+    /// Other platforms return [`FsError::Unsupported`] before opening descendants. Missing,
+    /// oversized or unproven name evidence rejects rather than weakening the guarantee.
+    /// The Host-issued root's spelling is outside this check. Concurrent rename is not frozen:
+    /// this is a per-component observation, not an atomic namespace or content snapshot.
+    pub fn open_directory_exact(&self, path: &RelativePath) -> Result<Self, FsError> {
+        platform::preflight_exact_spelling(FsOperation::OpenDirectory)?;
+        self.open_directory_with_spelling(path, true)
+    }
+
+    fn open_directory_with_spelling(
+        &self,
+        path: &RelativePath,
+        exact: bool,
+    ) -> Result<Self, FsError> {
         self.ensure_strict_resolution(FsOperation::OpenDirectory)?;
         let mut current = Arc::clone(&self.inner);
         for component in path.components() {
@@ -190,6 +216,14 @@ impl DirectoryCapability {
             )?;
             let facts = platform::facts(&file)?;
             validate_directory_facts(&self.inner, facts)?;
+            if exact {
+                platform::verify_exact_spelling(
+                    &current.file,
+                    &file,
+                    component,
+                    FsOperation::OpenDirectory,
+                )?;
+            }
             current = self.opened_directory_inner(file, facts);
         }
         Ok(Self { inner: current })
@@ -211,7 +245,17 @@ impl DirectoryCapability {
     }
 
     pub fn open_file(&self, path: &RelativePath) -> Result<FileCapability, FsError> {
-        self.open_file_with_observer(path, |_, _| {})
+        self.open_file_with_observer(path, false, |_, _| {})
+    }
+
+    /// Opens a regular file only when every parent and the leaf have their exact stored spelling.
+    ///
+    /// Uses the platform support, bounded name verification and concurrent-rename limits of
+    /// [`Self::open_directory_exact`], retaining all checks of [`Self::open_file`] (including
+    /// strict single-link admission). Returns the same verified handle, never a reopened path.
+    pub fn open_file_exact(&self, path: &RelativePath) -> Result<FileCapability, FsError> {
+        platform::preflight_exact_spelling(FsOperation::OpenFile)?;
+        self.open_file_with_observer(path, true, |_, _| {})
     }
 
     /// Resolves the authorized parent directory and leaf of a file target.
@@ -267,6 +311,7 @@ impl DirectoryCapability {
     fn open_file_with_observer(
         &self,
         path: &RelativePath,
+        exact: bool,
         mut after_parent_open: impl FnMut(usize, &RelativeComponent),
     ) -> Result<FileCapability, FsError> {
         self.ensure_strict_resolution(FsOperation::OpenFile)?;
@@ -282,6 +327,14 @@ impl DirectoryCapability {
             )?;
             let facts = platform::facts(&file)?;
             validate_directory_facts(&self.inner, facts)?;
+            if exact {
+                platform::verify_exact_spelling(
+                    &parent.file,
+                    &file,
+                    component,
+                    FsOperation::OpenDirectory,
+                )?;
+            }
             parent = self.opened_directory_inner(file, facts);
             after_parent_open(index, component);
         }
@@ -289,6 +342,9 @@ impl DirectoryCapability {
         let file = platform::open_file(&parent.file, leaf, self.inner.options.trust.is_strict())?;
         let facts = platform::facts(&file)?;
         validate_file_facts(&self.inner, facts)?;
+        if exact {
+            platform::verify_exact_spelling(&parent.file, &file, leaf, FsOperation::OpenFile)?;
+        }
         Ok(FileCapability::from_opened(
             file,
             FileIdentity::new(
@@ -936,7 +992,7 @@ mod tests {
         .unwrap();
         let path = RelativePath::new("assets/value.txt").unwrap();
         let file = capability
-            .open_file_with_observer(&path, |index, _| {
+            .open_file_with_observer(&path, false, |index, _| {
                 if index == 0 {
                     std::fs::rename(&original, &moved).unwrap();
                     std::fs::rename(&replacement, &original).unwrap();
@@ -977,13 +1033,21 @@ mod tests {
 
         let leaf = RelativePath::new("value.txt").unwrap();
         for tag in [IO_REPARSE_TAG_SYMLINK, 0x8000_0042] {
-            let facts = reparse_fixture_facts(&capability, FileKind::Regular, tag);
-            let error = platform::with_test_facts_override(facts, || capability.open_file(&leaf))
+            for exact in [false, true] {
+                let facts = reparse_fixture_facts(&capability, FileKind::Regular, tag);
+                let error = platform::with_test_facts_override(facts, || {
+                    if exact {
+                        capability.open_file_exact(&leaf)
+                    } else {
+                        capability.open_file(&leaf)
+                    }
+                })
                 .unwrap_err();
-            assert!(matches!(
-                error,
-                FsError::ReparsePoint { tag: rejected } if rejected == tag
-            ));
+                assert!(matches!(
+                    error,
+                    FsError::ReparsePoint { tag: rejected } if rejected == tag
+                ));
+            }
         }
 
         let facts =
@@ -996,6 +1060,80 @@ mod tests {
             FsError::ReparsePoint {
                 tag: IO_REPARSE_TAG_MOUNT_POINT
             }
+        ));
+        let error =
+            platform::with_test_facts_override(facts, || capability.open_file_exact(&nested))
+                .unwrap_err();
+        assert!(matches!(
+            error,
+            FsError::ReparsePoint {
+                tag: IO_REPARSE_TAG_MOUNT_POINT
+            }
+        ));
+        let error = platform::with_test_facts_override(facts, || {
+            capability.open_directory_exact(&RelativePath::new("assets").unwrap())
+        })
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            FsError::ReparsePoint {
+                tag: IO_REPARSE_TAG_MOUNT_POINT
+            }
+        ));
+
+        drop(capability);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn exact_open_rejects_cross_volume_facts_for_parents_and_leaf() {
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "nara_fs_exact_volume_{}_{}",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(root.join("Assets")).unwrap();
+        std::fs::write(root.join("value.txt"), b"authorized").unwrap();
+        std::fs::write(root.join("Assets/value.txt"), b"authorized").unwrap();
+        let capability = DirectoryCapability::from_host_handle(
+            test_host_directory(&root),
+            HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::Untrusted),
+        )
+        .unwrap();
+        let NativeFileIdentity::Windows {
+            volume_serial,
+            file_id,
+        } = capability.inner.root_native;
+        let mut facts = FileFacts {
+            identity: NativeFileIdentity::Windows {
+                volume_serial: volume_serial.wrapping_add(1),
+                file_id,
+            },
+            kind: FileKind::Regular,
+            link_count: 1,
+            reparse_tag: None,
+            identity_proven: true,
+        };
+        assert!(matches!(
+            platform::with_test_facts_override(facts, || {
+                capability.open_file_exact(&RelativePath::new("value.txt").unwrap())
+            }),
+            Err(FsError::CrossVolume)
+        ));
+        facts.kind = FileKind::Directory;
+        assert!(matches!(
+            platform::with_test_facts_override(facts, || {
+                capability.open_file_exact(&RelativePath::new("Assets/value.txt").unwrap())
+            }),
+            Err(FsError::CrossVolume)
+        ));
+        assert!(matches!(
+            platform::with_test_facts_override(facts, || {
+                capability.open_directory_exact(&RelativePath::new("Assets").unwrap())
+            }),
+            Err(FsError::CrossVolume)
         ));
 
         drop(capability);

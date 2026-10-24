@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-10
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-10-24
 **Refines**: [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
 [ADR 0049](0049-untrusted-project-input-and-parse-budget-policy.md),
 [ADR 0050](0050-asset-root-symlink-junction-and-package-trust-policy.md)
@@ -54,6 +54,13 @@ flowchart LR
 - `Unsupported` means the adapter, platform, or filesystem explicitly lacks the required primitive.
   `Unproven` means the primitive may exist, but sufficient evidence was unavailable for this object
   or runtime environment. Both fail closed for strict operations.
+- Native lookup and exact stored spelling are separate operations. `open_file_exact` and
+  `open_directory_exact` verify every descendant component without changing ordinary lookup
+  behavior, folding names or reopening a returned ambient path. Windows local NTFS/ReFS uses a
+  bounded normalized-name query on each opened handle; Linux uses a bounded native entry scan
+  and no-follow device/inode association. Other adapters fail explicitly. These are per-component
+  observations, not a frozen namespace, source identity or cross-file snapshot. Native source
+  owners select this operation before assigning path-based semantic identity.
 
 ### Independent guarantee axes
 
