@@ -3227,6 +3227,101 @@ mod tests {
         let unchanged = slot.session().document() == &original
             && slot.revision() == revision
             && slot.session().history_status().undo_depth == 0;
+
+        // Data-authoring admission cannot replace the integrated UI structural contract.
+        let ui_component = ComponentTypeId::new("nara.ui.UiRoot");
+        let ui_template = ComponentValue::map([("layer", ComponentValue::String("base".into()))]);
+        let data_bundle = nara_reflect::AuthoringSchemaBundle::new([
+            nara_reflect::AuthoringSchemaBundleOwner::new(
+                nara_reflect::PersistentComponentSchemaOwnerId::try_new("test.retained-ui")
+                    .unwrap(),
+                nara_reflect::ComponentSchemaCatalog {
+                    components: vec![
+                        ComponentSchema::new(
+                            ui_component.clone(),
+                            "Root",
+                            ComponentSchemaVersion::ONE,
+                        )
+                        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                        .with_fields([ComponentFieldSchema::required(
+                            ComponentFieldId::new("layer"),
+                            "Layer",
+                            ComponentFieldPath::from_fields(["layer"]),
+                            ComponentValueKind::String,
+                        )
+                        .with_capabilities(ComponentCapability::SCENE_AUTHORING)])
+                        .with_authoring_initial_value(ui_template.clone()),
+                    ],
+                    ..Default::default()
+                },
+                None,
+            ),
+        ])
+        .unwrap();
+        let adapter = nara_scene::__private::AuthoringAdapterReceipt::from_schema_owner(
+            &data_bundle.owners()[0],
+            &Default::default(),
+        )
+        .unwrap();
+        for contains_ui in [false, true] {
+            let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
+            if contains_ui {
+                anchor.components.insert(
+                    ui_component.clone(),
+                    SceneComponentRecord::new(ComponentSchemaVersion::ONE, ui_template.clone())
+                        .with_owner(data_bundle.owners()[0].owner_id().clone()),
+                );
+            }
+            let source = PrefabDocument::from_ordered_roots([anchor]);
+            let path = format!("guard-{contains_ui}.prefab.json");
+            let published = nara_scene::PrefabDocumentCandidate::decode_json_bytes(
+                source.to_json_string().unwrap().as_bytes(),
+            )
+            .unwrap()
+            .admit_authoring(
+                nara_scene::AuthoringDocumentSource::new(
+                    nara_asset::AssetRef::path(path.clone()).unwrap(),
+                ),
+                &data_bundle,
+                std::slice::from_ref(&adapter),
+            )
+            .unwrap()
+            .publish();
+            let target = editor
+                .workspace
+                .open_authoring_prefab_document(
+                    "Guard",
+                    EditorDocumentSourceBinding::new(path),
+                    published,
+                )
+                .unwrap()
+                .opened_document
+                .unwrap();
+            let basis = editor.workspace.prefab(target).unwrap().revision();
+            let mut draft = editor.begin_authoring_construction(target, basis).unwrap();
+            let local = draft
+                .create_entity(nara_scene::ScenePlacement::last(
+                    nara_scene::ScenePlacementOwner::Root,
+                ))
+                .unwrap();
+            if !contains_ui {
+                draft.add_component(&local, ui_component.clone()).unwrap();
+            }
+            assert!(
+                matches!(editor.prepare_authoring_construction(target, &draft),
+                Err(EditorEditPreparationError::StructureContractMismatch { document }) if document == target)
+            );
+            let bypass = editor
+                .workspace
+                .prepare_authoring_construction(target, &draft)
+                .unwrap();
+            assert!(matches!(editor.commit_authoring_construction(bypass),
+                Err(EditorActionOutcome::Rejected(nara_tooling::EditorActionRejection::StructureContractMismatch { document })) if document == target));
+            let slot = editor.workspace.prefab(target).unwrap();
+            assert_eq!(slot.session().document(), &source);
+            assert_eq!(slot.revision(), basis);
+            assert_eq!(slot.session().history_status().undo_depth, 0);
+        }
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             if matches!(

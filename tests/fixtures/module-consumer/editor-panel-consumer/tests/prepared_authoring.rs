@@ -904,6 +904,333 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
 }
 
 #[test]
+fn retained_construction_publishes_exact_ids_through_non_active_public_documents() {
+    use nara::scene::ConstructionPlacement;
+
+    for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
+        let project = text_project::TextProject::new();
+        fs::write(
+            project.root.join("schema/authoring.bundle.json"),
+            bundle().to_json_string().unwrap(),
+        )
+        .unwrap();
+        let original = [SceneEntityRecord::new(id("anchor")).with_component(
+            ComponentTypeId::new("consumer.Unknown"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("preserve me".into()),
+            ),
+        )];
+        for (path, contents) in [
+            (
+                "scenes/startup.scene.json",
+                SceneDocument::from_ordered_roots(original.clone())
+                    .to_json_string()
+                    .unwrap(),
+            ),
+            (
+                "prefabs/primary.prefab.json",
+                PrefabDocument::from_ordered_roots(original)
+                    .to_json_string()
+                    .unwrap(),
+            ),
+        ] {
+            fs::write(project.root.join(path), contents).unwrap();
+        }
+        let mut app = Application(EditorApplication::new(EditorLaunchOptions::new(
+            &project.root,
+        )));
+        app.native_shell_ready();
+        wait(&mut app, |frame| {
+            !frame.project_browser().has_pending_work()
+        });
+        let scene = frame(&app).workspace().active_document.unwrap();
+        submit(
+            &mut app,
+            EditorAction::ProjectBrowser(EditorProjectBrowserAction::Open {
+                relative_path: "prefabs/primary.prefab.json".into(),
+            }),
+        );
+        wait(&mut app, |frame| frame.document_open().result().is_some());
+        let prefab = frame(&app).workspace().active_document.unwrap();
+        assert_ne!(scene, prefab);
+        let (document, active, source) = if kind == EditorDocumentKind::Scene {
+            (scene, prefab, "scenes/startup.scene.json")
+        } else {
+            (prefab, scene, "prefabs/primary.prefab.json")
+        };
+        submit(
+            &mut app,
+            EditorAction::Navigate(EditorNavigationAction::SetActiveDocument { document: active }),
+        );
+        for selected in [document, active] {
+            submit(
+                &mut app,
+                EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                    document: selected,
+                    entity: Some(id("anchor")),
+                }),
+            );
+        }
+        let before = frame(&app);
+        let revision = basis(&app, document).revision;
+        let mut invalid = app
+            .begin_authoring_construction(document, revision)
+            .unwrap();
+        invalid
+            .add_component(id("anchor"), ComponentTypeId::new("consumer.Link"))
+            .unwrap();
+        invalid
+            .set_property(
+                id("anchor"),
+                ComponentTypeId::new("consumer.Link"),
+                ComponentPropertyPath::new(ComponentFieldId::new("amount")),
+                ComponentValue::U64(256),
+            )
+            .unwrap();
+        assert!(
+            app.prepare_authoring_construction(document, &invalid)
+                .is_err()
+        );
+        assert_eq!(
+            frame(&app).workspace().documents,
+            before.workspace().documents
+        );
+        let mut draft = app
+            .begin_authoring_construction(document, revision)
+            .unwrap();
+        let first = draft
+            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .unwrap();
+        let second = draft
+            .create_entity(ConstructionPlacement::ChildOf((&first).into()))
+            .unwrap();
+        for local in [&first, &second] {
+            for component in ["consumer.Link", "consumer.Tag"] {
+                draft
+                    .add_component(local, ComponentTypeId::new(component))
+                    .unwrap();
+            }
+        }
+        for (entity, target, amount) in [(&first, &second, 7), (&second, &first, 9)] {
+            draft
+                .set_entity_reference(
+                    entity,
+                    ComponentTypeId::new("consumer.Link"),
+                    ComponentPropertyPath::new(ComponentFieldId::new("target")),
+                    target,
+                )
+                .unwrap();
+            draft
+                .set_property(
+                    entity,
+                    ComponentTypeId::new("consumer.Link"),
+                    ComponentPropertyPath::new(ComponentFieldId::new("amount")),
+                    ComponentValue::U64(amount),
+                )
+                .unwrap();
+        }
+        let cancelled = app
+            .prepare_authoring_construction(document, &draft)
+            .unwrap();
+        assert_eq!(cancelled.document(), document);
+        assert_eq!(cancelled.document_kind(), kind);
+        assert_eq!(cancelled.base_revision(), revision);
+        assert_eq!(cancelled.patch().operations.len(), 10);
+        assert_eq!(cancelled.inverse().operations.len(), 10);
+        drop(cancelled);
+        assert_eq!(
+            frame(&app).workspace().documents,
+            before.workspace().documents
+        );
+        assert_eq!(
+            frame(&app)
+                .workspace()
+                .active_scene
+                .as_ref()
+                .unwrap()
+                .selection,
+            before.workspace().active_scene.as_ref().unwrap().selection
+        );
+
+        let prepared = app
+            .prepare_authoring_construction(document, &draft)
+            .unwrap();
+        let stale = app
+            .prepare_authoring_construction(document, &draft)
+            .unwrap();
+        let first_id = prepared.entity(&first).unwrap().clone();
+        let second_id = prepared.entity(&second).unwrap().clone();
+        assert_ne!(first_id, second_id);
+        let committed = app.commit_authoring_construction(prepared, Duration::ZERO);
+        assert!(matches!(committed.submission().actions(),
+            [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))] if report.applied));
+        assert_eq!(committed.entity(&first), Some(&first_id));
+        assert_eq!(committed.entity(&second), Some(&second_id));
+        let accepted = frame(&app);
+        assert_eq!(
+            accepted
+                .workspace()
+                .active_scene
+                .as_ref()
+                .unwrap()
+                .selection,
+            before.workspace().active_scene.as_ref().unwrap().selection
+        );
+        assert_eq!(
+            accepted
+                .workspace()
+                .document(document)
+                .unwrap()
+                .history
+                .undo_depth,
+            1
+        );
+        assert_eq!(accepted.workspace().active_document, Some(active));
+        assert_eq!(
+            accepted.workspace().document(active),
+            before.workspace().document(active)
+        );
+        assert_eq!(
+            accepted.scene_preview_document(),
+            before.scene_preview_document()
+        );
+        let rejected = app.commit_authoring_construction(stale, Duration::ZERO);
+        assert!(matches!(rejected.submission().actions(),
+            [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))] if !report.applied));
+        assert!(rejected.entity(&first).is_none());
+        assert_eq!(
+            frame(&app).workspace().documents,
+            accepted.workspace().documents
+        );
+
+        for redo in [false, true] {
+            let base_revision = basis(&app, document).revision;
+            let action = if redo {
+                EditorDocumentMutation::Redo {
+                    document,
+                    base_revision,
+                }
+            } else {
+                EditorDocumentMutation::Undo {
+                    document,
+                    base_revision,
+                }
+            };
+            let result = submit(&mut app, EditorAction::Mutate(action));
+            assert!(matches!(result.actions(),
+                [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))] if report.applied));
+            assert_eq!(
+                frame(&app).workspace().document(document).unwrap().dirty,
+                redo
+            );
+        }
+        let revision = basis(&app, document).revision;
+        submit(
+            &mut app,
+            EditorAction::Persistence(EditorPersistenceAction::Save {
+                document,
+                base_revision: revision,
+            }),
+        );
+        settle_persistence(&mut app);
+        assert!(!frame(&app).workspace().document(document).unwrap().dirty);
+        let bytes = fs::read(project.root.join(source)).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let records = saved["payload"]["entities"].as_array().unwrap();
+        assert_eq!(records.len(), 3);
+        let anchor = records
+            .iter()
+            .find(|record| record["id"] == "anchor")
+            .unwrap();
+        assert_eq!(
+            anchor["components"]["consumer.Unknown"]["value"],
+            serde_json::to_value(ComponentValue::String("preserve me".into())).unwrap()
+        );
+        assert_eq!(
+            saved["payload"]["roots"],
+            serde_json::json!(["anchor", first_id.as_str()])
+        );
+        for (entity, target, amount) in [(&first_id, &second_id, 7), (&second_id, &first_id, 9)] {
+            let record = records
+                .iter()
+                .find(|record| record["id"] == entity.as_str())
+                .unwrap();
+            if entity == &first_id {
+                assert_eq!(record["children"], serde_json::json!([second_id.as_str()]));
+            }
+            assert_eq!(record["components"].as_object().unwrap().len(), 2);
+            assert_eq!(
+                record["components"]["consumer.Link"]["value"],
+                serde_json::to_value(ComponentValue::map([
+                    (
+                        "target",
+                        ComponentValue::EntityReference(EntityReference::SceneLocal {
+                            entity: target.clone()
+                        })
+                    ),
+                    ("amount", ComponentValue::U64(amount)),
+                ]))
+                .unwrap()
+            );
+        }
+        let mut obsolete = app
+            .begin_authoring_construction(document, revision)
+            .unwrap();
+        let obsolete_local = obsolete
+            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .unwrap();
+        let old = app
+            .prepare_authoring_construction(document, &obsolete)
+            .unwrap();
+        submit(
+            &mut app,
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        );
+        submit(
+            &mut app,
+            EditorAction::Persistence(EditorPersistenceAction::Reopen {
+                target: EditorReopenTarget::OpenDocument {
+                    document,
+                    base_revision: revision,
+                },
+            }),
+        );
+        settle_persistence(&mut app);
+        assert_ne!(
+            basis(&app, document).revision.source_id(),
+            revision.source_id()
+        );
+        assert!(
+            app.prepare_authoring_construction(document, &obsolete)
+                .is_err()
+        );
+        let rejected = app.commit_authoring_construction(old, Duration::ZERO);
+        assert!(rejected.entity(&obsolete_local).is_none());
+        let (rejection, mapping) = rejected.into_parts();
+        assert!(mapping.is_none());
+        assert!(matches!(rejection.actions(),
+            [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))] if !report.applied));
+        assert_eq!(fs::read(project.root.join(source)).unwrap(), bytes);
+        assert_eq!(
+            committed.entity(&first),
+            Some(&first_id),
+            "owned results outlive Undo and Reopen"
+        );
+        assert_eq!(
+            frame(&app)
+                .workspace()
+                .active_scene
+                .as_ref()
+                .unwrap()
+                .selection,
+            before.workspace().active_scene.as_ref().unwrap().selection
+        );
+        assert!(app.close());
+    }
+}
+
+#[test]
 fn property_preparation_obeys_document_close_project_replacement_and_retirement() {
     use nara::project_host::EditorEditPreparationError;
 
@@ -965,6 +1292,15 @@ fn property_preparation_obeys_document_close_project_replacement_and_retirement(
         let prepared = app
             .prepare_authoring_property_edit(document, revision, &edits)
             .unwrap();
+        let mut draft = app
+            .begin_authoring_construction(document, revision)
+            .unwrap();
+        let local = draft
+            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .unwrap();
+        let construction = app
+            .prepare_authoring_construction(document, &draft)
+            .unwrap();
         let documents = frame(&app).workspace().documents.clone();
         match guard {
             "document-close" => {
@@ -1007,6 +1343,22 @@ fn property_preparation_obeys_document_close_project_replacement_and_retirement(
             ),
             "{guard} admitted preparation"
         );
+        assert!(matches!(
+            app.begin_authoring_construction(document, revision),
+            Err(EditorEditPreparationError::Closing)
+        ));
+        assert!(matches!(
+            app.prepare_authoring_construction(document, &draft),
+            Err(EditorEditPreparationError::Closing)
+        ));
+        let rejected_construction = app.commit_authoring_construction(construction, Duration::ZERO);
+        assert!(rejected_construction.entity(&local).is_none());
+        assert!(matches!(
+            rejected_construction.submission().actions(),
+            [EditorApplicationActionDispatch::NotDispatched(
+                EditorApplicationActionNotDispatched::Closing
+            )]
+        ));
         let rejected = app.commit_authoring_edit(prepared, Duration::ZERO);
         assert!(
             matches!(
@@ -1043,6 +1395,95 @@ fn property_preparation_obeys_document_close_project_replacement_and_retirement(
             std::thread::sleep(Duration::from_millis(1));
         }
         assert_eq!(frame(&app).workspace().documents, documents);
+        submit(
+            &mut app,
+            EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::AcknowledgeResult),
+        );
+        let obsolete = app
+            .prepare_authoring_construction(document, &draft)
+            .unwrap();
+        if guard == "retirement" {
+            assert!(app.close());
+        } else {
+            if guard == "document-close" {
+                let requested = submit(
+                    &mut app,
+                    EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Request(
+                        EditorWorkspaceIntent::CloseDocument { document },
+                    )),
+                );
+                assert!(matches!(
+                    requested.actions(),
+                    [EditorApplicationActionDispatch::Dispatched(
+                        EditorActionOutcome::WorkspaceIntent(
+                            EditorWorkspaceIntentRequestResult::Accepted
+                        )
+                    )]
+                ));
+            } else {
+                assert!(app.request_project_replacement(&replacement.root, None));
+            }
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while frame(&app).workspace_intent().decision_prompt().is_none() {
+                assert!(
+                    Instant::now() < deadline,
+                    "{guard} never requested final disposal"
+                );
+                app.advance_project_open();
+                let revision = frame(&app).revision();
+                app.submit_and_drive(EditorActionBatch::new(revision, []), Duration::ZERO);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let resolution = frame(&app)
+                .workspace_intent()
+                .decision_prompt()
+                .unwrap()
+                .resolve(EditorCloseDecision::Discard);
+            submit(&mut app, EditorAction::WorkspaceIntent(resolution));
+            loop {
+                app.advance_project_open();
+                if let Some(current) = app.current_frame() {
+                    let retired = if guard == "document-close" {
+                        current.workspace().document(document).is_none()
+                    } else {
+                        current
+                            .workspace()
+                            .document(document)
+                            .is_some_and(|tab| tab.revision.source_id() != revision.source_id())
+                    };
+                    if retired {
+                        break;
+                    }
+                    app.submit_and_drive(
+                        EditorActionBatch::new(current.revision(), []),
+                        Duration::ZERO,
+                    );
+                }
+                assert!(Instant::now() < deadline, "{guard} did not complete");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        if guard == "project-replacement" {
+            assert_eq!(
+                frame(&app).workspace().active_document,
+                Some(document),
+                "the new project's same raw slot must not authorize the old source"
+            );
+        }
+        let retained = app
+            .current_frame()
+            .map(|current| current.workspace().documents.clone());
+        let rejected = app.commit_authoring_construction(obsolete, Duration::ZERO);
+        let (submission, mapping) = rejected.into_parts();
+        assert!(mapping.is_none());
+        assert!(!matches!(submission.actions(),
+            [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))] if report.applied));
+        assert_eq!(
+            app.current_frame()
+                .map(|current| current.workspace().documents.clone()),
+            retained
+        );
+        assert_eq!(fs::read_to_string(&source_path).unwrap(), source);
         assert!(app.close(), "{guard} did not physically retire");
     }
 }

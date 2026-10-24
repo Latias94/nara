@@ -24,6 +24,15 @@ mod creation;
 pub use creation::CreatedSourceEntity;
 
 #[cfg(feature = "serde")]
+mod construction;
+#[cfg(feature = "serde")]
+pub use construction::{
+    AuthoringConstructionDraft, CommittedAuthoringConstruction, ConstructionEntity,
+    ConstructionEntityMap, ConstructionPlacement, LocalConstructionEntity,
+    PreparedPrefabAuthoringConstruction, PreparedSceneAuthoringConstruction,
+};
+
+#[cfg(feature = "serde")]
 mod prepared;
 #[cfg(feature = "serde")]
 pub use prepared::{PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit};
@@ -38,16 +47,18 @@ pub use nara_core::{
     DocumentRevision as SceneAuthoringRevision, DocumentSourceId as SceneAuthoringSourceId,
 };
 
-/// Fixed limits for the combined Undo and Redo history of one authoring session.
+/// Combined retention limits and per-entry limits for one authoring session.
+///
+/// Each entry is charged the maximum of its forward and reverse replay costs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SceneAuthoringHistoryLimits {
     max_records: usize,
     max_operations: usize,
     max_value_nodes: usize,
     max_logical_bytes: usize,
-    max_inverse_operations: usize,
-    max_inverse_value_nodes: usize,
-    max_inverse_logical_bytes: usize,
+    max_entry_operations: usize,
+    max_entry_value_nodes: usize,
+    max_entry_logical_bytes: usize,
 }
 
 impl SceneAuthoringHistoryLimits {
@@ -55,9 +66,9 @@ impl SceneAuthoringHistoryLimits {
     pub const DEFAULT_MAX_OPERATIONS: usize = 1_048_576;
     pub const DEFAULT_MAX_VALUE_NODES: usize = 1_048_576;
     pub const DEFAULT_MAX_LOGICAL_BYTES: usize = 64 * 1024 * 1024;
-    pub const DEFAULT_MAX_INVERSE_OPERATIONS: usize = 262_144;
-    pub const DEFAULT_MAX_INVERSE_VALUE_NODES: usize = 262_144;
-    pub const DEFAULT_MAX_INVERSE_LOGICAL_BYTES: usize = 16 * 1024 * 1024;
+    pub const DEFAULT_MAX_ENTRY_OPERATIONS: usize = 262_144;
+    pub const DEFAULT_MAX_ENTRY_VALUE_NODES: usize = 262_144;
+    pub const DEFAULT_MAX_ENTRY_LOGICAL_BYTES: usize = 16 * 1024 * 1024;
 
     #[must_use]
     pub const fn new(
@@ -65,20 +76,20 @@ impl SceneAuthoringHistoryLimits {
         max_operations: usize,
         max_value_nodes: usize,
         max_logical_bytes: usize,
-        max_inverse_operations: usize,
-        max_inverse_value_nodes: usize,
-        max_inverse_logical_bytes: usize,
+        max_entry_operations: usize,
+        max_entry_value_nodes: usize,
+        max_entry_logical_bytes: usize,
     ) -> Option<Self> {
         if max_records == 0
             || max_operations == 0
             || max_value_nodes == 0
             || max_logical_bytes == 0
-            || max_inverse_operations == 0
-            || max_inverse_value_nodes == 0
-            || max_inverse_logical_bytes == 0
-            || max_inverse_operations > max_operations
-            || max_inverse_value_nodes > max_value_nodes
-            || max_inverse_logical_bytes > max_logical_bytes
+            || max_entry_operations == 0
+            || max_entry_value_nodes == 0
+            || max_entry_logical_bytes == 0
+            || max_entry_operations > max_operations
+            || max_entry_value_nodes > max_value_nodes
+            || max_entry_logical_bytes > max_logical_bytes
         {
             return None;
         }
@@ -87,9 +98,9 @@ impl SceneAuthoringHistoryLimits {
             max_operations,
             max_value_nodes,
             max_logical_bytes,
-            max_inverse_operations,
-            max_inverse_value_nodes,
-            max_inverse_logical_bytes,
+            max_entry_operations,
+            max_entry_value_nodes,
+            max_entry_logical_bytes,
         })
     }
 
@@ -114,18 +125,18 @@ impl SceneAuthoringHistoryLimits {
     }
 
     #[must_use]
-    pub const fn max_inverse_operations(self) -> usize {
-        self.max_inverse_operations
+    pub const fn max_entry_operations(self) -> usize {
+        self.max_entry_operations
     }
 
     #[must_use]
-    pub const fn max_inverse_value_nodes(self) -> usize {
-        self.max_inverse_value_nodes
+    pub const fn max_entry_value_nodes(self) -> usize {
+        self.max_entry_value_nodes
     }
 
     #[must_use]
-    pub const fn max_inverse_logical_bytes(self) -> usize {
-        self.max_inverse_logical_bytes
+    pub const fn max_entry_logical_bytes(self) -> usize {
+        self.max_entry_logical_bytes
     }
 }
 
@@ -136,9 +147,9 @@ impl Default for SceneAuthoringHistoryLimits {
             Self::DEFAULT_MAX_OPERATIONS,
             Self::DEFAULT_MAX_VALUE_NODES,
             Self::DEFAULT_MAX_LOGICAL_BYTES,
-            Self::DEFAULT_MAX_INVERSE_OPERATIONS,
-            Self::DEFAULT_MAX_INVERSE_VALUE_NODES,
-            Self::DEFAULT_MAX_INVERSE_LOGICAL_BYTES,
+            Self::DEFAULT_MAX_ENTRY_OPERATIONS,
+            Self::DEFAULT_MAX_ENTRY_VALUE_NODES,
+            Self::DEFAULT_MAX_ENTRY_LOGICAL_BYTES,
         )
         .expect("default authoring history limits are valid")
     }
@@ -421,9 +432,9 @@ impl AuthoringHistory {
     }
 
     fn entry_is_admissible(&self, cost: SceneAuthoringHistoryCost) -> bool {
-        cost.operations <= self.limits.max_inverse_operations
-            && cost.value_nodes <= self.limits.max_inverse_value_nodes
-            && cost.logical_bytes <= self.limits.max_inverse_logical_bytes
+        cost.operations <= self.limits.max_entry_operations
+            && cost.value_nodes <= self.limits.max_entry_value_nodes
+            && cost.logical_bytes <= self.limits.max_entry_logical_bytes
     }
 
     fn clear_redo(&mut self) {

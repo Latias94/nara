@@ -1,7 +1,7 @@
 ---
 title: Source-Owned Creation And Transaction-Local Construction
 date: 2026-10-25
-status: Source-owned creation implemented; retained-draft interface selected for experiment, not implemented
+status: Source-owned creation and direct retained construction qualified; broader R2 remains open
 ---
 
 # Source-Owned Creation And Transaction-Local Construction
@@ -133,30 +133,67 @@ documents or mirror `ComponentValue` recursively. Existing explicit `SceneLocal`
 to the target source; do not claim to discover arbitrary forgotten provenance in copied plain data.
 Foreign opaque draft handles, in contrast, must be rejected by exact affinity.
 
-The final retained interface, mapping/result lifetime and error-recovery policy need an actual
-independent consumer before adoption. No public draft or new commit protocol is qualified by this
-design document. Do not delete working native creation or introduce a second registry to complete it.
+The owner experiment now uses nominal prepared-construction wrappers around the existing Scene/
+Prefab edits. It retains a private Arc scope for local handles and returns the same resolved mapping
+only on successful commit. Existing/staged property replacements share one lowerer. Foreign append
+refusal leaves earlier intent usable; semantic preparation failure currently requires rebuilding
+the proposal rather than editing a second retained document.
 
-### Next Experiment Boundary
+The retained experiment now reaches Workspace, project Session and direct Application consumers.
+The Workspace wrapper retains its explicit document and nominal source candidate. The Session
+checks closing and both specialized UI Prefab conditions at preparation and commit. Application
+returns one owned dispatch observation and subsequent drive, with a mapping only after successful
+source publication. It never infers success or identity from a later frame or parses its patch.
+Results remain historical data after Undo, Reopen or retirement, not proof of current existence.
 
-The retained draft should record intent, not eagerly copy a document or its record classification.
+An independently compiled consumer constructs two entities with two components, a local parent
+and mutual references in non-active Scene/Prefab documents, then performs Undo/Redo, Save/Reopen
+and stale rejection. Its first run exposed a test-only assumption that a random-ID record occupies
+a fixed array position; assertions now resolve by exact returned identity. The
+[pinned qualification](../knowledge/engineering/verification/2026-10/2026-10-24T224939Z-retained-source-construction-pinned-public-and-native-qualification-e1813acad6f04a93898a1e342989fa44.md)
+records owner/public, direct Session lifecycle and selected affected native regressions. The
+[owner comparison](../benchmarks/2026-10-25-retained-construction.md) records its bounded costs and
+caller-responsibility trade-off. This does not freeze the
+full R2 query/panel contract. Do not delete working native creation or introduce a second registry
+to complete it.
+
+### Retained Construction Contract
+
+The retained draft records intent, not an eager copy of a document or its record classification.
 Beginning it captures exact source revision and Schema basis. Append operations carry component
 IDs and property selectors; the originating session supplies its current admitted templates only
 when preparing that exact draft. This avoids cloning `AuthoringDocumentState` merely to retain
 template access and does not require tools to copy owner/version metadata.
 
-Experiment with separate scalar-property and entity-reference append operations. The latter can
+Separate scalar-property and entity-reference append operations are implemented. The latter can
 accept an existing source ID or an opaque local handle without introducing a recursive replacement
-for `ComponentValue`. Resolve all local entity IDs once, lower through the shared R5a property
-resolver over existing Available records plus admitted new templates, and run the existing final
-candidate/inverse/history admission. Preparation must not publish intermediate source revisions.
+for `ComponentValue`. Preparation resolves all local entity IDs once, lowers through the shared
+R5a property resolver over existing Available records plus admitted new templates, and runs the
+existing final candidate/inverse/history admission without publishing intermediate source revisions.
 
-The prepared construction needs its local-to-source mapping for preview. A successful consuming
-commit must return that same mapping with the ordinary report, so a tool can select the actual
+The prepared construction retains its local-to-source mapping for preview. A successful consuming
+commit returns that same mapping with the ordinary report, so a tool can select the actual
 created object without parsing patches. A rejected or dropped candidate must not be mistaken for
-successful creation. Compare a nominal prepared-construction wrapper around the existing edit
-with extending the existing prepared-edit result; compile the independent consumer before choosing
-the public signature. Keep owner affinity and failed-append recovery policy explicit in that trial.
+successful creation. The selected nominal prepared-construction wrapper retains the existing edit
+rather than extending every ordinary edit result with optional mapping state. The independent
+consumer compiles and exercises this signature. Independent adapter review found the wrappers'
+document, successful-publication and dispatch/drive responsibilities distinct. Owner affinity
+and failed-append recovery policy remain explicit. A draft is a bounded
+construction proposal, not a second interactive document: after semantic refusal, rebuild it from
+retained frontend inputs.
+
+Template admission borrows the exact Schema/value/owner first. Aggregate template payloads must
+fit the source's per-entry history and existing replay node/byte ceilings before any new deep
+copy; final expanded root/inverse/history validation remains separate. The initial prototype
+incorrectly copied every template before that refusal, allowing source-derived hundreds of MiB
+of unnecessary copying. A focused red case uses two 60,000-byte templates and a 100,000-byte history
+per-entry limit (with a larger total-retention limit) to distinguish the early copy gate from late history rejection without allocating that large
+failure case. This is a logical pre-copy bound, not a measured allocator/RSS ceiling.
+
+History exposes its single-entry ceilings as `max_entry_*`, not `max_inverse_*`: an entry is charged
+the maximum of forward and reverse cost. Using total-retention ceilings for the early gate would
+still allow copies that the already-known entry limit must reject. The naming correction changes
+no configured limits or history semantics and retains no unreleased compatibility alias.
 
 ## Acceptance And Measurement
 
@@ -181,7 +218,10 @@ It excludes caller patch construction, source admission, report disposal, projec
 rendering. The final comparison must retain these exclusions and name ID-length differences.
 At experiment entry, use twice the observed P95 as an investigation threshold, not a performance
 promise or permission to weaken correctness: 735,000 ns prepare and 10,200 ns commit. Repeat noisy
-observations before attribution. No release-frame, memory or native-performance claim follows.
+observations before attribution. The explicitly pinned Rust 1.95.0 retained/control follow-up records
+prepare P95 499,900/409,700 ns and commit P95 7,200/6,800 ns, including different generated/fixed ID lengths.
+These debug observations remain below the investigation thresholds and do not establish a commit
+speedup. No release-frame, memory or native-performance claim follows.
 
 ## Risks And Limits
 

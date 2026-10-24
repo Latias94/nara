@@ -1,11 +1,13 @@
 //! Public prepared authoring keeps document publication in its existing owner.
 
 use nara_scene::{
-    AuthoringPropertyEdit, SceneAuthoringRevision, ScenePatchDocument, ScenePatchOperation,
+    AuthoringConstructionDraft, AuthoringPropertyEdit, SceneAuthoringRevision, ScenePatchDocument,
+    ScenePatchOperation,
 };
 use nara_tooling::{
-    EditorActionOutcome, EditorActionRejection, EditorDocumentId, EditorDocumentKind,
-    EditorWorkspaceCommandReport, PreparedEditorDocumentEdit,
+    CommittedEditorDocumentConstruction, EditorActionOutcome, EditorActionRejection,
+    EditorDocumentId, EditorDocumentKind, EditorWorkspaceCommandReport,
+    PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
 };
 
 use super::{EditorProjectSession, editor_workspace_command_rejected};
@@ -23,6 +25,67 @@ pub enum EditorEditPreparationError {
 }
 
 impl EditorProjectSession {
+    /// Captures source-owned construction intent; no IDs or document state are published.
+    pub fn begin_authoring_construction(
+        &self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+    ) -> Result<AuthoringConstructionDraft, EditorEditPreparationError> {
+        if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
+            return Err(EditorEditPreparationError::Closing);
+        }
+        self.workspace
+            .begin_authoring_construction(document, base_revision)
+            .map_err(|report| EditorEditPreparationError::Document(Box::new(report)))
+    }
+
+    /// Keeps specialized Prefab admission after lowering, without a second transaction executor.
+    pub fn prepare_authoring_construction(
+        &self,
+        document: EditorDocumentId,
+        draft: &AuthoringConstructionDraft,
+    ) -> Result<PreparedEditorDocumentConstruction, EditorEditPreparationError> {
+        if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
+            return Err(EditorEditPreparationError::Closing);
+        }
+        let prepared = self
+            .workspace
+            .prepare_authoring_construction(document, draft)
+            .map_err(|report| EditorEditPreparationError::Document(Box::new(report)))?;
+        self.verify_prepared_patch_contract(document, prepared.patch())
+            .map_err(|_| EditorEditPreparationError::StructureContractMismatch { document })?;
+        Ok(prepared)
+    }
+
+    /// A successful receipt is returned only after source publication; rejection retains its outcome.
+    pub fn commit_authoring_construction(
+        &mut self,
+        prepared: PreparedEditorDocumentConstruction,
+    ) -> Result<CommittedEditorDocumentConstruction, EditorActionOutcome> {
+        if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
+            return Err(EditorActionOutcome::Workspace(
+                editor_workspace_command_rejected(
+                    self.workspace.active_document(),
+                    "project.editor.workspace-intent-pending",
+                ),
+            ));
+        }
+        self.verify_prepared_patch_contract(prepared.document(), prepared.patch())
+            .map_err(EditorActionOutcome::Rejected)?;
+        match self.workspace.commit_authoring_construction(prepared) {
+            Ok(committed) => {
+                let _ = self
+                    .diagnostics
+                    .extend(committed.report().diagnostics.clone());
+                Ok(committed)
+            }
+            Err(report) => {
+                let _ = self.diagnostics.extend(report.diagnostics.clone());
+                Err(EditorActionOutcome::Workspace(report))
+            }
+        }
+    }
+
     /// Prepares stable-property edits in one source owner, independently of selection and tabs.
     pub fn prepare_authoring_property_edit(
         &self,

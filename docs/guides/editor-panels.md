@@ -233,8 +233,53 @@ Generated identities are opaque source data, not display names. They contain fre
 in 22 URL-safe characters; existing authored IDs keep their spelling. Undo/Redo and saved Reopen
 retain the exact ID. Entropy failure or bounded collision exhaustion refuses creation without
 publishing document/history/selection changes. This is not an absolute non-reuse promise across
-arbitrary discarded history. Batch-local references and multi-entity construction remain separate
-R2 work; ordinary creation does not expose an ID reservation or another Undo authority.
+arbitrary discarded history. Ordinary creation does not expose an ID reservation or another Undo
+authority. The retained construction experiment below extends that owner rather than the ordinal
+or reservation mechanisms it replaced.
+
+## Construct With Transaction-Local References
+
+The direct Application experiment allows multiple new entities and references without assigning
+persistent IDs or copying creation-template owner/version metadata into caller-built records:
+
+```rust,ignore
+let mut draft = application.begin_authoring_construction(document, tab.revision)?;
+let first = draft.create_entity(ScenePlacement::last(ScenePlacementOwner::Root))?;
+let second = draft.create_entity(ConstructionPlacement::ChildOf((&first).into()))?;
+for local in [&first, &second] {
+    draft.add_component(local, ComponentTypeId::new("game.Link"))?;
+}
+let target = ComponentPropertyPath::new(ComponentFieldId::new("target"));
+draft.set_entity_reference(&first, ComponentTypeId::new("game.Link"), target.clone(), &second)?;
+draft.set_entity_reference(&second, ComponentTypeId::new("game.Link"), target, &first)?;
+let prepared = application.prepare_authoring_construction(document, &draft)?;
+preview_changes(prepared.patch(), prepared.inverse());
+let result = application.commit_authoring_construction(prepared, Duration::ZERO);
+observe_dispatch(result.submission().actions());
+if let Some(created) = result.entity(&first) {
+    observe_created_identity(created);
+}
+```
+
+This example assumes the admitted `game.Link` template and editable EntityRef property exist.
+Locals are opaque handles for one draft, not serialized IDs, allocation reservations or runtime
+entities. Local parents and sibling anchors must already be declared; references may be mutual.
+Each preparation allocates its own mapping. Dropping a prepared candidate publishes nothing;
+commit never reallocates that candidate's IDs. Only successful commit returns a mapping. Its
+historical receipt remains usable after Undo/Reopen, but does not certify that an entity still exists.
+
+Appending validates bounded intent and local affinity, not the complete Schema or final document.
+A refused append leaves earlier intent intact. After semantic preparation refusal, rebuild the
+proposal from the tool's retained user inputs; appending a correction cannot erase an earlier
+invalid write. Do not treat the draft as a second editable document or an input-buffer owner.
+Declarations plus coalesced roots share the existing 256-operation ceiling; raw property writes
+still share their independent eight-write and selector/value limits before coalescing.
+
+The independent consumer covers non-active Scene/Prefab construction, exact successful IDs,
+one Undo/Redo and persistence. The separately scoped qualification also checks affected native
+structural/Canvas/preview regressions; it does not add a panel-construction widget. Registered
+panel contexts still expose ordered actions rather than these direct prepared hooks; this section
+does not qualify panel transactions, generalized field queries or installable tools.
 
 ## Query A Non-Active Document
 

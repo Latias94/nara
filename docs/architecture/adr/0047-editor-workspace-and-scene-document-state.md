@@ -72,6 +72,11 @@ Rules:
   distinct; truncating an eagerly constructed Inspector is not bounded query execution.
 - Prepared edits remain owned by the document session. Workspace/Editor adapters carry their
   exact target and operation result without rebuilding validation, inverse or history logic.
+- Retained construction uses that same source owner. Workspace routes an explicit document plus
+  the draft's exact basis, and carries a nominal prepared construction with its fixed local mapping.
+  No navigation change or generated-entity selection is implicit. Success returns the actual
+  source IDs and exact report; rejection returns no successful mapping, including after Close,
+  Reopen or replacement by another project's numerically equal document slot.
 - Automatic entity creation uses the source owner's complete creation operation and returned ID.
   Workspace slots own no generated-ID ordinal, reservation or Reopen reset. Selection changes
   only after successful source publication; failed creation preserves the exact prior selection.

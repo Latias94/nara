@@ -2652,7 +2652,7 @@ fn placement_for_entity<D: EntityDocument + ?Sized>(
     document: &D,
     entity: &SceneEntityId,
 ) -> Option<ScenePlacement> {
-    let owner = placement_owner(document, entity)?;
+    let owner = placement_owner(document.roots(), document.entities(), entity)?;
     let siblings = siblings_for_owner(document, &owner)?;
     let index = siblings.iter().position(|candidate| candidate == entity)?;
     let anchor = if index == 0 {
@@ -2670,7 +2670,7 @@ fn placement_matches<D: EntityDocument + ?Sized>(
     entity: &SceneEntityId,
     placement: &ScenePlacement,
 ) -> bool {
-    let Some(owner) = placement_owner(document, entity) else {
+    let Some(owner) = placement_owner(document.roots(), document.entities(), entity) else {
         return false;
     };
     if owner != placement.owner {
@@ -2692,14 +2692,15 @@ fn placement_matches<D: EntityDocument + ?Sized>(
     }
 }
 
-fn placement_owner<D: EntityDocument + ?Sized>(
-    document: &D,
+pub(crate) fn placement_owner(
+    roots: &[SceneEntityId],
+    entities: &[SceneEntityRecord],
     entity: &SceneEntityId,
 ) -> Option<ScenePlacementOwner> {
-    if document.roots().contains(entity) {
+    if roots.contains(entity) {
         return Some(ScenePlacementOwner::Root);
     }
-    document.entities().iter().find_map(|record| {
+    entities.iter().find_map(|record| {
         record
             .children
             .contains(entity)

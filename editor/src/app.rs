@@ -215,6 +215,40 @@ impl EditorApplicationSubmission {
     }
 }
 
+/// One construction dispatch and subsequent drive, with IDs only for a successful publication.
+///
+/// Results remain associated with this call; Undo or Reopen does not rewrite the historical mapping.
+#[derive(Debug)]
+pub struct EditorApplicationConstructionSubmission {
+    submission: EditorApplicationSubmission,
+    entities: Option<nara::scene::ConstructionEntityMap>,
+}
+
+impl EditorApplicationConstructionSubmission {
+    #[must_use]
+    pub const fn submission(&self) -> &EditorApplicationSubmission {
+        &self.submission
+    }
+
+    #[must_use]
+    pub fn entity(
+        &self,
+        local: &nara::scene::LocalConstructionEntity,
+    ) -> Option<&nara::scene::SceneEntityId> {
+        self.entities.as_ref()?.entity(local)
+    }
+
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        EditorApplicationSubmission,
+        Option<nara::scene::ConstructionEntityMap>,
+    ) {
+        (self.submission, self.entities)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct EditorApplicationDispatch {
     actions_observed: bool,
@@ -852,6 +886,32 @@ impl EditorApplication {
             .prepare_authoring_edit(document, base_revision, patch)
     }
 
+    /// Starts construction in the exact named source, independently of selection and active tabs.
+    pub fn begin_authoring_construction(
+        &self,
+        document: nara::tooling::EditorDocumentId,
+        base_revision: nara::scene::SceneAuthoringRevision,
+    ) -> Result<
+        nara::scene::AuthoringConstructionDraft,
+        nara::project_host::EditorEditPreparationError,
+    > {
+        self.authoring_edit_session()?
+            .begin_authoring_construction(document, base_revision)
+    }
+
+    /// Resolves a bounded draft into one unpublished source candidate and fixed ID mapping.
+    pub fn prepare_authoring_construction(
+        &self,
+        document: nara::tooling::EditorDocumentId,
+        draft: &nara::scene::AuthoringConstructionDraft,
+    ) -> Result<
+        nara::tooling::PreparedEditorDocumentConstruction,
+        nara::project_host::EditorEditPreparationError,
+    > {
+        self.authoring_edit_session()?
+            .prepare_authoring_construction(document, draft)
+    }
+
     /// Prepares stable-property replacements using the same document candidate and Undo owner.
     pub fn prepare_authoring_property_edit(
         &self,
@@ -892,7 +952,47 @@ impl EditorApplication {
         prepared: nara::tooling::PreparedEditorDocumentEdit,
         real_delta: Duration,
     ) -> EditorApplicationSubmission {
-        let action = match &mut self.state {
+        let action = match self.authoring_edit_session_mut() {
+            Ok(session) => {
+                EditorApplicationActionDispatch::Dispatched(session.commit_authoring_edit(prepared))
+            }
+            Err(reason) => EditorApplicationActionDispatch::NotDispatched(reason),
+        };
+        self.drive_authoring_commit(action, real_delta)
+    }
+
+    /// Publishes the exact candidate and retains both its dispatch observation and successful IDs.
+    pub fn commit_authoring_construction(
+        &mut self,
+        prepared: nara::tooling::PreparedEditorDocumentConstruction,
+        real_delta: Duration,
+    ) -> EditorApplicationConstructionSubmission {
+        let (action, entities) = match self.authoring_edit_session_mut() {
+            Ok(session) => match session.commit_authoring_construction(prepared) {
+                Ok(committed) => {
+                    let (entities, report) = committed.into_parts();
+                    (
+                        EditorApplicationActionDispatch::Dispatched(
+                            EditorActionOutcome::Workspace(report),
+                        ),
+                        Some(entities),
+                    )
+                }
+                Err(outcome) => (EditorApplicationActionDispatch::Dispatched(outcome), None),
+            },
+            Err(reason) => (EditorApplicationActionDispatch::NotDispatched(reason), None),
+        };
+        EditorApplicationConstructionSubmission {
+            submission: self.drive_authoring_commit(action, real_delta),
+            entities,
+        }
+    }
+
+    fn authoring_edit_session_mut(
+        &mut self,
+    ) -> Result<&mut nara::project_host::EditorProjectSession, EditorApplicationActionNotDispatched>
+    {
+        match &mut self.state {
             EditorProductState::AuthoringReady(project)
             | EditorProductState::AuthoringDegraded(project)
                 if self.session_retirement.is_none()
@@ -903,21 +1003,22 @@ impl EditorApplication {
                         .intent()
                         .is_none() =>
             {
-                EditorApplicationActionDispatch::Dispatched(
-                    project.session.commit_authoring_edit(prepared),
-                )
+                Ok(&mut project.session)
             }
             EditorProductState::AuthoringReady(_)
             | EditorProductState::AuthoringDegraded(_)
             | EditorProductState::OpeningReplacement(OpeningReplacementState::Closing { .. }) => {
-                EditorApplicationActionDispatch::NotDispatched(
-                    EditorApplicationActionNotDispatched::Closing,
-                )
+                Err(EditorApplicationActionNotDispatched::Closing)
             }
-            _ => EditorApplicationActionDispatch::NotDispatched(
-                EditorApplicationActionNotDispatched::WorkspaceUnavailable,
-            ),
-        };
+            _ => Err(EditorApplicationActionNotDispatched::WorkspaceUnavailable),
+        }
+    }
+
+    fn drive_authoring_commit(
+        &mut self,
+        action: EditorApplicationActionDispatch,
+        real_delta: Duration,
+    ) -> EditorApplicationSubmission {
         let observed = matches!(action, EditorApplicationActionDispatch::Dispatched(_));
         let update = self.drive_editor_frame(real_delta, observed, true);
         EditorApplicationSubmission {

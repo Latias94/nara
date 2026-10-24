@@ -35,8 +35,10 @@ use crate::play::{SceneEditorModel, SceneEditorState};
 use crate::snapshot::WorldIdentitySnapshot;
 use crate::{EditorAtomicFieldEdit, EditorFieldTarget};
 
+mod construction;
 mod extension;
 mod prepared_edit;
+pub use construction::{CommittedEditorDocumentConstruction, PreparedEditorDocumentConstruction};
 pub use extension::{
     EditorExtensionCommand, EditorExtensionDocument, EditorExtensionDocumentCandidate,
     EditorExtensionDocumentError, EditorExtensionDocumentView,

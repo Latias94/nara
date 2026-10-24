@@ -279,8 +279,15 @@ Generated entity IDs and creation publication are owned by Scene/Prefab sessions
 Workspace ordinal allocator. Published authoring uses admitted creation data; registry-backed
 native creation retains its separate native validation. Both use the same private source-ID
 generation policy and return the accepted authored ID. The
-[construction design](../authoring-construction-design.md) keeps retained transaction-local
-drafts under experiment rather than claiming that ordinary creation alone completes them.
+[construction design](../authoring-construction-design.md) records retained transaction-local
+drafts and their separately scoped qualification; ordinary creation alone does not establish them.
+
+Direct Application construction carries the source-owned prepared candidate through the existing
+project Session and specialized UI Prefab checks at prepare and commit. Application returns its
+owned dispatch observation and subsequent drive together with IDs only for successful publication.
+NotDispatched lifecycle refusal remains distinct from a dispatched domain rejection. The mapping
+is an immutable observation of that publication, not current existence after Undo/Reopen/retirement.
+These direct hooks do not imply registered-panel prepared hooks or installable-tool qualification.
 
 A component schema may publish one optional complete `authoring_initial_value` in the existing bounded generic value grammar.
 It is creation-only data, validated through the canonical complete schema/value validator at catalog admission and copied for an explicit creation transaction.

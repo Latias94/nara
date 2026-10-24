@@ -55,6 +55,10 @@ Rules:
   must fit their actual operation/value admission before publication, even when a session admits
   larger source files or retained history. Cheap format/arity rejection precedes value traversal;
   bounded logical-cost admission stops when its ceiling is provably exceeded.
+- Combined history retention and one-entry admission are separate limits. One entry is charged
+  the maximum of its forward and reverse costs; its `max_entry_*` ceilings apply to both directions,
+  not only to the inverse. Preparation uses known entry ceilings before materializing template
+  payloads and still performs complete final replay/history admission.
 - A batch of Editor actions remains ordered dispatch, not a document transaction. Mixed
   authoring construction must validate one unpublished candidate and publish one history entry.
 - Generated entity creation belongs to the Scene/Prefab source owner, including identity
@@ -64,6 +68,12 @@ Rules:
   state. Stored IDs, not new allocation, drive Undo/Redo/Reopen. The
   [construction design](../authoring-construction-design.md) records the selected compact encoding,
   explicit collision limits and the absence of arbitrary-history non-reuse guarantees.
+- Transaction-local construction retains bounded additive declarations and ordered property writes
+  at one exact source revision/Schema basis, not another document or history. Opaque local handles
+  identify their originating draft and never become stored IDs. Preparation resolves fresh IDs
+  once through the source owner and lowers through the existing candidate/inverse/history kernel.
+  Preview can inspect that fixed mapping; consuming commit returns it only on successful publication.
+  Failed appends preserve earlier intent; semantic preparation refusal requires a rebuilt proposal.
 - Patch paths are schema-aware: `SceneEntityId + ComponentTypeId + field path`. Root field
   identity follows the declared Schema contract; nested member names and unkeyed indices are
   revision-local locators, not promises of rename/reorder-stable persistent identity.

@@ -1171,6 +1171,20 @@ pub(crate) struct AuthoringDocumentState {
     limits: SceneFileLimits,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct AuthoringComponentTemplate<'a> {
+    pub(crate) schema: &'a ComponentSchema,
+    pub(crate) value: &'a ComponentValue,
+    owner: &'a PersistentComponentSchemaOwnerId,
+}
+
+impl AuthoringComponentTemplate<'_> {
+    pub(crate) fn to_record(self) -> SceneComponentRecord {
+        SceneComponentRecord::new(self.schema.version(), self.value.clone())
+            .with_owner(self.owner.clone())
+    }
+}
+
 impl AuthoringDocumentState {
     pub(crate) fn schema_basis(&self) -> AuthoringSchemaBasis {
         AuthoringSchemaBasis(Arc::clone(&self.basis))
@@ -1187,17 +1201,23 @@ impl AuthoringDocumentState {
         &self,
         component: &ComponentTypeId,
     ) -> Option<SceneComponentRecord> {
+        self.initial_component_template(component)
+            .map(AuthoringComponentTemplate::to_record)
+    }
+
+    pub(crate) fn initial_component_template(
+        &self,
+        component: &ComponentTypeId,
+    ) -> Option<AuthoringComponentTemplate<'_>> {
         let entry = self.basis.schemas.get(component)?;
         if entry.adapter.is_none() || !component_allows_composition(&entry.schema) {
             return None;
         }
-        Some(
-            SceneComponentRecord::new(
-                entry.schema.version(),
-                entry.schema.authoring_initial_value()?.clone(),
-            )
-            .with_owner(entry.owner.clone()),
-        )
+        Some(AuthoringComponentTemplate {
+            schema: &entry.schema,
+            value: entry.schema.authoring_initial_value()?,
+            owner: &entry.owner,
+        })
     }
     pub(crate) const fn readiness(&self) -> AuthoringDocumentReadiness {
         self.readiness

@@ -32,8 +32,10 @@ mod tests;
 
 #[cfg(feature = "serde")]
 pub use authoring::{
-    AuthoringPropertyEdit, AuthoringSessionReplacementError, PreparedPrefabAuthoringEdit,
-    PreparedSceneAuthoringEdit,
+    AuthoringConstructionDraft, AuthoringPropertyEdit, AuthoringSessionReplacementError,
+    CommittedAuthoringConstruction, ConstructionEntity, ConstructionEntityMap,
+    ConstructionPlacement, LocalConstructionEntity, PreparedPrefabAuthoringConstruction,
+    PreparedPrefabAuthoringEdit, PreparedSceneAuthoringConstruction, PreparedSceneAuthoringEdit,
 };
 pub use authoring::{
     AuthoringSessionAuthorityError, CreatedSourceEntity, PrefabAuthoringSession,

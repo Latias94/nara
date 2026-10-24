@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "886273a7411f8f68b27b4af99a242dd7719296ff762db5a998ba8e4dba0da7a1"
+source_fingerprint: "8a5ddb0263d45642b59dfefb5e44eb871d8fb7d1f4e637e8d5a0dec8a31cfe69"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "886273a7411f8f68b27b4af99a242dd7719296ff762db5a998ba8e4dba0
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `886273a7411f8f68b27b4af99a242dd7719296ff762db5a998ba8e4dba0da7a1`
-- Immutable records: 896
+- Source fingerprint: `8a5ddb0263d45642b59dfefb5e44eb871d8fb7d1f4e637e8d5a0dec8a31cfe69`
+- Immutable records: 901
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,11 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Retained source construction pinned public and native qualification](verification/2026-10/2026-10-24T224939Z-retained-source-construction-pinned-public-and-native-qualification-e1813acad6f04a93898a1e342989fa44.md) - Rust 1.95.0 qualifies retained construction through owner/public/Session lifecycle paths, final static checks and selected Windows native regressions; full R2 remains open.
+- **Work Progress**: [Retained construction complete review and pinned qualification correction](progress/2026-10/2026-10-24T224111Z-retained-construction-complete-review-and-pinned-qualification-correction-5fc5eada19d14468877fc065bb2ff7ff.md) - Actual eight-lens CE receipt completed with one direct Session test gap; simplification applied and explicit Rust 1.95.0 qualification supersedes unsupported historical toolchain labels.
+- **Verification Evidence**: [Retained construction owner public and lifecycle regression checkpoint](verification/2026-10/2026-10-24T215522Z-retained-construction-owner-public-and-lifecycle-regression-checkpoint-82b171c17ee24213934e375e976c3e0c.md) - Source-owned retained construction passes owner, independent Application, lifecycle and root/Editor regressions; final static review and selected native qualification remain open.
+- **Subagent Finding**: [R2 selection independent field reading seam](subagents/2026-10/2026-10-24T215152Z-r2-selection-independent-field-reading-seam-389b97a2cf8f4275abbae7eeaa84bc6d.md) - Read-only investigation identifies the missing component/root-value observation workflow and bounded source-owner seams without selecting a general query language.
+- **Work Progress**: [Retained construction owner and public adapter checkpoint](progress/2026-10/2026-10-24T214058Z-retained-construction-owner-and-public-adapter-checkpoint-a65bea496a9442b18628572e20667490.md) - Owner prototype and direct Application construction are implemented; independent workflows pass while strengthened boundary, cost and final qualification remain in flight.
 - **Verification Evidence**: [Source-owned entity creation and generated product qualification](verification/2026-10/2026-10-24T203944Z-source-owned-entity-creation-and-generated-product-qualification-c5fd5454223046e38fc1761338ddffb0.md) - Qualified ordinary Scene/Prefab source-owned creation, removal of Workspace ordinals, independent persistence and Windows DX12 product workflows; full R2 remains open.
 - **Work Progress**: [Source-owned creation implemented; generated export qualification pending](progress/2026-10/2026-10-24T202546Z-source-owned-creation-implemented-generated-export-qualification-pending-982fcd60eda3477aa06a6ba835da0c56.md) - R2 ordinary creation owns IDs and publication; owner/public/native checks pass while a real release export remains live.
 - **Subagent Finding**: [R2 transaction local construction ownership and allocation alternatives](subagents/2026-10/2026-10-24T185535Z-r2-transaction-local-construction-ownership-and-allocation-alternatives-a12471c958dc470097f9b8c7337c0533.md) - Read-only next-unit findings identify caller-owned construction choreography and compare owner drafts, declarative intents and scoped builders without adopting an allocator.
@@ -76,11 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Owned ordinary Scene preparation and complete support admission qualification](verification/2026-10/2026-10-24T164025Z-owned-ordinary-scene-preparation-and-complete-support-admission-qualification-e94d2a95cbf94dd7a0cbbd371aedf55c.md) - Serial owner, public, independent and native qualification of move-only unbound Scene preparation and complete support-resource admission.
 - **Subagent Finding**: [Complete UI key representation constraints and bounded experiment](subagents/2026-10/2026-10-24T162730Z-complete-ui-key-representation-constraints-and-bounded-experiment-cf1460fb992640a7a0d9addfd0f2de54.md) - Mixed-context UI trees rule out implicit local-source inheritance; exact-sharing storage needs a bounded comparison before refreeze.
 - **Work Progress**: [Ordinary Scene preparation and complete resource-effect admission checkpoint](progress/2026-10/2026-10-24T160924Z-ordinary-scene-preparation-and-complete-resource-effect-admission-checkpoint-20639c6f67a24f389226e694eba5ba2d.md) - Owned unbound Scene preparation, separate execution and Host bases, and cached resource-target admission are implemented; final serial qualification remains in progress.
-- **Subagent Finding**: [Runtime and Canvas complete-key lowering findings](subagents/2026-10/2026-10-24T154955Z-runtime-and-canvas-complete-key-lowering-findings-e010e14b557f42aea70f859c48c9f47f.md) - Read-only next-unit evidence separates complete logical key coordinates, presentation fencing and bounded representation costs.
-- **Work Progress**: [Unbound prebinding admission and ordinary Scene preparation design checkpoint](progress/2026-10/2026-10-24T141552Z-unbound-prebinding-admission-and-ordinary-scene-preparation-design-checkpoint-c5f43007b24245da8e1c9dd009b7fa33.md) - Reflect revalidates retained unbound native values before target allocation; ordinary Scene prepare remains the next owning implementation.
-- **Work Progress**: [Source-bound Scene occurrence checkpoint and ordinary preparation follow-up](progress/2026-10/2026-10-24T133133Z-source-bound-scene-occurrence-checkpoint-and-ordinary-preparation-follow-up-ea0342ca0c55402c966ac1a073a4b09c.md) - Commit 87a1fc0 qualifies required Scene sources and active occurrence ownership; ordinary unbound preparation and Runtime/Canvas adoption are next, while the full foundation goal stays active.
-- **Verification Evidence**: [Required Scene sources and active occurrence ownership qualification](verification/2026-10/2026-10-24T114901Z-required-scene-sources-and-active-occurrence-ownership-qualification-e249da9a1f404677a72e52457ac990c4.md) - Required source-bound materialization and Scene-owned active logical occurrence replace identity-free spawn, qualified through owning, public, independent and selected native consumers.
-- **Work Progress**: [Canonical Prefab binding checkpoint and required Scene ownership follow-up](progress/2026-10/2026-10-24T111737Z-canonical-prefab-binding-checkpoint-and-required-scene-ownership-follow-up-99eaac49f2074e9f8121bf800204aa97.md) - Commit 1a03766 removes identity-free Prefab resolution; required containing-Scene binding, active occurrence ownership and shared UI identity remain the next replacements.
 
 # Integration Notes
 

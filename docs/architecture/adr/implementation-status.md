@@ -87,6 +87,16 @@ workflow. Workspace/all-target, correctness Clippy, portable wasm and format che
 identity is not an absolute historical non-reuse promise. This is ordinary creation, not the retained
 transaction-local draft, full field queries, panel preparation, cost comparison or full R2.
 
+The [retained construction qualification](../../knowledge/engineering/verification/2026-10/2026-10-24T224939Z-retained-source-construction-pinned-public-and-native-qualification-e1813acad6f04a93898a1e342989fa44.md)
+adds the bounded source-owned draft, opaque local references and fixed prepared/successful mapping
+through Workspace, project Session and direct Application adapters. Explicit Rust 1.95.0 passes
+owner 393, root/Editor 581, four independent workflows, the feature-off UI guard, no-default creation
+and direct Session lifecycle rejection. Three selected actual Windows native regressions and final
+workspace/correctness/portable checks pass. The complete eight-lens CE receipt's one P2 test gap is
+fixed and independently rechecked. The bounded debug comparison states its ID-length/timer limits
+and corrects earlier unpinned toolchain labeling. Field discovery/reading, registered-panel
+preparation and full R2 are not implemented by this qualification.
+
 The [R5c custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md)
 implements typed per-document Scene/Prefab file custody under ADRs 0047/0118. Save retains its
 admission-time Host through acknowledgement/uncertainty; Reopen validates exact retained Host

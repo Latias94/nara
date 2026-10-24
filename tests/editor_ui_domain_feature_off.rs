@@ -18,6 +18,7 @@ use nara::{
     reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{
         PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
+        ScenePlacement, ScenePlacementOwner,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentKind,
@@ -99,11 +100,14 @@ fn feature_off_editor_preserves_ui_structure_gate_for_retained_data_catalogs() {
             }
         }
     };
-    for _ in 0..128 {
-        if !editor.current_frame().project_browser().has_pending_work() {
-            break;
-        }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while editor.current_frame().project_browser().has_pending_work() {
+        assert!(
+            Instant::now() < deadline,
+            "the source index never became ready"
+        );
         let _ = editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
     }
     let frame = editor.current_frame();
     let opened = editor
@@ -116,7 +120,21 @@ fn feature_off_editor_preserves_ui_structure_gate_for_retained_data_catalogs() {
             )],
         ))
         .unwrap();
-    let _ = editor.drive_editor_frame(Duration::ZERO);
+    while editor
+        .current_frame()
+        .workspace()
+        .active_scene
+        .as_ref()
+        .is_none_or(|model| model.kind != EditorDocumentKind::Prefab)
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the Prefab never opened: {:?}",
+            opened.outcomes()
+        );
+        let _ = editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
     let frame = editor.current_frame();
     let model = frame
         .workspace()
@@ -132,6 +150,16 @@ fn feature_off_editor_preserves_ui_structure_gate_for_retained_data_catalogs() {
     let document = model.document;
     let revision = model.revision;
     let history = model.editor.inspector.history;
+    let mut draft = editor
+        .begin_authoring_construction(document, revision)
+        .unwrap();
+    draft
+        .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+        .unwrap();
+    assert!(
+        matches!(editor.prepare_authoring_construction(document, &draft),
+        Err(nara::project_host::EditorEditPreparationError::StructureContractMismatch { document: rejected }) if rejected == document)
+    );
     let report = editor
         .dispatch_editor_actions(EditorActionBatch::new(
             frame.revision(),

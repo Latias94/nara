@@ -13,6 +13,154 @@ enum ClosingMutation {
 }
 
 #[test]
+fn closing_session_rejects_retained_construction_at_owning_ingress() {
+    use editor::EditorEditPreparationError;
+    use nara_tooling::{
+        EditorCloseDecision, EditorWorkspaceIntent, EditorWorkspaceIntentPhase,
+        EditorWorkspaceIntentRequestResult,
+    };
+
+    #[derive(Clone, Copy)]
+    enum Cut {
+        DocumentIntent,
+        ExitIntent,
+        PhysicalClose,
+    }
+
+    for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
+        for cut in [Cut::DocumentIntent, Cut::ExitIntent, Cut::PhysicalClose] {
+            let project = TestProject::new("closing-session-construction");
+            fs::write(
+                project.root.join("scenes/startup.scene.json"),
+                editable_authoring_scene("original")
+                    .to_json_string()
+                    .unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                project.root.join("prefabs/ordinary.prefab.json"),
+                editable_authoring_prefab("original")
+                    .to_json_string()
+                    .unwrap(),
+            )
+            .unwrap();
+            let mut editor = open_generic_editor_with_ready_index(&project);
+            let document = if kind == EditorDocumentKind::Scene {
+                editor.workspace().active_document().unwrap()
+            } else {
+                let index = editor.project_source_index_snapshot().unwrap();
+                opened_document(editor.open_indexed_authoring_document(
+                    index,
+                    "prefabs/ordinary.prefab.json",
+                    crate::project_host::authoring::AuthoringDocumentKind::Prefab,
+                ))
+            };
+            let source = project.root.join(if kind == EditorDocumentKind::Scene {
+                "scenes/startup.scene.json"
+            } else {
+                "prefabs/ordinary.prefab.json"
+            });
+            let persisted = fs::read(&source).unwrap();
+            make_authoring_name_dirty(&mut editor, document, "retained-unsaved");
+            let frame = editor.drive_editor_frame(Duration::ZERO);
+            let selected = editor
+                .dispatch_editor_actions(EditorActionBatch::new(
+                    frame.revision(),
+                    [EditorAction::Navigate(
+                        EditorNavigationAction::SelectEntity {
+                            document,
+                            entity: Some(
+                                nara_identity::SceneEntityId::new("editable-name").unwrap(),
+                            ),
+                        },
+                    )],
+                ))
+                .unwrap();
+            assert!(
+                matches!(&selected.outcomes()[0], EditorActionOutcome::Workspace(report) if report.applied)
+            );
+            let revision = editor.workspace().document_revision(document).unwrap();
+            let mut draft = editor
+                .begin_authoring_construction(document, revision)
+                .unwrap();
+            let local = draft
+                .create_entity(nara_scene::ScenePlacement::last(
+                    nara_scene::ScenePlacementOwner::Root,
+                ))
+                .unwrap();
+            let prepared = editor
+                .prepare_authoring_construction(document, &draft)
+                .unwrap();
+            assert!(prepared.entity(&local).is_some());
+            let before = document_state(&editor, document);
+            let active = editor.workspace().active_document();
+
+            match cut {
+                Cut::DocumentIntent | Cut::ExitIntent => {
+                    let intent = match cut {
+                        Cut::DocumentIntent => EditorWorkspaceIntent::CloseDocument { document },
+                        _ => EditorWorkspaceIntent::Exit,
+                    };
+                    assert_eq!(
+                        editor.request_workspace_intent(intent),
+                        EditorWorkspaceIntentRequestResult::Accepted
+                    );
+                    assert_eq!(
+                        editor.workspace_intent_view().phase(),
+                        Some(EditorWorkspaceIntentPhase::AwaitingDecision)
+                    );
+                    assert!(editor.workspace_intent_view().decision_prompt().is_some());
+                }
+                Cut::PhysicalClose => {
+                    let _ = editor.advance_close();
+                }
+            }
+            assert_eq!(
+                editor.workspace().document_revision(document),
+                Some(revision)
+            );
+            let began = editor.begin_authoring_construction(document, revision);
+            let preparation = editor.prepare_authoring_construction(document, &draft);
+            let committed = editor.commit_authoring_construction(prepared);
+            let after = document_state(&editor, document);
+            let active_after = editor.workspace().active_document();
+            if let Some(prompt) = editor.workspace_intent_view().decision_prompt() {
+                assert_eq!(
+                    editor.resolve_workspace_intent(prompt, EditorCloseDecision::Cancel),
+                    EditorWorkspaceIntentRequestResult::Accepted
+                );
+            }
+            let _ = drive_editor_close_to_completion(&mut editor);
+
+            assert!(matches!(began, Err(EditorEditPreparationError::Closing)));
+            assert!(matches!(
+                preparation,
+                Err(EditorEditPreparationError::Closing)
+            ));
+            let Err(EditorActionOutcome::Workspace(report)) = committed else {
+                panic!(
+                    "the direct Session ingress must return a closing refusal, not a successful receipt: {committed:?}"
+                );
+            };
+            assert!(!report.applied);
+            assert!(
+                report
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code().as_str()
+                        == "project.editor.workspace-intent-pending")
+            );
+            assert_eq!(
+                after, before,
+                "construction must preserve source, revision, history, selection and saved state"
+            );
+            assert_eq!(active_after, active);
+            assert_eq!(fs::read(&source).unwrap(), persisted);
+        }
+    }
+}
+
+#[test]
 fn closing_session_rejects_new_runtime_edits_while_still_allowing_stop() {
     use nara_tooling::{EditorRuntimeEditRejection, EditorRuntimeEditRequest};
 

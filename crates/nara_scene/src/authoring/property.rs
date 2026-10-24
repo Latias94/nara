@@ -30,6 +30,13 @@ pub struct AuthoringPropertyEdit {
     pub value: ComponentValue,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct StagedPropertyRecord<'a> {
+    pub(super) schema: &'a ComponentSchema,
+    pub(super) version: ComponentSchemaVersion,
+    pub(super) value: &'a ComponentValue,
+}
+
 impl SceneAuthoringSession {
     /// Prepares ordered property replacements, coalescing roots into one existing history entry.
     pub fn prepare_authoring_property_edit(
@@ -41,7 +48,7 @@ impl SceneAuthoringSession {
             return Err(super::prepared::stale_basis());
         }
         let state = self.authority.published().ok_or_else(rejected)?;
-        let patch = lower(&self.document.entities, state, edits)?;
+        let patch = lower(&self.document.entities, state, edits, &BTreeMap::new())?;
         self.prepare_authoring_edit(base_revision, &patch)
     }
 }
@@ -57,15 +64,16 @@ impl PrefabAuthoringSession {
             return Err(super::prepared::stale_basis());
         }
         let state = self.authority.published().ok_or_else(rejected)?;
-        let patch = lower(&self.document.entities, state, edits)?;
+        let patch = lower(&self.document.entities, state, edits, &BTreeMap::new())?;
         self.prepare_authoring_edit(base_revision, &patch)
     }
 }
 
-fn lower(
-    entities: &[SceneEntityRecord],
-    state: &AuthoringDocumentState,
+pub(super) fn lower<'a>(
+    entities: &'a [SceneEntityRecord],
+    state: &'a AuthoringDocumentState,
     edits: &[AuthoringPropertyEdit],
+    staged: &BTreeMap<(SceneEntityId, ComponentTypeId), StagedPropertyRecord<'a>>,
 ) -> Result<ScenePatchDocument, ScenePatchReport> {
     // Bound original work, not just the coalesced patch: many writes to one root still cost work.
     if edits.is_empty() || edits.len() > MAX_AUTHORING_FIELD_WRITES {
@@ -96,32 +104,42 @@ fn lower(
         }
     }
 
-    let mut candidates = BTreeMap::<(SceneEntityId, ComponentTypeId), ComponentValue>::new();
+    let mut candidates =
+        BTreeMap::<(SceneEntityId, ComponentTypeId), (&ComponentSchema, ComponentValue)>::new();
     let mut touched = BTreeSet::<(SceneEntityId, ComponentTypeId, ComponentFieldId)>::new();
     for (operation_index, edit) in edits.iter().enumerate() {
-        let schema = state
-            .available_component_schema(&edit.entity, &edit.component)
-            .ok_or_else(|| rejected_at(operation_index))?;
         let key = (edit.entity.clone(), edit.component.clone());
-        let candidate = match candidates.entry(key) {
+        let (schema, candidate) = match candidates.entry(key) {
             std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
             std::collections::btree_map::Entry::Vacant(entry) => {
-                let record = entities
+                let original = entities
                     .iter()
                     .find(|entity| entity.id == edit.entity)
-                    .and_then(|entity| entity.components.get(&edit.component))
-                    .ok_or_else(|| rejected_at(operation_index))?;
-                if record.version != edit.component_version {
+                    .and_then(|entity| entity.components.get(&edit.component));
+                let target = match original {
+                    Some(record) => StagedPropertyRecord {
+                        schema: state
+                            .available_component_schema(&edit.entity, &edit.component)
+                            .ok_or_else(|| rejected_at(operation_index))?,
+                        version: record.version,
+                        value: &record.value,
+                    },
+                    None => *staged
+                        .get(entry.key())
+                        .ok_or_else(|| rejected_at(operation_index))?,
+                };
+                let schema = target.schema;
+                if target.version != edit.component_version {
                     return Err(property_rejection(
                         &ComponentPropertyError::VersionMismatch {
-                            expected: record.version,
+                            expected: target.version,
                             actual: edit.component_version,
                         },
                         schema,
                         operation_index,
                     ));
                 }
-                entry.insert(record.value.clone())
+                entry.insert((schema, target.value.clone()))
             }
         };
         replace_component_property(
@@ -141,17 +159,15 @@ fn lower(
 
     let mut operations = Vec::with_capacity(touched.len());
     for (entity, component, root) in touched {
-        let schema = state
-            .available_component_schema(&entity, &component)
+        let (schema, candidate) = candidates
+            .get(&(entity.clone(), component.clone()))
             .ok_or_else(rejected)?;
         let field = schema
             .fields()
             .iter()
             .find(|field| field.id() == &root)
             .ok_or_else(rejected)?;
-        let value = candidates
-            .get(&(entity.clone(), component.clone()))
-            .ok_or_else(rejected)?
+        let value = candidate
             .get_path(field.path())
             .map_err(|_| rejected())?
             .clone();

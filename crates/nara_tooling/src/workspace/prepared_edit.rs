@@ -95,24 +95,7 @@ impl EditorWorkspace {
         base_revision: SceneAuthoringRevision,
         request: EditRequest<'_>,
     ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
-        let context = WorkspaceDocumentContext::new(self.active_document, Some(document));
-        let Some(slot) = self.documents.get(&document) else {
-            return Err(workspace_document_error_report(context, document));
-        };
-        if slot.revision() != base_revision {
-            return Err(workspace_revision_error_report(
-                context,
-                document,
-                base_revision,
-                slot.revision(),
-            ));
-        }
-        if slot.authoring_readiness().is_none() {
-            return Err(authoring_document_error_report(
-                self.active_document,
-                document,
-            ));
-        }
+        let slot = self.resolve_authoring_preparation_slot(document, base_revision)?;
         let prepared = match slot {
             EditorDocumentSlot::Scene(slot) => match request {
                 EditRequest::Patch(patch) => {
@@ -141,13 +124,46 @@ impl EditorWorkspace {
         };
         prepared
             .map(|edit| PreparedEditorDocumentEdit { document, edit })
-            .map_err(|patch_report| {
-                let mut report = report_for_document(document, self.active_document, slot);
-                report.applied = false;
-                let _ = report.diagnostics.extend(patch_report.diagnostics.clone());
-                report.patch_report = Some(patch_report);
-                report
-            })
+            .map_err(|patch_report| self.authoring_preparation_error(document, slot, patch_report))
+    }
+
+    pub(super) fn resolve_authoring_preparation_slot(
+        &self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+    ) -> Result<&EditorDocumentSlot, EditorWorkspaceCommandReport> {
+        let context = WorkspaceDocumentContext::new(self.active_document, Some(document));
+        let Some(slot) = self.documents.get(&document) else {
+            return Err(workspace_document_error_report(context, document));
+        };
+        if slot.revision() != base_revision {
+            return Err(workspace_revision_error_report(
+                context,
+                document,
+                base_revision,
+                slot.revision(),
+            ));
+        }
+        if slot.authoring_readiness().is_none() {
+            return Err(authoring_document_error_report(
+                self.active_document,
+                document,
+            ));
+        }
+        Ok(slot)
+    }
+
+    pub(super) fn authoring_preparation_error(
+        &self,
+        document: EditorDocumentId,
+        slot: &EditorDocumentSlot,
+        patch_report: nara_scene::ScenePatchReport,
+    ) -> EditorWorkspaceCommandReport {
+        let mut report = report_for_document(document, self.active_document, slot);
+        report.applied = false;
+        let _ = report.diagnostics.extend(patch_report.diagnostics.clone());
+        report.patch_report = Some(patch_report);
+        report
     }
 
     /// Commits only to the original document/session and retains ordinary selection repair.
