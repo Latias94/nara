@@ -1,6 +1,6 @@
 {
   "kind": "authoring_schema_bundle",
-  "format_version": 2,
+  "format_version": 3,
   "engine_min_version": "0.1.0",
   "generator": {
     "name": "nara",
@@ -172,7 +172,7 @@
         "owner": "nara.scene.hierarchy.components",
         "current": {
           "generation": 2,
-          "predecessor": "bd55e114e38abc9211918c152f497a176323e02fd2432c1fdd38d03a8691dd27",
+          "predecessor": "c10f2b1f83e331a6dc3fc8f5819b8565c1747b59f8f7d14f307530699438d1cb",
           "components": [
             {
               "id": "nara.scene.Name",
@@ -324,7 +324,7 @@
         "owner": "nara.sprite.components",
         "current": {
           "generation": 2,
-          "predecessor": "1ad5864b87458d51e4e7c4442bfe889988c2f92ab90d21d3d16a5283b2de29dc",
+          "predecessor": "c945db7ecde643bfed2496ae195c35810cf0adca83441b1ebdec4132bdee92ca",
           "components": [
             {
               "id": "nara.sprite.Sprite",
@@ -1868,7 +1868,7 @@
         "owner": "nara.transform.components",
         "current": {
           "generation": 2,
-          "predecessor": "a75329b11ae0956d1c5d66db1b874ea57b74170a7d21a779880d2c90970482fe",
+          "predecessor": "c465ef2fc0cbced890aa0da47ade06eb1194308aff1b72750d450a1d3f20bb6c",
           "components": [
             {
               "id": "nara.transform.Transform2d",
@@ -2201,7 +2201,7 @@
         "owner": "nara.ui.components",
         "current": {
           "generation": 3,
-          "predecessor": "d7468da88c3ad3ca5e92d1a02e00e2a3d091037773abcec0bb552f19da626238",
+          "predecessor": "454b28fafbb8319b554b164ecaf4a65d77c8501be9fd0af7754c8f54794bd518",
           "components": [
             {
               "id": "nara.ui.UiButton",
@@ -5554,7 +5554,7 @@
         },
         "predecessor": {
           "generation": 2,
-          "predecessor": "4d6a78ab8359a8e1736dd9dccb6a90ecba2337b77487acb4a3a989183c736ea3",
+          "predecessor": "730565ab7c85d57b5977b744496fb85a7ef6cbea2311adf5b62bb5265c3cc21f",
           "components": [
             {
               "id": "nara.ui.UiButton",
@@ -8898,7 +8898,7 @@
         "owner": "reference-game.components",
         "current": {
           "generation": 5,
-          "predecessor": "f58cef4f2f2454165b7067beba3d7df2f1a3997a0b1664398ff851cdc8b470f5",
+          "predecessor": "8c97520cb7983457fdb9997d80d51a81fcb0b50e8533f773a276cfb793b3d2a1",
           "components": [
             {
               "id": "reference_game.EnemyRole",
@@ -9126,7 +9126,7 @@
         },
         "predecessor": {
           "generation": 4,
-          "predecessor": "e30afbb3600e1d9783145fc8a249d528cb94df84ea5ce40b4b74e6ac58ebd575",
+          "predecessor": "d9df70f9192b44f296fe811ae6a5f39e72c2145db02eb950c2e7ceb937a57ecf",
           "components": [
             {
               "id": "reference_game.EnemyRole",

@@ -1,6 +1,6 @@
 {
   "kind": "authoring_schema_bundle",
-  "format_version": 2,
+  "format_version": 3,
   "engine_min_version": "0.1.0",
   "generator": {
     "name": "nara",
@@ -12,7 +12,7 @@
         "owner": "collect-game",
         "current": {
           "generation": 2,
-          "predecessor": "f2fca7fff0d88e6e8f9bfea3f174da5929449fe0b2b8d8a96260f091d224662b",
+          "predecessor": "d5a4e668c896b1e22d51443d89568c7b3b3f5008280d4e3f21ea2029c4ceee45",
           "components": [
             {
               "id": "collect-game.Collectible",
@@ -358,7 +358,7 @@
         "owner": "nara.scene.hierarchy.components",
         "current": {
           "generation": 2,
-          "predecessor": "bd55e114e38abc9211918c152f497a176323e02fd2432c1fdd38d03a8691dd27",
+          "predecessor": "c10f2b1f83e331a6dc3fc8f5819b8565c1747b59f8f7d14f307530699438d1cb",
           "components": [
             {
               "id": "nara.scene.Name",
@@ -510,7 +510,7 @@
         "owner": "nara.sprite.components",
         "current": {
           "generation": 2,
-          "predecessor": "1ad5864b87458d51e4e7c4442bfe889988c2f92ab90d21d3d16a5283b2de29dc",
+          "predecessor": "c945db7ecde643bfed2496ae195c35810cf0adca83441b1ebdec4132bdee92ca",
           "components": [
             {
               "id": "nara.sprite.Sprite",
@@ -2082,7 +2082,7 @@
         "owner": "nara.transform.components",
         "current": {
           "generation": 2,
-          "predecessor": "a75329b11ae0956d1c5d66db1b874ea57b74170a7d21a779880d2c90970482fe",
+          "predecessor": "c465ef2fc0cbced890aa0da47ade06eb1194308aff1b72750d450a1d3f20bb6c",
           "components": [
             {
               "id": "nara.transform.Transform2d",

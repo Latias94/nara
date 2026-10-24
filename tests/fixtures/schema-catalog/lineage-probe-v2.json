@@ -1,6 +1,6 @@
 {
   "kind": "component_schema_catalog",
-  "format_version": 2,
+  "format_version": 3,
   "engine_min_version": "0.1.0",
   "generator": {
     "name": "nara",
@@ -8,7 +8,7 @@
   },
   "payload": {
     "generation": 2,
-    "predecessor": "a45f4b152afe0723b92d1a71c309ebdb39ea515662b36d06afef5febb36790c9",
+    "predecessor": "018a295008dc180d07798a76ec75f56c628e8595d72ab02597e343b44d481be9",
     "components": [
       {
         "id": "nara.test.LineageProbe",

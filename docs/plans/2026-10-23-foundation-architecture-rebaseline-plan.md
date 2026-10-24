@@ -299,10 +299,23 @@ Incremental projection,
 durable addressing and the remaining waves are not closed by an epoch policy.
 
 Separate source identity, structured projection chain, durable property and runtime incarnation.
-Select named nested member identity and keyed-item addressing; unkeyed list positions remain
-revision-local. Separate declarative Prefab overrides from exact editor operation/inverse patches;
-retain unresolved migration/rebase conflicts. Qualify ordinary incremental projection versus
-epoch reconstruction, not a generic incremental graph.
+The [R5a proposal](../architecture/durable-property-addressing-design.md) narrows its first
+implementation to a Schema-relative property selector: root field IDs are component-scoped and
+nested IDs are sibling-scoped; root-relative declaration-path tombstones retain retired scopes.
+Tagged selectors distinguish members, keyed items and map entries, and keyed selectors name the
+stable identity member as well as its value. Component version is a value basis, and only
+migrated/current values resolve. Same key
+means same logical identity; arbitrary deletion history is not manufactured to detect accidental
+reuse. Complete source/document/occurrence identity remains owned outside Reflect. R5a must update
+0011/0081 only after the selected metadata and lineage contract is independently reviewed.
+
+The R5 review also found a likely persistent UI-root collision when two source Scenes contribute
+the same local ID into one World. Prove it through an exact public consumer first. If reproduced,
+treat source provenance and UI-key correction as a separate owner unit, with a focused ADR 0038 /
+0102 amendment and ADR 0102 conformance refreeze; never substitute runtime instance, preview epoch
+or process-local workspace IDs. Separate declarative Prefab overrides from exact editor
+operation/inverse patches; retain unresolved migration/rebase conflicts. Qualify ordinary
+incremental projection versus epoch reconstruction, not a generic incremental graph.
 
 Acceptance: nested and repeated instances, base rename/reorder/delete, same-name members,
 Behavior migration, convert-to-local and explicit remap. Long edit churn preserves stale-alias

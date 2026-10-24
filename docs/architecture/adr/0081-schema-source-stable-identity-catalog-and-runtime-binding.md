@@ -1,7 +1,7 @@
 # ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding
 
 **Status**: Accepted
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-10-24
 **Date**: 2026-07-12
 **Implemented Slices**: RGF-U1 canonical catalog and native binding boundary on 2026-07-12; RGF-U2
 native Rust derive authoring and public headless consumer on 2026-07-13; RGF-U12 World-independent
@@ -12,6 +12,7 @@ target-World eligibility on 2026-07-18
 [ADR 0098](0098-schema-owner-lineage-and-active-runtime-composition.md), and
 [ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md)
 **Related**: ADR 0034, ADR 0058, ADR 0076
+**R5a Design**: [Durable Property Addressing](../durable-property-addressing-design.md)
 
 ## Semantic Authority And Representation Scope
 
@@ -116,15 +117,20 @@ name, or current runtime `ComponentId`.
 - `ComponentTypeId` remains the stable identity for the component-role slice of the schema catalog.
   It is an opaque, bounded string. Existing built-in reverse-domain IDs become permanent tokens;
   their resemblance to names does not make them renameable aliases.
-- Every catalog field has a `ComponentFieldId`. It is opaque, bounded, unique within its owning
-  component type, never reused, and retained as a tombstone after deletion.
+- Every root catalog field has a `ComponentFieldId`, unique within its component and retained as a
+  component-level tombstone after deletion. A nested Record member may opt into an opaque, bounded
+  sibling-scoped ID. Its identity includes its complete stable parent path, allowing identified
+  nested shapes to be reused. Root-relative declaration-path tombstones retain retired member
+  scopes even when an intermediate value shape disappears; a tombstoned prefix cannot reactivate.
+  This does not make every nested member durable by default or create a global shape registry.
 - Type and field display names are mutable aliases. Renaming an alias does not change an ID and does
   not require a persistent field-reference migration.
 - `ComponentFieldPath` locates data inside the current version's `ComponentValue`. It is a codec and
   value-layout locator, not durable field identity.
-- Persistent patch operations and other durable field references use
-  `ComponentTypeId + ComponentFieldId`. The active schema resolves that identity to the current
-  value path before validation or mutation.
+- Persistent root-field references use `ComponentTypeId + ComponentFieldId`; the nested
+  property selector extends this with tagged member, keyed-item and map-entry segments. The active
+  schema resolves the selector to a current value location only for the exact admitted Schema and
+  current-version value. It must not persist a Bevy reflection path or raw list index.
 - Moving a field between owning types, splitting or merging fields, or changing semantics requires
   an explicit migration. A storage-path change that preserves one field ID is handled by the
   component value migration and current catalog mapping.
@@ -133,6 +139,13 @@ name, or current runtime `ComponentId`.
   contract exists, writes from an older component version are rejected. Whole-component values use
   the registered component migration chain; identity-only field removal may resolve against the
   current catalog.
+- A keyed list's item identity is an explicit Schema declaration over an exact String/I64/U64
+  member value. A keyed-item selector also names that stable identity member; a different current
+  identity policy refuses it rather than silently changing its meaning. Keyed items are distinct
+  from list positions and map entries. Current uniqueness is
+  sufficient for current lookup, but this ADR does not manufacture arbitrary value history: a
+  reused key asserts continuity. A future overlay/rebase owner must retain lineage or require an
+  explicit remap if it needs to distinguish restoration from accidental reuse.
 - Identity allocation and tombstone persistence for generated or adapter-owned schemas belong to
   the concrete generator or adapter. RGF-U1 establishes the catalog contract but does not invent a
   universal source language or sidecar format.
@@ -154,12 +167,19 @@ The catalog must not contain Rust `TypeId`, `rust_type_path`, Bevy `ComponentId`
 function pointers, VM handles, or backend-native values. Rust paths may remain non-persistent debug
 metadata on a native binding.
 
-The unshipped catalog envelope and the authoring bundle embedding it move to canonical version 2
-for recursive shapes. Version-1 catalog/bundle input rejects explicitly; no automatic flat-format
-compatibility reader is retained. Component schema versions, stable IDs, tombstones and lineage
-remain distinct from this envelope reset. Fixtures preserve their component histories and rewrite
-fingerprints/predecessor links using the new canonical recursive encoding. Unrelated Scene,
-Prefab, patch and asset envelope versions remain unchanged.
+The unshipped catalog envelope and the authoring bundle embedding it move to canonical version 3
+for scoped nested-member identity, declaration-path tombstones and keyed-list policy. Versions 1/2
+reject explicitly; no automatic compatibility reader is retained. The fingerprint domain moves to
+version 3 with the new tagged semantic encoding. Component schema versions, stable IDs, tombstones
+and lineage remain distinct from this envelope reset. Fixtures preserve their component histories
+and rewrite fingerprints/predecessor links using the new canonical encoding. Root-only schemas do
+not gain member IDs or new value semantics through that rewrite. Unrelated Scene, Prefab, patch
+and asset envelope versions remain unchanged.
+
+The [R5a qualification](../../knowledge/engineering/verification/2026-10/2026-10-24T024954Z-r5a-final-owner-diagnostics-and-workspace-qualification-f58a0ab130cb47a8bc2829e32f1d0a86.md)
+executes metadata, lineage, resolver and independent Scene/Prefab edit workflows under this v3
+contract. It does not qualify complete source/product provenance, durable overlays or package
+scope. Those remain separate owning contracts rather than additional Reflect responsibilities.
 
 Shape fingerprints include recursive tags, member/key ordering, scalar numeric domains,
 presence/default semantics and reference capabilities. Editor-only presentation remains separate

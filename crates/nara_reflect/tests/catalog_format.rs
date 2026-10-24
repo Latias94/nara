@@ -75,7 +75,7 @@ fn sample_catalog() -> ComponentSchemaCatalog {
 }
 
 #[test]
-fn recursive_shapes_round_trip_as_v2_and_v1_headers_are_rejected() {
+fn recursive_shapes_round_trip_as_v3_and_old_headers_are_rejected() {
     let mut catalog = sample_catalog();
     catalog.components[0].fields[0].shape = ComponentValueShape::list(ComponentValueShape::map(
         ComponentValueShape::optional(ComponentValueShape::scalar(ComponentValueKind::U64)),
@@ -83,7 +83,7 @@ fn recursive_shapes_round_trip_as_v2_and_v1_headers_are_rejected() {
     catalog.canonicalize();
     let json = catalog.to_json_string().unwrap();
     let wire = serde_json::from_str::<serde_json::Value>(&json).unwrap();
-    assert_eq!(wire["format_version"], 2);
+    assert_eq!(wire["format_version"], 3);
     assert!(
         wire["payload"]["components"][0]["fields"][0]
             .get("value_kind")
@@ -216,7 +216,7 @@ fn standalone_catalog_predecessor_record_order_is_semantic_and_type_changes_stil
         ))
     ));
     let encoded =
-        serde_json::to_vec(&envelope("component_schema_catalog", 2, "0.1.0", successor)).unwrap();
+        serde_json::to_vec(&envelope("component_schema_catalog", 3, "0.1.0", successor)).unwrap();
     assert!(matches!(
         ComponentSchemaCatalog::from_json_bytes_with_predecessor(
             &encoded,
@@ -237,7 +237,7 @@ fn catalog_json_and_ron_use_one_canonical_envelope_without_native_identity() {
     let json = expected.to_json_string().unwrap();
     let json_value = serde_json::from_str::<serde_json::Value>(&json).unwrap();
     assert_eq!(json_value["kind"], "component_schema_catalog");
-    assert_eq!(json_value["format_version"], 2);
+    assert_eq!(json_value["format_version"], 3);
     assert_eq!(json_value["payload"]["generation"], 1);
     assert!(json_value.to_string().find("rust_type_path").is_none());
     assert_eq!(
@@ -271,7 +271,7 @@ fn catalog_header_contract_rejects_wrong_kind_version_and_engine_minimum() {
 
     let future_engine = serde_json::to_vec(&envelope(
         "component_schema_catalog",
-        2,
+        3,
         "999.0.0",
         &catalog,
     ))
@@ -317,7 +317,7 @@ fn catalog_byte_shape_and_domain_budgets_reject_before_candidate_publication() {
     };
     let encoded = serde_json::to_vec(&envelope(
         "component_schema_catalog",
-        2,
+        3,
         "0.1.0",
         &two_components,
     ))
@@ -330,7 +330,7 @@ fn catalog_byte_shape_and_domain_budgets_reject_before_candidate_publication() {
 
     let field_limits = defaults.with_fields(ItemLimit::ONE);
     let encoded =
-        serde_json::to_vec(&envelope("component_schema_catalog", 2, "0.1.0", &catalog)).unwrap();
+        serde_json::to_vec(&envelope("component_schema_catalog", 3, "0.1.0", &catalog)).unwrap();
     assert!(matches!(
         ComponentSchemaCatalog::from_json_bytes_with_limits(&encoded, field_limits),
         Err(ComponentCatalogFileError::Budget(error))
@@ -353,7 +353,7 @@ fn catalog_rejects_unknown_fields_and_invalid_identity_before_registry_mutation(
     let catalog = sample_catalog();
     let unknown = UnknownEnvelope {
         kind: "component_schema_catalog",
-        format_version: 2,
+        format_version: 3,
         engine_min_version: "0.1.0",
         generator: TestGenerator {
             name: "nara",
@@ -398,7 +398,7 @@ fn catalog_rejects_unknown_fields_and_invalid_identity_before_registry_mutation(
         ..ComponentSchemaCatalog::default()
     };
     let encoded =
-        serde_json::to_vec(&envelope("component_schema_catalog", 2, "0.1.0", invalid)).unwrap();
+        serde_json::to_vec(&envelope("component_schema_catalog", 3, "0.1.0", invalid)).unwrap();
     assert!(matches!(
         ComponentSchemaCatalog::from_json_bytes(&encoded),
         Err(ComponentCatalogFileError::Catalog(
@@ -447,7 +447,7 @@ fn loaded_catalog_remains_separate_from_native_binding_until_atomic_freeze() {
 }
 
 #[test]
-fn canonical_component_catalog_v2_fixtures_reserialize_exactly() {
+fn canonical_component_catalog_v3_fixtures_reserialize_exactly() {
     let json = include_str!("../../../tests/fixtures/formats/v1/component_schema_catalog.json");
     let ron = include_str!("../../../tests/fixtures/formats/v1/component_schema_catalog.ron");
 

@@ -22,6 +22,10 @@ use crate::{
 mod prepared;
 #[cfg(feature = "serde")]
 pub use prepared::{PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit};
+#[cfg(feature = "serde")]
+mod property;
+#[cfg(feature = "serde")]
+pub use property::AuthoringPropertyEdit;
 
 pub use nara_core::{
     DocumentContentState as SceneAuthoringContentState,

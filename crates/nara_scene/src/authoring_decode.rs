@@ -368,8 +368,8 @@ pub struct AuthoringRecordFact {
 /// Field edits retain their separate, smaller write/value budgets.
 pub const MAX_AUTHORING_EDIT_OPERATIONS: usize = 256;
 pub const MAX_AUTHORING_FIELD_WRITES: usize = 8;
-const MAX_AUTHORING_FIELD_VALUE_NODES: usize = 256;
-const MAX_AUTHORING_FIELD_LOGICAL_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_AUTHORING_FIELD_VALUE_NODES: usize = 256;
+pub(crate) const MAX_AUTHORING_FIELD_LOGICAL_BYTES: usize = 64 * 1024;
 
 /// One exact field write within a preservation-safe authoring edit.
 #[derive(Debug, Clone, PartialEq)]
@@ -923,7 +923,9 @@ fn supports_data_shape(shape: &ComponentValueShape) -> bool {
             ComponentValueShape::Record { members } => {
                 pending.extend(members.iter().map(|member| &member.shape));
             }
-            ComponentValueShape::List { item } => pending.push(item),
+            ComponentValueShape::List { item } | ComponentValueShape::KeyedList { item, .. } => {
+                pending.push(item)
+            }
             ComponentValueShape::Map { value } | ComponentValueShape::Optional { value } => {
                 pending.push(value);
             }

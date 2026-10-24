@@ -1,6 +1,8 @@
 //! Public prepared authoring keeps document publication in its existing owner.
 
-use nara_scene::{SceneAuthoringRevision, ScenePatchDocument, ScenePatchOperation};
+use nara_scene::{
+    AuthoringPropertyEdit, SceneAuthoringRevision, ScenePatchDocument, ScenePatchOperation,
+};
 use nara_tooling::{
     EditorActionOutcome, EditorActionRejection, EditorDocumentId, EditorDocumentKind,
     EditorWorkspaceCommandReport, PreparedEditorDocumentEdit,
@@ -21,6 +23,25 @@ pub enum EditorEditPreparationError {
 }
 
 impl EditorProjectSession {
+    /// Prepares stable-property edits in one source owner, independently of selection and tabs.
+    pub fn prepare_authoring_property_edit(
+        &self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        edits: &[AuthoringPropertyEdit],
+    ) -> Result<PreparedEditorDocumentEdit, EditorEditPreparationError> {
+        if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
+            return Err(EditorEditPreparationError::Closing);
+        }
+        let prepared = self
+            .workspace
+            .prepare_authoring_property_edit(document, base_revision, edits)
+            .map_err(|report| EditorEditPreparationError::Document(Box::new(report)))?;
+        self.verify_prepared_patch_contract(document, prepared.patch())
+            .map_err(|_| EditorEditPreparationError::StructureContractMismatch { document })?;
+        Ok(prepared)
+    }
+
     /// Prepares an explicitly targeted data-authoring transaction without changing the frame.
     pub fn prepare_authoring_edit(
         &self,

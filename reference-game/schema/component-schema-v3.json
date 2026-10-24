@@ -1,6 +1,6 @@
 {
   "kind": "component_schema_catalog",
-  "format_version": 2,
+  "format_version": 3,
   "engine_min_version": "0.1.0",
   "generator": {
     "name": "nara",
@@ -8,7 +8,7 @@
   },
   "payload": {
     "generation": 3,
-    "predecessor": "52c020e6f3ffe6ecfff14cd9d70f8846a57c2f1edcda3df7cd9dfb756ad3b4da",
+    "predecessor": "d86ff7df774d7bd383aa23d3c34d13ddac3e471b35d13aba18dcff984f3d3ba9",
     "components": [
       {
         "id": "reference_game.Enemy",

@@ -19,6 +19,7 @@ mod numeric_interval;
 mod path;
 mod persistent_apply;
 mod plugin;
+mod property;
 mod provider;
 mod registry;
 mod schema;
@@ -67,6 +68,10 @@ pub use plugin::{
     registry_for_plugin_preflight, report_component_registry_authority_fault,
     validate_component_registry_authority,
 };
+pub use property::{
+    ComponentPropertyError, ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep,
+    ResolvedComponentProperty, replace_component_property, resolve_component_property,
+};
 pub use provider::{
     ComponentSchemaContributionReceipt, ComponentSchemaOwnerContributionReceipt,
     ComponentSchemaOwnerFingerprint, ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
@@ -82,6 +87,7 @@ pub use registry::{
 pub use schema::{
     AliasError, CatalogFingerprint, CatalogFingerprintParseError, ComponentCapability,
     ComponentCatalogGenerationError, ComponentFieldId, ComponentFieldIdError, ComponentFieldSchema,
+    ComponentMemberPath, ComponentMemberPathError, ComponentMemberPathSegment,
     ComponentNumericDomain, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
     ComponentShapeError, ComponentShapeErrorKind, ComponentShapeMember, ComponentTypeId,
     ComponentTypeIdError, ComponentValueKind, ComponentValueShape,
@@ -153,15 +159,18 @@ pub mod prelude {
         ComponentCodecError, ComponentDecodeContext, ComponentDomainError, ComponentEncodeContext,
         ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentFieldPath,
         ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema, ComponentFloat,
+        ComponentMemberPath, ComponentMemberPathError, ComponentMemberPathSegment,
         ComponentMigrationError, ComponentNumericBound, ComponentNumericDomain,
-        ComponentNumericInterval, ComponentRegistry, ComponentRegistryError,
+        ComponentNumericInterval, ComponentPropertyError, ComponentPropertyKey,
+        ComponentPropertyPath, ComponentPropertyStep, ComponentRegistry, ComponentRegistryError,
         ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
         ComponentShapeError, ComponentShapeErrorKind, ComponentShapeMember, ComponentTypeId,
         ComponentValue, ComponentValueError, ComponentValueKind, ComponentValueShape,
         DeclaredAssetReference, DeclaredAssetReferenceError, EntityReference,
         EntityReferenceTraversalLimits, MigratedComponentValue, PersistentComponent,
         PersistentComponentProvider, PreparedComponent, PreparedComponentCandidate,
-        collect_declared_asset_references, remap_declared_entity_references,
+        ResolvedComponentProperty, collect_declared_asset_references,
+        remap_declared_entity_references, replace_component_property, resolve_component_property,
         rewrite_declared_entity_references, validate_component_value,
     };
     pub use bevy_reflect::prelude::*;

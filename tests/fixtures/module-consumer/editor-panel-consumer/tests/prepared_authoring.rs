@@ -12,19 +12,20 @@ use std::{
 use nara::{
     reflect::{
         AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
-        ComponentFieldPath, ComponentFieldSchema, ComponentNumericDomain, ComponentSchema,
-        ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-        ComponentValueKind, EntityReference, PersistentComponentSchemaOwnerId,
+        ComponentFieldPath, ComponentFieldSchema, ComponentNumericDomain, ComponentPropertyPath,
+        ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
+        ComponentValue, ComponentValueKind, EntityReference, PersistentComponentSchemaOwnerId,
     },
     scene::{
-        PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
-        ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+        AuthoringPropertyEdit, PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId,
+        SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
+        ScenePlacementOwner,
     },
 };
 use nara_editor::{
-    EditorApplication, EditorApplicationActionDispatch, EditorApplicationSubmission,
-    EditorLaunchOptions, EditorNativeComposition, ImguiEditorPanel, ImguiEditorPanelContext,
-    PanelActionDispatch, PanelSubmissionId,
+    EditorApplication, EditorApplicationActionDispatch, EditorApplicationActionNotDispatched,
+    EditorApplicationSubmission, EditorLaunchOptions, EditorNativeComposition, ImguiEditorPanel,
+    ImguiEditorPanelContext, PanelActionDispatch, PanelSubmissionId,
     workspace::{EditorPanelDescriptor, EditorPanelMultiplicity, EditorPanelPlacement},
 };
 use nara_tooling::{
@@ -900,6 +901,150 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
         app.close(),
         "the four-document owner did not physically retire"
     );
+}
+
+#[test]
+fn property_preparation_obeys_document_close_project_replacement_and_retirement() {
+    use nara::project_host::EditorEditPreparationError;
+
+    for guard in ["document-close", "project-replacement", "retirement"] {
+        let project = text_project::TextProject::new();
+        let replacement = text_project::TextProject::new();
+        let schemas = bundle();
+        fs::write(
+            project.root.join("schema/authoring.bundle.json"),
+            schemas.to_json_string().unwrap(),
+        )
+        .unwrap();
+        let source = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("anchor"))
+            .with_component(
+                ComponentTypeId::new("consumer.Link"),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    schemas.owners()[0].current().components[0]
+                        .authoring_initial_value()
+                        .unwrap()
+                        .clone(),
+                )
+                .with_owner(PersistentComponentSchemaOwnerId::try_new(OWNER).unwrap()),
+            )])
+        .to_json_string()
+        .unwrap();
+        let source_path = project.root.join("scenes/startup.scene.json");
+        fs::write(&source_path, &source).unwrap();
+        let mut app = Application(EditorApplication::new(EditorLaunchOptions::new(
+            &project.root,
+        )));
+        app.native_shell_ready();
+        wait(&mut app, |frame| {
+            !frame.project_browser().has_pending_work()
+        });
+        let document = frame(&app).workspace().active_document.unwrap();
+        let mut edits = [AuthoringPropertyEdit {
+            entity: id("anchor"),
+            component: ComponentTypeId::new("consumer.Link"),
+            component_version: ComponentSchemaVersion::ONE,
+            property: ComponentPropertyPath::new(ComponentFieldId::new("amount")),
+            value: ComponentValue::U64(2),
+        }];
+        let before = frame(&app);
+        let prepared = app
+            .prepare_authoring_property_edit(document, basis(&app, document).revision, &edits)
+            .unwrap();
+        assert_eq!(prepared.patch().operations.len(), 1);
+        assert_eq!(
+            frame(&app).workspace().documents,
+            before.workspace().documents
+        );
+        let committed = app.commit_authoring_edit(prepared, Duration::ZERO);
+        assert!(
+            matches!(committed.actions(), [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))] if report.applied)
+        );
+        edits[0].value = ComponentValue::U64(3);
+        let revision = basis(&app, document).revision;
+        let prepared = app
+            .prepare_authoring_property_edit(document, revision, &edits)
+            .unwrap();
+        let documents = frame(&app).workspace().documents.clone();
+        match guard {
+            "document-close" => {
+                let requested = submit(
+                    &mut app,
+                    EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Request(
+                        EditorWorkspaceIntent::CloseDocument { document },
+                    )),
+                );
+                assert!(matches!(
+                    requested.actions(),
+                    [EditorApplicationActionDispatch::Dispatched(
+                        EditorActionOutcome::WorkspaceIntent(
+                            EditorWorkspaceIntentRequestResult::Accepted
+                        )
+                    )]
+                ));
+            }
+            "project-replacement" => {
+                assert!(app.request_project_replacement(&replacement.root, None));
+            }
+            "retirement" => assert!(!app.request_exit().exit_ready()),
+            _ => unreachable!(),
+        }
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while frame(&app).workspace_intent().decision_prompt().is_none() {
+            assert!(
+                Instant::now() < deadline,
+                "{guard} never requested a decision"
+            );
+            app.advance_project_open();
+            let revision = frame(&app).revision();
+            app.submit_and_drive(EditorActionBatch::new(revision, []), Duration::ZERO);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            matches!(
+                app.prepare_authoring_property_edit(document, revision, &edits),
+                Err(EditorEditPreparationError::Closing)
+            ),
+            "{guard} admitted preparation"
+        );
+        let rejected = app.commit_authoring_edit(prepared, Duration::ZERO);
+        assert!(
+            matches!(
+                rejected.actions(),
+                [EditorApplicationActionDispatch::NotDispatched(
+                    EditorApplicationActionNotDispatched::Closing
+                )]
+            ),
+            "{guard} published a prepared edit"
+        );
+        assert_eq!(frame(&app).workspace().documents, documents);
+        assert_eq!(fs::read_to_string(&source_path).unwrap(), source);
+        let resolution = frame(&app)
+            .workspace_intent()
+            .decision_prompt()
+            .unwrap()
+            .resolve(EditorCloseDecision::Cancel);
+        submit(&mut app, EditorAction::WorkspaceIntent(resolution));
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            if app
+                .prepare_authoring_property_edit(document, revision, &edits)
+                .is_ok()
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{guard} cancellation did not restore authoring"
+            );
+            app.advance_project_open();
+            let revision = frame(&app).revision();
+            app.submit_and_drive(EditorActionBatch::new(revision, []), Duration::ZERO);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(frame(&app).workspace().documents, documents);
+        assert!(app.close(), "{guard} did not physically retire");
+    }
 }
 
 #[test]

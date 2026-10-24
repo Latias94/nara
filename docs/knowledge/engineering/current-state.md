@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "aae21da15d083db60906c386e2793a2dcfb0e3d11c1591f3bdf2c7b33c02a4c4"
+source_fingerprint: "049c721e72bc577c64cb82270eab2fd70738dd6a178907ee8c740263ee6b767e"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "aae21da15d083db60906c386e2793a2dcfb0e3d11c1591f3bdf2c7b33c0
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `aae21da15d083db60906c386e2793a2dcfb0e3d11c1591f3bdf2c7b33c02a4c4`
-- Immutable records: 872
+- Source fingerprint: `049c721e72bc577c64cb82270eab2fd70738dd6a178907ee8c740263ee6b767e`
+- Immutable records: 875
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,9 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [R5a final owner diagnostics and workspace qualification](verification/2026-10/2026-10-24T024954Z-r5a-final-owner-diagnostics-and-workspace-qualification-f58a0ab130cb47a8bc2829e32f1d0a86.md) - Qualified Schema-relative addressing, owner edits, v3 fixtures and safe diagnostic recovery; broader source identity and panel workflows remain open.
+- **Verification Evidence**: [R5a property addressing current qualification](verification/2026-10/2026-10-24T021414Z-r5a-property-addressing-current-qualification.md) - Current serial qualification of scoped property identity metadata, owner edits, and independent consumers; source identity remains open.
+- **Work Progress**: [R5a scoped property identity implementation and open qualification](progress/2026-10/2026-10-24T004112Z-r5a-scoped-property-identity-implementation-and-open-qualification-beb7daa155f8431ebb46c3d5e3082f32.md) - Scoped member lineage and keyed selectors replace the rejected component-global design; owner edits and canonical v3 metadata are implemented but final verification is pending.
 - **Verification Evidence**: [Disposable Scene projection epochs and stable native preview qualification](verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md) - Qualify complete-domain Scene epochs while retaining shared authoring owners and renderer producer identity.
 - **Work Progress**: [Projection lifetime next-unit design and measurement boundary](progress/2026-10/2026-10-23T211757Z-projection-lifetime-next-unit-design-and-measurement-boundary-d55f02e666d0487987d1a1f8b1d9c8b6.md) - Ground the remaining R5c preview-history pressure and compare explicit epoch handoff with owner-specific incremental projection; no production selection yet.
 - **Verification Evidence**: [Trusted Play source continuity and source-local Close qualification](verification/2026-10/2026-10-23T210921Z-trusted-play-source-continuity-and-source-local-close-qualification-61897d1b17744e2aaff6fc6efb1594a7.md) - Qualify the R5c trusted Play source through cancellation, Game handoff and physical retirement without stopping unrelated documents.
@@ -78,9 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Per-document persistence custody qualification](verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md) - Typed document file custody, captured Save/Reopen Hosts, exact cleanup isolation and bounded native/public evidence.
 - **Verification Evidence**: [Prepared source editing and non-active entity query qualification](verification/2026-10/2026-10-23T140847Z-prepared-source-editing-and-non-active-entity-query-qualification-d08c0cb5ab2c4f798dd7cd98c2a2e6c5.md) - Owner-bound candidates, replayable inverses, public Scene/Prefab workflow, exact query custody and per-kind Host limitation.
 - **Verification Evidence**: [Workflow-driven foundation waves and R1a owned Application submission qualification](verification/2026-10/2026-10-23T123523Z-workflow-driven-foundation-waves-and-r1a-owned-application-submission-qualification-5e5f6c3eb3b84150bc3a5e06e9862abf.md) - Target owner boundaries, dependency corrections, exact direct dispatch observations, consumer evidence and explicit remaining scope.
-- **Verification Evidence**: [Foundation architecture rebaseline documentation checks and adversarial closure](verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md) - Inventory, status, link and scoped adversarial checks close design work only; no runtime or performance qualification.
-- **Subagent Finding**: [Complete foundation review: six independent lanes and integrated design choices](subagents/2026-10/2026-10-23T113840Z-complete-foundation-review-six-independent-lanes-and-integrated-design-choices-0520f18c9f084c319ab268ab36204938.md) - Six source reviews challenge all conversation foundation topics and 103 baseline ADRs without claiming implementation.
-- **Verification Evidence**: [Chat-informed architecture review probes and design constraints](verification/2026-10/2026-10-23T105719Z-chat-informed-architecture-review-probes-and-design-constraints-cc6bbbacdaac48eea3745bc7d36f8d9a.md) - Three public-interface probes distinguish a reproduced control defect from current Identity and Theme contract debt.
 
 # Integration Notes
 

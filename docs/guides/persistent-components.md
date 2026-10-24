@@ -304,8 +304,10 @@ tombstones on every successor.
 `HashMap`, non-string map keys, enums, tuple structs, and arbitrary nested Rust structs remain
 unsupported. Manual schemas can declare closed records with `ComponentValueShape::record`:
 every declared member must be present, optional members encode `Null`, and extra members reject.
-The catalog and authoring-bundle envelopes use version 2; Scene, Prefab, and Patch formats retain
-their own versions. Historical component versions, stable IDs, and migration chains remain intact.
+The catalog and authoring-bundle envelopes use version 3; versions 1/2 are rejected. Scene, Prefab,
+and Patch formats retain their own versions. The unreleased R5a metadata reset preserves historical
+component definitions/versions and migration chains, while re-encoding catalogs and recomputing
+their predecessor fingerprints. It is not permission to rewrite historical component semantics.
 
 Schema-description limits bound metadata; Scene, Prefab, Patch, and reference traversal own the
 runtime value work budgets. Direct in-memory validation does not grant file-ingest or allocation
@@ -340,6 +342,69 @@ record expectation without retaining the working session or its history. Re-admi
 through the matching Scene/Prefab candidate method and check `preserves_scene` / `preserves_prefab`
 before publication. This validates preservation; it grants no permission to replace a Workspace
 document or mark it saved. Those operations still require the original owner and persistence receipt.
+
+## Stable Nested Properties
+
+Manual semantic Schemas can opt into nested identity without reflecting a Rust type. Use
+`record_members` and explicit member IDs; plain `record` remains appropriate when only whole-root
+replacement is needed. Member IDs are unique among siblings, not across a component: the same
+identified value shape may be reused under multiple stable parents.
+
+```rust
+use nara::reflect::{
+    ComponentFieldId, ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep,
+    ComponentShapeMember, ComponentValueKind, ComponentValueShape,
+};
+
+let items = ComponentValueShape::keyed_list(
+    ComponentValueShape::record_members([
+        ComponentShapeMember::new("wire_id", ComponentValueKind::String)
+            .with_id(ComponentFieldId::new("item-id")),
+        ComponentShapeMember::new("health", ComponentValueKind::U64)
+            .with_id(ComponentFieldId::new("hp")),
+    ]),
+    ComponentFieldId::new("item-id"),
+);
+let health = ComponentPropertyPath::new(ComponentFieldId::new("inventory"))
+    .with_steps([
+        ComponentPropertyStep::ListItem {
+            by: ComponentFieldId::new("item-id"),
+            key: ComponentPropertyKey::String("potion".to_owned()),
+        },
+        ComponentPropertyStep::Member(ComponentFieldId::new("hp")),
+    ]);
+```
+
+The root field's ID/path/shape/capabilities still come from its admitted `ComponentFieldSchema`.
+Keyed items support exact String/I64/U64 identities; duplicate keys reject. Reordering does not
+change a selector, but changing the key member policy rejects old `by` selectors. A reused key
+asserts identity continuity; Reflect does not invent historical item tombstones. Unkeyed list
+indices are not durable selectors. Map entries use separately tagged exact string keys.
+
+`resolve_component_property` reads an existing target only in a current-version value. It does not
+choose a catalog, migrate data, materialize omitted defaults, create optional containers, or grant
+mutation authority. Retired member declaration paths stay in the root field's `member_tombstones`;
+retiring a parent protects descendants, and the metadata survives intermediate shape changes.
+Wire renames still require explicit component value migration while retaining semantic IDs.
+
+For editing, pass ordered `AuthoringPropertyEdit` replacements to
+`prepare_authoring_property_edit` on a Scene/Prefab session, Workspace, project session or Editor
+Application, then use the existing `commit_authoring_edit`. The owner coalesces writes to each root
+and creates the ordinary inverse/history entry. Original operation count, selector bytes and
+replacement payload are admitted before coalescing; final root patches and inverses retain their
+existing limits. Exact source revision/Schema checks, unavailable-record preservation and one Undo
+remain unchanged. This path replaces existing stored targets; root omission/default reset still
+uses the existing root-field operations. It is not a complete document/Prefab-occurrence address
+or the future declarative Prefab overlay format.
+
+Resolution failures retain `operation-index`, a static `property-error-kind`, and a
+`property-step-index` when the failing selector step is known. Tools can distinguish missing
+optional containers, retired targets and changed list identity policy without reparsing values.
+These diagnostics do not publish actual map/list keys or replacement payloads.
+
+The first-party inline Inspector collection controls still support scalar items only. A keyed
+Record list is available through the public property-edit API, not those inline controls; this
+Schema capability does not imply a new collection UI.
 
 ## Runtime-Only Components
 

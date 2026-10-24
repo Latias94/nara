@@ -67,6 +67,10 @@ Rules:
   an older component schema version is rejected until an explicit field-value migration contract
   exists; a stable field ID proves identity, not that an old scalar or asset-reference value keeps
   the same semantics. Identity-only removal may resolve the stable ID against the current schema.
+- Stable nested-property selectors also require a current-version admitted component value before
+  resolution. A wire-layout migration may retain member IDs; changing keyed-item identity policy
+  refuses the old selector's `by` member until an explicit address remap is supplied. A component
+  migration does not implicitly migrate persistent selectors or manufacture a new overlay format.
 - Unsupported future document versions fail with typed format errors.
 - Prototype, unknown, and missing migration steps fail with typed format errors. nara must not
   best-effort guess unknown document shapes.

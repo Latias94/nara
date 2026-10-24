@@ -182,7 +182,7 @@ impl ValueDraft {
                 pending: None,
                 confirmed: source.is_some(),
             },
-            ComponentValueShape::Opaque { .. } => {
+            ComponentValueShape::Opaque { .. } | ComponentValueShape::KeyedList { .. } => {
                 unreachable!("unsupported shapes never open a draft")
             }
         }
@@ -303,7 +303,8 @@ pub(in crate::frontend::imgui) fn supported(shape: &ComponentValueShape) -> bool
         }
         ComponentValueShape::List { item } => scalar_item(item),
         ComponentValueShape::Map { value } => scalar_item(value),
-        ComponentValueShape::Opaque { .. } => false,
+        // Collection controls currently support scalar items, not keyed Record rows.
+        ComponentValueShape::Opaque { .. } | ComponentValueShape::KeyedList { .. } => false,
     }
 }
 
@@ -398,7 +399,7 @@ pub(in crate::frontend::imgui) fn parse_scalar(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara::reflect::ComponentNumericDomain;
+    use nara::reflect::{ComponentFieldId, ComponentNumericDomain, ComponentShapeMember};
 
     #[test]
     fn new_children_require_explicit_values_and_complete_record_members() {
@@ -453,6 +454,20 @@ mod tests {
                 "child".into(),
                 ComponentValueShape::opaque(ComponentValueKind::Map),
             )])
+        )));
+    }
+
+    #[test]
+    fn keyed_record_lists_remain_outside_scalar_collection_controls() {
+        let item = ComponentValueShape::record_members([ComponentShapeMember::new(
+            "id",
+            ComponentValueKind::String,
+        )
+        .with_id(ComponentFieldId::new("item-id"))]);
+        assert!(!supported(&ComponentValueShape::list(item.clone())));
+        assert!(!supported(&ComponentValueShape::keyed_list(
+            item,
+            ComponentFieldId::new("item-id"),
         )));
     }
 

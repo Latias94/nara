@@ -66,7 +66,7 @@ fn successor_of(predecessor: &ComponentSchemaCatalog) -> ComponentSchemaCatalog 
 fn envelope(owners: Vec<Value>) -> Vec<u8> {
     serde_json::to_vec(&json!({
         "kind": "authoring_schema_bundle",
-        "format_version": 2,
+        "format_version": 3,
         "engine_min_version": "0.1.0",
         "generator": {
             "name": "nara",
@@ -118,7 +118,7 @@ fn canonical_multi_owner_json_roundtrip_derives_composition_fingerprint() {
     assert_eq!(bundle.owners()[1].predecessor().unwrap().generation(), 1);
     assert_eq!(
         bundle.fingerprint().to_hex(),
-        "336e13f6c6df7e72a5cce2e55c0ac0c2d7fed7e3293d3569e444a14ddca0991f"
+        "17077fc2a6937fc1bc3f11c2a8d9f74e7b35aeabe9e48323dd6eae5918df4405"
     );
     assert_eq!(
         bundle.owners()[0]
@@ -233,14 +233,14 @@ fn unsupported_bundle_envelope_is_rejected_before_payload_publication() {
         None,
     )]))
     .unwrap();
-    for version in [1, 3] {
+    for version in [1, 2, 4] {
         encoded["format_version"] = Value::from(version);
         assert!(matches!(
             AuthoringSchemaBundle::from_json_bytes(&serde_json::to_vec(&encoded).unwrap()),
             Err(AuthoringSchemaBundleError::Contract(_))
         ));
     }
-    encoded["format_version"] = Value::from(2);
+    encoded["format_version"] = Value::from(3);
     encoded["kind"] = Value::String("future_authoring_bundle".to_owned());
     let encoded = serde_json::to_vec(&encoded).unwrap();
 

@@ -1,6 +1,6 @@
 {
   "kind": "authoring_schema_bundle",
-  "format_version": 2,
+  "format_version": 3,
   "engine_min_version": "0.1.0",
   "generator": {
     "name": "nara",
@@ -12,7 +12,7 @@
         "owner": "nara.scene.hierarchy.components",
         "current": {
           "generation": 2,
-          "predecessor": "bd55e114e38abc9211918c152f497a176323e02fd2432c1fdd38d03a8691dd27",
+          "predecessor": "c10f2b1f83e331a6dc3fc8f5819b8565c1747b59f8f7d14f307530699438d1cb",
           "components": [
             {
               "id": "nara.scene.Name",

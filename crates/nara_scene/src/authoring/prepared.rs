@@ -194,7 +194,7 @@ impl PrefabAuthoringSession {
     }
 }
 
-fn stale_basis() -> ScenePatchReport {
+pub(super) fn stale_basis() -> ScenePatchReport {
     history_error_report(
         "scene.authoring-edit-stale-basis",
         "Prepared authoring edits require their exact originating session, revision and Schema admission",

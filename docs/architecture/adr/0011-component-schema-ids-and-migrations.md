@@ -2,12 +2,14 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-18
-**Amended**: 2026-07-12 by RGF-U1 for stable field identity and registry freeze
+**Last Revised**: 2026-10-24
+**Amended**: 2026-07-12 by RGF-U1 for stable field identity and registry freeze; 2026-10-24 by
+R5a for scoped Schema-relative property selectors
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0045: Component
 Schema Capability Metadata; ADR 0049: Untrusted Project Input and Parse Budget Policy; ADR 0051:
 Persistent File Envelope, Migration, and Golden Fixtures; ADR 0081: Schema Source, Stable Identity,
 Catalog, and Runtime Binding
+**Related**: [R5a design](../durable-property-addressing-design.md)
 
 ## Context
 
@@ -30,9 +32,24 @@ Rules:
   records, lists, string-key maps, optional values and typed reference leaves share that authority.
   Opaque Map/List leaves explicitly retain manual-codec semantics without declaring nested
   reference authority. Enum/tuple shapes and a general Rust reflection/type registry are deferred.
-- Stable identity belongs to root fields. Record member names, map keys and list indices are
-  current value locators within that field, not new durable IDs. Root field capabilities govern
-  their descendants. A nested shape change follows the existing component-version/migration rules.
+- Root fields retain component-wide stable `ComponentFieldId` values. A nested Record member may
+  opt into a sibling-scoped stable `ComponentFieldId`, addressed through its complete stable
+  ancestor chain. Reusable nested shapes do not allocate different member IDs at every use site.
+  A root field retains retired member declaration paths, including schema-only collection scope
+  segments; retired prefixes cannot reactivate even after an intermediate shape change. Root
+  deletion retains the existing component-level field tombstone. Unidentified members remain
+  reachable only through root replacement or revision-bound current-value operations. Record
+  names and aliases are not durable identity.
+- A List may explicitly declare one identified required Record member as its item key. Supported
+  keys are exact String/I64/U64 values. The selector names both the stable identity member and key
+  so a later identity-policy change cannot silently redirect an old selector. Keyed lookup is
+  distinct from a current list index; an
+  unkeyed list has no durable item address. Map keys remain tagged value selectors and are not
+  interchangeable with Record members or keyed-list items.
+- Stable property selectors resolve only against the exact admitted current Schema and a component
+  value already migrated to its current version. `ComponentFieldPath` remains a current storage
+  locator. A nested shape change, split/merge, or semantic replacement follows the existing
+  component-version/migration rules; address resolution never guesses a replacement.
 
 ```mermaid
 flowchart TD
@@ -108,6 +125,12 @@ As of RGF-U1 on 2026-07-12:
   or backend handle. Native debug metadata stays outside the wire catalog.
 - An ordinary runtime-only component needs only the normal Rust/`bevy_ecs` component contract and
   is absent from the persistent registry.
+
+R5a qualification on 2026-10-24 adds sibling-scoped member IDs, root-relative member-path
+tombstones and explicit keyed-list identity. The current Reflect/Scene cohort passes 532 tests;
+independent Scene/Prefab editing consumers cover migration, reorder, failure atomicity, history
+and persistence. This proves a Schema-relative selector, not complete source-document or Prefab
+occurrence identity. See the [verification evidence](../../knowledge/engineering/verification/2026-10/2026-10-24T024954Z-r5a-final-owner-diagnostics-and-workspace-qualification-f58a0ab130cb47a8bc2829e32f1d0a86.md).
 
 ## Success Metrics
 

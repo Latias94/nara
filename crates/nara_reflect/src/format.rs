@@ -418,7 +418,7 @@ fn canonical_envelope(
         .map_err(ComponentCatalogFileError::Catalog)?;
     Ok(PersistentFileEnvelope::new(
         format_kind()?,
-        FormatVersion::new(2).expect("catalog format version is non-zero"),
+        FormatVersion::new(3).expect("catalog format version is non-zero"),
         engine_version(CANONICAL_ENGINE_MIN_VERSION)?,
         FormatGenerator::new(
             FORMAT_GENERATOR_NAME,
@@ -524,6 +524,21 @@ pub(crate) fn accumulate_catalog_budget(
                 ComponentCatalogFileBudgetKind::Aliases,
             )?;
             accumulate_shape_budget(&field.shape, limits, counts)?;
+            increase(
+                &mut counts.tombstones,
+                field.member_tombstones.len(),
+                limits.tombstones(),
+                ComponentCatalogFileBudgetKind::Tombstones,
+            )?;
+            for path in &field.member_tombstones {
+                counts.observe_diagnostic_source(limits)?;
+                increase(
+                    &mut counts.shape_nodes,
+                    path.segments().len(),
+                    limits.fields(),
+                    ComponentCatalogFileBudgetKind::ShapeNodes,
+                )?;
+            }
         }
         increase(
             &mut counts.tombstones,
@@ -573,7 +588,9 @@ fn accumulate_shape_budget(
                     pending.push(&member.shape);
                 }
             }
-            ComponentValueShape::List { item } => pending.push(item),
+            ComponentValueShape::List { item } | ComponentValueShape::KeyedList { item, .. } => {
+                pending.push(item)
+            }
             ComponentValueShape::Map { value } | ComponentValueShape::Optional { value } => {
                 pending.push(value)
             }
@@ -668,7 +685,7 @@ where
 fn file_contract() -> Result<PersistentFileContract, ComponentCatalogFileError> {
     Ok(PersistentFileContract::new(
         format_kind()?,
-        FormatVersion::new(2).expect("catalog format version is non-zero"),
+        FormatVersion::new(3).expect("catalog format version is non-zero"),
         engine_version(env!("CARGO_PKG_VERSION"))?,
     ))
 }

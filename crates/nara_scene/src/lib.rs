@@ -28,15 +28,16 @@ mod product_transaction_tests;
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "serde")]
+pub use authoring::{
+    AuthoringPropertyEdit, AuthoringSessionReplacementError, PreparedPrefabAuthoringEdit,
+    PreparedSceneAuthoringEdit,
+};
 pub use authoring::{
     AuthoringSessionAuthorityError, PrefabAuthoringSession, SceneAuthoringClearReport,
     SceneAuthoringContentState, SceneAuthoringHistoryLimits, SceneAuthoringHistoryStatus,
     SceneAuthoringHistoryUsage, SceneAuthoringRevision, SceneAuthoringSession,
     SceneAuthoringSourceId, SceneAuthoringSyncReport,
-};
-#[cfg(feature = "serde")]
-pub use authoring::{
-    AuthoringSessionReplacementError, PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit,
 };
 #[cfg(feature = "serde")]
 pub use authoring_decode::{

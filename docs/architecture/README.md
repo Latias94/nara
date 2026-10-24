@@ -112,6 +112,12 @@ incumbent and same-World candidate, without implying incremental projection or n
 The separate [scoped qualification](../knowledge/engineering/verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md)
 binds the implemented epoch/producer/presentation contracts to public, held-work and actual native evidence.
 
+The [durable property addressing design](durable-property-addressing-design.md) bounds the
+R5a implementation to a Schema-relative selector and resolver. It keeps source-document/entity,
+Prefab occurrence, operation basis and runtime incarnation as separate owner axes, and records the
+scoped nested-ID lineage, keyed-item, migration and unresolved-target rules that must be settled
+before R2/R3/R5b persistent contracts freeze.
+
 The [chat-informed foundation review](../audits/2026-10-23-chat-informed-engine-architecture-review.md)
 compares the supplied engine-design conversation with the current owners and pinned Bevy/Godot
 sources at `f91466b`. Four independent review lanes and three public-interface probes distinguish

@@ -848,15 +848,37 @@ impl EditorApplication {
         nara::tooling::PreparedEditorDocumentEdit,
         nara::project_host::EditorEditPreparationError,
     > {
+        self.authoring_edit_session()?
+            .prepare_authoring_edit(document, base_revision, patch)
+    }
+
+    /// Prepares stable-property replacements using the same document candidate and Undo owner.
+    pub fn prepare_authoring_property_edit(
+        &self,
+        document: nara::tooling::EditorDocumentId,
+        base_revision: nara::scene::SceneAuthoringRevision,
+        edits: &[nara::scene::AuthoringPropertyEdit],
+    ) -> Result<
+        nara::tooling::PreparedEditorDocumentEdit,
+        nara::project_host::EditorEditPreparationError,
+    > {
+        self.authoring_edit_session()?
+            .prepare_authoring_property_edit(document, base_revision, edits)
+    }
+
+    fn authoring_edit_session(
+        &self,
+    ) -> Result<
+        &nara::project_host::EditorProjectSession,
+        nara::project_host::EditorEditPreparationError,
+    > {
         use nara::project_host::EditorEditPreparationError;
         if self.session_retirement.is_some() {
             return Err(EditorEditPreparationError::Closing);
         }
         match &self.state {
             EditorProductState::AuthoringReady(project)
-            | EditorProductState::AuthoringDegraded(project) => project
-                .session
-                .prepare_authoring_edit(document, base_revision, patch),
+            | EditorProductState::AuthoringDegraded(project) => Ok(&project.session),
             EditorProductState::OpeningReplacement(OpeningReplacementState::Closing { .. }) => {
                 Err(EditorEditPreparationError::Closing)
             }

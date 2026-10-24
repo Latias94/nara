@@ -1,6 +1,6 @@
 {
   "kind": "component_schema_catalog",
-  "format_version": 2,
+  "format_version": 3,
   "engine_min_version": "0.1.0",
   "generator": {
     "name": "nara",
@@ -8,7 +8,7 @@
   },
   "payload": {
     "generation": 5,
-    "predecessor": "f58cef4f2f2454165b7067beba3d7df2f1a3997a0b1664398ff851cdc8b470f5",
+    "predecessor": "8c97520cb7983457fdb9997d80d51a81fcb0b50e8533f773a276cfb793b3d2a1",
     "components": [
       {
         "id": "reference_game.EnemyRole",

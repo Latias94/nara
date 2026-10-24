@@ -9,7 +9,8 @@ use std::{
 use nara_identity::EntityReference;
 
 use crate::{
-    ComponentFieldPath, ComponentFieldPathSegment, ComponentNumericInterval, ComponentValue,
+    ComponentFieldPath, ComponentFieldPathSegment, ComponentNumericInterval, ComponentPropertyKey,
+    ComponentValue,
 };
 
 const MAX_ALIAS_BYTES: usize = 128;
@@ -423,6 +424,7 @@ impl ComponentSchemaCatalog {
             schema.field_tombstones.sort();
             for field in &mut schema.fields {
                 field.aliases.sort();
+                field.member_tombstones.sort();
                 if field.shape.validate().is_ok() {
                     field.shape.canonicalize();
                 }
@@ -455,7 +457,7 @@ impl ComponentSchemaCatalog {
         let mut hasher = blake3::Hasher::new();
         // Generation and predecessor are deliberately excluded: this is a canonical content
         // fingerprint, and including predecessor would make the lineage identity recursive.
-        feed_bytes(&mut hasher, b"nara.component-schema-catalog-fingerprint.v2");
+        feed_bytes(&mut hasher, b"nara.component-schema-catalog-fingerprint.v3");
         let mut components = self.components.iter().collect::<Vec<_>>();
         components.sort_by(|left, right| left.id.cmp(&right.id));
         feed_len(&mut hasher, components.len());
@@ -492,7 +494,99 @@ impl ComponentSchemaCatalog {
 
 pub(crate) const MAX_SHAPE_DEPTH: usize = 64;
 const MAX_SHAPE_NODES: usize = 16_384;
-const MAX_SHAPE_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const MAX_SHAPE_BYTES: usize = 4 * 1024 * 1024;
+
+/// A declaration coordinate below one stable root field, not a concrete value locator.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(
+        tag = "kind",
+        content = "value",
+        rename_all = "snake_case",
+        deny_unknown_fields
+    )
+)]
+pub enum ComponentMemberPathSegment {
+    Member(ComponentFieldId),
+    ListItem,
+    MapEntry,
+}
+
+/// Root-relative member lineage retained even when the current shape has no Record.
+/// Optional shapes are transparent; collection segments describe schema wildcards.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+pub struct ComponentMemberPath {
+    segments: Vec<ComponentMemberPathSegment>,
+}
+
+impl ComponentMemberPath {
+    #[must_use]
+    pub fn new(segments: impl IntoIterator<Item = ComponentMemberPathSegment>) -> Self {
+        Self {
+            segments: segments.into_iter().collect(),
+        }
+    }
+
+    #[must_use]
+    pub fn segments(&self) -> &[ComponentMemberPathSegment] {
+        &self.segments
+    }
+
+    pub fn validate(&self) -> Result<(), ComponentMemberPathError> {
+        if self.segments.len() > MAX_SHAPE_DEPTH {
+            return Err(ComponentMemberPathError::DepthLimit);
+        }
+        if !matches!(
+            self.segments.last(),
+            Some(ComponentMemberPathSegment::Member(_))
+        ) {
+            return Err(ComponentMemberPathError::MustEndWithMember);
+        }
+        for segment in &self.segments {
+            if let ComponentMemberPathSegment::Member(id) = segment {
+                id.validate()
+                    .map_err(|_| ComponentMemberPathError::InvalidMemberId(id.clone()))?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ComponentMemberPathError {
+    MustEndWithMember,
+    InvalidMemberId(ComponentFieldId),
+    DepthLimit,
+}
+
+impl Display for ComponentMemberPathError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "invalid component member declaration path: {self:?}"
+        )
+    }
+}
+
+impl Error for ComponentMemberPathError {}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for ComponentMemberPath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let segments =
+            <Vec<ComponentMemberPathSegment> as serde::Deserialize>::deserialize(deserializer)?;
+        let path = Self::new(segments);
+        path.validate().map_err(serde::de::Error::custom)?;
+        Ok(path)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -522,6 +616,11 @@ pub enum ComponentValueShape {
     List {
         item: Box<Self>,
     },
+    /// An ordered collection whose items are identified by one required Record member.
+    KeyedList {
+        item: Box<Self>,
+        key: ComponentFieldId,
+    },
     Map {
         value: Box<Self>,
     },
@@ -538,7 +637,29 @@ pub enum ComponentValueShape {
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct ComponentShapeMember {
     pub name: String,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub id: Option<ComponentFieldId>,
     pub shape: ComponentValueShape,
+}
+
+impl ComponentShapeMember {
+    #[must_use]
+    pub fn new(name: impl Into<String>, shape: impl Into<ComponentValueShape>) -> Self {
+        Self {
+            name: name.into(),
+            id: None,
+            shape: shape.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_id(mut self, id: ComponentFieldId) -> Self {
+        self.id = Some(id);
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -562,7 +683,16 @@ pub enum ComponentShapeErrorKind {
     NumericIntervalBoundOutsideDomain,
     EmptyNumericInterval,
     InvalidRecordMember,
+    InvalidMemberId(ComponentFieldId),
+    DuplicateMemberId(ComponentFieldId),
+    InvalidMemberPath(ComponentMemberPathError),
     DuplicateRecordMember(String),
+    InvalidListKey(ComponentFieldId),
+    InvalidKeyedListItem,
+    MissingListKey(ComponentFieldId),
+    AmbiguousListKey(ComponentFieldId),
+    InvalidListKeyShape(ComponentFieldId),
+    DuplicateListKey(ComponentPropertyKey),
     InvalidOptional,
     DepthLimit,
     NodeLimit,
@@ -656,6 +786,14 @@ impl ComponentValueShape {
     }
 
     #[must_use]
+    pub fn keyed_list(item: Self, key: ComponentFieldId) -> Self {
+        Self::KeyedList {
+            item: Box::new(item),
+            key,
+        }
+    }
+
+    #[must_use]
     pub fn map(value: Self) -> Self {
         Self::Map {
             value: Box::new(value),
@@ -678,11 +816,17 @@ impl ComponentValueShape {
 
     #[must_use]
     pub fn record(members: impl IntoIterator<Item = (String, Self)>) -> Self {
-        Self::Record {
-            members: members
+        Self::record_members(
+            members
                 .into_iter()
-                .map(|(name, shape)| ComponentShapeMember { name, shape })
-                .collect(),
+                .map(|(name, shape)| ComponentShapeMember::new(name, shape)),
+        )
+    }
+
+    #[must_use]
+    pub fn record_members(members: impl IntoIterator<Item = ComponentShapeMember>) -> Self {
+        Self::Record {
+            members: members.into_iter().collect(),
         }
     }
 
@@ -764,7 +908,7 @@ impl ComponentValueShape {
                 Self::EntityRef => return ComponentValueKind::EntityRef,
                 Self::AssetRef => return ComponentValueKind::AssetRef,
                 Self::Record { .. } | Self::Map { .. } => return ComponentValueKind::Map,
-                Self::List { .. } => return ComponentValueKind::List,
+                Self::List { .. } | Self::KeyedList { .. } => return ComponentValueKind::List,
                 Self::Optional { value } => current = value,
             }
         }
@@ -810,7 +954,7 @@ impl ComponentValueShape {
                 Self::Record { members } => {
                     pending.extend(members.iter().map(|member| &member.shape))
                 }
-                Self::List { item } => pending.push(item),
+                Self::List { item } | Self::KeyedList { item, .. } => pending.push(item),
                 Self::Map { value } | Self::Optional { value } => pending.push(value),
                 Self::Opaque { .. } => {}
                 shape if shape.value_kind() == kind => return true,
@@ -876,6 +1020,7 @@ impl ComponentValueShape {
             }
             Self::Record { members } => {
                 let mut names = BTreeSet::new();
+                let mut ids = BTreeSet::new();
                 for member in members {
                     if member.name.is_empty()
                         || member.name.len() > ComponentFieldId::MAX_BYTES
@@ -894,11 +1039,31 @@ impl ComponentValueShape {
                     }
                     budget.bytes = budget.bytes.saturating_add(member.name.len());
                     path.push(ComponentFieldPathSegment::field(&member.name));
+                    if let Some(id) = &member.id {
+                        id.validate().map_err(|_| {
+                            shape_error(path, ComponentShapeErrorKind::InvalidMemberId(id.clone()))
+                        })?;
+                        if !ids.insert(id) {
+                            return Err(shape_error(
+                                path,
+                                ComponentShapeErrorKind::DuplicateMemberId(id.clone()),
+                            ));
+                        }
+                        budget.bytes = budget.bytes.saturating_add(id.as_str().len());
+                    }
                     member.shape.validate_shape_node(depth + 1, budget, path)?;
                     path.pop();
                 }
             }
             Self::List { item } => item.validate_shape_node(depth + 1, budget, path)?,
+            Self::KeyedList { item, key } => {
+                key.validate().map_err(|_| {
+                    shape_error(path, ComponentShapeErrorKind::InvalidListKey(key.clone()))
+                })?;
+                budget.bytes = budget.bytes.saturating_add(key.as_str().len());
+                item.validate_shape_node(depth + 1, budget, path)?;
+                keyed_list_member(item, key).map_err(|kind| shape_error(path, kind))?;
+            }
             Self::Map { value } => value.validate_shape_node(depth + 1, budget, path)?,
             Self::Optional { value } => {
                 if matches!(
@@ -1003,6 +1168,32 @@ impl ComponentValueShape {
                 }
                 Ok(())
             }
+            (Self::KeyedList { item, key }, ComponentValue::List(values)) => {
+                let member =
+                    keyed_list_member(item, key).map_err(|kind| shape_error(path, kind))?;
+                let mut keys = BTreeSet::new();
+                for (index, value) in values.iter().enumerate() {
+                    path.push(ComponentFieldPathSegment::index(index as u32));
+                    item.validate_value_node(value, path)?;
+                    let key = value
+                        .get(&member.name)
+                        .and_then(ComponentPropertyKey::from_value)
+                        .ok_or_else(|| {
+                            shape_error(
+                                path,
+                                ComponentShapeErrorKind::MissingMember(member.name.clone()),
+                            )
+                        })?;
+                    if !keys.insert(key.clone()) {
+                        return Err(shape_error(
+                            path,
+                            ComponentShapeErrorKind::DuplicateListKey(key),
+                        ));
+                    }
+                    path.pop();
+                }
+                Ok(())
+            }
             (Self::Map { value: shape }, ComponentValue::Map(values)) => {
                 for (name, value) in values {
                     path.push(ComponentFieldPathSegment::field(name));
@@ -1029,10 +1220,68 @@ impl ComponentValueShape {
                     member.shape.canonicalize();
                 }
             }
-            Self::List { item } => item.canonicalize(),
+            Self::List { item } | Self::KeyedList { item, .. } => item.canonicalize(),
             Self::Map { value } | Self::Optional { value } => value.canonicalize(),
             _ => {}
         }
+    }
+}
+
+pub(crate) fn keyed_list_member<'a>(
+    item: &'a ComponentValueShape,
+    key: &ComponentFieldId,
+) -> Result<&'a ComponentShapeMember, ComponentShapeErrorKind> {
+    let ComponentValueShape::Record { members } = item else {
+        return Err(ComponentShapeErrorKind::InvalidKeyedListItem);
+    };
+    let mut matches = members
+        .iter()
+        .filter(|member| member.id.as_ref() == Some(key));
+    let member = matches
+        .next()
+        .ok_or_else(|| ComponentShapeErrorKind::MissingListKey(key.clone()))?;
+    if matches.next().is_some() {
+        return Err(ComponentShapeErrorKind::AmbiguousListKey(key.clone()));
+    }
+    if !matches!(
+        &member.shape,
+        ComponentValueShape::Scalar {
+            kind: ComponentValueKind::String | ComponentValueKind::I64 | ComponentValueKind::U64,
+            ..
+        }
+    ) {
+        return Err(ComponentShapeErrorKind::InvalidListKeyShape(key.clone()));
+    }
+    Ok(member)
+}
+
+fn collect_member_paths(
+    shape: &ComponentValueShape,
+    declaration: &mut Vec<ComponentMemberPathSegment>,
+    paths: &mut Vec<ComponentMemberPath>,
+) {
+    match shape {
+        ComponentValueShape::Record { members } => {
+            for member in members {
+                let Some(id) = &member.id else { continue };
+                declaration.push(ComponentMemberPathSegment::Member(id.clone()));
+                paths.push(ComponentMemberPath::new(declaration.iter().cloned()));
+                collect_member_paths(&member.shape, declaration, paths);
+                declaration.pop();
+            }
+        }
+        ComponentValueShape::KeyedList { item, .. } => {
+            declaration.push(ComponentMemberPathSegment::ListItem);
+            collect_member_paths(item, declaration, paths);
+            declaration.pop();
+        }
+        ComponentValueShape::Map { value } => {
+            declaration.push(ComponentMemberPathSegment::MapEntry);
+            collect_member_paths(value, declaration, paths);
+            declaration.pop();
+        }
+        ComponentValueShape::Optional { value } => collect_member_paths(value, declaration, paths),
+        _ => {}
     }
 }
 
@@ -1082,36 +1331,49 @@ pub(crate) fn validate_component_shape_budget(
 ) -> Result<(), (ComponentFieldId, ComponentShapeError)> {
     let mut budget = ShapeBudget::default();
     for field in &schema.fields {
-        if field.path.segments().len() > MAX_SHAPE_DEPTH {
-            return Err((
-                field.id.clone(),
-                shape_error(&[], ComponentShapeErrorKind::DepthLimit),
-            ));
-        }
-        let path_bytes = field
-            .path
-            .segments()
-            .iter()
-            .fold(0_usize, |bytes, segment| {
-                bytes.saturating_add(match segment {
-                    ComponentFieldPathSegment::Field(name) => name.len(),
-                    ComponentFieldPathSegment::Index(_) => 4,
-                })
-            });
-        budget.bytes = budget.bytes.saturating_add(path_bytes);
-        if budget.bytes > MAX_SHAPE_BYTES {
-            return Err((
-                field.id.clone(),
-                shape_error(&[], ComponentShapeErrorKind::ByteLimit),
-            ));
-        }
-        let mut path = field.path.segments().to_vec();
-        field
-            .shape
-            .validate_shape_node(path.len(), &mut budget, &mut path)
+        validate_field_shape_budget(field, &mut budget)
             .map_err(|error| (field.id.clone(), error))?;
     }
     Ok(())
+}
+
+fn validate_field_shape_budget(
+    field: &ComponentFieldSchema,
+    budget: &mut ShapeBudget,
+) -> Result<(), ComponentShapeError> {
+    if field.path.segments().len() > MAX_SHAPE_DEPTH {
+        return Err(shape_error(&[], ComponentShapeErrorKind::DepthLimit));
+    }
+    let path_bytes = field
+        .path
+        .segments()
+        .iter()
+        .fold(0_usize, |bytes, segment| {
+            bytes.saturating_add(match segment {
+                ComponentFieldPathSegment::Field(name) => name.len(),
+                ComponentFieldPathSegment::Index(_) => 4,
+            })
+        });
+    budget.bytes = budget.bytes.saturating_add(path_bytes);
+    if budget.bytes > MAX_SHAPE_BYTES {
+        return Err(shape_error(&[], ComponentShapeErrorKind::ByteLimit));
+    }
+    let mut path = field.path.segments().to_vec();
+    for tombstone in &field.member_tombstones {
+        tombstone.validate().map_err(|error| {
+            shape_error(&path, ComponentShapeErrorKind::InvalidMemberPath(error))
+        })?;
+        for (index, segment) in tombstone.segments().iter().enumerate() {
+            let bytes = match segment {
+                ComponentMemberPathSegment::Member(id) => id.as_str().len(),
+                _ => 1,
+            };
+            budget.observe(index.saturating_add(1), bytes, &path)?;
+        }
+    }
+    field
+        .shape
+        .validate_shape_node(path.len(), budget, &mut path)
 }
 
 pub(crate) fn validate_component_value_budget(
@@ -1136,6 +1398,12 @@ pub struct ComponentFieldSchema {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub default_value: Option<ComponentValue>,
+    /// Retired nested declaration paths, retained independently of the current value shape.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Vec::is_empty")
+    )]
+    pub member_tombstones: Vec<ComponentMemberPath>,
 }
 
 impl ComponentFieldSchema {
@@ -1154,6 +1422,7 @@ impl ComponentFieldSchema {
             required: true,
             capabilities: BTreeSet::new(),
             default_value: None,
+            member_tombstones: Vec::new(),
         }
     }
 
@@ -1172,6 +1441,7 @@ impl ComponentFieldSchema {
             required: false,
             capabilities: BTreeSet::new(),
             default_value: None,
+            member_tombstones: Vec::new(),
         }
     }
 
@@ -1191,6 +1461,7 @@ impl ComponentFieldSchema {
             required: false,
             capabilities: BTreeSet::new(),
             default_value: Some(default_value),
+            member_tombstones: Vec::new(),
         }
     }
 
@@ -1198,6 +1469,27 @@ impl ComponentFieldSchema {
     pub fn with_aliases(mut self, aliases: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.aliases.extend(aliases.into_iter().map(Into::into));
         self
+    }
+
+    #[must_use]
+    pub fn with_member_tombstones(
+        mut self,
+        tombstones: impl IntoIterator<Item = ComponentMemberPath>,
+    ) -> Self {
+        self.member_tombstones.extend(tombstones);
+        self
+    }
+
+    /// Collects only members with a fully identified parent chain, after bounded validation.
+    /// Unkeyed lists have no durable item selector and do not contribute descendant paths.
+    pub(crate) fn active_member_paths(
+        &self,
+    ) -> Result<Vec<ComponentMemberPath>, (ComponentFieldId, ComponentShapeError)> {
+        validate_field_shape_budget(self, &mut ShapeBudget::default())
+            .map_err(|error| (self.id.clone(), error))?;
+        let mut paths = Vec::new();
+        collect_member_paths(&self.shape, &mut Vec::new(), &mut paths);
+        Ok(paths)
     }
 
     #[must_use]
@@ -1539,6 +1831,22 @@ fn feed_schema(hasher: &mut blake3::Hasher, schema: &ComponentSchema) {
         }
         feed_path(hasher, &field.path);
         feed_shape(hasher, &field.shape);
+        let mut tombstones = field.member_tombstones.iter().collect::<Vec<_>>();
+        tombstones.sort();
+        feed_len(hasher, tombstones.len());
+        for tombstone in tombstones {
+            feed_len(hasher, tombstone.segments().len());
+            for segment in tombstone.segments() {
+                match segment {
+                    ComponentMemberPathSegment::Member(id) => {
+                        feed_bytes(hasher, &[0]);
+                        feed_str(hasher, id.as_str());
+                    }
+                    ComponentMemberPathSegment::ListItem => feed_bytes(hasher, &[1]),
+                    ComponentMemberPathSegment::MapEntry => feed_bytes(hasher, &[2]),
+                }
+            }
+        }
         feed_bytes(hasher, &[u8::from(field.required)]);
         feed_len(hasher, field.capabilities.len());
         for capability in &field.capabilities {
@@ -1593,11 +1901,23 @@ fn feed_shape(hasher: &mut blake3::Hasher, shape: &ComponentValueShape) {
             members.sort_by(|left, right| left.name.cmp(&right.name));
             for member in members {
                 feed_str(hasher, &member.name);
+                match &member.id {
+                    Some(id) => {
+                        feed_bytes(hasher, &[1]);
+                        feed_str(hasher, id.as_str());
+                    }
+                    None => feed_bytes(hasher, &[0]),
+                }
                 feed_shape(hasher, &member.shape);
             }
         }
         ComponentValueShape::List { item } => {
             feed_bytes(hasher, &[4]);
+            feed_shape(hasher, item);
+        }
+        ComponentValueShape::KeyedList { item, key } => {
+            feed_bytes(hasher, &[8]);
+            feed_str(hasher, key.as_str());
             feed_shape(hasher, item);
         }
         ComponentValueShape::Map { value } => {

@@ -33,10 +33,10 @@ fn text_size_successor_preserves_the_generation_two_catalog_and_other_components
     let predecessor = crate::codec::ui_schema_predecessor_catalog();
     let current = crate::codec::ui_schema_catalog();
     assert_eq!(predecessor.generation(), 2);
-    // Frozen from the shipped generation-two authoring bundle before this successor.
+    // Generation-two semantics, re-encoded under the canonical v3 fingerprint domain.
     assert_eq!(
         predecessor.fingerprint().to_hex(),
-        "d7468da88c3ad3ca5e92d1a02e00e2a3d091037773abcec0bb552f19da626238"
+        "454b28fafbb8319b554b164ecaf4a65d77c8501be9fd0af7754c8f54794bd518"
     );
     assert!(predecessor.predecessor().is_some());
     assert_eq!(current.generation(), 3);

@@ -17,8 +17,8 @@ use nara_ecs::{
 };
 
 use crate::{
-    ComponentDomainError, ComponentFieldPath, ComponentFieldPathSegment, ComponentValue,
-    PersistentComponentProvider,
+    ComponentDomainError, ComponentFieldPath, ComponentFieldPathSegment, ComponentMemberPath,
+    ComponentValue, PersistentComponentProvider,
     codec::{ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext},
     effective::{ComponentValueMaterializationLimits, effective_component_value},
     migration::{ComponentMigration, ComponentMigrationError, MigratedComponentValue},
@@ -39,6 +39,8 @@ use crate::{
         validate_component_value_budget,
     },
 };
+
+mod member_lineage;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComponentRegistryError {
@@ -143,6 +145,26 @@ pub enum ComponentRegistryError {
     ActiveFieldIsTombstoned {
         component_id: ComponentTypeId,
         field_id: ComponentFieldId,
+    },
+    DuplicateMemberTombstone {
+        component_id: ComponentTypeId,
+        field_id: ComponentFieldId,
+        path: ComponentMemberPath,
+    },
+    ActiveMemberIsTombstoned {
+        component_id: ComponentTypeId,
+        field_id: ComponentFieldId,
+        path: ComponentMemberPath,
+    },
+    MissingMemberTombstone {
+        component_id: ComponentTypeId,
+        field_id: ComponentFieldId,
+        path: ComponentMemberPath,
+    },
+    ReactivatedMember {
+        component_id: ComponentTypeId,
+        field_id: ComponentFieldId,
+        path: ComponentMemberPath,
     },
     InvalidComponentFieldDefault {
         component_id: ComponentTypeId,
@@ -408,6 +430,38 @@ impl Display for ComponentRegistryError {
             } => write!(
                 formatter,
                 "component ID '{component_id}' field ID '{field_id}' is both active and tombstoned"
+            ),
+            Self::DuplicateMemberTombstone {
+                component_id,
+                field_id,
+                path,
+            } => write!(
+                formatter,
+                "component ID '{component_id}' field ID '{field_id}' repeats member tombstone {path:?}"
+            ),
+            Self::ActiveMemberIsTombstoned {
+                component_id,
+                field_id,
+                path,
+            } => write!(
+                formatter,
+                "component ID '{component_id}' field ID '{field_id}' has an active member in retired scope {path:?}"
+            ),
+            Self::MissingMemberTombstone {
+                component_id,
+                field_id,
+                path,
+            } => write!(
+                formatter,
+                "component ID '{component_id}' field ID '{field_id}' lacks member tombstone {path:?}"
+            ),
+            Self::ReactivatedMember {
+                component_id,
+                field_id,
+                path,
+            } => write!(
+                formatter,
+                "component ID '{component_id}' field ID '{field_id}' reactivated retired member scope {path:?}"
             ),
             Self::InvalidComponentFieldDefault {
                 component_id,
@@ -2330,6 +2384,7 @@ fn validate_schema(schema: &ComponentSchema) -> Result<(), ComponentRegistryErro
             }
         }
         validate_component_field_default(&schema.id, field)?;
+        member_lineage::validate(schema.id(), field)?;
     }
     let path_index = SchemaPathIndex::from_schema(schema);
     path_index.validate(schema)?;
@@ -2533,6 +2588,13 @@ fn validate_field_lineage(
                 field_id: field.id.clone(),
             });
         }
+        if let Some(current_field) = current
+            .fields
+            .iter()
+            .find(|candidate| candidate.id == field.id)
+        {
+            member_lineage::validate_successor(current.id(), current_field, field)?;
+        }
     }
     if current.version < previous.version {
         return Err(ComponentRegistryError::ComponentSchemaVersionRegressed {
@@ -2717,17 +2779,7 @@ fn validate_component_value_coverage_with_presence(
             Ok(value) => {
                 if let Err(error) = field.shape.validate_value(value) {
                     if error.kind == ComponentShapeErrorKind::NumericInterval {
-                        return Err(ComponentCodecError::domain(
-                            ComponentDomainError::new(
-                                DiagnosticCode::new("nara.reflect.numeric-range")
-                                    .expect("numeric interval diagnostic code is valid"),
-                                SafeSummary::new(
-                                    "Component value is outside its declared numeric interval",
-                                )
-                                .expect("numeric interval summary is safe static text"),
-                            )
-                            .with_field(field.id.clone()),
-                        ));
+                        return Err(numeric_range_error(&field.id));
                     }
                     let path = ComponentFieldPath::new(
                         field
@@ -2762,6 +2814,18 @@ fn validate_component_value_coverage_with_presence(
     }
 
     validate_value_node_coverage(schema, path_index, value, &mut Vec::new())
+}
+
+pub(crate) fn numeric_range_error(field: &ComponentFieldId) -> ComponentCodecError {
+    ComponentCodecError::domain(
+        ComponentDomainError::new(
+            DiagnosticCode::new("nara.reflect.numeric-range")
+                .expect("numeric interval diagnostic code is valid"),
+            SafeSummary::new("Component value is outside its declared numeric interval")
+                .expect("numeric interval summary is safe static text"),
+        )
+        .with_field(field.clone()),
+    )
 }
 
 fn validate_value_node_coverage(

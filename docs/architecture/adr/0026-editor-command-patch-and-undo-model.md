@@ -60,6 +60,14 @@ Rules:
 - Patch paths are schema-aware: `SceneEntityId + ComponentTypeId + field path`. Root field
   identity follows the declared Schema contract; nested member names and unkeyed indices are
   revision-local locators, not promises of rename/reorder-stable persistent identity.
+- Ordered stable-property replacements resolve through the admitted Schema against one evolving
+  private candidate, then coalesce into the existing root-field patch and owner-created inverse.
+  Original property operation count, selector/key bytes and replacement payload are bounded before
+  coalescing; forward/inverse/history admission remains separate. A late failure publishes nothing.
+  Rejection retains the original operation index, static property error kind and known step index,
+  not private selector keys or replacement values.
+  Scoped member IDs, declaration-path tombstones and keyed-item policy follow ADRs 0011/0081.
+  This adds neither a second Undo owner nor durable Prefab overlay semantics to operation patches.
 - Patches should be serializable so AI tools, editor UI, and tests can share the same mutation format.
 
 ```mermaid
@@ -137,6 +145,12 @@ Implementation notes as of 2026-07-08:
   independently resident Scene replacement retain their same-domain history semantics.
 - Incremental `WorldCommand` synchronization remains a later optimization. Spawning still
   preflights expanded documents before mutating the ECS `World`.
+
+R5a qualification on 2026-10-24 adds ordered stable-property preparation through these same
+Scene/Prefab owners. Raw operation, selector and value limits precede coalescing; indexed rejection
+diagnostics omit private keys and replacement values. Current owner and independent consumers
+pass, including non-active editing, Save/Reopen, Undo/Redo and last-operation failure. This does
+not qualify the continuous interaction contract below. See the [verification evidence](../../knowledge/engineering/verification/2026-10/2026-10-24T024954Z-r5a-final-owner-diagnostics-and-workspace-qualification-f58a0ab130cb47a8bc2829e32f1d0a86.md).
 
 ## Undo / Redo
 

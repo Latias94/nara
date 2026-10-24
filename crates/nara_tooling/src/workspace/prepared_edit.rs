@@ -7,8 +7,8 @@ use super::{
     workspace_document_error_report, workspace_revision_error_report,
 };
 use nara_scene::{
-    PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit, SceneAuthoringRevision,
-    ScenePatchDocument,
+    AuthoringPropertyEdit, PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit,
+    SceneAuthoringRevision, ScenePatchDocument,
 };
 
 /// A move-only edit of one explicitly named open document; it owns no workspace or selection.
@@ -22,6 +22,11 @@ pub struct PreparedEditorDocumentEdit {
 enum PreparedDocumentEdit {
     Scene(PreparedSceneAuthoringEdit),
     Prefab(PreparedPrefabAuthoringEdit),
+}
+
+enum EditRequest<'a> {
+    Patch(&'a ScenePatchDocument),
+    Properties(&'a [AuthoringPropertyEdit]),
 }
 
 impl PreparedEditorDocumentEdit {
@@ -71,6 +76,25 @@ impl EditorWorkspace {
         base_revision: SceneAuthoringRevision,
         patch: &ScenePatchDocument,
     ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
+        self.prepare_edit(document, base_revision, EditRequest::Patch(patch))
+    }
+
+    /// Prepares ordered stable-property edits without making the requested document active.
+    pub fn prepare_authoring_property_edit(
+        &self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        edits: &[AuthoringPropertyEdit],
+    ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
+        self.prepare_edit(document, base_revision, EditRequest::Properties(edits))
+    }
+
+    fn prepare_edit(
+        &self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        request: EditRequest<'_>,
+    ) -> Result<PreparedEditorDocumentEdit, EditorWorkspaceCommandReport> {
         let context = WorkspaceDocumentContext::new(self.active_document, Some(document));
         let Some(slot) = self.documents.get(&document) else {
             return Err(workspace_document_error_report(context, document));
@@ -90,14 +114,24 @@ impl EditorWorkspace {
             ));
         }
         let prepared = match slot {
-            EditorDocumentSlot::Scene(slot) => slot
-                .session
-                .prepare_authoring_edit(base_revision, patch)
-                .map(PreparedDocumentEdit::Scene),
-            EditorDocumentSlot::Prefab(slot) => slot
-                .session
-                .prepare_authoring_edit(base_revision, patch)
-                .map(PreparedDocumentEdit::Prefab),
+            EditorDocumentSlot::Scene(slot) => match request {
+                EditRequest::Patch(patch) => {
+                    slot.session.prepare_authoring_edit(base_revision, patch)
+                }
+                EditRequest::Properties(edits) => slot
+                    .session
+                    .prepare_authoring_property_edit(base_revision, edits),
+            }
+            .map(PreparedDocumentEdit::Scene),
+            EditorDocumentSlot::Prefab(slot) => match request {
+                EditRequest::Patch(patch) => {
+                    slot.session.prepare_authoring_edit(base_revision, patch)
+                }
+                EditRequest::Properties(edits) => slot
+                    .session
+                    .prepare_authoring_property_edit(base_revision, edits),
+            }
+            .map(PreparedDocumentEdit::Prefab),
             EditorDocumentSlot::Extension(_) => {
                 return Err(authoring_command_error_report(
                     self.active_document,

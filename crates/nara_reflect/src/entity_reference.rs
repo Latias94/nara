@@ -520,7 +520,10 @@ impl<'schema> PresentReferenceTraversal<'schema> {
             (ComponentValueShape::Record { members }, ComponentValue::Map(values)) => {
                 self.visit_record(field, members, values, path, depth)?;
             }
-            (ComponentValueShape::List { item }, ComponentValue::List(values)) => {
+            (
+                ComponentValueShape::List { item } | ComponentValueShape::KeyedList { item, .. },
+                ComponentValue::List(values),
+            ) => {
                 for (index, value) in values.iter().enumerate() {
                     let index = u32::try_from(index)
                         .map_err(|_| ComponentEntityReferenceRewriteError::PathIndexOverflow)?;

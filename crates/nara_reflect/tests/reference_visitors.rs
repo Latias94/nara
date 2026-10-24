@@ -5,10 +5,10 @@ use nara_reflect::__private::plan_declared_entity_references;
 use nara_reflect::{
     ComponentCapability, ComponentEntityReferenceRewriteError, ComponentFieldId,
     ComponentFieldPath, ComponentFieldPathSegment, ComponentFieldSchema, ComponentSchema,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    ComponentValueShape, DeclaredAssetReferenceError, EntityReferenceTraversalLimits,
-    collect_declared_asset_references_from_schema, collect_declared_field_asset_references,
-    rewrite_declared_entity_references,
+    ComponentSchemaVersion, ComponentShapeMember, ComponentTypeId, ComponentValue,
+    ComponentValueKind, ComponentValueShape, DeclaredAssetReferenceError,
+    EntityReferenceTraversalLimits, collect_declared_asset_references_from_schema,
+    collect_declared_field_asset_references, rewrite_declared_entity_references,
 };
 use std::cell::Cell;
 
@@ -32,6 +32,76 @@ fn schema(field: ComponentFieldSchema) -> ComponentSchema {
         ComponentSchemaVersion::ONE,
     )
     .with_fields([field])
+}
+
+#[test]
+fn keyed_record_rows_rewrite_entity_references_and_retain_asset_leaves() {
+    let schema = schema(
+        ComponentFieldSchema::required(
+            ComponentFieldId::new("rows"),
+            "Rows",
+            ComponentFieldPath::from_fields(["rows"]),
+            ComponentValueShape::keyed_list(
+                ComponentValueShape::record_members([
+                    ComponentShapeMember::new("id", ComponentValueKind::String)
+                        .with_id(ComponentFieldId::new("item-id")),
+                    ComponentShapeMember::new("target", ComponentValueShape::EntityRef),
+                    ComponentShapeMember::new("portrait", ComponentValueShape::AssetRef),
+                ]),
+                ComponentFieldId::new("item-id"),
+            ),
+        )
+        .with_capabilities([
+            ComponentCapability::EntityRef,
+            ComponentCapability::AssetRef,
+        ]),
+    );
+    let value = ComponentValue::map([(
+        "rows",
+        ComponentValue::List(vec![ComponentValue::map([
+            ("id", ComponentValue::String("a".into())),
+            ("target", entity("before")),
+            ("portrait", asset("textures/a.png")),
+        ])]),
+    )]);
+    let mut visited = Vec::new();
+    let rewritten = rewrite_declared_entity_references(
+        &schema,
+        &value,
+        EntityReferenceTraversalLimits::default(),
+        |path, _| {
+            visited.push(path.clone());
+            Ok::<_, ()>(EntityReference::SceneLocal {
+                entity: SceneEntityId::new("after").unwrap(),
+            })
+        },
+    )
+    .unwrap();
+    let target = ComponentFieldPath::new([
+        ComponentFieldPathSegment::field("rows"),
+        ComponentFieldPathSegment::index(0),
+        ComponentFieldPathSegment::field("target"),
+    ]);
+    assert_eq!(visited, [target.clone()]);
+    assert_eq!(rewritten.get_path(&target).unwrap(), &entity("after"));
+    assert_eq!(value.get_path(&target).unwrap(), &entity("before"));
+    let assets =
+        collect_declared_asset_references_from_schema(&schema, schema.version(), &rewritten)
+            .unwrap();
+    assert_eq!(assets.len(), 1);
+    assert_eq!(assets[0].field_id().as_str(), "rows");
+    assert_eq!(
+        assets[0].asset_ref(),
+        &AssetRef::path("textures/a.png").unwrap()
+    );
+    assert_eq!(
+        assets[0].path(),
+        &ComponentFieldPath::new([
+            ComponentFieldPathSegment::field("rows"),
+            ComponentFieldPathSegment::index(0),
+            ComponentFieldPathSegment::field("portrait"),
+        ])
+    );
 }
 
 #[test]
