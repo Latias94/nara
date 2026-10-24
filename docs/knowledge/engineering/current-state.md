@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "8e71edf36c2ba70df1a08648477fecc9127d318a49c5e7cb0ff264b8242381a0"
+source_fingerprint: "756af2d4db97a7ba99bb5ab306a2207a2f7ded9594808f195022361a32268d45"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "8e71edf36c2ba70df1a08648477fecc9127d318a49c5e7cb0ff264b8242
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `8e71edf36c2ba70df1a08648477fecc9127d318a49c5e7cb0ff264b8242381a0`
-- Immutable records: 892
+- Source fingerprint: `756af2d4db97a7ba99bb5ab306a2207a2f7ded9594808f195022361a32268d45`
+- Immutable records: 894
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Subagent Finding**: [R2 transaction local construction ownership and allocation alternatives](subagents/2026-10/2026-10-24T185535Z-r2-transaction-local-construction-ownership-and-allocation-alternatives-a12471c958dc470097f9b8c7337c0533.md) - Read-only next-unit findings identify caller-owned construction choreography and compare owner drafts, declarative intents and scoped builders without adopting an allocator.
+- **Verification Evidence**: [Complete persistent UI identity and neutral conformance successor](verification/2026-10/2026-10-24T185535Z-complete-persistent-ui-identity-and-neutral-conformance-successor-0cf84bdfd2f54766be84f3ca206f7931.md) - Qualified Runtime and Canvas complete-key adoption with exact public inventory, neutral assertions, independent consumers and Windows DX12 evidence.
 - **Verification Evidence**: [Owned ordinary Scene preparation and complete support admission qualification](verification/2026-10/2026-10-24T164025Z-owned-ordinary-scene-preparation-and-complete-support-admission-qualification-e94d2a95cbf94dd7a0cbbd371aedf55c.md) - Serial owner, public, independent and native qualification of move-only unbound Scene preparation and complete support-resource admission.
 - **Subagent Finding**: [Complete UI key representation constraints and bounded experiment](subagents/2026-10/2026-10-24T162730Z-complete-ui-key-representation-constraints-and-bounded-experiment-cf1460fb992640a7a0d9addfd0f2de54.md) - Mixed-context UI trees rule out implicit local-source inheritance; exact-sharing storage needs a bounded comparison before refreeze.
 - **Work Progress**: [Ordinary Scene preparation and complete resource-effect admission checkpoint](progress/2026-10/2026-10-24T160924Z-ordinary-scene-preparation-and-complete-resource-effect-admission-checkpoint-20639c6f67a24f389226e694eba5ba2d.md) - Owned unbound Scene preparation, separate execution and Host bases, and cached resource-target admission are implemented; final serial qualification remains in progress.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Canonical Prefab binding checkpoint and required Scene ownership follow-up](progress/2026-10/2026-10-24T111737Z-canonical-prefab-binding-checkpoint-and-required-scene-ownership-follow-up-99eaac49f2074e9f8121bf800204aa97.md) - Commit 1a03766 removes identity-free Prefab resolution; required containing-Scene binding, active occurrence ownership and shared UI identity remain the next replacements.
 - **Verification Evidence**: [Required canonical Prefab source binding qualification](verification/2026-10/2026-10-24T105758Z-required-canonical-prefab-source-binding-qualification-6afeb3f651f5456fba96e8e1e279c46c.md) - All Prefab resolvers and projection steps require canonical source keys; the in-memory adapter owns one document per key and all aliases share its publication.
 - **Verification Evidence**: [Exact stored spelling through filesystem capabilities](verification/2026-10/2026-10-24T095418Z-exact-stored-spelling-through-filesystem-capabilities-79d51b36d2944aa0bc70384eb2d11b86.md) - Bounded exact descendant-name opens preserve capability authority and reject native lookup aliases.
-- **Verification Evidence**: [Project content source admission and canonical Prefab binding qualification](verification/2026-10/2026-10-24T-project-content-source-admission-and-prefab-binding-qualification.md) - ProjectContentLoader admits explicit Scene/Prefab source keys, retains metadata closure members, and lends canonical Prefab bindings through expansion.
-- **Verification Evidence**: [Canonical v1 schema envelope reset qualification](verification/2026-10/2026-10-24T-schema-envelope-v1-reset-qualification.md) - Component schema catalogs and authoring schema bundles now use canonical persistent envelope version 1 while preserving semantic catalog lineage and fingerprint version 3.
 
 # Integration Notes
 

@@ -21,6 +21,10 @@
 [ADR 0109](0109-root-local-ui-compilation-and-presentation-closure.md)
 **Implementation Plans**: completed [UI Foundation Correction](../../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md) lineage and the current [Runtime UI Product Slice](../../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md); the complete-key replacement follows the [foundation rebaseline](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md); execution continuity belongs in engineering memory rather than this ADR
 
+The [complete persistent-key successor conformance](../../knowledge/engineering/verification/2026-10/2026-10-24T185535Z-complete-persistent-ui-identity-and-neutral-conformance-successor-0cf84bdfd2f54766be84f3ca206f7931.md) binds the current breaking
+identity inventory, exact neutral assertions and scoped qualification to implementation `f7ab300`.
+Historical inventories retain their recorded scope; this is not whole-toolkit qualification.
+
 ## Context
 
 The current runtime UI combines persistent ECS components, renderer-owned view discovery, layout,

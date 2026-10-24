@@ -1,7 +1,7 @@
 ---
 title: Scene Source Context And Logical Occurrence
 date: 2026-10-24
-status: Source/occurrence and ordinary preparation qualified; complete shared UI identity is implemented in qualification, with conformance refreeze pending
+status: Source/occurrence, ordinary preparation and complete Runtime/Canvas UI identity have scoped qualification; broader foundation work remains open
 ---
 
 # Scene Source Context And Logical Occurrence
@@ -350,7 +350,7 @@ retains their exact member bytes/digests. The unreleased manifest remains schema
 the old shape without a compatibility reader. The subsequent production admission checkpoint
 enforces native loader policy and canonical Prefab provenance. Scene occurrence claims and
 per-opened-document source admission have subsequent scoped qualification. Complete shared UI
-keys are implemented under the selected seam; their successor conformance remains a separate gate.
+keys have separate successor qualification under the selected seam.
 
 A required project-level enum is smaller than a second per-document location list, but it applies
 to all native document admission, not merely configured Scene/Prefab directories. The existing
@@ -673,8 +673,10 @@ gesture/image/profile facts and exact composite picking authority remain indepen
 Whole-key budgets include ready and rejected root envelopes. Root-count admission precedes excess
 identity/context construction, and node-count admission still precedes body projection. A shared
 opaque context is not permission to omit foreign child identity, evade a reduced limit or revive
-an old activation. Required complete-key Runtime/Canvas, neutral/public, interaction and native
-qualification must close before ADR 0102's successor conformance checkpoint is recorded as frozen.
+an old activation. The [scoped successor conformance](../knowledge/engineering/verification/2026-10/2026-10-24T185535Z-complete-persistent-ui-identity-and-neutral-conformance-successor-0cf84bdfd2f54766be84f3ca206f7931.md)
+now qualifies Runtime/Canvas lowering, neutral/public assertions, interaction/cache/receipt fences
+and selected actual native paths. Its exact inventory and implementation commit are frozen;
+remaining R5 and foundation obligations are not closed by this checkpoint.
 
 ## Pinned Reference Findings
 
