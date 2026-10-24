@@ -4135,10 +4135,6 @@ fn prefab_anchor(id: &str, source: AssetRef) -> SceneEntityRecord {
 fn repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance() {
     let mut app = ui_app();
     install_test_surface(app.configuration_world());
-    let mut registry = ComponentRegistry::new();
-    registry
-        .freeze()
-        .expect("empty scene registry should freeze");
     let source = AssetRef::path("prefabs/ui-root.ron").expect("test asset ref should be valid");
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
@@ -4154,27 +4150,44 @@ fn repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance() 
         prefab_anchor("left", source.clone()),
         prefab_anchor("right", source),
     ]);
-    let report = {
-        let expansion = (document).expand_prefabs(&registry, &resolver);
-        assert!(
-            !expansion.diagnostics.has_errors(),
-            "{:?}",
-            expansion.diagnostics
-        );
-        let candidate = expansion.candidate.unwrap().bind_source(scene_source_key(
-            "repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance/source",
-        ));
-        nara_scene::spawn_scene(
-            app.configuration_world(),
-            &registry,
-            &candidate,
-            &scene_occurrence(
-                "repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance/report",
-            ),
-            None,
-        )
-    };
-    assert!(!report.diagnostics.has_errors());
+    app.configuration()
+        .add_systems(nara_app::StartupStage::Scene, move |world: &mut World| {
+            let registry = ComponentRegistry::from_snapshot(
+                nara_reflect::component_registry(world).unwrap().snapshot().unwrap(),
+            );
+            let expansion = document.expand_prefabs(&registry, &resolver);
+            assert!(
+                !expansion.diagnostics.has_errors(),
+                "{:?}",
+                expansion.diagnostics
+            );
+            let candidate = expansion.candidate.unwrap().bind_source(scene_source_key(
+                "repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance/source",
+            ));
+            let report = nara_scene::spawn_scene(
+                world,
+                &registry,
+                &candidate,
+                &scene_occurrence(
+                    "repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance/report",
+                ),
+                None,
+            );
+            assert!(!report.diagnostics.has_errors());
+
+            let projected = world.iter_entities().filter_map(|entity| {
+                entity.get::<SceneEntitySource>()
+                    .filter(|source| source.source_entity_id.as_str() == "root")
+                    .map(|_| entity.id())
+            }).collect::<Vec<_>>();
+            for entity in projected {
+                world.entity_mut(entity).insert((
+                    UiRoot::new(UiLayer::Base), UiNode::new(UiStyle::fill()),
+                ));
+            }
+        })
+        .unwrap();
+    app.update().expect("prefab UI test frame should update");
 
     let projected = app
         .world()
@@ -4206,13 +4219,6 @@ fn repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance() 
             .iter()
             .all(|(_, source)| source.projection_path.is_some())
     );
-    for (entity, _) in &projected {
-        app.configuration_world()
-            .entity_mut(*entity)
-            .insert((UiRoot::new(UiLayer::Base), UiNode::new(UiStyle::fill())));
-    }
-
-    app.update().expect("prefab UI test frame should update");
     let frame = latest_ui_frame(app.world(), surface_id())
         .expect("UI runtime should be available")
         .expect("prefab UI frame should compile");

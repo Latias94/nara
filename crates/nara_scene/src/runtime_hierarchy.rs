@@ -33,7 +33,7 @@ pub(crate) struct PreparedSceneEntityRetirement {
 
 impl PreparedSceneEntityRetirement {
     pub(crate) fn prepare(
-        world: &mut World,
+        world: &World,
         entities: &[Entity],
         hierarchy: &PreparedSceneHierarchyRetirement,
     ) -> Result<Self, LifecycleFreeDespawnError> {
@@ -53,7 +53,7 @@ impl PreparedSceneEntityRetirement {
 }
 
 pub(crate) fn validate_scene_entity_retirement_admission(
-    world: &mut World,
+    world: &World,
     entities: &[Entity],
     hierarchy: &PreparedSceneHierarchyRetirement,
     claimed_component_ids: &[nara_ecs::bevy_ecs::component::ComponentId],

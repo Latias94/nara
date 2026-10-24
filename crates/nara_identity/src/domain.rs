@@ -25,7 +25,9 @@ use crate::{
 
 mod scene_projection_epoch;
 
-pub use scene_projection_epoch::prepare_scene_projection_epoch_retirement;
+pub use scene_projection_epoch::{
+    prepare_registered_scene_projection_epoch_retirement, prepare_scene_projection_epoch_retirement,
+};
 
 const DEFAULT_LIFETIME_CLAIMS: usize = 1_048_576;
 const DEFAULT_PERSISTENT_LOGICAL_RECORDS: usize = 1_048_576;
@@ -214,6 +216,15 @@ pub fn validate_identity_support_topology(
     world.register_component::<IdentityEntityMarker>();
     world.register_component::<WorldIdentityDomain>();
     world.flush();
+    validate_registered_identity_support_topology(world, targets)
+}
+
+/// Checks already-registered support after an enclosing owner's final metadata flush.
+#[doc(hidden)]
+pub fn validate_registered_identity_support_topology(
+    world: &World,
+    targets: impl IntoIterator<Item = Entity>,
+) -> Result<(), IdentitySupportTopologyError> {
     validate_registered_persistent_component_apply::<IdentityEntityMarker>(world, None)
         .and_then(|()| {
             if world.contains_resource::<WorldIdentityDomain>() {
@@ -879,6 +890,20 @@ impl WorldIdentityDomain {
     ) -> Result<PreparedSceneInstanceReplacement, IdentityDomainError> {
         validate_identity_support_topology(world, entries.iter().map(|(_, token)| token.entity()))
             .map_err(|_| IdentityDomainError::LifecycleConflict)?;
+        Self::prepare_registered_scene_instance_replacement(world, current, entries, cause)
+    }
+
+    fn prepare_registered_scene_instance_replacement(
+        world: &World,
+        current: &SpawnedSceneInstance,
+        entries: &[(SceneEntityId, WorldEntityToken)],
+        cause: TombstoneCause,
+    ) -> Result<PreparedSceneInstanceReplacement, IdentityDomainError> {
+        validate_registered_identity_support_topology(
+            world,
+            entries.iter().map(|(_, token)| token.entity()),
+        )
+        .map_err(|_| IdentityDomainError::LifecycleConflict)?;
         let domain = installed_domain(world)?;
         let instance = SceneInstanceId::from_non_zero(
             domain
@@ -910,6 +935,16 @@ impl WorldIdentityDomain {
         cause: TombstoneCause,
     ) -> Result<PreparedSceneInstanceRetirement, IdentityDomainError> {
         validate_identity_support_topology(world, std::iter::empty())
+            .map_err(|_| IdentityDomainError::LifecycleConflict)?;
+        Self::prepare_registered_scene_instance_retirement(world, current, cause)
+    }
+
+    fn prepare_registered_scene_instance_retirement(
+        world: &World,
+        current: &SpawnedSceneInstance,
+        cause: TombstoneCause,
+    ) -> Result<PreparedSceneInstanceRetirement, IdentityDomainError> {
+        validate_registered_identity_support_topology(world, [])
             .map_err(|_| IdentityDomainError::LifecycleConflict)?;
         let domain = installed_domain(world)?;
         let retirement = domain.prepare_scene_instance_retirement(world, current, cause)?;
@@ -2125,6 +2160,29 @@ pub fn prepare_exact_scene_instance_retirement(
     cause: TombstoneCause,
 ) -> Result<PreparedSceneInstanceRetirement, IdentityDomainError> {
     WorldIdentityDomain::prepare_exact_scene_instance_retirement(world, current, cause)
+}
+
+/// Prepares exact replacement against already-registered support, without flushing World work.
+#[doc(hidden)]
+pub fn prepare_registered_scene_instance_replacement(
+    world: &World,
+    current: &SpawnedSceneInstance,
+    entries: &[(SceneEntityId, WorldEntityToken)],
+    cause: TombstoneCause,
+) -> Result<PreparedSceneInstanceReplacement, IdentityDomainError> {
+    WorldIdentityDomain::prepare_registered_scene_instance_replacement(
+        world, current, entries, cause,
+    )
+}
+
+/// Prepares exact retirement against already-registered support, without flushing World work.
+#[doc(hidden)]
+pub fn prepare_registered_scene_instance_retirement(
+    world: &World,
+    current: &SpawnedSceneInstance,
+    cause: TombstoneCause,
+) -> Result<PreparedSceneInstanceRetirement, IdentityDomainError> {
+    WorldIdentityDomain::prepare_registered_scene_instance_retirement(world, current, cause)
 }
 
 /// Workspace-internal preparation for one exact semantic entity retirement.

@@ -959,6 +959,15 @@ pub fn validate_declared_persistent_apply_targets(
     let targets = targets.into_iter().collect::<BTreeSet<_>>();
     world.register_component::<PersistentApplyReceipts>();
     world.flush();
+    validate_registered_persistent_apply_targets(world, targets)
+}
+
+/// Validates existing receipts without registering metadata or flushing deferred work.
+#[doc(hidden)]
+pub fn validate_registered_persistent_apply_targets(
+    world: &World,
+    targets: impl IntoIterator<Item = Entity>,
+) -> Result<(), ComponentCodecError> {
     let bindings = world.get_resource::<PersistentWorldBindings>();
     for target in targets {
         let entity = world

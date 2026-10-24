@@ -116,7 +116,7 @@ pub(crate) fn validate_persistent_component_apply(
     validate_component_observers(world, component_id, target)
 }
 
-/// Validates the lifecycle work performed when a resource is first inserted.
+/// Validates insertion of a missing resource value, including a retained resource entity.
 ///
 /// Bevy resources intentionally require `IsResource`, whose intrinsic hooks maintain the resource
 /// entity cache. Those built-in semantics are allowed; extra requirements, hooks, or observers are
@@ -128,7 +128,11 @@ pub fn validate_resource_insertion<R: Resource>(
         .component_id::<R>()
         .ok_or(PersistentComponentMetadataError::ComponentMissing)?;
     validate_resource_metadata(world, resource_id)?;
-    validate_component_observers(world, resource_id, None)?;
+    validate_component_observers(
+        world,
+        resource_id,
+        world.resource_entities().get(resource_id),
+    )?;
     validate_is_resource_support(world)
 }
 
@@ -873,6 +877,57 @@ mod tests {
                 scope: PersistentObserverScope::EntityComponent,
             })
         );
+    }
+
+    #[test]
+    fn resource_reinsertion_probe_checks_the_cached_entity_observer_scopes() {
+        use bevy_ecs::observer::Observer;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        for component_scoped in [false, true] {
+            let mut world = World::new();
+            world.insert_resource(PlainResource);
+            let resource_id = world.component_id::<PlainResource>().unwrap();
+            let target = world.resource_entities().get(resource_id).unwrap();
+            world.remove_resource::<PlainResource>().unwrap();
+            assert!(!world.contains_resource::<PlainResource>());
+            assert_eq!(world.resource_entities().get(resource_id), Some(target));
+            assert_eq!(validate_resource_insertion::<PlainResource>(&world), Ok(()));
+            let hits = Arc::new(AtomicUsize::new(0));
+            let observed = Arc::clone(&hits);
+            let observer = Observer::new(move |_: On<Add<()>>| {
+                observed.fetch_add(1, Ordering::SeqCst);
+            })
+            .with_entity(target);
+            world.spawn(if component_scoped {
+                observer.with_component(resource_id)
+            } else {
+                observer
+            });
+            world.flush();
+            assert_eq!(
+                validate_resource_insertion::<PlainResource>(&world),
+                Err(PersistentComponentMetadataError::Observer {
+                    event: PersistentLifecycleEvent::Add,
+                    scope: if component_scoped {
+                        PersistentObserverScope::EntityComponent
+                    } else {
+                        PersistentObserverScope::Entity
+                    },
+                })
+            );
+            assert_eq!(hits.load(Ordering::SeqCst), 0);
+            if !component_scoped {
+                // Bevy's entity-only lifecycle route needs the destination archetype's flag.
+                world.add_observer(|_: On<Add<PlainResource>>| {});
+                world.flush();
+            }
+            world.insert_resource(PlainResource);
+            assert_eq!(hits.load(Ordering::SeqCst), 1);
+        }
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-10-24
+**Last Revised**: 2026-10-25
 **Refines**: ADR 0034: Editor Play Mode World Boundary; ADR 0038: Scene/Prefab Authoring
 Identity and Provenance; ADR 0056: Headless Runtime and Dedicated Server Readiness
 **Refined By**: ADR 0076: Play Runtime Debug Control and Observation
@@ -83,6 +83,17 @@ allocation or predecessor retirement. Association exhaustion rejects; active ent
 evicted. Deferred preparation revalidates the World, exact Identity and occurrence baselines before
 publishing components or installing a detached domain. A registration proof prepared for an
 uninterrupted immediate commit is not a reservation that may survive arbitrary intervening calls.
+
+Unbound ordinary Scene preparation reserves neither a logical slot nor a numeric instance ID.
+New materialization rechecks current vacancy and capacity when binding; unrelated compatible
+publications may advance the allocator meanwhile. Exact replacement retains its predecessor's
+activation, including after individual members retire. Binding acquires fresh exact Identity
+proofs from the currently admitted authority. It must not install an earlier detached domain
+over a now-installed authority or use an old target-bound allocator proof. Vacancy is a current
+admission fact, not a new permanent slot-history axis. Existing epoch/history rules are unchanged.
+The Scene kernel's final Identity support and exact registration/replacement/epoch proofs use
+already-registered support without flushing ordinary deferred work after another owner's final
+admission. Standalone Identity entry points retain their explicit materializing boundary.
 
 ### World identity domain authority
 

@@ -215,10 +215,11 @@ pub mod prelude {
         PersistentComponentProvider,
     };
     pub use nara_scene::{
-        ExpandedSceneCandidate, ExpandedSceneDocument, Name, PrefabDocument, SceneAuthoringSession,
-        SceneComponentRecord, SceneDocument, SceneEntityRecord, SceneOccurrenceKey,
-        ScenePatchDocument, ScenePatchOperation, SourceDocumentKey, SourceDocumentKind, Visibility,
-        export_scene, spawn_scene,
+        ExpandedSceneCandidate, ExpandedSceneDocument, Name, PrefabDocument, PreparedScene,
+        SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneEntityRecord,
+        SceneOccurrenceKey, ScenePatchDocument, ScenePatchOperation, SourceDocumentKey,
+        SourceDocumentKind, Visibility, export_scene, prepare_scene, prepare_scene_replacement,
+        spawn_scene,
     };
     pub use nara_transform::{
         FixedSpatialSnapshot2d, GlobalTransform2d, HistoricalSpatialSnapshot2d,

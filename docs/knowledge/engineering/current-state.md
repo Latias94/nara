@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "d88cbd549ac96be42bb55ef61a3e89732fbec9e3daafecb535f4ee1d8ae33a0d"
+source_fingerprint: "8e71edf36c2ba70df1a08648477fecc9127d318a49c5e7cb0ff264b8242381a0"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "d88cbd549ac96be42bb55ef61a3e89732fbec9e3daafecb535f4ee1d8ae
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `d88cbd549ac96be42bb55ef61a3e89732fbec9e3daafecb535f4ee1d8ae33a0d`
-- Immutable records: 888
+- Source fingerprint: `8e71edf36c2ba70df1a08648477fecc9127d318a49c5e7cb0ff264b8242381a0`
+- Immutable records: 892
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,10 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Owned ordinary Scene preparation and complete support admission qualification](verification/2026-10/2026-10-24T164025Z-owned-ordinary-scene-preparation-and-complete-support-admission-qualification-e94d2a95cbf94dd7a0cbbd371aedf55c.md) - Serial owner, public, independent and native qualification of move-only unbound Scene preparation and complete support-resource admission.
+- **Subagent Finding**: [Complete UI key representation constraints and bounded experiment](subagents/2026-10/2026-10-24T162730Z-complete-ui-key-representation-constraints-and-bounded-experiment-cf1460fb992640a7a0d9addfd0f2de54.md) - Mixed-context UI trees rule out implicit local-source inheritance; exact-sharing storage needs a bounded comparison before refreeze.
+- **Work Progress**: [Ordinary Scene preparation and complete resource-effect admission checkpoint](progress/2026-10/2026-10-24T160924Z-ordinary-scene-preparation-and-complete-resource-effect-admission-checkpoint-20639c6f67a24f389226e694eba5ba2d.md) - Owned unbound Scene preparation, separate execution and Host bases, and cached resource-target admission are implemented; final serial qualification remains in progress.
+- **Subagent Finding**: [Runtime and Canvas complete-key lowering findings](subagents/2026-10/2026-10-24T154955Z-runtime-and-canvas-complete-key-lowering-findings-e010e14b557f42aea70f859c48c9f47f.md) - Read-only next-unit evidence separates complete logical key coordinates, presentation fencing and bounded representation costs.
 - **Work Progress**: [Unbound prebinding admission and ordinary Scene preparation design checkpoint](progress/2026-10/2026-10-24T141552Z-unbound-prebinding-admission-and-ordinary-scene-preparation-design-checkpoint-c5f43007b24245da8e1c9dd009b7fa33.md) - Reflect revalidates retained unbound native values before target allocation; ordinary Scene prepare remains the next owning implementation.
 - **Work Progress**: [Source-bound Scene occurrence checkpoint and ordinary preparation follow-up](progress/2026-10/2026-10-24T133133Z-source-bound-scene-occurrence-checkpoint-and-ordinary-preparation-follow-up-ea0342ca0c55402c966ac1a073a4b09c.md) - Commit 87a1fc0 qualifies required Scene sources and active occurrence ownership; ordinary unbound preparation and Runtime/Canvas adoption are next, while the full foundation goal stays active.
 - **Verification Evidence**: [Required Scene sources and active occurrence ownership qualification](verification/2026-10/2026-10-24T114901Z-required-scene-sources-and-active-occurrence-ownership-qualification-e249da9a1f404677a72e52457ac990c4.md) - Required source-bound materialization and Scene-owned active logical occurrence replace identity-free spawn, qualified through owning, public, independent and selected native consumers.
@@ -77,10 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Exact stored spelling through filesystem capabilities](verification/2026-10/2026-10-24T095418Z-exact-stored-spelling-through-filesystem-capabilities-79d51b36d2944aa0bc70384eb2d11b86.md) - Bounded exact descendant-name opens preserve capability authority and reject native lookup aliases.
 - **Verification Evidence**: [Project content source admission and canonical Prefab binding qualification](verification/2026-10/2026-10-24T-project-content-source-admission-and-prefab-binding-qualification.md) - ProjectContentLoader admits explicit Scene/Prefab source keys, retains metadata closure members, and lends canonical Prefab bindings through expansion.
 - **Verification Evidence**: [Canonical v1 schema envelope reset qualification](verification/2026-10/2026-10-24T-schema-envelope-v1-reset-qualification.md) - Component schema catalogs and authoring schema bundles now use canonical persistent envelope version 1 while preserving semantic catalog lineage and fingerprint version 3.
-- **Verification Evidence**: [Project source authority carrier and creation identity qualification](verification/2026-10/2026-10-24T065424Z-project-source-authority-carrier-and-creation-identity-qualification-6cdfe4a580b14b8da78e659010497632.md) - Verification Evidence for Project source authority carrier and creation identity qualification.
-- **Verification Evidence**: [Untargeted native preparation before Scene entity allocation](verification/2026-10/2026-10-24T060059Z-untargeted-native-preparation-before-scene-entity-allocation-c2218c6824cd4aa7a8b9b657fedc9630.md) - Reflect-owned native values retain their asset context until target binding; allocation and admission ordering regressions qualify the production prerequisite.
-- **Verification Evidence**: [Source-context owner experiment and production entry gaps](verification/2026-10/2026-10-24T034432Z-source-context-owner-experiment-and-production-entry-gaps-b9598e00692a49e8ac835a63a3d4384a.md) - Flat direct/file source and World-bound occurrence intent evidence; production Scene preparation, canonical Prefab and shared UI adoption remain open.
-- **Verification Evidence**: [Public exact Scene instance end and source-context design review](verification/2026-10/2026-10-24T031111Z-public-exact-scene-instance-end-and-source-context-design-review-a91caf241959454f8674b9b04eabc141.md) - Qualified empty-instance public retirement and shared authoring path; source origin carrier trial and occurrence integration remain open.
 
 # Integration Notes
 

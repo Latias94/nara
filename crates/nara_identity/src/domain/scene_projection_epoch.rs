@@ -5,8 +5,8 @@ use nara_ecs::World;
 use super::{
     IdentityDomainError, IdentityEntityMarker, PreparedSceneInstanceRetirement,
     RuntimeEntityReference, SpawnedSceneInstance, TombstoneCause, WorldEntityToken,
-    WorldIdentityDomain, prepare_exact_scene_instance_retirement,
-    validate_identity_support_topology,
+    WorldIdentityDomain, prepare_registered_scene_instance_retirement,
+    validate_identity_support_topology, validate_registered_identity_support_topology,
 };
 
 /// Proves that the installed domain's entire semantic lifetime belongs to one projection.
@@ -20,16 +20,33 @@ pub fn prepare_scene_projection_epoch_retirement(
     world: &mut World,
     current: Option<&SpawnedSceneInstance>,
 ) -> Result<Option<PreparedSceneInstanceRetirement>, IdentityDomainError> {
+    validate_identity_support_topology(world, [])
+        .map_err(|_| IdentityDomainError::LifecycleConflict)?;
+    prepare_registered_scene_projection_epoch_retirement(world, current)
+}
+
+/// Checks the complete epoch against registered support without flushing deferred World work.
+#[doc(hidden)]
+pub fn prepare_registered_scene_projection_epoch_retirement(
+    world: &World,
+    current: Option<&SpawnedSceneInstance>,
+) -> Result<Option<PreparedSceneInstanceRetirement>, IdentityDomainError> {
     let prepared = match current {
         Some(current) => {
-            let prepared =
-                prepare_exact_scene_instance_retirement(world, current, TombstoneCause::Replaced)?;
-            validate_identity_support_topology(world, prepared.retiring_entities().iter().copied())
-                .map_err(|_| IdentityDomainError::LifecycleConflict)?;
+            let prepared = prepare_registered_scene_instance_retirement(
+                world,
+                current,
+                TombstoneCause::Replaced,
+            )?;
+            validate_registered_identity_support_topology(
+                world,
+                prepared.retiring_entities().iter().copied(),
+            )
+            .map_err(|_| IdentityDomainError::LifecycleConflict)?;
             Some(prepared)
         }
         None => {
-            validate_identity_support_topology(world, std::iter::empty())
+            validate_registered_identity_support_topology(world, std::iter::empty())
                 .map_err(|_| IdentityDomainError::LifecycleConflict)?;
             None
         }

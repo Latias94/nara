@@ -4,6 +4,7 @@
 **Date**: 2026-08-01
 **Amended**: 2026-08-05 by NUI-U8 ordered runtime projection
 **Amended**: 2026-10-23 by U4 private phase spatial snapshots
+**Amended**: 2026-10-25 by complete guarded resource-effect admission
 **Owner**: Runtime hierarchy, 2D transform projection, and consuming product hosts
 **Related**: ADR 0005, ADR 0006, and ADR 0018
 **Refines**: The current 2D completion slice of
@@ -112,6 +113,11 @@ flowchart LR
   private root-resource epoch; raw escapes and diagnostic/private construction paths retain complete
   validation. The overlay is dropped before a prepared batch crosses its prepare/commit boundary.
   Prepared batches still require the enclosing owner's no-flush/no-hierarchy-mutation window.
+- Guarded construction and placement admit every resource effect of their publication, not only
+  Parent/Children/member/root components: generation-state insertion when absent and completion
+  resource removal when present must be lifecycle-free. Fresh-target and bound final admission
+  share the owning check; a completion observer cannot execute after an enclosing Scene has
+  already published its native values or scratch asset catalogue.
 - Hierarchy completion associates its concrete order, private completion state and completion
   fact with one World-bound publication identity. Equal generation, root IDs and root epoch in a
   different World do not establish this association. Transform payload reuse includes that exact

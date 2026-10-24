@@ -92,6 +92,45 @@ The [independent component consumer](../../tests/fixtures/module-consumer/tests/
 demonstrates a successor catalog, a new current component, explicit migration and the ordinary
 Editor Create/Edit/Save/Reopen workflow using one product contribution.
 
+## Prepare And Materialize A Scene
+
+`spawn_scene(world, registry, candidate, occurrence, database)` is the immediate convenience. Use
+`prepare_scene` when a caller needs to hold actual native values before deciding to publish:
+
+```rust,ignore
+let prepared = prepare_scene(world, registry, candidate, occurrence, database)?;
+// Keep preparation across other compatible World work, or cancel with drop(prepared).
+let report = prepared.commit(world);
+let current = report.instance.ok_or(report.diagnostics)?;
+
+let replacement = prepare_scene_replacement(world, registry, successor, &current, database)?;
+let report = replacement.commit(world);
+```
+
+Both operations are exported from `nara::prelude` and `nara_scene`. The required
+`ExpandedSceneCandidate` binds its containing source to immutable expanded content and provenance.
+First placement declares a World-local `SceneOccurrenceKey`; replacement obtains that slot from
+its exact predecessor. A receipt is not permission to replace a later activation of the same slot.
+
+The move-only `PreparedScene` owns decoded native values and a frozen registry snapshot, not
+runtime Scene entities. Preparation can register ECS metadata and flush ordinary deferred work;
+it does not reserve a slot or runtime instance number. Dropping the token cancels private work,
+even after dropping its World. Commit consumes it once, rechecks current facts and never reruns
+codecs. A failed commit leaves the predecessor active and publishes no candidate. Native
+destructors and checked process-local identity allocation retain their ordinary effects.
+
+Retained preparation rejects a foreign World before flushing it, an occupied slot or ended
+predecessor, incompatible managed Schema authority, late unsupported lifecycle work, and a
+changed asset catalogue if preparation read or allocated asset identities. Unrelated compatible
+publications and asset changes that the batch did not read do not automatically invalidate it.
+The standalone registry variable may be dropped after preparation; a managed World must retain
+the exact admitted definition and its authority. This is not a promise to retain asset payload
+residency or every ProjectAssetDatabase revision. The advanced native-retirement integration owns
+target-bound scratch entities and still requires its explicit `discard(world)` lifecycle.
+
+The [independently compiled consumer](../../tests/fixtures/module-consumer/tests/scene_preparation.rs)
+exercises prepare/cancel, reverse-order commits, exact replacement, and retained-state rejection.
+
 ## Declare Numeric Constraints
 
 Declare finite scalar bounds once; Editor feedback, data-only validation and native preflight use

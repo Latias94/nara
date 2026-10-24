@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-27
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-10-25
 **Owner**: `nara_reflect`, schema-owning plugins, and product composition
 **Refines**: [ADR 0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md) and
 [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md)
@@ -211,11 +211,18 @@ bindings. Missing provider code, native binding, codec, or migration rejects Run
 Cook before `World` mutation. A document containing a component from an omitted owner continues to
 fail closed under the current unknown-component path.
 
-Fingerprints prove canonical equivalence, not shared authority. Within one file-backed Host,
-`RuntimePlan`, Editor authoring, and candidate `World` continue to require pointer identity with
-the same `ComponentRegistrySnapshot`. Independently constructed direct-App and file-backed
+Fingerprints prove canonical equivalence, not shared authority. Within one admitted executable
+composition, `RuntimePlan`, its executable Editor consumers, and candidate `World` require pointer
+identity with the same `ComponentRegistrySnapshot`. Independently constructed direct-App and file-backed
 registries may have equal semantic and executable fingerprints while retaining distinct snapshot
 instances.
+
+ADR 0114's data-authoring basis and explicitly selected native-preview capability are not the
+project's executable Runtime composition. A typed preview retains its own exact frozen execution
+definition while independently preserving the receiving authoring Host's managed composition
+basis under ADR 0081. The preview definition does not replace that Host registry or become project
+RuntimePlan authority. Ordinary Scene materialization in a managed World still uses that World's
+exact managed definition; there is no implicit fallback to whichever native catalog is available.
 
 Runtime-plan and publication evidence binds the canonical owner-contribution receipts together
 with `ExecutableRegistryFingerprint`; the executable fingerprint alone does not prove the reviewed

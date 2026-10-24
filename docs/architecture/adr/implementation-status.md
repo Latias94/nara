@@ -44,8 +44,19 @@ no-entity preparation, shared Runtime/Canvas identity refreeze or the complete f
 The [unbound prebinding prerequisite](../../knowledge/engineering/progress/2026-10/2026-10-24T141552Z-unbound-prebinding-admission-and-ordinary-scene-preparation-design-checkpoint-c5f43007b24245da8e1c9dd009b7fa33.md)
 qualifies Reflect's fresh-target revalidation over already prepared native values, preserving the
 original World and touched asset baseline without allocating targets or rerunning codecs. The
-570-test Reflect/Scene cohort passes. The ordinary Scene prepare API and its managed definition,
-occurrence and complete public-consumer integration remain the next owning implementation.
+570-test Reflect/Scene cohort passes. That prerequisite did not qualify the ordinary Scene prepare
+API or its managed definition, occurrence and complete public-consumer integration.
+
+The subsequent [ordinary Scene preparation qualification](../../knowledge/engineering/verification/2026-10/2026-10-24T164025Z-owned-ordinary-scene-preparation-and-complete-support-admission-qualification-e94d2a95cbf94dd7a0cbbd371aedf55c.md)
+implements move-only unbound native-value custody, world-free cancellation and consuming commit
+under ADRs 0038/0058/0081/0098. Ordinary execution uses the managed definition; explicit typed preview
+retains separate execution and Host composition bases without bypassing authority. Final checks
+are nonflushing, and shared ECS/Hierarchy admission includes cached resource targets, generation
+insertion and completion removal under ADR 0100. The final-source owner857, root/public588,
+independent47 and Reference Game31 cohorts pass, as do six actual Windows/DX12 trajectories,
+workspace/minimal compilation, scoped correctness lint, eight Scene doctests and three workspace
+format checks. Runtime/Canvas complete identity and ADR 0102 refreeze remain unimplemented; this
+bounded qualification does not complete the full foundation rebaseline.
 
 The [R1a qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T123523Z-workflow-driven-foundation-waves-and-r1a-owned-application-submission-qualification-5e5f6c3eb3b84150bc3a5e06e9862abf.md)
 adds owned per-action direct Application submission observations under ADR 0118. The relevant

@@ -1,7 +1,7 @@
 ---
 title: Scene Source Context And Logical Occurrence
 date: 2026-10-24
-status: Native source admission, required Scene/Prefab binding and active occurrence qualified; ordinary preparation and shared UI adoption remain Proposed
+status: Native source admission, required Scene/Prefab binding, active occurrence and ordinary preparation qualified; shared UI adoption remains Proposed
 ---
 
 # Scene Source Context And Logical Occurrence
@@ -78,8 +78,9 @@ Project startup and Editor preview declare their fixed product slots. Each opene
 Prefab retains its own policy-admitted key; preview and trusted Play receive that key rather than
 borrowing startup identity. Native source admission and prepared Open/Reopen preserve exact
 metadata observations. The [scoped qualification](../knowledge/engineering/verification/2026-10/2026-10-24T114901Z-required-scene-sources-and-active-occurrence-ownership-qualification-e249da9a1f404677a72e52457ac990c4.md)
-records actual checks, counterexamples and limits. Ordinary no-entity preparation, Runtime/Canvas
-complete-key lowering and compound imported products remain separate work. The bounded source-
+records actual checks, counterexamples and limits. Ordinary no-entity preparation has subsequent
+[separate qualification](../knowledge/engineering/verification/2026-10/2026-10-24T164025Z-owned-ordinary-scene-preparation-and-complete-support-admission-qualification-e94d2a95cbf94dd7a0cbbd371aedf55c.md);
+Runtime/Canvas complete-key lowering and compound imported products remain separate work. The bounded source-
 carrying delivery tests pass; the full independent desktop Export trajectory is not rerun here.
 
 ## Distinct Coordinates
@@ -281,19 +282,18 @@ This is evidence for a carrier/owner direction, not the complete trial's exit ga
   cancellation or preview reuse. Native completion, public panel preparation and product
   performance remain separate obligations.
 
-The public prepared replacement entry currently requires explicit asset bindings, native
+The advanced retained replacement entry requires explicit asset bindings, native
 retirement claims, overlay limits, additional retirements and a product callback; it may own scratch
 World entities that require explicit discard. That is a provisional native-product integration
 interface, not proof of an ergonomic ordinary source-placement prepare/preview/commit workflow.
-The production trial must compare a source-owned preparation that delays World allocation with
-an explicitly retained World-bound preparation, including failure and cancellation custody. Do not
-relocate this work into a caller's second candidate or cleanup system merely to keep the old API.
+Ordinary preparation below exposes the unbound alternative with separate failure and cancellation
+custody. It does not relocate target cleanup into a caller's second candidate or cleanup system.
 
 The production preparation kernel now separates native values from runtime target binding. Reflect
 retains all unbound values with the same scratch asset catalogue; Scene runs this phase after
 topology/identity-capacity admission and before allocating Scene entities. Deferred native failure
-therefore does not need target-entity rollback. This is an internal owner change, not an ordinary
-public Scene prepare/cancel API: the advanced retained publication still owns scratch entities,
+therefore does not need target-entity rollback. That prerequisite split by itself did not supply an
+ordinary public Scene prepare/cancel API: the advanced retained publication still owns scratch entities,
 and later admission failures retain their existing cleanup/custody semantics.
 
 ### Canonical Prefab Resolution Entry
@@ -428,16 +428,17 @@ Neither step changes ordinary Identity history or admits
 occurrence eviction. Authoring queries/edits remain document-relative; they do not need a runtime
 occurrence merely to edit a document.
 
-### Ordinary Preparation: Selected Next Boundary
+### Ordinary Preparation: Owned Unbound Native Values
 
-This is the next implementation design, not qualification of a public Scene preparation API.
-The native-value stage already exists in Reflect and is used by Scene before target allocation.
+The selected public implementation splits Scene publication at the existing native-value stage.
+Its independent/public and native qualification must be read from the implementation ledger;
+the design alone does not qualify it. Reflect is used by Scene before target allocation.
 Its `UnboundComponentApplyBatch` owns the actual values with their original scratch asset
 catalogue. It is not a new decoder, a reservation of live entities, or a complete admission proof.
-The missing seam is revalidation after returning that stage and before allocating targets:
-bindings have been consumed, so the existing validator over `PreparedComponent` inputs is no
-longer callable. Add a bounded fresh-target check to the owning unbound batch, reusing its exact
-bindings, receipt/support validators and original asset read basis. Do not reconstruct values,
+The revalidation seam returns that stage before allocating targets. Bindings have been consumed,
+so the original validator over `PreparedComponent` inputs is no longer callable. The owning
+unbound batch's fresh-target check reuses its exact bindings, receipt/support validators and
+original asset read basis. It does not reconstruct values,
 allocate dummy targets or add a second validation registry.
 
 The ordinary interface is selected as two operation-specific entry points:
@@ -481,10 +482,26 @@ The revalidation read-set is deliberately narrower than a global World revision:
   invalidate it solely by advancing the allocator. Replacement retains the exact predecessor
   activation, not an equality requirement on its original entity roster. A formerly occupied
   slot that is now vacant does not need a new permanent vacancy-history service.
-- Fresh lifecycle/support topology is checked after the final allowed flush and before target
+- Fresh lifecycle/support topology, including Hierarchy construction, is checked after the final allowed flush and before target
   allocation. Bound targets, exact identity registration/replacement and the complete publication
   tail still require their later checks. A target-bound proof is not an unbound reservation and
   cannot reuse a stale domain/allocator proof after arbitrary World advancement.
+
+The target-bound finalization retains the same frozen definition. It rejects a foreign World
+before flushing, materializes ordinary deferred work once, and then validates the full read-set
+through registered-support, nonflushing owner operations. Identity proof creation and receipt
+validation must not hide a later flush behind an earlier Schema, asset or occurrence check.
+Standalone means neither managed registry nor authority is installed; an authority whose registry
+has disappeared is broken managed state, not permission to fall back to standalone execution.
+
+The shared kernel retains two distinct facts: its selected immutable native execution definition,
+and the receiving World's original standalone/managed composition basis. Ordinary entry requires
+those definitions to be identical in a managed World before native preparation. Explicit product
+projection selects its execution definition independently, as the generic Editor's finite typed
+preview capability requires, but still preserves the original Host authority and complete binding
+admission. This is not a second source Schema, an authority-check escape or project execution
+readiness. ADRs 0081/0098 and 0114 govern that separation. Capture the basis once and pass it into
+the common kernel; do not resample between ordinary eligibility and deferred commit.
 
 The public consumer must prepare actual values, cancel without consuming Scene target allocator
 slots, commit two independent prepared Scenes, replace/end through exact receipts and reject
@@ -492,14 +509,14 @@ occupied/stale/foreign, changed read assets, incompatible definition and late li
 Report the ordinary prepare/commit/cancel scope independently from the advanced retained token,
 the existing historical trial's intent table and the later Runtime/Canvas key migration.
 
-The scoped lifecycle review identifies these concrete integration obligations, not current
-qualification of the replacement:
+The scoped lifecycle review supplied the following integration obligations. The ordinary
+replacement now has separately scoped qualification; these remain its owning invariants:
 
 - Ordinary preparation must stop after unbound native values and before target entity allocation.
   The existing advanced retained publication requires `discard(world)` and is not that token.
 - Revalidate registration at final commit, including the exact installed domain and allocator
-  baseline. The current immediate `Register` tail assumes uninterrupted exclusive ownership; a
-  deferred token cannot reuse its peeked registration proof after another allocation or install
+  baseline. A target-bound `Register` proof assumes uninterrupted exclusive ownership; a
+  deferred ordinary token cannot reuse a peeked registration proof after another allocation or install
   a detached domain over a successor authority. Refusal must precede component publication.
 - Compare exact domain/activation association, not an instance number alone or full equality of
   an original receipt and a newly captured, reduced entity roster. Individual entity retirement
@@ -524,9 +541,104 @@ Scene-instance end. The duplicate `direct_expanded` constructor is removed. Bare
 for editing, validation and serialization; they must not remain an identity-free persistent-spawn
 shortcut. Do not add a transient fallback without a concrete consumer and explicit semantics.
 
+### Runtime/Canvas Lowering Follow-up Findings
+
+The next key-adoption unit remains separate from ordinary preparation. Read-only inspection of
+`nara_ui/src/runtime/projection.rs` identifies missing containing-source and occurrence axes plus
+request-string encoding instead of canonical Prefab source. Canvas currently compiles a raw Prefab
+with local entity identity only; its source/occurrence must enter both the compile input and cache
+basis. Document/revision/gesture/image generation still fence presentation and picking, not
+persistent logical equality. Full provenance-derived equality includes diagnostic alias requests
+and must not become the semantic placement comparison.
+
+`nara_ui_kernel/src/identity.rs` currently admits a scoped key with `2 + root + local` bytes but
+reports `encoded_len()` as `1 + root + local`. The replacement must establish one consistent cost
+model. The present hard ceiling is 256 bytes: naively repeating complete context in both root and
+local identities can exhaust it after only a few Prefab steps. Exact bounded opaque carriers,
+shared immutable context and explicit scope-relative representations need comparison before
+refreeze. Do not silently truncate, use hash-only equality, or preserve a malformed key by raising
+a limit without a supported-workflow and memory-cost argument. Kernel remains ECS/Scene-independent.
+
+Acceptance must distinguish logical continuity from exact runtime incarnation and retained
+presented-session authority. A source switch changes logical identity; a compatible rebuild may
+retain it while old entity/activation tokens remain fenced. Existing retained UI requests must
+follow their actual presented-history contract, not an invented rule that every compatible
+rebuild immediately invalidates all input. Raw Prefab Canvas and a Scene-instanced Prefab are
+different placements; parity means equal complete coordinates produce equal keys in both adapters.
+
 Runtime projection and [Editor Canvas](../../crates/nara_ui/src/canvas.rs) migrate together so they
 do not establish different meanings for persistent UI equality. Retained-source leases and move-only
 candidate custody remain intact. Do not install source fields in a second post-publication pass.
+
+### Bounded Key-Representation Experiment
+
+A UI root is not a source-context boundary. `HierarchyWriter::move_entity` can move a node from
+another Scene occurrence under that root without changing its `SceneEntitySource`. Runtime UI
+traversal also accepts explicitly keyed runtime children and stops at nested UI roots, not at
+source changes. A representation must preserve these legal mixed-context trees rather than add
+a same-source restriction to make the key cheaper. `UiLocalKey` equality is independently
+observable through its public accessor and widget reconstruction; silently interpreting the old
+local constructor as an address relative to an implicit root would change that contract.
+
+Compare these concrete alternatives before changing ADR 0102:
+
+| Representation | Benefit | Cost or failure mode |
+| --- | --- | --- |
+| Complete root and local addresses, separately charged | Simple independent lowering and equality | Duplicated context exhausts the 256-byte scoped-key ceiling early; `Arc` sharing alone does not change the encoded cost |
+| Root context plus genuinely relative local address | Compact same-context children | Cross-source and runtime children need explicit absolute cases; construction, equality and round-trip extraction acquire a root basis |
+| Complete semantic addresses with exact context/prefix sharing | Independent lowering and mixed-context correctness, with no repeated shared prefix in the scoped representation | Requires content-defined cost and equality independent of storage shape; real storage savings must be demonstrated |
+
+The third is a candidate for a disposable experiment, not an accepted storage format. A simpler
+typed shared-context representation must be compared against arbitrary byte-prefix compression:
+the latter is not justified merely because it can charge fewer bytes. Follow the addresses through
+retained authoring snapshots, widget descriptions and compiled frame keys; sharing one compiled
+pair is not a memory saving if it only adds a new allocation while both original payloads remain
+retained. No global interner, recursive address graph or per-field allocation framework is needed.
+
+The storage follow-up finds that existing snapshots and compiled keys clone the same local `Arc`,
+not its payload. Adding a suffix allocation only at compilation can increase live payload while
+the snapshot remains alive, and authoring validation also calls `UiKey::scoped`. Runtime later
+drops its temporary snapshot, so this is not proof that compression can never help. Prefer
+complete typed addresses with an explicitly shared opaque context and allocation-free scoping
+as the initial replacement candidate. Treat prefix compression as an independently specified
+encoding cost, not a reason to replace the in-memory key with segmented storage. The experiment
+must displace that simpler candidate only with a benefit across the real retention phases.
+
+The adapter must encode complete canonical coordinates with discriminants, unambiguous lengths
+and raw UUID bytes. Preserve original UTF-8 text. Binary source/occurrence context cannot be placed
+in `UiKeyAtom`, which rejects controls more broadly than the source and occurrence owners. Kernel
+may consume bounded opaque bytes but must not import or reinterpret Scene/ECS authority. This
+carrier is a logical key representation, not a persistent document format or executable capability.
+
+For an illustrative flat prefix encoding with a tag and three two-byte lengths, scoped cost is
+`7 + R + L - P`, where `P` is the exact common prefix of complete root/local addresses. Root-only
+cost is `3 + R`. This is an experiment's framing, not a selected public encoding. Identical values
+constructed independently must have the same admission and cost as pointer-shared values. An
+unrelated source with no common prefix still pays both addresses and may legitimately exceed the
+unchanged ceiling. Encoded cost, live payload bytes, allocation count and allocator/RSS costs are
+different measurements; report them separately.
+
+The minimum experiment compares the unshared baseline and candidate on the same canonical input:
+
+- Independent construction, alternate storage sharing, Eq/Ord/Hash consistency and local extraction
+  plus re-composition; retain root-scoped `(root, child)` equality.
+- Same source with distinct occurrences, canonical aliases, repeated/diamond Prefab placements,
+  cross-Scene reparenting, persistent/runtime mixtures and nested-root traversal cutoffs.
+- Short stable, named and project-location sources; shallow and deep paths; exact 255/256/257-byte
+  admissions and reduced `UiLimits`. A 32-step structural ceiling is not a promise that every such
+  path fits the byte ceiling.
+- Equivalent Runtime/Canvas coordinates, source-switch last-good isolation, independent focus,
+  reducer, semantics and actions; preserve presented-history and incarnation rules separately.
+- A representative small tree and 4096 nodes, including retained authoring plus compiled output:
+  compare construction/lookup/compile time, allocation count and actual retained payload bytes.
+
+Begin with the small key-lifecycle probe, including Button reconstruction and validation/compile
+clones before and after snapshot disposal, without first integrating layout or rendering. If
+segmented storage cannot beat typed context on its most favorable long-prefix case, or needs
+extra round-trip allocations without a corresponding benefit, delete that storage candidate.
+
+Delete the losing experiment after selection. Amend the owning ADR and neutral public conformance
+inventory with the selected representation and measured limits before claiming shared UI adoption.
 
 ## Pinned Reference Findings
 

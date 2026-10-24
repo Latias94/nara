@@ -106,8 +106,9 @@ pub use source::{
     SourceDocumentKey, SourceDocumentKeyError, SourceDocumentKind, SourceDocumentOrigin,
 };
 pub use spawn::{
-    SceneEntityRetirementError, SceneEntitySource, SceneProjection, SceneSpawnReport,
-    retire_and_despawn_scene_entity, retire_and_despawn_scene_instance, spawn_scene,
+    PreparedScene, SceneEntityRetirementError, SceneEntitySource, SceneProjection,
+    SceneSpawnReport, prepare_scene, prepare_scene_replacement, retire_and_despawn_scene_entity,
+    retire_and_despawn_scene_instance, spawn_scene,
 };
 
 #[doc(hidden)]

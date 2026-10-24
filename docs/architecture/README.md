@@ -123,8 +123,10 @@ addresses the separately reproduced same-World/two-Scene UI key collision. It co
 source-bound envelope with embedded document identity, retains the independent runtime incarnation,
 and specifies the direct/file-backed trial and ADR 0102 refreeze boundary. Source admission and
 canonical Prefab binding, required containing-source materialization and Scene-owned active
-occurrence have scoped qualification. Ordinary unbound preparation and complete
-Runtime/Canvas key adoption remain Proposed, not a completed shared UI checkpoint.
+occurrence have scoped qualification. [Ordinary unbound preparation](../knowledge/engineering/verification/2026-10/2026-10-24T164025Z-owned-ordinary-scene-preparation-and-complete-support-admission-qualification-e94d2a95cbf94dd7a0cbbd371aedf55c.md)
+now has separate owner/public/independent and selected Windows/DX12 qualification. Complete
+Runtime/Canvas key adoption remains Proposed;
+neither source ownership nor the ordinary preparation API completes that shared UI checkpoint.
 
 The [chat-informed foundation review](../audits/2026-10-23-chat-informed-engine-architecture-review.md)
 compares the supplied engine-design conversation with the current owners and pinned Bevy/Godot

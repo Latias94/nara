@@ -11,9 +11,9 @@ use nara_ecs::{
 };
 
 use crate::{
-    Children, HierarchyError, HierarchyRoots, Parent, hierarchy_baseline_is_valid,
-    mark_hierarchy_baseline_valid, mark_topology_dirty, relation::HierarchyMember,
-    validate_hierarchy,
+    Children, HierarchyError, HierarchyGenerationState, HierarchyRoots, Parent,
+    hierarchy_baseline_is_valid, mark_hierarchy_baseline_valid, mark_topology_dirty,
+    relation::HierarchyMember, validate_hierarchy,
 };
 
 /// The ordered collection that owns one runtime hierarchy entity.
@@ -121,11 +121,12 @@ pub(crate) fn prepare_mutation_baseline(world: &mut World) {
     world.register_component::<Children>();
     world.register_component::<HierarchyMember>();
     world.register_component::<HierarchyRoots>();
+    world.register_component::<HierarchyGenerationState>();
     world.flush();
 }
 
 pub(crate) fn prepare_hierarchy_batch(
-    world: &mut World,
+    world: &World,
     operations: &[HierarchyOperation],
 ) -> Result<PreparedHierarchyBatch, HierarchyError> {
     let resolved = resolve_operations(world, operations, true)?;
@@ -712,27 +713,7 @@ fn validate_hierarchy_mutation_lifecycle(
         return Ok(());
     }
 
-    let roots_present = world.contains_resource::<HierarchyRoots>();
-    let allowed_hooks = [
-        PersistentLifecycleEvent::Insert,
-        PersistentLifecycleEvent::Discard,
-    ];
-    validate_registered_component_metadata::<Parent>(world, &allowed_hooks)
-        .map_err(|_| HierarchyError::LifecycleWork)?;
-    validate_registered_component_metadata::<Children>(world, &allowed_hooks)
-        .map_err(|_| HierarchyError::LifecycleWork)?;
-    validate_registered_component_metadata::<HierarchyMember>(
-        world,
-        &[PersistentLifecycleEvent::Discard],
-    )
-    .map_err(|_| HierarchyError::LifecycleWork)?;
-    if roots_present {
-        validate_resource_scope::<HierarchyRoots>(world)
-            .map_err(|_| HierarchyError::LifecycleWork)?;
-    } else {
-        validate_resource_insertion::<HierarchyRoots>(world)
-            .map_err(|_| HierarchyError::LifecycleWork)?;
-    }
+    validate_hierarchy_mutation_support(world)?;
 
     let mut parent_targets = EntityHashSet::default();
     let mut children_targets = EntityHashSet::default();
@@ -777,6 +758,55 @@ fn validate_hierarchy_mutation_lifecycle(
         validate_registered_component_observers::<Children>(world, Some(entity))
             .map_err(|_| HierarchyError::LifecycleWork)?;
     }
+    Ok(())
+}
+
+pub(crate) fn validate_fresh_construction_topology(
+    world: &World,
+    has_parent_edges: bool,
+) -> Result<(), HierarchyError> {
+    validate_hierarchy_mutation_support(world)?;
+    validate_registered_component_observers::<HierarchyMember>(world, None)
+        .map_err(|_| HierarchyError::LifecycleWork)?;
+    if has_parent_edges {
+        validate_registered_component_observers::<Parent>(world, None)
+            .and_then(|()| validate_registered_component_observers::<Children>(world, None))
+            .map_err(|_| HierarchyError::LifecycleWork)?;
+    }
+    Ok(())
+}
+
+fn validate_hierarchy_mutation_support(world: &World) -> Result<(), HierarchyError> {
+    let roots_present = world.contains_resource::<HierarchyRoots>();
+    let allowed_hooks = [
+        PersistentLifecycleEvent::Insert,
+        PersistentLifecycleEvent::Discard,
+    ];
+    validate_registered_component_metadata::<Parent>(world, &allowed_hooks)
+        .map_err(|_| HierarchyError::LifecycleWork)?;
+    validate_registered_component_metadata::<Children>(world, &allowed_hooks)
+        .map_err(|_| HierarchyError::LifecycleWork)?;
+    validate_registered_component_metadata::<HierarchyMember>(
+        world,
+        &[PersistentLifecycleEvent::Discard],
+    )
+    .map_err(|_| HierarchyError::LifecycleWork)?;
+    if roots_present {
+        validate_resource_scope::<HierarchyRoots>(world)
+            .map_err(|_| HierarchyError::LifecycleWork)?;
+    } else {
+        validate_resource_insertion::<HierarchyRoots>(world)
+            .map_err(|_| HierarchyError::LifecycleWork)?;
+    }
+    if !world.contains_resource::<HierarchyGenerationState>() {
+        validate_resource_insertion::<HierarchyGenerationState>(world)
+            .map_err(|_| HierarchyError::LifecycleWork)?;
+    }
+    if world.contains_resource::<crate::__private::CompletedHierarchyProjection>() {
+        validate_resource_scope::<crate::__private::CompletedHierarchyProjection>(world)
+            .map_err(|_| HierarchyError::LifecycleWork)?;
+    }
+
     Ok(())
 }
 

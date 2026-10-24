@@ -34,8 +34,11 @@ pub mod __private {
         PreparedSceneInstanceRegistration, PreparedSceneInstanceReplacement,
         PreparedSceneInstanceRetirement, prepare_exact_entity_retirement,
         prepare_exact_scene_instance_registration, prepare_exact_scene_instance_replacement,
-        prepare_exact_scene_instance_retirement, prepare_scene_projection_epoch_retirement,
-        validate_additional_retirement_identity_axes, validate_identity_support_topology,
+        prepare_exact_scene_instance_retirement, prepare_registered_scene_instance_replacement,
+        prepare_registered_scene_instance_retirement,
+        prepare_registered_scene_projection_epoch_retirement,
+        prepare_scene_projection_epoch_retirement, validate_additional_retirement_identity_axes,
+        validate_identity_support_topology, validate_registered_identity_support_topology,
     };
 }
 

@@ -1,7 +1,7 @@
 # ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding
 
 **Status**: Accepted
-**Last Revised**: 2026-10-24
+**Last Revised**: 2026-10-25
 **Date**: 2026-07-12
 **Implemented Slices**: RGF-U1 canonical catalog and native binding boundary on 2026-07-12; RGF-U2
 native Rust derive authoring and public headless consumer on 2026-07-13; RGF-U12 World-independent
@@ -241,6 +241,24 @@ preparation nor publishes the scratch catalogue or binding receipts. It is not a
 or a global World revision fence. Untouched asset catalogues need not remain unchanged, and bound
 targets still require their complete later validation. The primitive does not supply Schema/source
 or logical-occurrence authority on behalf of its owning Scene or Host.
+
+Scene retains the exact frozen execution definition with both its unbound ordinary token and
+later target-bound native-retirement token. Execution-definition custody and receiving Host
+composition are separate facts: capture one genuine Standalone basis or the exact valid managed
+snapshot, and retain that same basis through finalization without recapturing it. A missing
+registry under an installed authority, registry-only state, or a later composition change rejects.
+Ordinary materialization additionally requires its execution definition to be the managed
+snapshot. Explicit advanced/product projection may select its own frozen native definition,
+as ADR 0114's typed preview does; this never bypasses Host authority, binding bijection or any
+World/asset/lifecycle admission, and grants no project Runtime/Play/Check readiness. Do not invent
+an automatic foreign-definition fallback or a boolean that disables authority checking.
+After all support metadata and ordinary deferred work are materialized, final publication uses
+registered-support owner checks that do not flush again. Identity proof preparation, existing
+receipt checks and Hierarchy construction must not invalidate earlier Schema, asset or occurrence
+admission by executing another hidden deferred-work boundary.
+Resource-value absence does not imply fresh entity storage in the selected Bevy version. Support
+resource insertion must admit the actual cached resource entity when one exists, including its
+entity-scoped lifecycle observers, rather than checking component-global observers alone.
 
 Any future catalog-derived persistent composition must add stable `ComponentTypeId` dependencies,
 bounded deterministic closure and cycle rules, default/override/removal semantics, migrations, and

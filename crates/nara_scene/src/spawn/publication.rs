@@ -17,6 +17,7 @@ use crate::product_transaction::PreparedSceneProductResources;
 pub struct PreparedSceneReplacement(pub(super) PreparedScenePublication);
 
 pub(super) struct PreparedScenePublication {
+    pub(super) definition: preparation::ScenePreparationDefinition,
     pub(super) prepared_identity: PreparedSceneIdentityCommit,
     pub(super) identity_tokens: BTreeMap<SceneEntityId, WorldEntityToken>,
     pub(super) expected: Option<SpawnedSceneInstance>,
@@ -84,7 +85,9 @@ impl PreparedScenePublication {
         world: &mut World,
         finalize: bool,
     ) -> Result<FinalScenePublication, SceneSpawnReport> {
+        self.definition.validate(world)?;
         prepare_mutation_baseline(world);
+        let world = &*world;
         let changed = || {
             self.rejection(
                 "scene.prepared-baseline-changed",
@@ -104,8 +107,12 @@ impl PreparedScenePublication {
             resources.validate(world).map_err(|_| changed())?;
         }
         validate_hierarchy(world).map_err(|_| changed())?;
-        validate_scene_identity_support(world, &self.retired_entities).map_err(|_| changed())?;
-        validate_existing_scene_persistent_apply(world, &self.scene_retirements)
+        nara_identity::__private::validate_registered_identity_support_topology(
+            world,
+            self.retired_entities.iter().copied(),
+        )
+        .map_err(|_| changed())?;
+        validate_registered_persistent_apply_targets(world, self.scene_retirements.iter().copied())
             .map_err(|_| changed())?;
         if !self.additional_retirement_tokens.is_empty() {
             validate_additional_retirement_identity_axes(
@@ -121,8 +128,13 @@ impl PreparedScenePublication {
                 return Err(changed());
             }
         }
-        let candidates = self.spawned_by_id.values().copied().collect::<Vec<_>>();
-        validate_scene_source_support(world, &candidates).map_err(|_| changed())?;
+        for candidate in self.spawned_by_id.values().copied() {
+            validate_registered_persistent_component_apply::<SceneEntitySource>(
+                world,
+                Some(candidate),
+            )
+            .map_err(|_| changed())?;
+        }
         let entries = self
             .identity_tokens
             .iter()
@@ -160,7 +172,7 @@ impl PreparedScenePublication {
                     .expected
                     .as_ref()
                     .expect("replacement retains its predecessor receipt");
-                let replacement = prepare_exact_scene_instance_replacement(
+                let replacement = prepare_registered_scene_instance_replacement(
                     world,
                     expected,
                     &entries,
@@ -186,9 +198,11 @@ impl PreparedScenePublication {
                 {
                     return Err(changed());
                 }
-                let retirement =
-                    prepare_scene_projection_epoch_retirement(world, self.expected.as_ref())
-                        .map_err(|_| changed())?;
+                let retirement = prepare_registered_scene_projection_epoch_retirement(
+                    world,
+                    self.expected.as_ref(),
+                )
+                .map_err(|_| changed())?;
                 let registration =
                     prepare_exact_scene_instance_registration(domain, world, &entries)
                         .map_err(|_| changed())?;
@@ -251,6 +265,7 @@ impl PreparedScenePublication {
         }
         let hierarchy =
             prepare_construction_batch(world, &self.hierarchy_operations).map_err(|_| changed())?;
+        self.definition.validate(world)?;
         Ok(FinalScenePublication {
             identity,
             hierarchy,

@@ -4,6 +4,7 @@
 **Date**: 2026-07-09
 **Amended**: 2026-10-24 by production source admission, required Prefab/containing-source binding
 and Scene-owned logical occurrence
+**Amended**: 2026-10-25 by owned unbound ordinary Scene preparation
 **Refines**: ADR 0006: Scene and Prefab Data Model
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References;
@@ -71,6 +72,15 @@ flowchart TD
 
 ## Rules
 
+- Ordinary materialization exposes one move-only preparation stage owning actual unbound native
+  values and the exact immutable definition, source and occurrence context. Preparation allocates
+  no Scene target entities, and dropping it needs no World. First placement and exact replacement
+  use the same kernel as immediate spawn and advanced product publication; they do not re-decode
+  at commit. Commit consumes the ordinary token and revalidates current World, definition, touched
+  assets, lifecycle and occurrence eligibility before binding fresh targets. A managed World must
+  retain its required registry authority and match the prepared definition; standalone consumers
+  may retain the definition without keeping the caller's registry variable alive. Target-bound
+  native-retirement custody remains a later stage with its existing explicit cleanup obligation.
 - Expanded materialization input binds the immutable document and its complete provenance in one
   owner-created candidate. Public spawn/replacement APIs do not accept independently assembled
   document/map pairs. The candidate also requires the containing `SourceDocumentKey`; a plain-scene

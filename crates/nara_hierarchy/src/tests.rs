@@ -21,6 +21,78 @@ fn place_root(world: &mut World, entity: Entity) {
 }
 
 #[test]
+fn generation_resource_insertion_is_admitted_before_hierarchy_publication() {
+    use nara_ecs::bevy_ecs::{lifecycle::Add, observer::On};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    let mut world = World::new();
+    let entity = world.spawn_empty().id();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&hits);
+    world.add_observer(move |_: On<Add<HierarchyGenerationState>>| {
+        observed.fetch_add(1, Ordering::SeqCst);
+    });
+    world.flush();
+    let result = HierarchyWriter::new(&mut world).place(entity, root_last());
+    assert_eq!(result, Err(HierarchyError::LifecycleWork));
+    assert_eq!(hits.load(Ordering::SeqCst), 0);
+    assert!(!world.contains_resource::<HierarchyGenerationState>());
+    assert!(!world.contains_resource::<HierarchyRoots>());
+    assert!(world.get::<Parent>(entity).is_none());
+    assert_eq!(world.entity(entity).archetype().components().len(), 0);
+}
+
+#[test]
+fn cached_resource_targets_are_admitted_before_hierarchy_publication() {
+    use nara_ecs::bevy_ecs::{
+        lifecycle::Add,
+        observer::{Observer, On},
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    for generation in [false, true] {
+        let mut world = World::new();
+        let entity = world.spawn_empty().id();
+        let resource = if generation {
+            world.init_resource::<HierarchyGenerationState>();
+            let resource = world.component_id::<HierarchyGenerationState>().unwrap();
+            world.remove_resource::<HierarchyGenerationState>().unwrap();
+            resource
+        } else {
+            world.insert_resource(HierarchyRoots::new());
+            let resource = world.component_id::<HierarchyRoots>().unwrap();
+            world.remove_resource::<HierarchyRoots>().unwrap();
+            resource
+        };
+        let cached = world.resource_entities().get(resource).unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&hits);
+        world.spawn(
+            Observer::new(move |_: On<Add<()>>| {
+                observed.fetch_add(1, Ordering::SeqCst);
+            })
+            .with_entity(cached)
+            .with_component(resource),
+        );
+        world.flush();
+        assert_eq!(
+            HierarchyWriter::new(&mut world).place(entity, root_last()),
+            Err(HierarchyError::LifecycleWork)
+        );
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+        assert!(!world.contains_resource::<HierarchyRoots>());
+        assert!(!world.contains_resource::<HierarchyGenerationState>());
+        assert_eq!(world.entity(entity).archetype().components().len(), 0);
+    }
+}
+
+#[test]
 fn ordered_batch_publishes_explicit_roots_and_children() {
     let mut world = World::new();
     let second_child = world.spawn_empty().id();

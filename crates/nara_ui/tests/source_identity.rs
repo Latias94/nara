@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use nara_app::{App, RuntimeInstance};
+use nara_app::{App, RuntimeInstance, StartupStage};
 use nara_input::{InputPointerId, InputSeatId, InputWindowId};
-use nara_reflect::{ComponentRegistry, ComponentRegistryPlugin};
+use nara_reflect::{ComponentRegistry, ComponentRegistryPlugin, component_registry};
 use nara_scene::{SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource};
 use nara_ui::{
     UiAdapterDiagnostics, UiNode, UiPlugin, UiRoot, UiStyle, UiSurfaceEndpoint, UiSurfaceSlot,
@@ -33,45 +33,48 @@ fn independent_scenes_collide_only_when_their_document_local_ui_roots_match() {
             UiSurfaceContentTransform::new(size, size, UiSafeAreaInsets::default(), 1.0).unwrap(),
         )
         .unwrap();
-        let world = app.world_mut().unwrap();
-        install_ui_surface(world, slot).unwrap();
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
-
-        let mut instances = Vec::new();
-        for (root, marker) in [("root", "first-document"), (second_root, "second-document")] {
-            let root = SceneEntityId::new(root).unwrap();
-            let document = SceneDocument::from_ordered_roots([
-                SceneEntityRecord::new(root.clone()),
-                SceneEntityRecord::new(SceneEntityId::new(marker).unwrap()),
-            ]);
-            let report = nara_scene::spawn_scene(
-                world,
-                &registry,
-                &nara_scene::ExpandedSceneCandidate::plain(
-                    scene_source_key(marker),
-                    std::sync::Arc::new((document).clone()),
-                ),
-                &scene_occurrence(marker),
-                None,
+        install_ui_surface(app.world_mut().unwrap(), slot).unwrap();
+        app.add_systems(StartupStage::Scene, move |world: &mut nara_ecs::World| {
+            let registry = ComponentRegistry::from_snapshot(
+                component_registry(world).unwrap().snapshot().unwrap(),
             );
-            assert!(!report.diagnostics.has_errors());
-            let instance = report.instance.unwrap();
-            let root_entity = world
-                .iter_entities()
-                .find(|entity| {
-                    entity.get::<SceneEntitySource>().is_some_and(|source| {
-                        source.instance_id == instance.instance_id() && source.entity_id == root
+
+            let mut instances = Vec::new();
+            for (root, marker) in [("root", "first-document"), (second_root, "second-document")] {
+                let root = SceneEntityId::new(root).unwrap();
+                let document = SceneDocument::from_ordered_roots([
+                    SceneEntityRecord::new(root.clone()),
+                    SceneEntityRecord::new(SceneEntityId::new(marker).unwrap()),
+                ]);
+                let report = nara_scene::spawn_scene(
+                    world,
+                    &registry,
+                    &nara_scene::ExpandedSceneCandidate::plain(
+                        scene_source_key(marker),
+                        std::sync::Arc::new((document).clone()),
+                    ),
+                    &scene_occurrence(marker),
+                    None,
+                );
+                assert!(!report.diagnostics.has_errors());
+                let instance = report.instance.unwrap();
+                let root_entity = world
+                    .iter_entities()
+                    .find(|entity| {
+                        entity.get::<SceneEntitySource>().is_some_and(|source| {
+                            source.instance_id == instance.instance_id() && source.entity_id == root
+                        })
                     })
-                })
-                .unwrap()
-                .id();
-            world
-                .entity_mut(root_entity)
-                .insert((UiRoot::new(UiLayer::Base), UiNode::new(UiStyle::fill())));
-            instances.push(instance);
-        }
-        assert_ne!(instances[0].instance_id(), instances[1].instance_id());
+                    .unwrap()
+                    .id();
+                world
+                    .entity_mut(root_entity)
+                    .insert((UiRoot::new(UiLayer::Base), UiNode::new(UiStyle::fill())));
+                instances.push(instance);
+            }
+            assert_ne!(instances[0].instance_id(), instances[1].instance_id());
+        })
+        .unwrap();
 
         let mut runtime = RuntimeInstance::start(app).unwrap();
         runtime.drive(Duration::ZERO).unwrap();

@@ -46,6 +46,14 @@ pub mod __private {
 
     pub use super::writer::PreparedHierarchyBatch;
 
+    /// Admits nonempty fresh construction before target allocation; metadata must be registered.
+    pub fn validate_fresh_construction_topology(
+        world: &World,
+        has_parent_edges: bool,
+    ) -> Result<(), HierarchyError> {
+        super::writer::validate_fresh_construction_topology(world, has_parent_edges)
+    }
+
     /// Materializes deferred work before an enclosing owner takes any semantic World proofs.
     pub fn prepare_mutation_baseline(world: &mut World) {
         super::writer::prepare_mutation_baseline(world);
@@ -126,7 +134,7 @@ pub mod __private {
     ///
     /// This does not execute deferred work; preparation and commit require exclusive World access.
     pub fn prepare_construction_batch(
-        world: &mut World,
+        world: &World,
         operations: &[HierarchyOperation],
     ) -> Result<PreparedHierarchyBatch, HierarchyError> {
         prepare_hierarchy_batch(world, operations)
