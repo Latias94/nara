@@ -118,6 +118,12 @@ Prefab occurrence, operation basis and runtime incarnation as separate owner axe
 scoped nested-ID lineage, keyed-item, migration and unresolved-target rules that must be settled
 before R2/R3/R5b persistent contracts freeze.
 
+The [source-owned creation and construction design](authoring-construction-design.md) removes
+Workspace ordinal allocation and ID-reservation choreography from ordinary Scene/Prefab creation.
+Native registry/database-aware and Published admission retain their distinct owners. Its retained
+transaction-local draft is selected for experiment, not an implemented construction interface;
+ordinary creation does not complete R2's field-query, panel or cost-comparison work.
+
 The [source-context and logical-occurrence proposal](scene-source-and-occurrence-identity-design.md)
 addresses the separately reproduced same-World/two-Scene UI key collision. It compares a required
 source-bound envelope with embedded document identity, retains the independent runtime incarnation,

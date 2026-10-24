@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-24
+**Last Revised**: 2026-10-25
 **Amended**: 2026-08-15 to require exact mutation preconditions and independently bounded,
 branch-aware authoring history
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
@@ -57,6 +57,13 @@ Rules:
   bounded logical-cost admission stops when its ceiling is provably exceeded.
 - A batch of Editor actions remains ordered dispatch, not a document transaction. Mixed
   authoring construction must validate one unpublished candidate and publish one history entry.
+- Generated entity creation belongs to the Scene/Prefab source owner, including identity
+  generation, validation and history publication. The successful operation returns its authored
+  identity; Tooling does not reserve an ID and advance a separate allocator after applying a patch.
+  Generation may consume fallible OS entropy, but refusal/drop changes no published allocator
+  state. Stored IDs, not new allocation, drive Undo/Redo/Reopen. The
+  [construction design](../authoring-construction-design.md) records the selected compact encoding,
+  explicit collision limits and the absence of arbitrary-history non-reuse guarantees.
 - Patch paths are schema-aware: `SceneEntityId + ComponentTypeId + field path`. Root field
   identity follows the declared Schema contract; nested member names and unkeyed indices are
   revision-local locators, not promises of rename/reorder-stable persistent identity.

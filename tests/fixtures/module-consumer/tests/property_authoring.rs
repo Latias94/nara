@@ -25,13 +25,16 @@ use nara_scene::{
     AuthoringDocumentReadiness, AuthoringPropertyEdit, AuthoringRecordReadiness, PrefabDocument,
     PrefabDocumentCandidate, SceneAuthoringRevision, SceneComponentRecord, SceneDocument,
     SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, UnavailableRecordManifest, UnavailableRecordManifestEntry,
+    ScenePatchOperation, ScenePlacement, ScenePlacementOwner, UnavailableRecordManifest,
+    UnavailableRecordManifestEntry,
 };
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentId, EditorDocumentKind,
     EditorDocumentMutation, EditorDocumentOpenResult, EditorNavigationAction,
     EditorPersistenceAction, EditorPersistenceRequestResult, EditorPersistenceResult,
-    EditorProjectBrowserAction, EditorProjectBrowserActionOutcome,
+    EditorProjectBrowserAction, EditorProjectBrowserActionOutcome, PrefabCompositionCommand,
+    PrefabCompositionEntityDraft, PrefabCompositionOutcome, SceneCompositionCommand,
+    SceneCompositionEntityKind,
 };
 
 const COMPONENT: &str = "consumer.property.Settings";
@@ -224,6 +227,190 @@ fn patch(root: ComponentValue) -> ScenePatchDocument {
 
 #[derive(bevy_ecs::prelude::Component)]
 struct NativeSettings(ComponentValue);
+
+#[test]
+fn ordinary_creation_retains_generated_identity_and_unavailable_records_through_saved_reopen() {
+    for source in [SCENE, PREFAB] {
+        let project = Project::new();
+        let mut editor = open_project(&project);
+        let document = open_source(&mut editor, source);
+        let manifest = manifest(&editor);
+        let base_revision = revision(&editor, document);
+        let placement = ScenePlacement::last(ScenePlacementOwner::Root);
+        let mutation = if source == SCENE {
+            EditorDocumentMutation::ComposeScene {
+                document,
+                base_revision,
+                command: SceneCompositionCommand::CreateEntity {
+                    kind: SceneCompositionEntityKind::Empty,
+                    placement,
+                },
+            }
+        } else {
+            EditorDocumentMutation::ComposePrefab {
+                document,
+                base_revision,
+                command: PrefabCompositionCommand::CreateEntity {
+                    draft: PrefabCompositionEntityDraft::new(Default::default()).unwrap(),
+                    placement,
+                },
+            }
+        };
+        let outcome = dispatch(&mut editor, EditorAction::Mutate(mutation));
+        let frame = editor.current_frame();
+        let created = frame
+            .workspace()
+            .active_scene
+            .as_ref()
+            .unwrap()
+            .selection
+            .top_entity()
+            .unwrap()
+            .clone();
+        assert_ne!(created, id("actor"));
+        assert_ne!(created, id("observer"));
+        let EditorActionOutcome::Workspace(report) = outcome else {
+            panic!("{outcome:?}")
+        };
+        assert!(report.applied, "{:?}", report.diagnostics);
+        if source == PREFAB {
+            assert_eq!(
+                report.prefab_composition_outcome,
+                Some(PrefabCompositionOutcome::Created {
+                    entity: created.clone()
+                })
+            );
+        }
+        assert_eq!(
+            frame
+                .workspace()
+                .document(document)
+                .unwrap()
+                .history
+                .undo_depth,
+            1
+        );
+        assert_eq!(
+            editor.active_authoring_unavailable_record_manifest(),
+            Some(&manifest)
+        );
+        for redo in [false, true] {
+            let base_revision = revision(&editor, document);
+            let mutation = if redo {
+                EditorDocumentMutation::Redo {
+                    document,
+                    base_revision,
+                }
+            } else {
+                EditorDocumentMutation::Undo {
+                    document,
+                    base_revision,
+                }
+            };
+            assert_applied(dispatch(&mut editor, EditorAction::Mutate(mutation)));
+            let frame = editor.current_frame();
+            let scene = frame.workspace().active_scene.as_ref().unwrap();
+            assert_eq!(
+                scene
+                    .editor
+                    .inspector
+                    .entities
+                    .iter()
+                    .any(|row| row.id == created),
+                redo
+            );
+            assert_eq!(
+                frame
+                    .workspace()
+                    .document(document)
+                    .unwrap()
+                    .history
+                    .undo_depth,
+                usize::from(redo)
+            );
+            assert_eq!(
+                editor.active_authoring_unavailable_record_manifest(),
+                Some(&manifest)
+            );
+        }
+        let saved_revision = revision(&editor, document);
+        assert!(matches!(
+            dispatch(
+                &mut editor,
+                EditorAction::Persistence(EditorPersistenceAction::Save {
+                    document,
+                    base_revision: saved_revision
+                })
+            ),
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        ));
+        wait(&mut editor, |editor| {
+            editor.current_frame().persistence().result().is_some()
+        });
+        assert!(
+            matches!(editor.current_frame().persistence().result(), Some(EditorPersistenceResult::Saved { document: saved, revision, .. }) if saved == document && revision == saved_revision)
+        );
+        let mut expected = records(initial());
+        expected.push(SceneEntityRecord::new(created.clone()));
+        let expected = if source == SCENE {
+            SceneDocument::from_ordered_roots(expected)
+                .to_json_string()
+                .unwrap()
+        } else {
+            PrefabDocument::from_ordered_roots(expected)
+                .to_json_string()
+                .unwrap()
+        };
+        assert_eq!(
+            fs::read(project.root.join(source)).unwrap(),
+            expected.as_bytes()
+        );
+        dispatch(
+            &mut editor,
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        );
+        let target = editor.current_frame().reopen_target();
+        assert!(matches!(
+            dispatch(
+                &mut editor,
+                EditorAction::Persistence(EditorPersistenceAction::Reopen { target })
+            ),
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        ));
+        wait(&mut editor, |editor| {
+            editor.current_frame().persistence().result().is_some()
+        });
+        assert!(matches!(
+            editor.current_frame().persistence().result(),
+            Some(EditorPersistenceResult::Opened { .. })
+        ));
+        dispatch(
+            &mut editor,
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        );
+        select(&mut editor, document, created.as_str());
+        let reopened = editor.current_frame();
+        let tab = reopened.workspace().document(document).unwrap();
+        assert!(!tab.dirty);
+        assert_eq!(tab.history.undo_depth, 0);
+        assert_ne!(tab.revision.source_id(), saved_revision.source_id());
+        assert_eq!(
+            reopened
+                .workspace()
+                .active_scene
+                .as_ref()
+                .unwrap()
+                .selection
+                .top_entity(),
+            Some(&created)
+        );
+        assert_eq!(
+            editor.active_authoring_unavailable_record_manifest(),
+            Some(&manifest)
+        );
+        close_editor(&mut editor);
+    }
+}
 
 #[test]
 fn captured_property_survives_explicit_wire_migration_and_keyed_reorder() {

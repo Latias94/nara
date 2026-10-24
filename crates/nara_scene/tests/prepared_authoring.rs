@@ -114,6 +114,51 @@ fn dropping_a_prepared_edit_does_not_mutate_the_owner() {
 }
 
 #[test]
+fn published_source_creation_owns_identity_without_widening_native_admission() {
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("existing"))]);
+    let mut scene = open(&document);
+    let revision = scene.revision();
+    let created = scene
+        .create_authoring_entity(revision, ScenePlacement::last(ScenePlacementOwner::Root))
+        .unwrap();
+    let generated = created.entity().clone();
+    assert_ne!(generated, id("existing"));
+    assert_eq!(scene.document().roots, [id("existing"), generated.clone()]);
+    assert_eq!(scene.history_status().undo_depth, 1);
+    assert!(scene.undo_authoring().applied);
+    assert_eq!(scene.document(), &document);
+    assert!(scene.redo_authoring().applied);
+    assert_eq!(scene.document().roots[1], generated);
+    assert!(
+        scene
+            .create_authoring_entity(revision, ScenePlacement::last(ScenePlacementOwner::Root),)
+            .is_err()
+    );
+
+    let mut registry = nara_reflect::ComponentRegistry::new();
+    registry.freeze().unwrap();
+    assert!(
+        scene
+            .create_entity_with_registry(
+                scene.revision(),
+                &registry,
+                ScenePlacement::last(ScenePlacementOwner::Root),
+                Default::default(),
+            )
+            .is_err()
+    );
+    let mut native = SceneAuthoringSession::new(SceneDocument::default());
+    assert!(
+        native
+            .create_authoring_entity(
+                native.revision(),
+                ScenePlacement::last(ScenePlacementOwner::Root),
+            )
+            .is_err()
+    );
+}
+
+#[test]
 fn prepared_edits_reject_foreign_and_changed_owners_without_publication() {
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("existing"))]);
     let mut first = open(&document);
@@ -611,4 +656,60 @@ fn assert_both_kind_roundtrip(
     assert_eq!(prefab.document(), &document);
     assert!(prefab.redo_authoring().applied);
     assert_eq!(prefab.document(), &expected);
+}
+
+#[test]
+#[ignore = "decision-local prepare/commit observation; run this exact test alone"]
+fn explicit_construction_prepare_and_commit_cost_observation() {
+    use std::{hint::black_box, time::Instant};
+
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("existing"))]);
+    let bundle = link_bundle();
+    let mut prepare_ns = Vec::new();
+    let mut commit_ns = Vec::new();
+    for iteration in 0..72 {
+        let mut session =
+            open_with_bundle(&document, &bundle, SceneAuthoringHistoryLimits::default());
+        let template = session
+            .authoring_initial_component(&ComponentTypeId::new("game.Link"))
+            .unwrap();
+        let patch = linked_construction(template, 7);
+        let start = Instant::now();
+        let prepared = session
+            .prepare_authoring_edit(session.revision(), black_box(&patch))
+            .unwrap();
+        let prepare = start.elapsed().as_nanos();
+        let start = Instant::now();
+        let report = session.commit_authoring_edit(black_box(prepared));
+        let commit = start.elapsed().as_nanos();
+        assert!(report.applied, "{:?}", report.diagnostics);
+        assert_eq!(session.history_status().undo_depth, 1);
+        assert_eq!(session.document().entities.len(), 3);
+        if iteration >= 8 {
+            prepare_ns.push(prepare);
+            commit_ns.push(commit);
+        }
+    }
+    prepare_ns.sort_unstable();
+    commit_ns.sort_unstable();
+    println!(
+        "{}",
+        serde_json::json!({
+            "measurement": "explicit-construction-prepare-commit-v1",
+            "build": if cfg!(debug_assertions) { "debug" } else { "release" },
+            "warmups": 8,
+            "samples": prepare_ns.len(),
+            "entities_before": 1,
+            "entities_created": 2,
+            "components_per_created_entity": 1,
+            "field_writes": 3,
+            "prepare_median_ns": prepare_ns[32],
+            "prepare_p95_ns": prepare_ns[60],
+            "commit_median_ns": commit_ns[32],
+            "commit_p95_ns": commit_ns[60],
+            "prepare_samples_ns": prepare_ns,
+            "commit_samples_ns": commit_ns,
+            "scope": "owner preparation and consuming commit; excludes session admission, caller patch construction, report disposal, native projection, Save and rendering"
+        })
+    );
 }

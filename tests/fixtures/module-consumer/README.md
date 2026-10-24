@@ -29,6 +29,11 @@ cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --lo
 
 Run Cargo commands serially. See the [fixture guide](../README.md) for isolation and platform scope.
 
+`tests/property_authoring.rs` exercises Schema-relative property editing and ordinary source-owned
+entity creation through the public, window-free Editor Host. Scene and Prefab cases preserve
+unknown/future records, replay one history entry, save exact source bytes and reopen the stored
+generated identity. It does not predict generated ID spelling or qualify transaction-local drafts.
+
 `editor-panel-consumer/` independently compiles a trusted selection-summary panel.
 It installs a semantic descriptor and a Dear ImGui painter through the same paths as built-ins,
 reads selection and emits existing navigation actions without mutable document or GPU access.

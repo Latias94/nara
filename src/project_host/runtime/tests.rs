@@ -5417,12 +5417,12 @@ logical_height = 540
         panic!("a frame-lowered structure intent must reach the workspace");
     };
     assert!(created.applied, "{:?}", created.diagnostics);
-    assert_eq!(
-        created.prefab_composition_outcome,
-        Some(nara_tooling::PrefabCompositionOutcome::Created {
-            entity: nara_identity::SceneEntityId::new("editor_prefab_entity_1").unwrap(),
-        })
-    );
+    let Some(nara_tooling::PrefabCompositionOutcome::Created {
+        entity: created_entity,
+    }) = &created.prefab_composition_outcome
+    else {
+        panic!("successful structure creation must return its exact source identity");
+    };
     assert!(matches!(
         &created_batch.outcomes()[1],
         EditorActionOutcome::Rejected(EditorActionRejection::StaleDocumentFact {
@@ -5440,10 +5440,7 @@ logical_height = 540
         successor_ui.last_gesture_cancellation(),
         Some(EditorGestureCancelReason::StaleRevision)
     );
-    assert_eq!(
-        successor_ui.selection().top_entity(),
-        Some(&nara_identity::SceneEntityId::new("editor_prefab_entity_1").unwrap())
-    );
+    assert_eq!(successor_ui.selection().top_entity(), Some(created_entity));
     let stale = editor
         .dispatch_editor_actions(EditorActionBatch::new(
             successor_frame.revision(),

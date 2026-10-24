@@ -96,6 +96,7 @@ nara_window = { path = "crates/nara_window" }
 nara_winit = { path = "crates/nara_winit" }
 
 bevy_ecs = "=0.20.0"
+base64 = "0.21.7"
 bevy_ecs_macro_logic = "=0.20.0"
 bevy_macro_utils = "=0.20.0"
 bevy_reflect = { version = "0.20", features = ["glam"] }

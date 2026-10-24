@@ -92,8 +92,17 @@ fn accepted_scene_revision_publishes_one_matching_preview_candidate() {
         &outcomes[0],
         EditorActionOutcome::Workspace(report) if report.applied
     ));
-
     let frame = editor.drive_editor_frame(Duration::ZERO);
+    let created = frame
+        .workspace()
+        .active_scene
+        .as_ref()
+        .unwrap()
+        .selection
+        .top_entity()
+        .unwrap()
+        .clone();
+
     let revision = frame.workspace().scene(document).unwrap().revision;
     let candidate = editor
         .take_editor_preview_candidate()
@@ -104,7 +113,7 @@ fn accepted_scene_revision_publishes_one_matching_preview_candidate() {
     assert_eq!(geometry_revision, 2);
     assert_eq!(batches.total_instances(), 1);
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].entity(), &scene_id("editor_entity_1"));
+    assert_eq!(hits[0].entity(), &created);
     assert_eq!(hits[0].draw_ordinal(), 0);
     assert!(hits[0].contains_clip_point([0.0, 0.0]));
     assert!(!hits[0].contains_clip_point([2.0, 2.0]));

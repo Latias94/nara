@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "756af2d4db97a7ba99bb5ab306a2207a2f7ded9594808f195022361a32268d45"
+source_fingerprint: "886273a7411f8f68b27b4af99a242dd7719296ff762db5a998ba8e4dba0da7a1"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "756af2d4db97a7ba99bb5ab306a2207a2f7ded9594808f195022361a322
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `756af2d4db97a7ba99bb5ab306a2207a2f7ded9594808f195022361a32268d45`
-- Immutable records: 894
+- Source fingerprint: `886273a7411f8f68b27b4af99a242dd7719296ff762db5a998ba8e4dba0da7a1`
+- Immutable records: 896
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Source-owned entity creation and generated product qualification](verification/2026-10/2026-10-24T203944Z-source-owned-entity-creation-and-generated-product-qualification-c5fd5454223046e38fc1761338ddffb0.md) - Qualified ordinary Scene/Prefab source-owned creation, removal of Workspace ordinals, independent persistence and Windows DX12 product workflows; full R2 remains open.
+- **Work Progress**: [Source-owned creation implemented; generated export qualification pending](progress/2026-10/2026-10-24T202546Z-source-owned-creation-implemented-generated-export-qualification-pending-982fcd60eda3477aa06a6ba835da0c56.md) - R2 ordinary creation owns IDs and publication; owner/public/native checks pass while a real release export remains live.
 - **Subagent Finding**: [R2 transaction local construction ownership and allocation alternatives](subagents/2026-10/2026-10-24T185535Z-r2-transaction-local-construction-ownership-and-allocation-alternatives-a12471c958dc470097f9b8c7337c0533.md) - Read-only next-unit findings identify caller-owned construction choreography and compare owner drafts, declarative intents and scoped builders without adopting an allocator.
 - **Verification Evidence**: [Complete persistent UI identity and neutral conformance successor](verification/2026-10/2026-10-24T185535Z-complete-persistent-ui-identity-and-neutral-conformance-successor-0cf84bdfd2f54766be84f3ca206f7931.md) - Qualified Runtime and Canvas complete-key adoption with exact public inventory, neutral assertions, independent consumers and Windows DX12 evidence.
 - **Verification Evidence**: [Owned ordinary Scene preparation and complete support admission qualification](verification/2026-10/2026-10-24T164025Z-owned-ordinary-scene-preparation-and-complete-support-admission-qualification-e94d2a95cbf94dd7a0cbbd371aedf55c.md) - Serial owner, public, independent and native qualification of move-only unbound Scene preparation and complete support-resource admission.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Source-bound Scene occurrence checkpoint and ordinary preparation follow-up](progress/2026-10/2026-10-24T133133Z-source-bound-scene-occurrence-checkpoint-and-ordinary-preparation-follow-up-ea0342ca0c55402c966ac1a073a4b09c.md) - Commit 87a1fc0 qualifies required Scene sources and active occurrence ownership; ordinary unbound preparation and Runtime/Canvas adoption are next, while the full foundation goal stays active.
 - **Verification Evidence**: [Required Scene sources and active occurrence ownership qualification](verification/2026-10/2026-10-24T114901Z-required-scene-sources-and-active-occurrence-ownership-qualification-e249da9a1f404677a72e52457ac990c4.md) - Required source-bound materialization and Scene-owned active logical occurrence replace identity-free spawn, qualified through owning, public, independent and selected native consumers.
 - **Work Progress**: [Canonical Prefab binding checkpoint and required Scene ownership follow-up](progress/2026-10/2026-10-24T111737Z-canonical-prefab-binding-checkpoint-and-required-scene-ownership-follow-up-99eaac49f2074e9f8121bf800204aa97.md) - Commit 1a03766 removes identity-free Prefab resolution; required containing-Scene binding, active occurrence ownership and shared UI identity remain the next replacements.
-- **Verification Evidence**: [Required canonical Prefab source binding qualification](verification/2026-10/2026-10-24T105758Z-required-canonical-prefab-source-binding-qualification-6afeb3f651f5456fba96e8e1e279c46c.md) - All Prefab resolvers and projection steps require canonical source keys; the in-memory adapter owns one document per key and all aliases share its publication.
-- **Verification Evidence**: [Exact stored spelling through filesystem capabilities](verification/2026-10/2026-10-24T095418Z-exact-stored-spelling-through-filesystem-capabilities-79d51b36d2944aa0bc70384eb2d11b86.md) - Bounded exact descendant-name opens preserve capability authority and reject native lookup aliases.
 
 # Integration Notes
 

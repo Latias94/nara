@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-24
+**Last Revised**: 2026-10-25
 **Amended**: 2026-08-15 to make selection single-owner and separate monotonic revision from
 receipt-backed content state
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
@@ -72,6 +72,9 @@ Rules:
   distinct; truncating an eagerly constructed Inspector is not bounded query execution.
 - Prepared edits remain owned by the document session. Workspace/Editor adapters carry their
   exact target and operation result without rebuilding validation, inverse or history logic.
+- Automatic entity creation uses the source owner's complete creation operation and returned ID.
+  Workspace slots own no generated-ID ordinal, reservation or Reopen reset. Selection changes
+  only after successful source publication; failed creation preserves the exact prior selection.
 - Once physical Session close begins, ordinary mutations, Undo/Redo, gesture publication and
   prepared commits all reject new work at their owning ingress. Retained document observations
   do not reopen mutation admission while file Hosts and pending cleanup retire. Gesture rejection

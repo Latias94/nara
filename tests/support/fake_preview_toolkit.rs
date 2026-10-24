@@ -202,7 +202,17 @@ fn add_sprite(editor: &mut EditorProjectSession) -> (EditorDocumentId, SceneEnti
         })],
     );
     assert!(matches!(&outcomes[0], EditorActionOutcome::Workspace(report) if report.applied));
-    (document, SceneEntityId::new("editor_entity_1").unwrap())
+    let entity = editor
+        .drive_editor_frame(Duration::ZERO)
+        .workspace()
+        .active_scene
+        .as_ref()
+        .unwrap()
+        .selection
+        .top_entity()
+        .unwrap()
+        .clone();
+    (document, entity)
 }
 
 fn close_editor(editor: &mut EditorProjectSession) {

@@ -23,6 +23,7 @@ use crate::composition::{
     GenericCompositionDocument, PrefabCompositionCommand, PrefabCompositionOutcome,
     PrefabCompositionSelection, SceneCompositionCommand, SceneCompositionSelection,
     prepare_generic_composition, prepare_prefab_composition, prepare_scene_composition,
+    scene_entity_components,
 };
 use crate::diagnostic;
 use crate::entity_query::{
@@ -1599,6 +1600,40 @@ impl EditorWorkspace {
         if slot.kind() != kind {
             return authoring_command_error_report(active_document, document);
         }
+        if let SceneCompositionCommand::CreateEntity {
+            kind: crate::SceneCompositionEntityKind::Empty,
+            placement,
+        } = command
+        {
+            let created = match slot {
+                EditorDocumentSlot::Scene(slot) => slot
+                    .session
+                    .create_authoring_entity(base_revision, placement),
+                EditorDocumentSlot::Prefab(slot) => slot
+                    .session
+                    .create_authoring_entity(base_revision, placement),
+                EditorDocumentSlot::Extension(_) => {
+                    return authoring_command_error_report(active_document, document);
+                }
+            };
+            return match created {
+                Ok(created) => {
+                    let (entity, patch_report) = created.into_parts();
+                    slot.selection_mut().clear();
+                    let mut report =
+                        report_for_document_patch(document, active_document, slot, patch_report);
+                    slot.selection_mut().select_entity(Some(entity.clone()));
+                    if kind == EditorDocumentKind::Prefab {
+                        report.prefab_composition_outcome =
+                            Some(PrefabCompositionOutcome::Created { entity });
+                    }
+                    report
+                }
+                Err(patch_report) => {
+                    report_for_document_patch(document, active_document, slot, patch_report)
+                }
+            };
+        }
         if let (
             EditorDocumentSlot::Prefab(prefab),
             SceneCompositionCommand::MoveEntity { entity, to },
@@ -1612,26 +1647,6 @@ impl EditorWorkspace {
             });
             return report;
         }
-        let allocation = if command.allocates_entity() {
-            let candidate = match slot {
-                EditorDocumentSlot::Scene(slot) => slot.next_entity_candidate(),
-                EditorDocumentSlot::Prefab(slot) => slot.next_entity_candidate(),
-                EditorDocumentSlot::Extension(_) => {
-                    return authoring_command_error_report(active_document, document);
-                }
-            };
-            match candidate {
-                Ok(candidate) => Some(candidate),
-                Err(diagnostic) => {
-                    let mut report = report_for_document(document, active_document, slot);
-                    report.applied = false;
-                    report.diagnostics.push(diagnostic);
-                    return report;
-                }
-            }
-        } else {
-            None
-        };
         let source = match &*slot {
             EditorDocumentSlot::Scene(slot) => {
                 GenericCompositionDocument::Scene(slot.session.document())
@@ -1646,7 +1661,6 @@ impl EditorWorkspace {
         let prepared = prepare_generic_composition(
             source,
             slot.selection().top_entity(),
-            allocation.as_ref().map(|(entity, _)| entity.clone()),
             command,
             |component| match &*slot {
                 EditorDocumentSlot::Scene(slot) => {
@@ -1683,11 +1697,6 @@ impl EditorWorkspace {
             }
             if kind == EditorDocumentKind::Prefab {
                 report.prefab_composition_outcome = match &prepared.patch().operations[0] {
-                    nara_scene::ScenePatchOperation::AddEntity { entity, .. } => {
-                        Some(PrefabCompositionOutcome::Created {
-                            entity: entity.id.clone(),
-                        })
-                    }
                     nara_scene::ScenePatchOperation::MoveEntity { entity, .. } => {
                         Some(PrefabCompositionOutcome::Moved {
                             entity: entity.clone(),
@@ -1714,15 +1723,6 @@ impl EditorWorkspace {
                     _ => None,
                 };
             }
-            if let Some((_, next)) = allocation {
-                match slot {
-                    EditorDocumentSlot::Scene(slot) => slot.next_entity_ordinal = next,
-                    EditorDocumentSlot::Prefab(slot) => slot.next_entity_ordinal = next,
-                    EditorDocumentSlot::Extension(_) => {
-                        return authoring_command_error_report(active_document, document);
-                    }
-                }
-            }
         }
         report
     }
@@ -1739,24 +1739,39 @@ impl EditorWorkspace {
                 Ok(exact) => exact,
                 Err(report) => return report,
             };
-        let allocation = if command.allocates_entity() {
-            match slot.next_entity_candidate() {
-                Ok(candidate) => Some(candidate),
+        if let SceneCompositionCommand::CreateEntity { kind, placement } = command {
+            let components = match scene_entity_components(registry, kind) {
+                Ok(components) => components,
                 Err(entry) => {
                     let mut report = report_for_slot(document, active_document, slot);
                     report.applied = false;
                     report.diagnostics.push(entry);
                     return report;
                 }
-            }
-        } else {
-            None
-        };
+            };
+            return match slot.session.create_entity_with_registry(
+                base_revision,
+                registry,
+                placement,
+                components,
+            ) {
+                Ok(created) => {
+                    let (entity, patch_report) = created.into_parts();
+                    slot.selection.clear();
+                    let report =
+                        report_for_patch_slot(document, active_document, slot, patch_report);
+                    slot.selection.select_entity(Some(entity));
+                    report
+                }
+                Err(patch_report) => {
+                    report_for_patch_slot(document, active_document, slot, patch_report)
+                }
+            };
+        }
         let prepared = match prepare_scene_composition(
             slot.session.document(),
             registry,
             slot.selection.top_entity(),
-            allocation.as_ref().map(|(entity, _)| entity.clone()),
             command,
         ) {
             Ok(prepared) => prepared,
@@ -1776,9 +1791,6 @@ impl EditorWorkspace {
                     slot.selection.select_entity(entity.clone());
                 }
             }
-            if let Some((_, next_ordinal)) = allocation {
-                slot.next_entity_ordinal = next_ordinal;
-            }
         }
         report
     }
@@ -1795,24 +1807,32 @@ impl EditorWorkspace {
                 Ok(exact) => exact,
                 Err(report) => return report,
             };
-        let allocation = if command.allocates_entity() {
-            match slot.next_entity_candidate() {
-                Ok(candidate) => Some(candidate),
-                Err(entry) => {
-                    let mut report = report_for_prefab_slot(document, active_document, slot);
-                    report.applied = false;
-                    report.diagnostics.push(entry);
-                    return report;
+        if let PrefabCompositionCommand::CreateEntity { draft, placement } = command {
+            return match slot.session.create_entity_with_registry(
+                base_revision,
+                registry,
+                placement,
+                draft.components().clone(),
+            ) {
+                Ok(created) => {
+                    let (entity, patch_report) = created.into_parts();
+                    slot.selection.clear();
+                    let mut report =
+                        report_for_prefab_patch_slot(document, active_document, slot, patch_report);
+                    slot.selection.select_entity(Some(entity.clone()));
+                    report.prefab_composition_outcome =
+                        Some(PrefabCompositionOutcome::Created { entity });
+                    report
                 }
-            }
-        } else {
-            None
-        };
+                Err(patch_report) => {
+                    report_for_prefab_patch_slot(document, active_document, slot, patch_report)
+                }
+            };
+        }
         let prepared = match prepare_prefab_composition(
             slot.session.document(),
             registry,
             slot.selection.top_entity(),
-            allocation.as_ref().map(|(entity, _)| entity.clone()),
             command,
         ) {
             Ok(prepared) => prepared,
@@ -1838,9 +1858,6 @@ impl EditorWorkspace {
                 PrefabCompositionSelection::Select(entity) => {
                     slot.selection.select_entity(entity.clone());
                 }
-            }
-            if let Some((_, next_ordinal)) = allocation {
-                slot.next_entity_ordinal = next_ordinal;
             }
             report.prefab_composition_outcome = Some(prepared.outcome().clone());
         }
@@ -2153,7 +2170,6 @@ impl EditorWorkspace {
         slot.saved_content_state = slot.session.content_state();
         slot.saved_digest = None;
         slot.external_reload = EditorExternalReloadState::Clean;
-        slot.next_entity_ordinal = Some(1);
         Ok(report_for_slot(document, active_document, slot))
     }
 
@@ -2205,7 +2221,6 @@ impl EditorWorkspace {
         slot.saved_content_state = slot.session.content_state();
         slot.saved_digest = Some(digest);
         slot.external_reload = EditorExternalReloadState::Clean;
-        slot.next_entity_ordinal = Some(1);
         Ok(report_for_slot(document, active_document, slot))
     }
 
@@ -2246,7 +2261,6 @@ impl EditorWorkspace {
         slot.saved_content_state = slot.session.content_state();
         slot.saved_digest = Some(digest);
         slot.external_reload = EditorExternalReloadState::Clean;
-        slot.next_entity_ordinal = Some(1);
         Ok(EditorWorkspaceCommandReport {
             applied: true,
             document: Some(document),
@@ -2275,7 +2289,6 @@ pub struct EditorSceneSlot {
     saved_content_state: SceneAuthoringContentState,
     saved_digest: Option<EditorDocumentDigest>,
     external_reload: EditorExternalReloadState,
-    next_entity_ordinal: Option<u64>,
 }
 
 impl EditorSceneSlot {
@@ -2296,7 +2309,6 @@ impl EditorSceneSlot {
             saved_content_state,
             saved_digest: None,
             external_reload: EditorExternalReloadState::Clean,
-            next_entity_ordinal: Some(1),
         }
     }
 
@@ -2369,31 +2381,6 @@ impl EditorSceneSlot {
     #[must_use]
     pub fn unavailable_record_manifest(&self) -> Option<&UnavailableRecordManifest> {
         self.session.unavailable_record_manifest()
-    }
-
-    fn next_entity_candidate(
-        &self,
-    ) -> Result<(SceneEntityId, Option<u64>), nara_diagnostic::Diagnostic> {
-        let mut ordinal = self.next_entity_ordinal.ok_or_else(|| {
-            diagnostic::error(
-                "tooling.composition-entity-id-exhausted",
-                "scene composition cannot allocate another stable entity identity",
-            )
-        })?;
-        loop {
-            let entity = SceneEntityId::new(format!("editor_entity_{ordinal}"))
-                .expect("editor-generated entity identifiers must be valid");
-            let next = ordinal.checked_add(1);
-            if !document_has_entity(self.session.document(), &entity) {
-                return Ok((entity, next));
-            }
-            ordinal = next.ok_or_else(|| {
-                diagnostic::error(
-                    "tooling.composition-entity-id-exhausted",
-                    "scene composition cannot allocate another stable entity identity",
-                )
-            })?;
-        }
     }
 
     fn apply_persistence_checkpoint(
@@ -2472,7 +2459,6 @@ pub struct EditorPrefabSlot {
     saved_content_state: SceneAuthoringContentState,
     saved_digest: Option<EditorDocumentDigest>,
     external_reload: EditorExternalReloadState,
-    next_entity_ordinal: Option<u64>,
 }
 
 impl EditorPrefabSlot {
@@ -2517,7 +2503,6 @@ impl EditorPrefabSlot {
             saved_content_state,
             saved_digest: None,
             external_reload: EditorExternalReloadState::Clean,
-            next_entity_ordinal: Some(1),
         }
     }
 
@@ -2585,31 +2570,6 @@ impl EditorPrefabSlot {
     #[must_use]
     pub fn unavailable_record_manifest(&self) -> Option<&UnavailableRecordManifest> {
         self.session.unavailable_record_manifest()
-    }
-
-    fn next_entity_candidate(
-        &self,
-    ) -> Result<(SceneEntityId, Option<u64>), nara_diagnostic::Diagnostic> {
-        let mut ordinal = self.next_entity_ordinal.ok_or_else(|| {
-            diagnostic::error(
-                "tooling.prefab-composition-entity-id-exhausted",
-                "Prefab composition cannot allocate another stable entity identity",
-            )
-        })?;
-        loop {
-            let entity = SceneEntityId::new(format!("editor_prefab_entity_{ordinal}"))
-                .expect("editor-generated Prefab entity identifiers must be valid");
-            let next = ordinal.checked_add(1);
-            if !prefab_has_entity(self.session.document(), &entity) {
-                return Ok((entity, next));
-            }
-            ordinal = next.ok_or_else(|| {
-                diagnostic::error(
-                    "tooling.prefab-composition-entity-id-exhausted",
-                    "Prefab composition cannot allocate another stable entity identity",
-                )
-            })?;
-        }
     }
 
     fn apply_persistence_checkpoint(
@@ -3914,12 +3874,63 @@ mod tests {
     }
 
     #[test]
+    fn generated_entity_identity_does_not_restart_when_source_history_reopens() {
+        let registry = composition_registry();
+        let mut workspace = EditorWorkspace::new();
+        let document = open_scene(
+            &mut workspace,
+            "fresh-source-identity",
+            SceneDocument::default(),
+        );
+        let create = || SceneCompositionCommand::CreateEntity {
+            kind: SceneCompositionEntityKind::Empty,
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+        };
+        assert!(compose(&mut workspace, &registry, document, create()).applied);
+        let first = workspace
+            .scene(document)
+            .unwrap()
+            .selection()
+            .top_entity()
+            .unwrap()
+            .clone();
+        assert!(undo(&mut workspace, &registry, document).applied);
+        assert!(
+            workspace
+                .scene(document)
+                .unwrap()
+                .session()
+                .document()
+                .entities
+                .is_empty()
+        );
+        assert!(!workspace.scene(document).unwrap().is_dirty());
+        let revision = workspace.document_revision(document).unwrap();
+        workspace
+            .reload_external_session(
+                document,
+                revision,
+                SceneAuthoringSession::new(SceneDocument::default()),
+            )
+            .unwrap();
+        assert!(compose(&mut workspace, &registry, document, create()).applied);
+        let second = workspace
+            .scene(document)
+            .unwrap()
+            .selection()
+            .top_entity()
+            .unwrap();
+        assert_ne!(
+            &first, second,
+            "ordinary creation must not systematically assert the old object's identity after Reopen"
+        );
+    }
+
+    #[test]
     fn composition_commands_form_one_ordered_atomic_authoring_trajectory() {
         let registry = composition_registry();
         let mut workspace = EditorWorkspace::new();
         let document = open_scene(&mut workspace, "composition", SceneDocument::default());
-        let root = entity_id("editor_entity_1");
-        let sprite = entity_id("editor_entity_2");
 
         assert!(
             compose(
@@ -3933,9 +3944,21 @@ mod tests {
             )
             .applied
         );
+        let root = workspace
+            .scene(document)
+            .unwrap()
+            .selection()
+            .top_entity()
+            .unwrap()
+            .clone();
         assert_eq!(
-            workspace.scene(document).unwrap().selection().top_entity(),
-            Some(&root)
+            workspace
+                .scene(document)
+                .unwrap()
+                .session()
+                .document()
+                .roots,
+            [root.clone()]
         );
 
         assert!(
@@ -3982,6 +4005,8 @@ mod tests {
             .applied
         );
         let slot = workspace.scene(document).unwrap();
+        let sprite = slot.selection().top_entity().unwrap().clone();
+        assert_ne!(sprite, root);
         assert_eq!(
             slot.session().history_status().undo_depth,
             history_before_sprite + 1
@@ -4055,7 +4080,7 @@ mod tests {
     }
 
     #[test]
-    fn composition_rejection_preserves_revision_history_selection_and_identity_allocation() {
+    fn composition_rejection_preserves_revision_history_and_selection() {
         let empty_registry = frozen_empty_registry();
         let mut workspace = EditorWorkspace::new();
         let document = open_scene(&mut workspace, "composition", SceneDocument::default());
@@ -4099,7 +4124,13 @@ mod tests {
             )
             .applied
         );
-        let allocated = entity_id("editor_entity_1");
+        let allocated = workspace
+            .scene(document)
+            .unwrap()
+            .selection()
+            .top_entity()
+            .unwrap()
+            .clone();
         let current_revision = workspace.scene(document).unwrap().revision();
         let current_history = workspace
             .scene(document)
@@ -4129,14 +4160,14 @@ mod tests {
     }
 
     #[test]
-    fn prefab_composition_allocates_only_for_successful_exact_mutations() {
+    fn prefab_composition_returns_exact_identity_and_rejects_without_publication() {
         let registry = frozen_empty_registry();
         let existing = entity_id("editor_prefab_entity_1");
         let mut workspace = EditorWorkspace::new();
         let document = open_prefab(
             &mut workspace,
             "composition",
-            PrefabDocument::from_ordered_roots([SceneEntityRecord::new(existing)]),
+            PrefabDocument::from_ordered_roots([SceneEntityRecord::new(existing.clone())]),
         );
         let initial_revision = workspace.prefab(document).unwrap().revision();
         let draft = PrefabCompositionEntityDraft::new(BTreeMap::new()).unwrap();
@@ -4150,13 +4181,21 @@ mod tests {
                 placement: ScenePlacement::last(ScenePlacementOwner::Root),
             },
         );
-        let first = entity_id("editor_prefab_entity_2");
         assert!(created.applied);
+        let Some(PrefabCompositionOutcome::Created { entity: first }) =
+            created.prefab_composition_outcome
+        else {
+            panic!("successful creation must return its exact identity");
+        };
+        assert_ne!(first, existing);
         assert_eq!(
-            created.prefab_composition_outcome,
-            Some(PrefabCompositionOutcome::Created {
-                entity: first.clone()
-            })
+            workspace
+                .prefab(document)
+                .unwrap()
+                .session()
+                .document()
+                .roots,
+            [existing, first.clone()]
         );
         assert_eq!(
             workspace.prefab(document).unwrap().selection().top_entity(),
@@ -4207,11 +4246,26 @@ mod tests {
                 placement: ScenePlacement::last(ScenePlacementOwner::Root),
             },
         );
+        assert!(second.applied);
+        let Some(PrefabCompositionOutcome::Created { entity: second }) =
+            second.prefab_composition_outcome
+        else {
+            panic!("successful creation must return its exact identity");
+        };
+        assert_ne!(first, second);
         assert_eq!(
-            second.prefab_composition_outcome,
-            Some(PrefabCompositionOutcome::Created {
-                entity: entity_id("editor_prefab_entity_3")
-            })
+            workspace.prefab(document).unwrap().selection().top_entity(),
+            Some(&second)
+        );
+        assert_eq!(
+            workspace
+                .prefab(document)
+                .unwrap()
+                .session()
+                .document()
+                .entities
+                .len(),
+            3
         );
     }
 

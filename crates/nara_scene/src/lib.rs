@@ -36,10 +36,10 @@ pub use authoring::{
     PreparedSceneAuthoringEdit,
 };
 pub use authoring::{
-    AuthoringSessionAuthorityError, PrefabAuthoringSession, SceneAuthoringClearReport,
-    SceneAuthoringContentState, SceneAuthoringHistoryLimits, SceneAuthoringHistoryStatus,
-    SceneAuthoringHistoryUsage, SceneAuthoringRevision, SceneAuthoringSession,
-    SceneAuthoringSourceId, SceneAuthoringSyncReport,
+    AuthoringSessionAuthorityError, CreatedSourceEntity, PrefabAuthoringSession,
+    SceneAuthoringClearReport, SceneAuthoringContentState, SceneAuthoringHistoryLimits,
+    SceneAuthoringHistoryStatus, SceneAuthoringHistoryUsage, SceneAuthoringRevision,
+    SceneAuthoringSession, SceneAuthoringSourceId, SceneAuthoringSyncReport,
 };
 #[cfg(feature = "serde")]
 pub use authoring_decode::{

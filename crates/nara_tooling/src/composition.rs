@@ -10,8 +10,8 @@ use nara_reflect::{
     ComponentCapability, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
 };
 use nara_scene::{
-    PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId, ScenePatchDocument,
+    ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
 };
 
 use crate::diagnostic;
@@ -51,12 +51,6 @@ pub enum SceneCompositionCommand {
         entity: SceneEntityId,
         to: ScenePlacement,
     },
-}
-
-impl SceneCompositionCommand {
-    pub(crate) const fn allocates_entity(&self) -> bool {
-        matches!(self, Self::CreateEntity { .. })
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,24 +99,10 @@ impl GenericCompositionDocument<'_> {
 pub(crate) fn prepare_generic_composition(
     document: GenericCompositionDocument<'_>,
     selected: Option<&SceneEntityId>,
-    allocated_entity: Option<SceneEntityId>,
     command: SceneCompositionCommand,
     initial_component: impl FnOnce(&ComponentTypeId) -> Option<SceneComponentRecord>,
 ) -> Result<PreparedSceneComposition, Diagnostic> {
     let (operation, selection) = match command {
-        SceneCompositionCommand::CreateEntity {
-            kind: SceneCompositionEntityKind::Empty,
-            placement,
-        } => {
-            let entity = allocated_entity.ok_or_else(entity_id_exhausted)?;
-            (
-                ScenePatchOperation::AddEntity {
-                    entity: SceneEntityRecord::new(entity.clone()),
-                    placement,
-                },
-                SceneCompositionSelection::Select(Some(entity)),
-            )
-        }
         SceneCompositionCommand::AddComponent { entity, component } => {
             let value = initial_component(&component).ok_or_else(|| {
                 diagnostic::with_component(
@@ -190,30 +170,10 @@ pub(crate) fn prepare_scene_composition(
     document: &SceneDocument,
     registry: &ComponentRegistry,
     selected: Option<&SceneEntityId>,
-    allocated_entity: Option<SceneEntityId>,
     command: SceneCompositionCommand,
 ) -> Result<PreparedSceneComposition, Diagnostic> {
     match command {
-        SceneCompositionCommand::CreateEntity { kind, placement } => {
-            let entity_id = allocated_entity.ok_or_else(entity_id_exhausted)?;
-            let mut entity = SceneEntityRecord::new(entity_id.clone());
-            if kind == SceneCompositionEntityKind::ColoredSprite {
-                let (transform_id, transform) =
-                    component_draft(registry, ComponentTypeId::new(TRANSFORM_COMPONENT))?;
-                let (sprite_id, sprite) =
-                    component_draft(registry, ComponentTypeId::new(SPRITE_COMPONENT))?;
-                entity = entity
-                    .with_component(transform_id, transform)
-                    .with_component(sprite_id, sprite);
-            }
-            Ok(PreparedSceneComposition {
-                patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                    entity,
-                    placement,
-                }]),
-                selection: SceneCompositionSelection::Select(Some(entity_id)),
-            })
-        }
+        SceneCompositionCommand::CreateEntity { .. } => Err(creation_requires_source_owner()),
         SceneCompositionCommand::RemoveEntity { entity } => {
             let from = current_placement(document, &entity)?;
             let replacement_selection = selected
@@ -267,6 +227,19 @@ pub(crate) fn prepare_scene_composition(
                 selection: SceneCompositionSelection::Preserve,
             })
         }
+    }
+}
+
+pub(crate) fn scene_entity_components(
+    registry: &ComponentRegistry,
+    kind: SceneCompositionEntityKind,
+) -> Result<BTreeMap<ComponentTypeId, SceneComponentRecord>, Diagnostic> {
+    match kind {
+        SceneCompositionEntityKind::Empty => Ok(BTreeMap::new()),
+        SceneCompositionEntityKind::ColoredSprite => Ok(BTreeMap::from([
+            component_draft(registry, ComponentTypeId::new(TRANSFORM_COMPONENT))?,
+            component_draft(registry, ComponentTypeId::new(SPRITE_COMPONENT))?,
+        ])),
     }
 }
 
@@ -353,12 +326,6 @@ pub enum PrefabCompositionCommand {
     },
 }
 
-impl PrefabCompositionCommand {
-    pub(crate) const fn allocates_entity(&self) -> bool {
-        matches!(self, Self::CreateEntity { .. })
-    }
-}
-
 /// Exact structural result used by the Adapter to restore hierarchy focus.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrefabCompositionOutcome {
@@ -416,7 +383,6 @@ pub(crate) fn prepare_prefab_composition(
     document: &PrefabDocument,
     registry: &ComponentRegistry,
     selected: Option<&SceneEntityId>,
-    allocated_entity: Option<SceneEntityId>,
     command: PrefabCompositionCommand,
 ) -> Result<PreparedPrefabComposition, Diagnostic> {
     match command {
@@ -447,19 +413,7 @@ pub(crate) fn prepare_prefab_composition(
                 outcome: PrefabCompositionOutcome::ComponentRemoved { entity, component },
             })
         }
-        PrefabCompositionCommand::CreateEntity { draft, placement } => {
-            let entity_id = allocated_entity.ok_or_else(prefab_entity_id_exhausted)?;
-            let mut entity = SceneEntityRecord::new(entity_id.clone());
-            entity.components = draft.components().clone();
-            Ok(PreparedPrefabComposition {
-                patch: Some(ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                    entity,
-                    placement,
-                }])),
-                selection: PrefabCompositionSelection::Select(Some(entity_id.clone())),
-                outcome: PrefabCompositionOutcome::Created { entity: entity_id },
-            })
-        }
+        PrefabCompositionCommand::CreateEntity { .. } => Err(creation_requires_source_owner()),
         PrefabCompositionCommand::MoveEntity { entity, to } => {
             let from = ScenePlacement::current_prefab(document, &entity)
                 .ok_or_else(|| missing_prefab_entity(&entity))?;
@@ -540,10 +494,10 @@ fn missing_prefab_entity(entity: &SceneEntityId) -> Diagnostic {
     )
 }
 
-fn prefab_entity_id_exhausted() -> Diagnostic {
+fn creation_requires_source_owner() -> Diagnostic {
     diagnostic::error(
-        "tooling.prefab-composition-entity-id-exhausted",
-        "Prefab composition cannot allocate another stable entity identity",
+        "tooling.composition-creation-requires-source-owner",
+        "Entity creation must be submitted to the source owner, not lowered around a reserved ID",
     )
 }
 
@@ -625,13 +579,6 @@ fn missing_entity(entity: &SceneEntityId) -> Diagnostic {
             "scene composition targets an entity that is not in the document",
         ),
         entity,
-    )
-}
-
-fn entity_id_exhausted() -> Diagnostic {
-    diagnostic::error(
-        "tooling.composition-entity-id-exhausted",
-        "scene composition cannot allocate another stable entity identity",
     )
 }
 

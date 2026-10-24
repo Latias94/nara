@@ -50,7 +50,6 @@ use serde_json::Value;
 mod imgui;
 
 const PROJECT_SLUG: &str = "editor-authoring-loop";
-const CREATED_ENTITY: &str = "editor_entity_1";
 const GAME_VIEW_PROBE_ENTITY: &str = "game-view-probe";
 const SPRITE_COMPONENT: &str = "nara.sprite.Sprite";
 const TRANSFORM_COMPONENT: &str = "nara.transform.Transform2d";
@@ -386,11 +385,15 @@ fn starter_semantic_edit_crosses_editor_check_generated_product_and_export() {
     );
     let composed_scene = composed.workspace().active_scene.as_ref().unwrap();
     let composed_revision = composed_scene.revision;
-    let created_entity = SceneEntityId::new(CREATED_ENTITY).unwrap();
+    let created_entity = composed_scene.selection.top_entity().unwrap().clone();
     assert_ne!(composed_revision, initial_revision);
-    assert_eq!(
-        composed_scene.editor.inspector.selected_entity.as_ref(),
-        Some(&created_entity)
+    assert!(
+        composed_scene
+            .editor
+            .inspector
+            .entities
+            .iter()
+            .any(|row| row.id == created_entity)
     );
     assert!(composed_scene.dirty);
     assert_eq!(transform_x_field(&composed).value, 0.0);
@@ -541,7 +544,7 @@ fn starter_semantic_edit_crosses_editor_check_generated_product_and_export() {
         .workspace()
         .active_document
         .unwrap();
-    select_entity(&mut application, reopened_document, CREATED_ENTITY);
+    select_entity(&mut application, reopened_document, created_entity.as_str());
     let reopened = current_frame(&application);
     assert!(!reopened.workspace().active_scene.as_ref().unwrap().dirty);
     assert_eq!(transform_x_field(&reopened).value, EDITED_TRANSLATION_X);

@@ -275,6 +275,13 @@ flowchart TB
 
 ### Creation templates do not change decoding defaults
 
+Generated entity IDs and creation publication are owned by Scene/Prefab sessions, not a panel or
+Workspace ordinal allocator. Published authoring uses admitted creation data; registry-backed
+native creation retains its separate native validation. Both use the same private source-ID
+generation policy and return the accepted authored ID. The
+[construction design](../authoring-construction-design.md) keeps retained transaction-local
+drafts under experiment rather than claiming that ordinary creation alone completes them.
+
 A component schema may publish one optional complete `authoring_initial_value` in the existing bounded generic value grammar.
 It is creation-only data, validated through the canonical complete schema/value validator at catalog admission and copied for an explicit creation transaction.
 Its presence grants neither native execution nor project-specific invariants absent from the descriptor.

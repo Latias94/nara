@@ -208,11 +208,33 @@ value is insufficient if its inverse cannot be replayed under the same field lim
 existing field-value limits remain separate. This is not cross-document atomicity or atomic
 multi-file Save.
 
-This first interface uses explicit persistent `SceneEntityId` values and declared component
-templates. It does not yet provide transaction-local ID allocation/remapping, a rename-stable
-nested-property format, or a panel-context prepared-edit hook. Panels can submit ordinary atomic
-patches through the existing mutation action; direct Application clients use the retained
+This first mixed-construction interface uses explicit persistent `SceneEntityId` values and declared
+component templates. It does not yet provide transaction-local ID allocation/remapping or a
+panel-context prepared-edit hook. Schema-relative nested replacements have their separate
+[property-edit interface](persistent-components.md#stable-nested-properties). Panels can submit
+ordinary atomic patches through the existing mutation action; direct Application clients use the retained
 candidate interface above. No compatibility wrapper or second Undo authority is required.
+
+## Create A Source Entity
+
+Ordinary `ComposeScene` and `ComposePrefab` creation commands carry placement and the supported
+recipe, not a predicted entity ID. The Scene/Prefab owner generates the ID, validates the complete
+candidate and publishes one history entry. The Workspace selects the created entity only after
+success; Prefab creation also returns `PrefabCompositionOutcome::Created { entity }`. Read those
+actual results instead of constructing names such as `editor_entity_1`.
+
+Direct native Scene/Prefab sessions use `create_entity_with_registry`, or
+`create_entity_with_asset_database` when their codecs/references require project asset admission.
+They receive `CreatedSourceEntity` with the exact stored ID and ordinary patch report. Data-only
+Published sessions use `create_authoring_entity` for empty creation; component templates retain
+their existing admission policy. Raw native component records are not a Published escape hatch.
+
+Generated identities are opaque source data, not display names. They contain fresh 128-bit entropy
+in 22 URL-safe characters; existing authored IDs keep their spelling. Undo/Redo and saved Reopen
+retain the exact ID. Entropy failure or bounded collision exhaustion refuses creation without
+publishing document/history/selection changes. This is not an absolute non-reuse promise across
+arbitrary discarded history. Batch-local references and multi-entity construction remain separate
+R2 work; ordinary creation does not expose an ID reservation or another Undo authority.
 
 ## Query A Non-Active Document
 

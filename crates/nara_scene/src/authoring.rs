@@ -20,6 +20,9 @@ use crate::{
     spawn::SceneSpawner,
 };
 
+mod creation;
+pub use creation::CreatedSourceEntity;
+
 #[cfg(feature = "serde")]
 mod prepared;
 #[cfg(feature = "serde")]
