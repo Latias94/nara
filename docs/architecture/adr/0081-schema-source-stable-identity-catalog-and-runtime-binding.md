@@ -167,14 +167,15 @@ The catalog must not contain Rust `TypeId`, `rust_type_path`, Bevy `ComponentId`
 function pointers, VM handles, or backend-native values. Rust paths may remain non-persistent debug
 metadata on a native binding.
 
-The unshipped catalog envelope and the authoring bundle embedding it move to canonical version 3
-for scoped nested-member identity, declaration-path tombstones and keyed-list policy. Versions 1/2
-reject explicitly; no automatic compatibility reader is retained. The fingerprint domain moves to
-version 3 with the new tagged semantic encoding. Component schema versions, stable IDs, tombstones
-and lineage remain distinct from this envelope reset. Fixtures preserve their component histories
-and rewrite fingerprints/predecessor links using the new canonical encoding. Root-only schemas do
-not gain member IDs or new value semantics through that rewrite. Unrelated Scene, Prefab, patch
-and asset envelope versions remain unchanged.
+The unshipped catalog envelope and the authoring bundle embedding it use canonical envelope
+version 1, including scoped nested-member identity, declaration-path tombstones and keyed-list
+policy. No automatic compatibility reader is retained. The fingerprint domain is independently
+versioned at 3 for the new tagged semantic encoding; that fingerprint version is not the file
+envelope version. Component schema versions, stable IDs, tombstones and lineage remain distinct
+from both axes. Fixtures preserve their component histories and rewrite fingerprints/predecessor
+links using the selected semantic encoding. Root-only schemas do not gain member IDs or new value
+semantics through that rewrite. Unrelated Scene, Prefab, patch and asset envelope versions remain
+unchanged.
 
 The [R5a qualification](../../knowledge/engineering/verification/2026-10/2026-10-24T024954Z-r5a-final-owner-diagnostics-and-workspace-qualification-f58a0ab130cb47a8bc2829e32f1d0a86.md)
 executes metadata, lineage, resolver and independent Scene/Prefab edit workflows under this v3

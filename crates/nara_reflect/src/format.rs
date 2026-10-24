@@ -418,7 +418,7 @@ fn canonical_envelope(
         .map_err(ComponentCatalogFileError::Catalog)?;
     Ok(PersistentFileEnvelope::new(
         format_kind()?,
-        FormatVersion::new(3).expect("catalog format version is non-zero"),
+        FormatVersion::new(1).expect("catalog format version is non-zero"),
         engine_version(CANONICAL_ENGINE_MIN_VERSION)?,
         FormatGenerator::new(
             FORMAT_GENERATOR_NAME,
@@ -685,7 +685,7 @@ where
 fn file_contract() -> Result<PersistentFileContract, ComponentCatalogFileError> {
     Ok(PersistentFileContract::new(
         format_kind()?,
-        FormatVersion::new(3).expect("catalog format version is non-zero"),
+        FormatVersion::new(1).expect("catalog format version is non-zero"),
         engine_version(env!("CARGO_PKG_VERSION"))?,
     ))
 }

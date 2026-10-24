@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Amended**: 2026-08-20 for the EIR-U0 canonical typed asset-metadata reset
+**Amended**: 2026-08-20 for the EIR-U0 canonical typed asset-metadata reset; 2026-10-24 for
+the unreleased schema-catalog envelope reset
 **Implemented Slices**: RGF-U1 scene, prefab, scene-patch, and component-catalog envelopes; RGF-U12
 asset-metadata envelope
 **Refines**: ADR 0006, ADR 0007, ADR 0011, ADR 0037, ADR 0043, ADR 0045
@@ -45,10 +46,11 @@ flowchart TD
 Rules:
 
 - Persistent files include at least `kind`, `format_version`, `engine_min_version`, and `generator`.
-- The corrected unreleased shape defaults to canonical `format_version = 1` unless an owning ADR
-  explicitly selects another current envelope. ADR 0081 selects version 2 for recursive component
-  catalogs and authoring bundles; it does not retain a version-1 compatibility reader. Superseded
-  draft readers, structs and fixtures are removed; corrected Rust APIs use unsuffixed names.
+- The corrected unreleased shape defaults to canonical `format_version = 1`. Superseded draft
+  readers, structs and fixtures are removed; corrected Rust APIs use unsuffixed names. The
+  component catalog and authoring bundle now use envelope version 1 while retaining their
+  current recursive semantic payload and versioned lineage; their semantic fingerprint domain is
+  a separate axis and is not a compatibility reader.
 - Scene, prefab, scene patch, component schema catalog, and asset metadata currently have distinct
   canonical kinds. Import artifact records and a future file-backed project-manifest envelope
   remain long-term participants.
@@ -72,8 +74,8 @@ Rules:
 | `scene` | 1 | 1 | none |
 | `prefab` | 1 | 1 | none |
 | `scene_patch` | 1 | 1 | none |
-| `component_schema_catalog` | 2 | 2 | none; semantic lineage is checked against its direct predecessor under ADR 0081 |
-| `authoring_schema_bundle` | 2 | 2 | none; embeds the recursive catalog under ADR 0081 |
+| `component_schema_catalog` | 1 | 1 | none; semantic lineage is checked against its direct predecessor under ADR 0081 |
+| `authoring_schema_bundle` | 1 | 1 | none; embeds the recursive catalog under ADR 0081 |
 | `asset_meta` | 1 | 1 | none |
 
 ADR 0115 resets the unreleased canonical `asset_meta` version-1 payload to one typed composition.

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "007b02ed36462d333e5190987f1182495cc52875b95b5538382e67b36bdad9ba"
+source_fingerprint: "33c13971fbb86a62da215d8386b2cfe6cdbb8d5e098ad06a7c7ff11be319799e"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "007b02ed36462d333e5190987f1182495cc52875b95b5538382e67b36bd
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `007b02ed36462d333e5190987f1182495cc52875b95b5538382e67b36bdad9ba`
-- Immutable records: 880
+- Source fingerprint: `33c13971fbb86a62da215d8386b2cfe6cdbb8d5e098ad06a7c7ff11be319799e`
+- Immutable records: 881
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Canonical v1 schema envelope reset qualification](verification/2026-10/2026-10-24T-schema-envelope-v1-reset-qualification.md) - Component schema catalogs and authoring schema bundles now use canonical persistent envelope version 1 while preserving semantic catalog lineage and fingerprint version 3.
 - **Verification Evidence**: [Project source authority carrier and creation identity qualification](verification/2026-10/2026-10-24T065424Z-project-source-authority-carrier-and-creation-identity-qualification-6cdfe4a580b14b8da78e659010497632.md) - Verification Evidence for Project source authority carrier and creation identity qualification.
 - **Verification Evidence**: [Untargeted native preparation before Scene entity allocation](verification/2026-10/2026-10-24T060059Z-untargeted-native-preparation-before-scene-entity-allocation-c2218c6824cd4aa7a8b9b657fedc9630.md) - Reflect-owned native values retain their asset context until target binding; allocation and admission ordering regressions qualify the production prerequisite.
 - **Verification Evidence**: [Source-context owner experiment and production entry gaps](verification/2026-10/2026-10-24T034432Z-source-context-owner-experiment-and-production-entry-gaps-b9598e00692a49e8ac835a63a3d4384a.md) - Flat direct/file source and World-bound occurrence intent evidence; production Scene preparation, canonical Prefab and shared UI adoption remain open.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Disposable Scene projection epochs and stable native preview qualification](verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md) - Qualify complete-domain Scene epochs while retaining shared authoring owners and renderer producer identity.
 - **Work Progress**: [Projection lifetime next-unit design and measurement boundary](progress/2026-10/2026-10-23T211757Z-projection-lifetime-next-unit-design-and-measurement-boundary-d55f02e666d0487987d1a1f8b1d9c8b6.md) - Ground the remaining R5c preview-history pressure and compare explicit epoch handoff with owner-specific incremental projection; no production selection yet.
 - **Verification Evidence**: [Trusted Play source continuity and source-local Close qualification](verification/2026-10/2026-10-23T210921Z-trusted-play-source-continuity-and-source-local-close-qualification-61897d1b17744e2aaff6fc6efb1594a7.md) - Qualify the R5c trusted Play source through cancellation, Game handoff and physical retirement without stopping unrelated documents.
-- **Verification Evidence**: [Additive Scene and Prefab Open qualification](verification/2026-10/2026-10-23T202313Z-additive-scene-and-prefab-open-qualification-d0b1fc894dd2419fa1cf43c9e39eb79d.md) - Removes same-kind predecessor retirement, retains per-document Host custody, and qualifies explicit Close and public/native multi-document workflows.
 
 # Integration Notes
 

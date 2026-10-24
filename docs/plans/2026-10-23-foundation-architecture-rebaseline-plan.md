@@ -38,6 +38,13 @@ to alter concurrent work. Execution automation state remains external to the arc
   input and single-submit authority remain, but permanent closed topology is challenged.
 - The rest of the reviewed recommendations have named units below. They are not all adopted
   or implemented merely because the coverage table has no Pending entries.
+- The engine has not shipped, so internal persistent-format history is not a compatibility
+  contract. Once each owning replacement is final, converge its canonical schema/format to v1
+  and remove superseded readers, converters and historical fixtures that exist only for that
+  unreleased history. Keep the existing migration guide as requested; do not add a release
+  migration guide. Do not mechanically rewrite runtime epochs, stale-result generations or package
+  semver as file-format versions. Retain authored component-schema evolution only where a real
+  project-data migration workflow needs it; otherwise consolidate it with the canonical schema.
 
 ## Execution Rules
 
