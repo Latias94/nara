@@ -33,59 +33,53 @@ pub(crate) fn provenance_entry_bytes(
 }
 
 /// One source document/entity step in a concrete prefab projection.
+///
+/// Equality includes the authored lookup request as provenance evidence. It is not a canonical
+/// placement comparison: request aliases can name the same canonical source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrefabProjectionStep {
     source_document: AssetRef,
-    canonical_source: Option<SourceDocumentKey>,
+    canonical_source: SourceDocumentKey,
     source_entity: SceneEntityId,
 }
 
 impl PrefabProjectionStep {
     fn allocation_bytes(
         source_document: &AssetRef,
-        canonical_source: Option<&SourceDocumentKey>,
+        canonical_source: &SourceDocumentKey,
         source_entity: &SceneEntityId,
     ) -> Option<usize> {
-        let key_bytes = match canonical_source {
-            Some(key) => key.checked_retained_bytes()?,
-            None => 0,
-        };
         size_of::<Self>()
             .checked_add(provenance_asset_ref_bytes(source_document)?)?
-            .checked_add(key_bytes)?
+            .checked_add(canonical_source.checked_retained_bytes()?)?
             .checked_add(provenance_string_bytes(source_entity.as_str())?)
     }
 
-    pub(crate) const fn new(source_document: AssetRef, source_entity: SceneEntityId) -> Self {
-        Self {
-            source_document,
-            canonical_source: None,
-            source_entity,
-        }
-    }
-
-    pub(crate) fn with_canonical_source(
+    pub(crate) const fn new(
         source_document: AssetRef,
         canonical_source: SourceDocumentKey,
         source_entity: SceneEntityId,
     ) -> Self {
         Self {
             source_document,
-            canonical_source: Some(canonical_source),
+            canonical_source,
             source_entity,
         }
     }
 
-    /// Returns the prefab source that owns this projection step.
+    /// Returns the authored request used to resolve this Prefab step.
+    ///
+    /// This is diagnostic/write-back context, not canonical source identity. Use
+    /// [`Self::canonical_source`] to compare the admitted source independently of lookup spelling.
     #[must_use]
     pub const fn source_document(&self) -> &AssetRef {
         &self.source_document
     }
 
-    /// Returns the admitted canonical source identity when the resolver supplied one.
+    /// Returns the admitted canonical source identity independently of its lookup request.
     #[must_use]
-    pub const fn canonical_source(&self) -> Option<&SourceDocumentKey> {
-        self.canonical_source.as_ref()
+    pub const fn canonical_source(&self) -> &SourceDocumentKey {
+        &self.canonical_source
     }
 
     /// Returns the entity identity inside the owning prefab source.
@@ -118,10 +112,14 @@ impl PrefabProjectionPath {
     pub(crate) fn with_step(
         mut self,
         source_document: AssetRef,
+        canonical_source: SourceDocumentKey,
         source_entity: SceneEntityId,
     ) -> Self {
-        self.source_chain
-            .push(PrefabProjectionStep::new(source_document, source_entity));
+        self.source_chain.push(PrefabProjectionStep::new(
+            source_document,
+            canonical_source,
+            source_entity,
+        ));
         self
     }
 
@@ -129,7 +127,7 @@ impl PrefabProjectionPath {
         parent: Option<&Self>,
         root_anchor: &SceneEntityId,
         source_document: &AssetRef,
-        canonical_source: Option<&SourceDocumentKey>,
+        canonical_source: &SourceDocumentKey,
         source_entity: &SceneEntityId,
     ) -> Option<usize> {
         let root_anchor = parent.map_or(root_anchor, Self::root_anchor);
@@ -138,7 +136,7 @@ impl PrefabProjectionPath {
             for step in &parent.source_chain {
                 bytes = bytes.checked_add(PrefabProjectionStep::allocation_bytes(
                     &step.source_document,
-                    step.canonical_source.as_ref(),
+                    &step.canonical_source,
                     &step.source_entity,
                 )?)?;
             }
@@ -155,7 +153,7 @@ impl PrefabProjectionPath {
         parent: Option<&Self>,
         root_anchor: &SceneEntityId,
         source_document: &AssetRef,
-        canonical_source: Option<&SourceDocumentKey>,
+        canonical_source: &SourceDocumentKey,
         source_entity: &SceneEntityId,
     ) -> Self {
         let mut source_chain =
@@ -163,14 +161,11 @@ impl PrefabProjectionPath {
         if let Some(parent) = parent {
             source_chain.extend_from_slice(&parent.source_chain);
         }
-        let step = match canonical_source {
-            Some(canonical_source) => PrefabProjectionStep::with_canonical_source(
-                source_document.clone(),
-                canonical_source.clone(),
-                source_entity.clone(),
-            ),
-            None => PrefabProjectionStep::new(source_document.clone(), source_entity.clone()),
-        };
+        let step = PrefabProjectionStep::new(
+            source_document.clone(),
+            canonical_source.clone(),
+            source_entity.clone(),
+        );
         source_chain.push(step);
         Self {
             root_anchor: parent.map_or(root_anchor, Self::root_anchor).clone(),

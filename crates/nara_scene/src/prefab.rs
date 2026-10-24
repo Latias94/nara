@@ -198,38 +198,36 @@ impl<'de> serde::Deserialize<'de> for PrefabInstance {
     }
 }
 
+/// Resolves a lookup request to its admitted source identity and immutable document together.
+///
+/// Requests are lookup coordinates, not semantic identity. Aliases of the same source must return
+/// the same key and document; distinct sources must not share a key. This applies equally to
+/// code-authored and file-backed resolvers, including document-only expansion.
+///
+/// A bare document cannot satisfy the resolver contract:
+///
+/// ```compile_fail
+/// use nara_asset::AssetRef;
+/// use nara_scene::{PrefabDocument, PrefabSourceResolver};
+/// struct BareDocument;
+/// impl PrefabSourceResolver for BareDocument {
+///     fn resolve_prefab(&self, _: &AssetRef) -> Option<&PrefabDocument> { None }
+/// }
+/// ```
 pub trait PrefabSourceResolver {
-    fn resolve_prefab(&self, source: &AssetRef) -> Option<&PrefabDocument>;
-
-    /// Resolves a request to one immutable document and its canonical source key when the
-    /// admitting owner has one. Project-backed adapters override this method; the default keeps
-    /// source-keyless in-memory adapters useful for document-only tests.
-    fn resolve_prefab_binding(&self, source: &AssetRef) -> Option<ResolvedPrefabSource<'_>> {
-        self.resolve_prefab(source)
-            .map(ResolvedPrefabSource::unbound)
-    }
+    fn resolve_prefab(&self, source: &AssetRef) -> Option<ResolvedPrefabSource<'_>>;
 }
 
-/// One resolver-owned immutable Prefab and its canonical source identity, when admitted.
+/// One resolver-owned immutable Prefab and its required canonical source identity.
 #[derive(Debug, Clone, Copy)]
 pub struct ResolvedPrefabSource<'a> {
     document: &'a PrefabDocument,
-    key: Option<&'a SourceDocumentKey>,
+    key: &'a SourceDocumentKey,
 }
 
 impl<'a> ResolvedPrefabSource<'a> {
     pub const fn bound(document: &'a PrefabDocument, key: &'a SourceDocumentKey) -> Self {
-        Self {
-            document,
-            key: Some(key),
-        }
-    }
-
-    const fn unbound(document: &'a PrefabDocument) -> Self {
-        Self {
-            document,
-            key: None,
-        }
+        Self { document, key }
     }
 
     #[must_use]
@@ -238,14 +236,15 @@ impl<'a> ResolvedPrefabSource<'a> {
     }
 
     #[must_use]
-    pub const fn key(self) -> Option<&'a SourceDocumentKey> {
+    pub const fn key(self) -> &'a SourceDocumentKey {
         self.key
     }
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct InMemoryPrefabSourceResolver {
-    sources: Vec<(AssetRef, PrefabDocument)>,
+    sources: BTreeMap<SourceDocumentKey, PrefabDocument>,
+    requests: Vec<(AssetRef, SourceDocumentKey)>,
 }
 
 impl InMemoryPrefabSourceResolver {
@@ -255,38 +254,63 @@ impl InMemoryPrefabSourceResolver {
     }
 
     #[must_use]
-    pub fn with_prefab(mut self, source: AssetRef, prefab: PrefabDocument) -> Self {
-        self.insert(source, prefab);
+    pub fn with_prefab(
+        mut self,
+        source: AssetRef,
+        key: SourceDocumentKey,
+        prefab: PrefabDocument,
+    ) -> Self {
+        self.insert(source, key, prefab);
         self
     }
 
-    pub fn insert(&mut self, source: AssetRef, prefab: PrefabDocument) -> Option<PrefabDocument> {
-        if let Some((_, existing)) = self
-            .sources
+    /// Publishes one canonical source document and associates its lookup request.
+    ///
+    /// Replacing a canonical key updates every alias of that source. The returned value is the
+    /// previous document for that key, not the document previously addressed by the request.
+    /// Rebinding a request releases its old source when no other request still addresses it.
+    pub fn insert(
+        &mut self,
+        source: AssetRef,
+        key: SourceDocumentKey,
+        prefab: PrefabDocument,
+    ) -> Option<PrefabDocument> {
+        let previous_key = if let Some((_, existing_key)) = self
+            .requests
             .iter_mut()
             .find(|(candidate, _)| candidate == &source)
         {
-            return Some(std::mem::replace(existing, prefab));
+            Some(std::mem::replace(existing_key, key.clone()))
+        } else {
+            self.requests.push((source, key.clone()));
+            None
+        };
+        let previous_key = previous_key.filter(|previous_key| previous_key != &key);
+        let previous = self.sources.insert(key, prefab);
+        if let Some(previous_key) = previous_key
+            && !self.requests.iter().any(|(_, key)| *key == previous_key)
+        {
+            self.sources.remove(&previous_key);
         }
-
-        self.sources.push((source, prefab));
-        None
+        previous
     }
 
     #[cfg(feature = "serde")]
     pub fn insert_file_candidate(
         &mut self,
         source: AssetRef,
+        key: SourceDocumentKey,
         candidate: crate::PrefabDocumentCandidate,
         registry: &ComponentRegistry,
     ) -> Result<Option<PrefabDocument>, crate::SceneFilePublicationError> {
-        Ok(self.insert(source, candidate.publish(registry)?.into_document()))
+        Ok(self.insert(source, key, candidate.publish(registry)?.into_document()))
     }
 
     #[cfg(feature = "serde")]
     pub fn insert_file_candidate_with_asset_database(
         &mut self,
         source: AssetRef,
+        key: SourceDocumentKey,
         candidate: crate::PrefabDocumentCandidate,
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
@@ -298,16 +322,20 @@ impl InMemoryPrefabSourceResolver {
         if diagnostics.has_errors() {
             return Err(crate::SceneFilePublicationError::new(diagnostics));
         }
-        Ok(self.insert(source, prefab))
+        Ok(self.insert(source, key, prefab))
     }
 }
 
 impl PrefabSourceResolver for InMemoryPrefabSourceResolver {
-    fn resolve_prefab(&self, source: &AssetRef) -> Option<&PrefabDocument> {
-        self.sources
+    fn resolve_prefab(&self, source: &AssetRef) -> Option<ResolvedPrefabSource<'_>> {
+        self.requests
             .iter()
             .find(|(candidate, _)| candidate == source)
-            .map(|(_, prefab)| prefab)
+            .and_then(|(_, key)| {
+                self.sources
+                    .get_key_value(key)
+                    .map(|(key, prefab)| ResolvedPrefabSource::bound(prefab, key))
+            })
     }
 }
 
@@ -622,26 +650,15 @@ struct PrefabExpansionContext<'a, R: PrefabSourceResolver + ?Sized> {
 #[derive(Debug)]
 struct ActivePrefabSource {
     request: AssetRef,
-    key: Option<SourceDocumentKey>,
+    key: SourceDocumentKey,
 }
 
 impl ActivePrefabSource {
-    fn allocation_bytes(request: &AssetRef, key: Option<&SourceDocumentKey>) -> Option<usize> {
-        let key_bytes = match key {
-            Some(key) => key.checked_retained_bytes()?,
-            None => 0,
-        };
+    fn allocation_bytes(request: &AssetRef, key: &SourceDocumentKey) -> Option<usize> {
         std::mem::size_of::<AssetRef>()
-            .checked_add(std::mem::size_of::<Option<SourceDocumentKey>>())?
+            .checked_add(std::mem::size_of::<SourceDocumentKey>())?
             .checked_add(provenance_asset_ref_bytes(request)?)?
-            .checked_add(key_bytes)
-    }
-
-    fn matches(&self, request: &AssetRef, key: Option<&SourceDocumentKey>) -> bool {
-        match (&self.key, key) {
-            (Some(left), Some(right)) => left == right,
-            _ => self.request == *request,
-        }
+            .checked_add(key.checked_retained_bytes()?)
     }
 }
 
@@ -826,7 +843,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             return Vec::new();
         }
 
-        let resolved = self.resolver.resolve_prefab_binding(&source);
+        let resolved = self.resolver.resolve_prefab(&source);
         let Some(resolved) = resolved else {
             self.diagnostics.push(with_asset_ref(
                 with_public_locator(
@@ -847,7 +864,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             return Vec::new();
         };
         let canonical_key = resolved.key();
-        if canonical_key.is_some_and(|key| key.kind() != SourceDocumentKind::Prefab) {
+        if canonical_key.kind() != SourceDocumentKind::Prefab {
             self.diagnostics.push(with_asset_ref(
                 diagnostic_error(
                     "scene.prefab-source-kind-invalid",
@@ -861,7 +878,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         if let Some((cycle_start_index, cycle_from)) = self
             .stack
             .iter()
-            .position(|active_source| active_source.matches(&source, canonical_key))
+            .position(|active_source| active_source.key == *canonical_key)
             .zip(self.stack.last())
         {
             let diagnostic = with_public_u64(
@@ -916,7 +933,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
 
         self.stack.push(ActivePrefabSource {
             request: source.clone(),
-            key: canonical_key.cloned(),
+            key: canonical_key.clone(),
         });
 
         if !overrides.is_empty() {
@@ -1785,5 +1802,85 @@ const fn prefab_reference_remap_error_name(error: &PrefabReferenceRemapError) ->
         PrefabReferenceRemapError::GeneratedIdentifier { .. } => "generated-identifier-bytes",
         PrefabReferenceRemapError::MaterializedValue { .. } => "materialized-value-bytes",
         PrefabReferenceRemapError::MissingSourceEntity => "missing-source-entity",
+    }
+}
+
+#[cfg(test)]
+mod resolver_tests {
+    use super::*;
+
+    fn source_key(name: &str) -> SourceDocumentKey {
+        SourceDocumentKey::named(
+            "6b691227-a68a-4b11-8d1c-a9d5d8c7e952".parse().unwrap(),
+            name,
+            SourceDocumentKind::Prefab,
+        )
+        .unwrap()
+    }
+
+    fn document(entity: &str) -> PrefabDocument {
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(
+            SceneEntityId::new(entity).unwrap(),
+        )])
+    }
+
+    #[test]
+    fn canonical_source_replacement_updates_every_request_alias() {
+        let path = AssetRef::path("prefabs/hero.ron").unwrap();
+        let alias = AssetRef::path("aliases/hero.ron").unwrap();
+        let key = source_key("characters.hero");
+        let mut resolver = InMemoryPrefabSourceResolver::new();
+        assert_eq!(
+            resolver.insert(path.clone(), key.clone(), document("old")),
+            None
+        );
+        assert_eq!(
+            resolver.insert(alias.clone(), key.clone(), document("new")),
+            Some(document("old"))
+        );
+
+        let first = resolver.resolve_prefab(&path).unwrap();
+        let second = resolver.resolve_prefab(&alias).unwrap();
+        assert_eq!(first.key(), &key);
+        assert_eq!(second.key(), &key);
+        assert!(std::ptr::eq(first.document(), second.document()));
+        assert_eq!(first.document(), &document("new"));
+        assert_eq!(resolver.sources.len(), 1);
+    }
+
+    #[test]
+    fn request_rebinding_keeps_other_aliases_and_releases_unaddressed_sources() {
+        let path = AssetRef::path("prefabs/hero.ron").unwrap();
+        let alias = AssetRef::path("aliases/hero.ron").unwrap();
+        let first = source_key("characters.hero");
+        let second = source_key("characters.enemy");
+        let mut resolver = InMemoryPrefabSourceResolver::new()
+            .with_prefab(path.clone(), first.clone(), document("hero"))
+            .with_prefab(alias.clone(), first.clone(), document("hero"));
+
+        assert_eq!(
+            resolver.insert(path.clone(), second.clone(), document("enemy")),
+            None
+        );
+        assert_eq!(resolver.resolve_prefab(&path).unwrap().key(), &second);
+        assert_eq!(resolver.resolve_prefab(&alias).unwrap().key(), &first);
+        assert_eq!(resolver.sources.len(), 2);
+
+        assert_eq!(
+            resolver.insert(alias.clone(), second.clone(), document("successor")),
+            Some(document("enemy"))
+        );
+        assert_eq!(resolver.sources.len(), 1);
+        assert!(!resolver.sources.contains_key(&first));
+        assert_eq!(resolver.resolve_prefab(&alias).unwrap().key(), &second);
+        assert_eq!(
+            resolver.resolve_prefab(&path).unwrap().document(),
+            &document("successor")
+        );
+        assert!(
+            resolver
+                .resolve_prefab(&AssetRef::path("missing.ron").unwrap())
+                .is_none()
+        );
     }
 }

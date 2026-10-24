@@ -1,4 +1,8 @@
 #[cfg(feature = "serde")]
+#[path = "support/prefab_source.rs"]
+mod prefab_source;
+
+#[cfg(feature = "serde")]
 use nara_asset::AssetRef;
 use nara_asset::{AssetPath, AssetRecord, AssetSourceKind, ProjectAssetDatabase, StableAssetId};
 use nara_core::ItemLimit;
@@ -580,6 +584,7 @@ fn prefab_anchor_does_not_bypass_direct_source_reference_closure() {
     let source = AssetRef::path("prefabs/independent.prefab.json").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
+        prefab_source::key("final-closure.independent"),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("child"))]),
     );
     let mut anchor = SceneEntityRecord::new(scene_id("anchor"));

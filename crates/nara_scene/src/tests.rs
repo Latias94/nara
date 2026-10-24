@@ -36,6 +36,18 @@ use nara_reflect::{
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
     PreparedComponentCandidate, Reflect,
 };
+
+pub(crate) fn prefab_source_key(source: &AssetRef) -> SourceDocumentKey {
+    match source {
+        AssetRef::Path(path) => SourceDocumentKey::project_location(
+            "5ce92973-f3a0-4f12-b619-3b67e38959af".parse().unwrap(),
+            path.clone(),
+            SourceDocumentKind::Prefab,
+        ),
+        AssetRef::StableId(id) => SourceDocumentKey::stable_asset(*id, SourceDocumentKind::Prefab),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Component, Reflect)]
 struct TestPosition {
     x: i32,
@@ -626,6 +638,7 @@ fn scene_prefab_resolver_expands_one_level_instance_before_spawn() {
     let source = AssetRef::path("prefabs/enemy.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
+        crate::tests::prefab_source_key(&source),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("visual"))
             .with_component(position_type_id(), position_record(3))]),
     );
@@ -657,6 +670,7 @@ fn prefab_instance_override_patch_applies_before_projection() {
     let source = AssetRef::path("prefabs/enemy.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
+        crate::tests::prefab_source_key(&source),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("visual"))
             .with_component(position_type_id(), position_record(3))]),
     );
@@ -737,7 +751,11 @@ fn prefab_instance_override_preserves_ordered_placement_before_projection() {
             }),
         },
     ]);
-    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab);
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        crate::tests::prefab_source_key(&source),
+        prefab,
+    );
     let document = SceneDocument::from_ordered_roots([prefab_anchor_with_overrides(
         "instance", source, overrides,
     )]);
@@ -783,14 +801,17 @@ fn scene_prefab_resolver_expands_nested_instances_with_deterministic_ids() {
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             enemy_source.clone(),
+            crate::tests::prefab_source_key(&enemy_source),
             PrefabDocument::from_ordered_roots([prefab_anchor("weapon", weapon_source.clone())]),
         )
         .with_prefab(
             weapon_source.clone(),
+            crate::tests::prefab_source_key(&weapon_source),
             PrefabDocument::from_ordered_roots([prefab_anchor("muzzle", muzzle_source.clone())]),
         )
         .with_prefab(
             muzzle_source.clone(),
+            crate::tests::prefab_source_key(&muzzle_source),
             PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("flash"))
                 .with_component(position_type_id(), position_record(8))]),
         );
@@ -865,6 +886,7 @@ fn repeated_prefab_instances_expand_without_id_collisions() {
     let source = AssetRef::path("prefabs/enemy.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
+        crate::tests::prefab_source_key(&source),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("visual"))]),
     );
     let mut document = SceneDocument::from_ordered_roots([
@@ -905,10 +927,12 @@ fn prefab_opaque_ids_do_not_alias_distinct_nested_instances() {
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             inner_source.clone(),
+            crate::tests::prefab_source_key(&inner_source),
             PrefabDocument::from_ordered_roots([SceneEntityRecord::new(leaf_id.clone())]),
         )
         .with_prefab(
             outer_source.clone(),
+            crate::tests::prefab_source_key(&outer_source),
             PrefabDocument::from_ordered_roots([prefab_anchor("branch", inner_source.clone())]),
         );
     let document = SceneDocument::from_ordered_roots([
@@ -977,7 +1001,11 @@ fn prefab_expansion_preserves_source_order_and_prefixes_roots_before_anchor_chil
             SceneEntityRecord::new(child_b),
         ],
     );
-    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab);
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        crate::tests::prefab_source_key(&source),
+        prefab,
+    );
     let anchor = scene_id("anchor");
     let local_b = scene_id("local-b");
     let local_a = scene_id("local-a");
@@ -1044,7 +1072,11 @@ fn repeated_prefab_instances_remap_declared_scene_local_references() {
             }),
         ),
     ]);
-    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab.clone());
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        crate::tests::prefab_source_key(&source),
+        prefab.clone(),
+    );
     let document = SceneDocument::from_ordered_roots([
         prefab_anchor("left", source.clone()),
         prefab_anchor("right", source),
@@ -1103,6 +1135,7 @@ fn nested_prefabs_remap_declared_scene_local_references_through_each_anchor() {
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             inner_source.clone(),
+            crate::tests::prefab_source_key(&inner_source),
             PrefabDocument::from_ordered_roots([
                 SceneEntityRecord::new(scene_id("source")).with_component(
                     entity_link_type_id(),
@@ -1115,6 +1148,7 @@ fn nested_prefabs_remap_declared_scene_local_references_through_each_anchor() {
         )
         .with_prefab(
             outer_source.clone(),
+            crate::tests::prefab_source_key(&outer_source),
             PrefabDocument::from_ordered_roots([prefab_anchor("nested", inner_source)]),
         );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", outer_source)]);
@@ -1146,6 +1180,7 @@ fn nested_prefab_generated_identifier_budget_charges_only_final_projection() {
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             inner_source.clone(),
+            crate::tests::prefab_source_key(&inner_source),
             PrefabDocument::from_ordered_roots([
                 SceneEntityRecord::new(scene_id("source")).with_component(
                     entity_link_type_id(),
@@ -1158,6 +1193,7 @@ fn nested_prefab_generated_identifier_budget_charges_only_final_projection() {
         )
         .with_prefab(
             outer_source.clone(),
+            crate::tests::prefab_source_key(&outer_source),
             PrefabDocument::from_ordered_roots([prefab_anchor("nested", inner_source)]),
         );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", outer_source)]);
@@ -1214,7 +1250,11 @@ fn prefab_reference_rewrite_uses_the_migrated_component_schema() {
             .with_component(entity_link_type_id(), source_record),
         SceneEntityRecord::new(scene_id("target")),
     ]);
-    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab.clone());
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        crate::tests::prefab_source_key(&source),
+        prefab.clone(),
+    );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
 
     let expansion = document.expand_prefabs(&registry, &resolver);
@@ -1250,6 +1290,7 @@ fn prefab_expansion_budgets_mapped_component_references_before_publication() {
     let source = AssetRef::path("prefabs/linked-unit.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
+        crate::tests::prefab_source_key(&source),
         PrefabDocument::from_ordered_roots([
             SceneEntityRecord::new(scene_id("source")).with_component(
                 entity_link_type_id(),
@@ -1306,6 +1347,7 @@ fn prefab_reference_remap_preflight_uses_the_public_materialized_node_budget() {
     )]);
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
+        crate::tests::prefab_source_key(&source),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("source"))
             .with_component(
                 large_data_type_id(),
@@ -1357,7 +1399,11 @@ fn prefab_reference_remap_rejects_undeclared_references_without_mutating_the_sou
         SceneEntityRecord::new(scene_id("target")),
     ]);
     let source_before = prefab.clone();
-    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab.clone());
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        crate::tests::prefab_source_key(&source),
+        prefab.clone(),
+    );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
 
     let expansion = document.expand_prefabs(&registry, &resolver);
@@ -1383,7 +1429,11 @@ fn prefab_reference_remap_rejects_a_target_outside_its_source_document() {
                 entity: scene_id("missing"),
             }),
         )]);
-    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab.clone());
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        crate::tests::prefab_source_key(&source),
+        prefab.clone(),
+    );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source.clone())]);
 
     let expansion = document.expand_prefabs(&registry, &resolver);
@@ -1395,7 +1445,12 @@ fn prefab_reference_remap_rejects_a_target_outside_its_source_document() {
             && diagnostic_has_text_field(diagnostic, "rewrite-error-kind", "missing-source-entity")
             && diagnostic_has_text_field(diagnostic, "entity-id", "source")
     }));
-    assert_eq!(resolver.resolve_prefab(&source), Some(&prefab));
+    assert_eq!(
+        resolver
+            .resolve_prefab(&source)
+            .map(ResolvedPrefabSource::document),
+        Some(&prefab)
+    );
 }
 
 #[test]
@@ -1404,6 +1459,7 @@ fn prefab_expansion_budgets_mapped_reference_value_growth_before_publication() {
     let source = AssetRef::path("prefabs/linked-unit.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
+        crate::tests::prefab_source_key(&source),
         PrefabDocument::from_ordered_roots([
             SceneEntityRecord::new(scene_id("source")).with_component(
                 entity_link_type_id(),
@@ -1454,6 +1510,7 @@ fn prefab_reference_remap_traversal_accepts_persistent_reference_at_logical_byte
     let persistent = persistent_reference("77777777-7777-4777-8777-777777777777");
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
+        crate::tests::prefab_source_key(&source),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("source"))
             .with_component(
                 entity_link_type_id(),
@@ -1518,10 +1575,12 @@ fn prefab_source_cycle_reports_typed_edge_without_concatenated_chain() {
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             a.clone(),
+            crate::tests::prefab_source_key(&a),
             PrefabDocument::from_ordered_roots([prefab_anchor("b", b)]),
         )
         .with_prefab(
             AssetRef::path("prefabs/b.ron").unwrap(),
+            crate::tests::prefab_source_key(&AssetRef::path("prefabs/b.ron").unwrap()),
             PrefabDocument::from_ordered_roots([prefab_anchor("a", a.clone())]),
         );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", a)]);
@@ -1562,14 +1621,17 @@ fn prefab_source_cycle_reports_middle_cycle_start_for_multi_edge_chain() {
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             a.clone(),
+            crate::tests::prefab_source_key(&a),
             PrefabDocument::from_ordered_roots([prefab_anchor("b", b.clone())]),
         )
         .with_prefab(
             b.clone(),
+            crate::tests::prefab_source_key(&b),
             PrefabDocument::from_ordered_roots([prefab_anchor("c", c.clone())]),
         )
         .with_prefab(
-            c,
+            c.clone(),
+            crate::tests::prefab_source_key(&c),
             PrefabDocument::from_ordered_roots([prefab_anchor("b", b)]),
         );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", a)]);
@@ -1593,6 +1655,7 @@ fn prefab_expansion_depth_limit_reports_before_spawn_mutation() {
     let weapon_source = AssetRef::path("prefabs/weapon.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         enemy_source.clone(),
+        crate::tests::prefab_source_key(&enemy_source),
         PrefabDocument::from_ordered_roots([prefab_anchor("weapon", weapon_source)]),
     );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("enemy", enemy_source)]);
@@ -1618,6 +1681,7 @@ fn prefab_expansion_entity_budget_is_aggregate_across_reused_sources() {
     let source = AssetRef::path("prefabs/unit.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
+        crate::tests::prefab_source_key(&source),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("body"))]),
     );
     let document = SceneDocument::from_ordered_roots([
@@ -1657,6 +1721,7 @@ fn prefab_expansion_value_budgets_are_aggregate_across_reused_sources() {
     let payload_bytes = payload.len();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
+        crate::tests::prefab_source_key(&source),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("body"))
             .with_component(
                 ComponentTypeId::new("nara.scene.Name"),
@@ -1720,6 +1785,7 @@ fn prefab_expansion_component_and_instance_budgets_are_independent() {
     let source = AssetRef::path("prefabs/unit.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
+        crate::tests::prefab_source_key(&source),
         PrefabDocument::from_ordered_roots([
             SceneEntityRecord::new(scene_id("first"))
                 .with_component(position_type_id(), position_record(1)),
@@ -1760,6 +1826,7 @@ fn prefab_expansion_counts_override_operations_per_instance() {
     let source = AssetRef::path("prefabs/unit.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
+        crate::tests::prefab_source_key(&source),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("body"))
             .with_component(position_type_id(), position_record(1))]),
     );
@@ -1794,6 +1861,7 @@ fn prefab_expansion_bounds_generated_identifier_bytes_before_publication() {
     let source = AssetRef::path("prefabs/unit.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
+        crate::tests::prefab_source_key(&source),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("child"))]),
     );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
@@ -4670,10 +4738,12 @@ fn failed_nested_prefab_override_does_not_poison_a_sibling_source_expansion() {
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             inner_source.clone(),
+            crate::tests::prefab_source_key(&inner_source),
             PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("target"))]),
         )
         .with_prefab(
             outer_source.clone(),
+            crate::tests::prefab_source_key(&outer_source),
             PrefabDocument::from_ordered_roots([
                 prefab_anchor_with_overrides("bad", inner_source.clone(), invalid_override),
                 prefab_anchor("good", inner_source),

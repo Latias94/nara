@@ -898,9 +898,14 @@ fn expanded_candidate_keeps_nested_source_paths_through_spawn_and_product_replac
         overrides: ScenePatchDocument::default(),
     });
     let resolver = InMemoryPrefabSourceResolver::new()
-        .with_prefab(outer.clone(), PrefabDocument::from_ordered_roots([branch]))
+        .with_prefab(
+            outer.clone(),
+            crate::tests::prefab_source_key(&outer),
+            PrefabDocument::from_ordered_roots([branch]),
+        )
         .with_prefab(
             inner.clone(),
+            crate::tests::prefab_source_key(&inner),
             PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("leaf"))]),
         );
     let mut anchor = SceneEntityRecord::new(scene_id("anchor"));
@@ -961,6 +966,7 @@ fn expanded_candidate_source_observer_rejects_before_publication_and_preserves_o
     let prefab_source = nara_asset::AssetRef::path("prefabs/projected.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         prefab_source.clone(),
+        crate::tests::prefab_source_key(&prefab_source),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("projected"))]),
     );
     let mut anchor = SceneEntityRecord::new(fixture.target.clone());

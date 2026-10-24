@@ -36,7 +36,7 @@ Project-location projects bind the authored universe plus the complete project-r
 Stable-metadata projects require the sidecar, retain its exact closure member, and validate its
 declared relative path and Scene/Prefab kind before publication. Missing or mismatched metadata
 rejects; loading never mints metadata or silently falls back to location identity. The resolver's
-cycle stack compares canonical keys when available, so aliases for one admitted source do not
+cycle stack compares canonical keys, so aliases for one admitted source do not
 become separate active sources.
 
 Metadata lookup evidence and semantic identity remain separate. Under `project_location`, a
@@ -57,9 +57,9 @@ This is deliberately not a full source/occurrence adoption. `SceneSource`, runti
 `SceneEntitySource`, logical occurrence claims, Browser/Editor source admission, Runtime/Canvas
 UI keys, and source-carrying Export still need their owning migrations. The current checkpoint
 proves source admission and Prefab provenance at the content owner, not that a published runtime
-activation or UI projection already carries this key. The existing source-less direct Rust and
-in-memory resolver paths remain useful for document-only tests and are not evidence for the
-file-backed contract.
+activation or UI projection already carries this key. Source-less containing-Scene materialization
+remains an incumbent to replace; document-only expansion does not need a runtime occurrence.
+Canonical Prefab sources are required even for in-memory and document-only resolvers.
 
 ## Distinct Coordinates
 
@@ -243,8 +243,8 @@ This is evidence for a carrier/owner direction, not the complete trial's exit ga
   supplies selected-Scene/Prefab keys, exact metadata closure observations and retained accounting;
   Browser Open and Editor preview still need adoption. Neither proves complete filesystem
   alias/capture consistency.
-- Project-owned Prefab bindings and projection steps now retain canonical keys. Required bindings
-  for every materialization route remain the next replacement. A bare `AssetRef` request must not
+- All Prefab resolvers and projection steps now require canonical keys. The containing Scene
+  still needs required source binding at materialization. A bare `AssetRef` request must not
   become canonical provenance by stringification.
 - The product coordinate is distinguished as data, but no named imported Scene product is decoded
   or published by this experiment. Native files use `Primary` only.
@@ -274,7 +274,7 @@ and later admission failures retain their existing cleanup/custody semantics.
 
 ### Canonical Prefab Resolution Entry
 
-The resolver replacement must lend one private-field binding of canonical document key and
+The resolver now lends one private-field binding of canonical document key and
 immutable Prefab, not an independently assemblable key/document pair. Path/StableId requests are
 lookup coordinates; only the admitted source owner proves that two aliases resolve to that binding.
 An in-memory Rust author can explicitly bind aliases to one named source without inventing a new
@@ -295,8 +295,23 @@ source-local reference remaps and opaque generated runtime locators remain; no p
 IDs or second source registry is needed. The retained project resolver must lend its bound source
 without leaking independently cloneable allocations beyond the source lease. Project content now
 uses that borrow, and [canonical source tests](../../crates/nara_scene/tests/prefab_sources.rs)
-exercise alias cycles, sibling placements and wrong-kind rejection. The required-binding API
-replacement, nested consumer integration and shared UI contract remain separate work.
+exercise alias cycles, sibling placements and wrong-kind rejection. The resolver has one required
+`resolve_prefab` operation; neither its result nor a projection step has an optional-key fallback.
+The in-memory adapter requires the author's key and owns one document per key, with a separate
+request index. `insert(request, key, document)` replaces the canonical document for every alias
+and returns the previous document for that key. Rebinding a request releases its old source only
+when no other request addresses it. This is explicit canonical-key last-write-wins, not a
+content-preserving alias operation or an inference about which revision is newer. File-backed
+duplicate identity refusal remains at Project Content rather than inheriting this author-owned
+container's publication policy.
+
+This adapter-local index is not a permanent source registry. It borrows the key and document from
+one canonical entry and retains no historical source records. The separate
+[public consumer](../../tests/fixtures/module-consumer/tests/prefab_sources.rs) exercises canonical
+alias replacement, cycle refusal without mutation and successful re-expansion. Containing-Scene
+source binding, logical occurrence and the shared UI contract remain separate work. In particular,
+the existing Runtime UI lowering still encodes lookup requests; provenance's derived `Eq` includes
+diagnostic request context and is not canonical placement equality.
 
 ### Native Policy Decision Before Production Adoption
 
@@ -387,6 +402,31 @@ ADR 0038 must adopt required source binding and ADR 0058 must adopt active occur
 before step 1 changes their contract. Neither step changes ordinary Identity history or admits
 occurrence eviction. Authoring queries/edits remain document-relative; they do not need a runtime
 occurrence merely to edit a document.
+
+The scoped lifecycle review identifies these concrete integration obligations, not current
+qualification of the replacement:
+
+- Ordinary preparation must stop after unbound native values and before target entity allocation.
+  The existing advanced retained publication requires `discard(world)` and is not that token.
+- Revalidate registration at final commit, including the exact installed domain and allocator
+  baseline. The current immediate `Register` tail assumes uninterrupted exclusive ownership; a
+  deferred token cannot reuse its peeked registration proof after another allocation or install
+  a detached domain over a successor authority. Refusal must precede component publication.
+- Compare exact domain/activation association, not an instance number alone or full equality of
+  an original receipt and a newly captured, reduced entity roster. Individual entity retirement
+  can shrink the active roster without ending the activation or its occupied slot.
+- Claim installation, exact replacement and release join the same prevalidated publication/end
+  tail. A private resource still needs lifecycle-topology admission. Native preparation baseline
+  validation and the final commit both include the claim; caller cleanup after success is too late.
+- Projection epoch checks must include the new Scene association as well as Identity's existing
+  full-domain proof. Successor domains can reuse the numeric instance value. Empty instances,
+  deleted-last-entity instances and stale clear/end retries must not release a successor slot.
+
+For interface depth, exact replacement may obtain the predecessor's already-declared occurrence
+from the Scene association instead of asking the caller to repeat it. A `SceneProjection` can retain
+an explicitly supplied occurrence across publish/clear. Neither is an inferred default; first
+placement remains explicit and deleting the final entity still does not end it. Reconcile the
+owning ADRs when selecting those signatures, rather than introducing both alternatives publicly.
 
 The likely owning changes are `ExpandedSceneCandidate::plain`, SceneSpawner/direct spawn and
 replacement entry points, the Prefab resolver result, `SceneSource::direct`/`direct_expanded`,

@@ -4142,6 +4142,12 @@ fn repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance() 
     let source = AssetRef::path("prefabs/ui-root.ron").expect("test asset ref should be valid");
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
+        nara_scene::SourceDocumentKey::named(
+            "58735ed4-a767-46cc-a257-168970b29c68".parse().unwrap(),
+            "ui-test.root",
+            nara_scene::SourceDocumentKind::Prefab,
+        )
+        .unwrap(),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("root"))]),
     );
     let document = SceneDocument::from_ordered_roots([

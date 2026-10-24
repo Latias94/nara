@@ -817,13 +817,11 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
             && source.projection_path().is_some_and(|path| {
                 path.root_anchor() == &scene_id("enemy-anchor")
                     && path.source_chain().iter().any(|step| {
-                        step.canonical_source().is_some_and(|key| {
-                            matches!(
-                                key.origin(),
-                                SourceDocumentOrigin::ProjectLocation { path, .. }
-                                    if path.as_str() == "prefabs/enemy.prefab.json"
-                            )
-                        })
+                        matches!(
+                            step.canonical_source().origin(),
+                            SourceDocumentOrigin::ProjectLocation { path, .. }
+                                if path.as_str() == "prefabs/enemy.prefab.json"
+                        )
                     })
             })
     }));

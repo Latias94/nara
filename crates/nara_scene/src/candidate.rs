@@ -179,8 +179,11 @@ mod tests {
             SceneEntityRecord::new(id("anchor")),
             SceneEntityRecord::new(id("prefab_0")),
         ]);
-        let path = PrefabProjectionPath::new(id("anchor"))
-            .with_step(AssetRef::path("prefabs/source.ron").unwrap(), id("source"));
+        let path = PrefabProjectionPath::new(id("anchor")).with_step(
+            AssetRef::path("prefabs/source.ron").unwrap(),
+            crate::tests::prefab_source_key(&AssetRef::path("prefabs/source.ron").unwrap()),
+            id("source"),
+        );
         let provenance = [
             (id("anchor"), SceneEntityProvenance::local(id("anchor"))),
             (
@@ -207,8 +210,11 @@ mod tests {
             id("prefab_0"),
             SceneEntityProvenance::projected(
                 id("source"),
-                PrefabProjectionPath::new(id("absent"))
-                    .with_step(AssetRef::path("prefabs/source.ron").unwrap(), id("source")),
+                PrefabProjectionPath::new(id("absent")).with_step(
+                    AssetRef::path("prefabs/source.ron").unwrap(),
+                    crate::tests::prefab_source_key(&AssetRef::path("prefabs/source.ron").unwrap()),
+                    id("source"),
+                ),
             ),
         );
         assert_eq!(
@@ -229,6 +235,7 @@ mod tests {
             let source = AssetRef::path(path).unwrap();
             let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
                 source.clone(),
+                crate::tests::prefab_source_key(&source),
                 PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id(source_id))]),
             );
             let mut anchor = SceneEntityRecord::new(id("anchor"));

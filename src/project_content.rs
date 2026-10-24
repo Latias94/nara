@@ -490,12 +490,7 @@ struct SnapshotPrefabResolver<'a> {
 }
 
 impl PrefabSourceResolver for SnapshotPrefabResolver<'_> {
-    fn resolve_prefab(&self, source: &AssetRef) -> Option<&PrefabDocument> {
-        self.resolve_prefab_binding(source)
-            .map(ResolvedPrefabSource::document)
-    }
-
-    fn resolve_prefab_binding(&self, source: &AssetRef) -> Option<ResolvedPrefabSource<'_>> {
+    fn resolve_prefab(&self, source: &AssetRef) -> Option<ResolvedPrefabSource<'_>> {
         let path = match source {
             AssetRef::Path(path) => path,
             AssetRef::StableId(_) => self.database.resolve_ref(source).ok()?.path(),
@@ -2772,12 +2767,7 @@ impl<'a> LoadedPrefabResolver<'a> {
 }
 
 impl PrefabSourceResolver for LoadedPrefabResolver<'_> {
-    fn resolve_prefab(&self, source: &AssetRef) -> Option<&PrefabDocument> {
-        self.resolve_prefab_binding(source)
-            .map(ResolvedPrefabSource::document)
-    }
-
-    fn resolve_prefab_binding(&self, source: &AssetRef) -> Option<ResolvedPrefabSource<'_>> {
+    fn resolve_prefab(&self, source: &AssetRef) -> Option<ResolvedPrefabSource<'_>> {
         let path = match source {
             AssetRef::Path(path) => path,
             AssetRef::StableId(_) => self.database.resolve_ref(source).ok()?.path(),

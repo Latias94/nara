@@ -3,6 +3,7 @@ mod support;
 
 use bevy_ecs::{component::Component, entity::Entity, world::World};
 use nara_asset::{AssetDatabaseError, AssetRef};
+use nara_core::SourceUniverseId;
 use nara_identity::{
     EntityLookup, EntityReference, IdentityDomainError, PersistentRetirementDisposition,
     PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
@@ -14,7 +15,7 @@ use nara_reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId};
 use nara_scene::{
     InMemoryPrefabSourceResolver, Name, PrefabDocument, PrefabInstance, SceneDocument,
     SceneDocumentCandidate, SceneEntityRecord, SceneEntitySource, ScenePatchDocument,
-    ScenePatchOperation, export_scene, spawn_scene,
+    ScenePatchOperation, SourceDocumentKey, SourceDocumentKind, export_scene, spawn_scene,
     spawn_scene_with_prefab_resolver_and_asset_database,
 };
 use nara_scene_module_consumer::frozen_scene_registry;
@@ -191,8 +192,16 @@ fn copy_as_new_changes_only_references_inside_the_explicit_copied_closure() {
     }
 
     let resolver = InMemoryPrefabSourceResolver::new()
-        .with_prefab(AssetRef::StableId(copied_actor), copied.actor)
-        .with_prefab(AssetRef::StableId(stable_id(SHARED_ID)), shared);
+        .with_prefab(
+            AssetRef::StableId(copied_actor),
+            SourceDocumentKey::stable_asset(copied_actor, SourceDocumentKind::Prefab),
+            copied.actor,
+        )
+        .with_prefab(
+            AssetRef::StableId(stable_id(SHARED_ID)),
+            SourceDocumentKey::stable_asset(stable_id(SHARED_ID), SourceDocumentKind::Prefab),
+            shared,
+        );
     let mut world = World::new();
     let spawned = spawn_scene_with_prefab_resolver_and_asset_database(
         &mut world,
@@ -527,8 +536,17 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
             assert!(export_scene(&world, &registry).output().is_none());
 
             let prefab_source = AssetRef::path("prefabs/durable-links.prefab.ron").unwrap();
+            let universe: SourceUniverseId =
+                "cc25ede9-e5af-48d7-b105-63a0b33bc74a".parse().unwrap();
+            let key = SourceDocumentKey::named(
+                universe,
+                "consumer.durable.links",
+                SourceDocumentKind::Prefab,
+            )
+            .unwrap();
             let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
                 prefab_source.clone(),
+                key,
                 PrefabDocument::new(document.roots.clone(), document.entities.clone()),
             );
             let anchors = ["first", "second"].map(|id| {

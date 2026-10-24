@@ -1,9 +1,10 @@
 use nara::{
+    core::SourceUniverseId,
     identity::EntityLookup,
     prelude::*,
     scene::{
-        InMemoryPrefabSourceResolver, PrefabInstance, register_scene_components,
-        spawn_expanded_scene,
+        InMemoryPrefabSourceResolver, PrefabInstance, SourceDocumentKey, SourceDocumentKind,
+        register_scene_components, spawn_expanded_scene,
     },
     sprite::register_sprite_components,
 };
@@ -17,10 +18,14 @@ fn main() {
         .expect("component registry should freeze before scene expansion");
 
     let source = AssetRef::path("prefabs/enemy.ron").unwrap();
+    let universe: SourceUniverseId = "f037335a-e03a-41c7-8fb1-310ff21dd9be".parse().unwrap();
+    let enemy_source =
+        SourceDocumentKey::named(universe, "example.enemy", SourceDocumentKind::Prefab).unwrap();
     let enemy_prefab =
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("visual"))
             .with_component(sprite_id(), SceneComponentRecord::new(v1(), sprite_value()))]);
-    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), enemy_prefab);
+    let resolver =
+        InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), enemy_source, enemy_prefab);
     let overrides = ScenePatchDocument::new([
         ScenePatchOperation::SetField {
             entity: scene_id("visual"),

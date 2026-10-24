@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Amended**: 2026-10-24 by the production source-admission checkpoint
+**Amended**: 2026-10-24 by the production source-admission and required Prefab-binding checkpoints
 **Refines**: ADR 0006: Scene and Prefab Data Model
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References;
@@ -90,6 +90,15 @@ flowchart TD
   project-location policy binds the authored universe and complete project-relative path. A
   resolver lends the canonical key and immutable document together; callers must not assemble
   them from an `AssetRef` after lookup.
+- Canonical Prefab binding is required for every resolver, including code-authored and
+  document-only expansion. The resolver has one required operation returning the bound key and
+  document. Every projection step retains that key; there is no source-keyless result or
+  lookup-request fallback for cycle identity. In-memory authors supply the key explicitly, rather
+  than having Scene infer it from a path, request, callsite or pointer. Aliases must resolve to the
+  same key and immutable document; the source owner remains responsible for that association.
+- Requiring canonical Prefab sources does not assign the containing Scene's source identity or
+  a logical occurrence. Those are separate obligations at the materialization boundary; editing
+  and document-only expansion do not acquire a runtime occurrence to inspect source data.
 - Metadata used for stable-reference lookup remains revalidated closure evidence even under
   location identity. Adjacent metadata does not silently promote a location-authored source.
   Stable native Prefab admission uses the existing catalogue's duplicate-identity rejection;

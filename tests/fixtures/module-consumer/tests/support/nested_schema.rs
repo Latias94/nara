@@ -17,6 +17,7 @@ use nara_scene::{
 
 pub const COMPONENT_ID: &str = "consumer.nested.Relationships";
 pub const PREFAB_PATH: &str = "prefabs/relationships.prefab.ron";
+pub const PREFAB_ID: &str = "70bd3b0f-f4d3-486c-9566-6cb61e7c4c65";
 pub const IMAGE_PATH: &str = "textures/portrait.png";
 pub const IMAGE_ID: &str = "fabfe185-a67e-43c2-98cd-d6f143a08e75";
 
@@ -102,11 +103,7 @@ pub fn database() -> ProjectAssetDatabase {
     let mut database = ProjectAssetDatabase::default();
     for (id, path, kind) in [
         (IMAGE_ID, IMAGE_PATH, AssetSourceKind::Image),
-        (
-            "70bd3b0f-f4d3-486c-9566-6cb61e7c4c65",
-            PREFAB_PATH,
-            AssetSourceKind::Prefab,
-        ),
+        (PREFAB_ID, PREFAB_PATH, AssetSourceKind::Prefab),
     ] {
         database
             .insert(AssetRecord::new(

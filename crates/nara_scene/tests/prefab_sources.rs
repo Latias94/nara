@@ -38,6 +38,64 @@ fn universe() -> SourceUniverseId {
     "72011426-37e2-48ba-bc06-78841468889a".parse().unwrap()
 }
 
+#[cfg(feature = "serde")]
+#[test]
+fn rejected_file_publication_preserves_all_aliases_and_canonical_documents() {
+    use nara_asset::ProjectAssetDatabase;
+    use nara_scene::{InMemoryPrefabSourceResolver, PrefabDocumentCandidate};
+
+    let path = AssetRef::path("prefabs/source.ron").unwrap();
+    let alias = AssetRef::path("aliases/source.ron").unwrap();
+    let original =
+        SourceDocumentKey::named(universe(), "original", SourceDocumentKind::Prefab).unwrap();
+    let replacement =
+        SourceDocumentKey::named(universe(), "replacement", SourceDocumentKind::Prefab).unwrap();
+    let valid = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("local"))]);
+    let resolver = InMemoryPrefabSourceResolver::new()
+        .with_prefab(path.clone(), original.clone(), valid.clone())
+        .with_prefab(alias.clone(), original.clone(), valid);
+    let invalid = PrefabDocument::new([id("missing")], [])
+        .to_json_string()
+        .unwrap();
+    let registry = registry();
+    let database = ProjectAssetDatabase::default();
+
+    for key in [original.clone(), replacement] {
+        for with_database in [false, true] {
+            let mut candidate_resolver = resolver.clone();
+            let candidate = PrefabDocumentCandidate::decode_json_bytes(invalid.as_bytes()).unwrap();
+            let result = if with_database {
+                candidate_resolver.insert_file_candidate_with_asset_database(
+                    path.clone(),
+                    key.clone(),
+                    candidate,
+                    &registry,
+                    &database,
+                )
+            } else {
+                candidate_resolver.insert_file_candidate(
+                    path.clone(),
+                    key.clone(),
+                    candidate,
+                    &registry,
+                )
+            };
+            let error = result.unwrap_err();
+            assert!(
+                error
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| { diagnostic.code().as_str() == "scene.dangling-root" })
+            );
+            assert_eq!(candidate_resolver, resolver);
+            let first = candidate_resolver.resolve_prefab(&path).unwrap();
+            let second = candidate_resolver.resolve_prefab(&alias).unwrap();
+            assert_eq!(first.key(), &original);
+            assert!(std::ptr::eq(first.document(), second.document()));
+        }
+    }
+}
+
 fn provenance_options(bytes: usize) -> PrefabExpansionOptions {
     PrefabExpansionOptions::default().with_limits(
         PrefabExpansionLimits::default().with_provenance_bytes(ByteLimit::new(bytes).unwrap()),
@@ -67,10 +125,7 @@ fn key_bytes(key: &SourceDocumentKey) -> usize {
 }
 
 fn stack_bytes(source: &AssetRef, key: &SourceDocumentKey) -> usize {
-    size_of::<AssetRef>()
-        + size_of::<Option<SourceDocumentKey>>()
-        + request_bytes(source)
-        + key_bytes(key)
+    size_of::<AssetRef>() + size_of::<SourceDocumentKey>() + request_bytes(source) + key_bytes(key)
 }
 
 fn entry_bytes(expanded: &str, local: &str) -> usize {
@@ -139,12 +194,7 @@ impl AliasedSource {
 }
 
 impl PrefabSourceResolver for AliasedSource {
-    fn resolve_prefab(&self, source: &AssetRef) -> Option<&PrefabDocument> {
-        self.resolve_prefab_binding(source)
-            .map(ResolvedPrefabSource::document)
-    }
-
-    fn resolve_prefab_binding(&self, source: &AssetRef) -> Option<ResolvedPrefabSource<'_>> {
+    fn resolve_prefab(&self, source: &AssetRef) -> Option<ResolvedPrefabSource<'_>> {
         (source == &self.path || source == &self.stable)
             .then(|| ResolvedPrefabSource::bound(&self.document, &self.key))
     }
@@ -209,7 +259,7 @@ fn sibling_aliases_share_a_source_but_keep_distinct_authored_placements() {
     assert_ne!(projections[0].root_anchor(), projections[1].root_anchor());
     for path in projections {
         assert_eq!(path.source_chain().len(), 1);
-        assert_eq!(path.source_chain()[0].canonical_source(), Some(&source.key));
+        assert_eq!(path.source_chain()[0].canonical_source(), &source.key);
         assert_eq!(path.source_chain()[0].source_entity(), &id("local"));
     }
     let rejected =
@@ -352,12 +402,7 @@ impl SourceChain {
 }
 
 impl PrefabSourceResolver for SourceChain {
-    fn resolve_prefab(&self, source: &AssetRef) -> Option<&PrefabDocument> {
-        self.resolve_prefab_binding(source)
-            .map(ResolvedPrefabSource::document)
-    }
-
-    fn resolve_prefab_binding(&self, source: &AssetRef) -> Option<ResolvedPrefabSource<'_>> {
+    fn resolve_prefab(&self, source: &AssetRef) -> Option<ResolvedPrefabSource<'_>> {
         self.0
             .iter()
             .find(|(request, _, _)| request == source)
@@ -400,8 +445,8 @@ fn nested_projection_budget_counts_the_full_parent_key_for_every_leaf() {
             .unwrap();
         assert_eq!(path.root_anchor(), &id("outer"));
         assert_eq!(path.source_chain().len(), 2);
-        assert_eq!(path.source_chain()[0].canonical_source(), Some(outer_key));
-        assert_eq!(path.source_chain()[1].canonical_source(), Some(inner_key));
+        assert_eq!(path.source_chain()[0].canonical_source(), outer_key);
+        assert_eq!(path.source_chain()[1].canonical_source(), inner_key);
     }
     let rejected =
         scene.expand_prefabs_with_options(&registry(), &sources, provenance_options(exact - 1));

@@ -13,7 +13,8 @@ use nara_reflect::{
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabDocumentCandidate, SceneComponentRecord,
-    SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
+    SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SourceDocumentKey,
+    SourceDocumentKind,
 };
 
 pub const SCENE_ID: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -165,7 +166,11 @@ pub fn prefab_resolver(
     [stable_id(ACTOR_ID), stable_id(SHARED_ID)]
         .into_iter()
         .fold(InMemoryPrefabSourceResolver::new(), |resolver, id| {
-            resolver.with_prefab(AssetRef::StableId(id), load_prefab(database, registry, id))
+            resolver.with_prefab(
+                AssetRef::StableId(id),
+                SourceDocumentKey::stable_asset(id, SourceDocumentKind::Prefab),
+                load_prefab(database, registry, id),
+            )
         })
 }
 

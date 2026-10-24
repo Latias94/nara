@@ -1,3 +1,6 @@
+#[path = "support/prefab_source.rs"]
+mod prefab_source;
+
 use std::collections::BTreeSet;
 
 use nara_asset::{AssetRef, AssetRefExportPolicy};
@@ -161,7 +164,11 @@ fn repeated_prefabs_remap_default_local_reference_and_preserve_source_omission()
         SceneEntityRecord::new(scene_id("target")),
     ]);
     let original_prefab = prefab.clone();
-    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab.clone());
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        prefab_source::key("effective-references.default-link"),
+        prefab.clone(),
+    );
     let document = SceneDocument::from_ordered_roots(["left", "right"].map(|anchor| {
         let mut entity = SceneEntityRecord::new(scene_id(anchor));
         entity.prefab = Some(PrefabInstance {

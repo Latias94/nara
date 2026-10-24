@@ -3,7 +3,7 @@ mod support;
 
 use std::collections::BTreeSet;
 
-use nara_asset::AssetRef;
+use nara_asset::{AssetRef, StableAssetId};
 use nara_ecs::World;
 use nara_identity::{EntityLookup, EntityReference};
 use nara_reflect::{
@@ -13,10 +13,11 @@ use nara_reflect::{
 use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, InMemoryPrefabSourceResolver,
     PrefabDocument, PrefabInstance, SceneAuthoringSession, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SceneEntityRecord, ScenePatchDocument, export_scene, spawn_expanded_scene,
+    SceneEntityId, SceneEntityRecord, ScenePatchDocument, SourceDocumentKey, SourceDocumentKind,
+    export_scene, spawn_expanded_scene,
 };
 use nara_tooling::{SceneInspectorCommand, SceneInspectorState};
-use support::{COMPONENT_ID, IMAGE_ID, PREFAB_PATH, Relationships};
+use support::{COMPONENT_ID, IMAGE_ID, PREFAB_ID, PREFAB_PATH, Relationships};
 
 #[test]
 fn nested_component_survives_inspector_save_prefab_remap_and_export() {
@@ -99,7 +100,14 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
         reopened.document().entities.clone(),
     );
     let prefab_source = AssetRef::path(PREFAB_PATH).unwrap();
-    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(prefab_source.clone(), prefab);
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        prefab_source.clone(),
+        SourceDocumentKey::stable_asset(
+            StableAssetId::parse_str(PREFAB_ID).unwrap(),
+            SourceDocumentKind::Prefab,
+        ),
+        prefab,
+    );
     let anchors = ["first", "second"].map(|id| {
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new(id).unwrap());
         anchor.prefab = Some(PrefabInstance {

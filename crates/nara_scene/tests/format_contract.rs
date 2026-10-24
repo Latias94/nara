@@ -1,5 +1,8 @@
 #![cfg(feature = "serde")]
 
+#[path = "support/prefab_source.rs"]
+mod prefab_source;
+
 use nara_asset::AssetRef;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit, SerdeShapeLimits};
 use nara_diagnostic::{Diagnostic, DiagnosticReport, DiagnosticValueRef};
@@ -1075,18 +1078,24 @@ fn prefab_and_patch_migration_growth_respects_limits_and_is_failure_atomic() {
         .with_component_value_nodes(ItemLimit::new(4).unwrap())
         .with_component_value_bytes(ByteLimit::new(16).unwrap());
     let source = AssetRef::path("prefabs/migrating.ron").unwrap();
+    let key = prefab_source::key("format.migrating");
     let existing =
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("existing"))]);
     let incoming =
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
             .with_component(migrating_text_id(), legacy_text_record("x"))]);
     let encoded = incoming.to_json_string().unwrap();
-    let mut resolver =
-        InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), existing.clone());
+    let mut resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        key.clone(),
+        existing.clone(),
+    );
+    let before_resolver = resolver.clone();
 
     let error = resolver
         .insert_file_candidate(
             source.clone(),
+            prefab_source::key("format.migrating-replacement"),
             PrefabDocumentCandidate::decode_json_bytes_with_limits(encoded.as_bytes(), limits)
                 .unwrap(),
             &registry,
@@ -1096,7 +1105,10 @@ fn prefab_and_patch_migration_growth_respects_limits_and_is_failure_atomic() {
     assert!(error.diagnostics().iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.file-component-value-budget-exceeded"
     }));
-    assert_eq!(resolver.resolve_prefab(&source), Some(&existing));
+    let resolved = resolver.resolve_prefab(&source).unwrap();
+    assert_eq!(resolved.document(), &existing);
+    assert_eq!(resolved.key(), &key);
+    assert_eq!(resolver, before_resolver);
 
     let target = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("target"))]);
     let patch = ScenePatchDocument::new([ScenePatchOperation::AddComponent {
@@ -1470,17 +1482,21 @@ fn prefab_candidate_upgrades_nested_legacy_remove_field() {
     let incoming = PrefabDocument::from_ordered_roots([root]);
     let encoded = incoming.to_json_string().unwrap();
     let published_source = AssetRef::path("prefabs/root.ron").unwrap();
+    let key = prefab_source::key("format.nested-remove-field");
     let mut resolver = InMemoryPrefabSourceResolver::new();
 
     resolver
         .insert_file_candidate(
             published_source.clone(),
+            key.clone(),
             PrefabDocumentCandidate::decode_json_bytes(encoded.as_bytes()).unwrap(),
             &registry,
         )
         .unwrap();
 
     let published = resolver.resolve_prefab(&published_source).unwrap();
+    assert_eq!(published.key(), &key);
+    let published = published.document();
     let operations = &published.entities[0]
         .prefab
         .as_ref()
@@ -1527,17 +1543,21 @@ fn prefab_candidate_canonicalizes_components_and_nested_override_operations() {
         .to_json_string()
         .unwrap();
     let published_source = AssetRef::path("prefabs/root.ron").unwrap();
+    let key = prefab_source::key("format.canonical-nested-overrides");
     let mut resolver = InMemoryPrefabSourceResolver::new();
 
     resolver
         .insert_file_candidate(
             published_source.clone(),
+            key.clone(),
             PrefabDocumentCandidate::decode_json_bytes(encoded.as_bytes()).unwrap(),
             &registry,
         )
         .unwrap();
 
     let published = resolver.resolve_prefab(&published_source).unwrap();
+    assert_eq!(published.key(), &key);
+    let published = published.document();
     let root = &published.entities[0];
     let component = root.components.get(&migrating_text_id()).unwrap();
     assert_eq!(component.version, ComponentSchemaVersion(2));
@@ -1565,12 +1585,18 @@ fn prefab_candidate_canonicalizes_components_and_nested_override_operations() {
 fn prefab_and_patch_candidates_publish_only_through_their_owning_transactions() {
     let registry = frozen_scene_registry();
     let source = AssetRef::path("prefabs/player.ron").unwrap();
-    let mut resolver =
-        InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), PrefabDocument::default());
+    let key = prefab_source::key("format.player");
+    let mut resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        key.clone(),
+        PrefabDocument::default(),
+    );
+    let before_resolver = resolver.clone();
     let invalid_prefab_json = sample_prefab().to_json_string().unwrap();
     let error = resolver
         .insert_file_candidate(
             source.clone(),
+            prefab_source::key("format.player-replacement"),
             PrefabDocumentCandidate::decode_json_bytes(invalid_prefab_json.as_bytes()).unwrap(),
             &registry,
         )
@@ -1581,10 +1607,10 @@ fn prefab_and_patch_candidates_publish_only_through_their_owning_transactions() 
             .iter()
             .any(|diagnostic| diagnostic.code().as_str() == "scene.unknown-component")
     );
-    assert_eq!(
-        resolver.resolve_prefab(&source),
-        Some(&PrefabDocument::default())
-    );
+    let resolved = resolver.resolve_prefab(&source).unwrap();
+    assert_eq!(resolved.document(), &PrefabDocument::default());
+    assert_eq!(resolved.key(), &key);
+    assert_eq!(resolver, before_resolver);
 
     let mut target =
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("player"))]);
@@ -1837,6 +1863,7 @@ fn assert_prefab_migration_shape_rejected(
     limits: SceneFileLimits,
 ) {
     let source = AssetRef::path(format!("prefabs/{case}.ron")).unwrap();
+    let key = prefab_source::key(&format!("format.migration-shape.{case}"));
     let existing =
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("existing"))]);
     let incoming =
@@ -1845,15 +1872,27 @@ fn assert_prefab_migration_shape_rejected(
     let encoded = incoming.to_json_string().unwrap();
     let candidate =
         PrefabDocumentCandidate::decode_json_bytes_with_limits(encoded.as_bytes(), limits).unwrap();
-    let mut resolver =
-        InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), existing.clone());
+    let mut resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        key.clone(),
+        existing.clone(),
+    );
+    let before_resolver = resolver.clone();
 
     let error = resolver
-        .insert_file_candidate(source.clone(), candidate, registry)
+        .insert_file_candidate(
+            source.clone(),
+            prefab_source::key(&format!("format.migration-shape-replacement.{case}")),
+            candidate,
+            registry,
+        )
         .unwrap_err();
 
     assert_shape_budget_error(case, expected_code, error.diagnostics());
-    assert_eq!(resolver.resolve_prefab(&source), Some(&existing));
+    let resolved = resolver.resolve_prefab(&source).unwrap();
+    assert_eq!(resolved.document(), &existing);
+    assert_eq!(resolved.key(), &key);
+    assert_eq!(resolver, before_resolver);
 }
 
 fn assert_patch_migration_shape_rejected(

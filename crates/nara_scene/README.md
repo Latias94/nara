@@ -48,3 +48,44 @@ its complete disposable domain epoch. Do not end their retained receipts behind 
 This evidence covers the documented direct scene-module workflow only. It does not promise
 arbitrary cross-engine compatibility, arbitrary combinations of Nara modules, or a stable dynamic
 ABI. Other module workflows must document and prove their own prerequisites.
+
+## Prefab Source Binding
+
+`PrefabSourceResolver` has one required operation: return a `ResolvedPrefabSource` containing
+the immutable Prefab and its canonical `SourceDocumentKey` together. Lookup requests are not
+source identity. A code author declares the source explicitly, independently of the path used to
+request it:
+
+```rust
+use nara_asset::AssetRef;
+use nara_scene::{
+    InMemoryPrefabSourceResolver, PrefabDocument, SourceDocumentKey, SourceDocumentKind,
+};
+
+let key = SourceDocumentKey::named(
+    "46806b15-ef25-4da2-9983-32078fd5b5a7".parse().unwrap(),
+    "game.characters.hero",
+    SourceDocumentKind::Prefab,
+).unwrap();
+let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+    AssetRef::path("prefabs/hero.ron").unwrap(),
+    key,
+    PrefabDocument::default(),
+);
+```
+
+The in-memory resolver keeps one document per canonical key. `insert(request, key, document)`
+rebinds that request and replaces the document for **every** alias of the key. Its return value is
+the previous document for that key, not the request's previous target. Adding an alias through
+this operation is a content publication too: inserting an old copy replaces newer content rather
+than inferring which copy is newer. An unaddressed old key is released after request rebinding.
+File-backed conflict admission still belongs to Project Content; this author-owned container does
+not replace its duplicate stable-ID refusal.
+
+Expansion detects cycles by canonical source, not lookup spelling, and retains the required key
+on every projection step. Repeated siblings remain independent placements. The separately compiled
+[`Prefab consumer`](../../tests/fixtures/module-consumer/tests/prefab_sources.rs) exercises alias
+replacement, cycle refusal and successful re-expansion through public interfaces.
+
+This contract does not yet supply the containing Scene source or a logical runtime occurrence.
+Complete Runtime/Canvas identity adoption remains separate from document expansion.

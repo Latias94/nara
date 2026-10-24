@@ -1,3 +1,6 @@
+#[path = "support/prefab_source.rs"]
+mod prefab_source;
+
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -15,9 +18,9 @@ use nara_reflect::{
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, PrefabSourceResolver,
-    SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, spawn_scene, spawn_scene_with_prefab_resolver,
-    spawn_scene_with_prefab_resolver_and_asset_database,
+    ResolvedPrefabSource, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
+    ScenePatchDocument, ScenePatchOperation, SourceDocumentKey, spawn_scene,
+    spawn_scene_with_prefab_resolver, spawn_scene_with_prefab_resolver_and_asset_database,
 };
 
 fn scene_id(value: &str) -> SceneEntityId {
@@ -35,12 +38,13 @@ fn anchor(source: AssetRef) -> SceneEntityRecord {
 
 struct RawPrefabSource {
     source: AssetRef,
+    key: SourceDocumentKey,
     document: PrefabDocument,
 }
 
 impl PrefabSourceResolver for RawPrefabSource {
-    fn resolve_prefab(&self, source: &AssetRef) -> Option<&PrefabDocument> {
-        (source == &self.source).then_some(&self.document)
+    fn resolve_prefab(&self, source: &AssetRef) -> Option<ResolvedPrefabSource<'_>> {
+        (source == &self.source).then(|| ResolvedPrefabSource::bound(&self.document, &self.key))
     }
 }
 
@@ -147,17 +151,27 @@ fn assert_rejected_without_mutation(
 
 fn assert_raw_source_rejected(prefab: PrefabDocument, code: &str) {
     let source = AssetRef::path("prefabs/raw.prefab.ron").unwrap();
+    let key = prefab_source::key("topology.raw");
     let document = SceneDocument::from_ordered_roots([anchor(source.clone())]);
-    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab.clone());
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        key.clone(),
+        prefab.clone(),
+    );
     assert_rejected_without_mutation(&document, &resolver, code);
-    assert_eq!(resolver.resolve_prefab(&source), Some(&prefab));
+    let resolved = resolver.resolve_prefab(&source).unwrap();
+    assert_eq!(resolved.document(), &prefab);
+    assert_eq!(resolved.key(), &key);
 
     let resolver = RawPrefabSource {
-        source,
+        source: source.clone(),
+        key: key.clone(),
         document: prefab.clone(),
     };
     assert_rejected_without_mutation(&document, &resolver, code);
     assert_eq!(resolver.document, prefab);
+    assert_eq!(resolver.key, key);
+    assert_eq!(resolver.source, source);
 }
 
 #[test]
@@ -213,9 +227,14 @@ fn nested_raw_prefab_is_checked_before_projection() {
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             outer.clone(),
+            prefab_source::key("topology.outer"),
             PrefabDocument::from_ordered_roots([anchor(inner.clone())]),
         )
-        .with_prefab(inner, PrefabDocument::new([scene_id("missing")], []));
+        .with_prefab(
+            inner,
+            prefab_source::key("topology.inner"),
+            PrefabDocument::new([scene_id("missing")], []),
+        );
     let document = SceneDocument::from_ordered_roots([anchor(outer)]);
     assert_rejected_without_mutation(&document, &resolver, "scene.dangling-root");
 }
@@ -225,6 +244,7 @@ fn raw_prefab_topology_diagnostics_preserve_bounded_loss_accounting() {
     let source = AssetRef::path("prefabs/many-missing.prefab.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
+        prefab_source::key("topology.many-missing"),
         PrefabDocument::new(
             (0..1_024).map(|index| scene_id(&format!("missing_{index}"))),
             [],
@@ -289,7 +309,12 @@ fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_extra_
             ),
         )]);
     let source = AssetRef::path("prefabs/defaulted.prefab.ron").unwrap();
-    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab.clone());
+    let key = prefab_source::key("topology.defaulted");
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        key.clone(),
+        prefab.clone(),
+    );
     let mut document = SceneDocument::from_ordered_roots([anchor(source.clone())]);
 
     let expansion = document.expand_prefabs(&registry, &resolver);
@@ -328,7 +353,9 @@ fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_extra_
         .find_map(|entity| entity.components.get(&component_id))
         .unwrap();
     assert_eq!(component.value.field_i64("amount").unwrap(), 9);
-    assert_eq!(resolver.resolve_prefab(&source), Some(&prefab));
+    let resolved = resolver.resolve_prefab(&source).unwrap();
+    assert_eq!(resolved.document(), &prefab);
+    assert_eq!(resolved.key(), &key);
     assert!(
         prefab.entities[0].components[&component_id]
             .value

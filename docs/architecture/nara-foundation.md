@@ -577,8 +577,13 @@ second real adapter or stronger isolation pressure.
   runtime-facing crates. ADR 0118 supersedes the former egui adapter.
 - Prefab overrides use the same patch transaction model as scene edits. The old whole-component override API was removed before 1.0.
 - `PrefabSourceResolver` and `InMemoryPrefabSourceResolver` expand nested prefab instances before
-  spawn. Expanded IDs are opaque, document-local projections. Structured provenance records the
+  spawn. Every resolver returns the canonical source key and immutable document together; every
+  projection step retains that key. In-memory authors explicitly supply keys, and all request
+  aliases of a key borrow its one canonical document. Cycle checks use keys rather than requests.
+  Expanded IDs are opaque, document-local projections. Structured provenance records the
   authored source and projection path, while a live lookup also selects its concrete instance.
+  Containing-Scene source binding, logical occurrence and shared Runtime/Canvas identity adoption
+  remain separate from this Prefab-source contract.
   Prefab roots retain source order and are inserted before children authored directly on the
   instance anchor; record sorting never reconstructs either order.
 - Canonical Scene and Prefab files store an ordered document `roots` list and an ordered `children`

@@ -160,8 +160,7 @@ fn projection_path_retained_bytes(
             &mut total,
             checked_sum([
                 asset_ref_retained_bytes(step.source_document())?,
-                step.canonical_source()
-                    .map_or(0, nara_scene::SourceDocumentKey::retained_bytes),
+                step.canonical_source().retained_bytes(),
                 string_retained_bytes(step.source_entity().as_str())?,
             ])?,
         )?;
