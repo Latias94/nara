@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "4f01bf2d8d2cd9a695a1b00a0d0d6c9161766d10d69c9c494c02a30b0a3454b0"
+source_fingerprint: "b82376aaf491afec185709e256e29e4420456ac3a75748fd440036da701bafde"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "4f01bf2d8d2cd9a695a1b00a0d0d6c9161766d10d69c9c494c02a30b0a3
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `4f01bf2d8d2cd9a695a1b00a0d0d6c9161766d10d69c9c494c02a30b0a3454b0`
-- Immutable records: 884
+- Source fingerprint: `b82376aaf491afec185709e256e29e4420456ac3a75748fd440036da701bafde`
+- Immutable records: 885
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Work Progress**: [Canonical Prefab binding checkpoint and required Scene ownership follow-up](progress/2026-10/2026-10-24T111737Z-canonical-prefab-binding-checkpoint-and-required-scene-ownership-follow-up-99eaac49f2074e9f8121bf800204aa97.md) - Commit 1a03766 removes identity-free Prefab resolution; required containing-Scene binding, active occurrence ownership and shared UI identity remain the next replacements.
 - **Verification Evidence**: [Required canonical Prefab source binding qualification](verification/2026-10/2026-10-24T105758Z-required-canonical-prefab-source-binding-qualification-6afeb3f651f5456fba96e8e1e279c46c.md) - All Prefab resolvers and projection steps require canonical source keys; the in-memory adapter owns one document per key and all aliases share its publication.
 - **Verification Evidence**: [Exact stored spelling through filesystem capabilities](verification/2026-10/2026-10-24T095418Z-exact-stored-spelling-through-filesystem-capabilities-79d51b36d2944aa0bc70384eb2d11b86.md) - Bounded exact descendant-name opens preserve capability authority and reject native lookup aliases.
 - **Verification Evidence**: [Project content source admission and canonical Prefab binding qualification](verification/2026-10/2026-10-24T-project-content-source-admission-and-prefab-binding-qualification.md) - ProjectContentLoader admits explicit Scene/Prefab source keys, retains metadata closure members, and lends canonical Prefab bindings through expansion.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Cross-document UI source identity counterexample and next owner boundary](verification/2026-10/2026-10-24T025346Z-cross-document-ui-source-identity-counterexample-and-next-owner-boundary-c8f1cd178d8249a1824d61a363bbcf12.md) - Public same-World two-Scene characterization confirms missing containing source identity; source context and logical occurrence replacement remains Proposed.
 - **Verification Evidence**: [R5a final owner diagnostics and workspace qualification](verification/2026-10/2026-10-24T024954Z-r5a-final-owner-diagnostics-and-workspace-qualification-f58a0ab130cb47a8bc2829e32f1d0a86.md) - Qualified Schema-relative addressing, owner edits, v3 fixtures and safe diagnostic recovery; broader source identity and panel workflows remain open.
 - **Verification Evidence**: [R5a property addressing current qualification](verification/2026-10/2026-10-24T021414Z-r5a-property-addressing-current-qualification.md) - Current serial qualification of scoped property identity metadata, owner edits, and independent consumers; source identity remains open.
-- **Work Progress**: [R5a scoped property identity implementation and open qualification](progress/2026-10/2026-10-24T004112Z-r5a-scoped-property-identity-implementation-and-open-qualification-beb7daa155f8431ebb46c3d5e3082f32.md) - Scoped member lineage and keyed selectors replace the rejected component-global design; owner edits and canonical v3 metadata are implemented but final verification is pending.
 
 # Integration Notes
 
