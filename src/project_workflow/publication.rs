@@ -659,6 +659,7 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
+    use nara_asset::{AssetMeta, AssetMetaIdentity, AssetPath, AssetSourceKind, StableAssetId};
     use nara_fs::{
         CapabilityRights, FsError, FsOperation, HostCapabilityOptions, RelativePath, TrustMode,
     };
@@ -826,6 +827,63 @@ mod tests {
     }
 
     #[test]
+    fn post_publication_startup_metadata_change_prevents_creation_success() {
+        let root = TestRoot::new();
+        let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            root.capability(),
+            ProjectSlug::new("changed-metadata-after-publication").unwrap(),
+            NaraDependencySource::immutable_git(
+                "https://github.com/nara-engine/nara.git",
+                GIT_REVISION,
+            )
+            .unwrap(),
+        ))
+        .unwrap();
+        let metadata = root
+            .path
+            .join("changed-metadata-after-publication/scenes/startup.scene.json.meta");
+
+        let outcome = publish_prepared_with(prepared, |parent, publication, plan, dependency| {
+            let replacement = AssetMeta::new(
+                AssetMetaIdentity::new(
+                    StableAssetId::parse_str("7e8f1a5c-e9fb-4f95-8e4f-8c41c3d3d9bb").unwrap(),
+                    AssetPath::new("startup.scene.json").unwrap(),
+                    AssetSourceKind::Scene,
+                ),
+                (),
+            )
+            .to_json_string()
+            .unwrap();
+            fs::write(&metadata, replacement).unwrap();
+            admit_published(parent, publication, plan, dependency)
+        });
+        if publication_is_unavailable_and_clean(
+            &outcome,
+            &root.path,
+            "changed-metadata-after-publication",
+        ) {
+            return;
+        }
+        let ProjectCreationOutcome::PublishedButUnadmitted(outcome) = outcome else {
+            panic!("expected a published-but-unadmitted outcome: {outcome:?}");
+        };
+
+        assert!(
+            root.path
+                .join("changed-metadata-after-publication")
+                .is_dir()
+        );
+        assert_eq!(
+            outcome.error().kind(),
+            ProjectCreationAdmissionErrorKind::PublishedMember
+        );
+        assert_eq!(
+            outcome.error().member(),
+            Some(ProjectMember::StartupSceneMetadata)
+        );
+    }
+
+    #[test]
     fn manifest_parsing_rejects_bytes_that_do_not_match_the_plan_digest() {
         let root = TestRoot::new();
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
@@ -844,10 +902,18 @@ mod tests {
 
         let outcome = publish_prepared_with(prepared, |parent, publication, plan, dependency| {
             let mut bytes = fs::read_to_string(&manifest).unwrap();
-            bytes = bytes.replace(
-                "name = \"changed-manifest-after-publication\"",
-                "name = \"mutated-but-valid\"",
-            );
+            let original = nara_project::ProjectManifest::parse_toml_str(&bytes)
+                .manifest
+                .unwrap();
+            let replacement = if original.project.source_universe.to_string()
+                == "72011426-37e2-48ba-bc06-78841468889a"
+            {
+                "62011426-37e2-48ba-bc06-78841468889a"
+            } else {
+                "72011426-37e2-48ba-bc06-78841468889a"
+            };
+            bytes = bytes.replace(&original.project.source_universe.to_string(), replacement);
+            assert!(!nara_project::ProjectManifest::parse_toml_str(&bytes).has_errors());
             fs::write(&manifest, bytes).unwrap();
             admit_published(parent, publication, plan, dependency)
         });

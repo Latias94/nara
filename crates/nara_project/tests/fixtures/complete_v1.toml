@@ -1,6 +1,8 @@
 schema_version = 1
 
 [project]
+source_universe = '7675a068-ba77-526a-ad66-728b8913df19'
+native_document_identity = 'project_location'
 name = "Complete Fixture"
 stable_id = "complete-fixture"
 version = "0.1.0"

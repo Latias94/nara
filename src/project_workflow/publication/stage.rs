@@ -122,7 +122,7 @@ fn write_member(
         ProjectMember::AuthoringSchemaBundle => &tree.schema,
         ProjectMember::LibrarySource => &tree.source,
         ProjectMember::HeadlessSource | ProjectMember::DesktopSource => &tree.source_binaries,
-        ProjectMember::StartupScene => &tree.scenes,
+        ProjectMember::StartupScene | ProjectMember::StartupSceneMetadata => &tree.scenes,
     };
     let mut file = parent
         .create_child_file(&member_name(member.member()))
@@ -197,6 +197,7 @@ pub(super) fn member_path(member: ProjectMember) -> RelativePath {
         ProjectMember::HeadlessSource => "src/bin/headless.rs",
         ProjectMember::DesktopSource => "src/bin/desktop.rs",
         ProjectMember::StartupScene => "scenes/startup.scene.json",
+        ProjectMember::StartupSceneMetadata => "scenes/startup.scene.json.meta",
     })
     .expect("the closed starter inventory uses valid relative paths")
 }
@@ -214,16 +215,11 @@ pub(super) fn directory_path(directory: ProjectDirectory) -> RelativePath {
 }
 
 fn member_name(member: ProjectMember) -> RelativeComponent {
-    component(match member {
-        ProjectMember::CargoManifest => "Cargo.toml",
-        ProjectMember::ProjectManifest => "nara.toml",
-        ProjectMember::AuthoringSchemaBundle => "authoring.bundle.json",
-        ProjectMember::AuthorGuide => "README.md",
-        ProjectMember::LibrarySource => "lib.rs",
-        ProjectMember::HeadlessSource => "headless.rs",
-        ProjectMember::DesktopSource => "desktop.rs",
-        ProjectMember::StartupScene => "startup.scene.json",
-    })
+    member_path(member)
+        .components()
+        .last()
+        .cloned()
+        .expect("the closed starter inventory has non-empty relative paths")
 }
 
 fn component(name: &str) -> RelativeComponent {

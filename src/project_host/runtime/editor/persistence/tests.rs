@@ -35,7 +35,7 @@ impl Fixture {
         for directory in ["assets", "scenes", "prefabs", "schema"] {
             fs::create_dir_all(root.join(directory)).unwrap();
         }
-        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nname = \"Document custody\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n[capabilities]\nrequested = [\"runtime-2d\"]\n").unwrap();
+        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nsource_universe = '6d57f8c5-867c-5463-b74a-057a8cabe2bc'\nnative_document_identity = 'project_location'\nname = \"Document custody\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n[capabilities]\nrequested = [\"runtime-2d\"]\n").unwrap();
         let bundle = nara_reflect::AuthoringSchemaBundle::from_trusted_provider_definitions(
             built_in_schema_providers(),
         )

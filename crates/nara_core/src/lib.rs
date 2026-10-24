@@ -5,6 +5,7 @@ pub mod format;
 pub mod limits;
 #[cfg(feature = "serde")]
 pub mod serde_shape;
+pub mod source;
 
 pub use document::{
     DocumentContentState, DocumentHistoryStatus, DocumentRevision, DocumentSourceId,
@@ -21,6 +22,7 @@ pub use limits::{ByteLimit, DepthLimit, ItemLimit, TimeLimit};
 pub use serde_shape::{
     SerdeShapeError, SerdeShapeLimits, SerdeShapePreflightError, preflight_serde_shape,
 };
+pub use source::{SourceUniverseId, SourceUniverseIdError};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

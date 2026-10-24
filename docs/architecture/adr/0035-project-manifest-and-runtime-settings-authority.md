@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-07-18
+**Last Revised**: 2026-10-24
 **Refines**: ADR 0020: Project Source Layout
 **Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041: Input Routing,
 Actions, Text Input, UI Focus, and Accessibility; ADR 0046: Plugin Metadata and Default Plugin
@@ -40,7 +40,8 @@ persistent project configuration source for the same setting.
 The manifest contract is:
 
 - `schema_version` is required and gates future manifest migrations.
-- `[project]` owns project name and optional stable project identity.
+- `[project]` owns project name, a required non-nil `source_universe`, a required
+  `native_document_identity` policy, and optional descriptive stable ID/version fields.
 - `[paths]` owns logical project roots such as assets, scenes, prefabs, scripts, and generated
   `.nara/import-cache`.
 - `[startup]` owns the default startup scene or entry point when a project is launched from files.
@@ -59,9 +60,16 @@ The manifest contract is:
   `server`, `editor`, `dev`, and `release` profiles. Overrides patch manifest values; they do not
   replace the manifest authority.
 
-Canonical version 1 spells product selection as:
+Canonical version 1 declares source authority separately from product selection:
 
 ```toml
+schema_version = 1
+
+[project]
+name = "Example"
+source_universe = "72011426-37e2-48ba-bc06-78841468889a"
+native_document_identity = "stable_metadata"
+
 [runtime]
 preset = "local-headless"
 
@@ -72,6 +80,36 @@ requested = ["runtime-2d", "render-wgpu"]
 The runtime preset is one of `minimal`, `local-headless`, or `server`. Capability IDs are the
 coarse ADR 0079 feature names. A profile capability patch replaces the requested set rather than
 merging it, so one manifest plus profile has one auditable request.
+
+### Authored Source Authority
+
+`source_universe` is an authored UUID namespace for named and project-location sources. It is not
+the optional descriptive `stable_id`, a physical project-root identity, an opened-document
+incarnation, or a hash of project bytes. Its small value type belongs in ECS-independent
+`nara_core`; `nara_project` owns the required manifest carrier and policy, not a source registry.
+
+`native_document_identity` is project-wide, including native documents opened outside configured
+scan roots. `stable_metadata` requires the source owner's valid authored stable metadata;
+`project_location` selects the universe plus full project-relative location. Missing or corrupt
+metadata under the stable policy refuses admission; it never selects the location policy or mints
+an identity during loading. Stable asset/product identity does not inherit the receiving project's
+universe. These fields cannot be profile overlays. A deliberate policy or identity change requires
+source readmission rather than transparent identity continuity.
+
+Ordinary integrated project creation selects `stable_metadata`. Explicit project creation prepares
+fresh source identities once and retains their exact manifest/metadata bytes in the creation plan.
+Parsing, profile resolution, publication retry, reopening, export and repair must not regenerate
+them. The unreleased manifest schema remains 1; the current shape replaces its previous shape
+without a compatibility parser or inferred fields. Internal refactors do not create a released
+format lineage. Normalize other displaced unreleased formats at their owning refactor boundaries,
+not by retaining obsolete readers merely because a previous implementation used another number.
+The optional `stable_id` remains a descriptive application coordinate and is not substituted for
+`source_universe`.
+
+This establishes source configuration authority, not the complete Scene/Prefab source-binding or
+logical-occurrence API. Their owning replacement and qualification are tracked in the
+[source/occurrence design](../scene-source-and-occurrence-identity-design.md) and implementation
+ledger. A carrier-only implementation must not be reported as loader or UI identity qualification.
 
 Host/composition code opens and bounds `nara.toml` through a host-issued `nara_fs` capability, then
 passes an immutable byte or UTF-8 candidate into `nara_project`. The project crate owns parsing,
@@ -197,6 +235,5 @@ library-style embedded apps.
 
 ## Open Questions
 
-- Should project stable identity be required immediately or optional until packaging/export exists?
 - Should profile overlays live inline in `nara.toml` only, or may they be split into profile files
   later while preserving one effective manifest authority?

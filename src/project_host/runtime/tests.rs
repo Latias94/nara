@@ -835,6 +835,8 @@ fn editor_prefab_lane_saves_and_reopens_the_exact_source_document() {
         r#"schema_version = 1
 
 [project]
+source_universe = 'c60a6da4-b6a7-5028-bc53-39111af1a2ba'
+native_document_identity = 'project_location'
 name = "Editor Prefab Persistence"
 
 [paths]
@@ -4613,6 +4615,8 @@ fn editor_ui_authoring_frame_and_continuous_gesture_share_one_exact_prefab_revis
         r#"schema_version = 1
 
 [project]
+source_universe = 'c60a6da4-b6a7-5028-bc53-39111af1a2ba'
+native_document_identity = 'project_location'
 name = "Editor UI Authoring Frame"
 
 [paths]
@@ -5534,6 +5538,8 @@ fn editor_play_profile_keeps_logical_producers_without_native_gpu_contributions(
         r#"schema_version = 1
 
 [project]
+source_universe = 'c60a6da4-b6a7-5028-bc53-39111af1a2ba'
+native_document_identity = 'project_location'
 name = "Editor Play Placement"
 
 [paths]
@@ -7057,6 +7063,8 @@ impl TestProject {
                 r#"schema_version = 1
 
 [project]
+source_universe = 'c60a6da4-b6a7-5028-bc53-39111af1a2ba'
+native_document_identity = 'project_location'
 name = "{name}"
 
 [paths]
@@ -7138,6 +7146,8 @@ requested = ["runtime-2d"]
                 r#"schema_version = 1
 
 [project]
+source_universe = 'c60a6da4-b6a7-5028-bc53-39111af1a2ba'
+native_document_identity = 'project_location'
 name = "{name}"
 stable_id = "{name}"
 
@@ -7207,6 +7217,8 @@ desktop = []
                 r#"schema_version = 1
 
 [project]
+source_universe = 'c60a6da4-b6a7-5028-bc53-39111af1a2ba'
+native_document_identity = 'project_location'
 name = "{name}"
 
 [paths]

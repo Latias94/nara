@@ -106,7 +106,7 @@ impl TextProject {
         for path in ["assets", "prefabs", "scenes", "schema", "scripts"] {
             fs::create_dir(root.join(path)).unwrap();
         }
-        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nname = \"Editor text\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n[capabilities]\nrequested = [\"runtime-2d\"]\n").unwrap();
+        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nsource_universe = '24ed5e36-1b37-5fa3-9c42-232066b17916'\nnative_document_identity = 'project_location'\nname = \"Editor text\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n[capabilities]\nrequested = [\"runtime-2d\"]\n").unwrap();
         fs::write(
             root.join("scenes/startup.scene.json"),
             SceneDocument::from_ordered_roots([])

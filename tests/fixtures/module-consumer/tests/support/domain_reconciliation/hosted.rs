@@ -864,7 +864,7 @@ impl Project {
         for directory in ["assets", "scenes", "prefabs", "schema"] {
             fs::create_dir(root.join(directory)).unwrap();
         }
-        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nname = \"Native travel\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[content]\nscenes = [\"next.scene.json\"]\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n[capabilities]\nrequested = [\"runtime-2d\"]\n").unwrap();
+        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nsource_universe = 'c40c55e1-345b-5c21-936f-42ba01306c28'\nnative_document_identity = 'project_location'\nname = \"Native travel\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[content]\nscenes = [\"next.scene.json\"]\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n[capabilities]\nrequested = [\"runtime-2d\"]\n").unwrap();
         for path in ["startup.scene.json", "next.scene.json"] {
             let scene = SceneDocument::from_ordered_roots([
                 SceneEntityRecord::new(SceneEntityId::new("one").unwrap()),

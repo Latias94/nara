@@ -1,6 +1,8 @@
 schema_version = 1
 
 [project]
+source_universe = 'ee6d3cbc-9b11-5dc8-96fa-94299e28c369'
+native_document_identity = 'project_location'
 name = "Nara Reference Game"
 stable_id = "nara-reference-game"
 version = "0.1.0"

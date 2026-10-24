@@ -462,6 +462,8 @@ impl SourceProject {
             r#"schema_version = 1
 
 [project]
+source_universe = '5e1088f6-adb1-50fa-ad05-913801be66b0'
+native_document_identity = 'project_location'
 name = "Export Source Test"
 
 [paths]

@@ -454,6 +454,8 @@ impl CatalogueProject {
             format!(
                 r#"schema_version = 1
 [project]
+source_universe = '257bb27b-5c5f-559d-8283-f498450385be'
+native_document_identity = 'project_location'
 name = "Catalogue measurement"
 [paths]
 assets = "assets"

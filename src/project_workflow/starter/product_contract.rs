@@ -1,7 +1,8 @@
+use nara_asset::{AssetMetaIdentity, AssetMetaIdentityCandidate};
 use nara_fs::ContentDigest;
 use nara_project::{
-    ProductCapability, ProductCapabilitySet, ProjectExecutionContract, ProjectManifest,
-    RuntimePreset,
+    NativeDocumentIdentity, ProductCapability, ProductCapabilitySet, ProjectExecutionContract,
+    ProjectManifest, RuntimePreset, SourceUniverseId,
 };
 use nara_reflect::AuthoringSchemaBundle;
 use nara_scene::SceneDocumentCandidate;
@@ -28,6 +29,9 @@ const LIBRARY_MARKERS: [&[u8]; 2] = [
 const BINARY_MARKER: &[u8] = b"nara_game::product_recipe()";
 
 pub(super) struct ProductContractSources<'a> {
+    pub(super) source_universe: SourceUniverseId,
+    pub(super) expected_startup_metadata: &'a AssetMetaIdentity,
+    pub(super) startup_metadata: &'a [u8],
     pub(super) cargo_manifest: &'a [u8],
     pub(super) project_manifest: &'a [u8],
     pub(super) authoring_schema_bundle: &'a [u8],
@@ -87,12 +91,17 @@ required-features = ["desktop"]
     )
 }
 
-pub(super) fn render_project_manifest(slug: &ProjectSlug) -> String {
+pub(super) fn render_project_manifest(
+    slug: &ProjectSlug,
+    source_universe: SourceUniverseId,
+) -> String {
     format!(
         r#"schema_version = 1
 
 [project]
 name = "{}"
+source_universe = "{source_universe}"
+native_document_identity = "stable_metadata"
 stable_id = "{}"
 version = "0.1.0"
 
@@ -182,6 +191,8 @@ pub(super) fn validate(
         ProductCapability::RenderWgpu,
     ]);
     if manifest.project.name != slug.as_str()
+        || manifest.project.source_universe != sources.source_universe
+        || manifest.project.native_document_identity != NativeDocumentIdentity::StableMetadata
         || manifest.project.stable_id.as_deref() != Some(slug.as_str())
         || manifest.project.version.as_deref() != Some("0.1.0")
         || manifest.paths.assets != "assets"
@@ -226,6 +237,11 @@ pub(super) fn validate(
     )?;
     SceneDocumentCandidate::decode_json_bytes(sources.startup_scene)
         .map_err(|_| "generated startup scene is invalid")?;
+    let metadata = AssetMetaIdentityCandidate::decode_json_bytes(sources.startup_metadata)
+        .map_err(|_| "generated startup Scene metadata is invalid")?;
+    if metadata.identity() != sources.expected_startup_metadata {
+        return Err("generated startup Scene identity disagrees with the creation plan");
+    }
     Ok(())
 }
 

@@ -1,6 +1,8 @@
 schema_version = 1
 
 [project]
+source_universe = 'be3dea0c-93ef-5607-ab84-af715a1f98b3'
+native_document_identity = 'project_location'
 name = "two-level-game"
 stable_id = "two-level-game"
 version = "0.1.0"

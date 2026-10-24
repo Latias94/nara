@@ -1,4 +1,5 @@
 use nara_app::{FixedCatchUpPolicy, FixedTime, RuntimeTimeSettings};
+use nara_core::SourceUniverseId;
 use nara_diagnostic::RuntimeDiagnosticsSettings;
 use nara_ecs::Resource;
 use nara_tasks::TaskPoolConfig;
@@ -11,8 +12,8 @@ use crate::path::ProjectPath;
 use crate::profile::ProjectProfileError;
 use crate::render::EffectiveRenderSettings;
 use crate::sections::{
-    ProjectPathsManifest, ProjectProfileKind, ProjectStartupManifest, ProjectUiManifest,
-    ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest,
+    NativeDocumentIdentity, ProjectPathsManifest, ProjectProfileKind, ProjectStartupManifest,
+    ProjectUiManifest, ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest,
 };
 
 #[derive(Debug, Clone, PartialEq, Resource)]
@@ -43,6 +44,8 @@ impl EffectiveProjectSettings {
             schema_version: manifest.schema_version,
             project: EffectiveProjectInfo {
                 name: manifest.project.name.clone(),
+                source_universe: manifest.project.source_universe,
+                native_document_identity: manifest.project.native_document_identity,
                 stable_id: manifest.project.stable_id.clone(),
                 version: manifest.project.version.clone(),
             },
@@ -205,6 +208,8 @@ impl From<ProjectUiSafeAreaManifest> for EffectiveUiSafeArea {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectiveProjectInfo {
     pub name: String,
+    pub source_universe: SourceUniverseId,
+    pub native_document_identity: NativeDocumentIdentity,
     pub stable_id: Option<String>,
     pub version: Option<String>,
 }

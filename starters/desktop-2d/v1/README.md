@@ -4,6 +4,12 @@ This project was created from an immutable starter. Its generated files are proj
 The exact starter and Nara dependency coordinate are recorded above and in `Cargo.toml`; upgrades
 are explicit migrations, not automatic starter updates.
 
+The project manifest declares an authored `project.source_universe` and the project-wide
+`project.native_document_identity = "stable_metadata"` policy. Creation prepares these identities
+once, including `scenes/startup.scene.json.meta`; publication uses those exact prepared bytes.
+Keep authored metadata with its source. Parsing, reopening and startup selection repair do not
+generate replacement identity. The descriptive project `stable_id` is not the source universe.
+
 The project has two explicit product targets:
 
 - `headless`, using the base `runtime-2d` product;
@@ -79,8 +85,9 @@ The candidate's `bin/headless` and `bin/desktop --verify-first-present` executab
 sibling `project/` tree, so they can be launched from an unrelated working directory without this
 checkout or a Rust toolchain. Add `.exe` to the executable names on Windows.
 
-To exercise explicit recovery, move `scenes/startup.scene.json` to
-`scenes/repaired.scene.json` with your editor or file manager, then run:
+To exercise explicit recovery, move `scenes/startup.scene.json` and its `.meta` sidecar to
+`scenes/repaired.scene.json` and `scenes/repaired.scene.json.meta`. Update the metadata's authored
+path to `repaired.scene.json` while retaining its stable asset ID, then run:
 
 ```text
 nara check .

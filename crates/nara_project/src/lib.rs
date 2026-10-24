@@ -11,7 +11,7 @@ pub const MAX_PROJECT_FIXED_DEBT_STEPS: u32 = MAX_PROJECT_FIXED_STEPS_PER_FRAME 
 pub const MAX_PROJECT_UI_LOGICAL_EXTENT: u32 = 65_536;
 /// Maximum bytes retained for one profile execution contract identifier.
 pub const MAX_PROJECT_EXECUTION_CONTRACT_BYTES: usize = 128;
-/// Maximum explicit Scene roots in the version-1 project content declaration.
+/// Maximum explicit Scene roots in the project content declaration.
 ///
 /// The selected startup Scene is implicit and does not consume this declaration limit. This is
 /// a manifest admission bound, not a promise about supported scene size or runtime performance.
@@ -40,6 +40,7 @@ pub use effective::{
 pub use manifest::{
     ProjectManifest, ProjectManifestLoad, ProjectManifestMutationError, ProjectManifestWriteError,
 };
+pub use nara_core::{SourceUniverseId, SourceUniverseIdError};
 pub use path::{ProjectPath, ProjectPathError};
 pub use profile::{
     ProjectCapabilitiesPatch, ProjectDiagnosticsPatch, ProjectExecutionPatch, ProjectInputPatch,
@@ -52,11 +53,12 @@ pub use render::{
     ProjectWorldCanvasManifest,
 };
 pub use sections::{
-    ProjectAuthoringManifest, ProjectCapabilitiesManifest, ProjectDiagnosticsManifest,
-    ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest, ProjectPathsManifest,
-    ProjectPresentMode, ProjectProfileKind, ProjectRuntimeManifest, ProjectStartupManifest,
-    ProjectTaskPoolManifest, ProjectTaskShutdownManifest, ProjectTasksManifest, ProjectUiManifest,
-    ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest, ProjectWindowManifest, ProjectWindowMode,
+    NativeDocumentIdentity, ProjectAuthoringManifest, ProjectCapabilitiesManifest,
+    ProjectDiagnosticsManifest, ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest,
+    ProjectPathsManifest, ProjectPresentMode, ProjectProfileKind, ProjectRuntimeManifest,
+    ProjectStartupManifest, ProjectTaskPoolManifest, ProjectTaskShutdownManifest,
+    ProjectTasksManifest, ProjectUiManifest, ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest,
+    ProjectWindowManifest, ProjectWindowMode,
 };
 
 pub mod prelude {
@@ -69,18 +71,20 @@ pub mod prelude {
         EffectiveStartupSettings, EffectiveTaskSettings, EffectiveUiSafeArea, EffectiveUiSettings,
         EffectiveWindowSettings, EffectiveWorldCanvas, MAX_PROJECT_CONTENT_SCENES,
         MAX_PROJECT_EXECUTION_CONTRACT_BYTES, MAX_PROJECT_FIXED_DEBT_STEPS,
-        MAX_PROJECT_FIXED_STEPS_PER_FRAME, MAX_PROJECT_UI_LOGICAL_EXTENT, ProductCapability,
-        ProductCapabilitySet, ProjectAuthoringManifest, ProjectCapabilitiesManifest,
-        ProjectCapabilitiesPatch, ProjectContentManifest, ProjectDiagnosticsManifest,
-        ProjectExecutionContract, ProjectExecutionPatch, ProjectFixedCatchUpPolicy, ProjectInfo,
-        ProjectInputManifest, ProjectManifest, ProjectManifestLoad, ProjectManifestMutationError,
-        ProjectManifestWriteError, ProjectPath, ProjectPathError, ProjectPathsManifest,
-        ProjectPresentMode, ProjectProfileError, ProjectProfileKind, ProjectProfileOverlay,
-        ProjectRenderManifest, ProjectRenderPatch, ProjectRuntimeManifest, ProjectStartupManifest,
-        ProjectTaskPoolManifest, ProjectTaskPoolPatch, ProjectTaskShutdownManifest,
-        ProjectTaskShutdownPatch, ProjectTasksManifest, ProjectTasksPatch, ProjectUiManifest,
-        ProjectUiPatch, ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest, ProjectWindowManifest,
-        ProjectWindowMode, ProjectWorldCanvasManifest, RuntimePreset,
+        MAX_PROJECT_FIXED_STEPS_PER_FRAME, MAX_PROJECT_UI_LOGICAL_EXTENT, NativeDocumentIdentity,
+        ProductCapability, ProductCapabilitySet, ProjectAuthoringManifest,
+        ProjectCapabilitiesManifest, ProjectCapabilitiesPatch, ProjectContentManifest,
+        ProjectDiagnosticsManifest, ProjectExecutionContract, ProjectExecutionPatch,
+        ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest, ProjectManifest,
+        ProjectManifestLoad, ProjectManifestMutationError, ProjectManifestWriteError, ProjectPath,
+        ProjectPathError, ProjectPathsManifest, ProjectPresentMode, ProjectProfileError,
+        ProjectProfileKind, ProjectProfileOverlay, ProjectRenderManifest, ProjectRenderPatch,
+        ProjectRuntimeManifest, ProjectStartupManifest, ProjectTaskPoolManifest,
+        ProjectTaskPoolPatch, ProjectTaskShutdownManifest, ProjectTaskShutdownPatch,
+        ProjectTasksManifest, ProjectTasksPatch, ProjectUiManifest, ProjectUiPatch,
+        ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest, ProjectWindowManifest,
+        ProjectWindowMode, ProjectWorldCanvasManifest, RuntimePreset, SourceUniverseId,
+        SourceUniverseIdError,
     };
 }
 

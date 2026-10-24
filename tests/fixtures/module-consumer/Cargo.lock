@@ -1925,6 +1925,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.19",
  "toml",
+ "uuid",
  "windows-sys 0.61.2",
 ]
 
@@ -2053,6 +2054,7 @@ dependencies = [
  "glam",
  "semver",
  "serde",
+ "uuid",
 ]
 
 [[package]]

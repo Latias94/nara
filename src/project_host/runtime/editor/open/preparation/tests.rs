@@ -36,6 +36,8 @@ impl StartupProject {
             root.join("nara.toml"),
             r#"schema_version = 1
 [project]
+source_universe = '933964bb-d1c2-5fc0-a440-45abd07d05d7'
+native_document_identity = 'project_location'
 name = "Owned Startup"
 [paths]
 assets = "assets"

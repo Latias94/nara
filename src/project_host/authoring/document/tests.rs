@@ -286,6 +286,8 @@ impl TestProject {
             "nara.toml",
             br#"schema_version = 1
 [project]
+source_universe = '02cc62a3-cb41-57b0-b1c8-a7b98f50bdf9'
+native_document_identity = 'project_location'
 name = "Owned Document"
 [authoring]
 schema_bundle = "schema/authoring.bundle.json"

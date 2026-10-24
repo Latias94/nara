@@ -2093,6 +2093,7 @@ dependencies = [
  "toml",
  "tracing",
  "trybuild",
+ "uuid",
  "windows-sys 0.61.2",
  "yaml-rust2",
 ]
@@ -2164,6 +2165,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

@@ -1019,6 +1019,8 @@ fn editor_game_start_publishes_only_after_the_exact_native_activation() {
         r#"schema_version = 1
 
 [project]
+source_universe = 'ef254486-6691-5566-ba7b-27996b80a5ce'
+native_document_identity = 'project_location'
 name = "Editor Game Start"
 
 [paths]

@@ -621,6 +621,7 @@ fn new_command_creates_and_admits_a_local_project_from_an_unrelated_cwd() {
 
     assert!(project.join("nara.toml").is_file());
     assert!(project.join("scenes/startup.scene.json").is_file());
+    assert_created_source_identity(&project);
     let cargo_manifest = fs::read_to_string(project.join("Cargo.toml")).unwrap();
     let cargo: toml::Value = toml::from_str(&cargo_manifest).unwrap();
     let dependency = cargo["dependencies"]["nara"]["path"].as_str().unwrap();
@@ -630,6 +631,28 @@ fn new_command_creates_and_admits_a_local_project_from_an_unrelated_cwd() {
         fs::canonicalize(&checkout).unwrap()
     );
     assert!(cargo_manifest.contains("[workspace]\nresolver = \"3\""));
+}
+
+fn assert_created_source_identity(project: &Path) {
+    let bytes = fs::read(project.join("nara.toml")).unwrap();
+    let manifest = nara::project::ProjectManifest::parse_toml_bytes(&bytes)
+        .manifest
+        .unwrap();
+    assert_eq!(
+        manifest.project.native_document_identity,
+        nara::project::NativeDocumentIdentity::StableMetadata
+    );
+    assert!(!manifest.project.source_universe.as_uuid().is_nil());
+    let metadata = nara::asset::AssetMetaIdentityCandidate::decode_json_bytes(
+        &fs::read(project.join("scenes/startup.scene.json.meta")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(metadata.identity().path().as_str(), "startup.scene.json");
+    assert_eq!(
+        metadata.identity().source_kind(),
+        &nara::asset::AssetSourceKind::Scene
+    );
+    assert!(!metadata.identity().stable_id().as_uuid().is_nil());
 }
 
 #[test]
@@ -692,6 +715,7 @@ fn new_command_accepts_a_valid_immutable_git_source() {
         "git = \"https://github.com/nara-engine/nara.git\", rev = \"0123456789abcdef0123456789abcdef01234567\""
     ));
     assert!(!cargo_manifest.contains("@"));
+    assert_created_source_identity(&project);
 }
 
 #[test]

@@ -144,6 +144,8 @@ mod tests {
                 path.join("nara.toml"),
                 r#"schema_version = 1
 [project]
+source_universe = 'e6896809-3ac2-5a42-bfb7-cddc44b3f2ee'
+native_document_identity = 'project_location'
 name = "schema-test"
 [authoring]
 schema_bundle = "schema/authoring.bundle.json"

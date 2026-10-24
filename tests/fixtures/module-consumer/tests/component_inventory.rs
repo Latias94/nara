@@ -591,7 +591,7 @@ impl Project {
         for directory in ["assets", "prefabs", "scenes", "schema"] {
             fs::create_dir(root.join(directory)).unwrap();
         }
-        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nname = \"Component inventory consumer\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[capabilities]\nrequested = [\"runtime-2d\"]\n").unwrap();
+        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nsource_universe = '46044116-21ed-563c-ac41-77db155ac518'\nnative_document_identity = 'project_location'\nname = \"Component inventory consumer\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[capabilities]\nrequested = [\"runtime-2d\"]\n").unwrap();
         fs::write(
             root.join("scenes/startup.scene.json"),
             document.to_json_string().unwrap(),

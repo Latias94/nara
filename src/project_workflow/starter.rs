@@ -1,7 +1,8 @@
 use std::fmt::{self, Debug, Formatter};
 
+use nara_asset::{AssetMeta, AssetMetaIdentity, AssetPath, AssetSourceKind, StableAssetId};
 use nara_fs::{ContentDigest, PathValidationError, RelativeComponent};
-use nara_project::CURRENT_PROJECT_SCHEMA_VERSION;
+use nara_project::{CURRENT_PROJECT_SCHEMA_VERSION, SourceUniverseId};
 use nara_reflect::{AuthoringSchemaBundle, ComponentSchemaProviderDefinition};
 use thiserror::Error;
 
@@ -135,6 +136,7 @@ pub enum ProjectMember {
     HeadlessSource,
     DesktopSource,
     StartupScene,
+    StartupSceneMetadata,
     AuthoringSchemaBundle,
 }
 
@@ -335,12 +337,25 @@ const DESKTOP_2D_V1_AUTHORING_SCHEMA_PROVIDERS: [ComponentSchemaProviderDefiniti
 
 pub(crate) fn build_desktop_2d_v1_plan(
     slug: ProjectSlug,
+    source_universe: SourceUniverseId,
+    startup_scene_identity: StableAssetId,
     dependency_manifest_fragment: &str,
     creation_command_arguments: &str,
     dependency_receipt: NaraDependencyReceipt,
 ) -> Result<ProjectCreationPlan, &'static str> {
     let cargo_manifest = render_cargo_manifest(&slug, dependency_manifest_fragment);
-    let project_manifest = render_project_manifest(&slug);
+    let project_manifest = render_project_manifest(&slug, source_universe);
+    let startup_metadata = AssetMeta::new(
+        AssetMetaIdentity::new(
+            startup_scene_identity,
+            AssetPath::new("startup.scene.json").expect("the starter Scene path is valid"),
+            AssetSourceKind::Scene,
+        ),
+        (),
+    );
+    let startup_metadata_json = startup_metadata
+        .to_json_string()
+        .map_err(|_| "starter Scene metadata could not be encoded")?;
     let authoring_schema_bundle = desktop_2d_v1_authoring_schema_bundle()?;
     let authoring_schema_bundle_json = authoring_schema_bundle
         .to_json_string()
@@ -354,6 +369,9 @@ pub(crate) fn build_desktop_2d_v1_plan(
         &slug,
         &dependency_receipt,
         ProductContractSources {
+            source_universe,
+            expected_startup_metadata: startup_metadata.identity(),
+            startup_metadata: startup_metadata_json.as_bytes(),
             cargo_manifest: cargo_manifest.as_bytes(),
             project_manifest: project_manifest.as_bytes(),
             authoring_schema_bundle: authoring_schema_bundle_json.as_bytes(),
@@ -376,6 +394,10 @@ pub(crate) fn build_desktop_2d_v1_plan(
         member(ProjectMember::HeadlessSource, HEADLESS_SOURCE)?,
         member(ProjectMember::DesktopSource, DESKTOP_SOURCE)?,
         member(ProjectMember::StartupScene, STARTUP_SCENE)?,
+        member(
+            ProjectMember::StartupSceneMetadata,
+            startup_metadata_json.as_bytes(),
+        )?,
         member(
             ProjectMember::AuthoringSchemaBundle,
             authoring_schema_bundle_json.as_bytes(),

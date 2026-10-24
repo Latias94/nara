@@ -54,7 +54,7 @@ mod product_default_configuration;
 #[test]
 fn headless_world_canvas_setting_does_not_request_or_install_presentation() {
     let manifest = TestManifest::new(
-        "schema_version = 1\n[project]\nname = 'Headless canvas'\n[runtime]\npreset = 'local-headless'\n[render.world_canvas]\nwidth = 320\nheight = 180\n",
+        "schema_version = 1\n[project]\nsource_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'\nnative_document_identity = 'project_location'\nname = 'Headless canvas'\n[runtime]\npreset = 'local-headless'\n[render.world_canvas]\nwidth = 320\nheight = 180\n",
     );
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
     assert_eq!(candidate.settings().render.world_canvas.unwrap().width, 320);
@@ -81,7 +81,7 @@ fn assert_project_world_canvas_composition(capabilities: &[&str]) {
         .collect::<Vec<_>>()
         .join(", ");
     let manifest = TestManifest::new(&format!(
-        "schema_version = 1\n[project]\nname = 'Canvas composition'\n[window]\nwidth = 1280\nheight = 720\n[capabilities]\nrequested = [{requested}]\n[render.world_canvas]\nwidth = 320\nheight = 180\n[profiles.native.render]\nclear_world_canvas = true\n",
+        "schema_version = 1\n[project]\nsource_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'\nnative_document_identity = 'project_location'\nname = 'Canvas composition'\n[window]\nwidth = 1280\nheight = 720\n[capabilities]\nrequested = [{requested}]\n[render.world_canvas]\nwidth = 320\nheight = 180\n[profiles.native.render]\nclear_world_canvas = true\n",
     ));
     let fixed_candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
     let native_candidate = ingest_project_manifest(&manifest.capability(), Some("native")).unwrap();
@@ -1771,6 +1771,8 @@ fn requested_product_capability_alternative_is_recorded_as_an_admission_witness(
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Alternative Product Capability"
 
 [runtime]
@@ -1805,6 +1807,8 @@ fn every_requested_matching_alternative_is_recorded_conservatively() {
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Multiple Product Capability Alternatives"
 
 [runtime]
@@ -1856,6 +1860,8 @@ fn product_recipe_cannot_inject_image_prepare_into_runtime_2d() {
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Content-Only Runtime 2D"
 
 [runtime]
@@ -1912,6 +1918,8 @@ fn runtime_2d_selects_camera_content_without_presentation_scheduling() {
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Runtime 2D Camera Content"
 
 [runtime]
@@ -2280,6 +2288,8 @@ fn lineage_and_runtime_plan_debug_output_do_not_disclose_manifest_values() {
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "{CANARY}"
 
 [runtime]
@@ -2316,6 +2326,8 @@ fn plugin_debug_output_does_not_disclose_manifest_window_title() {
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Window Debug Privacy"
 
 [runtime]
@@ -2473,6 +2485,8 @@ fn presentation_2d_profile_satisfies_shared_image_prepare_and_render_plugins() {
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Presentation 2D Composition"
 
 [runtime]
@@ -2512,6 +2526,8 @@ fn presentation_2d_wgpu_profile_installs_only_the_sprite_contribution() {
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Presentation 2D WGPU Composition"
 
 [runtime]
@@ -2555,6 +2571,8 @@ fn presentation_ui_profile_satisfies_shared_image_prepare_and_render_plugins() {
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Runtime UI Composition"
 
 [runtime]
@@ -2605,6 +2623,8 @@ fn desktop_presentation_ui_profile_installs_winit_accessibility_once() {
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Desktop Presentation UI Composition"
 
 [runtime]
@@ -2642,6 +2662,8 @@ fn presentation_ui_wgpu_profile_installs_only_the_ui_contribution() {
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Presentation UI WGPU Composition"
 
 [runtime]
@@ -2691,6 +2713,8 @@ fn combined_wgpu_profile_installs_each_contribution_once() {
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Combined WGPU Composition"
 
 [runtime]
@@ -2811,6 +2835,8 @@ fn render_wgpu_profile_satisfies_the_shared_render_plugin() {
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Render WGPU Composition"
 
 [runtime]
@@ -2855,6 +2881,8 @@ fn editor_profile_keeps_tooling_out_of_the_runtime_plan() {
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Host-Owned Editor Profile"
 
 [profiles.editor]
@@ -3079,6 +3107,8 @@ const MINIMAL_MANIFEST: &str = r#"
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Plugin Composition"
 
 [runtime]
@@ -3092,6 +3122,8 @@ const CHANGED_MANIFEST: &str = r#"
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Changed Plugin Composition"
 
 [runtime]
@@ -3105,6 +3137,8 @@ const PROFILE_MANIFEST: &str = r#"
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Profile Lineage"
 
 [runtime]
@@ -3123,6 +3157,8 @@ const DESKTOP_MANIFEST: &str = r#"
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Desktop Plugin Composition"
 
 [runtime]
@@ -3149,6 +3185,8 @@ const FULL_PRODUCT_MANIFEST: &str = r#"
 schema_version = 1
 
 [project]
+source_universe = '8b29f285-a84c-57fe-b680-f7271c6b9eb4'
+native_document_identity = 'project_location'
 name = "Full Product Plugin Composition"
 
 [runtime]

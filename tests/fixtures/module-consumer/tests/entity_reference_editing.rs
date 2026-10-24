@@ -862,7 +862,7 @@ impl Project {
         for directory in ["assets", "prefabs", "scenes", "schema"] {
             fs::create_dir(root.join(directory)).unwrap();
         }
-        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nname = \"Entity reference consumer\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n[capabilities]\nrequested = [\"runtime-2d\"]\n").unwrap();
+        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nsource_universe = 'ebf75b1d-134b-5966-bc8b-b7ca14e8b578'\nnative_document_identity = 'project_location'\nname = \"Entity reference consumer\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n[capabilities]\nrequested = [\"runtime-2d\"]\n").unwrap();
         let document = SceneDocument::from_ordered_roots([
             SceneEntityRecord::new(id("source")).with_component(
                 ComponentTypeId::new(COMPONENT),

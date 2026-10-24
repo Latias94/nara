@@ -13,6 +13,8 @@ const MINIMAL_MANIFEST: &str = r#"
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Test Game"
 "#;
 const COMPLETE_MANIFEST: &str = include_str!("../tests/fixtures/complete_v1.toml");
@@ -41,6 +43,89 @@ fn diagnostic_field_class(diagnostic: &Diagnostic, key: &str) -> Option<Diagnost
         .iter()
         .find(|field| field.key().as_str() == key)
         .map(|field| field.class())
+}
+
+#[test]
+fn source_identity_round_trips_without_becoming_a_profile_setting() {
+    let source = r#"
+schema_version = 1
+[project]
+name = "Source identity"
+source_universe = "72011426-37e2-48ba-bc06-78841468889a"
+native_document_identity = "stable_metadata"
+[profiles.dev.window]
+enabled = false
+"#;
+    let load = ProjectManifest::parse_toml_str(source);
+    assert!(!load.has_errors(), "{:?}", load.diagnostics);
+    let manifest = load.manifest.unwrap();
+    let base = manifest.resolve_profile(None).unwrap();
+    let dev = manifest.resolve_profile(Some("dev")).unwrap();
+    assert_eq!(base.project.source_universe, dev.project.source_universe);
+    assert_eq!(
+        base.project.source_universe.to_string(),
+        "72011426-37e2-48ba-bc06-78841468889a"
+    );
+    assert_eq!(
+        base.project.native_document_identity,
+        NativeDocumentIdentity::StableMetadata
+    );
+    assert_eq!(
+        base.project.native_document_identity,
+        dev.project.native_document_identity
+    );
+    let encoded = manifest.to_canonical_toml_bytes().unwrap();
+    let reparsed = ProjectManifest::parse_toml_bytes(&encoded);
+    assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics);
+    assert_eq!(reparsed.manifest.unwrap(), manifest);
+    let value: toml::Value = toml::from_str(std::str::from_utf8(&encoded).unwrap()).unwrap();
+    assert_eq!(
+        value["project"]["source_universe"].as_str(),
+        Some("72011426-37e2-48ba-bc06-78841468889a")
+    );
+    assert_eq!(
+        value["project"]["native_document_identity"].as_str(),
+        Some("stable_metadata")
+    );
+    let override_source = format!(
+        "{source}\n[profiles.dev.project]\nnative_document_identity = \"project_location\"\n"
+    );
+    assert!(
+        ProjectManifest::parse_toml_str(&override_source)
+            .manifest
+            .is_none()
+    );
+}
+
+#[test]
+fn source_identity_cannot_be_missing_nil_or_inferred_from_an_old_manifest() {
+    let valid = "schema_version = 1\n[project]\nname = 'Required source'\nsource_universe = '72011426-37e2-48ba-bc06-78841468889a'\nnative_document_identity = 'project_location'\n";
+    for source in [
+        valid.replace(
+            "source_universe = '72011426-37e2-48ba-bc06-78841468889a'\n",
+            "",
+        ),
+        valid.replace("native_document_identity = 'project_location'\n", ""),
+        valid.replace(
+            "72011426-37e2-48ba-bc06-78841468889a",
+            "00000000-0000-0000-0000-000000000000",
+        ),
+        valid.replace("72011426-37e2-48ba-bc06-78841468889a", "not-a-universe"),
+        valid.replace("project_location", "fallback"),
+    ] {
+        let load = ProjectManifest::parse_toml_str(&source);
+        assert!(
+            load.manifest.is_none(),
+            "accepted invalid source identity: {source}"
+        );
+        assert!(diagnostic_codes(&load).contains(&"project.manifest.parse"));
+    }
+    let legacy =
+        ProjectManifest::parse_toml_str("schema_version = 1\n[project]\nname = 'Old project'\n");
+    assert!(legacy.has_errors());
+    let unsupported =
+        ProjectManifest::parse_toml_str(&valid.replace("schema_version = 1", "schema_version = 2"));
+    assert!(diagnostic_codes(&unsupported).contains(&"project.manifest.unsupported-schema"));
 }
 
 #[test]
@@ -78,6 +163,8 @@ fn authoring_schema_bundle_is_project_wide_and_canonical() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Authoring Bundle"
 
 [authoring]
@@ -109,6 +196,8 @@ fn authoring_schema_bundle_rejects_an_invalid_project_path() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Invalid Authoring Bundle"
 
 [authoring]
@@ -127,6 +216,8 @@ fn execution_contract_is_profile_local_exact_and_forward_compatible() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Execution Contract"
 
 [profiles.desktop.execution]
@@ -185,6 +276,8 @@ fn execution_contract_rejects_an_unbounded_or_non_identifier_value() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Invalid Execution Contract"
 
 [profiles.desktop.execution]
@@ -206,6 +299,8 @@ fn profile_cannot_override_the_project_wide_authoring_bundle() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Profile Authoring Override"
 
 [profiles.dev.authoring]
@@ -224,6 +319,8 @@ fn primary_ui_surface_is_optional_bounded_and_profile_owned() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "UI Surface"
 
 [ui.primary_surface]
@@ -273,6 +370,8 @@ logical_height = 720
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Invalid UI Surface"
 
 [ui.primary_surface]
@@ -338,6 +437,8 @@ schema_version = 1
 unexpected = true
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Bad"
 "#,
     );
@@ -359,6 +460,8 @@ schema_version = 1
 unexpected = "{canary}"
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Private Project"
 "#
     );
@@ -388,6 +491,8 @@ fn invalid_paths_produce_structured_diagnostics() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Bad Paths"
 
 [paths]
@@ -411,6 +516,8 @@ fn invalid_project_path_diagnostic_never_retains_the_raw_path() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Private Paths"
 
 [paths]
@@ -440,6 +547,8 @@ fn invalid_profile_name_is_redacted_before_overlay_field_paths_are_built() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Private Profile"
 
 [profiles."{profile_canary}".window]
@@ -476,6 +585,8 @@ fn diagnostic_identity_limits_do_not_reject_domain_valid_profile_names() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Long Profile"
 
 [profiles."{profile_name}".window]
@@ -512,6 +623,8 @@ fn runtime_rejects_non_finite_negative_overflowing_and_sub_nanosecond_values() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Invalid Runtime"
 
 [runtime]
@@ -530,6 +643,8 @@ fn runtime_rejects_zero_duration_and_fixed_caps() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Zero Runtime Limits"
 
 [runtime]
@@ -555,6 +670,8 @@ fn runtime_rejects_fixed_caps_above_project_hard_limits() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Oversized Fixed Runtime"
 
 [runtime]
@@ -577,6 +694,8 @@ max_fixed_debt_steps = {too_much_debt}
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Oversized Fixed Profile"
 
 [profiles.dev.runtime]
@@ -600,6 +719,8 @@ max_fixed_debt_steps = {too_much_debt}
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Fixed Runtime Boundary"
 
 [runtime]
@@ -626,6 +747,8 @@ fn obsolete_plugin_plan_field_is_rejected() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Obsolete Plugin Plan"
 
 [runtime]
@@ -645,6 +768,8 @@ fn runtime_tooling_capabilities_are_rejected_by_manifest() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Runtime Tooling Capability"
 
 [capabilities]
@@ -667,6 +792,8 @@ fn server_profile_enforces_headless_preserve_debt_with_threaded_tasks() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Server Game"
 
 [profiles.server]
@@ -702,6 +829,8 @@ fn editor_profile_does_not_request_runtime_tooling() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Host-Owned Editor"
 
 [profiles.editor]
@@ -728,6 +857,8 @@ fn server_preset_enforces_runtime_invariants_without_named_profile() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Direct Server Plan"
 
 [runtime]
@@ -757,6 +888,8 @@ fn profile_overlay_lowers_complete_runtime_task_and_project_settings() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Overlay Game"
 
 [runtime]
@@ -877,6 +1010,8 @@ fn profile_overlay_can_clear_optional_startup_and_input_paths() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Clear Overlay Game"
 
 [startup]
@@ -905,6 +1040,8 @@ fn server_profile_invariants_survive_hostile_overlay_values_without_resetting_de
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Hostile Server Game"
 
 [profiles.server.runtime]
@@ -970,6 +1107,8 @@ fn obsolete_flat_task_schema_is_rejected() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Obsolete Tasks"
 
 [tasks]
@@ -987,6 +1126,8 @@ fn task_settings_reject_zero_pool_and_shutdown_limits() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Zero Tasks"
 
 [tasks.io]
@@ -1013,6 +1154,8 @@ fn task_settings_reject_per_pool_and_aggregate_limits() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Per Pool Limits"
 
 [tasks.io]
@@ -1035,6 +1178,8 @@ pending_capacity = {}
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Aggregate Limits"
 
 [tasks.io]
@@ -1063,6 +1208,8 @@ fn task_profile_patch_is_validated_after_merging_with_base_settings() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Patched Aggregate Limits"
 
 [tasks.io]
@@ -1097,6 +1244,8 @@ fn task_settings_reject_phase_and_aggregate_shutdown_timeouts() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Shutdown Limits"
 
 [tasks.shutdown]
@@ -1118,6 +1267,8 @@ fn manifest_rejects_diagnostic_capacity_above_engine_cap() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Oversized Diagnostics"
 
 [diagnostics]
@@ -1136,6 +1287,8 @@ fn disabled_invalid_base_window_is_rejected_before_profile_reenable() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Window Reenable Game"
 
 [window]
@@ -1238,6 +1391,8 @@ fn duplicate_and_unknown_product_capabilities_are_rejected() {
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Duplicate Capabilities"
 
 [capabilities]
@@ -1251,6 +1406,8 @@ requested = ["runtime-2d", "runtime-2d"]
 schema_version = 1
 
 [project]
+source_universe = 'c945c1a2-4484-5a1e-b4fe-1ed73294d35a'
+native_document_identity = 'project_location'
 name = "Unknown Capability"
 
 [capabilities]

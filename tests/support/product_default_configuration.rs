@@ -26,7 +26,7 @@ fn manifest(presentation: bool) -> TestManifest {
         r#"["runtime-ui"]"#
     };
     TestManifest::new(&format!(
-        "schema_version = 1\n[project]\nname = 'Configured UI'\n[runtime]\npreset = 'minimal'\n[capabilities]\nrequested = {capabilities}\n"
+        "schema_version = 1\n[project]\nsource_universe = 'e561e359-65db-5481-af4d-5707d1c662df'\nnative_document_identity = 'project_location'\nname = 'Configured UI'\n[runtime]\npreset = 'minimal'\n[capabilities]\nrequested = {capabilities}\n"
     ))
 }
 

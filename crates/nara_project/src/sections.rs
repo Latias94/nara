@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, time::Duration};
 
 use nara_app::{FixedCatchUpPolicy, FixedTime, RuntimeTimeSettings};
-use nara_core::{ByteLimit, ItemLimit, TimeLimit};
+use nara_core::{ByteLimit, ItemLimit, SourceUniverseId, TimeLimit};
 use nara_diagnostic::{
     DiagnosticReport, MAX_RUNTIME_DIAGNOSTIC_ENTRIES, RuntimeDiagnosticsSettings,
 };
@@ -36,10 +36,23 @@ const PROJECT_RUNTIME_DIAGNOSTIC_BYTE_LIMIT: usize = 1024 * 1024;
 #[serde(deny_unknown_fields)]
 pub struct ProjectInfo {
     pub name: String,
+    pub source_universe: SourceUniverseId,
+    pub native_document_identity: NativeDocumentIdentity,
+    /// Optional descriptive project coordinate, not source equality authority.
     #[serde(default)]
     pub stable_id: Option<String>,
     #[serde(default)]
     pub version: Option<String>,
+}
+
+/// Project-wide source identity policy for native Scene and Prefab admission.
+///
+/// This is not a lookup fallback: missing stable metadata cannot select location identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeDocumentIdentity {
+    ProjectLocation,
+    StableMetadata,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]

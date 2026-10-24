@@ -106,6 +106,8 @@ fn server_preset_rejects_client_capabilities_before_publication() {
 schema_version = 1
 
 [project]
+source_universe = 'fdb0ca56-759d-5f78-8b7b-83d3228d7cf5'
+native_document_identity = 'project_location'
 name = "Server Conflict"
 
 [runtime]
@@ -129,6 +131,8 @@ fn presentation_requires_its_content_capability_during_manifest_ingest() {
 schema_version = 1
 
 [project]
+source_universe = 'fdb0ca56-759d-5f78-8b7b-83d3228d7cf5'
+native_document_identity = 'project_location'
 name = "Incomplete Presentation Closure"
 
 [capabilities]
@@ -162,6 +166,8 @@ requested = ["presentation-2d"]
 schema_version = 1
 
 [project]
+source_universe = 'fdb0ca56-759d-5f78-8b7b-83d3228d7cf5'
+native_document_identity = 'project_location'
 name = "Complete Presentation Closure"
 
 [capabilities]
@@ -190,6 +196,8 @@ fn runtime_tooling_capability_is_rejected_before_host_admission() {
 schema_version = 1
 
 [project]
+source_universe = 'fdb0ca56-759d-5f78-8b7b-83d3228d7cf5'
+native_document_identity = 'project_location'
 name = "Unavailable Tooling"
 
 [capabilities]
@@ -222,6 +230,8 @@ fn invalid_utf8_and_toml_shape_publish_no_candidate() {
         br#"
 schema_version = 1
 [project]
+source_universe = 'fdb0ca56-759d-5f78-8b7b-83d3228d7cf5'
+native_document_identity = 'project_location'
 name = ["not", "a", "string"]
 "#,
     );
@@ -453,6 +463,8 @@ fn minimal_manifest() -> &'static str {
 schema_version = 1
 
 [project]
+source_universe = 'fdb0ca56-759d-5f78-8b7b-83d3228d7cf5'
+native_document_identity = 'project_location'
 name = "Capability Test"
 "#
 }

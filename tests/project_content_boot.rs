@@ -861,6 +861,8 @@ fn ui_visual_asset_reference_alone_enters_the_startup_content_closure() {
         r#"schema_version = 1
 
 [project]
+source_universe = 'c3422bfd-4907-5b31-9ce9-cdd97a77d607'
+native_document_identity = 'project_location'
 name = "UI Content Test"
 
 [paths]

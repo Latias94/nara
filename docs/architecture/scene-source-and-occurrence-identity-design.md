@@ -260,6 +260,15 @@ and these canonical alias/cycle tests are still pending.
 
 ### Native Policy Decision Before Production Adoption
 
+The production manifest carrier now places both required fields in `[project]`:
+`source_universe` and `native_document_identity`. Unlike the optional content-root declaration,
+neither can disappear through defaulting/empty serialization or vary by profile. The non-nil
+`SourceUniverseId` value is ECS-independent in `nara_core`; policy and lowering belong to
+`nara_project`. Explicit creation prepares the universe and startup Scene metadata once and
+retains their exact member bytes/digests. The unreleased manifest remains schema 1 and replaces
+the old shape without a compatibility reader. This carrier/creation unit does not enforce native
+loader policy or adopt canonical Scene/Prefab provenance, occurrence claims or shared UI keys.
+
 A required project-level enum is smaller than a second per-document location list, but it applies
 to all native document admission, not merely configured Scene/Prefab directories. The existing
 [mixed-source rename consumer](../../src/project_host/authoring/mod.rs) has a metadata-free Scene

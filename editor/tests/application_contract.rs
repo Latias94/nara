@@ -1703,6 +1703,7 @@ fn member_path(member: ProjectMember) -> &'static str {
         ProjectMember::HeadlessSource => "src/bin/headless.rs",
         ProjectMember::DesktopSource => "src/bin/desktop.rs",
         ProjectMember::StartupScene => "scenes/startup.scene.json",
+        ProjectMember::StartupSceneMetadata => "scenes/startup.scene.json.meta",
         ProjectMember::AuthoringSchemaBundle => "schema/authoring.bundle.json",
     }
 }

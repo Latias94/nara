@@ -58,6 +58,8 @@ impl TestProject {
             r#"schema_version = 1
 
 [project]
+source_universe = '39f9d09d-63e3-5fc4-8e3f-71e84893cb8d'
+native_document_identity = 'project_location'
 name = "Content Test"
 
 [paths]
@@ -194,6 +196,8 @@ requested = ["runtime-2d"]
             r#"schema_version = 1
 
 [project]
+source_universe = '39f9d09d-63e3-5fc4-8e3f-71e84893cb8d'
+native_document_identity = 'project_location'
 name = "Runtime Test"
 
 [paths]

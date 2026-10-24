@@ -444,6 +444,8 @@ impl Fixture {
             r#"schema_version = 1
 
 [project]
+source_universe = '93f754e6-cbaf-5562-92f0-68ba1e50f6c8'
+native_document_identity = 'project_location'
 name = "Scene Request"
 [paths]
 assets = "assets"

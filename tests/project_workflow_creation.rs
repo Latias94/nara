@@ -23,6 +23,54 @@ const GIT_REVISION: &str = "0123456789abcdef0123456789abcdef01234567";
 static NEXT_TEMP_ROOT: AtomicU64 = AtomicU64::new(1);
 
 #[test]
+fn independent_project_preparations_do_not_share_source_identities() {
+    let root = TestRoot::new("independent-identities");
+    let prepare = || {
+        prepare_desktop_2d_project(ProjectCreationRequest::new(
+            root.writable_capability(),
+            ProjectSlug::new("same-slug").unwrap(),
+            NaraDependencySource::immutable_git(
+                "https://github.com/nara-engine/nara.git",
+                GIT_REVISION,
+            )
+            .unwrap(),
+        ))
+        .unwrap()
+    };
+    let first = prepare();
+    let second = prepare();
+    let manifest = |prepared: &nara::project_workflow::PreparedProjectCreation| {
+        nara::project::ProjectManifest::parse_toml_bytes(
+            prepared
+                .plan()
+                .member(ProjectMember::ProjectManifest)
+                .unwrap()
+                .bytes(),
+        )
+        .manifest
+        .unwrap()
+    };
+    assert_ne!(
+        manifest(&first).project.source_universe,
+        manifest(&second).project.source_universe
+    );
+    let scene_id = |prepared: &nara::project_workflow::PreparedProjectCreation| {
+        nara::asset::AssetMetaIdentityCandidate::decode_json_bytes(
+            prepared
+                .plan()
+                .member(ProjectMember::StartupSceneMetadata)
+                .unwrap()
+                .bytes(),
+        )
+        .unwrap()
+        .identity()
+        .stable_id()
+    };
+    assert_ne!(scene_id(&first), scene_id(&second));
+    assert!(!root.path().join("same-slug").exists());
+}
+
+#[test]
 fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
     let root = TestRoot::new("closed-plan");
     let parent = root.writable_capability();
@@ -61,6 +109,7 @@ fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
             ProjectMember::HeadlessSource,
             ProjectMember::DesktopSource,
             ProjectMember::StartupScene,
+            ProjectMember::StartupSceneMetadata,
             ProjectMember::AuthoringSchemaBundle,
         ]
     );
@@ -114,8 +163,34 @@ fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
     let load = nara::project::ProjectManifest::parse_toml_bytes(manifest.bytes());
     assert!(!load.has_errors());
     let manifest = load.manifest.unwrap();
+    assert_eq!(manifest.schema_version, 1);
+    assert_eq!(
+        manifest.project.native_document_identity,
+        nara::project::NativeDocumentIdentity::StableMetadata
+    );
+    assert!(!manifest.project.source_universe.as_uuid().is_nil());
     let headless = manifest.resolve_profile(None).unwrap();
     let desktop = manifest.resolve_profile(Some("desktop")).unwrap();
+    assert_eq!(
+        headless.project.source_universe,
+        manifest.project.source_universe
+    );
+    assert_eq!(
+        desktop.project.source_universe,
+        manifest.project.source_universe
+    );
+    let metadata = nara::asset::AssetMetaIdentityCandidate::decode_json_bytes(
+        plan.member(ProjectMember::StartupSceneMetadata)
+            .unwrap()
+            .bytes(),
+    )
+    .unwrap();
+    assert_eq!(
+        metadata.identity().source_kind(),
+        &nara::asset::AssetSourceKind::Scene
+    );
+    assert_eq!(metadata.identity().path().as_str(), "startup.scene.json");
+    assert!(!metadata.identity().stable_id().as_uuid().is_nil());
     assert!(
         headless
             .requested_capabilities
@@ -475,6 +550,18 @@ fn published_project_is_reopened_and_admitted_through_ordinary_authority() {
     ))
     .unwrap();
 
+    let planned_manifest = prepared
+        .plan()
+        .member(ProjectMember::ProjectManifest)
+        .unwrap()
+        .bytes()
+        .to_vec();
+    let planned_metadata = prepared
+        .plan()
+        .member(ProjectMember::StartupSceneMetadata)
+        .unwrap()
+        .bytes()
+        .to_vec();
     let outcome = prepared.publish();
     if publication_is_unavailable_and_clean(&outcome, root.path(), "published-game") {
         return;
@@ -527,9 +614,21 @@ fn published_project_is_reopened_and_admitted_through_ordinary_authority() {
             ProjectDirectory::SourceBinaries,
         ]
     );
-    assert_eq!(receipt.plan().members().len(), 8);
+    assert_eq!(receipt.plan().members().len(), 9);
 
     let project_root = receipt.project_root();
+    assert_eq!(
+        fs::read(root.path().join("published-game/nara.toml")).unwrap(),
+        planned_manifest
+    );
+    assert_eq!(
+        fs::read(
+            root.path()
+                .join("published-game/scenes/startup.scene.json.meta")
+        )
+        .unwrap(),
+        planned_metadata
+    );
     let manifest = project_root
         .open_file(&RelativePath::new("nara.toml").unwrap())
         .unwrap();
@@ -566,6 +665,7 @@ fn published_project_is_reopened_and_admitted_through_ordinary_authority() {
         "src/bin/headless.rs",
         "src/bin/desktop.rs",
         "scenes/startup.scene.json",
+        "scenes/startup.scene.json.meta",
     ] {
         assert!(root.path().join("published-game").join(path).is_file());
     }

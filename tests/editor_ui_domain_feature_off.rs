@@ -36,7 +36,7 @@ fn feature_off_editor_preserves_ui_structure_gate_for_retained_data_catalogs() {
     for directory in ["assets", "scenes", "prefabs", "schema"] {
         fs::create_dir_all(root.join(directory)).unwrap();
     }
-    fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nname = \"Feature-off UI gate\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n").unwrap();
+    fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nsource_universe = '1ce79b89-364a-5824-b43a-2b903cb0c3b8'\nnative_document_identity = 'project_location'\nname = \"Feature-off UI gate\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n").unwrap();
     fs::copy(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/generic-editor/image-import/schema/authoring.bundle.json"),

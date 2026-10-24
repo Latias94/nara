@@ -1,6 +1,8 @@
 schema_version = 1
 
 [project]
+source_universe = 'a05e94aa-dba4-57ac-950f-d1c52f150671'
+native_document_identity = 'project_location'
 name = "collect-game"
 stable_id = "collect-game"
 version = "0.1.0"

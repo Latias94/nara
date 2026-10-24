@@ -2,10 +2,12 @@ use nara_diagnostic::{DiagnosticFieldClass, DiagnosticValueRef};
 
 use crate::{MAX_PROJECT_CONTENT_SCENES, ProjectManifest, ProjectProfileError};
 
-const MINIMAL: &str = "schema_version = 1\n[project]\nname = 'Content roots'\n";
+const MINIMAL: &str = "schema_version = 1\n[project]\nsource_universe = '2649c813-2b09-54bb-98b6-35e506c33d16'\nnative_document_identity = 'project_location'\nname = 'Content roots'\n";
 const DECLARED: &str = r#"
 schema_version = 1
 [project]
+source_universe = '2649c813-2b09-54bb-98b6-35e506c33d16'
+native_document_identity = 'project_location'
 name = "Content roots"
 [paths]
 scenes = "levels"
@@ -74,6 +76,7 @@ fn absent_and_explicit_empty_content_have_the_same_canonical_bytes() {
 fn canonical_startup_repair_preserves_declared_roots_and_profiles() {
     let mut manifest = ProjectManifest::parse_toml_str(DECLARED).manifest.unwrap();
     let content = manifest.content.clone();
+    let project = manifest.project.clone();
     let profiles = manifest.profiles.clone();
     manifest
         .replace_startup_scene(
@@ -87,6 +90,7 @@ fn canonical_startup_repair_preserves_declared_roots_and_profiles() {
     let reloaded = load.manifest.unwrap();
     assert_eq!(reloaded, manifest);
     assert_eq!(reloaded.content, content);
+    assert_eq!(reloaded.project, project);
     assert_eq!(reloaded.profiles, profiles);
     assert_eq!(reloaded.to_canonical_toml_bytes().unwrap(), bytes);
 }

@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 glam.workspace = true
 semver.workspace = true
+uuid.workspace = true
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]

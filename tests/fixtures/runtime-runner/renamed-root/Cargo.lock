@@ -965,6 +965,7 @@ dependencies = [
  "glam",
  "semver",
  "serde",
+ "uuid",
 ]
 
 [[package]]

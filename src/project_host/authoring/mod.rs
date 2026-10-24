@@ -1541,6 +1541,8 @@ mod tests {
                     r#"schema_version = 1
 
 [project]
+source_universe = 'bb46c078-85b1-5823-8b1d-647b3b9e1f22'
+native_document_identity = 'project_location'
 name = "{name}"
 
 [authoring]
@@ -1568,6 +1570,8 @@ schema_bundle = "{BUNDLE_PATH}"
                     r#"schema_version = 1
 
 [project]
+source_universe = 'bb46c078-85b1-5823-8b1d-647b3b9e1f22'
+native_document_identity = 'project_location'
 name = "asset-closure"
 
 [paths]

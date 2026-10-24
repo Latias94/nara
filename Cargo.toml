@@ -139,6 +139,7 @@ windows-sys = "0.61.2"
 [dependencies]
 blake3 = { workspace = true, optional = true }
 getrandom = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 nara_app = { workspace = true, optional = true }
 nara_asset = { workspace = true, optional = true }
 nara_asset_watch = { workspace = true, optional = true }
@@ -279,6 +280,7 @@ project-workflow = [
     "runtime-2d",
     "serde",
     "dep:getrandom",
+    "dep:uuid",
     "dep:toml",
 ]
 project-workflow-cargo-facts = ["project-workflow", "dep:serde_json"]

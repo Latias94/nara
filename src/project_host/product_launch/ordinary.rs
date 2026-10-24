@@ -326,6 +326,8 @@ mod tests {
             root.join("nara.toml"),
             r#"schema_version = 1
 [project]
+source_universe = 'faedd389-ae49-519e-b046-6351fc9eda45'
+native_document_identity = 'project_location'
 name = "product-expired-cleanup"
 [paths]
 assets = "assets"

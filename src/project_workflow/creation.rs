@@ -1,3 +1,5 @@
+use nara_asset::StableAssetId;
+use nara_core::SourceUniverseId;
 use nara_fs::{DirectoryCapability, RelativeComponent};
 use thiserror::Error;
 
@@ -66,6 +68,7 @@ pub enum ProjectCreationPlanErrorKind {
     LocalParentUnavailable,
     LocalParentMismatch,
     NonUtf8LocalCoordinate,
+    SourceIdentityEntropy,
     StarterContract,
 }
 
@@ -79,6 +82,8 @@ pub enum ProjectCreationPlanError {
     LocalParentMismatch,
     #[error("local dependency coordinate is not UTF-8 and cannot be represented in Cargo.toml")]
     NonUtf8LocalCoordinate,
+    #[error("project source identity could not be generated")]
+    SourceIdentityEntropy(#[source] getrandom::Error),
     #[error("desktop-2d/v1 starter contract is invalid: {0}")]
     StarterContract(&'static str),
 }
@@ -93,6 +98,7 @@ impl ProjectCreationPlanError {
             Self::LocalParentUnavailable(_) => ProjectCreationPlanErrorKind::LocalParentUnavailable,
             Self::LocalParentMismatch => ProjectCreationPlanErrorKind::LocalParentMismatch,
             Self::NonUtf8LocalCoordinate => ProjectCreationPlanErrorKind::NonUtf8LocalCoordinate,
+            Self::SourceIdentityEntropy(_) => ProjectCreationPlanErrorKind::SourceIdentityEntropy,
             Self::StarterContract(_) => ProjectCreationPlanErrorKind::StarterContract,
         }
     }
@@ -128,8 +134,11 @@ pub fn prepare_desktop_2d_project(
         receipt,
         revalidation: dependency_revalidation,
     } = dependency;
+    let (source_universe, startup_scene_identity) = prepare_source_identities(getrandom::fill)?;
     let plan = build_desktop_2d_v1_plan(
         slug,
+        source_universe,
+        startup_scene_identity,
         &manifest_fragment,
         &creation_command_arguments,
         receipt,
@@ -141,4 +150,41 @@ pub fn prepare_desktop_2d_project(
         plan,
         dependency_revalidation,
     })
+}
+
+fn prepare_source_identities(
+    fill: impl FnOnce(&mut [u8]) -> Result<(), getrandom::Error>,
+) -> Result<(SourceUniverseId, StableAssetId), ProjectCreationPlanError> {
+    let mut entropy = [[0_u8; 16]; 2];
+    fill(entropy.as_flattened_mut()).map_err(ProjectCreationPlanError::SourceIdentityEntropy)?;
+    let [project, scene] = entropy;
+    let project = uuid::Builder::from_random_bytes(project).into_uuid();
+    let scene = uuid::Builder::from_random_bytes(scene).into_uuid();
+    Ok((
+        SourceUniverseId::try_from_uuid(project).expect("a version-4 UUID is not nil"),
+        StableAssetId::from_uuid(scene),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_identity_entropy_is_consumed_once_and_failure_is_explicit() {
+        let (universe, scene) = prepare_source_identities(|bytes| {
+            assert_eq!(bytes.len(), 32);
+            bytes[..16].fill(1);
+            bytes[16..].fill(2);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(universe.to_string(), "01010101-0101-4101-8101-010101010101");
+        assert_eq!(scene.to_string(), "02020202-0202-4202-8202-020202020202");
+        let error = prepare_source_identities(|_| Err(getrandom::Error::UNSUPPORTED)).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            ProjectCreationPlanErrorKind::SourceIdentityEntropy
+        );
+    }
 }

@@ -458,6 +458,8 @@ impl TestSourceProject {
             r#"schema_version = 1
 
 [project]
+source_universe = '63f498b6-6969-5cfc-87fe-c8c093fdc7ce'
+native_document_identity = 'project_location'
 name = "{name}"
 
 [paths]

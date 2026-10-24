@@ -3129,7 +3129,7 @@ mod tests {
         for directory in ["assets", "scenes", "prefabs", "schema"] {
             fs::create_dir_all(root.join(directory)).unwrap();
         }
-        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nname = \"UI transition\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n[capabilities]\nrequested = [\"runtime-2d\", \"runtime-ui\"]\n").unwrap();
+        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nsource_universe = '75a0a1c0-daf6-5671-b219-c2e2137d5517'\nnative_document_identity = 'project_location'\nname = \"UI transition\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n[capabilities]\nrequested = [\"runtime-2d\", \"runtime-ui\"]\n").unwrap();
         fs::write(
             root.join("scenes/startup.scene.json"),
             SceneDocument::default().to_json_string().unwrap(),

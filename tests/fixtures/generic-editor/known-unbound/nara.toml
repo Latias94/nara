@@ -1,6 +1,8 @@
 schema_version = 1
 
 [project]
+source_universe = 'c3504a11-271b-59f3-b385-4810c9a5c5a2'
+native_document_identity = 'project_location'
 name = "Signal Workshop"
 stable_id = "signal-workshop-clean-room"
 version = "0.1.0"

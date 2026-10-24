@@ -1,6 +1,8 @@
 schema_version = 1
 
 [project]
+source_universe = '796b54db-7d94-51a0-9ca8-a19d46ce7b50'
+native_document_identity = 'project_location'
 name = "Renamed Root Recipe Fixture"
 stable_id = "renamed-root-recipe-fixture"
 version = "0.1.0"

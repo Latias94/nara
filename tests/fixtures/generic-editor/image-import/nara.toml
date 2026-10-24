@@ -1,6 +1,8 @@
 schema_version = 1
 
 [project]
+source_universe = 'ad920d01-bb38-572b-8c99-17c1a2f267d9'
+native_document_identity = 'project_location'
 name = "Standalone Image Import"
 stable_id = "standalone-image-import-fixture"
 version = "0.1.0"
