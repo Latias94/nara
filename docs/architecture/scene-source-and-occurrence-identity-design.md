@@ -227,6 +227,37 @@ The production trial must compare a source-owned preparation that delays World a
 an explicitly retained World-bound preparation, including failure and cancellation custody. Do not
 relocate this work into a caller's second candidate or cleanup system merely to keep the old API.
 
+The production preparation kernel now separates native values from runtime target binding. Reflect
+retains all unbound values with the same scratch asset catalogue; Scene runs this phase after
+topology/identity-capacity admission and before allocating Scene entities. Deferred native failure
+therefore does not need target-entity rollback. This is an internal owner change, not an ordinary
+public Scene prepare/cancel API: the advanced retained publication still owns scratch entities,
+and later admission failures retain their existing cleanup/custody semantics.
+
+### Canonical Prefab Resolution Entry
+
+The resolver replacement must lend one private-field binding of canonical document key and
+immutable Prefab, not an independently assemblable key/document pair. Path/StableId requests are
+lookup coordinates; only the admitted source owner proves that two aliases resolve to that binding.
+An in-memory Rust author can explicitly bind aliases to one named source without inventing a new
+durable request syntax. Missing, unsupported product, wrong kind and conflicting admission must
+not collapse into an unqualified bare-document result or fallback to another product.
+
+Expansion must resolve first and check its active ancestry using the canonical document key,
+including product, rather than the requested `AssetRef`. The original request is diagnostic/write-
+back context only. Structured projection steps carry the resolved key and pre-remap source-local
+entity; the containing Scene key remains a separate outer coordinate. Repeated siblings and
+diamond dependencies are legal: source discovery deduplication is not an active-recursion stack.
+Count materialization and patch work per instance even when a source read is shared.
+
+Each recursive exit must pop its ancestry frame on patch, reference, structure and budget failure.
+Association is checked against the effective patched source, including valid override-added
+entities, not by requiring every materialized entity to exist in the unpatched Prefab. Existing
+source-local reference remaps and opaque generated runtime locators remain; no parser of expanded
+IDs or second source registry is needed. The retained project resolver must lend its bound source
+without leaking independently cloneable allocations beyond the source lease. Production adoption
+and these canonical alias/cycle tests are still pending.
+
 ### Native Policy Decision Before Production Adoption
 
 A required project-level enum is smaller than a second per-document location list, but it applies

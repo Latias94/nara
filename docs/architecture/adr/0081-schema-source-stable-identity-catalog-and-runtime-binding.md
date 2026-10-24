@@ -224,6 +224,15 @@ A content snapshot may certify bounded document/schema decoding and the explicit
 does not certify a future target `World`'s observer or component-registration topology. Runtime
 construction and every direct persistent-spawn path own the second check.
 
+Scene materialization separates fallible native-value preparation from runtime target binding.
+After the existing topology and identity-capacity admission, the component batch prepares all native
+values in its original scratch asset context before allocating Scene target entities. A preparation
+failure disposes the partial owned values and scratch catalogue without consuming Scene target
+allocations. Values and their originating batch stay inseparable; binding targets does not rerun
+codecs or transfer prepared handles to another catalogue. Final World, target, asset and lifecycle
+admission remains mandatory. This does not make the entire Scene publication allocation-free, undo
+ordinary deferred World work, or roll back arbitrary codec/destructor effects outside its context.
+
 Any future catalog-derived persistent composition must add stable `ComponentTypeId` dependencies,
 bounded deterministic closure and cycle rules, default/override/removal semantics, migrations, and
 unavailable-provider behavior to a versioned fingerprint. It must agree across Scene, Prefab,

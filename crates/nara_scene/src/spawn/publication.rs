@@ -413,6 +413,7 @@ impl PreparedScenePublication {
 mod tests {
     use super::*;
     use crate::{SceneEntityRecord, advanced::SceneProductResource, spawn_scene};
+    use nara_asset::{AssetRef, AssetServer, Handle};
     use nara_core::ItemLimit;
     use nara_ecs::{
         Resource,
@@ -424,8 +425,14 @@ mod tests {
         EntityLookup, PersistentRuntimeId, PersistentRuntimeNamespaceId,
         PersistentRuntimeReference, WorldIdentityDomain, spawn_identity_entity,
     };
+    use nara_reflect::{
+        __macro_support::{decode_persistent_field, encode_persistent_field},
+        ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
+        ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+        ComponentValueKind, PreparedComponentCandidate,
+    };
     use std::sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicUsize, Ordering},
     };
 
@@ -443,6 +450,95 @@ mod tests {
     #[derive(Resource)]
     struct ProductValue(u32);
     impl SceneProductResource for ProductValue {}
+
+    struct ProbeAsset;
+
+    #[derive(Default)]
+    struct NativePreparationProbe {
+        runs: AtomicUsize,
+        drops: AtomicUsize,
+        handle: OnceLock<Handle<ProbeAsset>>,
+    }
+
+    #[derive(Component)]
+    struct PreparedNativeValue {
+        handle: Handle<ProbeAsset>,
+        probe: Arc<NativePreparationProbe>,
+    }
+
+    impl Drop for PreparedNativeValue {
+        fn drop(&mut self) {
+            self.probe.drops.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn native_value_candidate(
+        id: SceneEntityId,
+        probe: &Arc<NativePreparationProbe>,
+    ) -> (ComponentRegistry, ExpandedSceneCandidate) {
+        let component_id = ComponentTypeId::new("test.PreparedNativeValue");
+        let schema = ComponentSchema::new(
+            component_id.clone(),
+            "Prepared value",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("asset"),
+            "Asset",
+            ComponentFieldPath::from_fields(["asset"]),
+            ComponentValueKind::AssetRef,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_capability(ComponentCapability::AssetRef)]);
+        let observed = Arc::clone(probe);
+        let mut registry = ComponentRegistry::new();
+        registry
+            .register_persistent_component_codec_with_context::<PreparedNativeValue, _, _>(
+                schema,
+                move |value, _| {
+                    let asset = decode_persistent_field::<AssetRef>(value, "asset")?;
+                    let probe = Arc::clone(&observed);
+                    Ok(PreparedComponentCandidate::with_asset_server(
+                        move |context| {
+                            probe.runs.fetch_add(1, Ordering::Relaxed);
+                            let handle = context
+                                .resolve_asset_ref::<ProbeAsset>(&asset)
+                                .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
+                            assert!(
+                                probe.handle.set(handle).is_ok(),
+                                "native preparation must run once"
+                            );
+                            Ok(PreparedNativeValue { handle, probe })
+                        },
+                    ))
+                },
+                |value, world, context| {
+                    let asset = AssetRef::from_handle_with_policy(
+                        world.resource::<AssetServer>(),
+                        value.handle,
+                        context.asset_ref_export_policy(),
+                    )
+                    .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
+                    Ok(ComponentValue::map([(
+                        "asset",
+                        encode_persistent_field(&asset)?,
+                    )]))
+                },
+            )
+            .unwrap();
+        registry.freeze().unwrap();
+        let asset = AssetRef::path("textures/retained-native.png").unwrap();
+        let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id)
+            .with_component(
+                component_id,
+                crate::SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::map([("asset", encode_persistent_field(&asset).unwrap())]),
+                ),
+            )]);
+        (registry, ExpandedSceneCandidate::plain(Arc::new(document)))
+    }
 
     fn fixture() -> (
         World,
@@ -650,7 +746,9 @@ mod tests {
 
     #[test]
     fn owned_replacement_retries_exact_candidate_without_replaying_configuration() {
-        let (mut world, registry, candidate, current, old, id) = fixture();
+        let (mut world, _, _, current, old, id) = fixture();
+        let probe = Arc::new(NativePreparationProbe::default());
+        let (registry, candidate) = native_value_candidate(id.clone(), &probe);
         let calls = Arc::new(AtomicUsize::new(0));
         let claims = SceneNativeRetirementClaims::from_component_ids([world
             .component_id::<NativeState>()
@@ -676,11 +774,18 @@ mod tests {
         assert_eq!(world.resource::<Removed>().0, 0);
         assert_eq!(world.resource::<ProductValue>().0, 1);
         assert_eq!(current.resolve(&world, &id), EntityLookup::Resolved(old));
+        assert_eq!(probe.runs.load(Ordering::Relaxed), 1);
+        assert_eq!(probe.drops.load(Ordering::Relaxed), 0);
+        let handle = *probe.handle.get().unwrap();
+        assert!(!world.contains_resource::<AssetServer>());
         let (prepared, report) = match prepared.commit(&mut world) {
             Err(failure) => failure,
             Ok(_) => panic!("native ownership was not retired"),
         };
         assert!(report.diagnostics.has_errors());
+        assert_eq!(probe.runs.load(Ordering::Relaxed), 1);
+        assert_eq!(probe.drops.load(Ordering::Relaxed), 0);
+        assert!(!world.contains_resource::<AssetServer>());
         world.entity_mut(old).remove::<NativeState>();
         let report = match prepared.commit(&mut world) {
             Ok(report) => report,
@@ -691,6 +796,39 @@ mod tests {
         assert_eq!(world.resource::<Removed>().0, 1);
         assert_eq!(world.resource::<ProductValue>().0, 2);
         assert!(world.get_entity(old).is_err());
+        let successor = report.instance.unwrap();
+        let EntityLookup::Resolved(entity) = successor.resolve(&world, &id) else {
+            panic!("replacement must resolve")
+        };
+        assert_eq!(
+            world.get::<PreparedNativeValue>(entity).unwrap().handle,
+            handle
+        );
+        assert_eq!(
+            world.resource::<AssetServer>().path(handle.id()),
+            Some("textures/retained-native.png")
+        );
+        assert_eq!(probe.runs.load(Ordering::Relaxed), 1);
+        assert_eq!(probe.drops.load(Ordering::Relaxed), 0);
+        retire_and_despawn_scene_instance(&mut world, &successor).unwrap();
+        assert_eq!(probe.drops.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn cancelled_owned_replacement_disposes_native_value_without_publishing_its_asset() {
+        let (mut world, _, _, current, old, id) = fixture();
+        let probe = Arc::new(NativePreparationProbe::default());
+        let (registry, candidate) = native_value_candidate(id.clone(), &probe);
+        let prepared = prepare_fixture_replacement(&mut world, &registry, &candidate, &current);
+        assert_eq!(probe.runs.load(Ordering::Relaxed), 1);
+        assert_eq!(probe.drops.load(Ordering::Relaxed), 0);
+        assert!(prepared.discard(&mut world).is_ok());
+        assert_eq!(probe.runs.load(Ordering::Relaxed), 1);
+        assert_eq!(probe.drops.load(Ordering::Relaxed), 1);
+        assert!(!world.contains_resource::<AssetServer>());
+        assert!(world.get::<NativeState>(old).is_some());
+        assert_eq!(current.resolve(&world, &id), EntityLookup::Resolved(old));
+        assert_eq!(world.resource::<Removed>().0, 0);
     }
 
     #[test]

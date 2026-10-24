@@ -674,6 +674,42 @@ impl SceneSpawner {
                     });
                 }
             };
+        let mut component_locations = Vec::new();
+        let mut components = Vec::new();
+        for (entity_index, entity) in preflight.entities.iter_mut().enumerate() {
+            for component in std::mem::take(&mut entity.components) {
+                component_locations.push((entity_index, component.id));
+                components.push(component.prepared);
+            }
+        }
+        let prepared_values = match component_batch.prepare_unbound(components) {
+            Ok(prepared) => prepared,
+            Err((index, error)) => {
+                let (entity_index, component_id) = &component_locations[index];
+                let entity_id = &preflight.entities[*entity_index].id;
+                diagnostics.push(with_codec_error(
+                    with_public_locator(
+                        with_public_locator(
+                            diagnostic_error(
+                                "scene.component-apply-failed",
+                                "Component apply failed",
+                            ),
+                            "entity-id",
+                            entity_id.as_str(),
+                        ),
+                        "component-id",
+                        component_id.as_str(),
+                    ),
+                    &error,
+                    registry.schema(component_id),
+                ));
+                return Err(SceneSpawnReport {
+                    instance: None,
+                    diagnostics,
+                    retired_entities: 0,
+                });
+            }
+        };
         let mut spawned_by_id = BTreeMap::new();
         let mut spawned_entities = Vec::new();
         for entity in &preflight.entities {
@@ -737,59 +773,42 @@ impl SceneSpawner {
             .map(|token| token.entity())
             .collect::<Vec<_>>();
 
-        for entity in preflight.entities {
-            let Some(runtime_entity) = spawned_by_id.get(&entity.id).copied() else {
+        let mut component_targets = Vec::with_capacity(component_locations.len());
+        for (entity_index, _) in &component_locations {
+            let entity_id = &preflight.entities[*entity_index].id;
+            let Some(runtime_entity) = spawned_by_id.get(entity_id).copied() else {
                 diagnostics.push(with_public_locator(
                     diagnostic_error(
                         "scene.internal-missing-entity",
                         "Spawned scene entity is missing",
                     ),
                     "entity-id",
-                    entity.id.as_str(),
+                    entity_id.as_str(),
                 ));
-                continue;
+                rollback_spawn_transaction(world, &spawned_entities);
+                return Err(SceneSpawnReport {
+                    instance: None,
+                    diagnostics,
+                    retired_entities: 0,
+                });
             };
-
-            for component in entity.components {
-                let component_id = component.id;
-                component_batch = match component_batch.stage(runtime_entity, component.prepared) {
-                    Ok(batch) => batch,
-                    Err(error) => {
-                        diagnostics.push(with_codec_error(
-                            with_public_locator(
-                                with_public_locator(
-                                    diagnostic_error(
-                                        "scene.component-apply-failed",
-                                        "Component apply failed",
-                                    ),
-                                    "entity-id",
-                                    entity.id.as_str(),
-                                ),
-                                "component-id",
-                                component_id.as_str(),
-                            ),
-                            &error,
-                            registry.schema(&component_id),
-                        ));
-                        rollback_spawn_transaction(world, &spawned_entities);
-                        return Err(SceneSpawnReport {
-                            instance: None,
-                            diagnostics,
-                            retired_entities: 0,
-                        });
-                    }
-                };
+            component_targets.push(runtime_entity);
+        }
+        let component_batch = match prepared_values.bind_targets(&component_targets) {
+            Ok(batch) => batch,
+            Err(_) => {
+                diagnostics.push(diagnostic_error(
+                    "scene.internal-component-target-count",
+                    "Prepared component values do not match runtime target bindings",
+                ));
+                rollback_spawn_transaction(world, &spawned_entities);
+                return Err(SceneSpawnReport {
+                    instance: None,
+                    diagnostics,
+                    retired_entities: 0,
+                });
             }
-        }
-
-        if diagnostics.has_errors() {
-            rollback_spawn_transaction(world, &spawned_entities);
-            return Err(SceneSpawnReport {
-                instance: None,
-                diagnostics,
-                retired_entities: 0,
-            });
-        }
+        };
 
         if let Err(error) = component_batch.validate_commit(world) {
             diagnostics.push(with_codec_error(

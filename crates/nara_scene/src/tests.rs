@@ -3571,6 +3571,34 @@ fn unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation() 
 }
 
 #[test]
+fn identity_admission_precedes_native_value_preparation() {
+    let registry = failing_apply_registry();
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("fails"))
+        .with_component(apply_fails_type_id(), apply_fails_record(None))]);
+    let mut world = World::new();
+    let settings = WorldIdentityDomainSettings::new(ItemLimit::ONE, ItemLimit::ONE, ItemLimit::ONE);
+    let domain = WorldIdentityDomain::new(&world, settings).unwrap();
+    world.insert_resource(domain);
+    let before = world.resource::<WorldIdentityDomain>().stats();
+
+    let report = spawn_scene(&mut world, &registry, &document);
+
+    assert!(report.instance.is_none());
+    assert!(
+        report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.identity-registration-failed"
+        })
+    );
+    assert!(
+        !report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.component-apply-failed" })
+    );
+    assert_eq!(world.resource::<WorldIdentityDomain>().stats(), before);
+}
+
+#[test]
 fn component_apply_failure_in_multi_component_entity_reports_component_and_rolls_back() {
     let registry = failing_apply_registry();
     let document = SceneDocument::from_ordered_roots([
@@ -3594,6 +3622,12 @@ fn component_apply_failure_in_multi_component_entity_reports_component_and_rolls
             && diagnostic_has_text_field(diagnostic, "component-id", apply_fails_type_id().as_str())
             && diagnostic_has_redacted_field(diagnostic, "codec-detail")
     }));
+    let mut untouched = World::new();
+    assert_eq!(
+        world.spawn_empty().id(),
+        untouched.spawn_empty().id(),
+        "failed native value preparation must not consume target-World entity allocations"
+    );
 }
 
 #[test]

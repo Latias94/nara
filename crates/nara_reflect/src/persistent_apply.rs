@@ -388,6 +388,44 @@ struct StagedComponent {
     binding: PreparedComponentBinding,
 }
 
+struct UnboundComponent {
+    value: Box<dyn PreparedComponentValue>,
+    binding: PreparedComponentBinding,
+}
+
+/// Prepared native values and their originating asset context, without runtime targets.
+///
+/// Target binding cannot rerun codecs or move values into another batch's scratch catalogue.
+/// Dropping this value abandons only owned preparation; no target-World entity was allocated by it.
+#[doc(hidden)]
+#[must_use]
+pub struct UnboundComponentApplyBatch {
+    batch: ComponentApplyBatch,
+    values: Vec<UnboundComponent>,
+}
+
+impl UnboundComponentApplyBatch {
+    /// Binds all prepared values in input order, retaining ownership on a count mismatch.
+    pub fn bind_targets(mut self, targets: &[Entity]) -> Result<ComponentApplyBatch, Self> {
+        if targets.len() != self.values.len() {
+            return Err(self);
+        }
+        self.batch
+            .components
+            .extend(
+                self.values
+                    .into_iter()
+                    .zip(targets)
+                    .map(|(component, entity)| StagedComponent {
+                        entity: *entity,
+                        value: component.value,
+                        binding: component.binding,
+                    }),
+            );
+        Ok(self.batch)
+    }
+}
+
 fn validate_component_apply_world(
     world: &World,
     world_id: WorldId,
@@ -492,18 +530,47 @@ impl ComponentApplyBatch {
         entity: Entity,
         component: PreparedComponent,
     ) -> Result<Self, ComponentCodecError> {
-        let PreparedComponent {
-            prepare,
-            binding,
-            may_touch_asset_server: _,
-        } = component;
-        let value = prepare(&mut self.context)?;
+        let UnboundComponent { value, binding } = self.prepare_value(component)?;
         self.components.push(StagedComponent {
             entity,
             value,
             binding,
         });
         Ok(self)
+    }
+
+    /// Prepares native values before the owning domain allocates runtime targets.
+    ///
+    /// Failure consumes all partial scratch state and identifies the rejected input index.
+    #[doc(hidden)]
+    pub fn prepare_unbound(
+        mut self,
+        components: impl IntoIterator<Item = PreparedComponent>,
+    ) -> Result<UnboundComponentApplyBatch, (usize, ComponentCodecError)> {
+        let mut values = Vec::new();
+        for (index, component) in components.into_iter().enumerate() {
+            values.push(
+                self.prepare_value(component)
+                    .map_err(|error| (index, error))?,
+            );
+        }
+        Ok(UnboundComponentApplyBatch {
+            batch: self,
+            values,
+        })
+    }
+
+    fn prepare_value(
+        &mut self,
+        component: PreparedComponent,
+    ) -> Result<UnboundComponent, ComponentCodecError> {
+        let PreparedComponent {
+            prepare, binding, ..
+        } = component;
+        Ok(UnboundComponent {
+            value: prepare(&mut self.context)?,
+            binding,
+        })
     }
 
     /// Prepares every registration, topology check, and receipt binding before publication.
@@ -877,7 +944,10 @@ pub fn validate_declared_persistent_apply_targets(
 
 #[cfg(test)]
 mod persistent_apply_contract_tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     use nara_ecs::{
         Component, Resource, World,
@@ -901,6 +971,18 @@ mod persistent_apply_contract_tests {
 
     struct SupportAsset;
 
+    #[derive(Component)]
+    struct PreparedAssetProbe(Handle<SupportAsset>);
+
+    #[derive(Component)]
+    struct PreparedDropProbe(Arc<AtomicUsize>);
+
+    impl Drop for PreparedDropProbe {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
     #[derive(Resource, Default)]
     struct SupportCanary(usize);
 
@@ -922,6 +1004,131 @@ mod persistent_apply_contract_tests {
                 .unwrap()
                 .unwrap()
         })
+    }
+
+    #[test]
+    fn unbound_preparation_keeps_values_assets_and_callback_custody_until_binding() {
+        let mut world = World::new();
+        let baseline = world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&runs);
+        let component = PreparedComponentCandidate::with_asset_server(move |context| {
+            observed.fetch_add(1, Ordering::SeqCst);
+            let handle = context
+                .resolve_asset_ref::<SupportAsset>(&AssetRef::path("textures/unbound.png").unwrap())
+                .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
+            Ok(PreparedAssetProbe(handle))
+        })
+        .erase()
+        .bind(ComponentTypeId::new("nara.test.UnboundAsset"));
+        let unbound = ComponentApplyBatch::from_world(&world)
+            .prepare_unbound([component])
+            .unwrap();
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            world
+                .iter_entities()
+                .map(|entity| entity.id())
+                .collect::<Vec<_>>(),
+            baseline
+        );
+        assert!(!world.contains_resource::<AssetServer>());
+        let unbound = match unbound.bind_targets(&[]) {
+            Err(unbound) => unbound,
+            Ok(_) => panic!("an incomplete target map must retain the prepared values"),
+        };
+        let target = world.spawn_empty().id();
+        let batch = unbound
+            .bind_targets(&[target])
+            .unwrap_or_else(|_| panic!("target count matches"));
+        batch.commit(&mut world).unwrap();
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        let component = world.get::<PreparedAssetProbe>(target).unwrap();
+        assert_eq!(
+            world.resource::<AssetServer>().path(component.0.id()),
+            Some("textures/unbound.png")
+        );
+    }
+
+    #[test]
+    fn unbound_failure_indexes_the_input_and_disposes_partial_values_without_publication() {
+        let world = World::new();
+        let baseline = world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut batch = ComponentApplyBatch::from_world(&world);
+        stage_scratch_asset(&mut batch, "textures/abandoned.png");
+        let failing = PreparedComponentCandidate::deferred(|| {
+            Err::<ReplaceProbe, _>(ComponentCodecError::Message(
+                "intentional failure".to_owned(),
+            ))
+        })
+        .erase()
+        .bind(ComponentTypeId::new("nara.test.UnboundFailure"));
+        let error = match batch.prepare_unbound([
+            bound_component(
+                PreparedDropProbe(Arc::clone(&drops)),
+                "nara.test.UnboundDrop",
+            ),
+            failing,
+        ]) {
+            Err(error) => error,
+            Ok(_) => panic!("the failing native preparation must reject the whole batch"),
+        };
+        assert_eq!(error.0, 1);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            world
+                .iter_entities()
+                .map(|entity| entity.id())
+                .collect::<Vec<_>>(),
+            baseline
+        );
+        assert!(!world.contains_resource::<AssetServer>());
+        assert!(!world.contains_resource::<PersistentWorldBindings>());
+    }
+
+    #[test]
+    fn unbound_values_cannot_publish_in_a_foreign_world_and_drop_needs_no_world_cleanup() {
+        let world = World::new();
+        let baseline = world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>();
+        let mut foreign = World::new();
+        let target = foreign.spawn_empty().id();
+        let unbound = ComponentApplyBatch::from_world(&world)
+            .prepare_unbound([direct_probe()])
+            .unwrap();
+        let batch = unbound
+            .bind_targets(&[target])
+            .unwrap_or_else(|_| panic!("target count matches"));
+        assert_eq!(
+            batch.commit(&mut foreign).unwrap_err(),
+            ComponentCodecError::WrongWorld
+        );
+        assert!(foreign.get::<DirectProbe>(target).is_none());
+        let drops = Arc::new(AtomicUsize::new(0));
+        let unbound = ComponentApplyBatch::from_world(&world)
+            .prepare_unbound([bound_component(
+                PreparedDropProbe(Arc::clone(&drops)),
+                "nara.test.AbandonedDrop",
+            )])
+            .unwrap();
+        drop(unbound);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            world
+                .iter_entities()
+                .map(|entity| entity.id())
+                .collect::<Vec<_>>(),
+            baseline
+        );
     }
 
     #[test]
