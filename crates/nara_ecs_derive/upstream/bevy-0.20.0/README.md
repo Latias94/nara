@@ -34,7 +34,7 @@ The derive entry points resolve the direct `nara_ecs` or `nara` dependency by
 package identity, including renamed dependencies, and append
 `::__private::bevy_ecs`. That hidden re-export supplies every upstream module
 needed by generated code without making those modules part of the ordinary
-authoring surface. Advanced source consumers use the public `upstream` path;
+authoring surface. Advanced source consumers use the public `nara_ecs::bevy_ecs` path;
 generated code uses the hidden support path.
 
 Keep these sources synchronized with `bevy_ecs`, `bevy_ecs_macro_logic` and
