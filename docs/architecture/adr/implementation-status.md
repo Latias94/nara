@@ -41,6 +41,12 @@ root/public 567, independent module 35 and reference-game 31 tests pass, as do s
 Windows/DX12 trajectories. This qualifies the bounded source/occurrence replacement, not ordinary
 no-entity preparation, shared Runtime/Canvas identity refreeze or the complete foundation goal.
 
+The [unbound prebinding prerequisite](../../knowledge/engineering/progress/2026-10/2026-10-24T141552Z-unbound-prebinding-admission-and-ordinary-scene-preparation-design-checkpoint-c5f43007b24245da8e1c9dd009b7fa33.md)
+qualifies Reflect's fresh-target revalidation over already prepared native values, preserving the
+original World and touched asset baseline without allocating targets or rerunning codecs. The
+570-test Reflect/Scene cohort passes. The ordinary Scene prepare API and its managed definition,
+occurrence and complete public-consumer integration remain the next owning implementation.
+
 The [R1a qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T123523Z-workflow-driven-foundation-waves-and-r1a-owned-application-submission-qualification-5e5f6c3eb3b84150bc3a5e06e9862abf.md)
 adds owned per-action direct Application submission observations under ADR 0118. The relevant
 214-test Editor/public cohort, 11 independent consumer tests and all three selected Windows/DX12

@@ -405,6 +405,43 @@ pub struct UnboundComponentApplyBatch {
 }
 
 impl UnboundComponentApplyBatch {
+    /// Revalidates fresh-target eligibility without binding targets or rerunning preparation.
+    ///
+    /// `has_targets` also covers fresh entities that have no persistent values. Native values
+    /// always imply targets. This may register metadata and flush ordinary deferred World work;
+    /// it allocates no targets and publishes neither values, receipts nor the scratch catalogue.
+    /// Asset changes reject only when this batch read or allocated asset identities. Existing
+    /// staged targets and eventual bound publication still require their full final validation.
+    pub fn validate_fresh_targets(
+        &self,
+        world: &mut World,
+        has_targets: bool,
+    ) -> Result<(), ComponentCodecError> {
+        self.batch.validate_commit(world)?;
+        let registered = self
+            .values
+            .iter()
+            .map(|component| component.binding.register(world))
+            .collect::<Vec<_>>();
+        validate_persistent_apply_support_topology(
+            world,
+            &self.batch,
+            has_targets || !self.values.is_empty(),
+            !self.values.is_empty() || !self.batch.components.is_empty(),
+        )?;
+        let receipts = self
+            .values
+            .iter()
+            .zip(registered)
+            .map(|(component, runtime)| component.binding.receipt(world.id(), runtime))
+            .collect::<Vec<_>>();
+        validate_persistent_apply_receipts(world, &receipts)?;
+        for component in &self.values {
+            component.binding.validate(world, None)?;
+        }
+        Ok(())
+    }
+
     /// Binds all prepared values in input order, retaining ownership on a count mismatch.
     pub fn bind_targets(mut self, targets: &[Entity]) -> Result<ComponentApplyBatch, Self> {
         if targets.len() != self.values.len() {
@@ -1129,6 +1166,217 @@ mod persistent_apply_contract_tests {
                 .collect::<Vec<_>>(),
             baseline
         );
+    }
+
+    #[test]
+    fn unbound_prebind_validation_rechecks_late_hooks_without_publishing_values() {
+        let mut world = World::new();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let unbound = ComponentApplyBatch::from_world(&world)
+            .prepare_unbound([bound_component(
+                PreparedDropProbe(Arc::clone(&drops)),
+                "nara.test.PrebindDrop",
+            )])
+            .unwrap();
+        world.commands().queue(|world: &mut World| {
+            world
+                .register_component_hooks::<PreparedDropProbe>()
+                .on_add(|_, _| panic!("an inadmissible hook must not execute"));
+        });
+
+        let error = unbound
+            .validate_fresh_targets(&mut world, true)
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ComponentCodecError::PersistentApplyRejected {
+                reason: PersistentApplyRejection::LifecycleHook {
+                    event: PersistentLifecycleEvent::Add,
+                },
+                ..
+            }
+        ));
+        let mut control = World::new();
+        control
+            .register_component_hooks::<PreparedDropProbe>()
+            .on_add(|_, _| panic!("an inadmissible hook must not execute"));
+        control.flush();
+        assert_eq!(
+            world.iter_entities().count(),
+            control.iter_entities().count()
+        );
+        assert!(!world.contains_resource::<PersistentWorldBindings>());
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        drop(unbound);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        assert_eq!(world.spawn_empty().id(), control.spawn_empty().id());
+    }
+
+    #[test]
+    fn unbound_prebind_validation_keeps_the_read_asset_baseline_after_flush() {
+        let mut world = World::new();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&runs);
+        let component = PreparedComponentCandidate::with_asset_server(move |context| {
+            observed.fetch_add(1, Ordering::SeqCst);
+            let handle = context
+                .resolve_asset_ref::<SupportAsset>(&AssetRef::path("textures/prebind.png").unwrap())
+                .unwrap();
+            Ok(PreparedAssetProbe(handle))
+        })
+        .erase()
+        .bind(ComponentTypeId::new("nara.test.PrebindAsset"));
+        let unbound = ComponentApplyBatch::from_world(&world)
+            .prepare_unbound([component])
+            .unwrap();
+        world.commands().queue(|world: &mut World| {
+            world.init_resource::<AssetServer>();
+        });
+
+        assert_eq!(
+            unbound
+                .validate_fresh_targets(&mut world, true)
+                .unwrap_err(),
+            ComponentCodecError::AssetServerChanged,
+        );
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert_eq!(world.resource::<AssetServer>(), &AssetServer::default());
+        assert!(!world.contains_resource::<PersistentWorldBindings>());
+        let mut control = World::new();
+        control.init_resource::<AssetServer>();
+        assert_eq!(
+            world.iter_entities().count(),
+            control.iter_entities().count()
+        );
+        drop(unbound);
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert_eq!(world.spawn_empty().id(), control.spawn_empty().id());
+    }
+
+    #[test]
+    fn unbound_prebind_validation_uses_the_world_and_asset_read_set_not_a_global_revision() {
+        let mut world = World::new();
+        let unbound = ComponentApplyBatch::from_world(&world)
+            .prepare_unbound([direct_probe()])
+            .unwrap();
+        let mut foreign = World::new();
+        foreign.commands().queue(|world: &mut World| {
+            world.init_resource::<SupportCanary>();
+        });
+        assert_eq!(
+            unbound
+                .validate_fresh_targets(&mut foreign, true)
+                .unwrap_err(),
+            ComponentCodecError::WrongWorld,
+        );
+        assert!(!foreign.contains_resource::<SupportCanary>());
+        world.init_resource::<AssetServer>();
+        let before = world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>();
+        unbound.validate_fresh_targets(&mut world, true).unwrap();
+        assert_eq!(
+            world
+                .iter_entities()
+                .map(|entity| entity.id())
+                .collect::<Vec<_>>(),
+            before
+        );
+        let target = world.spawn_empty().id();
+        unbound
+            .bind_targets(&[target])
+            .unwrap_or_else(|_| panic!("one prepared value has one target"))
+            .commit(&mut world)
+            .unwrap();
+        assert!(world.get::<DirectProbe>(target).is_some());
+    }
+
+    #[test]
+    fn unbound_prebind_validation_checks_receipts_even_without_persistent_values() {
+        for has_targets in [false, true] {
+            let mut world = World::new();
+            world.add_observer(|_: On<Add<PersistentApplyReceipts>>| {
+                panic!("an inadmissible receipt observer must not execute");
+            });
+            world.flush();
+            let before = world
+                .iter_entities()
+                .map(|entity| entity.id())
+                .collect::<Vec<_>>();
+            let unbound = ComponentApplyBatch::from_world(&world)
+                .prepare_unbound([])
+                .unwrap();
+            let result = unbound.validate_fresh_targets(&mut world, has_targets);
+            if has_targets {
+                assert!(matches!(
+                    result,
+                    Err(ComponentCodecError::PersistentApplySupportRejected {
+                        reason: PersistentApplyRejection::Observer {
+                            event: PersistentLifecycleEvent::Add,
+                            scope: PersistentObserverScope::ComponentGlobal,
+                        },
+                    })
+                ));
+            } else {
+                result.unwrap();
+            }
+            assert_eq!(
+                world
+                    .iter_entities()
+                    .map(|entity| entity.id())
+                    .collect::<Vec<_>>(),
+                before
+            );
+            assert!(!world.contains_resource::<PersistentWorldBindings>());
+            drop(unbound);
+        }
+    }
+
+    #[test]
+    fn unbound_prebind_validation_rechecks_binding_conflicts_and_missing_authority() {
+        for (missing_authority, stable_conflict) in [(false, true), (false, false), (true, false)] {
+            let mut world = World::new();
+            let unbound = ComponentApplyBatch::from_world(&world)
+                .prepare_unbound([direct_probe()])
+                .unwrap();
+            let target = world.spawn_empty().id();
+            let other = if missing_authority {
+                direct_probe()
+            } else if stable_conflict {
+                bound_component(OtherProbe, "nara.test.DirectProbe")
+            } else {
+                bound_component(DirectProbe, "nara.test.OtherStable")
+            };
+            other.apply(&mut world, target).unwrap();
+            if missing_authority {
+                world.remove_resource::<PersistentWorldBindings>();
+            }
+            let before = world
+                .iter_entities()
+                .map(|entity| entity.id())
+                .collect::<Vec<_>>();
+            let error = unbound
+                .validate_fresh_targets(&mut world, true)
+                .unwrap_err();
+            if missing_authority {
+                assert_eq!(error, ComponentCodecError::PersistentApplyReceiptMissing);
+            } else {
+                assert!(matches!(
+                    error,
+                    ComponentCodecError::PersistentApplyBindingConflict { .. }
+                ));
+            }
+            assert_eq!(
+                world
+                    .iter_entities()
+                    .map(|entity| entity.id())
+                    .collect::<Vec<_>>(),
+                before
+            );
+            drop(unbound);
+        }
     }
 
     #[test]

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "651d0017c4555e138977347120c64a564c31e02ab0be0dafc9d82c44f139fbf3"
+source_fingerprint: "d88cbd549ac96be42bb55ef61a3e89732fbec9e3daafecb535f4ee1d8ae33a0d"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "651d0017c4555e138977347120c64a564c31e02ab0be0dafc9d82c44f13
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `651d0017c4555e138977347120c64a564c31e02ab0be0dafc9d82c44f139fbf3`
-- Immutable records: 887
+- Source fingerprint: `d88cbd549ac96be42bb55ef61a3e89732fbec9e3daafecb535f4ee1d8ae33a0d`
+- Immutable records: 888
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Work Progress**: [Unbound prebinding admission and ordinary Scene preparation design checkpoint](progress/2026-10/2026-10-24T141552Z-unbound-prebinding-admission-and-ordinary-scene-preparation-design-checkpoint-c5f43007b24245da8e1c9dd009b7fa33.md) - Reflect revalidates retained unbound native values before target allocation; ordinary Scene prepare remains the next owning implementation.
 - **Work Progress**: [Source-bound Scene occurrence checkpoint and ordinary preparation follow-up](progress/2026-10/2026-10-24T133133Z-source-bound-scene-occurrence-checkpoint-and-ordinary-preparation-follow-up-ea0342ca0c55402c966ac1a073a4b09c.md) - Commit 87a1fc0 qualifies required Scene sources and active occurrence ownership; ordinary unbound preparation and Runtime/Canvas adoption are next, while the full foundation goal stays active.
 - **Verification Evidence**: [Required Scene sources and active occurrence ownership qualification](verification/2026-10/2026-10-24T114901Z-required-scene-sources-and-active-occurrence-ownership-qualification-e249da9a1f404677a72e52457ac990c4.md) - Required source-bound materialization and Scene-owned active logical occurrence replace identity-free spawn, qualified through owning, public, independent and selected native consumers.
 - **Work Progress**: [Canonical Prefab binding checkpoint and required Scene ownership follow-up](progress/2026-10/2026-10-24T111737Z-canonical-prefab-binding-checkpoint-and-required-scene-ownership-follow-up-99eaac49f2074e9f8121bf800204aa97.md) - Commit 1a03766 removes identity-free Prefab resolution; required containing-Scene binding, active occurrence ownership and shared UI identity remain the next replacements.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Untargeted native preparation before Scene entity allocation](verification/2026-10/2026-10-24T060059Z-untargeted-native-preparation-before-scene-entity-allocation-c2218c6824cd4aa7a8b9b657fedc9630.md) - Reflect-owned native values retain their asset context until target binding; allocation and admission ordering regressions qualify the production prerequisite.
 - **Verification Evidence**: [Source-context owner experiment and production entry gaps](verification/2026-10/2026-10-24T034432Z-source-context-owner-experiment-and-production-entry-gaps-b9598e00692a49e8ac835a63a3d4384a.md) - Flat direct/file source and World-bound occurrence intent evidence; production Scene preparation, canonical Prefab and shared UI adoption remain open.
 - **Verification Evidence**: [Public exact Scene instance end and source-context design review](verification/2026-10/2026-10-24T031111Z-public-exact-scene-instance-end-and-source-context-design-review-a91caf241959454f8674b9b04eabc141.md) - Qualified empty-instance public retirement and shared authoring path; source origin carrier trial and occurrence integration remain open.
-- **Verification Evidence**: [Cross-document UI source identity counterexample and next owner boundary](verification/2026-10/2026-10-24T025346Z-cross-document-ui-source-identity-counterexample-and-next-owner-boundary-c8f1cd178d8249a1824d61a363bbcf12.md) - Public same-World two-Scene characterization confirms missing containing source identity; source context and logical occurrence replacement remains Proposed.
 
 # Integration Notes
 

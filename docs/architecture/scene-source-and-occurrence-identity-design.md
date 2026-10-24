@@ -428,6 +428,70 @@ Neither step changes ordinary Identity history or admits
 occurrence eviction. Authoring queries/edits remain document-relative; they do not need a runtime
 occurrence merely to edit a document.
 
+### Ordinary Preparation: Selected Next Boundary
+
+This is the next implementation design, not qualification of a public Scene preparation API.
+The native-value stage already exists in Reflect and is used by Scene before target allocation.
+Its `UnboundComponentApplyBatch` owns the actual values with their original scratch asset
+catalogue. It is not a new decoder, a reservation of live entities, or a complete admission proof.
+The missing seam is revalidation after returning that stage and before allocating targets:
+bindings have been consumed, so the existing validator over `PreparedComponent` inputs is no
+longer callable. Add a bounded fresh-target check to the owning unbound batch, reusing its exact
+bindings, receipt/support validators and original asset read basis. Do not reconstruct values,
+allocate dummy targets or add a second validation registry.
+
+The ordinary interface is selected as two operation-specific entry points:
+
+```rust,ignore
+prepare_scene(world, registry, candidate, occurrence, database) -> Result<PreparedScene, SceneSpawnReport>
+prepare_scene_replacement(world, registry, candidate, current, database) -> Result<PreparedScene, SceneSpawnReport>
+prepared.commit(world) -> SceneSpawnReport
+```
+
+First placement remains explicit. Replacement obtains its occurrence from the exact predecessor
+association. A move-only ordinary token owns unbound native values, layout/provenance, source and
+occurrence admission, the frozen definition basis and any private scratch catalogue. It exposes
+preparation diagnostics, but no independently replaceable document/map or target list. Commit is
+one-shot; failure safely consumes private preparation and publishes no candidate. Dropping it,
+including after dropping its World, requires no World cleanup. This does not promise arbitrary
+codec/destructor rollback, no metadata registration, no ordinary deferred work, or no consumption
+of checked process-local IDs.
+
+Both entry points use one split Scene kernel. The first stage ends before target allocation. The
+second stage re-admits current World facts, allocates/binds targets and enters the existing fully
+validated publication tail. `spawn_scene` remains the immediate prepare/commit convenience;
+advanced native-retirement custody continues at the later target-bound stage of the same kernel,
+with its existing explicit discard responsibility. Do not retain an independent old decoder or
+make an ordinary token own unpublished target entities.
+
+The revalidation read-set is deliberately narrower than a global World revision:
+
+- World identity is exact; a foreign World rejects before flushing that foreign World's work.
+- The owning Scene token retains the exact frozen definition used to prepare values. Standalone
+  Worlds do not have to install a managed registry or keep the caller's registry variable alive.
+  If a managed registry exists, its current authority must agree with that frozen definition;
+  removing required managed authority or replacing it with another definition rejects. Reflect's
+  primitive does not itself own this Scene/managed-Host policy.
+- The original AssetServer value basis must still match when preparation read or allocated asset
+  identities. A batch that never touched assets does not become stale merely because unrelated
+  asset work completed. Equal catalogue values are compatible, not a new anti-ABA epoch. Decoded
+  reference values do not promise to pin payload residency or every ProjectAssetDatabase update.
+- Unbound preparation reserves neither a logical slot nor a runtime instance number. New spawn
+  rechecks current vacancy and Identity capacity; unrelated compatible Scene publications do not
+  invalidate it solely by advancing the allocator. Replacement retains the exact predecessor
+  activation, not an equality requirement on its original entity roster. A formerly occupied
+  slot that is now vacant does not need a new permanent vacancy-history service.
+- Fresh lifecycle/support topology is checked after the final allowed flush and before target
+  allocation. Bound targets, exact identity registration/replacement and the complete publication
+  tail still require their later checks. A target-bound proof is not an unbound reservation and
+  cannot reuse a stale domain/allocator proof after arbitrary World advancement.
+
+The public consumer must prepare actual values, cancel without consuming Scene target allocator
+slots, commit two independent prepared Scenes, replace/end through exact receipts and reject
+occupied/stale/foreign, changed read assets, incompatible definition and late lifecycle cases.
+Report the ordinary prepare/commit/cancel scope independently from the advanced retained token,
+the existing historical trial's intent table and the later Runtime/Canvas key migration.
+
 The scoped lifecycle review identifies these concrete integration obligations, not current
 qualification of the replacement:
 

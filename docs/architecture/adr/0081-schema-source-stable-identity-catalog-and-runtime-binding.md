@@ -234,6 +234,14 @@ codecs or transfer prepared handles to another catalogue. Final World, target, a
 admission remains mandatory. This does not make the entire Scene publication allocation-free, undo
 ordinary deferred World work, or roll back arbitrary codec/destructor effects outside its context.
 
+An unbound batch retained across World advancement revalidates its original World, touched asset
+catalogue and fresh binding/lifecycle/support eligibility before its owner allocates targets.
+This check uses the owned native bindings after the last allowed flush; it neither reruns native
+preparation nor publishes the scratch catalogue or binding receipts. It is not a slot reservation
+or a global World revision fence. Untouched asset catalogues need not remain unchanged, and bound
+targets still require their complete later validation. The primitive does not supply Schema/source
+or logical-occurrence authority on behalf of its owning Scene or Host.
+
 Any future catalog-derived persistent composition must add stable `ComponentTypeId` dependencies,
 bounded deterministic closure and cycle rules, default/override/removal semantics, migrations, and
 unavailable-provider behavior to a versioned fingerprint. It must agree across Scene, Prefab,
