@@ -1585,6 +1585,68 @@ pub(crate) enum SceneInstanceRetirementTransactionError {
     Lifecycle,
 }
 
+/// Ends exactly one Scene activation and despawns its remaining runtime entities.
+///
+/// This also ends an empty instance, or one whose entities have already been individually retired.
+/// A stale or foreign receipt rejects without ending another activation. Rejection preserves the
+/// admitted Scene identities and entities; ordinary pending World commands are flushed first.
+/// Native lifecycle work must be completed by its owning domain before this operation is eligible.
+///
+/// Returns the number of runtime entities removed. Identity history remains in the World domain;
+/// this is not history eviction or a disposable projection epoch reset. Owners of a
+/// [`SceneProjection`] must use [`SceneProjection::clear`] instead so their receipt and epoch are
+/// retired together. Dropping a receipt alone never ends an instance.
+pub fn retire_and_despawn_scene_instance(
+    world: &mut World,
+    current: &SpawnedSceneInstance,
+) -> Result<usize, DiagnosticReport> {
+    retire_scene_instance_exact(world, current, TombstoneCause::Unloaded)
+        .map(|retired| retired.len())
+        .map_err(|error| {
+            let diagnostic = match error {
+                SceneInstanceRetirementTransactionError::Identity(error) => {
+                    crate::diagnostics::with_identity_error(
+                        diagnostic_error(
+                            "scene.identity-retirement-failed",
+                            "Scene identity retirement failed",
+                        ),
+                        &error,
+                    )
+                }
+                SceneInstanceRetirementTransactionError::IdentitySupport(error) => {
+                    crate::diagnostics::with_identity_support_error(
+                        diagnostic_error(
+                            "scene.identity-support-ineligible",
+                            "Scene identity support is ineligible for retirement",
+                        ),
+                        &error,
+                    )
+                }
+                SceneInstanceRetirementTransactionError::PersistentApply(error) => {
+                    with_codec_error(
+                        diagnostic_error(
+                            "scene.persistent-apply-ineligible",
+                            "Persistent scene components are ineligible for retirement",
+                        ),
+                        &error,
+                        None,
+                    )
+                }
+                SceneInstanceRetirementTransactionError::Hierarchy => diagnostic_error(
+                    "scene.hierarchy-retirement-ineligible",
+                    "Scene hierarchy is ineligible for exact retirement",
+                ),
+                SceneInstanceRetirementTransactionError::Lifecycle => diagnostic_error(
+                    "scene.lifecycle-retirement-ineligible",
+                    "Scene retirement would run unsupported lifecycle work",
+                ),
+            };
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(diagnostic);
+            diagnostics
+        })
+}
+
 pub(crate) fn retire_scene_instance_exact(
     world: &mut World,
     current: &SpawnedSceneInstance,

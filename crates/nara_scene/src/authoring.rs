@@ -7,15 +7,15 @@ use std::{
 use nara_asset::ProjectAssetDatabase;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::World;
-use nara_identity::{SpawnedSceneInstance, TombstoneCause};
+use nara_identity::SpawnedSceneInstance;
 use nara_reflect::ComponentRegistry;
 
 use crate::{
     PrefabDocument, PrefabSourceResolver, SceneDocument, ScenePatchDocument, ScenePatchReport,
     SceneSpawnReport, SceneSpawner,
-    diagnostics::{error as diagnostic_error, info as diagnostic_info, with_codec_error},
+    diagnostics::{error as diagnostic_error, info as diagnostic_info},
     patch::{PreparedScenePatch, scene_patch_cost},
-    spawn::{SceneInstanceRetirementTransactionError, retire_scene_instance_exact},
+    retire_and_despawn_scene_instance,
 };
 
 #[cfg(feature = "serde")]
@@ -1605,48 +1605,9 @@ impl SceneAuthoringSession {
                 diagnostics: DiagnosticReport::default(),
             };
         };
-        let retired = match retire_scene_instance_exact(world, &current, TombstoneCause::Unloaded) {
-            Ok(retired) => retired,
-            Err(error) => {
-                let mut diagnostics = DiagnosticReport::default();
-                diagnostics.push(match error {
-                    SceneInstanceRetirementTransactionError::Identity(error) => {
-                        crate::diagnostics::with_identity_error(
-                            diagnostic_error(
-                                "scene.identity-retirement-failed",
-                                "Scene identity retirement failed",
-                            ),
-                            &error,
-                        )
-                    }
-                    SceneInstanceRetirementTransactionError::IdentitySupport(error) => {
-                        crate::diagnostics::with_identity_support_error(
-                            diagnostic_error(
-                                "scene.identity-support-ineligible",
-                                "Scene identity support is ineligible for retirement",
-                            ),
-                            &error,
-                        )
-                    }
-                    SceneInstanceRetirementTransactionError::PersistentApply(error) => {
-                        with_codec_error(
-                            diagnostic_error(
-                                "scene.persistent-apply-ineligible",
-                                "Persistent scene components are ineligible for retirement",
-                            ),
-                            &error,
-                            None,
-                        )
-                    }
-                    SceneInstanceRetirementTransactionError::Hierarchy => diagnostic_error(
-                        "scene.hierarchy-retirement-ineligible",
-                        "Scene hierarchy is ineligible for exact retirement",
-                    ),
-                    SceneInstanceRetirementTransactionError::Lifecycle => diagnostic_error(
-                        "scene.lifecycle-retirement-ineligible",
-                        "Scene retirement would run unsupported lifecycle work",
-                    ),
-                });
+        let removed_entities = match retire_and_despawn_scene_instance(world, &current) {
+            Ok(removed_entities) => removed_entities,
+            Err(diagnostics) => {
                 return SceneAuthoringClearReport {
                     cleared: false,
                     removed_entities: 0,
@@ -1656,7 +1617,6 @@ impl SceneAuthoringSession {
             }
         };
 
-        let removed_entities = retired.len();
         let diagnostics = DiagnosticReport::default();
         self.live_instance = None;
         self.live_dirty = !self.document.entities.is_empty();

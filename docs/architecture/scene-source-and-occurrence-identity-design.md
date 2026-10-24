@@ -119,6 +119,20 @@ Scene, and releases only that activation's claim without discarding Identity's i
 history. Deleting the final entity does not end the occurrence. A stale end retry or projection
 clear must never release a successor's claim. No permanent occurrence-history service is proposed.
 
+### Public Instance-End Prerequisite
+
+The [public exact-instance operation](../../crates/nara_scene/src/spawn.rs),
+`retire_and_despawn_scene_instance`, now exposes the existing Scene-owned retirement transaction.
+The [public tests](../../crates/nara_scene/tests/instance_retirement.rs) cover empty and individually
+emptied instances, independent instances, stale/foreign receipts and lifecycle refusal. The
+[separately compiled consumer](../../tests/fixtures/module-consumer/tests/scene_spawn.rs) completes
+parse/publish/spawn/end without private hooks. Authoring clear uses the same operation; disposable
+projection clear keeps its additional complete-epoch ownership proof.
+
+This prerequisite ends current runtime activations and retains Identity history. It does not yet
+create or release the source/occurrence claims proposed here. Their future integration must occur
+inside the same exclusive retirement/publication cut, not in caller cleanup after a successful end.
+
 ## Source Admission Work That Cannot Be Skipped
 
 Current project loading does not already supply this contract:

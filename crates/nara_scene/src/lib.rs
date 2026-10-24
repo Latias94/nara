@@ -101,8 +101,8 @@ pub use scene_components::{
 };
 pub use spawn::{
     SceneEntityRetirementError, SceneEntitySource, SceneProjection, SceneSpawnReport, SceneSpawner,
-    retire_and_despawn_scene_entity, spawn_expanded_scene, spawn_prefab,
-    spawn_prefab_with_asset_database, spawn_prefab_with_patch,
+    retire_and_despawn_scene_entity, retire_and_despawn_scene_instance, spawn_expanded_scene,
+    spawn_prefab, spawn_prefab_with_asset_database, spawn_prefab_with_patch,
     spawn_prefab_with_patch_and_asset_database, spawn_scene, spawn_scene_with_asset_database,
     spawn_scene_with_prefab_resolver, spawn_scene_with_prefab_resolver_and_asset_database,
 };

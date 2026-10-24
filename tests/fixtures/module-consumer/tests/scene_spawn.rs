@@ -2,7 +2,8 @@ use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use bevy_ecs::world::World;
 use nara_scene::{
-    Name, SceneDocumentCandidate, SceneEntityId, SceneEntitySource, Visibility, spawn_scene,
+    Name, SceneDocumentCandidate, SceneEntityId, SceneEntitySource, Visibility,
+    retire_and_despawn_scene_instance, spawn_scene,
 };
 use nara_scene_module_consumer::frozen_scene_registry;
 
@@ -54,6 +55,23 @@ fn committed_scene_fixture_parses_validates_and_spawns() {
         Some(("Player".to_owned(), Visibility::Visible))
     );
     assert!(spawned.is_empty());
+
+    assert_eq!(
+        retire_and_despawn_scene_instance(&mut world, instance).unwrap(),
+        2
+    );
+    assert!(
+        world
+            .query::<&SceneEntitySource>()
+            .iter(&world)
+            .next()
+            .is_none()
+    );
+    assert!(matches!(
+        instance.resolve(&world, &SceneEntityId::new("player").unwrap()),
+        nara_identity::EntityLookup::Tombstoned(_)
+    ));
+    assert!(retire_and_despawn_scene_instance(&mut world, instance).is_err());
 }
 
 fn fixture_path() -> PathBuf {

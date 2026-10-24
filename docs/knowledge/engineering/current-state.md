@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "c255f4c74867eb00fb294d975a28edea35abd9d9810952f6ef46abc078244646"
+source_fingerprint: "b7528cc20e120ef7ad71613e8e0d6f1c1b366fedbfb8d60d366687f639893d83"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "c255f4c74867eb00fb294d975a28edea35abd9d9810952f6ef46abc0782
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `c255f4c74867eb00fb294d975a28edea35abd9d9810952f6ef46abc078244646`
-- Immutable records: 876
+- Source fingerprint: `b7528cc20e120ef7ad71613e8e0d6f1c1b366fedbfb8d60d366687f639893d83`
+- Immutable records: 877
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Public exact Scene instance end and source-context design review](verification/2026-10/2026-10-24T031111Z-public-exact-scene-instance-end-and-source-context-design-review-a91caf241959454f8674b9b04eabc141.md) - Qualified empty-instance public retirement and shared authoring path; source origin carrier trial and occurrence integration remain open.
 - **Verification Evidence**: [Cross-document UI source identity counterexample and next owner boundary](verification/2026-10/2026-10-24T025346Z-cross-document-ui-source-identity-counterexample-and-next-owner-boundary-c8f1cd178d8249a1824d61a363bbcf12.md) - Public same-World two-Scene characterization confirms missing containing source identity; source context and logical occurrence replacement remains Proposed.
 - **Verification Evidence**: [R5a final owner diagnostics and workspace qualification](verification/2026-10/2026-10-24T024954Z-r5a-final-owner-diagnostics-and-workspace-qualification-f58a0ab130cb47a8bc2829e32f1d0a86.md) - Qualified Schema-relative addressing, owner edits, v3 fixtures and safe diagnostic recovery; broader source identity and panel workflows remain open.
 - **Verification Evidence**: [R5a property addressing current qualification](verification/2026-10/2026-10-24T021414Z-r5a-property-addressing-current-qualification.md) - Current serial qualification of scoped property identity metadata, owner edits, and independent consumers; source identity remains open.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Multi-source Prefab refresh obligation qualification](verification/2026-10/2026-10-23T192721Z-multi-source-prefab-refresh-obligation-qualification-47f6266123094e7bb2ea046f42131843.md) - Complete source-keyed refresh, canonical Prefab observations, budgeted loader admission and bounded recovery/native evidence.
 - **Verification Evidence**: [Common source admission and retained Scene preview qualification](verification/2026-10/2026-10-23T180456Z-common-source-admission-and-retained-scene-preview-qualification-45ffac37614a4edaa792f08d650f292e.md) - Three-domain source exclusion, explicit Scene preview selection, trusted source observation and bounded actual native evidence.
 - **Verification Evidence**: [Per-document persistence custody qualification](verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md) - Typed document file custody, captured Save/Reopen Hosts, exact cleanup isolation and bounded native/public evidence.
-- **Verification Evidence**: [Prepared source editing and non-active entity query qualification](verification/2026-10/2026-10-23T140847Z-prepared-source-editing-and-non-active-entity-query-qualification-d08c0cb5ab2c4f798dd7cd98c2a2e6c5.md) - Owner-bound candidates, replayable inverses, public Scene/Prefab workflow, exact query custody and per-kind Host limitation.
 
 # Integration Notes
 

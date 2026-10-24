@@ -26,7 +26,24 @@ An external project should select the corresponding published, Git, or local pac
 the package names, `nara_scene/serde` feature, and direct prerequisite roles remain the same. The
 checked-in [`module-consumer`](../../tests/fixtures/module-consumer/) workspace is the executable contract. It uses
 its own manifest and lockfile, parses a committed RON scene, validates it against a frozen registry,
-and spawns it into a fresh world.
+spawns it into a fresh world, and ends the exact instance through the Scene owner.
+
+## Instance Lifetime
+
+Retain the successful `SpawnedSceneInstance` receipt. Use
+`retire_and_despawn_scene_instance(&mut world, &instance)` to unload that activation and remove
+its remaining runtime entities. It also ends an empty instance, including one whose entities were
+individually retired. Deleting the final entity or dropping the receipt does not end the instance.
+
+The operation rejects foreign or stale receipts and unsupported native lifecycle work before
+Scene retirement. Owning native domains must complete their cleanup first; the function does not
+run arbitrary destruction callbacks. Pending World commands are flushed before admission, so
+rejection does not promise to undo those commands. Ordinary identity history remains retained;
+ending one instance does not reset the World domain or affect independently resident instances.
+
+`SceneAuthoringSession::clear_live_world` uses this same retirement path while updating its session
+receipt. A `SceneProjection` owner instead uses `SceneProjection::clear`, which additionally retires
+its complete disposable domain epoch. Do not end their retained receipts behind those owners.
 
 This evidence covers the documented direct scene-module workflow only. It does not promise
 arbitrary cross-engine compatibility, arbitrary combinations of Nara modules, or a stable dynamic
