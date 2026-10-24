@@ -92,7 +92,7 @@ impl SceneAuthoringSession {
             ..
         } = prepared.candidate;
         let report = self.history.publish_forward(
-            &mut self.document,
+            std::sync::Arc::make_mut(&mut self.document),
             document,
             report,
             prepared.history_cost,

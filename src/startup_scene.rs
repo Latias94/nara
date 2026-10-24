@@ -36,7 +36,7 @@ use nara_ecs::{
 };
 use nara_identity::SpawnedSceneInstance;
 use nara_reflect::{ComponentRegistry, component_registry, validate_component_registry_authority};
-use nara_scene::{ExpandedSceneCandidate, SceneDocument, spawn_expanded_scene};
+use nara_scene::{ExpandedSceneCandidate, SceneDocument, SceneOccurrenceKey, spawn_scene};
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 use crate::project_content::{
@@ -119,20 +119,11 @@ impl SceneSource {
     /// This path enforces its explicit limit but does not claim or imply a
     /// `ProjectContentBudgetHost` reservation.
     pub fn direct(
-        document: Arc<SceneDocument>,
-        retained_byte_limit: ByteLimit,
-    ) -> Result<Self, SceneSourceError> {
-        Self::direct_expanded(ExpandedSceneCandidate::plain(document), retained_byte_limit)
-    }
-
-    /// Retains an already-expanded candidate without separating its document from its sources.
-    pub fn direct_expanded(
         candidate: ExpandedSceneCandidate,
         retained_byte_limit: ByteLimit,
     ) -> Result<Self, SceneSourceError> {
-        let retained_bytes =
-            direct_startup_scene_retained_bytes(candidate.document(), candidate.provenance())
-                .map_err(|_| SceneSourceError::RetainedBytesOverflow)?;
+        let retained_bytes = direct_startup_scene_retained_bytes(&candidate)
+            .map_err(|_| SceneSourceError::RetainedBytesOverflow)?;
         let limit = retained_byte_limit.get();
         if retained_bytes > limit {
             return Err(SceneSourceError::RetainedBytesExceeded {
@@ -591,8 +582,16 @@ pub fn materialize_startup_scene(
             )
         })?;
 
-    let mut report =
-        spawn_expanded_scene(world, &registry, &source.candidate, source.asset_database());
+    // The product owns one current-Scene slot for the complete managed runtime lifetime.
+    let occurrence = SceneOccurrenceKey::new("nara.product", "current-scene")
+        .expect("the product declares a valid startup occurrence");
+    let mut report = spawn_scene(
+        world,
+        &registry,
+        &source.candidate,
+        &occurrence,
+        source.asset_database(),
+    );
     if report.diagnostics.has_errors() {
         return Err(StartupSceneMaterializeError::new(report.diagnostics));
     }
@@ -709,6 +708,18 @@ mod tests {
 
     use super::*;
 
+    fn scene_candidate(document: Arc<SceneDocument>) -> ExpandedSceneCandidate {
+        ExpandedSceneCandidate::plain(
+            nara_scene::SourceDocumentKey::named(
+                "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+                "startup-scene-fixture",
+                nara_scene::SourceDocumentKind::Scene,
+            )
+            .unwrap(),
+            document,
+        )
+    }
+
     #[test]
     fn borrowed_current_scene_is_absent_without_activation() {
         let world = World::new();
@@ -721,11 +732,21 @@ mod tests {
         let mut world = World::new();
         let document = Arc::new(SceneDocument::from_ordered_roots([]));
         let source = Arc::new(
-            SceneSource::direct(Arc::clone(&document), ByteLimit::new(1024).unwrap()).unwrap(),
+            SceneSource::direct(
+                scene_candidate(Arc::clone(&document)),
+                ByteLimit::new(1024).unwrap(),
+            )
+            .unwrap(),
         );
         let mut registry = ComponentRegistry::new();
         registry.freeze().unwrap();
-        let report = spawn_expanded_scene(&mut world, &registry, &source.candidate, None);
+        let report = spawn_scene(
+            &mut world,
+            &registry,
+            &source.candidate,
+            &SceneOccurrenceKey::new("startup-fixture", "current").unwrap(),
+            None,
+        );
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
         world.insert_resource(CurrentSceneOwner {
             source,
@@ -758,22 +779,22 @@ mod tests {
     #[test]
     fn direct_source_enforces_its_exact_retained_byte_limit() {
         let document = Arc::new(SceneDocument::from_ordered_roots([]));
-        let required = direct_startup_scene_retained_bytes(
-            &document,
-            &nara_scene::SceneEntityProvenanceMap::new(),
-        )
-        .unwrap();
+        let required =
+            direct_startup_scene_retained_bytes(&scene_candidate(Arc::clone(&document))).unwrap();
         assert!(required > 1);
 
-        let source =
-            SceneSource::direct(Arc::clone(&document), ByteLimit::new(required).unwrap()).unwrap();
+        let source = SceneSource::direct(
+            scene_candidate(Arc::clone(&document)),
+            ByteLimit::new(required).unwrap(),
+        )
+        .unwrap();
 
         assert!(std::ptr::eq(source.document(), document.as_ref()));
         assert_eq!(source.retained_bytes(), required);
         assert_eq!(source.direct_limit(), Some(required));
         assert_eq!(
             SceneSource::direct(
-                document,
+                scene_candidate(document),
                 ByteLimit::new(required.checked_sub(1).unwrap()).unwrap(),
             )
             .unwrap_err(),
@@ -788,7 +809,11 @@ mod tests {
     fn source_view_cannot_extend_the_root_document_lifetime() {
         let document = Arc::new(SceneDocument::from_ordered_roots([]));
         let source = Arc::new(
-            SceneSource::direct(Arc::clone(&document), ByteLimit::new(1024).unwrap()).unwrap(),
+            SceneSource::direct(
+                scene_candidate(Arc::clone(&document)),
+                ByteLimit::new(1024).unwrap(),
+            )
+            .unwrap(),
         );
         let view = SceneSourceView {
             source: Arc::downgrade(&source),
@@ -834,7 +859,7 @@ mod tests {
             )
             .unwrap();
         let source = SceneSource::direct(
-            Arc::new(SceneDocument::from_ordered_roots([])),
+            scene_candidate(Arc::new(SceneDocument::from_ordered_roots([]))),
             ByteLimit::new(1024).unwrap(),
         )
         .unwrap();
@@ -899,7 +924,7 @@ mod tests {
         });
         let entity_count = world.entities().len();
         let source = SceneSource::direct(
-            Arc::new(SceneDocument::from_ordered_roots([])),
+            scene_candidate(Arc::new(SceneDocument::from_ordered_roots([]))),
             ByteLimit::new(1024).unwrap(),
         )
         .unwrap();

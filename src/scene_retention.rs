@@ -4,9 +4,9 @@ use nara_asset::AssetRef;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 use nara_scene::PrefabDocument;
 use nara_scene::{
-    PrefabInstance, PrefabProjectionPath, SceneDocument, SceneEntityId, SceneEntityProvenanceMap,
-    SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-    ScenePlacementAnchor, ScenePlacementOwner,
+    ExpandedSceneCandidate, PrefabInstance, PrefabProjectionPath, SceneDocument, SceneEntityId,
+    SceneEntityProvenanceMap, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+    ScenePlacement, ScenePlacementAnchor, ScenePlacementOwner,
 };
 
 pub(crate) const STRING_ALLOCATION_OVERHEAD: usize = 2 * size_of::<usize>();
@@ -30,23 +30,23 @@ pub(crate) fn scene_retained_bytes(
 }
 
 pub(crate) fn direct_startup_scene_retained_bytes(
-    document: &SceneDocument,
-    provenance: &SceneEntityProvenanceMap,
+    candidate: &ExpandedSceneCandidate,
 ) -> Result<usize, SceneRetentionOverflow> {
     checked_sum([
-        startup_scene_retained_bytes(document, provenance)?,
+        startup_scene_retained_bytes(candidate)?,
         2 * ARC_CONTROL_BLOCK_BYTES,
         size_of::<std::sync::Arc<SceneDocument>>(),
     ])
 }
 
 pub(crate) fn startup_scene_retained_bytes(
-    document: &SceneDocument,
-    provenance: &SceneEntityProvenanceMap,
+    candidate: &ExpandedSceneCandidate,
 ) -> Result<usize, SceneRetentionOverflow> {
     checked_sum([
-        scene_retained_bytes(document)?,
-        scene_provenance_retained_bytes(provenance)?,
+        size_of::<ExpandedSceneCandidate>(),
+        candidate.source_key().retained_bytes(),
+        scene_retained_bytes(candidate.document())?,
+        scene_provenance_retained_bytes(candidate.provenance())?,
     ])
 }
 
@@ -353,5 +353,34 @@ mod tests {
         .unwrap();
 
         assert_eq!(scene_retained_bytes(&document).unwrap(), expected);
+    }
+
+    #[test]
+    fn bound_candidate_retention_charges_the_containing_source_and_envelope() {
+        let universe = "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap();
+        let candidate = |name| {
+            ExpandedSceneCandidate::plain(
+                nara_scene::SourceDocumentKey::named(
+                    universe,
+                    name,
+                    nara_scene::SourceDocumentKind::Scene,
+                )
+                .unwrap(),
+                std::sync::Arc::new(SceneDocument::default()),
+            )
+        };
+        let short = candidate("scene");
+        let long = candidate("scene-with-a-longer-explicit-source-name");
+        let short_bytes = startup_scene_retained_bytes(&short).unwrap();
+        let long_bytes = startup_scene_retained_bytes(&long).unwrap();
+        assert!(
+            short_bytes
+                >= size_of::<ExpandedSceneCandidate>() + short.source_key().retained_bytes()
+        );
+        assert_eq!(
+            long_bytes - short_bytes,
+            long.source_key().retained_bytes() - short.source_key().retained_bytes(),
+        );
+        assert!(direct_startup_scene_retained_bytes(&short).unwrap() > short_bytes);
     }
 }

@@ -395,6 +395,7 @@ fn rejected_projection_keeps_last_good_without_authorizing_the_rejected_revision
             document: DOCUMENT,
             revision: rejected.revision(),
             projection: Some(EditorPreviewProjection::new(
+                preview_source_key(),
                 rejected.document().clone(),
                 EditorAuthoringPreviewOmissions::empty(DOCUMENT, rejected.revision()),
             )),
@@ -520,6 +521,7 @@ fn foreign_unregistered_identity_rejects_preview_epoch_without_erasing_last_good
             document: DOCUMENT,
             revision: source.revision(),
             projection: Some(EditorPreviewProjection::new(
+                preview_source_key(),
                 source.document().clone(),
                 EditorAuthoringPreviewOmissions::empty(DOCUMENT, source.revision()),
             )),
@@ -781,7 +783,11 @@ fn nonempty_omissions_follow_only_the_accepted_epoch_and_preserve_unknown_source
             runtime.drive_preview(Some(EditorPreviewSource {
                 document: DOCUMENT,
                 revision: source.revision(),
-                projection: Some(EditorPreviewProjection::new(scene, omissions)),
+                projection: Some(EditorPreviewProjection::new(
+                    preview_source_key(),
+                    scene,
+                    omissions,
+                )),
             }))
         };
     assert!(

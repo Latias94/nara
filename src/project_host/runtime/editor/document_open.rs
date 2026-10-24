@@ -32,12 +32,14 @@ pub(crate) enum EditorDocumentOpenRequestResult {
 
 enum PreparedDocument {
     Scene {
+        source: crate::project_host::authoring::document::AuthoringDocumentSourceFact,
         relative_path: Arc<str>,
         digest: EditorDocumentDigest,
         host: RetainedHost<ScenePersistenceHost>,
         document: nara_scene::PublishedAuthoringSceneDocument,
     },
     Prefab {
+        source: crate::project_host::authoring::document::AuthoringDocumentSourceFact,
         relative_path: Arc<str>,
         digest: EditorDocumentDigest,
         host: RetainedHost<PrefabPersistenceHost>,
@@ -258,6 +260,19 @@ impl EditorProjectSession {
             .map_err(SourceAdmissionError::code)?;
         self.exclude_source_aliases(path, &current)
             .map_err(SourceAdmissionError::code)?;
+        let source = match prepared
+            .document
+            .as_ref()
+            .expect("prepared Open retains its document")
+        {
+            PreparedDocument::Scene { source, .. } | PreparedDocument::Prefab { source, .. } => {
+                source
+            }
+        };
+        source
+            .revalidate_native_source(&self.source_project_root())
+            .map_err(|error| error.code())?;
+        self.exclude_native_source_key(source.relative_path(), source.source_key())?;
         Ok(())
     }
 
@@ -366,6 +381,7 @@ impl EditorProjectSession {
             .expect("a prepared document publishes once")
         {
             PreparedDocument::Scene {
+                source,
                 relative_path,
                 digest,
                 host,
@@ -397,6 +413,7 @@ impl EditorProjectSession {
                     document,
                     EditorScenePersistenceLane {
                         project_path: relative_path,
+                        source_key: source.source_key().clone(),
                         document,
                         host,
                     },
@@ -405,6 +422,7 @@ impl EditorProjectSession {
                 Ok(document)
             }
             PreparedDocument::Prefab {
+                source,
                 relative_path,
                 digest,
                 host,
@@ -436,6 +454,7 @@ impl EditorProjectSession {
                     document,
                     EditorPrefabPersistenceLane {
                         project_path: relative_path,
+                        source_key: source.source_key().clone(),
                         document,
                         host,
                     },

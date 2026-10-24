@@ -4,7 +4,7 @@ use nara::{
     prelude::*,
     scene::{
         InMemoryPrefabSourceResolver, PrefabInstance, SourceDocumentKey, SourceDocumentKind,
-        register_scene_components, spawn_expanded_scene,
+        register_scene_components,
     },
     sprite::register_sprite_components,
 };
@@ -51,7 +51,10 @@ fn main() {
 
     let expansion = scene.expand_prefabs(&registry, &resolver);
     assert!(!expansion.diagnostics.has_errors());
-    let candidate = expansion.candidate.unwrap();
+    let candidate = expansion
+        .candidate
+        .unwrap()
+        .bind_source(scene_source_key("main/source"));
     let expanded = candidate.document();
     assert_eq!(expanded.entities.len(), 2);
     let visual_id = candidate
@@ -67,7 +70,13 @@ fn main() {
     assert!(!json.contains("AssetId"));
 
     let mut world = World::new();
-    let report = spawn_expanded_scene(&mut world, &registry, &candidate, None);
+    let report = nara::scene::spawn_scene(
+        &mut world,
+        &registry,
+        &candidate,
+        &scene_occurrence("main/report"),
+        None,
+    );
     assert!(!report.diagnostics.has_errors());
     let visual = match report
         .instance
@@ -147,4 +156,17 @@ fn v1() -> ComponentSchemaVersion {
 
 fn sprite_id() -> ComponentTypeId {
     ComponentTypeId::new("nara.sprite.Sprite")
+}
+
+fn scene_source_key(name: &str) -> nara::scene::SourceDocumentKey {
+    nara::scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara::scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara::scene::SceneOccurrenceKey {
+    nara::scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

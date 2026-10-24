@@ -84,6 +84,12 @@ impl SaveFixture {
             ScenePersistenceHost::open(&directory, "current.scene.json", &registry).unwrap();
         let lane = PersistenceLane::Scene(EditorScenePersistenceLane {
             project_path: Arc::from("scenes/current.scene.json"),
+            source_key: nara_scene::SourceDocumentKey::named(
+                "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+                "background-save-fixture",
+                nara_scene::SourceDocumentKind::Scene,
+            )
+            .unwrap(),
             document: self.document,
             host: custody.retain_scene(opened.host).unwrap(),
         });

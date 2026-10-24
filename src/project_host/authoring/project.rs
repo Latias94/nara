@@ -36,6 +36,7 @@ use super::{
 };
 
 mod catalogue;
+use super::native_source::{AdmittedNativeDocumentSource, NativeDocumentSourcePolicy};
 use catalogue::{ReferenceCatalogue, charge_database_record, insert_asset_record};
 
 const SOURCE_OPEN_HANDLE_PEAK: usize = 7;
@@ -165,6 +166,7 @@ impl AuthoringUnresolvedDependency {
 
 pub(crate) struct AuthoringPrefabSource {
     path: AssetPath,
+    native_source: AdmittedNativeDocumentSource,
     source: Arc<AuthoringSourceFact>,
     document: Arc<PublishedAuthoringPrefabDocument>,
 }
@@ -223,6 +225,10 @@ impl Debug for AuthoringAssetSource {
 }
 
 impl AuthoringPrefabSource {
+    pub(crate) fn native_source(&self) -> &AdmittedNativeDocumentSource {
+        &self.native_source
+    }
+
     #[must_use]
     pub(crate) const fn path(&self) -> &AssetPath {
         &self.path
@@ -256,6 +262,7 @@ struct AuthoringProjectSnapshotInner {
     scene_limits: SceneFileLimits,
     readiness: AuthoringProjectReadiness,
     startup_source: Arc<AuthoringSourceFact>,
+    startup_native_source: AdmittedNativeDocumentSource,
     startup_scene: Arc<PublishedAuthoringSceneDocument>,
     prefabs: Box<[AuthoringPrefabSource]>,
     assets: Box<[AuthoringAssetSource]>,
@@ -436,6 +443,7 @@ impl AuthoringProjectReceipt {
                 scene_limits: inner.scene_limits,
                 readiness: inner.readiness,
                 startup_source: inner.startup_source,
+                startup_native_source: inner.startup_native_source,
                 startup_scene: inner.startup_scene,
                 prefabs: inner.prefabs,
                 assets: inner.assets,
@@ -487,6 +495,7 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
     scene_limits: SceneFileLimits,
     readiness: AuthoringProjectReadiness,
     startup_source: Arc<AuthoringSourceFact>,
+    startup_native_source: AdmittedNativeDocumentSource,
     startup_scene: Arc<PublishedAuthoringSceneDocument>,
     prefabs: Box<[AuthoringPrefabSource]>,
     assets: Box<[AuthoringAssetSource]>,
@@ -498,6 +507,10 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
 }
 
 impl AuthoringProjectSessionSnapshot {
+    pub(crate) fn startup_native_source(&self) -> &AdmittedNativeDocumentSource {
+        &self.startup_native_source
+    }
+
     #[must_use]
     pub(crate) fn asset_database(&self) -> Arc<ProjectAssetDatabase> {
         Arc::clone(&self.asset_database)
@@ -556,6 +569,10 @@ impl AuthoringProjectSessionSnapshot {
     #[must_use]
     pub(crate) fn prefab(&self, path: &AssetPath) -> Option<&AuthoringPrefabSource> {
         self.prefabs.iter().find(|prefab| prefab.path() == path)
+    }
+
+    pub(crate) fn prefab_sources(&self) -> impl Iterator<Item = &AuthoringPrefabSource> {
+        self.prefabs.iter()
     }
 
     #[must_use]
@@ -738,6 +755,7 @@ impl PreparedAuthoringProject {
             startup_path.as_str(),
             AuthoringSourceKind::Scene,
             0,
+            &mut self.schema.budget,
         )?;
         let mut identities = HashMap::new();
         identities.insert(self.schema.manifest_identity(), LoadedIdentity::SchemaBasis);
@@ -769,6 +787,15 @@ impl PreparedAuthoringProject {
         drop(scenes);
 
         let startup_source = Arc::clone(&startup_read.source);
+        let source_policy = NativeDocumentSourcePolicy::new(self.schema.settings());
+        let startup_native_source = source_policy.admit_budgeted(
+            &self.schema.project_root,
+            startup_source.project_path().as_str(),
+            nara_scene::SourceDocumentKind::Scene,
+            startup_source.identity(),
+            3, // Project root, manifest and schema bundle; the startup read handle is closed.
+            &mut self.schema.budget,
+        )?;
         let mut readiness = AuthoringProjectReadiness::from_document(startup_scene.readiness());
         identities.insert(startup_source.identity(), LoadedIdentity::Scene);
         let mut source_facts = BTreeMap::new();
@@ -831,7 +858,26 @@ impl PreparedAuthoringProject {
                 path.as_str(),
                 AuthoringSourceKind::Prefab,
                 depth,
+                &mut self.schema.budget,
             )?;
+            let native_source = source_policy.admit_budgeted(
+                &self.schema.project_root,
+                opened.project_path.as_str(),
+                nara_scene::SourceDocumentKind::Prefab,
+                opened.identity,
+                5, // Schema handles, Prefab directory and original unread Prefab file.
+                &mut self.schema.budget,
+            )?;
+            if native_source.key().origin() == startup_native_source.key().origin()
+                || prefabs.values().any(|prefab: &AuthoringPrefabSource| {
+                    prefab.native_source.key().origin() == native_source.key().origin()
+                        && prefab.source.project_path() != &opened.project_path
+                })
+            {
+                return Err(AuthoringProjectSourceAdmissionError::NativeSource(
+                    super::AuthoringDocumentAdmissionError::NativeSourceIdentityConflict,
+                ));
+            }
 
             if let Some(loaded) = identities.get(&opened.identity) {
                 let LoadedIdentity::Prefab { source, document } = loaded else {
@@ -845,6 +891,7 @@ impl PreparedAuthoringProject {
                     path.clone(),
                     AuthoringPrefabSource {
                         path,
+                        native_source,
                         source: Arc::clone(source),
                         document: Arc::clone(document),
                     },
@@ -886,6 +933,7 @@ impl PreparedAuthoringProject {
                 path.clone(),
                 AuthoringPrefabSource {
                     path,
+                    native_source,
                     source,
                     document: Arc::clone(&document),
                 },
@@ -963,6 +1011,7 @@ impl PreparedAuthoringProject {
                 &metadata_path,
                 AuthoringSourceKind::AssetMetadata,
                 depth,
+                &mut self.schema.budget,
             )?;
             ensure_unclaimed_source_identity(&identities, &metadata_opened)?;
             let metadata_limits = AssetMetaFileLimits::default();
@@ -1023,6 +1072,7 @@ impl PreparedAuthoringProject {
                 record.path().as_str(),
                 AuthoringSourceKind::AssetSource,
                 depth,
+                &mut self.schema.budget,
             )?;
             ensure_unclaimed_source_identity(&identities, &source_opened)?;
             let aggregate_source_limit = self.schema.budget.maximum();
@@ -1085,6 +1135,36 @@ impl PreparedAuthoringProject {
                 .checked_add(path.as_str().len())
                 .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)
         })?;
+        startup_native_source
+            .revalidate(&self.schema.project_root)
+            .map_err(AuthoringProjectSourceAdmissionError::NativeSource)?;
+        for prefab in prefabs.values() {
+            prefab
+                .native_source
+                .revalidate(&self.schema.project_root)
+                .map_err(AuthoringProjectSourceAdmissionError::NativeSource)?;
+            if let nara_scene::SourceDocumentOrigin::StableAsset { stable_id } =
+                prefab.native_source.key().origin()
+                && asset_database
+                    .record_for_stable_id(*stable_id)
+                    .is_some_and(|record| {
+                        record.path() != prefab.path()
+                            || record.source_kind() != &AssetSourceKind::Prefab
+                    })
+            {
+                return Err(AuthoringProjectSourceAdmissionError::NativeSource(
+                    super::AuthoringDocumentAdmissionError::NativeSourceIdentityConflict,
+                ));
+            }
+        }
+        if let nara_scene::SourceDocumentOrigin::StableAsset { stable_id } =
+            startup_native_source.key().origin()
+            && asset_database.record_for_stable_id(*stable_id).is_some()
+        {
+            return Err(AuthoringProjectSourceAdmissionError::NativeSource(
+                super::AuthoringDocumentAdmissionError::NativeSourceIdentityConflict,
+            ));
+        }
         if !unresolved_dependencies.is_empty() {
             readiness = AuthoringProjectReadiness::Degraded;
         }
@@ -1115,6 +1195,7 @@ impl PreparedAuthoringProject {
                 scene_limits: self.scene_limits,
                 readiness,
                 startup_source,
+                startup_native_source,
                 startup_scene,
                 prefabs: prefabs.into_values().collect::<Vec<_>>().into_boxed_slice(),
                 assets: assets.into_values().collect::<Vec<_>>().into_boxed_slice(),
@@ -1160,10 +1241,19 @@ fn open_source_directory(
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<DirectoryCapability, AuthoringProjectSourceAdmissionError> {
     budget.charge_reference(path.as_str().len(), 0, false)?;
+    let preflight = RelativePath::preflight(path.as_str()).map_err(|source| {
+        AuthoringProjectSourceAdmissionError::SourceDirectoryPath { kind, source }
+    })?;
+    budget.charge_source_bytes(
+        0,
+        0,
+        exact_open_work(preflight.components(), path.as_str().len()),
+        0,
+    )?;
     let relative = RelativePath::new(path.as_str()).map_err(|source| {
         AuthoringProjectSourceAdmissionError::SourceDirectoryPath { kind, source }
     })?;
-    let directory = root.open_directory(&relative).map_err(|source| {
+    let directory = root.open_directory_exact(&relative).map_err(|source| {
         AuthoringProjectSourceAdmissionError::SourceDirectoryHost { kind, source }
     })?;
     Ok(directory)
@@ -1175,7 +1265,21 @@ fn open_source_file(
     logical_path: &str,
     kind: AuthoringSourceKind,
     dependency_depth: usize,
+    budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<OpenedAuthoringSource, AuthoringProjectSourceAdmissionError> {
+    let preflight = RelativePath::preflight(logical_path).map_err(|source| {
+        AuthoringProjectSourceAdmissionError::SourcePath {
+            kind,
+            path: project_path.clone(),
+            source,
+        }
+    })?;
+    budget.charge_source_bytes(
+        0,
+        0,
+        exact_open_work(preflight.components(), logical_path.len()),
+        0,
+    )?;
     let relative = RelativePath::new(logical_path).map_err(|source| {
         AuthoringProjectSourceAdmissionError::SourcePath {
             kind,
@@ -1183,7 +1287,7 @@ fn open_source_file(
             source,
         }
     })?;
-    let capability = directory.open_file(&relative).map_err(|source| {
+    let capability = directory.open_file_exact(&relative).map_err(|source| {
         AuthoringProjectSourceAdmissionError::SourceHost {
             kind,
             path: project_path.clone(),
@@ -1199,6 +1303,12 @@ fn open_source_file(
         capability,
         dependency_depth,
     })
+}
+
+fn exact_open_work(components: usize, path_bytes: usize) -> usize {
+    components
+        .saturating_mul(65_536)
+        .saturating_add(path_bytes.saturating_mul(2))
 }
 
 fn read_unique_source(
@@ -1835,7 +1945,7 @@ fn join_project_path(
     ProjectPath::new(path).map_err(AuthoringProjectSourceAdmissionError::JoinedSourcePath)
 }
 
-fn map_source_read_error(
+pub(super) fn map_source_read_error(
     source: FsError,
     kind: AuthoringSourceKind,
     path: ProjectPath,
@@ -1939,6 +2049,7 @@ fn checked_add_to(
 
 #[derive(Debug)]
 pub(crate) enum AuthoringProjectSourceAdmissionError {
+    NativeSource(super::AuthoringDocumentAdmissionError),
     MissingStartupScene,
     SourceDirectoryPath {
         kind: AuthoringSourceKind,
@@ -2016,6 +2127,9 @@ impl From<AuthoringProjectAdmissionError> for AuthoringProjectSourceAdmissionErr
 impl Display for AuthoringProjectSourceAdmissionError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::NativeSource(source) => {
+                write!(formatter, "native source admission failed: {source}")
+            }
             Self::MissingStartupScene => {
                 formatter.write_str("project manifest does not select a startup Scene")
             }
@@ -2104,6 +2218,7 @@ impl Display for AuthoringProjectSourceAdmissionError {
 impl Error for AuthoringProjectSourceAdmissionError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::NativeSource(source) => Some(source),
             Self::SourceDirectoryPath { source, .. } | Self::SourcePath { source, .. } => {
                 Some(source)
             }

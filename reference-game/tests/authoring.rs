@@ -625,7 +625,17 @@ fn canonical_scene_and_stable_field_patch_round_trip_into_the_live_world() {
     assert!(session.is_live_dirty());
 
     let mut world = World::new();
-    let sync_report = session.sync_world(&mut world, &registry).unwrap();
+    let source = nara::scene::SourceDocumentKey::named(
+        "46c78b91-3f23-438f-b76f-dcb4c8912f77".parse().unwrap(),
+        "reference-game.authoring",
+        nara::scene::SourceDocumentKind::Scene,
+    )
+    .unwrap();
+    let occurrence =
+        nara::scene::SceneOccurrenceKey::new("reference-game.authoring", "preview").unwrap();
+    let sync_report = session
+        .sync_world(&mut world, &registry, &source, &occurrence)
+        .unwrap();
     assert!(
         !sync_report.diagnostics.has_errors(),
         "{:#?}",

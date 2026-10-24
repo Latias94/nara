@@ -5384,7 +5384,26 @@ mod tests {
         let registry = frozen_empty_registry();
         let mut session = SceneAuthoringSession::new(SceneDocument::default());
         let mut world = nara_ecs::World::new();
-        assert!(session.sync_world(&mut world, &registry).unwrap().synced);
+        assert!(
+            session
+                .sync_world(
+                    &mut world,
+                    &registry,
+                    &nara_scene::SourceDocumentKey::named(
+                        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+                        "workspace-attached-session",
+                        nara_scene::SourceDocumentKind::Scene
+                    )
+                    .unwrap(),
+                    &nara_scene::SceneOccurrenceKey::new(
+                        "tooling.workspace.tests",
+                        "attached-session"
+                    )
+                    .unwrap()
+                )
+                .unwrap()
+                .synced
+        );
         assert!(session.live_instance().is_some());
         let mut workspace = EditorWorkspace::new();
 

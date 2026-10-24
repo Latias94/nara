@@ -63,7 +63,28 @@ patch, and component document schemas accept `EntityReference`, not `RuntimeEnti
 `SceneInstanceId`, `WorldIdentityDomainId`, or `WorldEntityLocator`. Command/replay adapters may
 encode runtime references only inside their declared timeline and existing ADR 0049 parse budgets.
 
-### World identity domain
+### Scene-owned active occurrence association
+
+Scene owns one private, World-bound active association keyed only by a caller-declared logical
+namespace and slot. Its values bind the required containing source and exact World domain/Scene
+activation. Source identity is not another uniqueness axis: switching source cannot bypass an
+occupied slot. First placement is explicit; exact replacement reuses its predecessor's association.
+The association is not an Entity resolver, a permanent slot history or a source registry.
+
+Empty activations occupy their slot. Individually retiring the last entity does not end the
+activation or release that occupancy. Whole-instance end, replacement and disposable projection
+clear validate the exact predecessor and update the association inside their existing exclusive,
+lifecycle-admitted publication cut. Stale or foreign receipts cannot release a successor. Projection
+validation covers the complete Scene association as well as Identity's full-domain proof; numeric
+instance values alone are insufficient across epochs. Ordinary Identity history remains unchanged.
+
+Admission bounds active association items and modeled retained source/occurrence bytes before
+allocation or predecessor retirement. Association exhaustion rejects; active entries are never
+evicted. Deferred preparation revalidates the World, exact Identity and occurrence baselines before
+publishing components or installing a detached domain. A registration proof prepared for an
+uninterrupted immediate commit is not a reservation that may survive arbitrary intervening calls.
+
+### World identity domain authority
 
 Each world that needs semantic identity owns exactly one `WorldIdentityDomain` ECS resource. Domain
 creation is fallible and binds the resource to the target Bevy `WorldId`. Moving that resource into

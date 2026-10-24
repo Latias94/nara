@@ -22,6 +22,87 @@ impl SourceAdmissionError {
 }
 
 impl EditorProjectSession {
+    pub(super) fn validate_reopened_native_source(
+        &self,
+        project_path: &str,
+        expected: &nara_scene::SourceDocumentKey,
+        file_identity: nara_fs::FileIdentity,
+        admitted: &crate::project_host::authoring::native_source::AdmittedNativeDocumentSource,
+    ) -> Result<(), nara_tooling::EditorPersistenceRejection> {
+        let rejected = || nara_tooling::EditorPersistenceRejection::SourceBindingMismatch;
+        admitted
+            .revalidate(&self.source_project_root())
+            .map_err(|_| rejected())?;
+        let path = RelativePath::new(project_path).map_err(|_| rejected())?;
+        let current = self
+            .source_project_root()
+            .open_file_exact(&path)
+            .map_err(|_| rejected())?;
+        if admitted.key() != expected
+            || admitted.source_identity() != file_identity
+            || current.identity() != file_identity
+        {
+            return Err(nara_tooling::EditorPersistenceRejection::SourceBindingMismatch);
+        }
+        Ok(())
+    }
+
+    pub(super) fn exclude_native_source_key(
+        &self,
+        project_path: &str,
+        key: &nara_scene::SourceDocumentKey,
+    ) -> Result<(), &'static str> {
+        let lane_conflict = self
+            .scene_lanes
+            .values()
+            .map(|lane| (lane.project_path.as_ref(), &lane.source_key))
+            .chain(
+                self.prefab_lanes
+                    .values()
+                    .map(|lane| (lane.project_path.as_ref(), &lane.source_key)),
+            )
+            .any(|(path, existing)| path != project_path && existing.origin() == key.origin());
+        let snapshot_conflict = match &self.execution {
+            EditorExecutionLane::Authoring(snapshot) => {
+                (snapshot.startup_source().project_path().as_str() != project_path
+                    && snapshot.startup_native_source().key().origin() == key.origin())
+                    || snapshot.prefab_sources().any(|prefab| {
+                        prefab.source().project_path().as_str() != project_path
+                            && prefab.native_source().key().origin() == key.origin()
+                    })
+                    || snapshot.asset_sources().any(|asset| {
+                        matches!(key.origin(), nara_scene::SourceDocumentOrigin::StableAsset { stable_id }
+                            if *stable_id == asset.record().stable_id()
+                                && asset.source().project_path().as_str() != project_path)
+                    })
+            }
+            EditorExecutionLane::TrustedCompiled(lane) => {
+                let snapshot = &lane.snapshot;
+                let roots = &lane.content_candidate.settings().paths;
+                (!matches_project_path(project_path, roots.scenes.as_str(), snapshot.selected_scene_path().as_str())
+                    && snapshot.selected_scene_source_key().origin() == key.origin())
+                    || snapshot.prefabs().iter().any(|prefab| {
+                        !matches_project_path(project_path, roots.prefabs.as_str(), prefab.path().as_str())
+                            && prefab.source_key().origin() == key.origin()
+                    })
+                    || snapshot.asset_database().records().any(|asset| {
+                        let root = if asset.source_kind() == &nara_asset::AssetSourceKind::Prefab {
+                            &roots.prefabs
+                        } else {
+                            &roots.assets
+                        };
+                        matches!(key.origin(), nara_scene::SourceDocumentOrigin::StableAsset { stable_id }
+                            if *stable_id == asset.stable_id()
+                                && !matches_project_path(project_path, root.as_str(), asset.path().as_str()))
+                    })
+            }
+        };
+        if lane_conflict || snapshot_conflict {
+            return Err("project.editor.document-source-identity-conflict");
+        }
+        Ok(())
+    }
+
     pub(super) fn source_project_root(&self) -> DirectoryCapability {
         match &self.execution {
             EditorExecutionLane::Authoring(snapshot) => snapshot.project_root(),
@@ -102,6 +183,13 @@ impl EditorProjectSession {
             let _ = self.workspace.activate_document(previous);
         }
     }
+}
+
+fn matches_project_path(project_path: &str, root: &str, logical_path: &str) -> bool {
+    project_path
+        .strip_prefix(root)
+        .and_then(|suffix| suffix.strip_prefix('/'))
+        == Some(logical_path)
 }
 
 fn exclude_file_alias(

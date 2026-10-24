@@ -23,7 +23,16 @@ impl Fixture {
         let mut world = World::new();
         world.insert_resource(AssetServer::new());
         let source = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("old"))]);
-        let report = spawn_scene(&mut world, &registry, &source);
+        let report = crate::spawn_scene(
+            &mut world,
+            &registry,
+            &crate::ExpandedSceneCandidate::plain(
+                scene_source_key("new/source"),
+                std::sync::Arc::new((source).clone()),
+            ),
+            &scene_occurrence("new/report"),
+            None,
+        );
         assert!(!report.diagnostics.has_errors());
         let old_entity = spawned_entity(&world, &report, &scene_id("old"));
         Self {
@@ -102,10 +111,13 @@ impl Fixture {
 }
 
 fn next_source(reference: AssetRef) -> ExpandedSceneCandidate {
-    ExpandedSceneCandidate::plain(Arc::new(SceneDocument::from_ordered_roots([
-        SceneEntityRecord::new(scene_id("next"))
-            .with_component(asset_link_type_id(), asset_link_record(reference)),
-    ])))
+    ExpandedSceneCandidate::plain(
+        scene_source_key("next_source/candidate"),
+        Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            scene_id("next"),
+        )
+        .with_component(asset_link_type_id(), asset_link_record(reference))])),
+    )
 }
 
 #[test]
@@ -200,7 +212,12 @@ fn untouched_bindings_from_another_world_reject_before_overlay_or_scene_mutation
         .map(|entity| entity.id())
         .collect::<BTreeSet<_>>();
     let stats = fixture.world.resource::<WorldIdentityDomain>().stats();
-    let candidate = ExpandedSceneCandidate::plain(Arc::new(SceneDocument::default()));
+    let candidate = ExpandedSceneCandidate::plain(
+        scene_source_key(
+            "untouched_bindings_from_another_world_reject_before_overlay_or_scene_mutation/candidate",
+        ),
+        Arc::new(SceneDocument::default()),
+    );
     let report = fixture.replace(
         &candidate,
         &ProjectAssetDatabase::default(),
@@ -289,14 +306,19 @@ fn apply_rejection_discards_prebound_catalogue_scratch_entities_and_owned_overla
             &AssetSourceKind::Image,
         )
         .unwrap();
-    let candidate = ExpandedSceneCandidate::plain(Arc::new(SceneDocument::from_ordered_roots([
-        SceneEntityRecord::new(scene_id("resolves")).with_component(
-            apply_resolves_asset_type_id(),
-            asset_link_record(AssetRef::path("textures/new.png").unwrap()),
+    let candidate = ExpandedSceneCandidate::plain(
+        scene_source_key(
+            "apply_rejection_discards_prebound_catalogue_scratch_entities_and_owned_overlay_values/candidate",
         ),
-        SceneEntityRecord::new(scene_id("fails"))
-            .with_component(apply_fails_type_id(), apply_fails_record(None)),
-    ])));
+        Arc::new(SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(scene_id("resolves")).with_component(
+                apply_resolves_asset_type_id(),
+                asset_link_record(AssetRef::path("textures/new.png").unwrap()),
+            ),
+            SceneEntityRecord::new(scene_id("fails"))
+                .with_component(apply_fails_type_id(), apply_fails_record(None)),
+        ])),
+    );
     let server = fixture.world.resource::<AssetServer>().clone();
     let entities = fixture
         .world

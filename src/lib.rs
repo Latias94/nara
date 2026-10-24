@@ -215,9 +215,10 @@ pub mod prelude {
         PersistentComponentProvider,
     };
     pub use nara_scene::{
-        Name, PrefabDocument, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
-        SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, SceneSpawner, Visibility,
-        export_scene, spawn_prefab, spawn_scene,
+        ExpandedSceneCandidate, ExpandedSceneDocument, Name, PrefabDocument, SceneAuthoringSession,
+        SceneComponentRecord, SceneDocument, SceneEntityRecord, SceneOccurrenceKey,
+        ScenePatchDocument, ScenePatchOperation, SourceDocumentKey, SourceDocumentKind, Visibility,
+        export_scene, spawn_scene,
     };
     pub use nara_transform::{
         FixedSpatialSnapshot2d, GlobalTransform2d, HistoricalSpatialSnapshot2d,
@@ -347,7 +348,7 @@ pub mod advanced_prelude {
     };
     pub use nara_scene::advanced::{
         SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
-        replace_expanded_scene_with_product, replace_scene_with_product,
+        replace_expanded_scene_with_product, replace_expanded_scene_with_product_and_bindings,
     };
     pub use nara_tasks::{
         OrderedTaskReadySnapshot, OrderedTaskResults, OrderedTaskTerminal, TaskCancellation,

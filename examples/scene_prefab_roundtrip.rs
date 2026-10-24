@@ -88,12 +88,16 @@ fn main() {
     );
 
     let mut world = World::new();
-    let mut spawner = SceneSpawner::new();
-    let spawn_report = spawner.spawn_with_asset_database(
+
+    let spawn_report = nara::scene::spawn_scene(
         &mut world,
         &registry,
-        from_json.document(),
-        &asset_database,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            scene_source_key("main/from_json-document"),
+            std::sync::Arc::new((from_json.document()).clone()),
+        ),
+        &scene_occurrence("main/spawn_report"),
+        Some(&asset_database),
     );
     assert!(!spawn_report.diagnostics.has_errors());
     assert_eq!(spawn_report.instance.as_ref().unwrap().len(), 3);
@@ -339,4 +343,17 @@ fn sprite_id() -> ComponentTypeId {
 
 fn tilemap_id() -> ComponentTypeId {
     ComponentTypeId::new("nara.tilemap.Tilemap")
+}
+
+fn scene_source_key(name: &str) -> nara::scene::SourceDocumentKey {
+    nara::scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara::scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara::scene::SceneOccurrenceKey {
+    nara::scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

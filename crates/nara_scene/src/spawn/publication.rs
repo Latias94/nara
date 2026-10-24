@@ -28,7 +28,8 @@ pub(super) struct PreparedScenePublication {
     pub(super) additional_retirement_tokens: Vec<WorldEntityToken>,
     pub(super) retired_entities: Vec<Entity>,
     pub(super) spawned_by_id: BTreeMap<SceneEntityId, Entity>,
-    pub(super) provenance: Option<SceneEntityProvenanceMap>,
+    pub(super) provenance: SceneEntityProvenanceMap,
+    pub(super) occurrence: PreparedSceneOccurrence,
     pub(super) claims: SceneNativeRetirementClaims,
     pub(super) diagnostics: DiagnosticReport,
 }
@@ -40,7 +41,7 @@ struct FinalScenePublication {
 }
 
 enum FinalSceneIdentityCommit {
-    Register,
+    Register(PreparedSceneInstanceRegistration),
     Replace(PreparedSceneInstanceReplacement),
     Projection {
         registration: PreparedSceneInstanceRegistration,
@@ -90,6 +91,9 @@ impl PreparedScenePublication {
                 "Prepared Scene World facts changed before publication",
             )
         };
+        self.occurrence
+            .validate(world, self.expected.as_ref())
+            .map_err(|error| occurrence_rejection(self.diagnostics.clone(), error))?;
         self.prepared_components
             .validate_commit(world)
             .map_err(|_| changed())?;
@@ -125,7 +129,32 @@ impl PreparedScenePublication {
             .map(|(id, token)| (id.clone(), *token))
             .collect::<Vec<_>>();
         let identity = match &self.prepared_identity {
-            PreparedSceneIdentityCommit::Register { .. } => FinalSceneIdentityCommit::Register,
+            PreparedSceneIdentityCommit::Register {
+                domain,
+                bound_domain,
+                ..
+            } => {
+                let registration = match domain {
+                    Some(domain) if !world.contains_resource::<WorldIdentityDomain>() => {
+                        prepare_exact_scene_instance_registration(domain, world, &entries)
+                    }
+                    None => {
+                        let installed = world
+                            .get_resource::<WorldIdentityDomain>()
+                            .ok_or_else(changed)?;
+                        if installed.id() != *bound_domain {
+                            return Err(changed());
+                        }
+                        prepare_exact_scene_instance_registration(installed, world, &entries)
+                    }
+                    _ => return Err(changed()),
+                }
+                .map_err(|_| changed())?;
+                if registration.instance_id() != self.prepared_identity.instance_id() {
+                    return Err(changed());
+                }
+                FinalSceneIdentityCommit::Register(registration)
+            }
             PreparedSceneIdentityCommit::Replace { .. } => {
                 let expected = self
                     .expected
@@ -246,6 +275,7 @@ impl PreparedScenePublication {
             retired_entities,
             spawned_by_id,
             provenance,
+            occurrence,
             diagnostics,
             ..
         } = self;
@@ -258,30 +288,23 @@ impl PreparedScenePublication {
         prepared_components.commit(world);
         let instance_id = prepared_identity.instance_id();
         for (entity_id, runtime_entity) in &spawned_by_id {
-            let source = provenance.as_ref().map(|sources| {
-                sources
-                    .get(entity_id)
-                    .expect("preflight admits complete source coverage")
-            });
+            let source = provenance
+                .get(entity_id)
+                .expect("preflight admits complete source coverage");
             world.entity_mut(*runtime_entity).insert(SceneEntitySource {
+                context: Arc::clone(&occurrence.context),
                 instance_id,
                 entity_id: entity_id.clone(),
-                source_entity_id: source.map_or_else(
-                    || entity_id.clone(),
-                    |source| source.source_entity_id().clone(),
-                ),
-                projection_path: source.and_then(|source| source.projection_path().cloned()),
+                source_entity_id: source.source_entity_id().clone(),
+                projection_path: source.projection_path().cloned(),
             });
         }
         finalization.hierarchy.commit(world);
         world.flush();
         let instance = match (prepared_identity, finalization.identity) {
             (
-                PreparedSceneIdentityCommit::Register {
-                    domain,
-                    registration,
-                },
-                FinalSceneIdentityCommit::Register,
+                PreparedSceneIdentityCommit::Register { domain, .. },
+                FinalSceneIdentityCommit::Register(registration),
             ) => match domain {
                 Some(mut domain) => {
                     let instance = registration.commit(&mut domain);
@@ -330,6 +353,7 @@ impl PreparedScenePublication {
             }
             _ => unreachable!("final identity admission matches the prepared publication mode"),
         };
+        occurrence.commit(world, &instance);
         if let Some(resources) = product_resources {
             resources.commit(world);
         }
@@ -412,7 +436,10 @@ impl PreparedScenePublication {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SceneEntityRecord, advanced::SceneProductResource, spawn_scene};
+    use crate::{
+        SceneDocument, SceneEntityRecord, SceneOccurrenceKey, SourceDocumentKey,
+        SourceDocumentKind, advanced::SceneProductResource, spawn_scene,
+    };
     use nara_asset::{AssetRef, AssetServer, Handle};
     use nara_core::ItemLimit;
     use nara_ecs::{
@@ -470,6 +497,19 @@ mod tests {
         fn drop(&mut self) {
             self.probe.drops.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    fn source_key() -> SourceDocumentKey {
+        SourceDocumentKey::named(
+            "dce16c36-187f-4a1f-bf61-72c0f41b361b".parse().unwrap(),
+            "publication.fixture",
+            SourceDocumentKind::Scene,
+        )
+        .unwrap()
+    }
+
+    fn occurrence() -> SceneOccurrenceKey {
+        SceneOccurrenceKey::new("publication-tests", "resident").unwrap()
     }
 
     fn native_value_candidate(
@@ -537,7 +577,10 @@ mod tests {
                     ComponentValue::map([("asset", encode_persistent_field(&asset).unwrap())]),
                 ),
             )]);
-        (registry, ExpandedSceneCandidate::plain(Arc::new(document)))
+        (
+            registry,
+            ExpandedSceneCandidate::plain(source_key(), Arc::new(document)),
+        )
     }
 
     fn fixture() -> (
@@ -555,20 +598,14 @@ mod tests {
         registry.freeze().unwrap();
         let id = SceneEntityId::new("root").unwrap();
         let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())]);
-        let report = spawn_scene(&mut world, &registry, &document);
+        let candidate = ExpandedSceneCandidate::plain(source_key(), Arc::new(document));
+        let report = spawn_scene(&mut world, &registry, &candidate, &occurrence(), None);
         let receipt = report.instance.unwrap();
         let EntityLookup::Resolved(entity) = receipt.resolve(&world, &id) else {
             panic!("root must resolve")
         };
         world.entity_mut(entity).insert(NativeState);
-        (
-            world,
-            registry,
-            ExpandedSceneCandidate::plain(Arc::new(document)),
-            receipt,
-            entity,
-            id,
-        )
+        (world, registry, candidate, receipt, entity, id)
     }
 
     fn limits() -> SceneProductTransactionLimits {
@@ -657,11 +694,13 @@ mod tests {
     fn discard_cleans_remaining_candidates_after_one_is_missing() {
         let (mut world, registry, _, current, old, id) = fixture();
         let other = SceneEntityId::new("other").unwrap();
-        let candidate =
-            ExpandedSceneCandidate::plain(Arc::new(SceneDocument::from_ordered_roots([
+        let candidate = ExpandedSceneCandidate::plain(
+            source_key(),
+            Arc::new(SceneDocument::from_ordered_roots([
                 SceneEntityRecord::new(id.clone()),
                 SceneEntityRecord::new(other.clone()),
-            ])));
+            ])),
+        );
         let prepared = prepare_fixture_replacement(&mut world, &registry, &candidate, &current);
         let missing = prepared.0.spawned_by_id[&id];
         let remaining = prepared.0.spawned_by_id[&other];

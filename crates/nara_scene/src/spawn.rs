@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, error::Error, fmt};
+use std::{collections::BTreeMap, error::Error, fmt, sync::Arc};
 
 mod projection;
 mod publication;
@@ -39,12 +39,15 @@ use nara_reflect::{
 };
 
 use crate::{
-    ExpandedSceneCandidate, PrefabDocument, PrefabExpansionReport, PrefabProjectionPath,
-    PrefabSourceResolver, SceneDocument, SceneEntityId, SceneEntityProvenanceMap,
-    ScenePatchDocument,
+    ExpandedSceneCandidate, PrefabProjectionPath, SceneEntityId, SceneEntityProvenanceMap,
+    SceneOccurrenceKey, SourceDocumentKey,
     asset_bindings::SceneAssetBindings,
     candidate::validate_scene_provenance,
     diagnostics::{error as diagnostic_error, with_codec_error, with_public_locator},
+    occurrence::{
+        OccurrenceError, PreparedSceneOccurrence, SceneSourceContext, occurrence_for_instance,
+        release_occurrence,
+    },
     product_transaction::{
         PreparedSceneProductOverlay, SceneProductOverlayError, SceneProductOverlayWriter,
         SceneProductTransactionLimits,
@@ -90,6 +93,7 @@ impl Error for SceneEntityRetirementError {
 /// Runtime provenance for an entity materialized from a persistent scene record.
 #[derive(Debug, Clone, PartialEq, Eq, Component)]
 pub struct SceneEntitySource {
+    pub(crate) context: Arc<SceneSourceContext>,
     /// Identity of the concrete materialized scene instance.
     pub instance_id: SceneInstanceId,
     /// Stable entity identity within the persistent scene document.
@@ -98,6 +102,20 @@ pub struct SceneEntitySource {
     pub source_entity_id: SceneEntityId,
     /// Structured prefab location, absent for scene-local entities.
     pub projection_path: Option<PrefabProjectionPath>,
+}
+
+impl SceneEntitySource {
+    /// Returns the required containing document source, independently of Prefab lookup requests.
+    #[must_use]
+    pub fn containing_source(&self) -> &SourceDocumentKey {
+        &self.context.source
+    }
+
+    /// Returns the caller-declared logical placement, independently of this runtime activation.
+    #[must_use]
+    pub fn occurrence(&self) -> &SceneOccurrenceKey {
+        &self.context.occurrence
+    }
 }
 
 /// Result of one scene materialization or replacement attempt.
@@ -160,7 +178,7 @@ impl SceneSpawnReport {
 
 /// Stateless entry point for scene materialization operations.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct SceneSpawner;
+pub(crate) struct SceneSpawner;
 
 struct SceneProductTransactionInput<'a> {
     limits: SceneProductTransactionLimits,
@@ -197,7 +215,8 @@ enum SceneIdentityCommit<'a> {
 enum PreparedSceneIdentityCommit {
     Register {
         domain: Option<WorldIdentityDomain>,
-        registration: PreparedSceneInstanceRegistration,
+        bound_domain: WorldIdentityDomainId,
+        instance: SceneInstanceId,
     },
     Replace {
         replacement: PreparedSceneInstanceReplacement,
@@ -213,7 +232,7 @@ enum PreparedSceneIdentityCommit {
 impl PreparedSceneIdentityCommit {
     const fn instance_id(&self) -> SceneInstanceId {
         match self {
-            Self::Register { registration, .. } => registration.instance_id(),
+            Self::Register { instance, .. } => *instance,
             Self::Replace { replacement, .. } => replacement.instance_id(),
             Self::Projection { registration, .. } => registration.instance_id(),
         }
@@ -247,154 +266,23 @@ impl SceneSpawner {
         Self
     }
 
-    pub fn spawn(
+    pub(crate) fn sync(
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
-        document: &SceneDocument,
-    ) -> SceneSpawnReport {
-        self.spawn_with_asset_context(
-            world,
-            registry,
-            document,
-            None,
-            SceneIdentityCommit::Register,
-        )
-    }
-
-    pub fn spawn_with_asset_database(
-        &mut self,
-        world: &mut World,
-        registry: &ComponentRegistry,
-        document: &SceneDocument,
-        database: &ProjectAssetDatabase,
-    ) -> SceneSpawnReport {
-        self.spawn_with_asset_context(
-            world,
-            registry,
-            document,
-            Some(database),
-            SceneIdentityCommit::Register,
-        )
-    }
-
-    pub(crate) fn replace(
-        &mut self,
-        world: &mut World,
-        registry: &ComponentRegistry,
-        document: &SceneDocument,
-        current: &SpawnedSceneInstance,
-    ) -> SceneSpawnReport {
-        self.spawn_with_asset_context(
-            world,
-            registry,
-            document,
-            None,
-            SceneIdentityCommit::Replace(current),
-        )
-    }
-
-    pub(crate) fn replace_with_asset_database(
-        &mut self,
-        world: &mut World,
-        registry: &ComponentRegistry,
-        document: &SceneDocument,
-        current: &SpawnedSceneInstance,
-        database: &ProjectAssetDatabase,
-    ) -> SceneSpawnReport {
-        self.spawn_with_asset_context(
-            world,
-            registry,
-            document,
-            Some(database),
-            SceneIdentityCommit::Replace(current),
-        )
-    }
-
-    pub fn spawn_with_prefab_resolver<R: PrefabSourceResolver + ?Sized>(
-        &mut self,
-        world: &mut World,
-        registry: &ComponentRegistry,
-        document: &SceneDocument,
-        resolver: &R,
-    ) -> SceneSpawnReport {
-        let expansion = document.expand_prefabs(registry, resolver);
-        self.spawn_prefab_expansion(
-            world,
-            registry,
-            expansion,
-            None,
-            SceneIdentityCommit::Register,
-        )
-    }
-
-    pub fn spawn_with_prefab_resolver_and_asset_database<R: PrefabSourceResolver + ?Sized>(
-        &mut self,
-        world: &mut World,
-        registry: &ComponentRegistry,
-        document: &SceneDocument,
-        resolver: &R,
-        database: &ProjectAssetDatabase,
-    ) -> SceneSpawnReport {
-        let expansion = document.expand_prefabs_with_asset_database(registry, resolver, database);
-        self.spawn_prefab_expansion(
-            world,
-            registry,
-            expansion,
-            Some(database),
-            SceneIdentityCommit::Register,
-        )
-    }
-
-    pub(crate) fn replace_with_prefab_resolver<R: PrefabSourceResolver + ?Sized>(
-        &mut self,
-        world: &mut World,
-        registry: &ComponentRegistry,
-        document: &SceneDocument,
-        current: &SpawnedSceneInstance,
-        resolver: &R,
-    ) -> SceneSpawnReport {
-        let expansion = document.expand_prefabs(registry, resolver);
-        self.spawn_prefab_expansion(
-            world,
-            registry,
-            expansion,
-            None,
-            SceneIdentityCommit::Replace(current),
-        )
-    }
-
-    pub(crate) fn replace_with_prefab_resolver_and_asset_database<
-        R: PrefabSourceResolver + ?Sized,
-    >(
-        &mut self,
-        world: &mut World,
-        registry: &ComponentRegistry,
-        document: &SceneDocument,
-        current: &SpawnedSceneInstance,
-        resolver: &R,
-        database: &ProjectAssetDatabase,
-    ) -> SceneSpawnReport {
-        let expansion = document.expand_prefabs_with_asset_database(registry, resolver, database);
-        self.spawn_prefab_expansion(
-            world,
-            registry,
-            expansion,
-            Some(database),
-            SceneIdentityCommit::Replace(current),
-        )
-    }
-
-    fn spawn_with_asset_context(
-        &mut self,
-        world: &mut World,
-        registry: &ComponentRegistry,
-        document: &SceneDocument,
+        candidate: &ExpandedSceneCandidate,
+        occurrence: &SceneOccurrenceKey,
         database: Option<&ProjectAssetDatabase>,
-        commit: SceneIdentityCommit<'_>,
+        current: Option<&SpawnedSceneInstance>,
     ) -> SceneSpawnReport {
         self.spawn_with_asset_context_and_product(
-            world, registry, document, None, database, commit, None,
+            world,
+            registry,
+            candidate,
+            occurrence,
+            database,
+            current.map_or(SceneIdentityCommit::Register, SceneIdentityCommit::Replace),
+            None,
         )
     }
 
@@ -402,15 +290,15 @@ impl SceneSpawner {
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
-        document: &SceneDocument,
-        provenance: Option<&SceneEntityProvenanceMap>,
+        candidate: &ExpandedSceneCandidate,
+        occurrence: &SceneOccurrenceKey,
         database: Option<&ProjectAssetDatabase>,
         commit: SceneIdentityCommit<'_>,
         product: Option<SceneProductTransactionInput<'_>>,
     ) -> SceneSpawnReport {
         let bindings = SceneAssetBindings::from_world(world);
         self.spawn_with_asset_context_and_product_bindings(
-            world, registry, document, provenance, database, commit, product, bindings,
+            world, registry, candidate, occurrence, database, commit, product, bindings,
         )
     }
 
@@ -418,8 +306,8 @@ impl SceneSpawner {
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
-        document: &SceneDocument,
-        provenance: Option<&SceneEntityProvenanceMap>,
+        candidate: &ExpandedSceneCandidate,
+        occurrence: &SceneOccurrenceKey,
         database: Option<&ProjectAssetDatabase>,
         commit: SceneIdentityCommit<'_>,
         product: Option<SceneProductTransactionInput<'_>>,
@@ -428,8 +316,8 @@ impl SceneSpawner {
         match self.prepare_with_asset_context_and_product_bindings(
             world,
             registry,
-            document,
-            provenance,
+            candidate,
+            occurrence,
             database,
             commit,
             product,
@@ -458,14 +346,27 @@ impl SceneSpawner {
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
-        document: &SceneDocument,
-        provenance: Option<&SceneEntityProvenanceMap>,
+        candidate: &ExpandedSceneCandidate,
+        occurrence: &SceneOccurrenceKey,
         database: Option<&ProjectAssetDatabase>,
         commit: SceneIdentityCommit<'_>,
         product: Option<SceneProductTransactionInput<'_>>,
         bindings: SceneAssetBindings,
         claims: &SceneNativeRetirementClaims,
     ) -> Result<PreparedScenePublication, SceneSpawnReport> {
+        let document = candidate.document();
+        let provenance = candidate.provenance();
+        if validate_scene_provenance(document, provenance).is_err() {
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(diagnostic_error(
+                "scene.invalid-provenance",
+                "Expanded scene source provenance is inconsistent",
+            ));
+            return Err(SceneSpawnReport {
+                diagnostics,
+                ..Default::default()
+            });
+        }
         let mut component_batch = match bindings.into_batch(world) {
             Ok(batch) => batch,
             Err(error) => {
@@ -485,20 +386,6 @@ impl SceneSpawner {
                 });
             }
         };
-        if provenance
-            .is_some_and(|provenance| validate_scene_provenance(document, provenance).is_err())
-        {
-            let mut diagnostics = DiagnosticReport::default();
-            diagnostics.push(diagnostic_error(
-                "scene.invalid-provenance",
-                "Expanded scene source provenance is inconsistent",
-            ));
-            return Err(SceneSpawnReport {
-                instance: None,
-                diagnostics,
-                retired_entities: 0,
-            });
-        }
         let mut preflight = component_batch.with_decode_context(database, |context| {
             preflight_scene_with_context(document, registry, context)
         });
@@ -646,6 +533,19 @@ impl SceneSpawner {
                 retired_entities: 0,
             });
         }
+        let predecessor = match commit {
+            SceneIdentityCommit::Register => None,
+            SceneIdentityCommit::Replace(current) => Some(current),
+            SceneIdentityCommit::Projection(current) => current,
+        };
+        let prepared_occurrence = PreparedSceneOccurrence::prepare(
+            world,
+            candidate.source_key(),
+            occurrence,
+            predecessor,
+            matches!(commit, SceneIdentityCommit::Projection(_)),
+        )
+        .map_err(|error| occurrence_rejection(DiagnosticReport::default(), error))?;
         let new_identity_domain =
             match prepare_scene_identity(world, preflight.entities.len(), commit) {
                 Ok(domain) => domain,
@@ -1095,124 +995,11 @@ impl SceneSpawner {
             additional_retirement_tokens: additional_retirements,
             retired_entities,
             spawned_by_id,
-            provenance: provenance.cloned(),
+            provenance: provenance.clone(),
+            occurrence: prepared_occurrence,
             claims: claims.clone(),
             diagnostics,
         })
-    }
-
-    fn spawn_prefab_expansion(
-        &mut self,
-        world: &mut World,
-        registry: &ComponentRegistry,
-        expansion: PrefabExpansionReport,
-        database: Option<&ProjectAssetDatabase>,
-        commit: SceneIdentityCommit<'_>,
-    ) -> SceneSpawnReport {
-        let PrefabExpansionReport {
-            candidate,
-            mut diagnostics,
-        } = expansion;
-        if diagnostics.has_errors() {
-            return SceneSpawnReport {
-                instance: None,
-                diagnostics,
-                retired_entities: 0,
-            };
-        }
-
-        let candidate = candidate.expect("successful prefab expansion should include candidate");
-        let mut report = self.spawn_with_asset_context_and_product(
-            world,
-            registry,
-            candidate.document(),
-            Some(candidate.provenance()),
-            database,
-            commit,
-            None,
-        );
-        diagnostics.extend(report.diagnostics);
-        report.diagnostics = diagnostics;
-        report
-    }
-
-    pub fn spawn_prefab(
-        &mut self,
-        world: &mut World,
-        registry: &ComponentRegistry,
-        prefab: &PrefabDocument,
-    ) -> SceneSpawnReport {
-        self.spawn_prefab_with_patch(world, registry, prefab, &ScenePatchDocument::default())
-    }
-
-    pub fn spawn_prefab_with_asset_database(
-        &mut self,
-        world: &mut World,
-        registry: &ComponentRegistry,
-        prefab: &PrefabDocument,
-        database: &ProjectAssetDatabase,
-    ) -> SceneSpawnReport {
-        self.spawn_prefab_with_patch_and_asset_database(
-            world,
-            registry,
-            prefab,
-            &ScenePatchDocument::default(),
-            database,
-        )
-    }
-
-    pub fn spawn_prefab_with_patch(
-        &mut self,
-        world: &mut World,
-        registry: &ComponentRegistry,
-        prefab: &PrefabDocument,
-        patch: &ScenePatchDocument,
-    ) -> SceneSpawnReport {
-        let instantiate = prefab.instantiate_with_patch(registry, patch);
-        let mut diagnostics = instantiate.diagnostics;
-        if diagnostics.has_errors() {
-            return SceneSpawnReport {
-                instance: None,
-                diagnostics,
-                retired_entities: 0,
-            };
-        }
-
-        let document = instantiate
-            .document
-            .expect("successful prefab patch instantiation should include document");
-        let mut report = self.spawn(world, registry, &document);
-        diagnostics.extend(report.diagnostics);
-        report.diagnostics = diagnostics;
-        report
-    }
-
-    pub fn spawn_prefab_with_patch_and_asset_database(
-        &mut self,
-        world: &mut World,
-        registry: &ComponentRegistry,
-        prefab: &PrefabDocument,
-        patch: &ScenePatchDocument,
-        database: &ProjectAssetDatabase,
-    ) -> SceneSpawnReport {
-        let instantiate =
-            prefab.instantiate_with_patch_and_asset_database(registry, patch, database);
-        let mut diagnostics = instantiate.diagnostics;
-        if diagnostics.has_errors() {
-            return SceneSpawnReport {
-                instance: None,
-                diagnostics,
-                retired_entities: 0,
-            };
-        }
-
-        let document = instantiate
-            .document
-            .expect("successful prefab patch instantiation should include document");
-        let mut report = self.spawn_with_asset_database(world, registry, &document, database);
-        diagnostics.extend(report.diagnostics);
-        report.diagnostics = diagnostics;
-        report
     }
 }
 
@@ -1227,35 +1014,6 @@ impl SceneSpawner {
 /// caller returns; a rejected replacement leaves that state unchanged.
 /// The asset database must come from the admitted source, as with initial spawning; `None` is
 /// appropriate only for sources that do not require project stable-asset resolution.
-#[must_use]
-pub fn replace_scene_with_product<F>(
-    world: &mut World,
-    registry: &ComponentRegistry,
-    document: &SceneDocument,
-    database: Option<&ProjectAssetDatabase>,
-    current: &SpawnedSceneInstance,
-    limits: SceneProductTransactionLimits,
-    additional_retirements: &[WorldEntityToken],
-    configure: F,
-) -> SceneSpawnReport
-where
-    F: FnOnce(&mut SceneProductOverlayWriter<'_>),
-{
-    SceneSpawner::new().spawn_with_asset_context_and_product(
-        world,
-        registry,
-        document,
-        None,
-        database,
-        SceneIdentityCommit::Replace(current),
-        Some(SceneProductTransactionInput {
-            limits,
-            additional_retirements,
-            configure: Box::new(configure),
-        }),
-    )
-}
-
 /// Replaces one active Scene Instance while preserving the source provenance of an already
 /// expanded document and its admitted asset-resolution context.
 #[must_use]
@@ -1311,11 +1069,15 @@ pub fn replace_expanded_scene_with_product_and_bindings<F>(
 where
     F: FnOnce(&mut SceneProductOverlayWriter<'_>),
 {
+    let occurrence = match occurrence_for_instance(world, current) {
+        Ok(occurrence) => occurrence.clone(),
+        Err(error) => return occurrence_rejection(DiagnosticReport::default(), error),
+    };
     SceneSpawner::new().spawn_with_asset_context_and_product_bindings(
         world,
         registry,
-        candidate.document(),
-        Some(candidate.provenance()),
+        candidate,
+        &occurrence,
         database,
         SceneIdentityCommit::Replace(current),
         Some(SceneProductTransactionInput {
@@ -1345,12 +1107,16 @@ pub fn prepare_expanded_scene_replacement_with_claims<F>(
 where
     F: FnOnce(&mut SceneProductOverlayWriter<'_>),
 {
+    let occurrence = match occurrence_for_instance(world, current) {
+        Ok(occurrence) => occurrence.clone(),
+        Err(error) => return Err(occurrence_rejection(DiagnosticReport::default(), error)),
+    };
     SceneSpawner::new()
         .prepare_with_asset_context_and_product_bindings(
             world,
             registry,
-            candidate.document(),
-            Some(candidate.provenance()),
+            candidate,
+            &occurrence,
             database,
             SceneIdentityCommit::Replace(current),
             Some(SceneProductTransactionInput {
@@ -1597,6 +1363,7 @@ pub(crate) fn validate_scene_identity_support(
 }
 
 pub(crate) enum SceneInstanceRetirementTransactionError {
+    Occurrence(OccurrenceError),
     Identity(IdentityDomainError),
     IdentitySupport(IdentitySupportTopologyError),
     PersistentApply(ComponentCodecError),
@@ -1623,6 +1390,9 @@ pub fn retire_and_despawn_scene_instance(
         .map(|retired| retired.len())
         .map_err(|error| {
             let diagnostic = match error {
+                SceneInstanceRetirementTransactionError::Occurrence(error) => {
+                    return occurrence_rejection(DiagnosticReport::default(), error).diagnostics;
+                }
                 SceneInstanceRetirementTransactionError::Identity(error) => {
                     crate::diagnostics::with_identity_error(
                         diagnostic_error(
@@ -1674,6 +1444,8 @@ pub(crate) fn retire_scene_instance_exact(
     prepare_mutation_baseline(world);
     let prepared = prepare_exact_scene_instance_retirement(world, current, cause)
         .map_err(SceneInstanceRetirementTransactionError::Identity)?;
+    occurrence_for_instance(world, current)
+        .map_err(SceneInstanceRetirementTransactionError::Occurrence)?;
     let retirements = prepared.retiring_entities().to_vec();
     validate_scene_identity_support(world, &retirements)
         .map_err(SceneInstanceRetirementTransactionError::IdentitySupport)?;
@@ -1692,7 +1464,41 @@ pub(crate) fn retire_scene_instance_exact(
     let retired = prepared.commit(&mut domain);
     retirement.commit(world);
     world.insert_resource(domain);
+    release_occurrence(world, current);
     Ok(retired)
+}
+
+fn occurrence_rejection(
+    mut diagnostics: DiagnosticReport,
+    error: OccurrenceError,
+) -> SceneSpawnReport {
+    let (code, message) = match error {
+        OccurrenceError::Occupied => (
+            "scene.occurrence-occupied",
+            "The logical Scene occurrence is already active",
+        ),
+        OccurrenceError::Budget => (
+            "scene.occurrence-budget-exceeded",
+            "Scene occurrence admission exceeds its active ownership budget",
+        ),
+        OccurrenceError::WrongWorld => (
+            "scene.occurrence-world-mismatch",
+            "Scene occurrence ownership belongs to another World",
+        ),
+        OccurrenceError::Lifecycle => (
+            "scene.occurrence-lifecycle-ineligible",
+            "Scene occurrence publication would run unsupported lifecycle work",
+        ),
+        OccurrenceError::Missing | OccurrenceError::Changed => (
+            "scene.occurrence-association-changed",
+            "The exact Scene occurrence association is missing or changed",
+        ),
+    };
+    diagnostics.push(diagnostic_error(code, message));
+    SceneSpawnReport {
+        diagnostics,
+        ..Default::default()
+    }
 }
 
 fn persistent_apply_rejection(
@@ -1853,8 +1659,9 @@ fn prepare_scene_identity_commit(
                 let registration =
                     prepare_exact_scene_instance_registration(&domain, world, &entries)?;
                 return Ok(PreparedSceneIdentityCommit::Register {
+                    bound_domain: domain.id(),
                     domain: Some(domain),
-                    registration,
+                    instance: registration.instance_id(),
                 });
             }
             let domain = world
@@ -1863,7 +1670,8 @@ fn prepare_scene_identity_commit(
             let registration = prepare_exact_scene_instance_registration(domain, world, &entries)?;
             Ok(PreparedSceneIdentityCommit::Register {
                 domain: None,
-                registration,
+                bound_domain: domain.id(),
+                instance: registration.instance_id(),
             })
         }
         SceneIdentityCommit::Replace(current) => {
@@ -1955,115 +1763,22 @@ pub fn retire_and_despawn_scene_entity(
     Ok(())
 }
 
+/// Materializes a required source-bound candidate into one explicitly declared logical slot.
 #[must_use]
 pub fn spawn_scene(
     world: &mut World,
     registry: &ComponentRegistry,
-    document: &SceneDocument,
-) -> SceneSpawnReport {
-    SceneSpawner::new().spawn(world, registry, document)
-}
-
-/// Materializes an immutable expanded scene with the source association admitted by its owner.
-#[must_use]
-pub fn spawn_expanded_scene(
-    world: &mut World,
-    registry: &ComponentRegistry,
     candidate: &ExpandedSceneCandidate,
+    occurrence: &SceneOccurrenceKey,
     database: Option<&ProjectAssetDatabase>,
 ) -> SceneSpawnReport {
-    SceneSpawner::new().spawn_with_asset_context_and_product(
-        world,
-        registry,
-        candidate.document(),
-        Some(candidate.provenance()),
-        database,
-        SceneIdentityCommit::Register,
-        None,
-    )
-}
-
-#[must_use]
-pub fn spawn_scene_with_asset_database(
-    world: &mut World,
-    registry: &ComponentRegistry,
-    document: &SceneDocument,
-    database: &ProjectAssetDatabase,
-) -> SceneSpawnReport {
-    SceneSpawner::new().spawn_with_asset_database(world, registry, document, database)
-}
-
-#[must_use]
-pub fn spawn_scene_with_prefab_resolver<R: PrefabSourceResolver + ?Sized>(
-    world: &mut World,
-    registry: &ComponentRegistry,
-    document: &SceneDocument,
-    resolver: &R,
-) -> SceneSpawnReport {
-    SceneSpawner::new().spawn_with_prefab_resolver(world, registry, document, resolver)
-}
-
-#[must_use]
-pub fn spawn_scene_with_prefab_resolver_and_asset_database<R: PrefabSourceResolver + ?Sized>(
-    world: &mut World,
-    registry: &ComponentRegistry,
-    document: &SceneDocument,
-    resolver: &R,
-    database: &ProjectAssetDatabase,
-) -> SceneSpawnReport {
-    SceneSpawner::new().spawn_with_prefab_resolver_and_asset_database(
-        world, registry, document, resolver, database,
-    )
-}
-
-#[must_use]
-pub fn spawn_prefab(
-    world: &mut World,
-    registry: &ComponentRegistry,
-    prefab: &PrefabDocument,
-) -> SceneSpawnReport {
-    SceneSpawner::new().spawn_prefab(world, registry, prefab)
-}
-
-#[must_use]
-pub fn spawn_prefab_with_asset_database(
-    world: &mut World,
-    registry: &ComponentRegistry,
-    prefab: &PrefabDocument,
-    database: &ProjectAssetDatabase,
-) -> SceneSpawnReport {
-    SceneSpawner::new().spawn_prefab_with_asset_database(world, registry, prefab, database)
-}
-
-#[must_use]
-pub fn spawn_prefab_with_patch(
-    world: &mut World,
-    registry: &ComponentRegistry,
-    prefab: &PrefabDocument,
-    patch: &ScenePatchDocument,
-) -> SceneSpawnReport {
-    SceneSpawner::new().spawn_prefab_with_patch(world, registry, prefab, patch)
-}
-
-#[must_use]
-pub fn spawn_prefab_with_patch_and_asset_database(
-    world: &mut World,
-    registry: &ComponentRegistry,
-    prefab: &PrefabDocument,
-    patch: &ScenePatchDocument,
-    database: &ProjectAssetDatabase,
-) -> SceneSpawnReport {
-    SceneSpawner::new()
-        .spawn_prefab_with_patch_and_asset_database(world, registry, prefab, patch, database)
+    SceneSpawner::new().sync(world, registry, candidate, occurrence, database, None)
 }
 
 #[cfg(test)]
 mod provenance_admission_tests {
     use super::*;
-    use crate::{SceneEntityProvenance, SceneEntityRecord};
-    use nara_core::ItemLimit;
     use nara_ecs::Component;
-    use nara_identity::EntityLookup;
 
     #[derive(Component)]
     struct ClaimedRuntimeState;
@@ -2077,138 +1792,72 @@ mod provenance_admission_tests {
         assert!(claims.contains(component_id));
     }
 
-    fn id(value: &str) -> SceneEntityId {
-        SceneEntityId::new(value).unwrap()
-    }
-
-    fn invalid_sources(document: &SceneDocument) -> Vec<SceneEntityProvenanceMap> {
-        let candidate = ExpandedSceneCandidate::plain(std::sync::Arc::new(document.clone()));
-        let sources = candidate.provenance();
-        let mut missing = sources.clone();
-        missing.remove(&id("left"));
-        let mut extra = sources.clone();
-        extra.insert(id("extra"), SceneEntityProvenance::local(id("extra")));
-        let mut rekeyed = sources.clone();
-        let source = rekeyed.remove(&id("left")).unwrap();
-        rekeyed.insert(id("stale"), source);
-        let swapped = [
-            (id("left"), sources[&id("right")].clone()),
-            (id("right"), sources[&id("left")].clone()),
-        ]
-        .into_iter()
-        .collect();
-        vec![missing, extra, rekeyed, swapped]
-    }
-
     #[test]
-    fn invalid_provenance_rejects_before_scene_allocation_or_product_configuration() {
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
-        let document = SceneDocument::from_ordered_roots([
-            SceneEntityRecord::new(id("left")),
-            SceneEntityRecord::new(id("right")),
-        ]);
-        for sources in invalid_sources(&document) {
+    fn prepared_registration_rejects_intervening_domain_or_allocator_publication() {
+        use crate::{SceneDocument, SourceDocumentKind};
+        for installed in [false, true] {
             let mut world = World::new();
-            let before_entities = world
-                .iter_entities()
-                .map(|entity| entity.id())
-                .collect::<Vec<_>>();
-            let report = SceneSpawner::new().spawn_with_asset_context_and_product(
-                &mut world,
-                &registry,
-                &document,
-                Some(&sources),
-                None,
-                SceneIdentityCommit::Register,
-                Some(SceneProductTransactionInput {
-                    limits: SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::ONE),
-                    additional_retirements: &[],
-                    configure: Box::new(|_| {
-                        panic!("invalid provenance must reject before product configuration")
-                    }),
-                }),
+            let mut registry = ComponentRegistry::new();
+            registry.freeze().unwrap();
+            let candidate = ExpandedSceneCandidate::plain(
+                SourceDocumentKey::named(
+                    "56d73fb3-6fc0-435b-956b-1d4df1569e3a".parse().unwrap(),
+                    "registration",
+                    SourceDocumentKind::Scene,
+                )
+                .unwrap(),
+                Arc::new(SceneDocument::default()),
             );
-            assert!(report.instance.is_none());
-            assert_eq!(
-                world
-                    .iter_entities()
-                    .map(|entity| entity.id())
-                    .collect::<Vec<_>>(),
-                before_entities
-            );
-            assert!(!world.contains_resource::<WorldIdentityDomain>());
-            assert_eq!(
-                report.diagnostics.iter().next().unwrap().code().as_str(),
-                "scene.invalid-provenance"
-            );
-        }
-    }
-
-    #[test]
-    fn invalid_provenance_replacement_preserves_old_entities_identity_and_sources() {
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
-        let document = SceneDocument::from_ordered_roots([
-            SceneEntityRecord::new(id("left")),
-            SceneEntityRecord::new(id("right")),
-        ]);
-        let mut world = World::new();
-        let initial = spawn_scene(&mut world, &registry, &document);
-        assert!(
-            !initial.diagnostics.has_errors(),
-            "{:#?}",
-            initial.diagnostics
-        );
-        let current = initial
-            .instance
-            .expect("the baseline plain scene must materialize");
-        let before = world
-            .iter_entities()
-            .map(|entity| entity.id())
-            .collect::<Vec<_>>();
-        let stats = world.resource::<WorldIdentityDomain>().stats();
-        let old_sources = before
-            .iter()
-            .filter_map(|entity| {
-                world
-                    .get::<SceneEntitySource>(*entity)
-                    .cloned()
-                    .map(|source| (*entity, source))
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(old_sources.len(), document.entities.len());
-        for sources in invalid_sources(&document) {
-            let report = SceneSpawner::new().spawn_with_asset_context_and_product(
-                &mut world,
-                &registry,
-                &document,
-                Some(&sources),
-                None,
-                SceneIdentityCommit::Replace(&current),
-                None,
-            );
-            assert!(report.instance.is_none());
-            assert_eq!(report.retired_entities(), 0);
-            assert_eq!(
-                report.diagnostics.iter().next().unwrap().code().as_str(),
-                "scene.invalid-provenance"
-            );
-            assert_eq!(
-                world
-                    .iter_entities()
-                    .map(|entity| entity.id())
-                    .collect::<Vec<_>>(),
-                before
-            );
-            assert_eq!(world.resource::<WorldIdentityDomain>().stats(), stats);
-            for (entity, source) in &old_sources {
-                assert_eq!(world.get::<SceneEntitySource>(*entity), Some(source));
-                assert_eq!(
-                    current.resolve(&world, &source.entity_id),
-                    EntityLookup::Resolved(*entity)
+            if installed {
+                let report = spawn_scene(
+                    &mut world,
+                    &registry,
+                    &candidate,
+                    &SceneOccurrenceKey::new("register", "baseline").unwrap(),
+                    None,
                 );
+                assert!(report.instance.is_some());
             }
+            let pending_slot = SceneOccurrenceKey::new("register", "pending").unwrap();
+            let bindings = SceneAssetBindings::from_world(&world);
+            let prepared = SceneSpawner::new()
+                .prepare_with_asset_context_and_product_bindings(
+                    &mut world,
+                    &registry,
+                    &candidate,
+                    &pending_slot,
+                    None,
+                    SceneIdentityCommit::Register,
+                    None,
+                    bindings,
+                    &SceneNativeRetirementClaims::default(),
+                )
+                .unwrap_or_else(|report| panic!("{:?}", report.diagnostics));
+            let intervening = spawn_scene(
+                &mut world,
+                &registry,
+                &candidate,
+                &SceneOccurrenceKey::new("register", "intervening").unwrap(),
+                None,
+            )
+            .instance
+            .unwrap();
+            let stats = world.resource::<WorldIdentityDomain>().stats();
+            let (prepared, report) = match prepared.commit(&mut world) {
+                Ok(_) => panic!("an old registration proof cannot survive another publication"),
+                Err(rejected) => rejected,
+            };
+            assert!(report.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code().as_str() == "scene.prepared-baseline-changed"
+            }));
+            assert_eq!(world.resource::<WorldIdentityDomain>().stats(), stats);
+            assert!(prepared.discard(&mut world).is_ok());
+            assert!(
+                spawn_scene(&mut world, &registry, &candidate, &pending_slot, None)
+                    .instance
+                    .is_some()
+            );
+            retire_and_despawn_scene_instance(&mut world, &intervening).unwrap();
         }
     }
 }

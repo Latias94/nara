@@ -2,6 +2,7 @@ use std::{
     collections::VecDeque,
     error::Error,
     fmt::{self, Display, Formatter},
+    sync::Arc,
 };
 
 use nara_asset::ProjectAssetDatabase;
@@ -11,11 +12,12 @@ use nara_identity::SpawnedSceneInstance;
 use nara_reflect::ComponentRegistry;
 
 use crate::{
-    PrefabDocument, PrefabSourceResolver, SceneDocument, ScenePatchDocument, ScenePatchReport,
-    SceneSpawnReport, SceneSpawner,
+    ExpandedSceneCandidate, PrefabDocument, PrefabSourceResolver, SceneDocument,
+    SceneOccurrenceKey, ScenePatchDocument, ScenePatchReport, SceneSpawnReport, SourceDocumentKey,
     diagnostics::{error as diagnostic_error, info as diagnostic_info},
     patch::{PreparedScenePatch, scene_patch_cost},
     retire_and_despawn_scene_instance,
+    spawn::SceneSpawner,
 };
 
 #[cfg(feature = "serde")]
@@ -580,7 +582,7 @@ impl AuthoringSessionAuthority {
 
 #[derive(Debug)]
 pub struct SceneAuthoringSession {
-    document: SceneDocument,
+    document: Arc<SceneDocument>,
     history: AuthoringHistory,
     live_instance: Option<SpawnedSceneInstance>,
     live_dirty: bool,
@@ -1107,7 +1109,7 @@ impl SceneAuthoringSession {
         history_limits: SceneAuthoringHistoryLimits,
     ) -> Self {
         Self {
-            document,
+            document: Arc::new(document),
             history: AuthoringHistory::new(history_limits),
             live_instance: None,
             live_dirty: true,
@@ -1135,7 +1137,7 @@ impl SceneAuthoringSession {
     ) -> Self {
         let (document, state) = published.into_parts();
         Self {
-            document,
+            document: Arc::new(document),
             history: AuthoringHistory::new(history_limits),
             live_instance: None,
             live_dirty: true,
@@ -1265,7 +1267,7 @@ impl SceneAuthoringSession {
         document: SceneDocument,
         source_upgrade_required: bool,
     ) {
-        self.document = document;
+        self.document = Arc::new(document);
         self.history.replace_source();
         self.live_dirty = true;
         self.source_upgrade_required = source_upgrade_required;
@@ -1505,95 +1507,105 @@ impl SceneAuthoringSession {
         })
     }
 
-    /// Synchronizes a native-authority session into the World.
-    ///
-    /// Published authoring sessions are rejected before the World is inspected or mutated.
+    /// Synchronizes a native-authority document with an explicit source and logical placement.
+    /// Published authoring sessions reject before inspecting or mutating the World.
     pub fn sync_world(
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
+        source: &SourceDocumentKey,
+        occurrence: &SceneOccurrenceKey,
     ) -> Result<SceneAuthoringSyncReport, AuthoringSessionAuthorityError> {
         self.authority.require_native()?;
-        let mut spawner = SceneSpawner::new();
-        let report = match self.live_instance.as_ref() {
-            Some(current) => spawner.replace(world, registry, &self.document, current),
-            None => spawner.spawn(world, registry, &self.document),
-        };
-        Ok(self.finish_world_sync(report))
+        let candidate = ExpandedSceneCandidate::plain(source.clone(), Arc::clone(&self.document));
+        Ok(self.sync_bound_candidate(world, registry, &candidate, occurrence, None))
     }
 
-    /// Synchronizes a native-authority session with project asset validation.
     pub fn sync_world_with_asset_database(
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
+        source: &SourceDocumentKey,
+        occurrence: &SceneOccurrenceKey,
         database: &ProjectAssetDatabase,
     ) -> Result<SceneAuthoringSyncReport, AuthoringSessionAuthorityError> {
         self.authority.require_native()?;
-        let mut spawner = SceneSpawner::new();
-        let report = match self.live_instance.as_ref() {
-            Some(current) => spawner.replace_with_asset_database(
-                world,
-                registry,
-                &self.document,
-                current,
-                database,
-            ),
-            None => spawner.spawn_with_asset_database(world, registry, &self.document, database),
-        };
-        Ok(self.finish_world_sync(report))
+        let candidate = ExpandedSceneCandidate::plain(source.clone(), Arc::clone(&self.document));
+        Ok(self.sync_bound_candidate(world, registry, &candidate, occurrence, Some(database)))
     }
 
-    /// Synchronizes a native-authority session with Prefab resolution.
     pub fn sync_world_with_prefab_resolver<R: PrefabSourceResolver + ?Sized>(
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
+        source: &SourceDocumentKey,
+        occurrence: &SceneOccurrenceKey,
         resolver: &R,
     ) -> Result<SceneAuthoringSyncReport, AuthoringSessionAuthorityError> {
         self.authority.require_native()?;
-        let mut spawner = SceneSpawner::new();
-        let report = match self.live_instance.as_ref() {
-            Some(current) => spawner.replace_with_prefab_resolver(
-                world,
-                registry,
-                &self.document,
-                current,
-                resolver,
-            ),
-            None => spawner.spawn_with_prefab_resolver(world, registry, &self.document, resolver),
-        };
-        Ok(self.finish_world_sync(report))
+        let report = self.document.expand_prefabs(registry, resolver);
+        Ok(self.sync_expansion(world, registry, source, occurrence, report, None))
     }
 
-    /// Synchronizes a native-authority session with Prefab and project asset resolution.
     pub fn sync_world_with_prefab_resolver_and_asset_database<R: PrefabSourceResolver + ?Sized>(
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
+        source: &SourceDocumentKey,
+        occurrence: &SceneOccurrenceKey,
         resolver: &R,
         database: &ProjectAssetDatabase,
     ) -> Result<SceneAuthoringSyncReport, AuthoringSessionAuthorityError> {
         self.authority.require_native()?;
-        let mut spawner = SceneSpawner::new();
-        let report = match self.live_instance.as_ref() {
-            Some(current) => spawner.replace_with_prefab_resolver_and_asset_database(
+        let report = self
+            .document
+            .expand_prefabs_with_asset_database(registry, resolver, database);
+        Ok(self.sync_expansion(world, registry, source, occurrence, report, Some(database)))
+    }
+
+    fn sync_expansion(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        source: &SourceDocumentKey,
+        occurrence: &SceneOccurrenceKey,
+        expansion: crate::PrefabExpansionReport,
+        database: Option<&ProjectAssetDatabase>,
+    ) -> SceneAuthoringSyncReport {
+        let mut diagnostics = expansion.diagnostics;
+        let mut report = match expansion.candidate {
+            Some(expanded) => SceneSpawner::new().sync(
                 world,
                 registry,
-                &self.document,
-                current,
-                resolver,
+                &expanded.bind_source(source.clone()),
+                occurrence,
                 database,
+                self.live_instance.as_ref(),
             ),
-            None => spawner.spawn_with_prefab_resolver_and_asset_database(
-                world,
-                registry,
-                &self.document,
-                resolver,
-                database,
-            ),
+            None => SceneSpawnReport::default(),
         };
-        Ok(self.finish_world_sync(report))
+        diagnostics.extend(report.diagnostics);
+        report.diagnostics = diagnostics;
+        self.finish_world_sync(report)
+    }
+
+    fn sync_bound_candidate(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        candidate: &ExpandedSceneCandidate,
+        occurrence: &SceneOccurrenceKey,
+        database: Option<&ProjectAssetDatabase>,
+    ) -> SceneAuthoringSyncReport {
+        let report = SceneSpawner::new().sync(
+            world,
+            registry,
+            candidate,
+            occurrence,
+            database,
+            self.live_instance.as_ref(),
+        );
+        self.finish_world_sync(report)
     }
 
     pub fn clear_live_world(&mut self, world: &mut World) -> SceneAuthoringClearReport {
@@ -1634,7 +1646,7 @@ impl SceneAuthoringSession {
         prepared: Result<PreparedScenePatch, ScenePatchReport>,
     ) -> ScenePatchReport {
         let report = self.history.apply_forward(
-            &mut self.document,
+            Arc::make_mut(&mut self.document),
             patch,
             prepared.map(PreparedScenePatch::into_parts),
         );
@@ -1652,11 +1664,11 @@ impl SceneAuthoringSession {
             &SceneDocument,
         ) -> Result<PreparedScenePatch, ScenePatchReport>,
     ) -> ScenePatchReport {
-        let report =
-            self.history
-                .apply_history(&mut self.document, direction, |patch, document| {
-                    apply(patch, document).map(PreparedScenePatch::into_parts)
-                });
+        let report = self.history.apply_history(
+            Arc::make_mut(&mut self.document),
+            direction,
+            |patch, document| apply(patch, document).map(PreparedScenePatch::into_parts),
+        );
         if report.applied {
             self.live_dirty = true;
         }
@@ -1670,15 +1682,17 @@ impl SceneAuthoringSession {
             .published()
             .expect("an admitted authoring document owns classification state");
         let mut next_state = None;
-        let report =
-            self.history
-                .apply_history(&mut self.document, direction, |patch, document| {
-                    let prepared = crate::authoring_decode::prepare_scene_authoring_patch(
-                        document, state, patch, true,
-                    )?;
-                    next_state = Some(prepared.state);
-                    Ok((prepared.document, prepared.report))
-                });
+        let report = self.history.apply_history(
+            Arc::make_mut(&mut self.document),
+            direction,
+            |patch, document| {
+                let prepared = crate::authoring_decode::prepare_scene_authoring_patch(
+                    document, state, patch, true,
+                )?;
+                next_state = Some(prepared.state);
+                Ok((prepared.document, prepared.report))
+            },
+        );
         if report.applied {
             self.authority = AuthoringSessionAuthority::Published(
                 next_state.expect("accepted authoring history publishes classification state"),

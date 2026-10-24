@@ -12,8 +12,9 @@ use nara_identity::SpawnedSceneInstance;
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
     ExpandedSceneCandidate, SceneDocument, SceneDocumentCandidate, SceneEntityId,
+    SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind,
     advanced::{SceneProductTransactionLimits, replace_expanded_scene_with_product},
-    retire_and_despawn_scene_instance, spawn_expanded_scene,
+    retire_and_despawn_scene_instance, spawn_scene,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -78,6 +79,29 @@ pub struct SourceKey {
 }
 
 impl SourceKey {
+    fn document_key(&self) -> Result<SourceDocumentKey, Error> {
+        if self.product != Product::Primary {
+            return Err(Error::Context);
+        }
+        match &self.origin {
+            Origin::Named(universe, name) => SourceDocumentKey::named(
+                universe.0.to_string().parse().map_err(|_| Error::Context)?,
+                name.0.clone(),
+                SourceDocumentKind::Scene,
+            )
+            .map_err(|_| Error::Origin),
+            Origin::Asset(stable_id) => Ok(SourceDocumentKey::stable_asset(
+                *stable_id,
+                SourceDocumentKind::Scene,
+            )),
+            Origin::Location(universe, path) => Ok(SourceDocumentKey::project_location(
+                universe.0.to_string().parse().map_err(|_| Error::Context)?,
+                path.clone(),
+                SourceDocumentKind::Scene,
+            )),
+        }
+    }
+
     pub fn encode_exact(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         self.encode_into(&mut bytes);
@@ -124,12 +148,13 @@ pub struct BoundScene {
 
 impl BoundScene {
     pub fn named(universe: Universe, name: &str, document: SceneDocument) -> Result<Self, Error> {
+        let key = SourceKey {
+            origin: Origin::Named(universe, Atom::new(name)?),
+            product: Product::Primary,
+        };
         Ok(Self {
-            key: SourceKey {
-                origin: Origin::Named(universe, Atom::new(name)?),
-                product: Product::Primary,
-            },
-            candidate: ExpandedSceneCandidate::plain(Arc::new(document)),
+            candidate: ExpandedSceneCandidate::plain(key.document_key()?, Arc::new(document)),
+            key,
         })
     }
 
@@ -270,12 +295,13 @@ impl<'root> FileSources<'root> {
         {
             self.database.insert(record).map_err(|_| Error::Metadata)?;
         }
+        let key = SourceKey {
+            origin,
+            product: Product::Primary,
+        };
         Ok(BoundScene {
-            key: SourceKey {
-                origin,
-                product: Product::Primary,
-            },
-            candidate: ExpandedSceneCandidate::plain(Arc::new(document)),
+            candidate: ExpandedSceneCandidate::plain(key.document_key()?, Arc::new(document)),
+            key,
         })
     }
 }
@@ -402,10 +428,15 @@ impl TrialHost {
         }
         self.check(&intent.occurrence, intent.predecessor.as_ref())?;
         let report = match &intent.predecessor {
-            None => spawn_expanded_scene(
+            None => spawn_scene(
                 &mut self.world,
                 &self.registry,
                 &intent.source.candidate,
+                &SceneOccurrenceKey::new(
+                    intent.occurrence.namespace.0.to_string(),
+                    intent.occurrence.slot.0.clone(),
+                )
+                .map_err(|_| Error::Origin)?,
                 None,
             ),
             Some(current) => replace_expanded_scene_with_product(

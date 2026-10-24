@@ -358,8 +358,16 @@ fn update_domain(world: &mut World) {
         }
         Request::Retry => reconcile(world, &mut domain, &registry, &control),
         Request::LegacySync => {
-            domain.legacy_sync_rejected =
-                !domain.session.sync_world(world, &registry).unwrap().synced;
+            domain.legacy_sync_rejected = !domain
+                .session
+                .sync_world(
+                    world,
+                    &registry,
+                    &scene_source_key("domain-reconciliation/authored"),
+                    &scene_occurrence("domain-reconciliation/projection"),
+                )
+                .unwrap()
+                .synced;
         }
         Request::LegacyClear => {
             domain.legacy_clear_rejected = !domain.session.clear_live_world(world).cleared;
@@ -396,7 +404,15 @@ fn reconcile(
     // Native effects retire in their owning domain phase, outside persistent rollback. Remove
     // both the owner and its required/hook-created state before the strict scene transaction.
     retire_native_state(world);
-    let report = domain.session.sync_world(world, registry).unwrap();
+    let report = domain
+        .session
+        .sync_world(
+            world,
+            registry,
+            &scene_source_key("domain-reconciliation/authored"),
+            &scene_occurrence("domain-reconciliation/projection"),
+        )
+        .unwrap();
     if !report.synced {
         domain.readiness =
             Readiness::Unavailable(revision, UnavailableReason::PersistentProjection);
@@ -507,4 +523,16 @@ fn retire_native_state(world: &mut World) {
             .remove::<(NativeState, NativeRequired, HookOwned)>();
     }
     world.flush();
+}
+
+fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {
+    nara_scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara_scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+fn scene_occurrence(slot: &str) -> nara_scene::SceneOccurrenceKey {
+    nara_scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

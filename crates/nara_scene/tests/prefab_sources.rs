@@ -12,7 +12,7 @@ use nara_scene::{
     PrefabInstance, PrefabProjectionStep, PrefabSourceResolver, ResolvedPrefabSource,
     SceneDocument, SceneEntityId, SceneEntityProvenance, SceneEntityProvenanceMap,
     SceneEntityRecord, SceneEntitySource, ScenePatchDocument, SourceDocumentKey,
-    SourceDocumentKind, SourceDocumentOrigin, spawn_scene, spawn_scene_with_prefab_resolver,
+    SourceDocumentKind, SourceDocumentOrigin,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -458,11 +458,24 @@ fn nested_projection_budget_counts_the_full_parent_key_for_every_leaf() {
 }
 
 #[test]
-fn default_provenance_rejection_through_public_spawn_preserves_world_and_identity() {
+fn default_provenance_rejection_before_source_binding_preserves_world_and_identity() {
     let registry = registry();
     let mut world = World::new();
     let existing = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("existing"))]);
-    let existing_spawn = spawn_scene(&mut world, &registry, &existing);
+    let existing_spawn = nara_scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara_scene::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "default_provenance_rejection_through_public_spawn_preserves_world_and_identity/existing",
+            ),
+            std::sync::Arc::new((existing).clone()),
+        ),
+        &scene_occurrence(
+            "default_provenance_rejection_through_public_spawn_preserves_world_and_identity/existing_spawn",
+        ),
+        None,
+    );
     assert!(
         existing_spawn.instance.is_some(),
         "{:?}",
@@ -496,8 +509,8 @@ fn default_provenance_rejection_through_public_spawn_preserves_world_and_identit
     // The default depth/entity/value/identifier budgets all permit this finite source tree.
     let sources = SourceChain::new(30, 1_200);
     let scene = SceneDocument::from_ordered_roots([anchor("outer", sources.0[0].0.clone())]);
-    let rejected = spawn_scene_with_prefab_resolver(&mut world, &registry, &scene, &sources);
-    assert!(rejected.instance.is_none());
+    let rejected = (scene).expand_prefabs(&registry, &sources);
+    assert!(rejected.candidate.is_none());
     assert_provenance_budget(&rejected.diagnostics, 64 * 1024 * 1024);
     assert_eq!(
         world
@@ -530,4 +543,17 @@ fn default_provenance_rejection_through_public_spawn_preserves_world_and_identit
         before_ticks,
     );
     assert_eq!(world.resource::<HierarchyRoots>().as_slice(), before_roots);
+}
+
+fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {
+    nara_scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara_scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara_scene::SceneOccurrenceKey {
+    nara_scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

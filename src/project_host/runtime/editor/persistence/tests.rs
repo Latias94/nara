@@ -89,6 +89,34 @@ impl Fixture {
         .unwrap()
     }
 
+    fn authoring_editor(&self) -> EditorProjectSession {
+        use crate::project_host::authoring::{
+            AuthoringProjectAdmissionHost, PreparedAuthoringProject, project_authoring_adapters,
+        };
+        let schema = AuthoringProjectAdmissionHost::default()
+            .prepare(self.capability(), None)
+            .unwrap()
+            .admit_bundle()
+            .unwrap()
+            .publish();
+        let adapters = project_authoring_adapters(schema.bundle()).unwrap();
+        let receipt = PreparedAuthoringProject::new(schema, adapters)
+            .admit_startup_closure()
+            .unwrap()
+            .publish();
+        let mut editor = EditorProjectSession::open(receipt).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while editor.project_source_index_work_pending() {
+            editor.drive_editor_frame(Duration::ZERO);
+            assert!(
+                Instant::now() < deadline,
+                "the authoring source index did not settle"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        editor
+    }
+
     fn two_prefabs(&self) -> (EditorProjectSession, [EditorDocumentId; 2]) {
         let anchors = ["p.json", "q.json"].map(|path| {
             fs::write(
@@ -159,6 +187,11 @@ impl Fixture {
                             document,
                             EditorScenePersistenceLane {
                                 project_path: Arc::from(format!("scenes/{name}")),
+                                source_key: nara_scene::SourceDocumentKey::project_location(
+                                    "6d57f8c5-867c-5463-b74a-057a8cabe2bc".parse().unwrap(),
+                                    AssetPath::new(format!("scenes/{name}")).unwrap(),
+                                    nara_scene::SourceDocumentKind::Scene,
+                                ),
                                 document,
                                 host: editor
                                     .authoring_runtime
@@ -203,6 +236,11 @@ impl Fixture {
                             document,
                             EditorPrefabPersistenceLane {
                                 project_path: Arc::from(format!("prefabs/{name}")),
+                                source_key: nara_scene::SourceDocumentKey::project_location(
+                                    "6d57f8c5-867c-5463-b74a-057a8cabe2bc".parse().unwrap(),
+                                    AssetPath::new(format!("prefabs/{name}")).unwrap(),
+                                    nara_scene::SourceDocumentKind::Prefab,
+                                ),
                                 document,
                                 host: editor
                                     .authoring_runtime
@@ -336,6 +374,527 @@ fn close(editor: &mut EditorProjectSession) {
         }
         assert!(Instant::now() < deadline, "custody did not retire");
         std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[test]
+fn independently_opened_scene_keeps_its_own_admitted_location_source() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.root.join("scenes/second.scene.json"),
+        SceneDocument::default().to_json_string().unwrap(),
+    )
+    .unwrap();
+    let mut editor = fixture.authoring_editor();
+    let startup = editor.scene_preview_document.unwrap();
+    let index = editor.project_source_index_snapshot().unwrap();
+    let result = editor.open_indexed_authoring_document(
+        index,
+        "scenes/second.scene.json",
+        crate::project_host::authoring::AuthoringDocumentKind::Scene,
+    );
+    let super::super::document_open::EditorDocumentOpenRequestResult::Opened { document } = result
+    else {
+        panic!("the independent Scene should open: {result:?}");
+    };
+    let expected = nara_scene::SourceDocumentKey::project_location(
+        editor
+            .authoring_project()
+            .unwrap()
+            .settings()
+            .project
+            .source_universe,
+        AssetPath::new("scenes/second.scene.json").unwrap(),
+        nara_scene::SourceDocumentKind::Scene,
+    );
+    assert_eq!(editor.scene_lanes[&document].source_key, expected);
+    assert_ne!(
+        editor.scene_lanes[&document].source_key,
+        editor.scene_lanes[&startup].source_key
+    );
+    assert_eq!(editor.scene_preview_document, Some(document));
+    close(&mut editor);
+}
+
+#[test]
+fn stable_editor_open_and_reopen_reject_missing_mismatched_duplicate_and_changed_metadata() {
+    use super::super::document_open::EditorDocumentOpenRequestResult;
+    use crate::project_host::authoring::AuthoringDocumentKind;
+    use nara_asset::{AssetMeta, AssetMetaIdentity, AssetSourceKind, StableAssetId};
+
+    let fixture = Fixture::new();
+    let manifest = fs::read_to_string(fixture.root.join("nara.toml"))
+        .unwrap()
+        .replace("project_location", "stable_metadata");
+    fs::write(fixture.root.join("nara.toml"), manifest).unwrap();
+    let startup_id = StableAssetId::parse_str("a48d60e2-8ede-4103-b721-f6a0533fb99f").unwrap();
+    let opened_id = StableAssetId::parse_str("be8c37d3-2cd3-4cdf-9479-004f3cd0866d").unwrap();
+    let successor_id = StableAssetId::parse_str("64a2efa1-70cb-4779-8386-dda7c9541bd2").unwrap();
+    let metadata = |name: &str, declared: &str, stable_id, kind| {
+        fs::write(
+            fixture.root.join(format!("scenes/{name}.meta")),
+            AssetMeta::new(
+                AssetMetaIdentity::new(stable_id, AssetPath::new(declared).unwrap(), kind),
+                (),
+            )
+            .to_json_string()
+            .unwrap(),
+        )
+        .unwrap();
+    };
+    metadata(
+        "startup.scene.json",
+        "startup.scene.json",
+        startup_id,
+        AssetSourceKind::Scene,
+    );
+    for name in ["missing", "mismatched", "second", "duplicate"] {
+        fs::write(
+            fixture.root.join(format!("scenes/{name}.scene.json")),
+            SceneDocument::default().to_json_string().unwrap(),
+        )
+        .unwrap();
+    }
+    metadata(
+        "mismatched.scene.json",
+        "other.scene.json",
+        successor_id,
+        AssetSourceKind::Scene,
+    );
+    metadata(
+        "second.scene.json",
+        "second.scene.json",
+        opened_id,
+        AssetSourceKind::Scene,
+    );
+    metadata(
+        "duplicate.scene.json",
+        "duplicate.scene.json",
+        opened_id,
+        AssetSourceKind::Scene,
+    );
+    let mut editor = fixture.authoring_editor();
+    let index = editor.project_source_index_snapshot().unwrap();
+    let startup = editor.scene_preview_document.unwrap();
+    for path in ["scenes/missing.scene.json", "scenes/mismatched.scene.json"] {
+        assert!(matches!(
+            editor.open_indexed_authoring_document(
+                Arc::clone(&index),
+                path,
+                AuthoringDocumentKind::Scene
+            ),
+            EditorDocumentOpenRequestResult::Rejected { .. },
+        ));
+        assert_eq!(editor.workspace.len(), 1);
+        assert_eq!(editor.scene_preview_document, Some(startup));
+    }
+    assert!(!fixture.root.join("scenes/missing.scene.json.meta").exists());
+    let opened = editor.open_indexed_authoring_document(
+        Arc::clone(&index),
+        "scenes/second.scene.json",
+        AuthoringDocumentKind::Scene,
+    );
+    let EditorDocumentOpenRequestResult::Opened { document } = opened else {
+        panic!("the independently admitted stable Scene should open: {opened:?}");
+    };
+    let expected = nara_scene::SourceDocumentKey::stable_asset(
+        opened_id,
+        nara_scene::SourceDocumentKind::Scene,
+    );
+    assert_eq!(editor.scene_lanes[&document].source_key, expected);
+    assert_eq!(
+        editor.open_indexed_authoring_document(
+            index,
+            "scenes/duplicate.scene.json",
+            AuthoringDocumentKind::Scene
+        ),
+        EditorDocumentOpenRequestResult::Rejected {
+            code: "project.editor.document-source-identity-conflict"
+        },
+    );
+    assert_eq!(editor.workspace.len(), 2);
+    let revision = editor.workspace.document_revision(document).unwrap();
+    let gate = editor.hold_next_reopen(ReopenTestPhase::AfterPreparation);
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Reopen {
+            document: Some(document)
+        }),
+        EditorPersistenceRequestResult::Accepted,
+    );
+    editor.advance_persistence();
+    assert!(gate.wait_until_started());
+    metadata(
+        "second.scene.json",
+        "second.scene.json",
+        successor_id,
+        AssetSourceKind::Scene,
+    );
+    gate.release();
+    assert!(matches!(
+        settle(&mut editor),
+        EditorPersistenceResult::Rejected {
+            reason: EditorPersistenceRejection::SourceBindingMismatch,
+            ..
+        },
+    ));
+    assert_eq!(editor.workspace.document_revision(document), Some(revision));
+    assert_eq!(editor.scene_lanes[&document].source_key, expected);
+    close(&mut editor);
+}
+
+#[test]
+fn indexed_open_rejects_loaded_but_unopened_prefab_and_image_identity_conflicts() {
+    use super::super::document_open::EditorDocumentOpenRequestResult;
+    use crate::project_host::authoring::AuthoringDocumentKind;
+    use nara_asset::{AssetMeta, AssetMetaIdentity, AssetSourceKind, StableAssetId};
+    use nara_reflect::{ComponentTypeId, ComponentValue};
+    for trusted in [false, true] {
+        let fixture = Fixture::new();
+        fs::write(
+            fixture.root.join("nara.toml"),
+            fs::read_to_string(fixture.root.join("nara.toml"))
+                .unwrap()
+                .replace("project_location", "stable_metadata"),
+        )
+        .unwrap();
+        let startup_id = StableAssetId::parse_str("a48d60e2-8ede-4103-b721-f6a0533fb99f").unwrap();
+        let prefab_id = StableAssetId::parse_str("be8c37d3-2cd3-4cdf-9479-004f3cd0866d").unwrap();
+        let image_id = StableAssetId::parse_str("64a2efa1-70cb-4779-8386-dda7c9541bd2").unwrap();
+        for (path, declaration, id, kind) in [
+            (
+                "scenes/startup.scene.json",
+                "startup.scene.json",
+                startup_id,
+                AssetSourceKind::Scene,
+            ),
+            (
+                "prefabs/loaded.prefab.json",
+                "loaded.prefab.json",
+                prefab_id,
+                AssetSourceKind::Prefab,
+            ),
+            (
+                "scenes/prefab-conflict.scene.json",
+                "prefab-conflict.scene.json",
+                prefab_id,
+                AssetSourceKind::Scene,
+            ),
+            (
+                "scenes/image-conflict.scene.json",
+                "image-conflict.scene.json",
+                image_id,
+                AssetSourceKind::Scene,
+            ),
+        ] {
+            fs::write(
+                fixture.root.join(format!("{path}.meta")),
+                AssetMeta::new(
+                    AssetMetaIdentity::new(id, AssetPath::new(declaration).unwrap(), kind),
+                    (),
+                )
+                .to_json_string()
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        fs::write(
+            fixture.root.join("prefabs/loaded.prefab.json"),
+            PrefabDocument::default().to_json_string().unwrap(),
+        )
+        .unwrap();
+        for path in [
+            "scenes/prefab-conflict.scene.json",
+            "scenes/image-conflict.scene.json",
+        ] {
+            fs::write(
+                fixture.root.join(path),
+                SceneDocument::default().to_json_string().unwrap(),
+            )
+            .unwrap();
+        }
+        image::RgbaImage::from_pixel(1, 1, image::Rgba([255_u8, 255, 255, 255]))
+            .save(fixture.root.join("assets/loaded.png"))
+            .unwrap();
+        fs::write(
+            fixture.root.join("assets/loaded.png.meta"),
+            AssetMeta::new(
+                AssetMetaIdentity::new(
+                    image_id,
+                    AssetPath::new("loaded.png").unwrap(),
+                    AssetSourceKind::Image,
+                ),
+                nara_image::ImageImportSettings::default(),
+            )
+            .to_json_string()
+            .unwrap(),
+        )
+        .unwrap();
+        let registry = crate::project_host::authoring::first_party_authoring_preview_registry(
+            built_in_schema_providers(),
+        )
+        .unwrap();
+        let component = ComponentTypeId::new("nara.sprite.Sprite");
+        let schema = registry.schema(&component).unwrap();
+        let mut value = schema.authoring_initial_value().unwrap().clone();
+        let ComponentValue::Map(fields) = &mut value else {
+            panic!("Sprite is a map")
+        };
+        let Some(ComponentValue::Map(material)) = fields.get_mut("material") else {
+            panic!("Sprite has material")
+        };
+        material.insert(
+            "image".into(),
+            ComponentValue::map([
+                ("kind", ComponentValue::String("path".into())),
+                ("value", ComponentValue::String("loaded.png".into())),
+            ]),
+        );
+        let sprite = SceneEntityRecord::new(SceneEntityId::new("sprite").unwrap()).with_component(
+            component,
+            nara_scene::SceneComponentRecord::new(schema.version, value),
+        );
+        let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
+        anchor.prefab = Some(nara_scene::PrefabInstance {
+            source: AssetRef::path("loaded.prefab.json").unwrap(),
+            overrides: Default::default(),
+        });
+        fs::write(
+            fixture.root.join("scenes/startup.scene.json"),
+            SceneDocument::from_ordered_roots([sprite, anchor])
+                .to_json_string()
+                .unwrap(),
+        )
+        .unwrap();
+        let mut editor = if trusted {
+            fixture.editor()
+        } else {
+            fixture.authoring_editor()
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while editor.project_source_index_work_pending() {
+            editor.drive_editor_frame(Duration::ZERO);
+            assert!(Instant::now() < deadline, "source index must settle");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(editor.prefab_lanes.is_empty());
+        match &editor.execution {
+            EditorExecutionLane::Authoring(snapshot) => {
+                assert_eq!(snapshot.prefab_sources().count(), 1);
+                assert_eq!(snapshot.asset_sources().count(), 1);
+            }
+            EditorExecutionLane::TrustedCompiled(lane) => {
+                assert_eq!(lane.snapshot.prefabs().len(), 1);
+                assert!(
+                    lane.snapshot
+                        .asset_database()
+                        .record_for_stable_id(image_id)
+                        .is_some()
+                );
+            }
+        }
+        let index = editor.project_source_index_snapshot();
+        let startup = editor.scene_preview_document;
+        for (path, id) in [
+            ("scenes/prefab-conflict.scene.json", prefab_id),
+            ("scenes/image-conflict.scene.json", image_id),
+        ] {
+            if trusted {
+                // Trusted compiled Hosts do not expose Browser Open. Exercise their same owner
+                // conflict gate against the actual retained catalogue, not a nonexistent index.
+                assert_eq!(
+                    editor.exclude_native_source_key(
+                        path,
+                        &nara_scene::SourceDocumentKey::stable_asset(
+                            id,
+                            nara_scene::SourceDocumentKind::Scene,
+                        )
+                    ),
+                    Err("project.editor.document-source-identity-conflict"),
+                );
+            } else {
+                assert_eq!(
+                    editor.open_indexed_authoring_document(
+                        Arc::clone(index.as_ref().unwrap()),
+                        path,
+                        AuthoringDocumentKind::Scene,
+                    ),
+                    EditorDocumentOpenRequestResult::Rejected {
+                        code: "project.editor.document-source-identity-conflict"
+                    },
+                );
+            }
+            assert_eq!(editor.workspace.len(), 1);
+            assert_eq!(editor.scene_preview_document, startup);
+        }
+        if trusted {
+            let document = startup.unwrap();
+            let anchor = SceneEntityId::new("anchor").unwrap();
+            assert!(
+                editor
+                    .apply_workspace_command(EditorWorkspaceCommand::SelectEntity {
+                        document,
+                        entity: Some(anchor.clone()),
+                    })
+                    .applied
+            );
+            let revision = editor.workspace.document_revision(document).unwrap();
+            let report = editor.open_prefab_source(document, revision, &anchor);
+            assert!(
+                report.applied && report.opened_document.is_some(),
+                "{report:?}"
+            );
+        } else {
+            assert!(matches!(
+                editor.open_indexed_authoring_document(
+                    index.unwrap(),
+                    "prefabs/loaded.prefab.json",
+                    AuthoringDocumentKind::Prefab,
+                ),
+                EditorDocumentOpenRequestResult::Opened { .. }
+            ));
+        }
+        assert_eq!(editor.workspace.len(), 2);
+        close(&mut editor);
+    }
+}
+
+#[test]
+fn reopen_rejects_same_key_metadata_byte_and_file_replacements_after_preparation() {
+    use nara_asset::{AssetMeta, AssetMetaIdentity, AssetSourceKind, StableAssetId};
+    for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
+        for replace_object in [false, true] {
+            let fixture = Fixture::new();
+            fs::write(
+                fixture.root.join("nara.toml"),
+                fs::read_to_string(fixture.root.join("nara.toml"))
+                    .unwrap()
+                    .replace("project_location", "stable_metadata"),
+            )
+            .unwrap();
+            let startup_id =
+                StableAssetId::parse_str("a48d60e2-8ede-4103-b721-f6a0533fb99f").unwrap();
+            fs::write(
+                fixture.root.join("scenes/startup.scene.json.meta"),
+                AssetMeta::new(
+                    AssetMetaIdentity::new(
+                        startup_id,
+                        AssetPath::new("startup.scene.json").unwrap(),
+                        AssetSourceKind::Scene,
+                    ),
+                    (),
+                )
+                .to_json_string()
+                .unwrap(),
+            )
+            .unwrap();
+            let (path, logical, source_kind, document_kind) = match kind {
+                EditorDocumentKind::Scene => (
+                    "scenes/second.scene.json",
+                    "second.scene.json",
+                    AssetSourceKind::Scene,
+                    crate::project_host::authoring::AuthoringDocumentKind::Scene,
+                ),
+                EditorDocumentKind::Prefab => (
+                    "prefabs/second.prefab.json",
+                    "second.prefab.json",
+                    AssetSourceKind::Prefab,
+                    crate::project_host::authoring::AuthoringDocumentKind::Prefab,
+                ),
+                _ => unreachable!(),
+            };
+            let bytes = if kind == EditorDocumentKind::Scene {
+                SceneDocument::default().to_json_string().unwrap()
+            } else {
+                PrefabDocument::default().to_json_string().unwrap()
+            };
+            fs::write(fixture.root.join(path), &bytes).unwrap();
+            let metadata_path = fixture.root.join(format!("{path}.meta"));
+            let metadata = AssetMeta::new(
+                AssetMetaIdentity::new(
+                    StableAssetId::parse_str("be8c37d3-2cd3-4cdf-9479-004f3cd0866d").unwrap(),
+                    AssetPath::new(logical).unwrap(),
+                    source_kind,
+                ),
+                (),
+            )
+            .to_json_string()
+            .unwrap();
+            fs::write(&metadata_path, &metadata).unwrap();
+            let mut editor = fixture.authoring_editor();
+            let index = editor.project_source_index_snapshot().unwrap();
+            let super::super::document_open::EditorDocumentOpenRequestResult::Opened { document } =
+                editor.open_indexed_authoring_document(index, path, document_kind)
+            else {
+                panic!("a stable native document must open")
+            };
+            edit(&mut editor, document, "unsaved");
+            let revision = editor.workspace.document_revision(document);
+            let old_session = match kind {
+                EditorDocumentKind::Scene => editor
+                    .workspace
+                    .scene(document)
+                    .unwrap()
+                    .session()
+                    .document()
+                    .to_json_string()
+                    .unwrap(),
+                EditorDocumentKind::Prefab => editor
+                    .workspace
+                    .prefab(document)
+                    .unwrap()
+                    .session()
+                    .document()
+                    .to_json_string()
+                    .unwrap(),
+                _ => unreachable!(),
+            };
+            let gate = editor.hold_next_reopen(ReopenTestPhase::AfterPreparation);
+            assert_eq!(
+                editor.request_persistence(EditorPersistenceCommand::Reopen {
+                    document: Some(document)
+                }),
+                EditorPersistenceRequestResult::Accepted
+            );
+            editor.advance_persistence();
+            assert!(gate.wait_until_started());
+            if replace_object {
+                fs::rename(&metadata_path, metadata_path.with_extension("previous")).unwrap();
+                fs::write(&metadata_path, &metadata).unwrap();
+            } else {
+                fs::write(&metadata_path, format!("{metadata}\n")).unwrap();
+            }
+            gate.release();
+            assert!(matches!(
+                settle(&mut editor),
+                EditorPersistenceResult::Rejected {
+                    reason: EditorPersistenceRejection::SourceBindingMismatch,
+                    ..
+                }
+            ));
+            assert_eq!(editor.workspace.document_revision(document), revision);
+            let retained_session = match kind {
+                EditorDocumentKind::Scene => editor
+                    .workspace
+                    .scene(document)
+                    .unwrap()
+                    .session()
+                    .document()
+                    .to_json_string()
+                    .unwrap(),
+                EditorDocumentKind::Prefab => editor
+                    .workspace
+                    .prefab(document)
+                    .unwrap()
+                    .session()
+                    .document()
+                    .to_json_string()
+                    .unwrap(),
+                _ => unreachable!(),
+            };
+            assert_eq!(retained_session, old_session);
+            assert_eq!(fs::read_to_string(fixture.root.join(path)).unwrap(), bytes);
+            close(&mut editor);
+        }
     }
 }
 
@@ -949,7 +1508,16 @@ fn source_exclusion_observes_atomic_replacement_and_retained_parent_rename() {
 fn trusted_play_divergence_follows_its_source_while_inspecting_a_prefab() {
     let fixture = Fixture::new();
     let mut editor = fixture.editor();
-    let source = editor.scene_preview_document.unwrap();
+    let startup_key = editor
+        .trusted_compiled()
+        .unwrap()
+        .snapshot
+        .selected_scene_source_key()
+        .clone();
+    let source = fixture.add(&mut editor, EditorDocumentKind::Scene, "play-selected.json");
+    edit(&mut editor, source, "play-source");
+    let expected_source_key = editor.scene_lanes[&source].source_key.clone();
+    assert_ne!(expected_source_key, startup_key);
     let prefab = fixture.add(&mut editor, EditorDocumentKind::Prefab, "inspected.json");
     assert!(
         editor
@@ -969,6 +1537,33 @@ fn trusted_play_divergence_follows_its_source_while_inspecting_a_prefab() {
         );
         editor.drive_editor_frame(Duration::ZERO);
         std::thread::sleep(Duration::from_millis(1));
+    }
+    {
+        let runtime = editor
+            .trusted_compiled_mut()
+            .unwrap()
+            .runtime_host
+            .running_runtime_mut()
+            .unwrap();
+        let current = crate::startup_scene::CurrentScene::get(runtime.world()).unwrap();
+        current
+            .source_view()
+            .with_expanded_scene(|candidate, _| {
+                assert_eq!(candidate.source_key(), &expected_source_key);
+            })
+            .unwrap();
+        let mut count = 0;
+        for entity in runtime.world().iter_entities() {
+            if let Some(materialized) = entity.get::<nara_scene::SceneEntitySource>() {
+                count += 1;
+                assert_eq!(materialized.containing_source(), &expected_source_key);
+                assert_eq!(
+                    materialized.occurrence(),
+                    &nara_scene::SceneOccurrenceKey::new("nara.product", "current-scene").unwrap(),
+                );
+            }
+        }
+        assert_eq!(count, 1);
     }
     assert!(
         editor

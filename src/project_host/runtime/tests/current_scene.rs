@@ -37,7 +37,15 @@ fn inspect_project_scene_restart(world: &mut World) {
     let limits =
         SceneProductTransactionLimits::new(ItemLimit::new(1).unwrap(), ItemLimit::new(1).unwrap());
     let direct = SceneSource::direct(
-        Arc::new(SceneDocument::default()),
+        nara_scene::ExpandedSceneCandidate::plain(
+            nara_scene::SourceDocumentKey::named(
+                "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+                "project-scene-restart-fixture",
+                nara_scene::SourceDocumentKind::Scene,
+            )
+            .unwrap(),
+            Arc::new(SceneDocument::default()),
+        ),
         ByteLimit::new(16 * 1024).unwrap(),
     )
     .unwrap();

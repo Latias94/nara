@@ -39,7 +39,7 @@ fn inspector_model_lists_scene_entities_schema_fields_and_live_snapshot() {
     let inspector = SceneInspectorState::new();
     let mut world = World::new();
     world.spawn_empty();
-    assert!(session.sync_world(&mut world, &registry).unwrap().synced);
+    assert!(session.sync_world(&mut world, &registry, &scene_source_key("inspector_model_lists_scene_entities_schema_fields_and_live_snapshot/authored"), &scene_occurrence("inspector_model_lists_scene_entities_schema_fields_and_live_snapshot/projection")).unwrap().synced);
     let snapshot = WorldIdentitySnapshot::capture_default(&world).unwrap();
 
     let model = inspector.model_with_selection(&session, &registry, Some(&player), Some(&snapshot));
@@ -761,4 +761,16 @@ fn position_type_id() -> ComponentTypeId {
 
 fn scene_id(id: &str) -> SceneEntityId {
     SceneEntityId::new(id).unwrap()
+}
+
+fn scene_source_key(name: &str) -> nara::scene::SourceDocumentKey {
+    nara::scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara::scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+fn scene_occurrence(slot: &str) -> nara::scene::SceneOccurrenceKey {
+    nara::scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

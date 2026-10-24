@@ -2,7 +2,8 @@
 
 mod adapter;
 mod bundle;
-mod document;
+pub(crate) mod document;
+pub(crate) mod native_source;
 mod project;
 mod source_index;
 
@@ -342,6 +343,13 @@ impl AuthoringProjectAdmissionBudget {
         live_handles: usize,
     ) -> Result<(), AuthoringProjectAdmissionError> {
         self.unique_files = self.unique_files.saturating_add(1);
+        self.admit_handle_peak(live_handles)
+    }
+
+    fn admit_handle_peak(
+        &mut self,
+        live_handles: usize,
+    ) -> Result<(), AuthoringProjectAdmissionError> {
         self.peak_open_handles = self.peak_open_handles.max(live_handles);
         self.ensure_within_limits()
     }
@@ -388,6 +396,21 @@ impl AuthoringProjectAdmissionBudget {
         self.diagnostic_items = self.diagnostic_items.saturating_add(items);
         self.diagnostic_bytes = self.diagnostic_bytes.saturating_add(bytes);
         self.ensure_within_limits()
+    }
+
+    fn reconcile_retained_reservation(
+        &mut self,
+        reserved: usize,
+        actual: usize,
+    ) -> Result<(), project::AuthoringProjectSourceAdmissionError> {
+        let refund = reserved
+            .checked_sub(actual)
+            .ok_or(project::AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
+        self.retained_candidate_bytes = self
+            .retained_candidate_bytes
+            .checked_sub(refund)
+            .ok_or(project::AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
+        Ok(())
     }
 
     fn ensure_within_limits(&self) -> Result<(), AuthoringProjectAdmissionError> {
@@ -1279,6 +1302,110 @@ mod tests {
             assert_eq!(snapshot.startup_scene().document(), &scene);
             // Unknown native owners remain degraded even after their data dependencies resolve.
             assert_eq!(snapshot.readiness(), AuthoringProjectReadiness::Degraded);
+        }
+    }
+
+    #[test]
+    fn path_prefab_native_admission_enforces_the_simultaneous_handle_peak() {
+        for stable in [false, true] {
+            let project = TestAuthoringProject::new(
+                "native-handle-peak",
+                AuthoringSchemaBundle::new(std::iter::empty::<AuthoringSchemaBundleOwner>())
+                    .unwrap(),
+            );
+            project.write_startup_manifest();
+            if stable {
+                let path = project.root.join(PROJECT_MANIFEST_PATH);
+                let manifest = fs::read_to_string(&path).unwrap();
+                fs::write(
+                    path,
+                    manifest.replace("'project_location'", "'stable_metadata'"),
+                )
+                .unwrap();
+            }
+            for directory in ["scenes", "prefabs"] {
+                fs::create_dir_all(project.root.join(directory)).unwrap();
+            }
+            let mut anchor = SceneEntityRecord::new(SceneEntityId::new("instance").unwrap());
+            anchor.prefab = Some(PrefabInstance {
+                source: AssetRef::Path(AssetPath::new("p.prefab.json").unwrap()),
+                overrides: ScenePatchDocument::default(),
+            });
+            fs::write(
+                project.root.join("scenes/startup.scene.json"),
+                SceneDocument::from_ordered_roots([anchor])
+                    .to_json_string()
+                    .unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                project.root.join("prefabs/p.prefab.json"),
+                PrefabDocument::default().to_json_string().unwrap(),
+            )
+            .unwrap();
+            if stable {
+                for (root, path, kind, id) in [
+                    (
+                        "scenes",
+                        "startup.scene.json",
+                        AssetSourceKind::Scene,
+                        "9899ce12-26f0-4427-9c2d-ef42bb558f1b",
+                    ),
+                    (
+                        "prefabs",
+                        "p.prefab.json",
+                        AssetSourceKind::Prefab,
+                        "9899ce12-26f0-4427-9c2d-ef42bb558f1c",
+                    ),
+                ] {
+                    fs::write(
+                        project.root.join(root).join(format!("{path}.meta")),
+                        AssetMeta::new(
+                            AssetMetaIdentity::new(
+                                StableAssetId::parse_str(id).unwrap(),
+                                AssetPath::new(path).unwrap(),
+                                kind,
+                            ),
+                            (),
+                        )
+                        .to_json_string()
+                        .unwrap(),
+                    )
+                    .unwrap();
+                }
+            }
+            // Three schema handles, the Prefab directory and original source, plus exact-open
+            // traversal. Stable metadata keeps the second source handle alive during its open.
+            let expected_peak = 7 + usize::from(cfg!(target_os = "linux")) + usize::from(stable);
+            for maximum in [7, expected_peak] {
+                let limits = AuthoringProjectAdmissionLimits {
+                    peak_open_handles: ItemLimit::new(maximum).unwrap(),
+                    ..AuthoringProjectAdmissionLimits::default()
+                };
+                let schema = AuthoringProjectAdmissionHost::new(limits)
+                    .prepare(project.capability(), None)
+                    .unwrap()
+                    .admit_bundle()
+                    .unwrap()
+                    .publish();
+                let result =
+                    PreparedAuthoringProject::new(schema, Box::new([])).admit_startup_closure();
+                if maximum < expected_peak {
+                    assert!(matches!(
+                        result,
+                        Err(AuthoringProjectSourceAdmissionError::Budget(
+                            AuthoringProjectAdmissionError::PeakOpenHandlesExceeded { maximum: 7 }
+                        ))
+                    ));
+                } else {
+                    let receipt = result.unwrap().publish();
+                    assert_eq!(
+                        receipt.snapshot().usage().peak_open_handles(),
+                        expected_peak
+                    );
+                    assert_eq!(receipt.snapshot().prefabs().len(), 1);
+                }
+            }
         }
     }
 

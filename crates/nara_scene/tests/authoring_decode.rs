@@ -18,7 +18,7 @@ use nara_scene::{
     SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneAuthoringSession,
     SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
     SceneFormatError, ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
-    UnavailableRecordManifestEntry, UnavailableValuePathSegment, spawn_prefab, spawn_scene,
+    UnavailableRecordManifestEntry, UnavailableValuePathSegment,
 };
 
 const OWNER: &str = "nara.scene.hierarchy.components";
@@ -624,7 +624,16 @@ fn available_field_edit_preserves_known_unbound_manifest_across_reopen() {
     let mut world = World::new();
     let world_entities_before_sync = world.iter_entities().count();
     assert_eq!(
-        session.sync_world(&mut world, &registry),
+        session.sync_world(
+            &mut world,
+            &registry,
+            &scene_source_key(
+                "available_field_edit_preserves_known_unbound_manifest_across_reopen/authored"
+            ),
+            &scene_occurrence(
+                "available_field_edit_preserves_known_unbound_manifest_across_reopen/projection"
+            )
+        ),
         Err(AuthoringSessionAuthorityError::PublishedAuthoringDocument)
     );
     assert_eq!(world.iter_entities().count(), world_entities_before_sync);
@@ -778,12 +787,38 @@ fn strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation() {
     let mut world = World::new();
     let before = world.iter_entities().count();
 
-    let scene_report = spawn_scene(&mut world, &registry, scene.document());
+    let scene_report = nara_scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara_scene::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation/scene-document",
+            ),
+            std::sync::Arc::new((scene.document()).clone()),
+        ),
+        &scene_occurrence(
+            "strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation/scene_report",
+        ),
+        None,
+    );
     assert!(scene_report.diagnostics.has_errors());
     assert!(scene_report.instance.is_none());
     assert_eq!(world.iter_entities().count(), before);
 
-    let prefab_report = spawn_prefab(&mut world, &registry, prefab.document());
+    let prefab_report = nara_scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara_scene::ExpandedSceneCandidate::plain(
+            named_prefab_source_key(
+                "strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation/prefab",
+            ),
+            std::sync::Arc::new((prefab.document()).instantiate()),
+        ),
+        &scene_occurrence(
+            "strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation/prefab_report",
+        ),
+        None,
+    );
     assert!(prefab_report.diagnostics.has_errors());
     assert!(prefab_report.instance.is_none());
     assert_eq!(world.iter_entities().count(), before);
@@ -798,7 +833,20 @@ fn strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation() {
                 )
                 .with_owner(persistent_owner("nara.project.spoofed-scene-owner")),
             )]);
-    let owner_report = spawn_scene(&mut world, &registry, &mismatched_owner);
+    let owner_report = nara_scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara_scene::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation/mismatched_owner",
+            ),
+            std::sync::Arc::new((mismatched_owner).clone()),
+        ),
+        &scene_occurrence(
+            "strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation/owner_report",
+        ),
+        None,
+    );
     assert!(owner_report.instance.is_none());
     assert!(
         owner_report
@@ -1059,4 +1107,26 @@ fn component_id(value: &str) -> ComponentTypeId {
 
 fn scene_id(value: &str) -> SceneEntityId {
     SceneEntityId::new(value).unwrap()
+}
+
+fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {
+    nara_scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara_scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara_scene::SceneOccurrenceKey {
+    nara_scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
+}
+
+fn named_prefab_source_key(name: &str) -> nara_scene::SourceDocumentKey {
+    nara_scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara_scene::SourceDocumentKind::Prefab,
+    )
+    .unwrap()
 }

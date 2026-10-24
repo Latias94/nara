@@ -15,8 +15,7 @@ use nara_reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId};
 use nara_scene::{
     InMemoryPrefabSourceResolver, Name, PrefabDocument, PrefabInstance, SceneDocument,
     SceneDocumentCandidate, SceneEntityRecord, SceneEntitySource, ScenePatchDocument,
-    ScenePatchOperation, SourceDocumentKey, SourceDocumentKind, export_scene, spawn_scene,
-    spawn_scene_with_prefab_resolver_and_asset_database,
+    ScenePatchOperation, SourceDocumentKey, SourceDocumentKind, export_scene,
 };
 use nara_scene_module_consumer::frozen_scene_registry;
 use serde::{Deserialize, Serialize};
@@ -36,9 +35,30 @@ fn two_resolved_sources_merge_and_spawn_through_the_public_scene_module() {
     let resolver = prefab_resolver(&database, &registry);
     let mut world = World::new();
 
-    let spawned = spawn_scene_with_prefab_resolver_and_asset_database(
-        &mut world, &registry, &scene, &resolver, &database,
-    );
+    let spawned = {
+        let expansion = (scene).expand_prefabs_with_asset_database(&registry, &resolver, &database);
+        assert!(
+            !expansion.diagnostics.has_errors(),
+            "{:?}",
+            expansion.diagnostics
+        );
+        let candidate = expansion
+            .candidate
+            .unwrap()
+            .bind_source(SourceDocumentKey::stable_asset(
+                stable_id(SCENE_ID),
+                SourceDocumentKind::Scene,
+            ));
+        nara_scene::spawn_scene(
+            &mut world,
+            &registry,
+            &candidate,
+            &scene_occurrence(
+                "two_resolved_sources_merge_and_spawn_through_the_public_scene_module/spawned",
+            ),
+            Some(&database),
+        )
+    };
 
     assert!(
         !spawned.diagnostics.has_errors(),
@@ -90,11 +110,20 @@ fn disposable_projection_keeps_repeated_prefab_provenance_in_bounded_epochs() {
     );
     let domain = WorldIdentityDomain::new(&world, settings).unwrap();
     world.insert_resource(domain);
-    let mut projection = nara_scene::SceneProjection::default();
+    let occurrence = scene_occurrence("durable-identity/disposable-projection");
+    let mut projection = nara_scene::SceneProjection::new(occurrence.clone());
+    let expansion = scene.expand_prefabs_with_asset_database(&registry, &resolver, &database);
+    assert!(
+        !expansion.diagnostics.has_errors(),
+        "{:?}",
+        expansion.diagnostics
+    );
+    let source_key =
+        SourceDocumentKey::stable_asset(stable_id(SCENE_ID), SourceDocumentKind::Scene);
+    let candidate = expansion.candidate.unwrap().bind_source(source_key.clone());
     let mut previous: Option<SpawnedSceneInstance> = None;
     for _ in 0..16 {
-        let report = projection
-            .publish_with_prefab_resolver(&mut world, &registry, &scene, &resolver, &database);
+        let report = projection.publish(&mut world, &registry, &candidate, &database);
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
         let instance = report.instance.unwrap();
         assert_eq!(projection.instance(), Some(&instance));
@@ -116,6 +145,8 @@ fn disposable_projection_keeps_repeated_prefab_provenance_in_bounded_epochs() {
         let mut depths = projected
             .iter(&world)
             .filter_map(|(source, name)| {
+                assert_eq!(source.containing_source(), &source_key);
+                assert_eq!(source.occurrence(), &occurrence);
                 (source.source_entity_id.as_str() == "opaque/shared" && name.as_str() == "Shared")
                     .then(|| {
                         source
@@ -172,6 +203,7 @@ fn copy_as_new_changes_only_references_inside_the_explicit_copied_closure() {
     assert_eq!(copied.stable_ids.len(), 2);
     assert_ne!(copied.stable_ids[&stable_id(SCENE_ID)], stable_id(SCENE_ID));
     let copied_actor = copied.stable_ids[&stable_id(ACTOR_ID)];
+    let copied_scene = copied.stable_ids[&stable_id(SCENE_ID)];
     assert_ne!(copied_actor, stable_id(ACTOR_ID));
     assert_ne!(copied_actor, copied.stable_ids[&stable_id(SCENE_ID)]);
     assert_eq!(copied.database.len(), 5);
@@ -203,13 +235,34 @@ fn copy_as_new_changes_only_references_inside_the_explicit_copied_closure() {
             shared,
         );
     let mut world = World::new();
-    let spawned = spawn_scene_with_prefab_resolver_and_asset_database(
-        &mut world,
-        &registry,
-        &copied.scene,
-        &resolver,
-        &copied.database,
-    );
+    let spawned = {
+        let expansion = (copied.scene).expand_prefabs_with_asset_database(
+            &registry,
+            &resolver,
+            &copied.database,
+        );
+        assert!(
+            !expansion.diagnostics.has_errors(),
+            "{:?}",
+            expansion.diagnostics
+        );
+        let candidate = expansion
+            .candidate
+            .unwrap()
+            .bind_source(SourceDocumentKey::stable_asset(
+                copied_scene,
+                SourceDocumentKind::Scene,
+            ));
+        nara_scene::spawn_scene(
+            &mut world,
+            &registry,
+            &candidate,
+            &scene_occurrence(
+                "copy_as_new_changes_only_references_inside_the_explicit_copied_closure/spawned",
+            ),
+            Some(&copied.database),
+        )
+    };
     assert!(
         !spawned.diagnostics.has_errors(),
         "{:?}",
@@ -283,6 +336,7 @@ fn a_saved_authored_binding_selects_one_restored_instance_after_spawn_order_chan
         &resolver,
         &database,
         alpha.clone(),
+        &scene_occurrence("durable-identity/alpha"),
     );
     let original_beta = spawn_owned_instance(
         &mut original,
@@ -291,6 +345,7 @@ fn a_saved_authored_binding_selects_one_restored_instance_after_spawn_order_chan
         &resolver,
         &database,
         beta.clone(),
+        &scene_occurrence("durable-identity/beta"),
     );
     assert_ne!(original_alpha.instance_id(), original_beta.instance_id());
     let saved = SavedAuthoredBinding {
@@ -302,8 +357,15 @@ fn a_saved_authored_binding_selects_one_restored_instance_after_spawn_order_chan
     drop(original);
 
     let mut restored = World::new();
-    let restored_beta =
-        spawn_owned_instance(&mut restored, &registry, &scene, &resolver, &database, beta);
+    let restored_beta = spawn_owned_instance(
+        &mut restored,
+        &registry,
+        &scene,
+        &resolver,
+        &database,
+        beta,
+        &scene_occurrence("durable-identity/beta"),
+    );
     let restored_alpha = spawn_owned_instance(
         &mut restored,
         &registry,
@@ -311,6 +373,7 @@ fn a_saved_authored_binding_selects_one_restored_instance_after_spawn_order_chan
         &resolver,
         &database,
         alpha,
+        &scene_occurrence("durable-identity/alpha"),
     );
     assert_ne!(original_alpha.instance_id(), restored_alpha.instance_id());
     assert_eq!(original_alpha.instance_id(), restored_beta.instance_id());
@@ -359,6 +422,7 @@ fn a_persistent_npc_rematerializes_without_reloading_its_scene_owner() {
         &resolver,
         &database,
         persistent_owner("11111111-1111-4111-8111-111111111111"),
+        &scene_occurrence("durable-identity/instance"),
     );
     let scene_claims = world
         .resource::<WorldIdentityDomain>()
@@ -458,7 +522,20 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
                 .unwrap();
             assert_eq!(published.document(), &document);
             let mut world = World::new();
-            let spawned = spawn_scene(&mut world, &registry, &document);
+            let spawned = nara_scene::spawn_scene(
+                &mut world,
+                &registry,
+                &nara_scene::ExpandedSceneCandidate::plain(
+                    scene_source_key(
+                        "nested_durable_references_preserve_values_across_residency_and_default_matrix/document",
+                    ),
+                    std::sync::Arc::new((document).clone()),
+                ),
+                &scene_occurrence(
+                    "nested_durable_references_preserve_values_across_residency_and_default_matrix/spawned",
+                ),
+                None,
+            );
             assert!(
                 !spawned.diagnostics.has_errors(),
                 "{:?}",
@@ -527,7 +604,20 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
             );
             assert_eq!(document, original);
             assert_eq!(document.to_json_string().unwrap(), encoded);
-            let unloaded_spawn = spawn_scene(&mut world, &registry, &document);
+            let unloaded_spawn = nara_scene::spawn_scene(
+                &mut world,
+                &registry,
+                &nara_scene::ExpandedSceneCandidate::plain(
+                    scene_source_key(
+                        "nested_durable_references_preserve_values_across_residency_and_default_matrix/document",
+                    ),
+                    std::sync::Arc::new((document).clone()),
+                ),
+                &scene_occurrence(
+                    "nested_durable_references_preserve_values_across_residency_and_default_matrix/unloaded_spawn",
+                ),
+                None,
+            );
             assert!(
                 !unloaded_spawn.diagnostics.has_errors(),
                 "{:?}",
@@ -643,7 +733,20 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
             );
             assert_eq!(document, original);
             assert!(!document.validate(&registry).has_errors());
-            let deleted_spawn = spawn_scene(&mut world, &registry, &document);
+            let deleted_spawn = nara_scene::spawn_scene(
+                &mut world,
+                &registry,
+                &nara_scene::ExpandedSceneCandidate::plain(
+                    scene_source_key(
+                        "nested_durable_references_preserve_values_across_residency_and_default_matrix/document",
+                    ),
+                    std::sync::Arc::new((document).clone()),
+                ),
+                &scene_occurrence(
+                    "nested_durable_references_preserve_values_across_residency_and_default_matrix/deleted_spawn",
+                ),
+                None,
+            );
             assert!(
                 !deleted_spawn.diagnostics.has_errors(),
                 "{:?}",
@@ -687,10 +790,24 @@ fn spawn_owned_instance(
     resolver: &InMemoryPrefabSourceResolver,
     database: &nara_asset::ProjectAssetDatabase,
     owner: PersistentRuntimeReference,
+    occurrence: &nara_scene::SceneOccurrenceKey,
 ) -> SpawnedSceneInstance {
-    let report = spawn_scene_with_prefab_resolver_and_asset_database(
-        world, registry, scene, resolver, database,
-    );
+    let report = {
+        let expansion = (scene).expand_prefabs_with_asset_database(registry, resolver, database);
+        assert!(
+            !expansion.diagnostics.has_errors(),
+            "{:?}",
+            expansion.diagnostics
+        );
+        let candidate = expansion
+            .candidate
+            .unwrap()
+            .bind_source(SourceDocumentKey::stable_asset(
+                stable_id(SCENE_ID),
+                SourceDocumentKind::Scene,
+            ));
+        nara_scene::spawn_scene(world, registry, &candidate, occurrence, Some(database))
+    };
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let instance = report.instance.unwrap();
     let token = spawn_identity_entity(world).unwrap();
@@ -699,4 +816,17 @@ fn spawn_owned_instance(
         .entity_mut(token.entity())
         .insert(InstanceOwner(instance.clone()));
     instance
+}
+
+fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {
+    nara_scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara_scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara_scene::SceneOccurrenceKey {
+    nara_scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

@@ -615,7 +615,16 @@ fn unsupported_prefab_instance_prevents_world_mutation() {
     let mut world = World::new();
     let before = world.iter_entities().count();
 
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("unsupported_prefab_instance_prevents_world_mutation/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("unsupported_prefab_instance_prevents_world_mutation/report"),
+        None,
+    );
 
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
@@ -646,7 +655,26 @@ fn scene_prefab_resolver_expands_one_level_instance_before_spawn() {
     let mut world = World::new();
 
     let expansion = document.expand_prefabs(&registry, &resolver);
-    let report = spawn_scene_with_prefab_resolver(&mut world, &registry, &document, &resolver);
+    let report = {
+        let expansion = (document).expand_prefabs(&registry, &resolver);
+        assert!(
+            !expansion.diagnostics.has_errors(),
+            "{:?}",
+            expansion.diagnostics
+        );
+        let candidate = expansion.candidate.unwrap().bind_source(scene_source_key(
+            "scene_prefab_resolver_expands_one_level_instance_before_spawn/source",
+        ));
+        crate::spawn_scene(
+            &mut world,
+            &registry,
+            &candidate,
+            &scene_occurrence(
+                "scene_prefab_resolver_expands_one_level_instance_before_spawn/report",
+            ),
+            None,
+        )
+    };
 
     assert!(!expansion.diagnostics.has_errors());
     let visual_id = prefab_projection_id(&expansion, "enemy", &["visual"]);
@@ -862,7 +890,26 @@ fn scene_prefab_resolver_expands_nested_instances_with_deterministic_ids() {
     assert_eq!(expansion, document.expand_prefabs(&registry, &resolver));
 
     let mut world = World::new();
-    let report = spawn_scene_with_prefab_resolver(&mut world, &registry, &document, &resolver);
+    let report = {
+        let expansion = (document).expand_prefabs(&registry, &resolver);
+        assert!(
+            !expansion.diagnostics.has_errors(),
+            "{:?}",
+            expansion.diagnostics
+        );
+        let candidate = expansion.candidate.unwrap().bind_source(scene_source_key(
+            "scene_prefab_resolver_expands_nested_instances_with_deterministic_ids/source",
+        ));
+        crate::spawn_scene(
+            &mut world,
+            &registry,
+            &candidate,
+            &scene_occurrence(
+                "scene_prefab_resolver_expands_nested_instances_with_deterministic_ids/report",
+            ),
+            None,
+        )
+    };
     let projected = spawned_entity(&world, &report, flash_id);
     let source = world
         .get::<SceneEntitySource>(projected)
@@ -1550,11 +1597,11 @@ fn missing_prefab_source_reports_asset_ref_without_expanded_document() {
     let source = AssetRef::path("prefabs/missing.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new();
     let document = SceneDocument::from_ordered_roots([prefab_anchor("enemy", source)]);
-    let mut world = World::new();
+    let world = World::new();
     let before = world.iter_entities().count();
 
     let expansion = document.expand_prefabs(&registry, &resolver);
-    let report = spawn_scene_with_prefab_resolver(&mut world, &registry, &document, &resolver);
+    let report = (document).expand_prefabs(&registry, &resolver);
 
     assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
@@ -1564,7 +1611,7 @@ fn missing_prefab_source_reports_asset_ref_without_expanded_document() {
     }));
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
-    assert!(report.instance.is_none());
+    assert!(report.candidate.is_none());
 }
 
 #[test]
@@ -1919,7 +1966,16 @@ fn invalid_component_payload_does_not_mutate_world() {
     let mut world = World::new();
     let before = world.iter_entities().count();
 
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("invalid_component_payload_does_not_mutate_world/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("invalid_component_payload_does_not_mutate_world/report"),
+        None,
+    );
 
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
@@ -1945,7 +2001,18 @@ fn component_observer_rejects_fresh_scene_before_target_allocation() {
         .map(|entity| entity.id())
         .collect::<Vec<_>>();
 
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "component_observer_rejects_fresh_scene_before_target_allocation/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("component_observer_rejects_fresh_scene_before_target_allocation/report"),
+        None,
+    );
 
     assert!(report.instance.is_none());
     assert!(report.diagnostics.iter().any(|diagnostic| {
@@ -1987,7 +2054,20 @@ fn deferred_dynamic_hook_rejects_fresh_scene_before_target_allocation() {
         .map(|entity| entity.id())
         .collect::<Vec<_>>();
 
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "deferred_dynamic_hook_rejects_fresh_scene_before_target_allocation/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "deferred_dynamic_hook_rejects_fresh_scene_before_target_allocation/report",
+        ),
+        None,
+    );
 
     assert!(report.instance.is_none());
     assert!(report.diagnostics.iter().any(|diagnostic| {
@@ -2035,7 +2115,20 @@ fn hierarchy_observer_rejects_publication_before_candidate_mutation() {
         .map(|entity| entity.id())
         .collect::<Vec<_>>();
 
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "hierarchy_observer_rejects_publication_before_candidate_mutation/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "hierarchy_observer_rejects_publication_before_candidate_mutation/report",
+        ),
+        None,
+    );
 
     assert!(report.instance.is_none());
     assert!(
@@ -2068,7 +2161,20 @@ fn component_migration_runs_before_scene_preflight_without_mutating_document() {
     let mut world = World::new();
 
     let validation = document.validate(&registry);
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "component_migration_runs_before_scene_preflight_without_mutating_document/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "component_migration_runs_before_scene_preflight_without_mutating_document/report",
+        ),
+        None,
+    );
 
     assert!(!validation.has_errors());
     assert!(!report.diagnostics.has_errors());
@@ -2146,7 +2252,18 @@ fn path_asset_ref_resolves_before_scene_spawn_without_database() {
         )]);
     let mut world = World::new();
 
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "path_asset_ref_resolves_before_scene_spawn_without_database/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("path_asset_ref_resolves_before_scene_spawn_without_database/report"),
+        None,
+    );
 
     assert!(!report.diagnostics.has_errors());
     let entity = spawned_entity(&world, &report, &id);
@@ -2177,7 +2294,18 @@ fn asset_server_observer_rejects_scene_before_target_allocation() {
         .map(|entity| entity.id())
         .collect::<Vec<_>>();
 
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "asset_server_observer_rejects_scene_before_target_allocation/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("asset_server_observer_rejects_scene_before_target_allocation/report"),
+        None,
+    );
 
     assert!(report.instance.is_none());
     assert!(report.diagnostics.iter().any(|diagnostic| {
@@ -2216,7 +2344,20 @@ fn deferred_asset_prepare_declares_resource_access_before_target_allocation() {
         .map(|entity| entity.id())
         .collect::<Vec<_>>();
 
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "deferred_asset_prepare_declares_resource_access_before_target_allocation/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "deferred_asset_prepare_declares_resource_access_before_target_allocation/report",
+        ),
+        None,
+    );
 
     assert!(report.instance.is_none());
     assert!(
@@ -2247,7 +2388,20 @@ fn identity_resource_scope_observer_rejects_scene_before_target_allocation() {
             .with_component(position_type_id(), position_record(2))]);
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
-    let first = spawn_scene(&mut world, &registry, &first_document);
+    let first = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "identity_resource_scope_observer_rejects_scene_before_target_allocation/first_document",
+            ),
+            std::sync::Arc::new((first_document).clone()),
+        ),
+        &scene_occurrence(
+            "identity_resource_scope_observer_rejects_scene_before_target_allocation/first",
+        ),
+        None,
+    );
     assert!(!first.diagnostics.has_errors());
     world.add_observer(
         |_: On<Remove<WorldIdentityDomain>>, mut canary: ResMut<PersistentApplyCanary>| {
@@ -2260,7 +2414,20 @@ fn identity_resource_scope_observer_rejects_scene_before_target_allocation() {
         .map(|entity| entity.id())
         .collect::<Vec<_>>();
 
-    let report = spawn_scene(&mut world, &registry, &second_document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "identity_resource_scope_observer_rejects_scene_before_target_allocation/second_document",
+            ),
+            std::sync::Arc::new((second_document).clone()),
+        ),
+        &scene_occurrence(
+            "identity_resource_scope_observer_rejects_scene_before_target_allocation/report",
+        ),
+        None,
+    );
 
     assert!(report.instance.is_none());
     assert!(
@@ -2279,16 +2446,54 @@ fn identity_resource_scope_observer_rejects_scene_before_target_allocation() {
 }
 
 #[test]
-#[allow(clippy::default_constructed_unit_structs)]
-fn scene_instance_allocation_is_world_global_across_every_spawner_entrypoint() {
+fn scene_instance_allocation_is_world_global_across_explicit_occurrences() {
     let registry = test_registry();
     let id = scene_id("entity");
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())]);
     let mut world = World::new();
 
-    let first = SceneSpawner::new().spawn(&mut world, &registry, &document);
-    let second = SceneSpawner::default().spawn(&mut world, &registry, &document);
-    let third = spawn_scene(&mut world, &registry, &document);
+    let first = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "scene_instance_allocation_is_world_global_across_explicit_occurrences/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "scene_instance_allocation_is_world_global_across_explicit_occurrences/first",
+        ),
+        None,
+    );
+    let second = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "scene_instance_allocation_is_world_global_across_explicit_occurrences/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "scene_instance_allocation_is_world_global_across_explicit_occurrences/second",
+        ),
+        None,
+    );
+    let third = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "scene_instance_allocation_is_world_global_across_explicit_occurrences/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "scene_instance_allocation_is_world_global_across_explicit_occurrences/third",
+        ),
+        None,
+    );
 
     assert!(
         [&first, &second, &third]
@@ -2320,8 +2525,26 @@ fn empty_scene_spawn_publishes_a_non_reusable_instance_claim() {
     let document = SceneDocument::from_ordered_roots([]);
     let mut world = World::new();
 
-    let first = spawn_scene(&mut world, &registry, &document);
-    let second = spawn_scene(&mut world, &registry, &document);
+    let first = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("empty_scene_spawn_publishes_a_non_reusable_instance_claim/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("empty_scene_spawn_publishes_a_non_reusable_instance_claim/first"),
+        None,
+    );
+    let second = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("empty_scene_spawn_publishes_a_non_reusable_instance_claim/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("empty_scene_spawn_publishes_a_non_reusable_instance_claim/second"),
+        None,
+    );
 
     assert!(!first.diagnostics.has_errors());
     assert!(!second.diagnostics.has_errors());
@@ -2344,19 +2567,60 @@ fn empty_scene_replacement_handles_empty_and_nonempty_candidates() {
     let populated =
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(populated_id.clone())]);
     let mut world = World::new();
-    let mut spawner = SceneSpawner::new();
 
-    let initial = spawner.spawn(&mut world, &registry, &empty);
+    let initial = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("empty_scene_replacement_handles_empty_and_nonempty_candidates/empty"),
+            std::sync::Arc::new((empty).clone()),
+        ),
+        &scene_occurrence("empty_scene_replacement_handles_empty_and_nonempty_candidates/initial"),
+        None,
+    );
     assert!(!initial.diagnostics.has_errors());
     let initial = spawned_instance(&initial).clone();
 
-    let empty_replacement = spawner.replace(&mut world, &registry, &empty, &initial);
+    let empty_replacement = crate::advanced::replace_expanded_scene_with_product(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "empty_scene_replacement_handles_empty_and_nonempty_candidates/replacement",
+            ),
+            std::sync::Arc::new((empty).clone()),
+        ),
+        None,
+        &initial,
+        crate::advanced::SceneProductTransactionLimits::new(
+            nara_core::ItemLimit::ONE,
+            nara_core::ItemLimit::ONE,
+        ),
+        &[],
+        |_| {},
+    );
     assert!(!empty_replacement.diagnostics.has_errors());
     assert_eq!(empty_replacement.retired_entities(), 0);
     let empty_replacement = spawned_instance(&empty_replacement).clone();
 
-    let populated_replacement =
-        spawner.replace(&mut world, &registry, &populated, &empty_replacement);
+    let populated_replacement = crate::advanced::replace_expanded_scene_with_product(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "empty_scene_replacement_handles_empty_and_nonempty_candidates/replacement",
+            ),
+            std::sync::Arc::new((populated).clone()),
+        ),
+        None,
+        &empty_replacement,
+        crate::advanced::SceneProductTransactionLimits::new(
+            nara_core::ItemLimit::ONE,
+            nara_core::ItemLimit::ONE,
+        ),
+        &[],
+        |_| {},
+    );
     assert!(!populated_replacement.diagnostics.has_errors());
     assert_eq!(populated_replacement.retired_entities(), 0);
     let populated_entity = spawned_entity(&world, &populated_replacement, &populated_id);
@@ -2371,7 +2635,18 @@ fn individual_scene_retirement_tombstones_identity_before_despawn() {
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())
             .with_component(position_type_id(), position_record(1))]);
     let mut world = World::new();
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "individual_scene_retirement_tombstones_identity_before_despawn/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("individual_scene_retirement_tombstones_identity_before_despawn/report"),
+        None,
+    );
     let instance = spawned_instance(&report).clone();
     let entity = spawned_entity(&world, &report, &id);
 
@@ -2401,7 +2676,20 @@ fn individual_scene_retirement_rejects_identity_resource_observers_before_effect
             .with_component(position_type_id(), position_record(7))]);
         let mut world = World::new();
         world.init_resource::<PersistentApplyCanary>();
-        let report = spawn_scene(&mut world, &registry, &document);
+        let report = crate::spawn_scene(
+            &mut world,
+            &registry,
+            &crate::ExpandedSceneCandidate::plain(
+                scene_source_key(
+                    "individual_scene_retirement_rejects_identity_resource_observers_before_effects/document",
+                ),
+                std::sync::Arc::new((document).clone()),
+            ),
+            &scene_occurrence(
+                "individual_scene_retirement_rejects_identity_resource_observers_before_effects/report",
+            ),
+            None,
+        );
         let instance = spawned_instance(&report).clone();
         let entity = spawned_entity(&world, &report, &id);
         if insert {
@@ -2460,12 +2748,29 @@ fn scene_retirement_rejection_keeps_the_target_alive() {
     let id = scene_id("retained");
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())]);
     let mut world = World::new();
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("scene_retirement_rejection_keeps_the_target_alive/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("scene_retirement_rejection_keeps_the_target_alive/report"),
+        None,
+    );
     let entity = spawned_entity(&world, &report, &id);
 
     let source = world.get::<SceneEntitySource>(entity).unwrap().clone();
     let forged = world
         .spawn(SceneEntitySource {
+            context: std::sync::Arc::new(crate::occurrence::SceneSourceContext {
+                source: scene_source_key(
+                    "scene_retirement_rejection_keeps_the_target_alive/document",
+                ),
+                occurrence: scene_occurrence(
+                    "scene_retirement_rejection_keeps_the_target_alive/report",
+                ),
+            }),
             instance_id: source.instance_id,
             entity_id: scene_id("forged"),
             source_entity_id: scene_id("forged"),
@@ -2508,7 +2813,20 @@ fn scene_retirement_rejects_a_source_that_disagrees_with_registered_identity() {
     let id = scene_id("retained");
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())]);
     let mut world = World::new();
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "scene_retirement_rejects_a_source_that_disagrees_with_registered_identity/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "scene_retirement_rejects_a_source_that_disagrees_with_registered_identity/report",
+        ),
+        None,
+    );
     let instance = spawned_instance(&report).clone();
     let entity = spawned_entity(&world, &report, &id);
     let stats = world.resource::<WorldIdentityDomain>().stats();
@@ -2545,7 +2863,20 @@ fn individual_scene_retirement_rejects_parents_and_unlinks_retired_children() {
         ],
     );
     let mut world = World::new();
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "individual_scene_retirement_rejects_parents_and_unlinks_retired_children/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "individual_scene_retirement_rejects_parents_and_unlinks_retired_children/report",
+        ),
+        None,
+    );
     let instance = spawned_instance(&report).clone();
     let parent = spawned_entity(&world, &report, &parent_id);
     let child = spawned_entity(&world, &report, &child_id);
@@ -2586,7 +2917,20 @@ fn empty_persistent_set_rejects_event_global_observer_before_target_allocation()
         .map(|entity| entity.id())
         .collect::<Vec<_>>();
 
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "empty_persistent_set_rejects_event_global_observer_before_target_allocation/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "empty_persistent_set_rejects_event_global_observer_before_target_allocation/report",
+        ),
+        None,
+    );
 
     assert!(report.instance.is_none());
     assert!(report.diagnostics.iter().any(|diagnostic| {
@@ -2631,7 +2975,20 @@ fn identity_claim_failure_preserves_world_assets_ticks_and_allocator() {
         .expect("asset server must be installed");
 
     let before_asset_server = world.resource::<AssetServer>().clone();
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "identity_claim_failure_preserves_world_assets_ticks_and_allocator/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "identity_claim_failure_preserves_world_assets_ticks_and_allocator/report",
+        ),
+        None,
+    );
 
     assert!(report.diagnostics.has_errors());
     assert!(report.instance.is_none());
@@ -2652,10 +3009,19 @@ fn identity_claim_failure_preserves_world_assets_ticks_and_allocator() {
     );
     assert_eq!(asset_server, &before_asset_server);
 
-    let empty = spawn_scene(
+    let empty = crate::spawn_scene(
         &mut world,
         &registry,
-        &SceneDocument::from_ordered_roots([]),
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "identity_claim_failure_preserves_world_assets_ticks_and_allocator/SceneDocument-from_ordered_roots",
+            ),
+            std::sync::Arc::new((SceneDocument::from_ordered_roots([])).clone()),
+        ),
+        &scene_occurrence(
+            "identity_claim_failure_preserves_world_assets_ticks_and_allocator/empty",
+        ),
+        None,
     );
     assert!(!empty.diagnostics.has_errors());
     assert_eq!(spawned_instance(&empty).instance_id().get(), 1);
@@ -2672,7 +3038,16 @@ fn authoring_replacement_and_clear_publish_typed_tombstones() {
         .with_component(position_type_id(), position_record(1))]));
     let mut world = World::new();
 
-    let first_sync = session.sync_world(&mut world, &registry).unwrap();
+    let first_sync = session
+        .sync_world(
+            &mut world,
+            &registry,
+            &scene_source_key("authoring_replacement_and_clear_publish_typed_tombstones/authored"),
+            &scene_occurrence(
+                "authoring_replacement_and_clear_publish_typed_tombstones/projection",
+            ),
+        )
+        .unwrap();
     assert!(first_sync.synced);
     let first = first_sync.live_instance.unwrap();
     let first_entity = match first.resolve(&world, &id) {
@@ -2686,7 +3061,16 @@ fn authoring_replacement_and_clear_publish_typed_tombstones() {
         )
         .with_component(position_type_id(), position_record(2))]))
         .unwrap();
-    let second_sync = session.sync_world(&mut world, &registry).unwrap();
+    let second_sync = session
+        .sync_world(
+            &mut world,
+            &registry,
+            &scene_source_key("authoring_replacement_and_clear_publish_typed_tombstones/authored"),
+            &scene_occurrence(
+                "authoring_replacement_and_clear_publish_typed_tombstones/projection",
+            ),
+        )
+        .unwrap();
     assert!(second_sync.synced);
     assert_eq!(second_sync.removed_entities, 1);
     let second = second_sync.live_instance.unwrap();
@@ -2730,8 +3114,19 @@ fn hierarchy_aware_replacement_retires_exact_scene_membership_only() {
         ],
     );
     let mut world = World::new();
-    let mut spawner = SceneSpawner::new();
-    let first = spawner.spawn(&mut world, &registry, &document);
+
+    let first = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "hierarchy_aware_replacement_retires_exact_scene_membership_only/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("hierarchy_aware_replacement_retires_exact_scene_membership_only/first"),
+        None,
+    );
     assert!(!first.diagnostics.has_errors());
     let current = spawned_instance(&first).clone();
     let old_root = spawned_entity(&world, &first, &root_id);
@@ -2739,7 +3134,24 @@ fn hierarchy_aware_replacement_retires_exact_scene_membership_only() {
     let external_descendant = world.spawn_empty().id();
     place_runtime_child(&mut world, external_descendant, old_child);
 
-    let replacement = spawner.replace(&mut world, &registry, &document, &current);
+    let replacement = crate::advanced::replace_expanded_scene_with_product(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "hierarchy_aware_replacement_retires_exact_scene_membership_only/replacement",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        None,
+        &current,
+        crate::advanced::SceneProductTransactionLimits::new(
+            nara_core::ItemLimit::ONE,
+            nara_core::ItemLimit::ONE,
+        ),
+        &[],
+        |_| {},
+    );
 
     assert!(!replacement.diagnostics.has_errors());
     assert_eq!(replacement.retired_entities(), 2);
@@ -2770,7 +3182,14 @@ fn hierarchy_aware_unload_detaches_external_descendants() {
     );
     let mut session = SceneAuthoringSession::new(document);
     let mut world = World::new();
-    let sync = session.sync_world(&mut world, &registry).unwrap();
+    let sync = session
+        .sync_world(
+            &mut world,
+            &registry,
+            &scene_source_key("hierarchy_aware_unload_detaches_external_descendants/authored"),
+            &scene_occurrence("hierarchy_aware_unload_detaches_external_descendants/projection"),
+        )
+        .unwrap();
     assert!(sync.synced);
     let live = sync.live_instance.unwrap();
     let scene_child = match live.resolve(&world, &child_id) {
@@ -2806,7 +3225,18 @@ fn authoring_replacement_failure_keeps_the_previous_projection() {
         )
         .with_component(position_type_id(), position_record(1))]));
 
-    let first_sync = session.sync_world(&mut world, &registry).unwrap();
+    let first_sync = session
+        .sync_world(
+            &mut world,
+            &registry,
+            &scene_source_key(
+                "authoring_replacement_failure_keeps_the_previous_projection/authored",
+            ),
+            &scene_occurrence(
+                "authoring_replacement_failure_keeps_the_previous_projection/projection",
+            ),
+        )
+        .unwrap();
     assert!(first_sync.synced);
     let first = first_sync.live_instance.unwrap();
     let first_entity = match first.resolve(&world, &id) {
@@ -2822,7 +3252,18 @@ fn authoring_replacement_failure_keeps_the_previous_projection() {
         )
         .with_component(position_type_id(), position_record(2))]))
         .unwrap();
-    let failed = session.sync_world(&mut world, &registry).unwrap();
+    let failed = session
+        .sync_world(
+            &mut world,
+            &registry,
+            &scene_source_key(
+                "authoring_replacement_failure_keeps_the_previous_projection/authored",
+            ),
+            &scene_occurrence(
+                "authoring_replacement_failure_keeps_the_previous_projection/projection",
+            ),
+        )
+        .unwrap();
 
     assert!(!failed.synced);
     assert!(failed.diagnostics.has_errors());
@@ -2848,12 +3289,24 @@ fn runtime_component_despawn_observer_rejects_scene_replacement_atomically() {
     let id = scene_id("player");
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
-    let mut spawner = SceneSpawner::new();
-    let first = spawner.spawn(
+
+    let first = crate::spawn_scene(
         &mut world,
         &registry,
-        &SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())
-            .with_component(position_type_id(), position_record(1))]),
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "runtime_component_despawn_observer_rejects_scene_replacement_atomically/source",
+            ),
+            std::sync::Arc::new(
+                (SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())
+                    .with_component(position_type_id(), position_record(1))]))
+                .clone(),
+            ),
+        ),
+        &scene_occurrence(
+            "runtime_component_despawn_observer_rejects_scene_replacement_atomically/first",
+        ),
+        None,
     );
     assert!(!first.diagnostics.has_errors());
     let current = spawned_instance(&first).clone();
@@ -2876,12 +3329,27 @@ fn runtime_component_despawn_observer_rejects_scene_replacement_atomically() {
         .collect::<Vec<_>>();
     let baseline_stats = world.resource::<WorldIdentityDomain>().stats();
 
-    let failed = spawner.replace(
+    let failed = crate::advanced::replace_expanded_scene_with_product(
         &mut world,
         &registry,
-        &SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())
-            .with_component(position_type_id(), position_record(2))]),
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "runtime_component_despawn_observer_rejects_scene_replacement_atomically/replacement",
+            ),
+            std::sync::Arc::new(
+                (SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())
+                    .with_component(position_type_id(), position_record(2))]))
+                .clone(),
+            ),
+        ),
+        None,
         &current,
+        crate::advanced::SceneProductTransactionLimits::new(
+            nara_core::ItemLimit::ONE,
+            nara_core::ItemLimit::ONE,
+        ),
+        &[],
+        |_| {},
     );
 
     assert!(failed.instance.is_none());
@@ -2922,8 +3390,21 @@ fn hierarchy_remove_observer_rejects_scene_replacement_before_detach() {
     );
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
-    let mut spawner = SceneSpawner::new();
-    let first = spawner.spawn(&mut world, &registry, &document);
+
+    let first = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "hierarchy_remove_observer_rejects_scene_replacement_before_detach/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "hierarchy_remove_observer_rejects_scene_replacement_before_detach/first",
+        ),
+        None,
+    );
     assert!(!first.diagnostics.has_errors());
     let current = spawned_instance(&first).clone();
     let old_child = spawned_entity(&world, &first, &child_id);
@@ -2939,7 +3420,24 @@ fn hierarchy_remove_observer_rejects_scene_replacement_before_detach() {
         .collect::<Vec<_>>();
     let baseline_stats = world.resource::<WorldIdentityDomain>().stats();
 
-    let failed = spawner.replace(&mut world, &registry, &document, &current);
+    let failed = crate::advanced::replace_expanded_scene_with_product(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "hierarchy_remove_observer_rejects_scene_replacement_before_detach/replacement",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        None,
+        &current,
+        crate::advanced::SceneProductTransactionLimits::new(
+            nara_core::ItemLimit::ONE,
+            nara_core::ItemLimit::ONE,
+        ),
+        &[],
+        |_| {},
+    );
 
     assert!(failed.instance.is_none());
     assert_eq!(failed.retired_entities(), 0);
@@ -2982,9 +3480,17 @@ fn children_add_observer_rejects_fresh_scene_publication() {
     );
     world.flush();
     let baseline_entities = world.iter_entities().count();
-    let mut spawner = SceneSpawner::new();
 
-    let failed = spawner.spawn(&mut world, &registry, &document);
+    let failed = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("children_add_observer_rejects_fresh_scene_publication/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("children_add_observer_rejects_fresh_scene_publication/failed"),
+        None,
+    );
 
     assert!(failed.instance.is_none());
     assert_eq!(failed.retired_entities(), 0);
@@ -3010,9 +3516,17 @@ fn children_add_observer_does_not_reject_a_flat_scene() {
         },
     );
     world.flush();
-    let mut spawner = SceneSpawner::new();
 
-    let report = spawner.spawn(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("children_add_observer_does_not_reject_a_flat_scene/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("children_add_observer_does_not_reject_a_flat_scene/report"),
+        None,
+    );
 
     assert!(!report.diagnostics.has_errors());
     assert!(report.instance.is_some());
@@ -3054,7 +3568,16 @@ fn parented_transform_materializes_through_every_entry_point() {
     assert!(!has_unavailable_projection(&document.validate(&registry)));
 
     let mut direct_world = World::new();
-    let direct = SceneSpawner::new().spawn(&mut direct_world, &registry, &document);
+    let direct = crate::spawn_scene(
+        &mut direct_world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("parented_transform_materializes_through_every_entry_point/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("parented_transform_materializes_through_every_entry_point/direct"),
+        None,
+    );
     assert!(!direct.diagnostics.has_errors());
     let direct_root = spawned_entity(&direct_world, &direct, &root_id);
     let direct_child = spawned_entity(&direct_world, &direct, &child_id);
@@ -3069,7 +3592,20 @@ fn parented_transform_materializes_through_every_entry_point() {
 
     let prefab = PrefabDocument::new(document.roots.clone(), document.entities.clone());
     let mut prefab_world = World::new();
-    let prefab_report = SceneSpawner::new().spawn_prefab(&mut prefab_world, &registry, &prefab);
+    let prefab_report = crate::spawn_scene(
+        &mut prefab_world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            named_prefab_source_key(
+                "parented_transform_materializes_through_every_entry_point/prefab",
+            ),
+            std::sync::Arc::new((prefab).instantiate()),
+        ),
+        &scene_occurrence(
+            "parented_transform_materializes_through_every_entry_point/prefab_report",
+        ),
+        None,
+    );
     assert!(!prefab_report.diagnostics.has_errors());
     let prefab_root = spawned_entity(&prefab_world, &prefab_report, &root_id);
     let prefab_child = spawned_entity(&prefab_world, &prefab_report, &child_id);
@@ -3086,16 +3622,39 @@ fn parented_transform_materializes_through_every_entry_point() {
     let current_document =
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(current_id.clone())]);
     let mut replacement_world = World::new();
-    let mut replacement_spawner = SceneSpawner::new();
-    let current = replacement_spawner.spawn(&mut replacement_world, &registry, &current_document);
+
+    let current = crate::spawn_scene(
+        &mut replacement_world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "parented_transform_materializes_through_every_entry_point/current_document",
+            ),
+            std::sync::Arc::new((current_document).clone()),
+        ),
+        &scene_occurrence("parented_transform_materializes_through_every_entry_point/current"),
+        None,
+    );
     assert!(!current.diagnostics.has_errors());
     let current_instance = spawned_instance(&current).clone();
     let current_entity = spawned_entity(&replacement_world, &current, &current_id);
-    let replacement = replacement_spawner.replace(
+    let replacement = crate::advanced::replace_expanded_scene_with_product(
         &mut replacement_world,
         &registry,
-        &document,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "parented_transform_materializes_through_every_entry_point/replacement",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        None,
         &current_instance,
+        crate::advanced::SceneProductTransactionLimits::new(
+            nara_core::ItemLimit::ONE,
+            nara_core::ItemLimit::ONE,
+        ),
+        &[],
+        |_| {},
     );
     assert!(!replacement.diagnostics.has_errors());
     assert_eq!(replacement.retired_entities(), 1);
@@ -3111,7 +3670,16 @@ fn parented_transform_materializes_through_every_entry_point() {
 
     let mut authoring_world = World::new();
     let mut session = SceneAuthoringSession::new(document);
-    let authoring = session.sync_world(&mut authoring_world, &registry).unwrap();
+    let authoring = session
+        .sync_world(
+            &mut authoring_world,
+            &registry,
+            &scene_source_key("parented_transform_materializes_through_every_entry_point/authored"),
+            &scene_occurrence(
+                "parented_transform_materializes_through_every_entry_point/projection",
+            ),
+        )
+        .unwrap();
     assert!(authoring.synced);
     assert!(!authoring.diagnostics.has_errors());
     let authoring_instance = authoring.live_instance.as_ref().unwrap();
@@ -3189,8 +3757,19 @@ fn children_remove_observer_rejects_scene_replacement_before_detach() {
     );
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
-    let mut spawner = SceneSpawner::new();
-    let first = spawner.spawn(&mut world, &registry, &document);
+
+    let first = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "children_remove_observer_rejects_scene_replacement_before_detach/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("children_remove_observer_rejects_scene_replacement_before_detach/first"),
+        None,
+    );
     assert!(!first.diagnostics.has_errors());
     let current = spawned_instance(&first).clone();
     let old_root = spawned_entity(&world, &first, &root_id);
@@ -3207,7 +3786,24 @@ fn children_remove_observer_rejects_scene_replacement_before_detach() {
         .collect::<Vec<_>>();
     let baseline_stats = world.resource::<WorldIdentityDomain>().stats();
 
-    let failed = spawner.replace(&mut world, &registry, &document, &current);
+    let failed = crate::advanced::replace_expanded_scene_with_product(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "children_remove_observer_rejects_scene_replacement_before_detach/replacement",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        None,
+        &current,
+        crate::advanced::SceneProductTransactionLimits::new(
+            nara_core::ItemLimit::ONE,
+            nara_core::ItemLimit::ONE,
+        ),
+        &[],
+        |_| {},
+    );
 
     assert!(failed.instance.is_none());
     assert_eq!(failed.retired_entities(), 0);
@@ -3250,7 +3846,18 @@ fn children_remove_observer_rejects_authoring_unload_before_detach() {
     ));
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
-    let sync = session.sync_world(&mut world, &registry).unwrap();
+    let sync = session
+        .sync_world(
+            &mut world,
+            &registry,
+            &scene_source_key(
+                "children_remove_observer_rejects_authoring_unload_before_detach/authored",
+            ),
+            &scene_occurrence(
+                "children_remove_observer_rejects_authoring_unload_before_detach/projection",
+            ),
+        )
+        .unwrap();
     assert!(sync.synced);
     let live = sync.live_instance.unwrap();
     let root = match live.resolve(&world, &root_id) {
@@ -3327,8 +3934,21 @@ fn replacement_relationship_rejection_precedes_asset_and_binding_publication() {
     );
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
-    let mut spawner = SceneSpawner::new();
-    let first = spawner.spawn(&mut world, &registry, &current_document);
+
+    let first = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "replacement_relationship_rejection_precedes_asset_and_binding_publication/current_document",
+            ),
+            std::sync::Arc::new((current_document).clone()),
+        ),
+        &scene_occurrence(
+            "replacement_relationship_rejection_precedes_asset_and_binding_publication/first",
+        ),
+        None,
+    );
     assert!(!first.diagnostics.has_errors());
     let current = spawned_instance(&first).clone();
     let old_root = spawned_entity(&world, &first, &root_id);
@@ -3345,7 +3965,24 @@ fn replacement_relationship_rejection_precedes_asset_and_binding_publication() {
         .collect::<Vec<_>>();
     let baseline_stats = world.resource::<WorldIdentityDomain>().stats();
 
-    let failed = spawner.replace(&mut world, &registry, &replacement_document, &current);
+    let failed = crate::advanced::replace_expanded_scene_with_product(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "replacement_relationship_rejection_precedes_asset_and_binding_publication/replacement",
+            ),
+            std::sync::Arc::new((replacement_document).clone()),
+        ),
+        None,
+        &current,
+        crate::advanced::SceneProductTransactionLimits::new(
+            nara_core::ItemLimit::ONE,
+            nara_core::ItemLimit::ONE,
+        ),
+        &[],
+        |_| {},
+    );
 
     assert!(failed.instance.is_none());
     assert_eq!(failed.retired_entities(), 0);
@@ -3378,7 +4015,20 @@ fn replacement_relationship_rejection_precedes_asset_and_binding_publication() {
                 asset_link_type_id(),
                 asset_link_record(AssetRef::path("textures/alternate.png").unwrap()),
             )]);
-    let alternate = SceneSpawner::new().spawn(&mut world, &alternate_registry, &alternate_document);
+    let alternate = crate::spawn_scene(
+        &mut world,
+        &alternate_registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "replacement_relationship_rejection_precedes_asset_and_binding_publication/alternate_document",
+            ),
+            std::sync::Arc::new((alternate_document).clone()),
+        ),
+        &scene_occurrence(
+            "replacement_relationship_rejection_precedes_asset_and_binding_publication/alternate",
+        ),
+        None,
+    );
     assert!(!alternate.diagnostics.has_errors());
     let alternate_entity = spawned_entity(&world, &alternate, &alternate_id);
     assert!(
@@ -3400,7 +4050,7 @@ fn entity_component_observer_rejects_authoring_replacement_before_retirement() {
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
 
-    let first_sync = session.sync_world(&mut world, &registry).unwrap();
+    let first_sync = session.sync_world(&mut world, &registry, &scene_source_key("entity_component_observer_rejects_authoring_replacement_before_retirement/authored"), &scene_occurrence("entity_component_observer_rejects_authoring_replacement_before_retirement/projection")).unwrap();
     assert!(first_sync.synced);
     let first = first_sync.live_instance.unwrap();
     let first_entity = match first.resolve(&world, &id) {
@@ -3426,7 +4076,7 @@ fn entity_component_observer_rejects_authoring_replacement_before_retirement() {
         .with_component(position_type_id(), position_record(2))]))
         .unwrap();
     let baseline_revision = session.revision();
-    let failed = session.sync_world(&mut world, &registry).unwrap();
+    let failed = session.sync_world(&mut world, &registry, &scene_source_key("entity_component_observer_rejects_authoring_replacement_before_retirement/authored"), &scene_occurrence("entity_component_observer_rejects_authoring_replacement_before_retirement/projection")).unwrap();
 
     assert!(!failed.synced);
     assert!(failed.diagnostics.iter().any(|diagnostic| {
@@ -3475,7 +4125,18 @@ fn entity_component_observer_rejects_authoring_clear_before_retirement() {
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
 
-    let sync = session.sync_world(&mut world, &registry).unwrap();
+    let sync = session
+        .sync_world(
+            &mut world,
+            &registry,
+            &scene_source_key(
+                "entity_component_observer_rejects_authoring_clear_before_retirement/authored",
+            ),
+            &scene_occurrence(
+                "entity_component_observer_rejects_authoring_clear_before_retirement/projection",
+            ),
+        )
+        .unwrap();
     assert!(sync.synced);
     let live = sync.live_instance.unwrap();
     let entity = match live.resolve(&world, &id) {
@@ -3534,10 +4195,18 @@ fn stable_asset_ref_resolves_with_database_before_scene_spawn() {
             asset_link_record(AssetRef::StableId(stable_id)),
         )]);
     let mut world = World::new();
-    let mut spawner = SceneSpawner::new();
 
     let validation = document.validate_with_asset_database(&registry, &database);
-    let report = spawner.spawn_with_asset_database(&mut world, &registry, &document, &database);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("stable_asset_ref_resolves_with_database_before_scene_spawn/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("stable_asset_ref_resolves_with_database_before_scene_spawn/report"),
+        Some(&database),
+    );
 
     assert!(!validation.has_errors());
     assert!(!report.diagnostics.has_errors());
@@ -3563,14 +4232,26 @@ fn product_replacement_preserves_stable_asset_resolution() {
             asset_link_record(AssetRef::StableId(stable_id)),
         )]);
     let mut world = World::new();
-    let initial = spawn_scene_with_asset_database(&mut world, &registry, &document, &database);
+    let initial = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("product_replacement_preserves_stable_asset_resolution/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("product_replacement_preserves_stable_asset_resolution/initial"),
+        Some(&database),
+    );
     assert!(!initial.diagnostics.has_errors());
     let old_entity = spawned_entity(&world, &initial, &id);
 
-    let replacement = crate::advanced::replace_scene_with_product(
+    let replacement = crate::advanced::replace_expanded_scene_with_product(
         &mut world,
         &registry,
-        &document,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("product_replacement_preserves_stable_asset_resolution/replacement"),
+            std::sync::Arc::new((document).clone()),
+        ),
         Some(&database),
         initial.instance.as_ref().unwrap(),
         crate::advanced::SceneProductTransactionLimits::new(
@@ -3615,7 +4296,20 @@ fn unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation() 
     let before_entities = world.iter_entities().count();
 
     let before_asset_server = world.resource::<AssetServer>().clone();
-    let report = spawn_scene_with_asset_database(&mut world, &registry, &document, &database);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation/report",
+        ),
+        Some(&database),
+    );
     assert!(report.diagnostics.has_errors());
     assert!(report.instance.is_none());
     assert!(world.get_resource::<WorldIdentityDomain>().is_none());
@@ -3649,7 +4343,16 @@ fn identity_admission_precedes_native_value_preparation() {
     world.insert_resource(domain);
     let before = world.resource::<WorldIdentityDomain>().stats();
 
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("identity_admission_precedes_native_value_preparation/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("identity_admission_precedes_native_value_preparation/report"),
+        None,
+    );
 
     assert!(report.instance.is_none());
     assert!(
@@ -3679,7 +4382,20 @@ fn component_apply_failure_in_multi_component_entity_reports_component_and_rolls
     let mut world = World::new();
     let before_entities = world.iter_entities().count();
 
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "component_apply_failure_in_multi_component_entity_reports_component_and_rolls_back/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "component_apply_failure_in_multi_component_entity_reports_component_and_rolls_back/report",
+        ),
+        None,
+    );
 
     assert!(report.diagnostics.has_errors());
     assert!(report.instance.is_none());
@@ -3709,7 +4425,16 @@ fn component_apply_failure_removes_scratch_asset_server() {
     let mut world = World::new();
     let before_entities = world.iter_entities().count();
 
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("component_apply_failure_removes_scratch_asset_server/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("component_apply_failure_removes_scratch_asset_server/report"),
+        None,
+    );
 
     assert!(report.diagnostics.has_errors());
     assert!(report.instance.is_none());
@@ -3735,7 +4460,16 @@ fn component_apply_failure_restores_original_asset_server() {
     let before_entities = world.iter_entities().count();
 
     let before_asset_server = world.resource::<AssetServer>().clone();
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("component_apply_failure_restores_original_asset_server/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("component_apply_failure_restores_original_asset_server/report"),
+        None,
+    );
 
     assert!(report.diagnostics.has_errors());
     assert!(report.instance.is_none());
@@ -3773,7 +4507,20 @@ fn later_component_apply_failure_does_not_publish_prior_asset_resolution() {
         .expect("asset server must be installed");
 
     let before_asset_server = world.resource::<AssetServer>().clone();
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "later_component_apply_failure_does_not_publish_prior_asset_resolution/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "later_component_apply_failure_does_not_publish_prior_asset_resolution/report",
+        ),
+        None,
+    );
 
     assert!(report.diagnostics.has_errors());
     assert!(report.instance.is_none());
@@ -3808,9 +4555,17 @@ fn scene_spawn_and_export_preserve_ordered_runtime_topology() {
         ],
     );
     let mut world = World::new();
-    let mut spawner = SceneSpawner::new();
 
-    let report = spawner.spawn(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("scene_spawn_and_export_preserve_ordered_runtime_topology/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("scene_spawn_and_export_preserve_ordered_runtime_topology/report"),
+        None,
+    );
 
     assert!(!report.diagnostics.has_errors());
     assert_eq!(spawned_instance(&report).len(), 2);
@@ -3857,7 +4612,20 @@ fn multi_root_and_sibling_order_ignore_record_sorting_and_entity_allocation() {
     let mut world = World::new();
     let _unrelated_before = world.spawn_empty().id();
 
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "multi_root_and_sibling_order_ignore_record_sorting_and_entity_allocation/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "multi_root_and_sibling_order_ignore_record_sorting_and_entity_allocation/report",
+        ),
+        None,
+    );
     let _unrelated_after = world.spawn_empty().id();
 
     assert!(!report.diagnostics.has_errors());
@@ -3892,7 +4660,16 @@ fn export_rejects_a_building_component_registry() {
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(entity_id)
             .with_component(position_type_id(), position_record(1))]);
     let mut world = World::new();
-    let report = spawn_scene(&mut world, &frozen_registry, &document);
+    let report = crate::spawn_scene(
+        &mut world,
+        &frozen_registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("export_rejects_a_building_component_registry/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("export_rejects_a_building_component_registry/report"),
+        None,
+    );
     assert!(!report.diagnostics.has_errors());
     let mut building_registry = ComponentRegistry::new();
     register_test_position(&mut building_registry).unwrap();
@@ -3915,19 +4692,38 @@ fn repeated_scene_spawns_export_with_injective_generated_ids() {
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())
             .with_component(position_type_id(), position_record(7))]);
     let mut world = World::new();
-    let mut spawner = SceneSpawner::new();
 
     assert!(
-        !spawner
-            .spawn(&mut world, &registry, &document)
-            .diagnostics
-            .has_errors()
+        !crate::spawn_scene(
+            &mut world,
+            &registry,
+            &crate::ExpandedSceneCandidate::plain(
+                scene_source_key(
+                    "repeated_scene_spawns_export_with_injective_generated_ids/document"
+                ),
+                std::sync::Arc::new((document).clone())
+            ),
+            &scene_occurrence("repeated_scene_spawns_export_with_injective_generated_ids/left"),
+            None
+        )
+        .diagnostics
+        .has_errors()
     );
     assert!(
-        !spawner
-            .spawn(&mut world, &registry, &document)
-            .diagnostics
-            .has_errors()
+        !crate::spawn_scene(
+            &mut world,
+            &registry,
+            &crate::ExpandedSceneCandidate::plain(
+                scene_source_key(
+                    "repeated_scene_spawns_export_with_injective_generated_ids/document"
+                ),
+                std::sync::Arc::new((document).clone())
+            ),
+            &scene_occurrence("repeated_scene_spawns_export_with_injective_generated_ids/right"),
+            None
+        )
+        .diagnostics
+        .has_errors()
     );
 
     let export = export_scene(&world, &registry);
@@ -3958,19 +4754,46 @@ fn generated_export_ids_skip_every_authored_claim() {
     let mut world = World::new();
 
     assert!(
-        !spawn_scene(&mut world, &registry, &authored)
-            .diagnostics
-            .has_errors()
+        !crate::spawn_scene(
+            &mut world,
+            &registry,
+            &crate::ExpandedSceneCandidate::plain(
+                scene_source_key("generated_export_ids_skip_every_authored_claim/authored"),
+                std::sync::Arc::new((authored).clone())
+            ),
+            &scene_occurrence("generated_export_ids_skip_every_authored_claim/authored"),
+            None
+        )
+        .diagnostics
+        .has_errors()
     );
     assert!(
-        !spawn_scene(&mut world, &registry, &duplicate)
-            .diagnostics
-            .has_errors()
+        !crate::spawn_scene(
+            &mut world,
+            &registry,
+            &crate::ExpandedSceneCandidate::plain(
+                scene_source_key("generated_export_ids_skip_every_authored_claim/duplicate"),
+                std::sync::Arc::new((duplicate).clone())
+            ),
+            &scene_occurrence("generated_export_ids_skip_every_authored_claim/left"),
+            None
+        )
+        .diagnostics
+        .has_errors()
     );
     assert!(
-        !spawn_scene(&mut world, &registry, &duplicate)
-            .diagnostics
-            .has_errors()
+        !crate::spawn_scene(
+            &mut world,
+            &registry,
+            &crate::ExpandedSceneCandidate::plain(
+                scene_source_key("generated_export_ids_skip_every_authored_claim/duplicate"),
+                std::sync::Arc::new((duplicate).clone())
+            ),
+            &scene_occurrence("generated_export_ids_skip_every_authored_claim/right"),
+            None
+        )
+        .diagnostics
+        .has_errors()
     );
 
     let export = export_scene(&world, &registry);
@@ -4005,14 +4828,40 @@ fn export_rewrites_scene_local_references_with_owner_instance_context() {
     let mut world = World::new();
 
     assert!(
-        !spawn_scene(&mut world, &registry, &document)
-            .diagnostics
-            .has_errors()
+        !crate::spawn_scene(
+            &mut world,
+            &registry,
+            &crate::ExpandedSceneCandidate::plain(
+                scene_source_key(
+                    "export_rewrites_scene_local_references_with_owner_instance_context/document"
+                ),
+                std::sync::Arc::new((document).clone())
+            ),
+            &scene_occurrence(
+                "export_rewrites_scene_local_references_with_owner_instance_context/left"
+            ),
+            None
+        )
+        .diagnostics
+        .has_errors()
     );
     assert!(
-        !spawn_scene(&mut world, &registry, &document)
-            .diagnostics
-            .has_errors()
+        !crate::spawn_scene(
+            &mut world,
+            &registry,
+            &crate::ExpandedSceneCandidate::plain(
+                scene_source_key(
+                    "export_rewrites_scene_local_references_with_owner_instance_context/document"
+                ),
+                std::sync::Arc::new((document).clone())
+            ),
+            &scene_occurrence(
+                "export_rewrites_scene_local_references_with_owner_instance_context/right"
+            ),
+            None
+        )
+        .diagnostics
+        .has_errors()
     );
 
     let export = export_scene(&world, &registry);
@@ -4051,7 +4900,18 @@ fn dangling_scene_local_reference_rejects_scene_spawn_before_export() {
         )]);
     let mut world = World::new();
     let before_entities = world.iter_entities().count();
-    let spawn = spawn_scene(&mut world, &registry, &document);
+    let spawn = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "dangling_scene_local_reference_rejects_scene_spawn_before_export/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("dangling_scene_local_reference_rejects_scene_spawn_before_export/spawn"),
+        None,
+    );
     assert!(spawn.diagnostics.has_errors());
     assert!(spawn.instance.is_none());
     assert_eq!(world.iter_entities().count(), before_entities);
@@ -4082,7 +4942,18 @@ fn persistent_reference_to_exported_entity_rewrites_to_scene_local() {
         SceneEntityRecord::new(target.clone()),
     ]);
     let mut world = World::new();
-    let spawn = spawn_scene(&mut world, &registry, &document);
+    let spawn = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "persistent_reference_to_exported_entity_rewrites_to_scene_local/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("persistent_reference_to_exported_entity_rewrites_to_scene_local/spawn"),
+        None,
+    );
     assert!(!spawn.diagnostics.has_errors());
     let target_entity = spawned_entity(&world, &spawn, &target);
     let persistent_locator = register_persistent_axis(&mut world, target_entity, persistent);
@@ -4119,7 +4990,16 @@ fn resolved_external_persistent_reference_is_preserved() {
             }),
         )]);
     let mut world = World::new();
-    let spawn = spawn_scene(&mut world, &registry, &document);
+    let spawn = crate::spawn_scene(
+        &mut world,
+        &registry,
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("resolved_external_persistent_reference_is_preserved/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("resolved_external_persistent_reference_is_preserved/spawn"),
+        None,
+    );
     assert!(!spawn.diagnostics.has_errors());
     let external = spawn_identity_entity(&mut world).unwrap().entity();
     register_persistent_axis(&mut world, external, persistent.clone());
@@ -4145,9 +5025,20 @@ fn missing_persistent_reference_prevents_export_publication() {
         )]);
     let mut world = World::new();
     assert!(
-        !spawn_scene(&mut world, &registry, &document)
-            .diagnostics
-            .has_errors()
+        !crate::spawn_scene(
+            &mut world,
+            &registry,
+            &crate::ExpandedSceneCandidate::plain(
+                scene_source_key(
+                    "missing_persistent_reference_prevents_export_publication/document"
+                ),
+                std::sync::Arc::new((document).clone())
+            ),
+            &scene_occurrence("missing_persistent_reference_prevents_export_publication/document"),
+            None
+        )
+        .diagnostics
+        .has_errors()
     );
 
     let export = export_scene(&world, &registry);
@@ -4177,9 +5068,20 @@ fn unloaded_persistent_reference_prevents_export_publication() {
         )]);
     let mut world = World::new();
     assert!(
-        !spawn_scene(&mut world, &registry, &document)
-            .diagnostics
-            .has_errors()
+        !crate::spawn_scene(
+            &mut world,
+            &registry,
+            &crate::ExpandedSceneCandidate::plain(
+                scene_source_key(
+                    "unloaded_persistent_reference_prevents_export_publication/document"
+                ),
+                std::sync::Arc::new((document).clone())
+            ),
+            &scene_occurrence("unloaded_persistent_reference_prevents_export_publication/document"),
+            None
+        )
+        .diagnostics
+        .has_errors()
     );
     let external = spawn_identity_entity(&mut world).unwrap().entity();
     register_persistent_axis(&mut world, external, persistent);
@@ -4217,9 +5119,20 @@ fn deleted_persistent_reference_prevents_export_publication() {
         )]);
     let mut world = World::new();
     assert!(
-        !spawn_scene(&mut world, &registry, &document)
-            .diagnostics
-            .has_errors()
+        !crate::spawn_scene(
+            &mut world,
+            &registry,
+            &crate::ExpandedSceneCandidate::plain(
+                scene_source_key(
+                    "deleted_persistent_reference_prevents_export_publication/document"
+                ),
+                std::sync::Arc::new((document).clone())
+            ),
+            &scene_occurrence("deleted_persistent_reference_prevents_export_publication/document"),
+            None
+        )
+        .diagnostics
+        .has_errors()
     );
     let external = spawn_identity_entity(&mut world).unwrap().entity();
     register_persistent_axis(&mut world, external, persistent);
@@ -4264,9 +5177,18 @@ fn stale_persistent_reference_prevents_export_publication() {
         )]);
     let mut world = World::new();
     assert!(
-        !spawn_scene(&mut world, &registry, &document)
-            .diagnostics
-            .has_errors()
+        !crate::spawn_scene(
+            &mut world,
+            &registry,
+            &crate::ExpandedSceneCandidate::plain(
+                scene_source_key("stale_persistent_reference_prevents_export_publication/document"),
+                std::sync::Arc::new((document).clone())
+            ),
+            &scene_occurrence("stale_persistent_reference_prevents_export_publication/document"),
+            None
+        )
+        .diagnostics
+        .has_errors()
     );
     let external = spawn_identity_entity(&mut world).unwrap().entity();
     register_persistent_axis(&mut world, external, persistent);
@@ -4415,9 +5337,26 @@ fn direct_prefab_spawn_applies_patch_field_overrides() {
         value: ComponentValue::I64(9),
     }]);
     let mut world = World::new();
-    let mut spawner = SceneSpawner::new();
 
-    let report = spawner.spawn_prefab_with_patch(&mut world, &registry, &prefab, &patch);
+    let report = {
+        let instantiated = (prefab).instantiate_with_patch(&registry, &patch);
+        assert!(
+            !instantiated.diagnostics.has_errors(),
+            "{:?}",
+            instantiated.diagnostics
+        );
+        let candidate = crate::ExpandedSceneCandidate::plain(
+            named_prefab_source_key("direct_prefab_spawn_applies_patch_field_overrides/prefab"),
+            std::sync::Arc::new(instantiated.document.unwrap()),
+        );
+        crate::spawn_scene(
+            &mut world,
+            &registry,
+            &candidate,
+            &scene_occurrence("direct_prefab_spawn_applies_patch_field_overrides/report"),
+            None,
+        )
+    };
 
     assert!(!report.diagnostics.has_errors());
     let entity = spawned_entity(&world, &report, &id);
@@ -4447,7 +5386,25 @@ fn prefab_patch_can_add_and_remove_components() {
     ]);
     let mut world = World::new();
 
-    let report = spawn_prefab_with_patch(&mut world, &registry, &prefab, &patch);
+    let report = {
+        let instantiated = (prefab).instantiate_with_patch(&registry, &patch);
+        assert!(
+            !instantiated.diagnostics.has_errors(),
+            "{:?}",
+            instantiated.diagnostics
+        );
+        let candidate = crate::ExpandedSceneCandidate::plain(
+            named_prefab_source_key("prefab_patch_can_add_and_remove_components/prefab"),
+            std::sync::Arc::new(instantiated.document.unwrap()),
+        );
+        crate::spawn_scene(
+            &mut world,
+            &registry,
+            &candidate,
+            &scene_occurrence("prefab_patch_can_add_and_remove_components/report"),
+            None,
+        )
+    };
 
     assert!(!report.diagnostics.has_errors());
     assert_eq!(
@@ -4476,12 +5433,13 @@ fn unknown_prefab_patch_target_prevents_world_mutation() {
         field: ComponentFieldId::new("x"),
         value: ComponentValue::I64(9),
     }]);
-    let mut world = World::new();
+    let world = World::new();
     let before = world.iter_entities().count();
 
-    let report = spawn_prefab_with_patch(&mut world, &registry, &prefab, &patch);
+    let report = (prefab).instantiate_with_patch(&registry, &patch);
 
     assert!(report.diagnostics.has_errors());
+    assert!(report.document.is_none());
     assert_eq!(world.iter_entities().count(), before);
     assert!(report.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.patch-missing-entity"
@@ -4773,11 +5731,19 @@ fn export_rejects_a_scene_entity_owned_by_a_non_scene_parent() {
     let registry = test_registry();
     let mut world = World::new();
     let child_id = scene_id("child");
-    let report = spawn_scene(
+    let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &SceneDocument::from_ordered_roots([SceneEntityRecord::new(child_id.clone())
-            .with_component(position_type_id(), position_record(3))]),
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("export_rejects_a_scene_entity_owned_by_a_non_scene_parent/source"),
+            std::sync::Arc::new(
+                (SceneDocument::from_ordered_roots([SceneEntityRecord::new(child_id.clone())
+                    .with_component(position_type_id(), position_record(3))]))
+                .clone(),
+            ),
+        ),
+        &scene_occurrence("export_rejects_a_scene_entity_owned_by_a_non_scene_parent/report"),
+        None,
     );
     let child = spawned_entity(&world, &report, &child_id);
     let parent = world.spawn_empty().id();
@@ -4798,17 +5764,28 @@ fn export_rejects_a_scene_entity_owned_by_a_non_scene_parent() {
 fn export_component_encode_failure_is_an_error() {
     let registry = broken_export_registry();
     let mut world = World::new();
-    let report = spawn_scene(
+    let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("broken"))
-            .with_component(
-                broken_export_type_id(),
-                SceneComponentRecord::new(
-                    ComponentSchemaVersion(1),
-                    ComponentValue::map([("broken", ComponentValue::String("value".to_owned()))]),
-                ),
-            )]),
+        &crate::ExpandedSceneCandidate::plain(
+            scene_source_key("export_component_encode_failure_is_an_error/source"),
+            std::sync::Arc::new(
+                (SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("broken"))
+                    .with_component(
+                        broken_export_type_id(),
+                        SceneComponentRecord::new(
+                            ComponentSchemaVersion(1),
+                            ComponentValue::map([(
+                                "broken",
+                                ComponentValue::String("value".to_owned()),
+                            )]),
+                        ),
+                    )]))
+                .clone(),
+            ),
+        ),
+        &scene_occurrence("export_component_encode_failure_is_an_error/report"),
+        None,
     );
     assert!(!report.diagnostics.has_errors());
 
@@ -5672,4 +6649,26 @@ fn exported_entity_link(record: &SceneEntityRecord) -> &EntityReference {
         .value
         .field_entity_reference("target")
         .expect("exported entity-link target must remain typed")
+}
+
+pub(crate) fn scene_source_key(name: &str) -> crate::SourceDocumentKey {
+    crate::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        crate::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+pub(crate) fn scene_occurrence(slot: &str) -> crate::SceneOccurrenceKey {
+    crate::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
+}
+
+fn named_prefab_source_key(name: &str) -> crate::SourceDocumentKey {
+    crate::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        crate::SourceDocumentKind::Prefab,
+    )
+    .unwrap()
 }

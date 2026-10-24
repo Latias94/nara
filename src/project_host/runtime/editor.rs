@@ -711,6 +711,7 @@ impl AuthoringPrefabSourceObservation {
 #[derive(Clone)]
 struct EditorScenePersistenceLane {
     project_path: Arc<str>,
+    source_key: nara_scene::SourceDocumentKey,
     document: EditorDocumentId,
     host: persistence::RetainedHost<ScenePersistenceHost>,
 }
@@ -718,6 +719,7 @@ struct EditorScenePersistenceLane {
 #[derive(Clone)]
 struct EditorPrefabPersistenceLane {
     project_path: Arc<str>,
+    source_key: nara_scene::SourceDocumentKey,
     document: EditorDocumentId,
     host: persistence::RetainedHost<PrefabPersistenceHost>,
 }
@@ -1316,6 +1318,12 @@ impl EditorProjectSession {
             startup.as_str()
         ));
         let startup_source = parts.snapshot.startup_source();
+        parts
+            .snapshot
+            .startup_native_source()
+            .revalidate(&project_root)
+            .map_err(|error| editor_open_error(error.code()))?;
+        let startup_source_key = parts.snapshot.startup_native_source().key().clone();
         let (persistence, opened_digest) = ScenePersistenceHost::bind_authoring_source(
             &scenes,
             startup.as_str(),
@@ -1354,6 +1362,7 @@ impl EditorProjectSession {
                 document,
                 EditorScenePersistenceLane {
                     project_path: startup_project_path,
+                    source_key: startup_source_key,
                     document,
                     host: authoring_runtime
                         .host_custody()
@@ -1574,6 +1583,7 @@ impl EditorProjectSession {
                 document,
                 EditorScenePersistenceLane {
                     project_path: startup_project_path,
+                    source_key: snapshot.selected_scene_source_key().clone(),
                     document,
                     host: authoring_runtime
                         .host_custody()
@@ -2233,7 +2243,15 @@ impl EditorProjectSession {
                     document,
                     revision: slot.revision(),
                     projection: scene.map(|(scene, omissions)| {
-                        preview::EditorPreviewProjection::new(scene, omissions)
+                        preview::EditorPreviewProjection::new(
+                            self.scene_lanes
+                                .get(&document)
+                                .expect("an open Scene retains its admitted source")
+                                .source_key
+                                .clone(),
+                            scene,
+                            omissions,
+                        )
                     }),
                 })
             })
@@ -3096,7 +3114,6 @@ mod tests {
     use super::*;
 
     use nara_ecs::Component;
-    use nara_identity::SceneInstanceId;
     use nara_reflect::{
         ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentSchema,
         ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
@@ -3326,7 +3343,7 @@ mod tests {
         let mut world = World::new();
         let entity = world
             .spawn((
-                scene_source(1, entity_id.clone()),
+                scene_source(entity_id.clone()),
                 FieldReadOnlyProbe { value: 7 },
             ))
             .id();
@@ -3392,13 +3409,13 @@ mod tests {
         let mut world = World::new();
         let component_entity = world
             .spawn((
-                scene_source(1, component_entity_id.clone()),
+                scene_source(component_entity_id.clone()),
                 ComponentReadOnlyProbe { value: 7 },
             ))
             .id();
         let field_entity = world
             .spawn((
-                scene_source(2, field_entity_id.clone()),
+                scene_source(field_entity_id.clone()),
                 FieldReadOnlyProbe { value: 11 },
             ))
             .id();
@@ -3468,12 +3485,34 @@ mod tests {
             .unwrap();
     }
 
-    fn scene_source(instance: u64, entity_id: SceneEntityId) -> SceneEntitySource {
-        SceneEntitySource {
-            instance_id: SceneInstanceId::new(instance).unwrap(),
-            source_entity_id: entity_id.clone(),
-            entity_id,
-            projection_path: None,
-        }
+    fn scene_source(entity_id: SceneEntityId) -> SceneEntitySource {
+        let mut fixture = World::new();
+        let mut registry = ComponentRegistry::new();
+        registry.freeze().unwrap();
+        let candidate = nara_scene::ExpandedSceneCandidate::plain(
+            nara_scene::SourceDocumentKey::named(
+                "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+                "runtime-edit-probe",
+                nara_scene::SourceDocumentKind::Scene,
+            )
+            .unwrap(),
+            Arc::new(nara_scene::SceneDocument::from_ordered_roots([
+                nara_scene::SceneEntityRecord::new(entity_id.clone()),
+            ])),
+        );
+        let report = nara_scene::spawn_scene(
+            &mut fixture,
+            &registry,
+            &candidate,
+            &nara_scene::SceneOccurrenceKey::new("editor-fixture", "runtime-edit-probe").unwrap(),
+            None,
+        );
+        assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+        let nara_identity::EntityLookup::Resolved(entity) =
+            report.instance.unwrap().resolve(&fixture, &entity_id)
+        else {
+            panic!("the fixture publishes its bound source entity");
+        };
+        fixture.get::<SceneEntitySource>(entity).unwrap().clone()
     }
 }

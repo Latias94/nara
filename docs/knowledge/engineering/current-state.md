@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "b82376aaf491afec185709e256e29e4420456ac3a75748fd440036da701bafde"
+source_fingerprint: "2528cfa457306ecdce6dda116d19374593d1cf721f16d6498d99c731a42662a9"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "b82376aaf491afec185709e256e29e4420456ac3a75748fd440036da701
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `b82376aaf491afec185709e256e29e4420456ac3a75748fd440036da701bafde`
-- Immutable records: 885
+- Source fingerprint: `2528cfa457306ecdce6dda116d19374593d1cf721f16d6498d99c731a42662a9`
+- Immutable records: 886
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Required Scene sources and active occurrence ownership qualification](verification/2026-10/2026-10-24T114901Z-required-scene-sources-and-active-occurrence-ownership-qualification-e249da9a1f404677a72e52457ac990c4.md) - Required source-bound materialization and Scene-owned active logical occurrence replace identity-free spawn, qualified through owning, public, independent and selected native consumers.
 - **Work Progress**: [Canonical Prefab binding checkpoint and required Scene ownership follow-up](progress/2026-10/2026-10-24T111737Z-canonical-prefab-binding-checkpoint-and-required-scene-ownership-follow-up-99eaac49f2074e9f8121bf800204aa97.md) - Commit 1a03766 removes identity-free Prefab resolution; required containing-Scene binding, active occurrence ownership and shared UI identity remain the next replacements.
 - **Verification Evidence**: [Required canonical Prefab source binding qualification](verification/2026-10/2026-10-24T105758Z-required-canonical-prefab-source-binding-qualification-6afeb3f651f5456fba96e8e1e279c46c.md) - All Prefab resolvers and projection steps require canonical source keys; the in-memory adapter owns one document per key and all aliases share its publication.
 - **Verification Evidence**: [Exact stored spelling through filesystem capabilities](verification/2026-10/2026-10-24T095418Z-exact-stored-spelling-through-filesystem-capabilities-79d51b36d2944aa0bc70384eb2d11b86.md) - Bounded exact descendant-name opens preserve capability authority and reject native lookup aliases.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Public exact Scene instance end and source-context design review](verification/2026-10/2026-10-24T031111Z-public-exact-scene-instance-end-and-source-context-design-review-a91caf241959454f8674b9b04eabc141.md) - Qualified empty-instance public retirement and shared authoring path; source origin carrier trial and occurrence integration remain open.
 - **Verification Evidence**: [Cross-document UI source identity counterexample and next owner boundary](verification/2026-10/2026-10-24T025346Z-cross-document-ui-source-identity-counterexample-and-next-owner-boundary-c8f1cd178d8249a1824d61a363bbcf12.md) - Public same-World two-Scene characterization confirms missing containing source identity; source context and logical occurrence replacement remains Proposed.
 - **Verification Evidence**: [R5a final owner diagnostics and workspace qualification](verification/2026-10/2026-10-24T024954Z-r5a-final-owner-diagnostics-and-workspace-qualification-f58a0ab130cb47a8bc2829e32f1d0a86.md) - Qualified Schema-relative addressing, owner edits, v3 fixtures and safe diagnostic recovery; broader source identity and panel workflows remain open.
-- **Verification Evidence**: [R5a property addressing current qualification](verification/2026-10/2026-10-24T021414Z-r5a-property-addressing-current-qualification.md) - Current serial qualification of scoped property identity metadata, owner edits, and independent consumers; source identity remains open.
 
 # Integration Notes
 

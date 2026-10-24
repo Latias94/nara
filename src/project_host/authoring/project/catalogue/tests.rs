@@ -15,6 +15,42 @@ use crate::project_host::authoring::AuthoringProjectAdmissionLimits;
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
+fn exact_directory_and_file_open_costs_are_admitted_before_opening() {
+    let fixture = CatalogueFixture::new();
+    let root = fixture.capability();
+    let limits = AuthoringProjectAdmissionLimits {
+        decode_work: ItemLimit::new(1).unwrap(),
+        ..AuthoringProjectAdmissionLimits::default()
+    };
+    let mut budget = AuthoringProjectAdmissionBudget::new(limits);
+    assert!(matches!(
+        open_source_directory(
+            &root,
+            &ProjectPath::new("missing").unwrap(),
+            AuthoringSourceKind::Scene,
+            &mut budget
+        ),
+        Err(AuthoringProjectSourceAdmissionError::Budget(
+            AuthoringProjectAdmissionError::DecodeWorkExceeded { maximum: 1 },
+        )),
+    ));
+    let mut budget = AuthoringProjectAdmissionBudget::new(limits);
+    assert!(matches!(
+        open_source_file(
+            &root,
+            ProjectPath::new("missing.scene.json").unwrap(),
+            "missing.scene.json",
+            AuthoringSourceKind::Scene,
+            0,
+            &mut budget
+        ),
+        Err(AuthoringProjectSourceAdmissionError::Budget(
+            AuthoringProjectAdmissionError::DecodeWorkExceeded { maximum: 1 },
+        )),
+    ));
+}
+
+#[test]
 fn actual_prefab_metadata_read_rejects_changed_bytes_and_replaced_identity_after_lookup() {
     let fixture = CatalogueFixture::new();
     let root = fixture.capability();

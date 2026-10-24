@@ -14,9 +14,10 @@ use nara_scene::__private::AuthoringAdapterReceipt;
 use nara_scene::{
     AuthoringDocumentPublicationError, AuthoringDocumentSource, PrefabDocumentCandidate,
     PublishedAuthoringPrefabDocument, PublishedAuthoringSceneDocument, SceneDocumentCandidate,
-    SceneFileLimits, SceneFormatError,
+    SceneFileLimits, SceneFormatError, SourceDocumentKey, SourceDocumentKind,
 };
 
+use super::native_source::{AdmittedNativeDocumentSource, NativeDocumentSourcePolicy};
 use super::{
     AuthoringSchemaReceipt, ProjectSourceIndexSnapshot, source_index::ProjectSourceOpenCapability,
 };
@@ -36,6 +37,7 @@ pub(crate) struct AuthoringDocumentSourceFact {
     identity: FileIdentity,
     parent_identity: Option<FileIdentity>,
     digest: ContentDigest,
+    native: AdmittedNativeDocumentSource,
 }
 
 impl AuthoringDocumentSourceFact {
@@ -57,6 +59,17 @@ impl AuthoringDocumentSourceFact {
     #[must_use]
     pub(crate) const fn digest(&self) -> ContentDigest {
         self.digest
+    }
+
+    pub(crate) fn source_key(&self) -> &SourceDocumentKey {
+        self.native.key()
+    }
+
+    pub(crate) fn revalidate_native_source(
+        &self,
+        root: &DirectoryCapability,
+    ) -> Result<(), AuthoringDocumentAdmissionError> {
+        self.native.revalidate(root)
     }
 }
 
@@ -123,6 +136,7 @@ impl<'basis> AuthoringDocumentAdmissionBasis<'basis> {
             self.limits,
             self.schema.bundle(),
             self.adapters,
+            &NativeDocumentSourcePolicy::new(self.schema.settings()),
         )
     }
 
@@ -145,6 +159,7 @@ impl<'basis> AuthoringDocumentAdmissionBasis<'basis> {
             adapters: Arc::clone(self.adapters),
             limits: self.limits,
             lineage,
+            source_policy: NativeDocumentSourcePolicy::new(self.schema.settings()),
         })
     }
 }
@@ -159,6 +174,7 @@ pub(crate) struct OwnedAuthoringDocumentRequest {
     adapters: Arc<[AuthoringAdapterReceipt]>,
     limits: SceneFileLimits,
     lineage: DocumentIndexLineage,
+    source_policy: NativeDocumentSourcePolicy,
 }
 
 impl OwnedAuthoringDocumentRequest {
@@ -178,6 +194,7 @@ impl OwnedAuthoringDocumentRequest {
             self.limits,
             &self.bundle,
             &self.adapters,
+            &self.source_policy,
         )
     }
 }
@@ -250,11 +267,12 @@ fn admit_indexed_document(
     limits: SceneFileLimits,
     bundle: &AuthoringSchemaBundle,
     adapters: &[AuthoringAdapterReceipt],
+    source_policy: &NativeDocumentSourcePolicy,
 ) -> Result<AdmittedAuthoringDocument, AuthoringDocumentAdmissionError> {
     let (path, relative, expected_identity) =
         indexed_document_source(index, relative_path, expected_kind)?;
     let capability = root
-        .open_file(&relative)
+        .open_file_exact(&relative)
         .map_err(AuthoringDocumentAdmissionError::OpenSource)?;
     if capability.identity() != expected_identity {
         return Err(AuthoringDocumentAdmissionError::SourceIdentityChanged);
@@ -272,6 +290,15 @@ fn admit_indexed_document(
         identity: capability.identity(),
         parent_identity: capability.parent_identity(),
         digest: ContentDigest::of_bytes(&bytes),
+        native: source_policy.admit(
+            root,
+            relative_path,
+            match expected_kind {
+                AuthoringDocumentKind::Scene => SourceDocumentKind::Scene,
+                AuthoringDocumentKind::Prefab => SourceDocumentKind::Prefab,
+            },
+            capability.identity(),
+        )?,
     };
     match expected_kind {
         AuthoringDocumentKind::Scene => Ok(AdmittedAuthoringDocument::Scene {
@@ -347,6 +374,10 @@ pub(crate) enum AuthoringDocumentDataError {
 
 #[derive(Debug)]
 pub(crate) enum AuthoringDocumentAdmissionError {
+    NativeSourceIdentityConflict,
+    NativeSourceMetadataInvalid,
+    NativeSourceMetadataMismatch,
+    NativeSourceMetadataTooLarge { maximum: u64 },
     IndexLineageMismatch,
     MissingIndexMember,
     IdentityUnavailable,
@@ -385,7 +416,9 @@ impl AuthoringDocumentAdmissionError {
             SafeSummary::new("Editor document source could not be admitted")
                 .expect("document error summaries are engine-owned"),
         );
-        if let Self::SourceTooLarge { maximum } = self {
+        if let Self::SourceTooLarge { maximum } | Self::NativeSourceMetadataTooLarge { maximum } =
+            self
+        {
             return diagnostic
                 .try_with_field(DiagnosticField::public_identifier(
                     DiagnosticFieldKey::new("reason").expect("field key is engine-owned"),
@@ -413,6 +446,12 @@ impl AuthoringDocumentAdmissionError {
     #[must_use]
     pub(crate) const fn code(&self) -> &'static str {
         match self {
+            Self::NativeSourceIdentityConflict => "project.editor.native-source-identity-conflict",
+            Self::NativeSourceMetadataInvalid => "project.editor.native-source-metadata-invalid",
+            Self::NativeSourceMetadataMismatch => "project.editor.native-source-metadata-mismatch",
+            Self::NativeSourceMetadataTooLarge { .. } => {
+                "project.editor.native-source-metadata-too-large"
+            }
             Self::IndexLineageMismatch => "project.editor.document-index-lineage-mismatch",
             Self::MissingIndexMember => "project.editor.document-index-member-missing",
             Self::IdentityUnavailable => "project.editor.document-identity-unavailable",

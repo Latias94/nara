@@ -15,7 +15,6 @@ use nara_reflect::{
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, SceneComponentRecord,
     SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, export_scene,
-    spawn_expanded_scene, spawn_scene,
 };
 #[cfg(feature = "serde")]
 use nara_scene::{SceneDocumentCandidate, SceneFileLimits};
@@ -103,7 +102,20 @@ fn scene_spawn_materializes_default_reference_without_rewriting_source() {
     let source = document.clone();
     let mut world = World::new();
 
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = nara_scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara_scene::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "scene_spawn_materializes_default_reference_without_rewriting_source/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "scene_spawn_materializes_default_reference_without_rewriting_source/report",
+        ),
+        None,
+    );
 
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let instance = report.instance.unwrap();
@@ -133,7 +145,20 @@ fn scene_spawn_rejects_missing_local_target_before_world_mutation() {
         let canary = world.spawn_empty().id();
         let before_entities = world.iter_entities().count();
 
-        let report = spawn_scene(&mut world, &registry, &document);
+        let report = nara_scene::spawn_scene(
+            &mut world,
+            &registry,
+            &nara_scene::ExpandedSceneCandidate::plain(
+                scene_source_key(
+                    "scene_spawn_rejects_missing_local_target_before_world_mutation/document",
+                ),
+                std::sync::Arc::new((document).clone()),
+            ),
+            &scene_occurrence(
+                "scene_spawn_rejects_missing_local_target_before_world_mutation/report",
+            ),
+            None,
+        );
 
         assert!(
             report.diagnostics.has_errors(),
@@ -223,10 +248,15 @@ fn repeated_prefabs_remap_default_local_reference_and_preserve_source_omission()
     }
     assert_eq!(mapped_targets.len(), 2);
     let mut world = World::new();
-    let report = spawn_expanded_scene(
+    let report = nara_scene::spawn_scene(
         &mut world,
         &registry,
-        expansion.candidate.as_ref().unwrap(),
+        &expansion.candidate.unwrap().bind_source(scene_source_key(
+            "repeated_prefabs_remap_default_local_reference_and_preserve_source_omission/source",
+        )),
+        &scene_occurrence(
+            "repeated_prefabs_remap_default_local_reference_and_preserve_source_omission/report",
+        ),
         None,
     );
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
@@ -245,8 +275,19 @@ fn export_materializes_omitted_default_reference_before_instance_remap() {
     let document = linked_scene(false);
     let mut world = World::new();
     let mut instances = Vec::new();
-    for _instance in 0..2 {
-        let report = spawn_scene(&mut world, &registry, &document);
+    for slot in ["first", "second"] {
+        let report = nara_scene::spawn_scene(
+            &mut world,
+            &registry,
+            &nara_scene::ExpandedSceneCandidate::plain(
+                scene_source_key(
+                    "export_materializes_omitted_default_reference_before_instance_remap/document",
+                ),
+                std::sync::Arc::new((document).clone()),
+            ),
+            &scene_occurrence(slot),
+            None,
+        );
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
         instances.push(report.instance.unwrap());
     }
@@ -298,8 +339,19 @@ fn export_aggregate_value_budget_has_exact_boundary_and_preserves_world() {
     let registry = registry(true);
     let document = linked_scene(true);
     let mut world = World::new();
-    for _instance in 0..2 {
-        let report = spawn_scene(&mut world, &registry, &document);
+    for slot in ["first", "second"] {
+        let report = nara_scene::spawn_scene(
+            &mut world,
+            &registry,
+            &nara_scene::ExpandedSceneCandidate::plain(
+                scene_source_key(
+                    "export_aggregate_value_budget_has_exact_boundary_and_preserves_world/document",
+                ),
+                std::sync::Arc::new((document).clone()),
+            ),
+            &scene_occurrence(slot),
+            None,
+        );
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     }
     let before_entities = world.iter_entities().count();
@@ -367,4 +419,17 @@ fn scene_file_value_limits_survive_canonical_publish() {
         .unwrap()
         .publish(&registry);
     assert!(published.is_ok());
+}
+
+fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {
+    nara_scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara_scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara_scene::SceneOccurrenceKey {
+    nara_scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

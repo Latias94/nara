@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, fs, path::PathBuf};
 use bevy_ecs::world::World;
 use nara_scene::{
     Name, SceneDocumentCandidate, SceneEntityId, SceneEntitySource, Visibility,
-    retire_and_despawn_scene_instance, spawn_scene,
+    retire_and_despawn_scene_instance,
 };
 use nara_scene_module_consumer::frozen_scene_registry;
 
@@ -22,7 +22,15 @@ fn committed_scene_fixture_parses_validates_and_spawns() {
     assert!(!validation.has_errors(), "{validation:#?}");
 
     let mut world = World::new();
-    let spawn = spawn_scene(&mut world, &registry, published.document());
+    let source_key = scene_source_key("module-consumer/basic-scene");
+    let occurrence = scene_occurrence("module-consumer/basic-scene");
+    let candidate = nara_scene::ExpandedSceneCandidate::plain(
+        source_key.clone(),
+        std::sync::Arc::new(published.document().clone()),
+    );
+    assert_eq!(candidate.source_key(), &source_key);
+    assert_eq!(candidate.document(), published.document());
+    let spawn = nara_scene::spawn_scene(&mut world, &registry, &candidate, &occurrence, None);
     assert!(!spawn.diagnostics.has_errors(), "{:#?}", spawn.diagnostics);
     let instance = spawn
         .instance
@@ -40,6 +48,8 @@ fn committed_scene_fixture_parses_validates_and_spawns() {
         .query::<(&SceneEntitySource, &Name, &Visibility)>()
         .iter(&world)
         .map(|(source, name, visibility)| {
+            assert_eq!(source.containing_source(), &source_key);
+            assert_eq!(source.occurrence(), &occurrence);
             (
                 source.entity_id.as_str().to_owned(),
                 (name.as_str().to_owned(), *visibility),
@@ -76,4 +86,17 @@ fn committed_scene_fixture_parses_validates_and_spawns() {
 
 fn fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/basic.scene.ron")
+}
+
+fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {
+    nara_scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara_scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara_scene::SceneOccurrenceKey {
+    nara_scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

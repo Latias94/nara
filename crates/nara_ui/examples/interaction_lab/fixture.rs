@@ -10,7 +10,7 @@ use nara_input::{
     InputWindowId, KeyCode,
 };
 use nara_reflect::{ComponentRegistry, ComponentRegistryPlugin};
-use nara_scene::{SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource, spawn_scene};
+use nara_scene::{SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource};
 use nara_ui::{
     advanced::{
         UiSize, UiSurfaceContentTransform, UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot,
@@ -154,7 +154,16 @@ fn spawn_scene_overlay(world: &mut World) -> Result<Entity, Box<dyn Error>> {
     registry.freeze()?;
     let source_id = SceneEntityId::new("scene-overlay")?;
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(source_id.clone())]);
-    let report = spawn_scene(world, &registry, &document);
+    let report = nara_scene::spawn_scene(
+        world,
+        &registry,
+        &nara_scene::ExpandedSceneCandidate::plain(
+            scene_source_key("spawn_scene_overlay/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("spawn_scene_overlay/report"),
+        None,
+    );
     assert!(
         !report.diagnostics.has_errors(),
         "neutral Scene authoring should materialize: {:?}",
@@ -196,4 +205,17 @@ fn button_bundle(
 
 pub(super) fn surface_id(value: u64) -> UiSurfaceId {
     UiSurfaceId::new(value).expect("lab surface IDs are non-zero")
+}
+
+fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {
+    nara_scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara_scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara_scene::SceneOccurrenceKey {
+    nara_scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

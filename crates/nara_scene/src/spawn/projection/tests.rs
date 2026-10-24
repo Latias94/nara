@@ -1,5 +1,8 @@
 use super::*;
-use crate::{Name, SceneComponentRecord, SceneEntityRecord, register_scene_components};
+use crate::{
+    Name, SceneComponentRecord, SceneDocument, SceneEntityRecord, SceneOccurrenceKey,
+    SourceDocumentKey, SourceDocumentKind, register_scene_components, spawn_scene,
+};
 use nara_core::ItemLimit;
 use nara_ecs::{Resource, bevy_ecs::lifecycle::HookContext, bevy_ecs::world::DeferredWorld};
 use nara_identity::{
@@ -51,6 +54,20 @@ fn named_scene(name: &str) -> SceneDocument {
     )])
 }
 
+fn bound_scene(document: SceneDocument) -> ExpandedSceneCandidate {
+    let source = SourceDocumentKey::named(
+        "a2e25c7c-56c1-4d70-983a-bcc09985ced3".parse().unwrap(),
+        "projection.source",
+        SourceDocumentKind::Scene,
+    )
+    .unwrap();
+    ExpandedSceneCandidate::plain(source, Arc::new(document))
+}
+
+fn occurrence(slot: &str) -> SceneOccurrenceKey {
+    SceneOccurrenceKey::new("projection-tests", slot).unwrap()
+}
+
 fn resolved_entity(world: &World, instance: &SpawnedSceneInstance, id: &SceneEntityId) -> Entity {
     match instance.resolve(world, id) {
         EntityLookup::Resolved(entity) => entity,
@@ -86,9 +103,13 @@ impl ProjectionFixture {
         let mut world = World::new();
         let registry = registry();
         let database = ProjectAssetDatabase::default();
-        let mut projection = SceneProjection::default();
-        let report =
-            projection.publish(&mut world, &registry, &named_scene("last-good"), &database);
+        let mut projection = SceneProjection::new(occurrence("projection"));
+        let report = projection.publish(
+            &mut world,
+            &registry,
+            &bound_scene(named_scene("last-good")),
+            &database,
+        );
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
         let id = scene_id("root");
         let entity = resolved_entity(&world, projection.instance().unwrap(), &id);
@@ -102,14 +123,14 @@ impl ProjectionFixture {
         }
     }
 
-    fn prepare(&mut self, document: &SceneDocument) -> PreparedScenePublication {
+    fn prepare(&mut self, candidate: &ExpandedSceneCandidate) -> PreparedScenePublication {
         let bindings = SceneAssetBindings::from_world(&self.world);
         SceneSpawner::new()
             .prepare_with_asset_context_and_product_bindings(
                 &mut self.world,
                 &self.registry,
-                document,
-                None,
+                candidate,
+                &self.projection.occurrence,
                 Some(&self.database),
                 SceneIdentityCommit::Projection(self.projection.instance()),
                 None,
@@ -157,14 +178,19 @@ fn repeated_epochs_bound_claims_without_replacing_the_world_or_unmanaged_state()
     world.insert_resource(domain);
     let registry = registry();
     let database = ProjectAssetDatabase::default();
-    let mut projection = SceneProjection::default();
+    let mut projection = SceneProjection::new(occurrence("projection"));
     let id = scene_id("root");
     let mut history: Vec<(SpawnedSceneInstance, Entity)> = Vec::new();
     let mut initial_population = None;
 
     for epoch in 0..16 {
         let name = format!("epoch-{epoch}");
-        let report = projection.publish(&mut world, &registry, &named_scene(&name), &database);
+        let report = projection.publish(
+            &mut world,
+            &registry,
+            &bound_scene(named_scene(&name)),
+            &database,
+        );
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
         assert_eq!(report.retired_entities(), usize::from(epoch != 0));
         let current = report.instance.as_ref().unwrap();
@@ -212,7 +238,7 @@ fn repeated_epochs_bound_claims_without_replacing_the_world_or_unmanaged_state()
 fn empty_projection_is_an_owned_epoch_that_can_be_replaced_cleared_and_republished() {
     let mut fixture = ProjectionFixture::new();
     let nonempty = fixture.projection.instance().unwrap().clone();
-    let empty = SceneDocument::default();
+    let empty = bound_scene(SceneDocument::default());
     let report = fixture.projection.publish(
         &mut fixture.world,
         &fixture.registry,
@@ -262,7 +288,7 @@ fn empty_projection_is_an_owned_epoch_that_can_be_replaced_cleared_and_republish
     let report = fixture.projection.publish(
         &mut fixture.world,
         &fixture.registry,
-        &named_scene("nonempty"),
+        &bound_scene(named_scene("nonempty")),
         &fixture.database,
     );
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
@@ -307,7 +333,7 @@ fn invalid_final_component_preserves_the_receipt_domain_and_old_lookups() {
     let report = fixture.projection.publish(
         &mut fixture.world,
         &fixture.registry,
-        &invalid,
+        &bound_scene(invalid),
         &fixture.database,
     );
 
@@ -327,10 +353,12 @@ fn foreign_active_and_retired_scene_claims_reject_projection_replacement() {
     for retired in [false, true] {
         let mut fixture = ProjectionFixture::new();
         let current = fixture.projection.instance().unwrap().clone();
-        let report = SceneSpawner::new().spawn(
+        let report = spawn_scene(
             &mut fixture.world,
             &fixture.registry,
-            &named_scene("foreign"),
+            &bound_scene(named_scene("foreign")),
+            &occurrence("foreign"),
+            None,
         );
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
         let foreign = report.instance.unwrap();
@@ -348,15 +376,30 @@ fn foreign_active_and_retired_scene_claims_reject_projection_replacement() {
         assert_eq!(stats.active_scene_instances, if retired { 1 } else { 2 });
         assert_eq!(stats.claimed_scene_instances, 2);
         let population = fixture.world.iter_entities().count();
+        assert!(
+            nara_identity::__private::prepare_scene_projection_epoch_retirement(
+                &mut fixture.world,
+                Some(&current),
+            )
+            .is_err(),
+            "foreign active and historical Scene responsibility must both fence the epoch"
+        );
 
         let report = fixture.projection.publish(
             &mut fixture.world,
             &fixture.registry,
-            &named_scene("candidate"),
+            &bound_scene(named_scene("candidate")),
             &fixture.database,
         );
 
-        assert_rejected(&report, "scene.projection-epoch-ineligible");
+        assert_rejected(
+            &report,
+            if retired {
+                "scene.projection-epoch-ineligible"
+            } else {
+                "scene.occurrence-association-changed"
+            },
+        );
         fixture.assert_last_good(&current);
         assert_eq!(
             fixture.world.resource::<WorldIdentityDomain>().stats(),
@@ -372,18 +415,24 @@ fn fresh_owner_cannot_take_another_owners_empty_projection() {
     let mut world = World::new();
     let registry = registry();
     let database = ProjectAssetDatabase::default();
-    let mut owner = SceneProjection::default();
-    let report = owner.publish(&mut world, &registry, &SceneDocument::default(), &database);
+    let mut owner = SceneProjection::new(occurrence("owner"));
+    let empty = bound_scene(SceneDocument::default());
+    let report = owner.publish(&mut world, &registry, &empty, &database);
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let current = report.instance.unwrap();
     assert!(current.is_empty());
     let stats = world.resource::<WorldIdentityDomain>().stats();
     let population = world.iter_entities().count();
-    let mut other = SceneProjection::default();
+    let mut other = SceneProjection::new(occurrence("other"));
+    assert!(
+        nara_identity::__private::prepare_scene_projection_epoch_retirement(&mut world, None)
+            .is_err(),
+        "an unbound owner must not replace another owner's empty epoch"
+    );
 
-    let report = other.publish(&mut world, &registry, &SceneDocument::default(), &database);
+    let report = other.publish(&mut world, &registry, &empty, &database);
 
-    assert_rejected(&report, "scene.projection-epoch-ineligible");
+    assert_rejected(&report, "scene.occurrence-association-changed");
     assert!(other.instance().is_none());
     assert_eq!(other.clear(&mut world).unwrap(), 0);
     assert_eq!(owner.instance(), Some(&current));
@@ -439,7 +488,7 @@ fn persistent_active_unloaded_and_deleted_responsibilities_are_not_discarded() {
         let report = fixture.projection.publish(
             &mut fixture.world,
             &fixture.registry,
-            &named_scene("candidate"),
+            &bound_scene(named_scene("candidate")),
             &fixture.database,
         );
 
@@ -469,7 +518,7 @@ fn unregistered_identity_refuses_publish_and_clear_until_its_owner_retires_it() 
     let report = fixture.projection.publish(
         &mut fixture.world,
         &fixture.registry,
-        &named_scene("candidate"),
+        &bound_scene(named_scene("candidate")),
         &fixture.database,
     );
 
@@ -513,7 +562,7 @@ fn prepared_successor_rechecks_foreign_responsibility_and_discards_its_detached_
     let current = fixture.projection.instance().unwrap().clone();
     let stats = fixture.world.resource::<WorldIdentityDomain>().stats();
     let population = fixture.world.iter_entities().count();
-    let prepared = fixture.prepare(&named_scene("candidate"));
+    let prepared = fixture.prepare(&bound_scene(named_scene("candidate")));
     let candidate = prepared.identity_tokens[&fixture.id];
     assert_ne!(candidate.domain_id(), current.domain_id());
     let PreparedSceneIdentityCommit::Projection { domain, .. } = &prepared.prepared_identity else {
@@ -565,7 +614,7 @@ fn late_native_state_refuses_prepared_publish_and_clear_then_clear_can_retry() {
     fixture.world.init_resource::<Removals>();
     let current = fixture.projection.instance().unwrap().clone();
     let stats = fixture.world.resource::<WorldIdentityDomain>().stats();
-    let prepared = fixture.prepare(&named_scene("candidate"));
+    let prepared = fixture.prepare(&bound_scene(named_scene("candidate")));
     let candidate = prepared.identity_tokens[&fixture.id];
     fixture.world.entity_mut(fixture.entity).insert(NativeState);
 
@@ -617,14 +666,14 @@ fn initial_detached_candidate_rejects_empty_installed_domain_replacement_or_remo
         };
         let registry = registry();
         let database = ProjectAssetDatabase::default();
-        let projection = SceneProjection::default();
+        let projection = SceneProjection::new(occurrence("projection"));
         let bindings = SceneAssetBindings::from_world(&world);
         let prepared = SceneSpawner::new()
             .prepare_with_asset_context_and_product_bindings(
                 &mut world,
                 &registry,
-                &named_scene("candidate"),
-                None,
+                &bound_scene(named_scene("candidate")),
+                &projection.occurrence,
                 Some(&database),
                 SceneIdentityCommit::Projection(projection.instance()),
                 None,

@@ -1024,6 +1024,72 @@ mod preview_content_tests {
         authoring_preview::EditorAuthoringPreviewOmissions, preview::EditorPreviewProjection,
     };
 
+    fn preview_source_key() -> nara_scene::SourceDocumentKey {
+        nara_scene::SourceDocumentKey::named(
+            "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+            "authoring-preview-fixture",
+            nara_scene::SourceDocumentKind::Scene,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn preview_switches_the_containing_source_without_changing_its_logical_slot() {
+        let (mut runtime, _, _) = authoring_runtime();
+        runtime.set_preview_extent(Extent2d::new(320, 180));
+        let source = SceneAuthoringSession::new(SceneDocument::from_ordered_roots([
+            nara_scene::SceneEntityRecord::new(
+                nara_scene::SceneEntityId::new("shared-local-id").unwrap(),
+            ),
+        ]));
+        let first_key = preview_source_key();
+        let second_key = nara_scene::SourceDocumentKey::named(
+            "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+            "second-authoring-preview-fixture",
+            nara_scene::SourceDocumentKind::Scene,
+        )
+        .unwrap();
+        for (document, key) in [
+            (EditorDocumentId::from_raw(1), &first_key),
+            (EditorDocumentId::from_raw(2), &second_key),
+            (EditorDocumentId::from_raw(1), &first_key),
+        ] {
+            let revision = source.revision();
+            assert!(
+                runtime
+                    .drive_preview(Some(EditorPreviewSource {
+                        document,
+                        revision,
+                        projection: Some(EditorPreviewProjection::new(
+                            key.clone(),
+                            source.document().clone(),
+                            EditorAuthoringPreviewOmissions::empty(document, revision),
+                        )),
+                    }))
+                    .is_none()
+            );
+            assert_eq!(
+                runtime.take_preview_candidate().unwrap().document(),
+                document
+            );
+            let world = runtime.runtime.world();
+            let mut materialized_count = 0;
+            for entity in world.iter_entities() {
+                if let Some(materialized_source) = entity.get::<nara_scene::SceneEntitySource>() {
+                    materialized_count += 1;
+                    assert_eq!(materialized_source.containing_source(), key);
+                    assert_eq!(
+                        materialized_source.occurrence(),
+                        &nara_scene::SceneOccurrenceKey::new("nara.editor", "scene-preview")
+                            .unwrap(),
+                    );
+                }
+            }
+            assert_eq!(materialized_count, 1);
+        }
+        retire(&mut runtime);
+    }
+
     fn authoring_runtime() -> (EditorAuthoringRuntime, AssetRecord, Handle<ImageAsset>) {
         authoring_runtime_with_claim_limit(None)
     }
@@ -1114,6 +1180,7 @@ mod preview_content_tests {
             .preview_requires_source_projection(document, revision)
             .then(|| {
                 EditorPreviewProjection::new(
+                    preview_source_key(),
                     source.document().clone(),
                     EditorAuthoringPreviewOmissions::empty(document, revision),
                 )

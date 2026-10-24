@@ -22,7 +22,7 @@ use nara_reflect::{
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, SceneDocument, SceneEntityId,
-    SceneEntityRecord, SceneEntitySource, ScenePatchDocument, spawn_scene_with_prefab_resolver,
+    SceneEntityRecord, SceneEntitySource, ScenePatchDocument,
 };
 use nara_ui_kernel::{
     UiAccessibilityInput, UiActivationSource, UiButtonPhase, UiInputEvent, UiKey, UiLayer,
@@ -4154,12 +4154,26 @@ fn repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance() 
         prefab_anchor("left", source.clone()),
         prefab_anchor("right", source),
     ]);
-    let report = spawn_scene_with_prefab_resolver(
-        app.configuration_world(),
-        &registry,
-        &document,
-        &resolver,
-    );
+    let report = {
+        let expansion = (document).expand_prefabs(&registry, &resolver);
+        assert!(
+            !expansion.diagnostics.has_errors(),
+            "{:?}",
+            expansion.diagnostics
+        );
+        let candidate = expansion.candidate.unwrap().bind_source(scene_source_key(
+            "repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance/source",
+        ));
+        nara_scene::spawn_scene(
+            app.configuration_world(),
+            &registry,
+            &candidate,
+            &scene_occurrence(
+                "repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance/report",
+            ),
+            None,
+        )
+    };
     assert!(!report.diagnostics.has_errors());
 
     let projected = app
@@ -4173,6 +4187,20 @@ fn repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance() 
         })
         .collect::<Vec<_>>();
     assert_eq!(projected.len(), 2);
+    for (_, source) in &projected {
+        assert_eq!(
+            source.containing_source(),
+            &scene_source_key(
+                "repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance/source"
+            ),
+        );
+        assert_eq!(
+            source.occurrence(),
+            &scene_occurrence(
+                "repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance/report"
+            ),
+        );
+    }
     assert!(
         projected
             .iter()
@@ -4208,4 +4236,16 @@ fn repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance() 
             .collect::<Vec<_>>(),
         keys
     );
+}
+
+fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {
+    nara_scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara_scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+fn scene_occurrence(slot: &str) -> nara_scene::SceneOccurrenceKey {
+    nara_scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

@@ -16,8 +16,7 @@ use nara::{
     },
     scene::{
         PrefabDocument, SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneEntityId,
-        SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, export_scene, spawn_prefab,
-        spawn_scene,
+        SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, export_scene,
     },
 };
 
@@ -164,7 +163,20 @@ fn every_public_authoring_route_materializes_only_the_explicit_persistent_set() 
 
     let mut scene_world = World::new();
     let scene = SceneDocument::from_ordered_roots([record(&id, ComponentSchemaVersion::ONE, 11)]);
-    let scene_report = spawn_scene(&mut scene_world, &registry, &scene);
+    let scene_report = nara::scene::spawn_scene(
+        &mut scene_world,
+        &registry,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "every_public_authoring_route_materializes_only_the_explicit_persistent_set/scene",
+            ),
+            std::sync::Arc::new((scene).clone()),
+        ),
+        &scene_occurrence(
+            "every_public_authoring_route_materializes_only_the_explicit_persistent_set/scene_report",
+        ),
+        None,
+    );
     assert!(!scene_report.diagnostics.has_errors());
     let scene_entity = resolved_entity(&scene_world, &scene_report, &id);
     assert_eq!(
@@ -193,7 +205,20 @@ fn every_public_authoring_route_materializes_only_the_explicit_persistent_set() 
         ComponentSchemaVersion::new(2).unwrap(),
         12,
     )]);
-    let prefab_report = spawn_prefab(&mut prefab_world, &registry, &prefab);
+    let prefab_report = nara::scene::spawn_scene(
+        &mut prefab_world,
+        &registry,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            named_prefab_source_key(
+                "every_public_authoring_route_materializes_only_the_explicit_persistent_set/prefab",
+            ),
+            std::sync::Arc::new((prefab).instantiate()),
+        ),
+        &scene_occurrence(
+            "every_public_authoring_route_materializes_only_the_explicit_persistent_set/prefab_report",
+        ),
+        None,
+    );
     assert!(!prefab_report.diagnostics.has_errors());
     let prefab_entity = resolved_entity(&prefab_world, &prefab_report, &id);
     assert_eq!(
@@ -217,7 +242,7 @@ fn every_public_authoring_route_materializes_only_the_explicit_persistent_set() 
     }]);
     assert!(session.apply_patch(&patch, &registry).applied);
     let mut authoring_world = World::new();
-    let sync = session.sync_world(&mut authoring_world, &registry).unwrap();
+    let sync = session.sync_world(&mut authoring_world, &registry, &scene_source_key("every_public_authoring_route_materializes_only_the_explicit_persistent_set/authored"), &scene_occurrence("every_public_authoring_route_materializes_only_the_explicit_persistent_set/projection")).unwrap();
     assert!(sync.synced);
     let authoring_instance = sync.live_instance.as_ref().unwrap();
     let authoring_entity = match authoring_instance.resolve(&authoring_world, &id) {
@@ -278,7 +303,20 @@ fn fresh_scene_apply_flushes_and_rejects_dynamic_hooks_before_allocation() {
         .map(|entity| entity.id())
         .collect::<Vec<_>>();
 
-    let report = spawn_scene(&mut world, &registry, &scene);
+    let report = nara::scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "fresh_scene_apply_flushes_and_rejects_dynamic_hooks_before_allocation/scene",
+            ),
+            std::sync::Arc::new((scene).clone()),
+        ),
+        &scene_occurrence(
+            "fresh_scene_apply_flushes_and_rejects_dynamic_hooks_before_allocation/report",
+        ),
+        None,
+    );
 
     assert!(report.instance.is_none());
     assert!(
@@ -314,7 +352,20 @@ fn late_required_component_metadata_rejects_public_apply_before_persistent_mutat
         .map(|entity| entity.id())
         .collect::<Vec<_>>();
 
-    let report = spawn_scene(&mut scene_world, &registry, &scene);
+    let report = nara::scene::spawn_scene(
+        &mut scene_world,
+        &registry,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "late_required_component_metadata_rejects_public_apply_before_persistent_mutation/scene",
+            ),
+            std::sync::Arc::new((scene).clone()),
+        ),
+        &scene_occurrence(
+            "late_required_component_metadata_rejects_public_apply_before_persistent_mutation/report",
+        ),
+        None,
+    );
 
     assert!(report.instance.is_none());
     assert!(
@@ -366,7 +417,20 @@ fn post_publication_runtime_observer_runs_but_blocks_the_next_persistent_apply()
     )]);
     let mut world = World::new();
     world.init_resource::<HookCanary>();
-    let report = spawn_scene(&mut world, &registry, &scene);
+    let report = nara::scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "post_publication_runtime_observer_runs_but_blocks_the_next_persistent_apply/scene",
+            ),
+            std::sync::Arc::new((scene).clone()),
+        ),
+        &scene_occurrence(
+            "post_publication_runtime_observer_runs_but_blocks_the_next_persistent_apply/report",
+        ),
+        None,
+    );
     assert!(!report.diagnostics.has_errors());
     let entity = resolved_entity(&world, &report, &id);
 
@@ -423,7 +487,18 @@ fn component_global_observer_rejects_a_fresh_scene_without_running() {
         .map(|entity| entity.id())
         .collect::<Vec<_>>();
 
-    let report = spawn_scene(&mut world, &registry, &scene);
+    let report = nara::scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "component_global_observer_rejects_a_fresh_scene_without_running/scene",
+            ),
+            std::sync::Arc::new((scene).clone()),
+        ),
+        &scene_occurrence("component_global_observer_rejects_a_fresh_scene_without_running/report"),
+        None,
+    );
 
     assert!(report.instance.is_none());
     assert_eq!(
@@ -459,7 +534,16 @@ fn identity_resource_observer_rejects_before_scene_allocation() {
         .map(|entity| entity.id())
         .collect::<Vec<_>>();
 
-    let report = spawn_scene(&mut world, &registry, &scene);
+    let report = nara::scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            scene_source_key("identity_resource_observer_rejects_before_scene_allocation/scene"),
+            std::sync::Arc::new((scene).clone()),
+        ),
+        &scene_occurrence("identity_resource_observer_rejects_before_scene_allocation/report"),
+        None,
+    );
 
     assert!(report.instance.is_none());
     assert!(
@@ -484,4 +568,26 @@ fn prepared_component_cannot_be_forged_outside_the_registry() {
     tests.compile_fail(
         "tests/ui/scene_component_composition/prepared_component_not_constructible.rs",
     );
+}
+
+fn scene_source_key(name: &str) -> nara::scene::SourceDocumentKey {
+    nara::scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara::scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara::scene::SceneOccurrenceKey {
+    nara::scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
+}
+
+fn named_prefab_source_key(name: &str) -> nara::scene::SourceDocumentKey {
+    nara::scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara::scene::SourceDocumentKind::Prefab,
+    )
+    .unwrap()
 }

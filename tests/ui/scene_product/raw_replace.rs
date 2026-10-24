@@ -1,5 +1,5 @@
-use nara::scene::SceneSpawner;
+use nara::scene::spawn::SceneSpawner;
 
 fn main() {
-    let _ = SceneSpawner::replace;
+    let _ = SceneSpawner::new;
 }

@@ -564,7 +564,7 @@ fn prefab_anchor_does_not_bypass_direct_source_reference_closure() {
     };
     use nara_scene::{
         __private::AuthoringAdapterReceipt, AuthoringDocumentSource, InMemoryPrefabSourceResolver,
-        PrefabInstance, SceneDocumentCandidate, spawn_scene_with_prefab_resolver,
+        PrefabInstance, SceneDocumentCandidate,
     };
     use std::collections::BTreeSet;
 
@@ -621,17 +621,48 @@ fn prefab_anchor_does_not_bypass_direct_source_reference_closure() {
         assert_eq!(native.is_err(), dangling);
         let mut world = World::new();
         let before_entities = world.iter_entities().count();
-        let spawned =
-            spawn_scene_with_prefab_resolver(&mut world, &registry, &candidate_document, &resolver);
+        let expansion = (candidate_document).expand_prefabs(&registry, &resolver);
         assert_eq!(
-            spawned.diagnostics.has_errors(),
+            expansion.diagnostics.has_errors(),
             dangling,
             "{:?}",
-            spawned.diagnostics
+            expansion.diagnostics
         );
-        assert_eq!(spawned.instance.is_none(), dangling);
+        assert_eq!(expansion.candidate.is_none(), dangling);
         if dangling {
             assert_eq!(world.iter_entities().count(), before_entities);
+        } else {
+            let candidate = expansion
+                .candidate
+                .unwrap()
+                .bind_source(scene_source_key("prefab-anchor-reference-closure/source"));
+            let spawned = nara_scene::spawn_scene(
+                &mut world,
+                &registry,
+                &candidate,
+                &scene_occurrence("prefab-anchor-reference-closure/instance"),
+                None,
+            );
+            assert!(
+                !spawned.diagnostics.has_errors(),
+                "{:?}",
+                spawned.diagnostics
+            );
+            assert!(spawned.instance.is_some());
         }
     }
+}
+
+#[cfg(feature = "serde")]
+fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {
+    nara_scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara_scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+#[cfg(feature = "serde")]
+fn scene_occurrence(slot: &str) -> nara_scene::SceneOccurrenceKey {
+    nara_scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

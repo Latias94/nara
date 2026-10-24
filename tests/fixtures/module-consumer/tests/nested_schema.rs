@@ -14,7 +14,7 @@ use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, InMemoryPrefabSourceResolver,
     PrefabDocument, PrefabInstance, SceneAuthoringSession, SceneDocument, SceneDocumentCandidate,
     SceneEntityId, SceneEntityRecord, ScenePatchDocument, SourceDocumentKey, SourceDocumentKind,
-    export_scene, spawn_expanded_scene,
+    export_scene,
 };
 use nara_tooling::{SceneInspectorCommand, SceneInspectorState};
 use support::{COMPONENT_ID, IMAGE_ID, PREFAB_ID, PREFAB_PATH, Relationships};
@@ -171,10 +171,15 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
     assert_eq!(remapped_targets.len(), 2);
 
     let mut world = World::new();
-    let spawned = spawn_expanded_scene(
+    let spawned = nara_scene::spawn_scene(
         &mut world,
         &registry,
-        expansion.candidate.as_ref().unwrap(),
+        &expansion.candidate.unwrap().bind_source(scene_source_key(
+            "nested_component_survives_inspector_save_prefab_remap_and_export/source",
+        )),
+        &scene_occurrence(
+            "nested_component_survives_inspector_save_prefab_remap_and_export/spawned",
+        ),
         Some(&database),
     );
     assert!(
@@ -239,4 +244,17 @@ fn set_field(field: &str, value: ComponentValue) -> SceneInspectorCommand {
         field: ComponentFieldId::new(field),
         value,
     }
+}
+
+fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {
+    nara_scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara_scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara_scene::SceneOccurrenceKey {
+    nara_scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

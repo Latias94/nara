@@ -319,6 +319,11 @@ fn bundle_failure(
 
 fn source_failure(error: AuthoringProjectSourceAdmissionError) -> EditorProjectOpenFailure {
     let (relative_source, diagnostics) = match error {
+        AuthoringProjectSourceAdmissionError::NativeSource(error) => {
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(error.diagnostic());
+            (None, diagnostics)
+        }
         AuthoringProjectSourceAdmissionError::SourcePublication { path, source, .. } => {
             (Some(path.as_str().to_owned()), source.into_diagnostics())
         }

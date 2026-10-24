@@ -14,6 +14,7 @@ mod export;
 mod format;
 #[cfg(feature = "serde")]
 mod migration;
+mod occurrence;
 mod patch;
 mod prefab;
 mod product_transaction;
@@ -53,7 +54,7 @@ pub use authoring_decode::{
     UnavailablePatchTarget, UnavailableRecord, UnavailableRecordManifest,
     UnavailableRecordManifestEntry, UnavailableValuePathSegment,
 };
-pub use candidate::ExpandedSceneCandidate;
+pub use candidate::{ExpandedSceneCandidate, ExpandedSceneDocument};
 pub use document::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
 pub use export::{
     SceneExportOptions, SceneExportOutput, SceneExportRemap, SceneExportReport, export_scene,
@@ -67,6 +68,7 @@ pub use format::{
     SceneFormatError, ScenePatchDocumentCandidate,
 };
 pub use nara_identity::{SceneEntityId, SceneEntityIdError, SceneInstanceId, SpawnedSceneInstance};
+pub use occurrence::{SceneOccurrenceKey, SceneOccurrenceKeyError, SceneOccurrenceLimits};
 pub use patch::{
     ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
     ScenePlacement, ScenePlacementAnchor, ScenePlacementOwner,
@@ -91,7 +93,7 @@ pub mod advanced {
     pub use crate::spawn::{
         PreparedSceneReplacement, SceneNativeRetirementClaims,
         prepare_expanded_scene_replacement_with_claims, replace_expanded_scene_with_product,
-        replace_expanded_scene_with_product_and_bindings, replace_scene_with_product,
+        replace_expanded_scene_with_product_and_bindings,
     };
 }
 pub use scene_components::{
@@ -104,11 +106,8 @@ pub use source::{
     SourceDocumentKey, SourceDocumentKeyError, SourceDocumentKind, SourceDocumentOrigin,
 };
 pub use spawn::{
-    SceneEntityRetirementError, SceneEntitySource, SceneProjection, SceneSpawnReport, SceneSpawner,
-    retire_and_despawn_scene_entity, retire_and_despawn_scene_instance, spawn_expanded_scene,
-    spawn_prefab, spawn_prefab_with_asset_database, spawn_prefab_with_patch,
-    spawn_prefab_with_patch_and_asset_database, spawn_scene, spawn_scene_with_asset_database,
-    spawn_scene_with_prefab_resolver, spawn_scene_with_prefab_resolver_and_asset_database,
+    SceneEntityRetirementError, SceneEntitySource, SceneProjection, SceneSpawnReport,
+    retire_and_despawn_scene_entity, retire_and_despawn_scene_instance, spawn_scene,
 };
 
 #[doc(hidden)]

@@ -407,16 +407,14 @@ impl ProjectContentSnapshot {
             Arc::clone(&self.inner.assets),
             self.inner._runtime_lease.clone(),
             self.inner._generation_lease.clone(),
-            startup_scene_retained_bytes(
-                self.inner.expanded_scene.document(),
-                self.inner.expanded_scene.provenance(),
-            )
-            .expect("an admitted Scene already has a valid retained-byte plan"),
+            startup_scene_retained_bytes(&self.inner.expanded_scene)
+                .expect("an admitted Scene already has a valid retained-byte plan"),
         )
     }
 
     pub(crate) fn prepare_editor_startup_scene(
         &self,
+        source_key: &SourceDocumentKey,
         document: &SceneDocument,
         registry: &nara_reflect::ComponentRegistry,
     ) -> Result<SceneSource, ProjectContentError> {
@@ -434,11 +432,12 @@ impl ProjectContentSnapshot {
             candidate,
             diagnostics,
         } = expansion;
-        let expanded_candidate = candidate.ok_or_else(|| {
-            map_scene_diagnostics(ProjectContentErrorKind::PrefabExpansion, diagnostics)
-        })?;
+        let expanded_candidate = candidate
+            .ok_or_else(|| {
+                map_scene_diagnostics(ProjectContentErrorKind::PrefabExpansion, diagnostics)
+            })?
+            .bind_source(source_key.clone());
         let expanded = expanded_candidate.document();
-        let provenance = expanded_candidate.provenance();
         let diagnostics =
             expanded.validate_with_asset_database(registry, self.inner.assets.database());
         if diagnostics.has_errors() {
@@ -447,7 +446,7 @@ impl ProjectContentSnapshot {
                 diagnostics,
             ));
         }
-        let retained_bytes = editor_startup_scene_retained_bytes(&expanded, &provenance)?;
+        let retained_bytes = editor_startup_scene_retained_bytes(&expanded_candidate)?;
         let lease = self
             .inner
             ._runtime_lease
@@ -466,6 +465,7 @@ impl ProjectContentSnapshot {
     pub(crate) fn sync_editor_preview_scene(
         &self,
         projection: &mut nara_scene::SceneProjection,
+        source_key: &SourceDocumentKey,
         document: &SceneDocument,
         world: &mut nara_ecs::World,
         registry: &nara_reflect::ComponentRegistry,
@@ -474,11 +474,21 @@ impl ProjectContentSnapshot {
             prefabs: self.prefabs(),
             database: self.inner.assets.database(),
         };
-        projection.publish_with_prefab_resolver(
+        let expansion = document.expand_prefabs_with_options_and_asset_database(
+            registry,
+            &resolver,
+            nara_scene::PrefabExpansionOptions::default(),
+            self.inner.assets.database(),
+        );
+        let Some(candidate) = expansion.candidate else {
+            let mut report = nara_scene::SceneSpawnReport::default();
+            report.diagnostics = expansion.diagnostics;
+            return report;
+        };
+        projection.publish(
             world,
             registry,
-            document,
-            &resolver,
+            &candidate.bind_source(source_key.clone()),
             self.inner.assets.database(),
         )
     }
@@ -1256,12 +1266,14 @@ impl<'a> LoadContext<'a> {
             candidate: expanded_candidate,
             diagnostics,
         } = expansion;
-        let expanded_candidate = expanded_candidate.ok_or_else(|| {
-            map_scene_diagnostics(ProjectContentErrorKind::PrefabExpansion, diagnostics)
-        })?;
+        let expanded_candidate = expanded_candidate
+            .ok_or_else(|| {
+                map_scene_diagnostics(ProjectContentErrorKind::PrefabExpansion, diagnostics)
+            })?
+            .bind_source(selected_scene_source.clone());
         let expanded = expanded_candidate.document();
         let provenance = expanded_candidate.provenance();
-        let expanded_retained = startup_scene_retained_bytes(&expanded, &provenance)?;
+        let expanded_retained = startup_scene_retained_bytes(&expanded_candidate)?;
         self.commit_work_as_retained(work_before, expanded_retained)?;
 
         if let Some(agreement) = self.runtime_agreement.take() {
@@ -2926,18 +2938,16 @@ fn prefab_expansion_work_plan(
 }
 
 pub(crate) fn startup_scene_retained_bytes(
-    document: &SceneDocument,
-    provenance: &SceneEntityProvenanceMap,
+    candidate: &ExpandedSceneCandidate,
 ) -> Result<usize, ProjectContentError> {
-    crate::scene_retention::startup_scene_retained_bytes(document, provenance)
+    crate::scene_retention::startup_scene_retained_bytes(candidate)
         .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
 }
 
 fn editor_startup_scene_retained_bytes(
-    document: &SceneDocument,
-    provenance: &SceneEntityProvenanceMap,
+    candidate: &ExpandedSceneCandidate,
 ) -> Result<usize, ProjectContentError> {
-    crate::scene_retention::direct_startup_scene_retained_bytes(document, provenance)
+    crate::scene_retention::direct_startup_scene_retained_bytes(candidate)
         .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))?
         .checked_add(SNAPSHOT_LEASE_OVERHEAD)
         .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::RetainedBytes))

@@ -1,5 +1,5 @@
-use nara::scene::ExpandedSceneCandidate;
+use nara::scene::ExpandedSceneDocument;
 
 fn main() {
-    let _ = ExpandedSceneCandidate::from_expansion;
+    let _ = ExpandedSceneDocument::from_expansion;
 }

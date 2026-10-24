@@ -15,7 +15,7 @@ use nara_reflect::{
 };
 
 use crate::{
-    ExpandedSceneCandidate, PrefabProjectionPath, SceneDocument, SceneEntityId,
+    ExpandedSceneDocument, PrefabProjectionPath, SceneDocument, SceneEntityId,
     SceneEntityProvenance, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
     SourceDocumentKey, SourceDocumentKind,
     diagnostics::{
@@ -549,8 +549,11 @@ impl PrefabExpansionOptions {
 
 #[derive(Debug, Default, PartialEq)]
 pub struct PrefabExpansionReport {
-    /// The immutable document and its source association, absent after failed expansion.
-    pub candidate: Option<ExpandedSceneCandidate>,
+    /// The immutable expanded document and its complete provenance, absent after failed expansion.
+    ///
+    /// Its source owner must bind the containing source before materialization. Expansion does
+    /// not infer that source or claim a runtime occurrence.
+    pub candidate: Option<ExpandedSceneDocument>,
     pub diagnostics: DiagnosticReport,
 }
 
@@ -558,9 +561,7 @@ impl PrefabExpansionReport {
     /// Borrows the expanded document without granting materialization authority by itself.
     #[must_use]
     pub fn document(&self) -> Option<&SceneDocument> {
-        self.candidate
-            .as_ref()
-            .map(ExpandedSceneCandidate::document)
+        self.candidate.as_ref().map(ExpandedSceneDocument::document)
     }
 
     /// Borrows the source association established by this expansion.
@@ -568,7 +569,7 @@ impl PrefabExpansionReport {
     pub fn provenance(&self) -> Option<&crate::SceneEntityProvenanceMap> {
         self.candidate
             .as_ref()
-            .map(ExpandedSceneCandidate::provenance)
+            .map(ExpandedSceneDocument::provenance)
     }
 }
 
@@ -731,7 +732,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         }
 
         let candidate =
-            ExpandedSceneCandidate::from_expansion(expanded, std::mem::take(&mut self.provenance));
+            ExpandedSceneDocument::from_expansion(expanded, std::mem::take(&mut self.provenance));
         let candidate = match candidate {
             Ok(candidate) => Some(candidate),
             Err(_) => {
@@ -1822,6 +1823,56 @@ mod resolver_tests {
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(
             SceneEntityId::new(entity).unwrap(),
         )])
+    }
+
+    #[test]
+    fn expansion_report_borrows_the_document_and_complete_provenance_together() {
+        let mut registry = ComponentRegistry::new();
+        registry.freeze().unwrap();
+        let request = AssetRef::path("prefabs/hero.ron").unwrap();
+        let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+            request.clone(),
+            source_key("characters.hero"),
+            document("hero"),
+        );
+        let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
+        anchor.prefab = Some(PrefabInstance {
+            source: request,
+            overrides: ScenePatchDocument::default(),
+        });
+        let report =
+            SceneDocument::from_ordered_roots([anchor]).expand_prefabs(&registry, &resolver);
+
+        assert!(!report.diagnostics.has_errors());
+        let expanded: &ExpandedSceneDocument = report.candidate.as_ref().unwrap();
+        assert!(std::ptr::eq(
+            report.document().unwrap(),
+            expanded.document()
+        ));
+        assert!(std::ptr::eq(
+            report.provenance().unwrap(),
+            expanded.provenance()
+        ));
+        assert_eq!(expanded.document().entities.len(), 2);
+        assert_eq!(expanded.provenance().len(), 2);
+    }
+
+    #[test]
+    fn failed_expansion_report_exposes_neither_document_nor_provenance() {
+        let mut registry = ComponentRegistry::new();
+        registry.freeze().unwrap();
+        let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
+        anchor.prefab = Some(PrefabInstance {
+            source: AssetRef::path("prefabs/missing.ron").unwrap(),
+            overrides: ScenePatchDocument::default(),
+        });
+        let report = SceneDocument::from_ordered_roots([anchor])
+            .expand_prefabs(&registry, &InMemoryPrefabSourceResolver::new());
+
+        assert!(report.diagnostics.has_errors());
+        assert!(report.candidate.is_none());
+        assert!(report.document().is_none());
+        assert!(report.provenance().is_none());
     }
 
     #[test]

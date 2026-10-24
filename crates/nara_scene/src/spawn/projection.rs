@@ -11,12 +11,21 @@ mod tests;
 /// entity IDs. The World, assets and other non-identity resources remain in place. A domain with
 /// unrelated current or historical identity responsibility is rejected without replacing it.
 /// Use ordinary Scene spawning/replacement for independently resident instances in a shared domain.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SceneProjection {
+    occurrence: SceneOccurrenceKey,
     current: Option<SpawnedSceneInstance>,
 }
 
 impl SceneProjection {
+    #[must_use]
+    pub const fn new(occurrence: SceneOccurrenceKey) -> Self {
+        Self {
+            occurrence,
+            current: None,
+        }
+    }
+
     /// Returns the exact receipt of the last successfully published projection.
     #[must_use]
     pub const fn instance(&self) -> Option<&SpawnedSceneInstance> {
@@ -31,38 +40,17 @@ impl SceneProjection {
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
-        document: &SceneDocument,
+        candidate: &ExpandedSceneCandidate,
         database: &ProjectAssetDatabase,
     ) -> SceneSpawnReport {
-        let report = SceneSpawner::new().spawn_with_asset_context(
+        let report = SceneSpawner::new().spawn_with_asset_context_and_product(
             world,
             registry,
-            document,
+            candidate,
+            &self.occurrence,
             Some(database),
             SceneIdentityCommit::Projection(self.current.as_ref()),
-        );
-        if let Some(instance) = &report.instance {
-            self.current = Some(instance.clone());
-        }
-        report
-    }
-
-    /// Publishes an expanded projection with its exact Prefab provenance and asset context.
-    pub fn publish_with_prefab_resolver<R: PrefabSourceResolver + ?Sized>(
-        &mut self,
-        world: &mut World,
-        registry: &ComponentRegistry,
-        document: &SceneDocument,
-        resolver: &R,
-        database: &ProjectAssetDatabase,
-    ) -> SceneSpawnReport {
-        let expansion = document.expand_prefabs_with_asset_database(registry, resolver, database);
-        let report = SceneSpawner::new().spawn_prefab_expansion(
-            world,
-            registry,
-            expansion,
-            Some(database),
-            SceneIdentityCommit::Projection(self.current.as_ref()),
+            None,
         );
         if let Some(instance) = &report.instance {
             self.current = Some(instance.clone());
@@ -78,6 +66,9 @@ impl SceneProjection {
         let Some(current) = self.current.as_ref() else {
             return Ok(0);
         };
+        crate::occurrence::validate_projection_occurrence(world, Some(current)).map_err(
+            |error| occurrence_rejection(DiagnosticReport::default(), error).diagnostics,
+        )?;
         nara_identity::__private::prepare_scene_projection_epoch_retirement(world, Some(current))
             .map_err(projection_identity_rejection)?;
         let retired = retire_scene_instance_exact(world, current, TombstoneCause::Unloaded)

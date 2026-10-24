@@ -22,12 +22,24 @@ impl SceneProductResource for RunValue {}
 
 fn source(name: &str) -> SceneSource {
     SceneSource::direct(
-        Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-            id(name),
-        )])),
+        candidate(Arc::new(SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(id(name)),
+        ]))),
         ByteLimit::new(16 * 1024).unwrap(),
     )
     .unwrap()
+}
+
+fn candidate(document: Arc<SceneDocument>) -> ExpandedSceneCandidate {
+    ExpandedSceneCandidate::plain(
+        nara_scene::SourceDocumentKey::named(
+            "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+            "current-scene-replacement-fixture",
+            nara_scene::SourceDocumentKind::Scene,
+        )
+        .unwrap(),
+        document,
+    )
 }
 
 fn id(name: &str) -> SceneEntityId {
@@ -216,10 +228,15 @@ fn stale_and_foreign_expected_receipts_reject_before_product_configuration() {
             component_registry(world).unwrap().snapshot().unwrap(),
         );
         let mut foreign_world = World::new();
-        let foreign =
-            nara_scene::spawn_scene(&mut foreign_world, &registry, &SceneDocument::default())
-                .instance
-                .unwrap();
+        let foreign = nara_scene::spawn_scene(
+            &mut foreign_world,
+            &registry,
+            &candidate(Arc::new(SceneDocument::default())),
+            &SceneOccurrenceKey::new("replacement-fixture", "foreign").unwrap(),
+            None,
+        )
+        .instance
+        .unwrap();
         let report =
             replace_current_scene_with_product(world, &foreign, source("c"), limits(), &[], |_| {
                 panic!("a foreign request cannot configure the next Scene");
@@ -254,7 +271,7 @@ fn rejected_candidate_keeps_the_current_pair_and_product_state() {
         let report = replace_current_scene_with_product(
             world,
             &current,
-            SceneSource::direct(invalid, ByteLimit::new(16 * 1024).unwrap()).unwrap(),
+            SceneSource::direct(candidate(invalid), ByteLimit::new(16 * 1024).unwrap()).unwrap(),
             limits(),
             &[],
             |writer| {

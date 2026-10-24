@@ -26,7 +26,7 @@ fn authoring_session_applies_patch_syncs_world_and_preserves_runtime_entities() 
     let mut world = World::new();
     let runtime_entity = world.spawn_empty().id();
 
-    let first_sync = session.sync_world(&mut world, &registry).unwrap();
+    let first_sync = session.sync_world(&mut world, &registry, &scene_source_key("authoring_session_applies_patch_syncs_world_and_preserves_runtime_entities/authored"), &scene_occurrence("authoring_session_applies_patch_syncs_world_and_preserves_runtime_entities/projection")).unwrap();
 
     assert!(first_sync.synced);
     assert!(!first_sync.diagnostics.has_errors());
@@ -56,7 +56,7 @@ fn authoring_session_applies_patch_syncs_world_and_preserves_runtime_entities() 
     );
     assert_eq!(document_label(session.document(), &player), "Hero");
 
-    let second_sync = session.sync_world(&mut world, &registry).unwrap();
+    let second_sync = session.sync_world(&mut world, &registry, &scene_source_key("authoring_session_applies_patch_syncs_world_and_preserves_runtime_entities/authored"), &scene_occurrence("authoring_session_applies_patch_syncs_world_and_preserves_runtime_entities/projection")).unwrap();
 
     assert!(second_sync.synced);
     assert_eq!(second_sync.removed_entities, 1);
@@ -588,7 +588,18 @@ fn failed_authoring_patch_does_not_dirty_live_world_or_enter_history() {
             "Player",
         )]));
     let mut world = World::new();
-    let sync = session.sync_world(&mut world, &registry).unwrap();
+    let sync = session
+        .sync_world(
+            &mut world,
+            &registry,
+            &scene_source_key(
+                "failed_authoring_patch_does_not_dirty_live_world_or_enter_history/authored",
+            ),
+            &scene_occurrence(
+                "failed_authoring_patch_does_not_dirty_live_world_or_enter_history/projection",
+            ),
+        )
+        .unwrap();
     assert!(sync.synced);
     assert!(!session.is_live_dirty());
 
@@ -624,7 +635,14 @@ fn failed_world_sync_keeps_existing_live_projection() {
             "Player",
         )]));
     let mut world = World::new();
-    let sync = session.sync_world(&mut world, &registry).unwrap();
+    let sync = session
+        .sync_world(
+            &mut world,
+            &registry,
+            &scene_source_key("failed_world_sync_keeps_existing_live_projection/authored"),
+            &scene_occurrence("failed_world_sync_keeps_existing_live_projection/projection"),
+        )
+        .unwrap();
     assert!(sync.synced);
     let live_player = resolve_scene_entity(session.live_instance().unwrap(), &world, &player);
 
@@ -640,7 +658,14 @@ fn failed_world_sync_keeps_existing_live_projection() {
             ),
         )]))
         .unwrap();
-    let failed_sync = session.sync_world(&mut world, &registry).unwrap();
+    let failed_sync = session
+        .sync_world(
+            &mut world,
+            &registry,
+            &scene_source_key("failed_world_sync_keeps_existing_live_projection/authored"),
+            &scene_occurrence("failed_world_sync_keeps_existing_live_projection/projection"),
+        )
+        .unwrap();
 
     assert!(!failed_sync.synced);
     assert!(failed_sync.diagnostics.has_errors());
@@ -688,7 +713,18 @@ fn authoring_revision_changes_only_for_successful_document_mutations() {
     let initial = session.revision();
     let mut world = World::new();
 
-    let sync = session.sync_world(&mut world, &registry).unwrap();
+    let sync = session
+        .sync_world(
+            &mut world,
+            &registry,
+            &scene_source_key(
+                "authoring_revision_changes_only_for_successful_document_mutations/authored",
+            ),
+            &scene_occurrence(
+                "authoring_revision_changes_only_for_successful_document_mutations/projection",
+            ),
+        )
+        .unwrap();
     assert!(sync.synced);
     assert_eq!(session.revision(), initial);
 
@@ -738,7 +774,16 @@ fn authoring_revision_changes_only_for_successful_document_mutations() {
     );
 
     let failed_sync = session
-        .sync_world(&mut world, &ComponentRegistry::new())
+        .sync_world(
+            &mut world,
+            &ComponentRegistry::new(),
+            &scene_source_key(
+                "authoring_revision_changes_only_for_successful_document_mutations/authored",
+            ),
+            &scene_occurrence(
+                "authoring_revision_changes_only_for_successful_document_mutations/projection",
+            ),
+        )
         .unwrap();
     assert!(!failed_sync.synced);
     assert_eq!(session.revision(), after_replace);
@@ -873,4 +918,17 @@ fn resolve_scene_entity(
         EntityLookup::Resolved(entity) => entity,
         lookup => panic!("expected resolved scene entity, got {lookup:?}"),
     }
+}
+
+fn scene_source_key(name: &str) -> nara::scene::SourceDocumentKey {
+    nara::scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara::scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara::scene::SceneOccurrenceKey {
+    nara::scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

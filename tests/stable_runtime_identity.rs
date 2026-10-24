@@ -4,7 +4,7 @@ use nara::{
     gameplay::GameplayCommandTarget,
     identity::{EntityLookup, SceneEntityId, resolve_in_world},
     reflect::ComponentRegistry,
-    scene::{SceneDocument, SceneEntityRecord, spawn_scene},
+    scene::{SceneDocument, SceneEntityRecord},
     tooling::WorldIdentitySnapshot,
 };
 
@@ -19,12 +19,38 @@ fn scene_commands_and_tooling_share_one_world_scoped_identity_contract() {
     let mut world = World::new();
     world.spawn_empty();
 
-    let first_report = spawn_scene(&mut world, &registry, &document);
+    let first_report = nara::scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "scene_commands_and_tooling_share_one_world_scoped_identity_contract/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "scene_commands_and_tooling_share_one_world_scoped_identity_contract/first_report",
+        ),
+        None,
+    );
     assert!(!first_report.diagnostics.has_errors());
     let first = first_report
         .instance
         .expect("the first scene instance should spawn");
-    let second_report = spawn_scene(&mut world, &registry, &document);
+    let second_report = nara::scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "scene_commands_and_tooling_share_one_world_scoped_identity_contract/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "scene_commands_and_tooling_share_one_world_scoped_identity_contract/second_report",
+        ),
+        None,
+    );
     assert!(!second_report.diagnostics.has_errors());
     let second = second_report
         .instance
@@ -81,4 +107,17 @@ fn command_target_serialization_contains_stable_timeline_identity_only() {
             }
         })
     );
+}
+
+fn scene_source_key(name: &str) -> nara::scene::SourceDocumentKey {
+    nara::scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara::scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara::scene::SceneOccurrenceKey {
+    nara::scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

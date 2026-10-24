@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Amended**: 2026-10-24 by the production source-admission and required Prefab-binding checkpoints
+**Amended**: 2026-10-24 by production source admission, required Prefab/containing-source binding
+and Scene-owned logical occurrence
 **Refines**: ADR 0006: Scene and Prefab Data Model
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References;
@@ -72,7 +73,14 @@ flowchart TD
 
 - Expanded materialization input binds the immutable document and its complete provenance in one
   owner-created candidate. Public spawn/replacement APIs do not accept independently assembled
-  document/map pairs. A plain-scene constructor explicitly supplies local provenance.
+  document/map pairs. The candidate also requires the containing `SourceDocumentKey`; a plain-scene
+  constructor explicitly supplies that key and local provenance. Pure document expansion remains
+  independent of runtime placement and yields an immutable expanded document that its source owner
+  binds before materialization. No bare-document or optional-source persistent spawn path remains.
+- First materialization requires an explicit logical occurrence namespace and slot. Runtime source
+  records carry both the containing source and that occurrence alongside the existing exact
+  activation and document-relative provenance. Exact replacement reuses the predecessor's
+  Scene-owned occurrence association rather than asking callers to reconstruct it.
 - Validate source coverage and projection association before allocation or retiring the previous
   instance. Install admitted source fields within the prepared commit, before hierarchy/identity
   retirement; do not apply a second provenance pass after publication.

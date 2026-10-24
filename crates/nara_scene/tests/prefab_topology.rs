@@ -19,8 +19,7 @@ use nara_reflect::{
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, PrefabSourceResolver,
     ResolvedPrefabSource, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation, SourceDocumentKey, spawn_scene,
-    spawn_scene_with_prefab_resolver, spawn_scene_with_prefab_resolver_and_asset_database,
+    ScenePatchDocument, ScenePatchOperation, SourceDocumentKey,
 };
 
 fn scene_id(value: &str) -> SceneEntityId {
@@ -86,7 +85,16 @@ fn assert_rejected_without_mutation(
         if with_existing_identity {
             let existing =
                 SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("existing"))]);
-            let report = spawn_scene(&mut world, &registry, &existing);
+            let report = nara_scene::spawn_scene(
+                &mut world,
+                &registry,
+                &nara_scene::ExpandedSceneCandidate::plain(
+                    scene_source_key("assert_rejected_without_mutation/existing"),
+                    std::sync::Arc::new((existing).clone()),
+                ),
+                &scene_occurrence("assert_rejected_without_mutation/report"),
+                None,
+            );
             assert!(report.instance.is_some(), "{:?}", report.diagnostics);
         }
         world.increment_change_tick();
@@ -106,13 +114,11 @@ fn assert_rejected_without_mutation(
 
         for with_database in [false, true] {
             let report = if with_database {
-                spawn_scene_with_prefab_resolver_and_asset_database(
-                    &mut world, &registry, document, resolver, &database,
-                )
+                (document).expand_prefabs_with_asset_database(&registry, resolver, &database)
             } else {
-                spawn_scene_with_prefab_resolver(&mut world, &registry, document, resolver)
+                (document).expand_prefabs(&registry, resolver)
             };
-            assert!(report.instance.is_none());
+            assert!(report.candidate.is_none());
             assert_bounded_errors(&report.diagnostics, code);
             assert_eq!(
                 world
@@ -362,4 +368,17 @@ fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_extra_
             .get("amount")
             .is_none()
     );
+}
+
+fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {
+    nara_scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara_scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara_scene::SceneOccurrenceKey {
+    nara_scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

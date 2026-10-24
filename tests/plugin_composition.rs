@@ -1232,8 +1232,18 @@ fn omitted_known_owner_component_rejects_before_world_mutation() {
         .map(|entity| entity.id())
         .collect::<Vec<_>>();
 
-    let report =
-        nara::scene::spawn_scene(&mut world, plan.schema_validation().registry(), &document);
+    let report = nara::scene::spawn_scene(
+        &mut world,
+        plan.schema_validation().registry(),
+        &nara::scene::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "omitted_known_owner_component_rejects_before_world_mutation/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("omitted_known_owner_component_rejects_before_world_mutation/document"),
+        None,
+    );
 
     assert!(report.instance.is_none());
     assert!(report.diagnostics.iter().any(|diagnostic| {
@@ -3201,3 +3211,16 @@ title = "Full Product Window"
 width = 1280
 height = 720
 "#;
+
+fn scene_source_key(name: &str) -> nara::scene::SourceDocumentKey {
+    nara::scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara::scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara::scene::SceneOccurrenceKey {
+    nara::scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
+}

@@ -1242,6 +1242,7 @@ fn reexpand_modified_authored_scene(
         |resolver, prefab| {
             resolver.with_prefab(
                 nara::asset::AssetRef::Path(prefab.path().clone()),
+                prefab.source_key().clone(),
                 prefab.document().clone(),
             )
         },
@@ -1252,10 +1253,11 @@ fn reexpand_modified_authored_scene(
         "{:#?}",
         expansion.diagnostics
     );
-    SceneSource::direct_expanded(
+    SceneSource::direct(
         expansion
             .candidate
-            .expect("successful expansion binds source provenance"),
+            .expect("successful expansion binds source provenance")
+            .bind_source(snapshot.selected_scene_source_key().clone()),
         ByteLimit::new(16 * 1024 * 1024).expect("the direct retained-scene limit is non-zero"),
     )
     .expect("the modified reference scene fits the bounded direct retention limit")

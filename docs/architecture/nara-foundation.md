@@ -582,8 +582,11 @@ second real adapter or stronger isolation pressure.
   aliases of a key borrow its one canonical document. Cycle checks use keys rather than requests.
   Expanded IDs are opaque, document-local projections. Structured provenance records the
   authored source and projection path, while a live lookup also selects its concrete instance.
-  Containing-Scene source binding, logical occurrence and shared Runtime/Canvas identity adoption
-  remain separate from this Prefab-source contract.
+  Pure expansion yields an `ExpandedSceneDocument`; its source owner binds the containing source
+  before materialization. Ordinary Scene spawn requires that bound candidate and an explicit
+  namespace/slot occurrence. Scene owns active slot association through exact replacement, end
+  and projection clear, including empty instances. The owning implementation has scoped qualification;
+  complete Runtime/Canvas key lowering remains separate from this Scene-source contract.
   Prefab roots retain source order and are inserted before children authored directly on the
   instance anchor; record sorting never reconstructs either order.
 - Canonical Scene and Prefab files store an ordered document `roots` list and an ordered `children`

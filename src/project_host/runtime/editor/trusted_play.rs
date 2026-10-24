@@ -288,6 +288,11 @@ impl EditorProjectSession {
         }
         let expanded = match self.trusted_compiled().map(|lane| {
             lane.snapshot.prepare_editor_startup_scene(
+                &self
+                    .scene_lanes
+                    .get(&document)
+                    .expect("a playable Scene retains its admitted source")
+                    .source_key,
                 slot.session().document(),
                 lane.plan.schema_validation().registry(),
             )

@@ -7,6 +7,9 @@ use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest, TaskTerminal,
 };
 
+use crate::project_host::authoring::native_source::{
+    AdmittedNativeDocumentSource, NativeDocumentSourcePolicy,
+};
 use crate::project_host::persistence::{
     PrefabReopenRequest, PreparedPrefabReopen, PreparedSceneReopen, SceneReopenRequest,
 };
@@ -27,14 +30,20 @@ pub(super) struct ReopenAdmission {
 }
 
 enum ReopenRequest {
-    Scene(SceneReopenRequest),
-    Prefab(PrefabReopenRequest),
+    Scene(SceneReopenRequest, NativeReopenSource),
+    Prefab(PrefabReopenRequest, NativeReopenSource),
     Extension(super::super::extension_documents::ExtensionReopenRequest),
 }
 
 pub(super) enum ReopenCompletion {
-    Scene(PreparedSceneReopen),
-    Prefab(PreparedPrefabReopen),
+    Scene(
+        PreparedSceneReopen,
+        Result<AdmittedNativeDocumentSource, EditorPersistenceRejection>,
+    ),
+    Prefab(
+        PreparedPrefabReopen,
+        Result<AdmittedNativeDocumentSource, EditorPersistenceRejection>,
+    ),
     Extension(
         Result<
             super::super::extension_documents::PreparedExtensionReopen,
@@ -42,6 +51,24 @@ pub(super) enum ReopenCompletion {
         >,
     ),
     Unavailable,
+}
+
+struct NativeReopenSource {
+    root: DirectoryCapability,
+    policy: NativeDocumentSourcePolicy,
+    project_path: Arc<str>,
+    kind: nara_scene::SourceDocumentKind,
+}
+
+impl NativeReopenSource {
+    fn prepare(self) -> Result<AdmittedNativeDocumentSource, EditorPersistenceRejection> {
+        let rejected = || EditorPersistenceRejection::SourceBindingMismatch;
+        let path = RelativePath::new(self.project_path.as_ref()).map_err(|_| rejected())?;
+        let file = self.root.open_file_exact(&path).map_err(|_| rejected())?;
+        self.policy
+            .admit(&self.root, &self.project_path, self.kind, file.identity())
+            .map_err(|_| rejected())
+    }
 }
 
 pub(in crate::project_host::runtime::editor) struct PendingReopen {
@@ -86,9 +113,13 @@ impl BackgroundReopen {
                     work.wait_at(ReopenTestPhase::BeforeRead);
                     let request = work.request.take().expect("a Reopen request runs once");
                     work.prepared = Some(match request {
-                        ReopenRequest::Scene(request) => ReopenCompletion::Scene(request.prepare()),
-                        ReopenRequest::Prefab(request) => {
-                            ReopenCompletion::Prefab(request.prepare())
+                        ReopenRequest::Scene(request, source) => {
+                            let source = source.prepare();
+                            ReopenCompletion::Scene(request.prepare(), source)
+                        }
+                        ReopenRequest::Prefab(request, source) => {
+                            let source = source.prepare();
+                            ReopenCompletion::Prefab(request.prepare(), source)
                         }
                         ReopenRequest::Extension(request) => {
                             ReopenCompletion::Extension(request.prepare())
@@ -138,6 +169,23 @@ impl BackgroundReopen {
 }
 
 impl EditorProjectSession {
+    fn capture_native_reopen_source(
+        &self,
+        project_path: &Arc<str>,
+        kind: nara_scene::SourceDocumentKind,
+    ) -> NativeReopenSource {
+        let settings = match &self.execution {
+            EditorExecutionLane::Authoring(snapshot) => snapshot.settings(),
+            EditorExecutionLane::TrustedCompiled(lane) => lane.content_candidate.settings(),
+        };
+        NativeReopenSource {
+            root: self.source_project_root(),
+            policy: NativeDocumentSourcePolicy::new(settings),
+            project_path: Arc::clone(project_path),
+            kind,
+        }
+    }
+
     pub(super) fn capture_reopen(
         &self,
         document: EditorDocumentId,
@@ -169,6 +217,10 @@ impl EditorProjectSession {
                                 host.prepare_reopen(slot.session().authoring_readmission())
                             })
                             .ok_or(EditorPersistenceRejection::Busy)??,
+                        self.capture_native_reopen_source(
+                            &lane.project_path,
+                            nara_scene::SourceDocumentKind::Scene,
+                        ),
                     ),
                 )
             }
@@ -193,6 +245,10 @@ impl EditorProjectSession {
                                 host.prepare_reopen(slot.session().authoring_readmission())
                             })
                             .ok_or(EditorPersistenceRejection::Busy)??,
+                        self.capture_native_reopen_source(
+                            &lane.project_path,
+                            nara_scene::SourceDocumentKind::Prefab,
+                        ),
                     ),
                 )
             }
@@ -294,11 +350,29 @@ impl EditorProjectSession {
             .trusted_compiled()
             .map(|lane| lane.plan.schema_validation().registry());
         match (prepared, &admission.lane) {
-            (ReopenCompletion::Scene(prepared), PersistenceLane::Scene(lane)) => {
+            (ReopenCompletion::Scene(prepared, source), PersistenceLane::Scene(lane)) => {
+                let source = match source {
+                    Ok(source) => source,
+                    Err(reason) => return rejected(reason),
+                };
+                if source.key() != &lane.source_key
+                    || source.revalidate(&self.source_project_root()).is_err()
+                {
+                    return rejected(EditorPersistenceRejection::SourceBindingMismatch);
+                }
                 let outcome = prepared.admit(registry);
-                self.publish_scene_reopen(lane, admission.revision, outcome)
+                self.publish_scene_reopen(lane, admission.revision, &source, outcome)
             }
-            (ReopenCompletion::Prefab(prepared), PersistenceLane::Prefab(lane)) => {
+            (ReopenCompletion::Prefab(prepared, source), PersistenceLane::Prefab(lane)) => {
+                let source = match source {
+                    Ok(source) => source,
+                    Err(reason) => return rejected(reason),
+                };
+                if source.key() != &lane.source_key
+                    || source.revalidate(&self.source_project_root()).is_err()
+                {
+                    return rejected(EditorPersistenceRejection::SourceBindingMismatch);
+                }
                 let outcome = prepared.admit(registry);
                 let refresh = lane
                     .host
@@ -312,6 +386,7 @@ impl EditorProjectSession {
                         .clone()
                         .expect("an admitted Prefab retains its source binding"),
                     refresh,
+                    &source,
                     outcome,
                 )
             }

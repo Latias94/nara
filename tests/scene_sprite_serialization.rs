@@ -2,11 +2,7 @@ use nara::{
     advanced_prelude::*,
     diagnostic::DiagnosticValueRef,
     ecs::{bevy_ecs::lifecycle::Add, bevy_ecs::observer::On, system::ResMut},
-    scene::{
-        SceneExportOptions, SceneSpawnReport, export_scene_with_options,
-        spawn_prefab_with_asset_database, spawn_prefab_with_patch,
-        spawn_prefab_with_patch_and_asset_database, spawn_scene_with_asset_database,
-    },
+    scene::{SceneExportOptions, SceneSpawnReport, export_scene_with_options},
 };
 
 #[derive(Resource, Default)]
@@ -34,7 +30,20 @@ fn sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy() {
     let document = sprite_scene(asset_ref_value("stable_id", PLAYER_STABLE_ID));
     let mut world = World::new();
 
-    let report = spawn_scene_with_asset_database(&mut world, &registry, &document, &database);
+    let report = nara::scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy/report",
+        ),
+        Some(&database),
+    );
 
     assert!(!report.diagnostics.has_errors());
     let entity = spawned_entity(&report, &world, &scene_id("player"));
@@ -92,7 +101,18 @@ fn unknown_sprite_stable_asset_id_fails_without_world_mutation() {
     let mut world = World::new();
     let before = world.iter_entities().count();
 
-    let report = spawn_scene_with_asset_database(&mut world, &registry, &document, &database);
+    let report = nara::scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "unknown_sprite_stable_asset_id_fails_without_world_mutation/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("unknown_sprite_stable_asset_id_fails_without_world_mutation/report"),
+        Some(&database),
+    );
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
     assert!(world.get_resource::<AssetServer>().is_none());
@@ -132,7 +152,18 @@ fn sprite_path_asset_ref_still_resolves_without_project_database() {
     let document = sprite_scene(asset_ref_value("path", "textures/player.png"));
     let mut world = World::new();
 
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = nara::scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "sprite_path_asset_ref_still_resolves_without_project_database/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("sprite_path_asset_ref_still_resolves_without_project_database/report"),
+        None,
+    );
 
     assert!(!report.diagnostics.has_errors());
     let entity = spawned_entity(&report, &world, &scene_id("player"));
@@ -158,7 +189,16 @@ fn asset_free_sprite_does_not_claim_or_insert_an_asset_server() {
     );
     world.flush();
 
-    let report = spawn_scene(&mut world, &registry, &document);
+    let report = nara::scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            scene_source_key("asset_free_sprite_does_not_claim_or_insert_an_asset_server/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("asset_free_sprite_does_not_claim_or_insert_an_asset_server/report"),
+        None,
+    );
 
     assert!(!report.diagnostics.has_errors());
     assert!(report.instance.is_some());
@@ -202,7 +242,20 @@ fn unknown_sprite_path_asset_ref_fails_with_project_database_without_world_mutat
     let mut world = World::new();
     let before = world.iter_entities().count();
 
-    let report = spawn_scene_with_asset_database(&mut world, &registry, &document, &database);
+    let report = nara::scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            scene_source_key(
+                "unknown_sprite_path_asset_ref_fails_with_project_database_without_world_mutation/document",
+            ),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence(
+            "unknown_sprite_path_asset_ref_fails_with_project_database_without_world_mutation/report",
+        ),
+        Some(&database),
+    );
 
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
@@ -251,7 +304,16 @@ fn prefab_stable_asset_id_uses_asset_database_preflight() {
         )]);
     let mut world = World::new();
 
-    let report = spawn_prefab_with_asset_database(&mut world, &registry, &prefab, &database);
+    let report = nara::scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            named_prefab_source_key("prefab_stable_asset_id_uses_asset_database_preflight/prefab"),
+            std::sync::Arc::new((prefab).instantiate()),
+        ),
+        &scene_occurrence("prefab_stable_asset_id_uses_asset_database_preflight/report"),
+        Some(&database),
+    );
 
     assert!(!report.diagnostics.has_errors());
     let entity = spawned_entity(&report, &world, &scene_id("player"));
@@ -279,7 +341,27 @@ fn prefab_patch_field_override_preserves_inherited_sprite_data() {
     }]);
     let mut world = World::new();
 
-    let report = spawn_prefab_with_patch(&mut world, &registry, &prefab, &patch);
+    let report = {
+        let instantiated = (prefab).instantiate_with_patch(&registry, &patch);
+        assert!(
+            !instantiated.diagnostics.has_errors(),
+            "{:?}",
+            instantiated.diagnostics
+        );
+        let candidate = nara::scene::ExpandedSceneCandidate::plain(
+            named_prefab_source_key(
+                "prefab_patch_field_override_preserves_inherited_sprite_data/prefab",
+            ),
+            std::sync::Arc::new(instantiated.document.unwrap()),
+        );
+        nara::scene::spawn_scene(
+            &mut world,
+            &registry,
+            &candidate,
+            &scene_occurrence("prefab_patch_field_override_preserves_inherited_sprite_data/report"),
+            None,
+        )
+    };
 
     assert!(!report.diagnostics.has_errors());
     let sprite = world
@@ -310,16 +392,14 @@ fn prefab_patch_invalid_asset_ref_fails_before_world_mutation() {
         asset_ref: AssetRef::stable_id(UNKNOWN_STABLE_ID).unwrap(),
     }]);
     let database = ProjectAssetDatabase::default();
-    let mut world = World::new();
+    let world = World::new();
     let before = world.iter_entities().count();
 
-    let report = spawn_prefab_with_patch_and_asset_database(
-        &mut world, &registry, &prefab, &patch, &database,
-    );
+    let report = (prefab).instantiate_with_patch_and_asset_database(&registry, &patch, &database);
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
     assert!(world.get_resource::<AssetServer>().is_none());
-    assert!(report.instance.is_none());
+    assert!(report.document.is_none());
     assert!(report.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.invalid-component-payload"
             && diagnostic_has_field(
@@ -373,7 +453,16 @@ fn tilemap_stable_tileset_id_resolves_before_world_spawn() {
         )]);
     let mut world = World::new();
 
-    let report = spawn_scene_with_asset_database(&mut world, &registry, &document, &database);
+    let report = nara::scene::spawn_scene(
+        &mut world,
+        &registry,
+        &nara::scene::ExpandedSceneCandidate::plain(
+            scene_source_key("tilemap_stable_tileset_id_resolves_before_world_spawn/document"),
+            std::sync::Arc::new((document).clone()),
+        ),
+        &scene_occurrence("tilemap_stable_tileset_id_resolves_before_world_spawn/report"),
+        Some(&database),
+    );
 
     assert!(!report.diagnostics.has_errors());
     let entity = spawned_entity(&report, &world, &scene_id("tiles"));
@@ -535,4 +624,26 @@ fn spawned_entity(report: &SceneSpawnReport, world: &World, id: &SceneEntityId) 
         EntityLookup::Resolved(entity) => entity,
         lookup => panic!("expected resolved scene entity, got {lookup:?}"),
     }
+}
+
+fn scene_source_key(name: &str) -> nara::scene::SourceDocumentKey {
+    nara::scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara::scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara::scene::SceneOccurrenceKey {
+    nara::scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
+}
+
+fn named_prefab_source_key(name: &str) -> nara::scene::SourceDocumentKey {
+    nara::scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara::scene::SourceDocumentKind::Prefab,
+    )
+    .unwrap()
 }

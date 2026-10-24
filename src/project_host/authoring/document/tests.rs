@@ -266,6 +266,352 @@ fn capture_rejects_an_index_from_another_schema_authority() {
     drop(schema);
 }
 
+#[test]
+fn location_admission_keeps_each_opened_document_in_its_full_project_location() {
+    let project = TestProject::new();
+    project.write(
+        "scenes/second.scene.json",
+        SceneDocument::default()
+            .to_json_string()
+            .unwrap()
+            .as_bytes(),
+    );
+    let (schema, index) = project.admission();
+    let adapters: Arc<[AuthoringAdapterReceipt]> = Arc::from([]);
+    let basis =
+        AuthoringDocumentAdmissionBasis::new(&schema, &adapters, SceneFileLimits::default());
+    let first = basis
+        .admit(&index, SCENE_PATH, AuthoringDocumentKind::Scene)
+        .unwrap();
+    let second = basis
+        .admit(
+            &index,
+            "scenes/second.scene.json",
+            AuthoringDocumentKind::Scene,
+        )
+        .unwrap();
+    assert_ne!(first.source().source_key(), second.source().source_key());
+    for admitted in [&first, &second] {
+        assert!(matches!(
+            admitted.source().source_key().origin(),
+            nara_scene::SourceDocumentOrigin::ProjectLocation { universe, path }
+                if *universe == schema.settings().project.source_universe
+                    && path.as_str() == admitted.source().relative_path()
+        ));
+    }
+}
+
+#[test]
+fn stable_admission_requires_exact_metadata_and_revalidates_its_prepared_observation() {
+    use nara_asset::{AssetMeta, AssetMetaIdentity, AssetSourceKind, StableAssetId};
+    let project = TestProject::new();
+    let manifest = fs::read_to_string(project.path("nara.toml"))
+        .unwrap()
+        .replace("project_location", "stable_metadata");
+    project.write("nara.toml", manifest.as_bytes());
+    let (schema, index) = project.admission();
+    let adapters: Arc<[AuthoringAdapterReceipt]> = Arc::from([]);
+    let basis =
+        AuthoringDocumentAdmissionBasis::new(&schema, &adapters, SceneFileLimits::default());
+    assert!(
+        basis
+            .admit(&index, SCENE_PATH, AuthoringDocumentKind::Scene)
+            .is_err()
+    );
+    assert!(!project.path(&format!("{SCENE_PATH}.meta")).exists());
+    let stable_id = StableAssetId::parse_str("98ded649-6558-4d57-a287-d74c05b20d9e").unwrap();
+    let metadata = |path: &str, kind| {
+        AssetMeta::new(
+            AssetMetaIdentity::new(stable_id, AssetPath::new(path).unwrap(), kind),
+            (),
+        )
+        .to_json_string()
+        .unwrap()
+    };
+    for (path, kind) in [
+        ("other.scene.json", AssetSourceKind::Scene),
+        ("external.scene.json", AssetSourceKind::Prefab),
+    ] {
+        project.write(
+            &format!("{SCENE_PATH}.meta"),
+            metadata(path, kind).as_bytes(),
+        );
+        assert_eq!(
+            basis
+                .admit(&index, SCENE_PATH, AuthoringDocumentKind::Scene)
+                .err()
+                .unwrap()
+                .code(),
+            "project.editor.native-source-metadata-mismatch",
+        );
+    }
+    let valid = metadata("external.scene.json", AssetSourceKind::Scene);
+    project.write(&format!("{SCENE_PATH}.meta"), valid.as_bytes());
+    let request = basis
+        .capture(
+            Arc::clone(&index),
+            Arc::from(SCENE_PATH),
+            AuthoringDocumentKind::Scene,
+        )
+        .unwrap();
+    let admitted = request.prepare().unwrap();
+    assert_eq!(
+        admitted.source().source_key(),
+        &SourceDocumentKey::stable_asset(stable_id, SourceDocumentKind::Scene),
+    );
+    admitted
+        .source()
+        .revalidate_native_source(&schema.project_root())
+        .unwrap();
+    project.write(
+        &format!("{SCENE_PATH}.meta"),
+        format!("{valid}\n").as_bytes(),
+    );
+    assert_eq!(
+        admitted
+            .source()
+            .revalidate_native_source(&schema.project_root())
+            .unwrap_err()
+            .code(),
+        "project.editor.document-source-identity-changed",
+    );
+    assert_eq!(
+        fs::read(project.path(SCENE_PATH)).unwrap(),
+        SceneDocument::default()
+            .to_json_string()
+            .unwrap()
+            .as_bytes()
+    );
+}
+
+#[test]
+fn stable_documents_use_their_containing_configured_root_instead_of_the_document_kind() {
+    use nara_asset::{AssetMeta, AssetMetaIdentity, AssetSourceKind, StableAssetId};
+    let project = TestProject::new();
+    project.write(
+        "nara.toml",
+        fs::read_to_string(project.path("nara.toml"))
+            .unwrap()
+            .replace("project_location", "stable_metadata")
+            .as_bytes(),
+    );
+    fs::create_dir_all(project.path("assets/cutscenes")).unwrap();
+    for path in [
+        "assets/cutscenes/intro.scene.json",
+        "prefabs/intro.scene.json",
+    ] {
+        project.write(
+            path,
+            SceneDocument::default()
+                .to_json_string()
+                .unwrap()
+                .as_bytes(),
+        );
+    }
+    let (schema, index) = project.admission();
+    let adapters: Arc<[AuthoringAdapterReceipt]> = Arc::from([]);
+    let basis =
+        AuthoringDocumentAdmissionBasis::new(&schema, &adapters, SceneFileLimits::default());
+    let id = StableAssetId::parse_str("98ded649-6558-4d57-a287-d74c05b20d9e").unwrap();
+    for (path, declaration) in [
+        (
+            "assets/cutscenes/intro.scene.json",
+            "cutscenes/intro.scene.json",
+        ),
+        ("prefabs/intro.scene.json", "intro.scene.json"),
+    ] {
+        let metadata = |declared: &str| {
+            AssetMeta::new(
+                AssetMetaIdentity::new(
+                    id,
+                    AssetPath::new(declared).unwrap(),
+                    AssetSourceKind::Scene,
+                ),
+                (),
+            )
+            .to_json_string()
+            .unwrap()
+        };
+        project.write(&format!("{path}.meta"), metadata(declaration).as_bytes());
+        let admitted = basis
+            .admit(&index, path, AuthoringDocumentKind::Scene)
+            .unwrap();
+        assert_eq!(
+            admitted.source().source_key(),
+            &SourceDocumentKey::stable_asset(id, SourceDocumentKind::Scene)
+        );
+        project.write(
+            &format!("{path}.meta"),
+            metadata("other.scene.json").as_bytes(),
+        );
+        assert!(matches!(
+            basis.admit(&index, path, AuthoringDocumentKind::Scene),
+            Err(AuthoringDocumentAdmissionError::NativeSourceMetadataMismatch),
+        ));
+    }
+}
+
+#[test]
+fn native_metadata_read_preserves_aggregate_source_and_io_failure_classes() {
+    use crate::project_host::authoring::{
+        AuthoringProjectAdmissionBudget, AuthoringProjectAdmissionError,
+        AuthoringProjectAdmissionLimits, AuthoringProjectSourceAdmissionError, AuthoringSourceKind,
+    };
+    use nara_asset::{AssetMeta, AssetMetaIdentity, AssetSourceKind, StableAssetId};
+    let project = TestProject::new();
+    let (schema, _) = project.admission();
+    let mut settings = schema.settings().clone();
+    settings.project.native_document_identity =
+        nara_project::NativeDocumentIdentity::StableMetadata;
+    let policy = NativeDocumentSourcePolicy::new(&settings);
+    let root = schema.project_root();
+    let identity = root
+        .open_file(&RelativePath::new(SCENE_PATH).unwrap())
+        .unwrap()
+        .identity();
+    let metadata_path = format!("{SCENE_PATH}.meta");
+    let metadata = AssetMeta::new(
+        AssetMetaIdentity::new(
+            StableAssetId::parse_str("98ded649-6558-4d57-a287-d74c05b20d9e").unwrap(),
+            AssetPath::new("external.scene.json").unwrap(),
+            AssetSourceKind::Scene,
+        ),
+        (),
+    )
+    .to_json_string()
+    .unwrap();
+    assert!(metadata.len() > 128);
+    project.write(&metadata_path, metadata.as_bytes());
+    let mut budget = AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::new(
+        ByteLimit::new(256).unwrap(),
+    ));
+    budget.charge_source_bytes(128, 0, 0, 0).unwrap();
+    assert!(matches!(
+        policy.admit_budgeted(
+            &root,
+            SCENE_PATH,
+            SourceDocumentKind::Scene,
+            identity,
+            3,
+            &mut budget
+        ),
+        Err(AuthoringProjectSourceAdmissionError::Budget(
+            AuthoringProjectAdmissionError::AggregateEncodedBytesExceeded { maximum: 256 },
+        )),
+    ));
+    let mut budget =
+        AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
+    let admitted = policy
+        .admit_budgeted(
+            &root,
+            SCENE_PATH,
+            SourceDocumentKind::Scene,
+            identity,
+            3,
+            &mut budget,
+        )
+        .unwrap();
+    assert_eq!(
+        budget.usage().retained_candidate_bytes(),
+        admitted.retained_bytes().unwrap()
+    );
+    project.write(&metadata_path, &vec![b' '; 65_537]);
+    let mut budget =
+        AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
+    assert!(matches!(
+        policy.admit_budgeted(
+            &root,
+            SCENE_PATH,
+            SourceDocumentKind::Scene,
+            identity,
+            3,
+            &mut budget
+        ),
+        Err(AuthoringProjectSourceAdmissionError::SourceTooLarge {
+            kind: AuthoringSourceKind::AssetMetadata,
+            maximum: 65_536,
+            ..
+        }),
+    ));
+    assert!(matches!(
+        policy.admit(&root, SCENE_PATH, SourceDocumentKind::Scene, identity),
+        Err(AuthoringDocumentAdmissionError::NativeSourceMetadataTooLarge { maximum: 65_536 }),
+    ));
+    fs::remove_file(project.path(&metadata_path)).unwrap();
+    let mut budget =
+        AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
+    assert!(matches!(
+        policy.admit_budgeted(
+            &root,
+            SCENE_PATH,
+            SourceDocumentKind::Scene,
+            identity,
+            3,
+            &mut budget
+        ),
+        Err(AuthoringProjectSourceAdmissionError::NativeSource(
+            AuthoringDocumentAdmissionError::OpenSource(_)
+        )),
+    ));
+}
+
+#[test]
+fn native_source_retention_is_admitted_before_opening_and_reconciled_after_success() {
+    use crate::project_host::authoring::{
+        AuthoringProjectAdmissionBudget, AuthoringProjectAdmissionError,
+        AuthoringProjectAdmissionLimits, AuthoringProjectSourceAdmissionError,
+    };
+    let project = TestProject::new();
+    let (schema, _) = project.admission();
+    let root = schema.project_root();
+    let identity = root
+        .open_file(&RelativePath::new(SCENE_PATH).unwrap())
+        .unwrap()
+        .identity();
+    for stable in [false, true] {
+        let mut settings = schema.settings().clone();
+        if stable {
+            settings.project.native_document_identity =
+                nara_project::NativeDocumentIdentity::StableMetadata;
+        }
+        let policy = NativeDocumentSourcePolicy::new(&settings);
+        let mut limits = AuthoringProjectAdmissionLimits::default();
+        limits.retained_candidate_bytes = ByteLimit::new(1).unwrap();
+        let mut budget = AuthoringProjectAdmissionBudget::new(limits);
+        // The missing source is a read canary: reaching the open would produce OpenSource.
+        assert!(matches!(
+            policy.admit_budgeted(
+                &root,
+                "scenes/missing.scene.json",
+                SourceDocumentKind::Scene,
+                identity,
+                3,
+                &mut budget
+            ),
+            Err(AuthoringProjectSourceAdmissionError::Budget(
+                AuthoringProjectAdmissionError::RetainedCandidateBytesExceeded { maximum: 1 },
+            )),
+        ));
+    }
+    let policy = NativeDocumentSourcePolicy::new(schema.settings());
+    let mut budget =
+        AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
+    let source = policy
+        .admit_budgeted(
+            &root,
+            SCENE_PATH,
+            SourceDocumentKind::Scene,
+            identity,
+            3,
+            &mut budget,
+        )
+        .unwrap();
+    assert_eq!(
+        budget.usage().retained_candidate_bytes(),
+        source.retained_bytes().unwrap()
+    );
+}
+
 struct TestProject {
     root: PathBuf,
 }

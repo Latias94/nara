@@ -169,13 +169,22 @@ struct EditorPreviewPublicationRequest {
 }
 
 pub(super) struct EditorPreviewProjection {
+    source_key: nara_scene::SourceDocumentKey,
     scene: SceneDocument,
     omissions: EditorAuthoringPreviewOmissions,
 }
 
 impl EditorPreviewProjection {
-    pub(super) fn new(scene: SceneDocument, omissions: EditorAuthoringPreviewOmissions) -> Self {
-        Self { scene, omissions }
+    pub(super) fn new(
+        source_key: nara_scene::SourceDocumentKey,
+        scene: SceneDocument,
+        omissions: EditorAuthoringPreviewOmissions,
+    ) -> Self {
+        Self {
+            source_key,
+            scene,
+            omissions,
+        }
     }
 }
 
@@ -246,7 +255,7 @@ struct EditorPreviewDocumentStamp {
     revision: SceneAuthoringRevision,
 }
 
-#[derive(Default, Resource)]
+#[derive(Resource)]
 struct EditorPreviewRuntimeState {
     materializer: SceneProjection,
     requested: Option<EditorPreviewDocumentStamp>,
@@ -254,6 +263,22 @@ struct EditorPreviewRuntimeState {
     accepted: Option<AcceptedEditorPreview>,
     camera: Option<Entity>,
     diagnostics: DiagnosticReport,
+}
+
+impl EditorPreviewRuntimeState {
+    fn new() -> Self {
+        Self {
+            materializer: SceneProjection::new(
+                nara_scene::SceneOccurrenceKey::new("nara.editor", "scene-preview")
+                    .expect("the Editor declares a valid preview slot"),
+            ),
+            requested: None,
+            requested_projection: None,
+            accepted: None,
+            camera: None,
+            diagnostics: DiagnosticReport::default(),
+        }
+    }
 }
 
 struct AcceptedEditorPreview {
@@ -335,7 +360,7 @@ impl EditorPreviewSession {
                 )))
             })
             .and_then(|app| app.insert_resource(project))
-            .and_then(|app| app.insert_resource(EditorPreviewRuntimeState::default()))
+            .and_then(|app| app.insert_resource(EditorPreviewRuntimeState::new()))
             .and_then(|app| app.add_systems(CoreStage::First, apply_editor_preview_request))
             .map_err(|_| preview_error("project.editor.preview-state-install-failed"))?;
         Ok(Self {
@@ -588,13 +613,18 @@ fn apply_editor_preview_request(world: &mut World) {
             .as_ref()
             .expect("a requested preview retains its exact projection");
         let report = match &project {
-            EditorPreviewProject::Authoring(assets) => {
-                state
-                    .materializer
-                    .publish(world, &registry.0, &projection.scene, &assets.database)
-            }
+            EditorPreviewProject::Authoring(assets) => state.materializer.publish(
+                world,
+                &registry.0,
+                &nara_scene::ExpandedSceneCandidate::plain(
+                    projection.source_key.clone(),
+                    Arc::new(projection.scene.clone()),
+                ),
+                &assets.database,
+            ),
             EditorPreviewProject::TrustedCompiled(project) => project.sync_editor_preview_scene(
                 &mut state.materializer,
+                &projection.source_key,
                 &projection.scene,
                 world,
                 &registry.0,

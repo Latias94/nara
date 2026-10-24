@@ -1,8 +1,8 @@
 error[E0624]: associated function `from_expansion` is private
- --> tests/ui/scene_product/candidate_not_constructible.rs:4:37
+ --> tests/ui/scene_product/candidate_not_constructible.rs:4:36
   |
-4 |       let _ = ExpandedSceneCandidate::from_expansion;
-  |                                       ^^^^^^^^^^^^^^ private associated function
+4 |       let _ = ExpandedSceneDocument::from_expansion;
+  |                                      ^^^^^^^^^^^^^^ private associated function
   |
  ::: crates/nara_scene/src/candidate.rs
   |

@@ -170,6 +170,7 @@ fn bind_document_open(
                     digest,
                     host: host.clone(),
                     document,
+                    source,
                 },
                 PreparedHost::Scene(host),
             )
@@ -194,6 +195,7 @@ fn bind_document_open(
                     digest,
                     host: host.clone(),
                     document,
+                    source,
                 },
                 PreparedHost::Prefab(host),
             )

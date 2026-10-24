@@ -3,7 +3,7 @@ use std::time::Duration;
 use nara_app::{App, RuntimeInstance};
 use nara_input::{InputPointerId, InputSeatId, InputWindowId};
 use nara_reflect::{ComponentRegistry, ComponentRegistryPlugin};
-use nara_scene::{SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource, spawn_scene};
+use nara_scene::{SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource};
 use nara_ui::{
     UiAdapterDiagnostics, UiNode, UiPlugin, UiRoot, UiStyle, UiSurfaceEndpoint, UiSurfaceSlot,
     install_ui_surface, latest_ui_frame,
@@ -45,7 +45,16 @@ fn independent_scenes_collide_only_when_their_document_local_ui_roots_match() {
                 SceneEntityRecord::new(root.clone()),
                 SceneEntityRecord::new(SceneEntityId::new(marker).unwrap()),
             ]);
-            let report = spawn_scene(world, &registry, &document);
+            let report = nara_scene::spawn_scene(
+                world,
+                &registry,
+                &nara_scene::ExpandedSceneCandidate::plain(
+                    scene_source_key(marker),
+                    std::sync::Arc::new((document).clone()),
+                ),
+                &scene_occurrence(marker),
+                None,
+            );
             assert!(!report.diagnostics.has_errors());
             let instance = report.instance.unwrap();
             let root_entity = world
@@ -91,4 +100,17 @@ fn independent_scenes_collide_only_when_their_document_local_ui_roots_match() {
             .finish()
             .expect("the window-free UI runtime must retire");
     }
+}
+
+fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {
+    nara_scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara_scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara_scene::SceneOccurrenceKey {
+    nara_scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

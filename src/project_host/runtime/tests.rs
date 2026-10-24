@@ -5812,6 +5812,7 @@ fn editor_startup_source_has_an_exact_independent_retained_budget_lease() {
 
     let source = snapshot
         .prepare_editor_startup_scene(
+            snapshot.selected_scene_source_key(),
             snapshot.expanded_scene(),
             plan.schema_validation().registry(),
         )
@@ -5855,6 +5856,7 @@ fn editor_startup_source_has_an_exact_independent_retained_budget_lease() {
     let exact_budget = loader.budget_host();
     let source = snapshot
         .prepare_editor_startup_scene(
+            snapshot.selected_scene_source_key(),
             snapshot.expanded_scene(),
             plan.schema_validation().registry(),
         )
@@ -5884,6 +5886,7 @@ fn editor_startup_source_has_an_exact_independent_retained_budget_lease() {
     let rejected_budget = loader.budget_host();
     let rejected_baseline_reservations = rejected_budget.snapshot().active_reservations();
     let result = snapshot.prepare_editor_startup_scene(
+        snapshot.selected_scene_source_key(),
         snapshot.expanded_scene(),
         plan.schema_validation().registry(),
     );
@@ -5961,6 +5964,7 @@ fn editor_activation_lease_survives_failed_startup_until_delayed_cleanup_finishe
     let baseline_reservations = budget_host.snapshot().active_reservations();
     let source = snapshot
         .prepare_editor_startup_scene(
+            snapshot.selected_scene_source_key(),
             snapshot.expanded_scene(),
             plan.schema_validation().registry(),
         )

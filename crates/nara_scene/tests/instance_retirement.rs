@@ -3,14 +3,19 @@ use nara_identity::{EntityLookup, SpawnedSceneInstance, WorldIdentityDomain};
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
     SceneDocument, SceneEntityId, SceneEntityRecord, retire_and_despawn_scene_entity,
-    retire_and_despawn_scene_instance, spawn_scene,
+    retire_and_despawn_scene_instance,
 };
 
 fn id() -> SceneEntityId {
     SceneEntityId::new("root").unwrap()
 }
 
-fn spawn(world: &mut World, empty: bool) -> SpawnedSceneInstance {
+fn spawn(
+    world: &mut World,
+    empty: bool,
+    source: nara_scene::SourceDocumentKey,
+    occurrence: &nara_scene::SceneOccurrenceKey,
+) -> SpawnedSceneInstance {
     let mut registry = ComponentRegistry::new();
     registry.freeze().unwrap();
     let document = if empty {
@@ -18,7 +23,13 @@ fn spawn(world: &mut World, empty: bool) -> SpawnedSceneInstance {
     } else {
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(id())])
     };
-    let report = spawn_scene(world, &registry, &document);
+    let report = nara_scene::spawn_scene(
+        world,
+        &registry,
+        &nara_scene::ExpandedSceneCandidate::plain(source, std::sync::Arc::new((document).clone())),
+        occurrence,
+        None,
+    );
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     report.instance.unwrap()
 }
@@ -33,7 +44,12 @@ fn resolve(world: &World, instance: &SpawnedSceneInstance) -> Entity {
 #[test]
 fn empty_instances_end_by_receipt_without_scanning_entities() {
     let mut world = World::new();
-    let instance = spawn(&mut world, true);
+    let instance = spawn(
+        &mut world,
+        true,
+        scene_source_key("empty_instances_end_by_receipt_without_scanning_entities/source"),
+        &scene_occurrence("empty_instances_end_by_receipt_without_scanning_entities/instance"),
+    );
     assert!(instance.is_empty());
     assert_eq!(
         world
@@ -60,8 +76,26 @@ fn empty_instances_end_by_receipt_without_scanning_entities() {
 #[test]
 fn ending_one_instance_preserves_other_instances_and_runtime_history() {
     let mut world = World::new();
-    let first = spawn(&mut world, false);
-    let second = spawn(&mut world, false);
+    let first = spawn(
+        &mut world,
+        false,
+        scene_source_key(
+            "ending_one_instance_preserves_other_instances_and_runtime_history/source",
+        ),
+        &scene_occurrence(
+            "ending_one_instance_preserves_other_instances_and_runtime_history/first",
+        ),
+    );
+    let second = spawn(
+        &mut world,
+        false,
+        scene_source_key(
+            "ending_one_instance_preserves_other_instances_and_runtime_history/source",
+        ),
+        &scene_occurrence(
+            "ending_one_instance_preserves_other_instances_and_runtime_history/second",
+        ),
+    );
     let first_entity = resolve(&world, &first);
     let second_entity = resolve(&world, &second);
 
@@ -83,7 +117,16 @@ fn ending_one_instance_preserves_other_instances_and_runtime_history() {
         2
     );
 
-    let successor = spawn(&mut world, false);
+    let successor = spawn(
+        &mut world,
+        false,
+        scene_source_key(
+            "ending_one_instance_preserves_other_instances_and_runtime_history/source",
+        ),
+        &scene_occurrence(
+            "ending_one_instance_preserves_other_instances_and_runtime_history/first",
+        ),
+    );
     let successor_entity = resolve(&world, &successor);
     assert!(retire_and_despawn_scene_instance(&mut world, &first).is_err());
     assert_eq!(resolve(&world, &successor), successor_entity);
@@ -93,9 +136,19 @@ fn ending_one_instance_preserves_other_instances_and_runtime_history() {
 #[test]
 fn foreign_receipt_cannot_end_an_instance_with_equal_local_ids() {
     let mut first_world = World::new();
-    let foreign = spawn(&mut first_world, false);
+    let foreign = spawn(
+        &mut first_world,
+        false,
+        scene_source_key("foreign_receipt_cannot_end_an_instance_with_equal_local_ids/source"),
+        &scene_occurrence("foreign_receipt_cannot_end_an_instance_with_equal_local_ids/foreign"),
+    );
     let mut world = World::new();
-    let local = spawn(&mut world, false);
+    let local = spawn(
+        &mut world,
+        false,
+        scene_source_key("foreign_receipt_cannot_end_an_instance_with_equal_local_ids/source"),
+        &scene_occurrence("foreign_receipt_cannot_end_an_instance_with_equal_local_ids/local"),
+    );
     let entity = resolve(&world, &local);
     let baseline = world.resource::<WorldIdentityDomain>().stats();
 
@@ -111,7 +164,12 @@ fn foreign_receipt_cannot_end_an_instance_with_equal_local_ids() {
 #[test]
 fn deleting_the_final_entity_does_not_end_the_instance() {
     let mut world = World::new();
-    let instance = spawn(&mut world, false);
+    let instance = spawn(
+        &mut world,
+        false,
+        scene_source_key("deleting_the_final_entity_does_not_end_the_instance/source"),
+        &scene_occurrence("deleting_the_final_entity_does_not_end_the_instance/instance"),
+    );
     let entity = resolve(&world, &instance);
     retire_and_despawn_scene_entity(&mut world, entity).unwrap();
     assert_eq!(
@@ -153,7 +211,16 @@ fn record_removal(
 fn unsupported_native_lifecycle_rejects_before_identity_or_entity_retirement() {
     let mut world = World::new();
     world.init_resource::<Removals>();
-    let instance = spawn(&mut world, false);
+    let instance = spawn(
+        &mut world,
+        false,
+        scene_source_key(
+            "unsupported_native_lifecycle_rejects_before_identity_or_entity_retirement/source",
+        ),
+        &scene_occurrence(
+            "unsupported_native_lifecycle_rejects_before_identity_or_entity_retirement/instance",
+        ),
+    );
     let entity = resolve(&world, &instance);
     world.entity_mut(entity).insert(NativeState);
     let baseline = world.resource::<WorldIdentityDomain>().stats();
@@ -164,4 +231,17 @@ fn unsupported_native_lifecycle_rejects_before_identity_or_entity_retirement() {
     assert!(world.get::<NativeState>(entity).is_some());
     assert_eq!(world.resource::<Removals>().0, 0);
     assert_eq!(world.resource::<WorldIdentityDomain>().stats(), baseline);
+}
+
+fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {
+    nara_scene::SourceDocumentKey::named(
+        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
+        name,
+        nara_scene::SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn scene_occurrence(slot: &str) -> nara_scene::SceneOccurrenceKey {
+    nara_scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }

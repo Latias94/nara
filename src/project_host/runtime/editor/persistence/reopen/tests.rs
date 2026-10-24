@@ -73,6 +73,12 @@ impl ReopenFixture {
                 admission: ReopenAdmission {
                     lane: PersistenceLane::Scene(EditorScenePersistenceLane {
                         project_path: Arc::from("scenes/current.scene.json"),
+                        source_key: nara_scene::SourceDocumentKey::named(
+                            "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+                            "background-reopen-fixture",
+                            nara_scene::SourceDocumentKind::Scene,
+                        )
+                        .unwrap(),
                         document: self.document,
                         host: self.host.clone(),
                     }),
@@ -88,6 +94,19 @@ impl ReopenFixture {
                         .try_with(|host| host.prepare_reopen(None))
                         .unwrap()
                         .unwrap(),
+                    NativeReopenSource {
+                        root: DirectoryCapability::from_host_handle(
+                            open_directory(&self.directory),
+                            HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::TrustedLocal),
+                        ).unwrap(),
+                        policy: NativeDocumentSourcePolicy::new(
+                            &nara_project::ProjectManifest::parse_toml_str(
+                                "schema_version = 1\n[project]\nname = 'Reopen fixture'\nsource_universe = '840ad54a-4b14-4f32-954a-e873ff0d6e41'\nnative_document_identity = 'project_location'\n",
+                            ).manifest.unwrap().resolve_profile(None).unwrap(),
+                        ),
+                        project_path: Arc::from("current.scene.json"),
+                        kind: nara_scene::SourceDocumentKind::Scene,
+                    },
                 ),
             },
             pools,
@@ -244,9 +263,10 @@ fn completed_preparation_can_be_admitted_only_by_the_owner() {
     let pools = TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap();
     let mut reopen = fixture.start(&pools, None);
     assert_eq!(pools.run_pending_for_tests().executed, 1);
-    let Some(ReopenCompletion::Scene(prepared)) = reopen.poll() else {
+    let Some(ReopenCompletion::Scene(prepared, source)) = reopen.poll() else {
         panic!("a completed read must return its candidate")
     };
+    assert!(source.is_ok());
     let SceneReopenOutcome::Opened(opened) = prepared.admit(Some(&fixture.registry)) else {
         panic!("the candidate must admit on the owner")
     };
