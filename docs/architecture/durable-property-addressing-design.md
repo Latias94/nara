@@ -232,17 +232,19 @@ registry, or arbitrary IDs for every scalar.
 
 ## Adjacent Source-Identity Finding
 
-The independent review traced a likely cross-document key collision: `nara_ui` derives persistent
-UI root/local keys from `source_entity_id` and an optional Prefab occurrence, while
-`SceneEntitySource` does not carry the containing Scene source. Two independently resident Scenes
-with the same authored local root ID can therefore produce equal keys; the current projector should
-reject duplicate roots closed rather than route actions ambiguously. The same risk applies to equal
-anchors and Prefab chains. This is an independent source-provenance/UI owner change, not part of the
-Reflect property selector. Add a public same-World/two-Scene reproduction before calling it a
-qualified runtime finding. If confirmed, carry admitted source identity from the document owner;
-never substitute `SceneInstanceId`, preview epochs or process-local Workspace IDs. ADR 0102's
-frozen conformance gate requires a focused amendment, updated independent consumer and refreeze
-before changing shared UI key semantics.
+The [public same-World/two-Scene characterization](../../crates/nara_ui/tests/source_identity.rs)
+confirms the cross-document collision: `nara_ui` derives persistent root/local keys from
+`source_entity_id` and an optional Prefab path, while `SceneEntitySource` lacks the containing Scene
+source. Two different documents with the same authored local root ID reject the candidate through
+`root-key-duplicate`; distinct local IDs compile two roots. This proves a valid-composition gap,
+not action misrouting. Equal anchors/chains across containing Scenes and repeated complete-source
+occurrences remain separately qualified follow-up cases.
+
+The [source-context and occurrence proposal](scene-source-and-occurrence-identity-design.md)
+develops this independent Scene/source/UI owner replacement. It does not add source ownership to
+Reflect. Never substitute `SceneInstanceId`, preview epochs or process-local Workspace IDs for
+source or logical placement. ADR 0102's frozen conformance gate requires a focused amendment,
+updated independent consumer and refreeze before changing shared UI key semantics.
 
 ## Acceptance And Limits
 

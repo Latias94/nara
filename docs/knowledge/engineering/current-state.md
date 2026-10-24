@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "049c721e72bc577c64cb82270eab2fd70738dd6a178907ee8c740263ee6b767e"
+source_fingerprint: "c255f4c74867eb00fb294d975a28edea35abd9d9810952f6ef46abc078244646"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "049c721e72bc577c64cb82270eab2fd70738dd6a178907ee8c740263ee6
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `049c721e72bc577c64cb82270eab2fd70738dd6a178907ee8c740263ee6b767e`
-- Immutable records: 875
+- Source fingerprint: `c255f4c74867eb00fb294d975a28edea35abd9d9810952f6ef46abc078244646`
+- Immutable records: 876
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Cross-document UI source identity counterexample and next owner boundary](verification/2026-10/2026-10-24T025346Z-cross-document-ui-source-identity-counterexample-and-next-owner-boundary-c8f1cd178d8249a1824d61a363bbcf12.md) - Public same-World two-Scene characterization confirms missing containing source identity; source context and logical occurrence replacement remains Proposed.
 - **Verification Evidence**: [R5a final owner diagnostics and workspace qualification](verification/2026-10/2026-10-24T024954Z-r5a-final-owner-diagnostics-and-workspace-qualification-f58a0ab130cb47a8bc2829e32f1d0a86.md) - Qualified Schema-relative addressing, owner edits, v3 fixtures and safe diagnostic recovery; broader source identity and panel workflows remain open.
 - **Verification Evidence**: [R5a property addressing current qualification](verification/2026-10/2026-10-24T021414Z-r5a-property-addressing-current-qualification.md) - Current serial qualification of scoped property identity metadata, owner edits, and independent consumers; source identity remains open.
 - **Work Progress**: [R5a scoped property identity implementation and open qualification](progress/2026-10/2026-10-24T004112Z-r5a-scoped-property-identity-implementation-and-open-qualification-beb7daa155f8431ebb46c3d5e3082f32.md) - Scoped member lineage and keyed selectors replace the rejected component-global design; owner edits and canonical v3 metadata are implemented but final verification is pending.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Common source admission and retained Scene preview qualification](verification/2026-10/2026-10-23T180456Z-common-source-admission-and-retained-scene-preview-qualification-45ffac37614a4edaa792f08d650f292e.md) - Three-domain source exclusion, explicit Scene preview selection, trusted source observation and bounded actual native evidence.
 - **Verification Evidence**: [Per-document persistence custody qualification](verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md) - Typed document file custody, captured Save/Reopen Hosts, exact cleanup isolation and bounded native/public evidence.
 - **Verification Evidence**: [Prepared source editing and non-active entity query qualification](verification/2026-10/2026-10-23T140847Z-prepared-source-editing-and-non-active-entity-query-qualification-d08c0cb5ab2c4f798dd7cd98c2a2e6c5.md) - Owner-bound candidates, replayable inverses, public Scene/Prefab workflow, exact query custody and per-kind Host limitation.
-- **Verification Evidence**: [Workflow-driven foundation waves and R1a owned Application submission qualification](verification/2026-10/2026-10-23T123523Z-workflow-driven-foundation-waves-and-r1a-owned-application-submission-qualification-5e5f6c3eb3b84150bc3a5e06e9862abf.md) - Target owner boundaries, dependency corrections, exact direct dispatch observations, consumer evidence and explicit remaining scope.
 
 # Integration Notes
 

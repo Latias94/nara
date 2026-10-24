@@ -118,6 +118,12 @@ Prefab occurrence, operation basis and runtime incarnation as separate owner axe
 scoped nested-ID lineage, keyed-item, migration and unresolved-target rules that must be settled
 before R2/R3/R5b persistent contracts freeze.
 
+The [source-context and logical-occurrence proposal](scene-source-and-occurrence-identity-design.md)
+addresses the separately reproduced same-World/two-Scene UI key collision. It compares a required
+source-bound envelope with embedded document identity, retains the independent runtime incarnation,
+and specifies the direct/file-backed trial and ADR 0102 refreeze boundary. This is a Proposed
+replacement, not an implemented source identity or a completed shared UI checkpoint.
+
 The [chat-informed foundation review](../audits/2026-10-23-chat-informed-engine-architecture-review.md)
 compares the supplied engine-design conversation with the current owners and pinned Bevy/Godot
 sources at `f91466b`. Four independent review lanes and three public-interface probes distinguish
