@@ -1,8 +1,10 @@
 use std::{collections::BTreeMap, fmt, mem::size_of, sync::Arc};
 
+use nara_asset::{AssetSourceKind, StableAssetId};
 use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity};
 use nara_project::ProjectPath;
 use nara_reflect::SchemaCompositionFingerprint;
+use nara_scene::SourceDocumentOrigin;
 
 use super::catalogue::DeliveryCatalogue;
 use super::{
@@ -182,6 +184,13 @@ impl ProjectContentLoader {
         roots.sort_by(|left, right| left.as_str().cmp(right.as_str()));
         roots.dedup();
 
+        let mut source_identities = BTreeMap::new();
+        merge_delivery_source_identities(
+            &mut source_identities,
+            &snapshot,
+            candidate,
+            &mut budget,
+        )?;
         let mut members = BTreeMap::<String, ProjectContentMemberReceipt>::new();
         self.merge_delivery_members(
             &mut members,
@@ -202,6 +211,12 @@ impl ProjectContentLoader {
                 catalogue.is_none(),
             )?;
             catalogue = next_catalogue.or(catalogue);
+            merge_delivery_source_identities(
+                &mut source_identities,
+                &snapshot,
+                candidate,
+                &mut budget,
+            )?;
             self.merge_delivery_members(
                 &mut members,
                 &snapshot.content_closure(),
@@ -211,6 +226,7 @@ impl ProjectContentLoader {
             // No decoded Scene/Image or generation lease escapes into the delivery receipt.
             drop(snapshot);
         }
+        drop(source_identities);
 
         let array_work = checked_plan_product(
             ProjectContentBudgetKind::WorkBytes,
@@ -324,6 +340,85 @@ impl ProjectContentLoader {
         }
         Ok(())
     }
+}
+
+fn merge_delivery_source_identities(
+    identities: &mut BTreeMap<StableAssetId, ProjectPath>,
+    snapshot: &ProjectContentSnapshot,
+    candidate: &ProjectSettingsCandidate,
+    budget: &mut super::BudgetTicket,
+) -> Result<(), ProjectContentError> {
+    let paths = &candidate.settings().paths;
+    if let SourceDocumentOrigin::StableAsset { stable_id } =
+        snapshot.selected_scene_source_key().origin()
+    {
+        admit_delivery_source_identity(
+            identities,
+            *stable_id,
+            &paths.scenes,
+            snapshot.selected_scene_path().as_str(),
+            budget,
+        )?;
+    }
+    for record in snapshot.asset_database().records() {
+        let root = match record.source_kind() {
+            AssetSourceKind::Prefab => &paths.prefabs,
+            _ => &paths.assets,
+        };
+        admit_delivery_source_identity(
+            identities,
+            record.stable_id(),
+            root,
+            record.path().as_str(),
+            budget,
+        )?;
+    }
+    Ok(())
+}
+
+fn admit_delivery_source_identity(
+    identities: &mut BTreeMap<StableAssetId, ProjectPath>,
+    stable_id: StableAssetId,
+    root: &ProjectPath,
+    relative_path: &str,
+    budget: &mut super::BudgetTicket,
+) -> Result<(), ProjectContentError> {
+    if let Some(existing) = identities.get(&stable_id) {
+        if existing
+            .as_str()
+            .strip_prefix(root.as_str())
+            .and_then(|suffix| suffix.strip_prefix('/'))
+            == Some(relative_path)
+        {
+            return Ok(());
+        }
+        return Err(ProjectContentError::single(
+            ProjectContentErrorKind::AssetMetaMismatch,
+            "project.delivery.source-identity-conflict",
+            "Different delivery source paths claim the same stable identity",
+        ));
+    }
+    let work = checked_plan_sum(
+        ProjectContentBudgetKind::WorkBytes,
+        [
+            size_of::<(StableAssetId, ProjectPath)>(),
+            BTREE_ENTRY_OVERHEAD,
+            root.as_str().len(),
+            1,
+            relative_path.len(),
+        ],
+    )?;
+    budget
+        .add(ProjectContentBudgetKind::WorkBytes, work)
+        .map_err(ProjectContentError::budget)?;
+    let path = ProjectPath::new(format!("{}/{relative_path}", root.as_str())).map_err(|_| {
+        delivery_error(
+            "project.delivery.source-path-invalid",
+            "Delivery source has an invalid project-relative path",
+        )
+    })?;
+    identities.insert(stable_id, path);
+    Ok(())
 }
 
 fn delivery_error(code: &'static str, summary: &'static str) -> ProjectContentError {

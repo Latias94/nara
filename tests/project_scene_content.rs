@@ -21,6 +21,35 @@ use project_content_fixture::{
     TestProject, identity_transform_record, image_meta, scene_id, sprite_value, valid_png_bytes,
 };
 
+#[cfg(windows)]
+#[test]
+fn native_source_admission_rejects_case_aliases_instead_of_minting_location_identity() {
+    let project = TestProject::with_prefab_startup();
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    assert!(
+        loader
+            .load_scene(
+                &candidate,
+                &plan,
+                &ProjectPath::new("STARTUP.scene.json").unwrap(),
+            )
+            .is_err()
+    );
+    let before = loader.load(&candidate, &plan).unwrap();
+    let mut aliased = before.scene().clone();
+    aliased.entities[0].prefab.as_mut().unwrap().source =
+        AssetRef::path("ENEMY.prefab.json").unwrap();
+    project.write_scene_source(&aliased);
+    assert!(loader.load(&candidate, &plan).is_err());
+    assert_eq!(
+        before.scene().entities[0].prefab.as_ref().unwrap().source,
+        AssetRef::path("enemy.prefab.json").unwrap()
+    );
+    drop(before);
+    assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+}
+
 #[test]
 fn selected_scene_loads_only_its_dependency_closure_without_retargeting_startup() {
     let project = TestProject::with_prefab_startup();

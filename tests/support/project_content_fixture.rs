@@ -229,6 +229,54 @@ requested = ["runtime-2d"]
         .unwrap();
     }
 
+    pub fn use_stable_native_identity(&self) {
+        let manifest = fs::read_to_string(self.root.join("nara.toml")).unwrap();
+        fs::write(
+            self.root.join("nara.toml"),
+            manifest.replace(
+                "native_document_identity = 'project_location'",
+                "native_document_identity = 'stable_metadata'",
+            ),
+        )
+        .unwrap();
+    }
+
+    pub fn write_scene_meta(&self, stable_id: StableAssetId) {
+        self.write_scene_meta_path("startup.scene.json", stable_id);
+    }
+
+    pub fn write_scene_meta_path(&self, path: &str, stable_id: StableAssetId) {
+        let metadata = AssetMeta::new(
+            AssetMetaIdentity::new(
+                stable_id,
+                AssetPath::new(path).unwrap(),
+                AssetSourceKind::Scene,
+            ),
+            (),
+        );
+        fs::write(
+            self.root.join("scenes/startup.scene.json.meta"),
+            metadata.to_json_string().unwrap(),
+        )
+        .unwrap();
+    }
+
+    pub fn write_prefab_meta(&self, path: &str, stable_id: StableAssetId) {
+        let metadata = AssetMeta::new(
+            AssetMetaIdentity::new(
+                stable_id,
+                AssetPath::new(path).unwrap(),
+                AssetSourceKind::Prefab,
+            ),
+            (),
+        );
+        fs::write(
+            self.root.join("prefabs").join(format!("{path}.meta")),
+            metadata.to_json_string().unwrap(),
+        )
+        .unwrap();
+    }
+
     pub fn write_scene_bytes(&self, bytes: &[u8]) {
         fs::write(self.root.join("scenes/startup.scene.json"), bytes).unwrap();
     }

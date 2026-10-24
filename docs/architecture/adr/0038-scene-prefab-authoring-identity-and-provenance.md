@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Amended**: 2026-08-05 by the ADR 0102 UI identity checkpoint
+**Amended**: 2026-10-24 by the production source-admission checkpoint
 **Refines**: ADR 0006: Scene and Prefab Data Model
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References;
@@ -85,6 +85,22 @@ flowchart TD
   available; `AssetRef::Path` remains valid for hand-authored and AI-generated projects.
 - Source prefab moves should update project asset metadata or path references through normal asset
   ref migration, not by changing expanded IDs.
+- File-backed project content must admit a private-field `SourceDocumentKey` for each selected Scene and
+  loaded Prefab before expansion. Stable-metadata policy requires and validates the exact sidecar;
+  project-location policy binds the authored universe and complete project-relative path. A
+  resolver lends the canonical key and immutable document together; callers must not assemble
+  them from an `AssetRef` after lookup.
+- Metadata used for stable-reference lookup remains revalidated closure evidence even under
+  location identity. Adjacent metadata does not silently promote a location-authored source.
+  Stable native Prefab admission uses the existing catalogue's duplicate-identity rejection;
+  partial catalogue discovery is not complete asset-reference admission.
+- Native admission verifies stored path spelling through filesystem capabilities before assigning
+  a location key. Content delivery checks stable source identities across its admitted union using
+  full project-relative paths; a distinct path cannot silently claim an already admitted identity.
+  Neither operation is a persistent project-wide registry or a namespace snapshot.
+- Expansion admits modeled source-ancestry and provenance bytes before copying a source key or
+  projection chain. Post-expansion retained-byte accounting cannot substitute for this bounded
+  allocation admission. Limits model logical ownership, not allocator capacity or process RSS.
 - Apply Changes may remain narrow. Any future prefab-expanded write-back must declare whether it is
   producing an override patch, editing the prefab source, or converting to local scene data.
 

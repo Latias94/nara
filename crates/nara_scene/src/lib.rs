@@ -20,6 +20,7 @@ mod product_transaction;
 mod provenance;
 mod runtime_hierarchy;
 mod scene_components;
+mod source;
 mod spawn;
 mod validation;
 
@@ -73,7 +74,7 @@ pub use patch::{
 pub use prefab::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabExpansionBudgetKind, PrefabExpansionLimits,
     PrefabExpansionOptions, PrefabExpansionReport, PrefabInstance, PrefabInstantiationReport,
-    PrefabSourceResolver,
+    PrefabSourceResolver, ResolvedPrefabSource,
 };
 pub use provenance::{
     PrefabProjectionPath, PrefabProjectionStep, SceneEntityProvenance, SceneEntityProvenanceMap,
@@ -98,6 +99,9 @@ pub use scene_components::{
     SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER,
     SCENE_COMPONENTS_SCHEMA_PROVIDER_ID, SceneComponentsPlugin, Visibility,
     register_scene_components,
+};
+pub use source::{
+    SourceDocumentKey, SourceDocumentKeyError, SourceDocumentKind, SourceDocumentOrigin,
 };
 pub use spawn::{
     SceneEntityRetirementError, SceneEntitySource, SceneProjection, SceneSpawnReport, SceneSpawner,

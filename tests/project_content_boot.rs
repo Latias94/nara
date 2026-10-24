@@ -7,14 +7,18 @@ use std::sync::Arc;
 
 use nara::advanced_prelude::Component;
 
-use nara::asset::AssetMeta;
+use nara::asset::{AssetMeta, AssetRef, StableAssetId};
 use nara::diagnostic::DiagnosticValueRef;
 use nara::image::{ImageColorSpace, ImageImportSettings};
 use nara::project_host::{
-    ProjectContentBudgetKind, ProjectContentLoader, ProjectContentMemberKind,
+    ProjectContentBudgetKind, ProjectContentErrorKind, ProjectContentLimits, ProjectContentLoader,
+    ProjectContentMemberKind,
 };
 use nara::reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue};
-use nara::scene::{PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityRecord};
+use nara::scene::{
+    PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityRecord,
+    ScenePatchDocument, SourceDocumentOrigin,
+};
 use project_content_fixture::{TestProject, player_image_meta, scene_id, tileset_meta};
 
 struct EscapeOwner;
@@ -316,6 +320,53 @@ fn path_tileset_discovery_completes_the_catalogue_for_a_later_stable_image_depen
             .high_water(ProjectContentBudgetKind::DirectoryEntries)
             > 0
     );
+}
+
+#[test]
+fn assets_that_complete_the_catalogue_reconcile_already_expanded_prefab_metadata() {
+    let project = TestProject::with_prefab_startup();
+    let path = "tilesets/terrain.tileset.ron";
+    project.write_tileset_source(
+        path,
+        &nara::tilemap::TileSetSource::new(
+            AssetRef::StableId(player_image_meta().identity().stable_id()),
+            nara::tilemap::TileAtlasLayout::grid(nara::core::Vec2::ONE, 1, 1),
+        ),
+        &tileset_meta("d3d3f9a6-f7a9-4db0-ae3c-e1d4264d6f12", path),
+    );
+    project.write_prefab_source(&PrefabDocument::from_ordered_roots([
+        SceneEntityRecord::new(scene_id("local")),
+    ]));
+    let mut anchor = SceneEntityRecord::new(scene_id("anchor"));
+    anchor.prefab = Some(PrefabInstance {
+        source: AssetRef::path("enemy.prefab.json").unwrap(),
+        overrides: ScenePatchDocument::default(),
+    });
+    project.write_scene_source(&SceneDocument::from_ordered_roots([
+        anchor,
+        persisted_tilemap(Some(path), Some(0)),
+    ]));
+    project.write_prefab_meta(
+        "enemy.prefab.json",
+        StableAssetId::parse_str("5f2f9a19-f6a8-4e4e-9b7d-2f48d2b3bb8b").unwrap(),
+    );
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    let before = loader.load(&candidate, &plan).unwrap();
+    assert!(
+        before
+            .content_closure()
+            .members()
+            .iter()
+            .any(|member| { member.path().as_str() == "prefabs/enemy.prefab.json.meta" })
+    );
+    project.write_prefab_meta(
+        "enemy.prefab.json",
+        StableAssetId::parse_str("6f2f9a19-f6a8-4e4e-9b7d-2f48d2b3bb8b").unwrap(),
+    );
+    let after = loader.load(&candidate, &plan).unwrap();
+    assert_ne!(before.content_digest(), after.content_digest());
+    assert_ne!(before.revision(), after.revision());
 }
 
 #[test]
@@ -744,6 +795,18 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
             .all(|(_, _, byte_len, digest)| { *byte_len > 0 && *byte_len == digest.length() })
     );
     assert_eq!(snapshot.prefabs().len(), 1);
+    assert!(matches!(
+        snapshot.selected_scene_source_key().origin(),
+        SourceDocumentOrigin::ProjectLocation { universe, path }
+            if path.as_str() == "scenes/startup.scene.json"
+                && !universe.as_uuid().is_nil()
+    ));
+    assert!(matches!(
+        snapshot.prefabs()[0].source_key().origin(),
+        SourceDocumentOrigin::ProjectLocation { universe, path }
+            if path.as_str() == "prefabs/enemy.prefab.json"
+                && !universe.as_uuid().is_nil()
+    ));
     assert_eq!(snapshot.images().len(), 1);
     assert_eq!(snapshot.images()[0].path().as_str(), "textures/player.png");
     assert_eq!(snapshot.images()[0].image().extent().width, 1);
@@ -751,9 +814,18 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
     assert_eq!(snapshot.images()[0].image().pixels(), &[24, 120, 220, 255]);
     assert!(snapshot.expanded_scene_provenance().values().any(|source| {
         source.source_entity_id() == &scene_id("enemy")
-            && source
-                .projection_path()
-                .is_some_and(|path| path.root_anchor() == &scene_id("enemy-anchor"))
+            && source.projection_path().is_some_and(|path| {
+                path.root_anchor() == &scene_id("enemy-anchor")
+                    && path.source_chain().iter().any(|step| {
+                        step.canonical_source().is_some_and(|key| {
+                            matches!(
+                                key.origin(),
+                                SourceDocumentOrigin::ProjectLocation { path, .. }
+                                    if path.as_str() == "prefabs/enemy.prefab.json"
+                            )
+                        })
+                    })
+            })
     }));
     assert!(std::ptr::eq(
         snapshot.images()[0].image().pixels(),
@@ -793,6 +865,205 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
     assert_eq!(released.active(ProjectContentBudgetKind::ArtifactBytes), 0);
     assert_eq!(released.active(ProjectContentBudgetKind::RetainedBytes), 0);
     assert_eq!(released.active_reservations(), 0);
+}
+
+#[test]
+fn stable_native_identity_admits_metadata_and_rejects_mismatch() {
+    let project = TestProject::with_prefab_startup();
+    project.use_stable_native_identity();
+    let scene_id = StableAssetId::parse_str("4c2a2c0e-25dd-4b3e-9e6b-52f0a04e8de1").unwrap();
+    let prefab_id = StableAssetId::parse_str("5f2f9a19-f6a8-4e4e-9b7d-2f48d2b3bb8b").unwrap();
+    project.write_scene_meta(scene_id);
+    project.write_prefab_meta("enemy.prefab.json", prefab_id);
+
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    let snapshot = loader.load(&candidate, &plan).unwrap();
+
+    assert!(matches!(
+        snapshot.selected_scene_source_key().origin(),
+        SourceDocumentOrigin::StableAsset { stable_id } if *stable_id == scene_id
+    ));
+    assert!(matches!(
+        snapshot.prefabs()[0].source_key().origin(),
+        SourceDocumentOrigin::StableAsset { stable_id } if *stable_id == prefab_id
+    ));
+    assert!(
+        snapshot
+            .content_closure()
+            .members()
+            .iter()
+            .any(|member| member.path().as_str() == "scenes/startup.scene.json.meta")
+    );
+    assert!(
+        snapshot
+            .content_closure()
+            .members()
+            .iter()
+            .any(|member| member.path().as_str() == "prefabs/enemy.prefab.json.meta")
+    );
+
+    project.write_scene_meta_path("other.scene.json", prefab_id);
+    let error = loader.load(&candidate, &plan).unwrap_err();
+    assert_eq!(error.kind(), ProjectContentErrorKind::AssetMetaMismatch);
+
+    project.write_scene_meta(prefab_id);
+    let error = loader.load(&candidate, &plan).unwrap_err();
+    assert!(error.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "project.content.native-source-identity-conflict"
+    }));
+}
+
+#[test]
+fn native_metadata_admission_preserves_budget_rejection() {
+    let project = TestProject::with_prefab_startup();
+    project.use_stable_native_identity();
+    project.write_scene_meta(
+        StableAssetId::parse_str("4c2a2c0e-25dd-4b3e-9e6b-52f0a04e8de1").unwrap(),
+    );
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let limits = ProjectContentLimits::default()
+        .with_limit(ProjectContentBudgetKind::Files, 1)
+        .unwrap();
+    let loader = ProjectContentLoader::with_limits(root, limits).unwrap();
+    let error = loader.load(&candidate, &plan).unwrap_err();
+    assert_eq!(error.kind(), ProjectContentErrorKind::BudgetExceeded);
+    assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+}
+
+#[test]
+fn stable_native_identity_rejects_two_prefab_paths_with_one_identity() {
+    let project = TestProject::with_prefab_startup();
+    project.use_stable_native_identity();
+    project.write_scene_meta(
+        StableAssetId::parse_str("4c2a2c0e-25dd-4b3e-9e6b-52f0a04e8de1").unwrap(),
+    );
+    let prefab_id = StableAssetId::parse_str("5f2f9a19-f6a8-4e4e-9b7d-2f48d2b3bb8b").unwrap();
+    let prefab = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("local"))]);
+    let paths = ["enemy.prefab.json", "copy.prefab.json"];
+    for path in paths {
+        project.write_prefab(path, &prefab);
+        project.write_prefab_meta(path, prefab_id);
+    }
+    project.write_scene_source(&SceneDocument::from_ordered_roots(
+        paths.into_iter().enumerate().map(|(index, path)| {
+            let mut anchor = SceneEntityRecord::new(scene_id(&format!("anchor-{index}")));
+            anchor.prefab = Some(PrefabInstance {
+                source: AssetRef::path(path).unwrap(),
+                overrides: ScenePatchDocument::default(),
+            });
+            anchor
+        }),
+    ));
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    let error = loader.load(&candidate, &plan).unwrap_err();
+    assert_eq!(error.kind(), ProjectContentErrorKind::AssetMetaMismatch);
+    assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+}
+
+#[test]
+fn native_location_identity_does_not_promote_unreferenced_adjacent_metadata() {
+    let project = TestProject::with_prefab_startup();
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    let before = loader.load(&candidate, &plan).unwrap();
+    std::fs::write(
+        project.path().join("scenes/startup.scene.json.meta"),
+        b"not source authority under project_location",
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("prefabs/enemy.prefab.json.meta"),
+        b"not source authority under project_location",
+    )
+    .unwrap();
+    let after = loader.load(&candidate, &plan).unwrap();
+    assert_eq!(
+        before.selected_scene_source_key(),
+        after.selected_scene_source_key()
+    );
+    assert_eq!(
+        before.prefabs()[0].source_key(),
+        after.prefabs()[0].source_key()
+    );
+    assert_eq!(before.content_digest(), after.content_digest());
+}
+
+#[test]
+fn stable_native_identity_never_falls_back_when_either_sidecar_is_missing() {
+    let project = TestProject::with_prefab_startup();
+    project.use_stable_native_identity();
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    assert!(loader.load(&candidate, &plan).is_err());
+    assert!(
+        !project
+            .path()
+            .join("scenes/startup.scene.json.meta")
+            .exists()
+    );
+    project.write_scene_meta(
+        StableAssetId::parse_str("4c2a2c0e-25dd-4b3e-9e6b-52f0a04e8de1").unwrap(),
+    );
+    assert!(loader.load(&candidate, &plan).is_err());
+    assert!(
+        !project
+            .path()
+            .join("prefabs/enemy.prefab.json.meta")
+            .exists()
+    );
+    assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+    assert_eq!(loader.budget_snapshot().active_generations(), 0);
+}
+
+#[test]
+fn later_stable_prefab_reference_retains_metadata_for_an_already_loaded_path() {
+    let project = TestProject::with_prefab_startup();
+    let stable_id = StableAssetId::parse_str("5f2f9a19-f6a8-4e4e-9b7d-2f48d2b3bb8b").unwrap();
+    project.write_prefab(
+        "a.prefab.json",
+        &PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("local"))]),
+    );
+    project.write_prefab_meta("a.prefab.json", stable_id);
+    let mut nested = SceneEntityRecord::new(scene_id("nested"));
+    nested.prefab = Some(PrefabInstance {
+        source: AssetRef::StableId(stable_id),
+        overrides: ScenePatchDocument::default(),
+    });
+    project.write_prefab(
+        "c.prefab.json",
+        &PrefabDocument::from_ordered_roots([nested]),
+    );
+    project.write_scene_source(&SceneDocument::from_ordered_roots(
+        ["a.prefab.json", "c.prefab.json"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, path)| {
+                let mut anchor = SceneEntityRecord::new(scene_id(&format!("anchor-{index}")));
+                anchor.prefab = Some(PrefabInstance {
+                    source: AssetRef::path(path).unwrap(),
+                    overrides: ScenePatchDocument::default(),
+                });
+                anchor
+            }),
+    ));
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    let before = loader.load(&candidate, &plan).unwrap();
+    assert!(
+        before
+            .content_closure()
+            .members()
+            .iter()
+            .any(|member| { member.path().as_str() == "prefabs/a.prefab.json.meta" })
+    );
+    let path = project.path().join("prefabs/a.prefab.json.meta");
+    let mut bytes = std::fs::read(&path).unwrap();
+    bytes.push(b'\n');
+    std::fs::write(path, bytes).unwrap();
+    let after = loader.load(&candidate, &plan).unwrap();
+    assert_ne!(before.content_digest(), after.content_digest());
 }
 
 #[test]

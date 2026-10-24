@@ -24,6 +24,12 @@ pub(crate) struct DeliveryCatalogue {
 }
 
 impl LoadContext<'_> {
+    pub(super) fn reference_catalogue_complete(&self) -> bool {
+        self.catalogue
+            .as_ref()
+            .is_some_and(|catalogue| catalogue.complete)
+    }
+
     pub(super) fn take_delivery_catalogue(&mut self) -> Option<DeliveryCatalogue> {
         self.completed_delivery_catalogue.take()
     }
@@ -240,6 +246,16 @@ impl LoadContext<'_> {
                 .map_err(|_| invalid_metadata(&path))?
                 .into_identity();
         self.subtract_budget(ProjectContentBudgetKind::WorkBytes, reservation.reserved);
+        self.index_metadata_identity(path, root_index, digest, identity)
+    }
+
+    pub(super) fn index_metadata_identity(
+        &mut self,
+        path: AssetPath,
+        root_index: usize,
+        digest: ContentDigest,
+        identity: nara_asset::AssetMetaIdentity,
+    ) -> Result<(), ProjectContentError> {
         if let Some((indexed_root, indexed_digest)) = self
             .catalogue
             .as_ref()
@@ -264,7 +280,9 @@ impl LoadContext<'_> {
         }
         self.reserve_asset_database_work(&AssetRecord::from(identity.clone()))?;
         self.reserve_catalogue_work(
-            size_of::<(AssetPath, (usize, ContentDigest))>() + source.len() + BTREE_ENTRY_OVERHEAD,
+            size_of::<(AssetPath, (usize, ContentDigest))>()
+                + path.as_str().len()
+                + BTREE_ENTRY_OVERHEAD,
         )?;
         self.asset_database
             .insert_identity(path.clone(), identity)
@@ -281,8 +299,7 @@ impl LoadContext<'_> {
         self.add_budget(ProjectContentBudgetKind::WorkBytes, bytes)?;
         let catalogue = self
             .catalogue
-            .as_mut()
-            .expect("catalogue work is owned until publication");
+            .get_or_insert_with(ReferenceCatalogue::default);
         catalogue.work_bytes = catalogue
             .work_bytes
             .checked_add(bytes)
@@ -311,7 +328,7 @@ impl LoadContext<'_> {
 
     pub(super) fn retain_loaded_asset_identities(
         &mut self,
-        prefabs: &BTreeMap<AssetPath, Arc<PrefabDocument>>,
+        prefabs: &BTreeMap<AssetPath, LoadedPrefabContent>,
         images: &[ProjectImageContent],
         tilesets: &[ProjectTileSetContent],
         domains: &[Box<dyn domains::ErasedCollection>],
@@ -430,7 +447,7 @@ impl LoadContext<'_> {
         Ok(())
     }
 
-    pub(super) fn admit_prefab_metadata(
+    pub(super) fn admit_catalogued_prefab_metadata(
         &mut self,
         directory: &DirectoryCapability,
         root: &nara_project::ProjectPath,
@@ -444,7 +461,7 @@ impl LoadContext<'_> {
             return Ok(());
         }
         let meta_path = path.meta_path();
-        let (_, digest) = self.read_file(
+        let (_, digest) = self.read_native_file(
             directory,
             &meta_path,
             AssetMetaFileLimits::default().encoded_bytes().get(),

@@ -17,6 +17,7 @@ use nara_reflect::{
 use crate::{
     ExpandedSceneCandidate, PrefabProjectionPath, SceneDocument, SceneEntityId,
     SceneEntityProvenance, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+    SourceDocumentKey, SourceDocumentKind,
     diagnostics::{
         error as diagnostic_error, usize_to_u64, with_asset_ref, with_codec_error,
         with_entity_reference_rewrite_error, with_migration_error, with_public_locator,
@@ -25,6 +26,7 @@ use crate::{
     patch::{
         scene_entities_source_value_cost, scene_entity_component_value_cost, scene_patch_value_cost,
     },
+    provenance::{provenance_asset_ref_bytes, provenance_entry_bytes},
     validation::{
         preflight_scene_with_context, reference_traversal_limits, validate_scene_structure,
     },
@@ -198,6 +200,47 @@ impl<'de> serde::Deserialize<'de> for PrefabInstance {
 
 pub trait PrefabSourceResolver {
     fn resolve_prefab(&self, source: &AssetRef) -> Option<&PrefabDocument>;
+
+    /// Resolves a request to one immutable document and its canonical source key when the
+    /// admitting owner has one. Project-backed adapters override this method; the default keeps
+    /// source-keyless in-memory adapters useful for document-only tests.
+    fn resolve_prefab_binding(&self, source: &AssetRef) -> Option<ResolvedPrefabSource<'_>> {
+        self.resolve_prefab(source)
+            .map(ResolvedPrefabSource::unbound)
+    }
+}
+
+/// One resolver-owned immutable Prefab and its canonical source identity, when admitted.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedPrefabSource<'a> {
+    document: &'a PrefabDocument,
+    key: Option<&'a SourceDocumentKey>,
+}
+
+impl<'a> ResolvedPrefabSource<'a> {
+    pub const fn bound(document: &'a PrefabDocument, key: &'a SourceDocumentKey) -> Self {
+        Self {
+            document,
+            key: Some(key),
+        }
+    }
+
+    const fn unbound(document: &'a PrefabDocument) -> Self {
+        Self {
+            document,
+            key: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn document(self) -> &'a PrefabDocument {
+        self.document
+    }
+
+    #[must_use]
+    pub const fn key(self) -> Option<&'a SourceDocumentKey> {
+        self.key
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -278,6 +321,7 @@ pub enum PrefabExpansionBudgetKind {
     AppliedPatchOperations,
     GeneratedIdentifierBytes,
     SingleGeneratedIdentifierBytes,
+    ProvenanceBytes,
 }
 
 impl PrefabExpansionBudgetKind {
@@ -291,6 +335,7 @@ impl PrefabExpansionBudgetKind {
             Self::AppliedPatchOperations => "applied-patch-operations",
             Self::GeneratedIdentifierBytes => "generated-identifier-bytes",
             Self::SingleGeneratedIdentifierBytes => "single-generated-identifier-bytes",
+            Self::ProvenanceBytes => "provenance-bytes",
         }
     }
 }
@@ -311,6 +356,7 @@ pub struct PrefabExpansionLimits {
     applied_patch_operations: ItemLimit,
     generated_identifier_bytes: ByteLimit,
     single_generated_identifier_bytes: ByteLimit,
+    provenance_bytes: ByteLimit,
 }
 
 impl Default for PrefabExpansionLimits {
@@ -332,6 +378,8 @@ impl Default for PrefabExpansionLimits {
                 .expect("prefab expansion generated identifier byte limit is non-zero"),
             single_generated_identifier_bytes: ByteLimit::new(1024 * 1024)
                 .expect("prefab expansion identifier byte limit is non-zero"),
+            provenance_bytes: ByteLimit::new(64 * 1024 * 1024)
+                .expect("prefab expansion provenance byte limit is non-zero"),
         }
     }
 }
@@ -375,6 +423,16 @@ impl PrefabExpansionLimits {
     #[must_use]
     pub const fn single_generated_identifier_bytes(self) -> ByteLimit {
         self.single_generated_identifier_bytes
+    }
+
+    /// Cumulative modeled bytes admitted for source ancestry and entity provenance.
+    ///
+    /// Includes active stack entries and each owned copy of a projection chain, source key,
+    /// request and entity identifier. Released entries do not refund this allocation budget.
+    /// This is a logical ownership model, not an allocator or resident-memory limit.
+    #[must_use]
+    pub const fn provenance_bytes(self) -> ByteLimit {
+        self.provenance_bytes
     }
 
     #[must_use]
@@ -422,6 +480,12 @@ impl PrefabExpansionLimits {
     #[must_use]
     pub const fn with_single_generated_identifier_bytes(mut self, limit: ByteLimit) -> Self {
         self.single_generated_identifier_bytes = limit;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_provenance_bytes(mut self, limit: ByteLimit) -> Self {
+        self.provenance_bytes = limit;
         self
     }
 }
@@ -489,6 +553,7 @@ struct PrefabExpansionUsage {
     resolved_instances: usize,
     applied_patch_operations: usize,
     generated_identifier_bytes: usize,
+    provenance_bytes: usize,
 }
 
 impl SceneDocument {
@@ -545,13 +610,39 @@ struct PrefabExpansionContext<'a, R: PrefabSourceResolver + ?Sized> {
     resolver: &'a R,
     options: PrefabExpansionOptions,
     database: Option<&'a ProjectAssetDatabase>,
-    stack: Vec<AssetRef>,
+    stack: Vec<ActivePrefabSource>,
     usage: PrefabExpansionUsage,
     budget_failed: bool,
     diagnostics: DiagnosticReport,
     provenance: BTreeMap<SceneEntityId, SceneEntityProvenance>,
     reserved_entity_ids: BTreeSet<SceneEntityId>,
     next_projected_entity: usize,
+}
+
+#[derive(Debug)]
+struct ActivePrefabSource {
+    request: AssetRef,
+    key: Option<SourceDocumentKey>,
+}
+
+impl ActivePrefabSource {
+    fn allocation_bytes(request: &AssetRef, key: Option<&SourceDocumentKey>) -> Option<usize> {
+        let key_bytes = match key {
+            Some(key) => key.checked_retained_bytes()?,
+            None => 0,
+        };
+        std::mem::size_of::<AssetRef>()
+            .checked_add(std::mem::size_of::<Option<SourceDocumentKey>>())?
+            .checked_add(provenance_asset_ref_bytes(request)?)?
+            .checked_add(key_bytes)
+    }
+
+    fn matches(&self, request: &AssetRef, key: Option<&SourceDocumentKey>) -> bool {
+        match (&self.key, key) {
+            (Some(left), Some(right)) => left == right,
+            _ => self.request == *request,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -589,7 +680,11 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             roots: document.roots.clone(),
             entities: Vec::new(),
         };
-        if self
+        if self.reserve_provenance_bytes(
+            Some(std::mem::size_of::<crate::SceneEntityProvenanceMap>()),
+            None,
+            None,
+        ) && self
             .observe_item_budget(
                 PrefabExpansionBudgetKind::MaterializedEntities,
                 0,
@@ -653,6 +748,13 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         let Some(original_cost) = self.reserve_materialized_entity(entity) else {
             return;
         };
+        if !self.reserve_provenance_bytes(
+            provenance_entry_bytes(&entity.id, &entity.id),
+            Some(&entity.id),
+            entity.prefab.as_ref().map(|prefab| &prefab.source),
+        ) {
+            return;
+        }
         let mut anchor = entity.clone();
         let Some(replacement_cost) =
             self.normalize_entity_components(&mut anchor, original_cost, &entity.id)
@@ -674,6 +776,9 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         if let Some(instance) = prefab_instance {
             let prefab_roots = self.expand_prefab_instance(&entity.id, instance, output, None);
             anchor.children.splice(0..0, prefab_roots);
+        }
+        if self.budget_failed {
+            return;
         }
         self.provenance.insert(
             anchor.id.clone(),
@@ -721,10 +826,42 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             return Vec::new();
         }
 
+        let resolved = self.resolver.resolve_prefab_binding(&source);
+        let Some(resolved) = resolved else {
+            self.diagnostics.push(with_asset_ref(
+                with_public_locator(
+                    with_public_locator(
+                        diagnostic_error(
+                            "scene.prefab-source-missing",
+                            "Prefab source could not be resolved",
+                        ),
+                        "entity-id",
+                        anchor_id.as_str(),
+                    ),
+                    "field-path",
+                    "prefab.source",
+                ),
+                "asset-ref",
+                &source,
+            ));
+            return Vec::new();
+        };
+        let canonical_key = resolved.key();
+        if canonical_key.is_some_and(|key| key.kind() != SourceDocumentKind::Prefab) {
+            self.diagnostics.push(with_asset_ref(
+                diagnostic_error(
+                    "scene.prefab-source-kind-invalid",
+                    "Resolved Prefab source identity does not describe a Prefab",
+                ),
+                "asset-ref",
+                &source,
+            ));
+            return Vec::new();
+        }
         if let Some((cycle_start_index, cycle_from)) = self
             .stack
             .iter()
-            .position(|active_source| active_source == &source)
+            .position(|active_source| active_source.matches(&source, canonical_key))
             .zip(self.stack.last())
         {
             let diagnostic = with_public_u64(
@@ -752,34 +889,20 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
                         .saturating_add(1),
                 ),
             );
-            let diagnostic = with_asset_ref(diagnostic, "cycle-from", cycle_from);
+            let diagnostic = with_asset_ref(diagnostic, "cycle-from", &cycle_from.request);
             self.diagnostics
                 .push(with_asset_ref(diagnostic, "cycle-to", &source));
             return Vec::new();
         }
-
-        let Some(prefab) = self.resolver.resolve_prefab(&source) else {
-            self.diagnostics.push(with_asset_ref(
-                with_public_locator(
-                    with_public_locator(
-                        diagnostic_error(
-                            "scene.prefab-source-missing",
-                            "Prefab source could not be resolved",
-                        ),
-                        "entity-id",
-                        anchor_id.as_str(),
-                    ),
-                    "field-path",
-                    "prefab.source",
-                ),
-                "asset-ref",
-                &source,
-            ));
-            return Vec::new();
-        };
+        let prefab = resolved.document();
 
         if !self.reserve_applied_patch_operations(overrides.operations.len(), anchor_id, &source)
             || !self.preflight_source_materialization(prefab, &overrides, anchor_id, &source)
+            || !self.reserve_provenance_bytes(
+                ActivePrefabSource::allocation_bytes(&source, canonical_key),
+                Some(anchor_id),
+                Some(&source),
+            )
         {
             return Vec::new();
         }
@@ -791,7 +914,10 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             return Vec::new();
         }
 
-        self.stack.push(source.clone());
+        self.stack.push(ActivePrefabSource {
+            request: source.clone(),
+            key: canonical_key.cloned(),
+        });
 
         if !overrides.is_empty() {
             let patch_report = match self.database {
@@ -826,10 +952,26 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
                 break;
             }
             let is_root = root_ids.contains(&entity.id);
-            let projection = parent_projection
-                .cloned()
-                .unwrap_or_else(|| PrefabProjectionPath::new(anchor_id.clone()))
-                .with_step(source.clone(), entity.id.clone());
+            let provenance_bytes = PrefabProjectionPath::extended_allocation_bytes(
+                parent_projection,
+                anchor_id,
+                &source,
+                canonical_key,
+                &entity.id,
+            )
+            .and_then(|bytes| {
+                bytes.checked_add(provenance_entry_bytes(&entity_ids[&entity.id], &entity.id)?)
+            });
+            if !self.reserve_provenance_bytes(provenance_bytes, Some(anchor_id), Some(&source)) {
+                break;
+            }
+            let projection = PrefabProjectionPath::from_resolved_step(
+                parent_projection,
+                anchor_id,
+                &source,
+                canonical_key,
+                &entity.id,
+            );
             self.expand_prefab_entity(anchor_id, entity, is_root, projection, &entity_ids, output);
         }
 
@@ -1086,6 +1228,9 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
                 self.expand_prefab_instance(&nested_anchor_id, instance, output, Some(&projection));
             entity.children.splice(0..0, nested_roots);
         }
+        if self.budget_failed {
+            return;
+        }
         self.provenance.insert(
             entity.id.clone(),
             SceneEntityProvenance::projected(source_entity_id, projection),
@@ -1243,6 +1388,39 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             return false;
         };
         self.usage.resolved_instances = instances;
+        true
+    }
+
+    fn reserve_provenance_bytes(
+        &mut self,
+        amount: Option<usize>,
+        entity: Option<&SceneEntityId>,
+        source: Option<&AssetRef>,
+    ) -> bool {
+        let limit = self.options.limits.provenance_bytes();
+        let Some(amount) =
+            amount.filter(|amount| self.usage.provenance_bytes.checked_add(*amount).is_some())
+        else {
+            self.fail_budget(
+                PrefabExpansionBudgetKind::ProvenanceBytes,
+                usize::MAX,
+                limit.get(),
+                entity,
+                source,
+            );
+            return false;
+        };
+        let Some(bytes) = self.observe_byte_budget(
+            PrefabExpansionBudgetKind::ProvenanceBytes,
+            self.usage.provenance_bytes,
+            amount,
+            limit,
+            entity,
+            source,
+        ) else {
+            return false;
+        };
+        self.usage.provenance_bytes = bytes;
         true
     }
 

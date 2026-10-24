@@ -35,6 +35,41 @@ const SECOND_SCENE: &str = "second.scene.json";
 const SECOND_IMAGE: &str = "textures/second.png";
 
 #[test]
+fn stable_scene_roots_cannot_claim_the_same_source_identity() {
+    let project = TestProject::with_prefab_startup();
+    project.use_stable_native_identity();
+    let scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("local"))]);
+    project.write_scene_source(&scene);
+    fs::write(
+        project.path().join("scenes").join(SECOND_SCENE),
+        scene.to_json_string().unwrap(),
+    )
+    .unwrap();
+    let stable_id = StableAssetId::parse_str("4c2a2c0e-25dd-4b3e-9e6b-52f0a04e8de1").unwrap();
+    project.write_scene_meta(stable_id);
+    let metadata = AssetMeta::new(
+        AssetMetaIdentity::new(
+            stable_id,
+            AssetPath::new(SECOND_SCENE).unwrap(),
+            AssetSourceKind::Scene,
+        ),
+        (),
+    );
+    fs::write(
+        project.path().join(format!("scenes/{SECOND_SCENE}.meta")),
+        metadata.to_json_string().unwrap(),
+    )
+    .unwrap();
+    declare_scenes(&project, &[SECOND_SCENE]);
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    let error = loader.load_delivery(&candidate, &plan).unwrap_err();
+    assert_eq!(error.kind(), ProjectContentErrorKind::AssetMetaMismatch);
+    assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+    assert_eq!(loader.budget_snapshot().active_generations(), 0);
+}
+
+#[test]
 fn selected_scene_content_is_truthful_without_granting_startup_or_delivery_authority() {
     let project = two_scene_project();
     let spare = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("spare"))]);

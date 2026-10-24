@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "33c13971fbb86a62da215d8386b2cfe6cdbb8d5e098ad06a7c7ff11be319799e"
+source_fingerprint: "93eafc0f46002fe51fee458f20c9228a4f7ef356c1dc52fd1a57c113971609bd"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "33c13971fbb86a62da215d8386b2cfe6cdbb8d5e098ad06a7c7ff11be31
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `33c13971fbb86a62da215d8386b2cfe6cdbb8d5e098ad06a7c7ff11be319799e`
-- Immutable records: 881
+- Source fingerprint: `93eafc0f46002fe51fee458f20c9228a4f7ef356c1dc52fd1a57c113971609bd`
+- Immutable records: 883
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Exact stored spelling through filesystem capabilities](verification/2026-10/2026-10-24T095418Z-exact-stored-spelling-through-filesystem-capabilities-79d51b36d2944aa0bc70384eb2d11b86.md) - Bounded exact descendant-name opens preserve capability authority and reject native lookup aliases.
+- **Verification Evidence**: [Project content source admission and canonical Prefab binding qualification](verification/2026-10/2026-10-24T-project-content-source-admission-and-prefab-binding-qualification.md) - ProjectContentLoader admits explicit Scene/Prefab source keys, retains metadata closure members, and lends canonical Prefab bindings through expansion.
 - **Verification Evidence**: [Canonical v1 schema envelope reset qualification](verification/2026-10/2026-10-24T-schema-envelope-v1-reset-qualification.md) - Component schema catalogs and authoring schema bundles now use canonical persistent envelope version 1 while preserving semantic catalog lineage and fingerprint version 3.
 - **Verification Evidence**: [Project source authority carrier and creation identity qualification](verification/2026-10/2026-10-24T065424Z-project-source-authority-carrier-and-creation-identity-qualification-6cdfe4a580b14b8da78e659010497632.md) - Verification Evidence for Project source authority carrier and creation identity qualification.
 - **Verification Evidence**: [Untargeted native preparation before Scene entity allocation](verification/2026-10/2026-10-24T060059Z-untargeted-native-preparation-before-scene-entity-allocation-c2218c6824cd4aa7a8b9b657fedc9630.md) - Reflect-owned native values retain their asset context until target binding; allocation and admission ordering regressions qualify the production prerequisite.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [R5a property addressing current qualification](verification/2026-10/2026-10-24T021414Z-r5a-property-addressing-current-qualification.md) - Current serial qualification of scoped property identity metadata, owner edits, and independent consumers; source identity remains open.
 - **Work Progress**: [R5a scoped property identity implementation and open qualification](progress/2026-10/2026-10-24T004112Z-r5a-scoped-property-identity-implementation-and-open-qualification-beb7daa155f8431ebb46c3d5e3082f32.md) - Scoped member lineage and keyed selectors replace the rejected component-global design; owner edits and canonical v3 metadata are implemented but final verification is pending.
 - **Verification Evidence**: [Disposable Scene projection epochs and stable native preview qualification](verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md) - Qualify complete-domain Scene epochs while retaining shared authoring owners and renderer producer identity.
-- **Work Progress**: [Projection lifetime next-unit design and measurement boundary](progress/2026-10/2026-10-23T211757Z-projection-lifetime-next-unit-design-and-measurement-boundary-d55f02e666d0487987d1a1f8b1d9c8b6.md) - Ground the remaining R5c preview-history pressure and compare explicit epoch handoff with owner-specific incremental projection; no production selection yet.
-- **Verification Evidence**: [Trusted Play source continuity and source-local Close qualification](verification/2026-10/2026-10-23T210921Z-trusted-play-source-continuity-and-source-local-close-qualification-61897d1b17744e2aaff6fc6efb1594a7.md) - Qualify the R5c trusted Play source through cancellation, Game handoff and physical retirement without stopping unrelated documents.
 
 # Integration Notes
 

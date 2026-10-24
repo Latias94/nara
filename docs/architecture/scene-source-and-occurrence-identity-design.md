@@ -1,7 +1,7 @@
 ---
 title: Scene Source Context And Logical Occurrence
 date: 2026-10-24
-status: Proposed owning replacement; public counterexample qualified; shared UI refreeze not yet performed
+status: Production source-admission slice qualified; occurrence, materialization, and shared UI adoption remain Proposed
 ---
 
 # Scene Source Context And Logical Occurrence
@@ -26,6 +26,41 @@ does not own this outer source/occurrence contract. The
 [foundation rebaseline plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md) remains
 broader than either unit.
 
+## Production Source Admission Checkpoint
+
+The project content owner now admits the source-document portion of this contract for selected
+file-backed Scenes and the complete loaded Prefab closure. `ProjectContentSnapshot` retains a
+`SourceDocumentKey` for the selected Scene and every Prefab; the Prefab resolver lends the bound
+key and immutable document together, and expanded projection steps retain the canonical key.
+Project-location projects bind the authored universe plus the complete project-relative path.
+Stable-metadata projects require the sidecar, retain its exact closure member, and validate its
+declared relative path and Scene/Prefab kind before publication. Missing or mismatched metadata
+rejects; loading never mints metadata or silently falls back to location identity. The resolver's
+cycle stack compares canonical keys when available, so aliases for one admitted source do not
+become separate active sources.
+
+Metadata lookup evidence and semantic identity remain separate. Under `project_location`, a
+Prefab discovered through the stable-reference catalogue must still revalidate that catalogue's
+sidecar and include it in the exact closure; its source key remains location-based. Unreferenced
+adjacent metadata does not change the declared policy. Under `stable_metadata`, admitted Prefab
+identities enter the existing catalogue, so two distinct paths cannot silently claim one stable
+asset identity. A partial identity catalogue is not a complete asset-reference validation basis.
+Reconciliation runs after complete Prefab discovery, so a later stable reference also retains the
+sidecar for a path that was loaded earlier. Delivery checks the union of selected Scene and loaded
+asset identities against full project-relative paths, without retaining decoded snapshots or a
+permanent source registry. Native source admission verifies exact stored component spelling through
+the filesystem owner instead of creating different location identities for case aliases. Windows
+and WSL Linux filesystem tests execute; casefold-volume behavior and native Linux product loading
+are not qualified by that filesystem cohort. Other exact-spelling adapters remain unsupported.
+
+This is deliberately not a full source/occurrence adoption. `SceneSource`, runtime
+`SceneEntitySource`, logical occurrence claims, Browser/Editor source admission, Runtime/Canvas
+UI keys, and source-carrying Export still need their owning migrations. The current checkpoint
+proves source admission and Prefab provenance at the content owner, not that a published runtime
+activation or UI projection already carries this key. The existing source-less direct Rust and
+in-memory resolver paths remain useful for document-only tests and are not evidence for the
+file-backed contract.
+
 ## Distinct Coordinates
 
 Names here describe semantic roles, not frozen Rust type names or new global services.
@@ -39,7 +74,7 @@ Names here describe semantic roles, not frozen Rust type names or new global ser
 | Runtime activation | One World-bound Scene instance and entity incarnation | Existing Identity/Scene publication owners |
 | Property selector | Component identity plus stable root/member/key selector | Schema owner and current-value resolver |
 
-Source equality must not come from content bytes, a Rust type path, source location, a pointer,
+Source equality must not come from content bytes, a Rust type path, a compiler/macro callsite, a pointer,
 active tab, workspace incarnation, physical file identity or runtime instance counter. File identity
 and content digests remain custody/change-detection evidence. They do not prove semantic continuity.
 
@@ -133,17 +168,18 @@ This prerequisite ends current runtime activations and retains Identity history.
 create or release the source/occurrence claims proposed here. Their future integration must occur
 inside the same exclusive retirement/publication cut, not in caller cleanup after a successful end.
 
-## Source Admission Work That Cannot Be Skipped
+## Admission Boundary And Remaining Adoption
 
-Current project loading does not already supply this contract:
+The production admission checkpoint covers the native source owner, not every downstream owner:
 
 - [Project content loading](../../src/project_content.rs) reads and expands the selected Scene but
   does not bind a containing source-document identity to its expanded candidate.
-- [Retained asset catalogues](../../src/project_content/catalogue.rs) retain Prefab/Image/TileSet/
-  domain records, not necessarily the selected Scene. Prefab metadata admission can legally have
-  no metadata. The implementation must not assume every Scene/Prefab already has a stable asset ID.
-- [PrefabSourceResolver](../../crates/nara_scene/src/prefab.rs) returns a document while expansion
-  retains the requested `AssetRef`; it does not return a proven canonical source binding.
+- [Retained asset catalogues](../../src/project_content/catalogue.rs) retain domain-relative
+  Prefab/Image/TileSet records. The selected Scene key is retained separately, without appending an
+  unscoped Scene record to that database. Location-authored documents need not have a stable ID.
+- [PrefabSourceResolver](../../crates/nara_scene/src/prefab.rs) now lends canonical bindings from
+  project content. Bare in-memory document resolution remains an incumbent document-only route;
+  the required-binding materialization replacement below must remove its identity-free shortcut.
 - [Editor source admission](../../src/project_host/runtime/editor/source_admission.rs) rejects
   duplicate file custody. That is not durable source-document identity.
 
@@ -160,11 +196,11 @@ and file-authored origins before changing public APIs. Required semantics are:
    identity loss is an explicit conflict/repair operation; a deliberately path-authored origin is
    not silently promoted to a different identity policy.
 
-The durable source-universe carrier for path-authored project content remains an implementation-entry
-decision. A project name, current directory or process-local session ID is not an acceptable default.
-This question must be settled in a complete direct/file-backed public trial, not hidden by a
-fallback. Full importer publication, package governance and multi-file migration are not prerequisites
-to that bounded identity trial.
+The durable source-universe carrier is now the required authored `[project].source_universe`.
+A project name, current directory or process-local session ID is not an acceptable default. A
+complete direct/file-backed materialization trial still needs to adopt this carrier, not hide its
+absence behind a fallback. Full importer publication, package governance and multi-file migration
+are not prerequisites to that bounded identity trial.
 
 ### Executable Owner Experiment
 
@@ -203,11 +239,13 @@ vacancy, not a historical vacancy generation. It is not an already decoded Scene
 
 This is evidence for a carrier/owner direction, not the complete trial's exit gate. In particular:
 
-- The real selected-Scene Loader, Browser Open, closure observations, retention leases and Editor
-  preview have not adopted these fields or types. The prototype's scan is deliberately narrow;
-  it does not establish complete discovery or filesystem alias/capture consistency.
-- Prefab canonical resolver results, nested projection chains and their source association remain
-  unimplemented. A bare `AssetRef` request must not become canonical provenance by stringification.
+- This prototype did not qualify production admission. The subsequent production checkpoint now
+  supplies selected-Scene/Prefab keys, exact metadata closure observations and retained accounting;
+  Browser Open and Editor preview still need adoption. Neither proves complete filesystem
+  alias/capture consistency.
+- Project-owned Prefab bindings and projection steps now retain canonical keys. Required bindings
+  for every materialization route remain the next replacement. A bare `AssetRef` request must not
+  become canonical provenance by stringification.
 - The product coordinate is distinguished as data, but no named imported Scene product is decoded
   or published by this experiment. Native files use `Primary` only.
 - The typed trial payload has an exact tagged byte encoding for cost inspection. It is not a
@@ -255,8 +293,10 @@ Association is checked against the effective patched source, including valid ove
 entities, not by requiring every materialized entity to exist in the unpatched Prefab. Existing
 source-local reference remaps and opaque generated runtime locators remain; no parser of expanded
 IDs or second source registry is needed. The retained project resolver must lend its bound source
-without leaking independently cloneable allocations beyond the source lease. Production adoption
-and these canonical alias/cycle tests are still pending.
+without leaking independently cloneable allocations beyond the source lease. Project content now
+uses that borrow, and [canonical source tests](../../crates/nara_scene/tests/prefab_sources.rs)
+exercise alias cycles, sibling placements and wrong-kind rejection. The required-binding API
+replacement, nested consumer integration and shared UI contract remain separate work.
 
 ### Native Policy Decision Before Production Adoption
 
@@ -266,8 +306,9 @@ neither can disappear through defaulting/empty serialization or vary by profile.
 `SourceUniverseId` value is ECS-independent in `nara_core`; policy and lowering belong to
 `nara_project`. Explicit creation prepares the universe and startup Scene metadata once and
 retains their exact member bytes/digests. The unreleased manifest remains schema 1 and replaces
-the old shape without a compatibility reader. This carrier/creation unit does not enforce native
-loader policy or adopt canonical Scene/Prefab provenance, occurrence claims or shared UI keys.
+the old shape without a compatibility reader. The subsequent production admission checkpoint
+enforces native loader policy and canonical Prefab provenance. Occurrence claims and shared UI keys
+remain unimplemented.
 
 A required project-level enum is smaller than a second per-document location list, but it applies
 to all native document admission, not merely configured Scene/Prefab directories. The existing
@@ -321,6 +362,31 @@ already published. A stronger pre-Scene key-admission guarantee would require an
 preflight contract and evidence; this proposal does not silently claim one.
 
 ## Deliberate API Replacement
+
+The independent owner review selects the following dependency-ordered replacement, rather than
+extending the prototype's product-side claim table:
+
+1. Make the containing source mandatory in `ExpandedSceneCandidate`, require canonical Prefab
+   bindings, and replace source-less persistent spawn/replacement inputs. Scene owns a private,
+   World-bound active occurrence association keyed by explicit namespace/slot. It records source
+   and exact activation as values, covers empty instances, and participates in publication,
+   replacement, exact end and disposable projection clear. Reuse the existing instance receipt;
+   do not add another Entity resolver, source registry or permanent slot-history service.
+2. Expose ordinary preparation at the existing unbound-native-value stage, before Scene target
+   entity allocation. Dropping this token needs no World; commit revalidates the exact World,
+   Schema, asset and occurrence baselines. World-bound asset context is not cross-World purity.
+   Advanced native retirement custody remains a later stage of this same kernel, not a second
+   preparation policy. Compare prepare/commit/cancel separately through a public consumer.
+3. Adopt one complete source/placement/occurrence lowering in Runtime and Canvas, then refreeze
+   ADR 0102's public inventory and neutral conformance assertions. A canonical native key currently
+   names only a primary Scene or Prefab document; `SourceDocumentKind` is not an imported product
+   identifier. Admit a real product coordinate before supporting multiple entity-bearing products
+   from one source.
+
+ADR 0038 must adopt required source binding and ADR 0058 must adopt active occurrence ownership
+before step 1 changes their contract. Neither step changes ordinary Identity history or admits
+occurrence eviction. Authoring queries/edits remain document-relative; they do not need a runtime
+occurrence merely to edit a document.
 
 The likely owning changes are `ExpandedSceneCandidate::plain`, SceneSpawner/direct spawn and
 replacement entry points, the Prefab resolver result, `SceneSource::direct`/`direct_expanded`,
