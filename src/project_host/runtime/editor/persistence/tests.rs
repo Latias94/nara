@@ -19,6 +19,7 @@ mod content_refresh;
 mod initial_open;
 #[cfg(feature = "presentation-2d")]
 mod preview_epoch;
+mod reopen_failures;
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
 

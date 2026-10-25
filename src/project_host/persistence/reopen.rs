@@ -18,7 +18,8 @@ struct ReopenedFile {
     content_digest: ContentDigest,
 }
 
-enum ReopenFailure {
+#[derive(Clone, Copy)]
+pub(in crate::project_host) enum ReopenFailure {
     Rejected(EditorPersistenceRejection),
     Failed(EditorPersistenceFailureStage),
 }
@@ -130,6 +131,16 @@ impl SceneReopenRequest {
 }
 
 impl PreparedSceneReopen {
+    /// Observes pure preparation without invoking native codecs or migrations.
+    pub(in crate::project_host) fn preparation_identity(
+        &self,
+    ) -> Result<FileIdentity, ReopenFailure> {
+        match &self.result {
+            Ok((_, identity, _)) => Ok(*identity),
+            Err(failure) => Err(*failure),
+        }
+    }
+
     pub(in crate::project_host) fn admit(
         self,
         registry: Option<&ComponentRegistry>,
@@ -206,6 +217,16 @@ impl PrefabReopenRequest {
 }
 
 impl PreparedPrefabReopen {
+    /// Observes pure preparation without invoking native codecs or migrations.
+    pub(in crate::project_host) fn preparation_identity(
+        &self,
+    ) -> Result<FileIdentity, ReopenFailure> {
+        match &self.result {
+            Ok((_, identity, _)) => Ok(*identity),
+            Err(failure) => Err(*failure),
+        }
+    }
+
     pub(in crate::project_host) fn admit(
         self,
         registry: Option<&ComponentRegistry>,

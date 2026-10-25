@@ -11,7 +11,8 @@ use crate::project_host::authoring::native_source::{
     AdmittedNativeDocumentSource, NativeDocumentSourcePolicy,
 };
 use crate::project_host::persistence::{
-    PrefabReopenRequest, PreparedPrefabReopen, PreparedSceneReopen, SceneReopenRequest,
+    PrefabReopenRequest, PreparedPrefabReopen, PreparedSceneReopen, ReopenFailure,
+    SceneReopenRequest,
 };
 
 use super::*;
@@ -342,6 +343,14 @@ impl EditorProjectSession {
             document: Some(admission.document),
             reason,
         };
+        let preparation_failed = |failure| match failure {
+            ReopenFailure::Rejected(reason) => rejected(reason),
+            ReopenFailure::Failed(stage) => EditorPersistenceResult::Failed {
+                request: EditorPersistenceRequestKind::Reopen,
+                document: Some(admission.document),
+                stage,
+            },
+        };
         if let Err(reason) = self.validate_reopen_admission(admission) {
             return rejected(reason);
         }
@@ -351,27 +360,41 @@ impl EditorProjectSession {
             .map(|lane| lane.plan.schema_validation().registry());
         match (prepared, &admission.lane) {
             (ReopenCompletion::Scene(prepared, source), PersistenceLane::Scene(lane)) => {
+                let identity = match prepared.preparation_identity() {
+                    Ok(identity) => identity,
+                    Err(failure) => return preparation_failed(failure),
+                };
                 let source = match source {
                     Ok(source) => source,
                     Err(reason) => return rejected(reason),
                 };
-                if source.key() != &lane.source_key
-                    || source.revalidate(&self.source_project_root()).is_err()
-                {
-                    return rejected(EditorPersistenceRejection::SourceBindingMismatch);
+                if let Err(reason) = self.validate_reopened_native_source(
+                    &admission.project_path,
+                    &lane.source_key,
+                    identity,
+                    &source,
+                ) {
+                    return rejected(reason);
                 }
                 let outcome = prepared.admit(registry);
                 self.publish_scene_reopen(lane, admission.revision, &source, outcome)
             }
             (ReopenCompletion::Prefab(prepared, source), PersistenceLane::Prefab(lane)) => {
+                let identity = match prepared.preparation_identity() {
+                    Ok(identity) => identity,
+                    Err(failure) => return preparation_failed(failure),
+                };
                 let source = match source {
                     Ok(source) => source,
                     Err(reason) => return rejected(reason),
                 };
-                if source.key() != &lane.source_key
-                    || source.revalidate(&self.source_project_root()).is_err()
-                {
-                    return rejected(EditorPersistenceRejection::SourceBindingMismatch);
+                if let Err(reason) = self.validate_reopened_native_source(
+                    &admission.project_path,
+                    &lane.source_key,
+                    identity,
+                    &source,
+                ) {
+                    return rejected(reason);
                 }
                 let outcome = prepared.admit(registry);
                 let refresh = lane

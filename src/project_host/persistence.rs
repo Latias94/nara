@@ -23,7 +23,8 @@ use nara_tooling::{
 
 mod reopen;
 pub(super) use reopen::{
-    PrefabReopenRequest, PreparedPrefabReopen, PreparedSceneReopen, SceneReopenRequest,
+    PrefabReopenRequest, PreparedPrefabReopen, PreparedSceneReopen, ReopenFailure,
+    SceneReopenRequest,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

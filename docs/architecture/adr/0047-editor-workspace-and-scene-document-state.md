@@ -184,6 +184,9 @@ Rules:
   Workspace owner. Pure authoring validation may run there; native registry codecs and migrations
   remain on owner admission. Before those callbacks or document replacement, the owner rechecks
   source binding, schema admission, original lane and the trusted Scene Runtime exclusion.
+  An already failed pure preparation preserves its file/decode/validation outcome instead of
+  being relabeled by an independent source probe. Successful candidates prove the exact admitted,
+  actually read and current source identities before native callbacks and again before publication.
   A stale, cancelled, failed or rejected preparation cannot update the document or Host baseline.
   Only a Completed task after physical return may publish; unlike Save, read preparation has no
   irreversible file write to acknowledge. Reopen exposes no new public Cancel action.
