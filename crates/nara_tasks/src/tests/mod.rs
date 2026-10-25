@@ -1,5 +1,6 @@
 mod close;
 mod execution;
+mod lazy;
 mod scopes;
 
 use std::time::Duration;

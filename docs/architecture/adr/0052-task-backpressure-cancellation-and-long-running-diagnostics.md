@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-25
+**Last Revised**: 2026-10-26
 **Refines**: ADR 0008, ADR 0042, ADR 0048
 **Refined By**: ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
@@ -41,6 +41,12 @@ flowchart TD
 
 - IO, compute, and async-compute pools each have non-zero worker and pending-item limits. Per-kind and
   aggregate worker/pending maxima are validated before any thread is created.
+- Optional lazy facilities keep those configured limits but activate only a used worker kind.
+  First use may wait for OS thread creation on its submitter before queue admission; it is not
+  part of accepted-admission-to-start timing. Partial startup rejects the closure with
+  `WorkerStartupFailed`, closes that kind without implicit retry, and retains every successfully
+  created worker for physical retirement. Other kinds remain independently usable. Eager
+  construction remains available when startup must acquire worker capacity before publication.
 - Submission never blocks for queue capacity and never falls back to caller-thread execution.
 - Each request carries an admission tick, `TaskDomainKey`, overload policy, and receives a monotonic
   `TaskId`; together they form `TaskOrderKey`.
@@ -131,6 +137,11 @@ flowchart TD
   pending/running handles in bounded batches, and joins only workers already known to have exited.
   All three pool kinds begin closing together rather than serially consuming three complete timeout
   budgets.
+- Physical close also prevents further lazy activation. An in-flight OS spawn remains in the
+  same retained worker-custody object; close/Drop does not wait for its private startup mutex or
+  take an incomplete handle snapshot. Completion requires startup to return and every created
+  handle to join. Scope close need not wait for a first-use submission that has not been admitted;
+  that later refusal and input disposal remain the submitter's responsibility.
 - Removing previously admitted work for coalescing, reclamation or disposal transfers its custody
   under the queue lock before removal becomes visible. Destructors run outside that lock. Physical
   close also waits for these disposals to return, including on a submitting thread after workers

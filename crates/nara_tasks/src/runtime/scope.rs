@@ -15,6 +15,11 @@ impl TaskFacilities {
         TaskPools::try_new(config).map(|pools| Self { pools })
     }
 
+    /// Creates optional first-use worker activation with the same custody as [`TaskPools::try_new_lazy`].
+    pub fn try_new_lazy(config: TaskPoolConfig) -> Result<Self, TaskPoolError> {
+        TaskPools::try_new_lazy(config).map(|pools| Self { pools })
+    }
+
     /// Creates explicit test facilities without worker threads.
     pub fn inline_for_tests(config: TaskPoolConfig) -> Result<Self, TaskPoolError> {
         TaskPools::inline_for_tests(config).map(|pools| Self { pools })
@@ -121,7 +126,7 @@ impl TaskScope {
         if !retired.is_empty() {
             retain_abandoned_task_owner(AbandonedTaskPoolOwner {
                 pending: retired,
-                workers: Vec::new(),
+                workers: None,
                 disposal_owner: None,
             });
         }
@@ -217,6 +222,7 @@ impl TaskPoolExecutor {
         Self {
             shared: self.shared.clone(),
             inline: self.inline,
+            workers: self.workers.clone(),
         }
     }
 }

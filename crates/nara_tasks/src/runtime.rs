@@ -21,8 +21,10 @@ use nara_core::{ItemLimit, TimeLimit};
 use nara_ecs::Resource;
 
 mod scope;
+mod workers;
 pub use scope::{TaskFacilities, TaskScope, TaskScopeCloseReport};
 use scope::{TaskScopeShared, prepare_admission, same_scope};
+use workers::{TaskWorkers, WorkerActivationError};
 
 #[cfg(test)]
 use std::cell::RefCell;
@@ -595,9 +597,13 @@ impl TaskSpawnRequest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskRejectReason {
-    QueueFull { capacity: usize },
+    QueueFull {
+        capacity: usize,
+    },
     PoolClosed,
     ScopeClosed,
+    /// This worker kind failed first-use activation; its physical owner retains partial workers.
+    WorkerStartupFailed,
     TaskIdExhausted,
 }
 
@@ -1306,6 +1312,7 @@ pub struct TaskPoolStats {
     pub coalesced: u64,
     pub queued: usize,
     pub running: usize,
+    /// Started workers plus in-flight OS spawn reservations; zero is not worker-join evidence.
     pub live_workers: usize,
     pub started: u64,
     pub completed: u64,
@@ -1457,6 +1464,34 @@ impl TaskPoolsConstructionFailure {
 impl TaskPools {
     pub fn try_new(config: TaskPoolConfig) -> Result<Self, TaskPoolError> {
         Self::try_new_retained(config).map_err(TaskPoolsConstructionFailure::into_error)
+    }
+
+    /// Creates bounded threaded queues whose workers start on the first submission to each kind.
+    ///
+    /// First use may block for OS thread creation. A partial startup is retained by the physical
+    /// owner and rejects submission as [`TaskRejectReason::WorkerStartupFailed`]. It is not retried
+    /// implicitly. Idle kinds create no workers; ordinary submission never executes work inline.
+    pub fn try_new_lazy(config: TaskPoolConfig) -> Result<Self, TaskPoolError> {
+        config.validate().map_err(TaskPoolError::InvalidConfig)?;
+        prewarm_task_owner_reaper();
+        let (io, io_owner) = TaskPoolExecutor::lazy(TaskPoolKind::Io, config);
+        let (compute, compute_owner) = TaskPoolExecutor::lazy(TaskPoolKind::Compute, config);
+        let (async_compute, async_owner) =
+            TaskPoolExecutor::lazy(TaskPoolKind::AsyncCompute, config);
+        Ok(Self {
+            config,
+            next_id: Arc::new(AtomicU64::new(1)),
+            instance_token: Arc::new(TaskPoolInstanceToken::default()),
+            io,
+            compute,
+            async_compute,
+            close_owner: Mutex::new(Some(TaskPoolsCloseOwner::new(
+                io_owner,
+                compute_owner,
+                async_owner,
+            ))),
+            scope: None,
+        })
     }
 
     fn try_new_retained(config: TaskPoolConfig) -> Result<Self, TaskPoolsConstructionFailure> {
@@ -1762,6 +1797,29 @@ impl TaskPools {
     #[cfg(test)]
     pub(crate) fn set_next_task_id_for_tests(&self, next_id: u64) {
         self.next_id.store(next_id, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_before_worker_activation_hook_for_tests(
+        &self,
+        hook: impl FnOnce() + Send + 'static,
+    ) {
+        self.io.workers.before_activation(hook);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn after_lazy_first_worker_for_tests(&self, hook: impl FnOnce() + Send + 'static) {
+        self.io.workers.after_first_worker(hook);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn after_worker_reservation_for_tests(&self, hook: impl FnOnce() + Send + 'static) {
+        self.io.workers.after_reservation(hook);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn worker_join_probe_for_tests(&self) -> Arc<AtomicUsize> {
+        self.io.workers.join_probe()
     }
 
     #[cfg(test)]
@@ -2212,11 +2270,12 @@ enum InlineStep {
 struct TaskPoolExecutor {
     shared: Arc<ExecutorShared>,
     inline: bool,
+    workers: Arc<TaskWorkers>,
 }
 
 struct TaskPoolCloseOwner {
     shared: Arc<ExecutorShared>,
-    workers: Vec<JoinHandle<()>>,
+    workers: Arc<TaskWorkers>,
     pending_reaps: Vec<TaskOwnerReapReceipt>,
     shutdown_policy: TaskShutdownPolicy,
     inline: bool,
@@ -2260,67 +2319,72 @@ impl TaskPoolExecutor {
         kind: TaskPoolKind,
         config: TaskPoolConfig,
     ) -> Result<(Self, TaskPoolCloseOwner), TaskPoolExecutorConstructionFailure> {
-        let kind_config = config.kind(kind);
-        let thread_count = kind_config.workers().get();
-        let shared = Arc::new(ExecutorShared::new(
-            kind_config.pending().get(),
-            thread_count,
-        ));
-        let mut workers: Vec<JoinHandle<()>> = Vec::with_capacity(thread_count);
-        for index in 0..thread_count {
-            let worker_shared = shared.clone();
-            let worker = match spawn_task_worker(kind, index, worker_shared) {
-                Ok(worker) => worker,
-                Err(error) => {
-                    {
-                        let mut queue = lock_unpoisoned(&shared.queue);
-                        queue.live_workers = workers.len();
-                        queue.lifecycle = QueueLifecycle::Closed;
-                        shared.changed.notify_all();
+        let (executor, close_owner) = Self::lazy(kind, config);
+        match executor.workers.activate(&executor.shared) {
+            Ok(()) => Ok((executor, close_owner)),
+            Err(activation) => {
+                let message = match activation {
+                    WorkerActivationError::Failed(Some(error)) => error.to_string(),
+                    WorkerActivationError::Failed(None) | WorkerActivationError::Closed => {
+                        "worker activation is unavailable".to_owned()
                     }
-                    let close_owner =
-                        TaskPoolCloseOwner::new(shared, workers, config.shutdown_policy(), false);
-                    #[cfg(test)]
-                    let close_owner = {
-                        let mut close_owner = close_owner;
-                        close_owner.construction_cleanup_polls =
-                            worker_spawn_failure_injection(kind)
-                                .map(|injection| injection.cleanup_polls);
-                        close_owner
-                    };
-                    return Err(TaskPoolExecutorConstructionFailure {
-                        error: TaskPoolError::WorkerSpawnFailed {
-                            kind,
-                            message: error.to_string(),
-                        },
-                        close_owner,
-                    });
-                }
-            };
-            workers.push(worker);
+                };
+                #[cfg(test)]
+                let close_owner = {
+                    let mut close_owner = close_owner;
+                    close_owner.construction_cleanup_polls = worker_spawn_failure_injection(kind)
+                        .map(|injection| injection.cleanup_polls);
+                    close_owner
+                };
+                Err(TaskPoolExecutorConstructionFailure {
+                    error: TaskPoolError::WorkerSpawnFailed { kind, message },
+                    close_owner,
+                })
+            }
         }
-        Ok((
+    }
+
+    fn lazy(kind: TaskPoolKind, config: TaskPoolConfig) -> (Self, TaskPoolCloseOwner) {
+        let shared = Arc::new(ExecutorShared::new(config.kind(kind).pending().get(), 0));
+        let workers = Arc::new(TaskWorkers::dormant(
+            kind,
+            config.kind(kind).workers().get(),
+        ));
+        (
             Self {
                 shared: shared.clone(),
                 inline: false,
+                workers: workers.clone(),
             },
             TaskPoolCloseOwner::new(shared, workers, config.shutdown_policy(), false),
-        ))
+        )
     }
 
     fn inline(kind: TaskPoolKind, config: TaskPoolConfig) -> (Self, TaskPoolCloseOwner) {
         let shared = Arc::new(ExecutorShared::new(config.kind(kind).pending().get(), 0));
+        let workers = Arc::new(TaskWorkers::dormant(kind, 0));
         (
             Self {
                 shared: shared.clone(),
                 inline: true,
+                workers: workers.clone(),
             },
-            TaskPoolCloseOwner::new(shared, Vec::new(), config.shutdown_policy(), true),
+            TaskPoolCloseOwner::new(shared, workers, config.shutdown_policy(), true),
         )
     }
 
     fn admit(&self, pending: PendingJob) -> AdmissionDecision {
         let scope = pending.scope.clone();
+        let activation_error = if self.inline
+            || self.workers.is_active()
+            || scope
+                .as_ref()
+                .is_some_and(|scope| scope.lock_admission().is_closed())
+        {
+            None
+        } else {
+            self.workers.activate(&self.shared).err()
+        };
         let activity = scope.as_ref().map(|scope| scope.lock_admission());
         let mut pending = Some(pending);
         let mut discarded = Vec::new();
@@ -2358,6 +2422,8 @@ impl TaskPoolExecutor {
 
             if scope_closed {
                 decision = AdmissionDecision::Rejected(TaskRejectReason::ScopeClosed);
+            } else if matches!(activation_error, Some(WorkerActivationError::Failed(_))) {
+                decision = AdmissionDecision::Rejected(TaskRejectReason::WorkerStartupFailed);
             } else if queue.lifecycle != QueueLifecycle::Open {
                 decision = AdmissionDecision::Rejected(TaskRejectReason::PoolClosed);
             } else {
@@ -2480,7 +2546,7 @@ impl TaskPoolExecutor {
 impl TaskPoolCloseOwner {
     fn new(
         shared: Arc<ExecutorShared>,
-        workers: Vec<JoinHandle<()>>,
+        workers: Arc<TaskWorkers>,
         shutdown_policy: TaskShutdownPolicy,
         inline: bool,
     ) -> Self {
@@ -2502,14 +2568,12 @@ impl TaskPoolCloseOwner {
         if self.close_phase != TaskPoolClosePhase::Open {
             return;
         }
-        let mut queue = lock_unpoisoned(&self.shared.queue);
-        queue.lifecycle = if self.inline {
+        let lifecycle = if self.inline {
             QueueLifecycle::Closed
         } else {
             QueueLifecycle::Draining
         };
-        self.shared.changed.notify_all();
-        drop(queue);
+        self.workers.close_admission(&self.shared, lifecycle);
         self.close_phase = if self.inline {
             TaskPoolClosePhase::Cancelling {
                 deadline: deadline_after(self.shutdown_policy.cancel_timeout().get()),
@@ -2694,7 +2758,7 @@ impl TaskPoolCloseOwner {
             self.pending_reaps
                 .push(retain_abandoned_task_owner(AbandonedTaskPoolOwner {
                     pending,
-                    workers: Vec::new(),
+                    workers: None,
                     disposal_owner: None,
                 }));
         }
@@ -2715,21 +2779,7 @@ impl TaskPoolCloseOwner {
     }
 
     fn join_finished_workers(&mut self) {
-        let mut index = 0;
-        while index < self.workers.len() {
-            if !self.workers[index].is_finished() {
-                index += 1;
-                continue;
-            }
-            let worker = self.workers.swap_remove(index);
-            if worker.join().is_ok() {
-                self.shutdown_report.joined_workers =
-                    self.shutdown_report.joined_workers.saturating_add(1);
-            } else {
-                self.shutdown_report.panicked_workers =
-                    self.shutdown_report.panicked_workers.saturating_add(1);
-            }
-        }
+        self.workers.join_finished(&mut self.shutdown_report);
     }
 
     fn record_shutdown(&mut self) {
@@ -2747,6 +2797,8 @@ impl TaskPoolCloseOwner {
     }
 
     fn abandon(&mut self) {
+        self.workers
+            .close_admission(&self.shared, QueueLifecycle::Closed);
         let (pending, running) = {
             let mut queue = lock_unpoisoned(&self.shared.queue);
             queue.lifecycle = QueueLifecycle::Closed;
@@ -2780,7 +2832,7 @@ impl TaskPoolCloseOwner {
         self.join_finished_workers();
         retain_abandoned_task_owner(AbandonedTaskPoolOwner {
             pending,
-            workers: std::mem::take(&mut self.workers),
+            workers: Some(self.workers.clone()),
             disposal_owner: Some(Arc::clone(&self.shared)),
         });
         for control in running {
@@ -3097,7 +3149,7 @@ fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 struct AbandonedTaskPoolOwner {
     pending: VecDeque<PendingJob>,
-    workers: Vec<JoinHandle<()>>,
+    workers: Option<Arc<TaskWorkers>>,
     disposal_owner: Option<Arc<ExecutorShared>>,
 }
 
@@ -3107,13 +3159,18 @@ impl AbandonedTaskPoolOwner {
     }
 
     fn poll_finished_workers(&mut self) {
-        reap_abandoned_workers(&mut self.workers);
+        if let Some(workers) = &self.workers {
+            workers.join_finished(&mut TaskPoolShutdownReport::default());
+        }
     }
 
     fn is_reaped(&self, pending_in_flight: &AtomicUsize) -> bool {
         self.pending.is_empty()
             && pending_in_flight.load(Ordering::Acquire) == 0
-            && self.workers.is_empty()
+            && self
+                .workers
+                .as_ref()
+                .is_none_or(|workers| workers.is_empty())
             && self
                 .disposal_owner
                 .as_ref()
@@ -3719,18 +3776,6 @@ fn retain_reaper_message(
     }
 }
 
-fn reap_abandoned_workers(retained: &mut Vec<JoinHandle<()>>) {
-    let mut index = 0;
-    while index < retained.len() {
-        if !retained[index].is_finished() {
-            index += 1;
-            continue;
-        }
-        let worker = retained.swap_remove(index);
-        let _ = worker.join();
-    }
-}
-
 #[cfg(test)]
 pub(crate) fn retained_abandoned_worker_count_for_tests() -> usize {
     ABANDONED_TASK_OWNER_COUNT.load(Ordering::Acquire) as usize
@@ -3806,7 +3851,9 @@ impl TaskOwnerReaperHarness {
         self.supervisor.retain(TaskOwnerReapRequest::new(
             AbandonedTaskPoolOwner {
                 pending: VecDeque::new(),
-                workers: vec![thread::spawn(|| {})],
+                workers: Some(Arc::new(TaskWorkers::retained_for_tests(vec![
+                    thread::spawn(|| {}),
+                ]))),
                 disposal_owner: None,
             },
             receipt.clone(),
@@ -3853,7 +3900,7 @@ impl TaskOwnerReaperHarness {
         self.supervisor.retain(TaskOwnerReapRequest::new(
             AbandonedTaskPoolOwner {
                 pending,
-                workers: Vec::new(),
+                workers: None,
                 disposal_owner: None,
             },
             receipt.clone(),

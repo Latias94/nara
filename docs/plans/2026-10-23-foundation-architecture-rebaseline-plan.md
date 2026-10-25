@@ -253,7 +253,9 @@ Editor graphics have their bounded qualification under the
 [owner-local close design](../architecture/native-close-ownership-design.md). R4b's first
 [activity-custody unit](../architecture/task-activity-scope-design.md) has bounded Tasks/Image and
 independent-consumer qualification; lazy/shared
-product comparison, integrated deployment and R4c remain open.
+comparison now has [bounded release Image evidence](../benchmarks/2026-10-26-task-facility-locality.md).
+It challenges unconditional sharing for interactive progress; actual Editor lifecycle/deployment
+qualification and R4c remain open.
 **Owners:** App/Tasks, executable Host and domains.
 
 Three independently verifiable sub-units:

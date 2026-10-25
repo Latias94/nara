@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "activity_scopes/comparison.rs"]
+mod comparison;
+
 use nara_app::{
     RuntimeClosePolicy, RuntimeControl, RuntimeControlFailure, RuntimeControlRequestResult,
     RuntimeControlStatus, RuntimeDriveError, RuntimeInstance, RuntimeObligationLedger,

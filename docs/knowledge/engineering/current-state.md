@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "995b1cabfb1b9dc670fff119d05e5e712c21b5c023335ab5f0280d1f45d15676"
+source_fingerprint: "b2eec204d1397825cf680010cc6b8916af57140c1a7e37c5226b7d0830f56e47"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "995b1cabfb1b9dc670fff119d05e5e712c21b5c023335ab5f0280d1f45d
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `995b1cabfb1b9dc670fff119d05e5e712c21b5c023335ab5f0280d1f45d15676`
-- Immutable records: 923
+- Source fingerprint: `b2eec204d1397825cf680010cc6b8916af57140c1a7e37c5226b7d0830f56e47`
+- Immutable records: 924
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Demand activation custody and matched lazy shared Image comparison](verification/2026-10/2026-10-25T164306Z-demand-activation-custody-and-matched-lazy-shared-image-comparison-c5d3a638a3884807b489a85f0b7b0b1a.md) - Qualifies lazy per-kind workers, concurrent physical retirement, actual joined retention and a matched release Image comparison that challenges unconditional physical sharing.
 - **Session Handoff**: [R4b task activity custody merged and ready for lazy facility comparison](sessions/2026-10/2026-10-25T160206Z-r4b-task-activity-custody-merged-and-ready-for-lazy-facility-comparison-48eac0b948164958bb8efff8a892bcab.md) - Pins the qualified optional custody substrate to local main while preserving the full foundation Goal and remaining workload/product selection.
 - **Verification Evidence**: [Independent task activity custody and shared Image runtime qualification](verification/2026-10/2026-10-25T155728Z-independent-task-activity-custody-and-shared-image-runtime-qualification-13caef5f8c39471aa58529789ae9c530.md) - R4b first custody unit, isolated reaper recovery correction and actual two-Runtime Image evidence; deployment and lazy comparison remain open.
 - **Session Handoff**: [Editor native retirement committed and qualified for next foundation unit](sessions/2026-10/2026-10-25T151327Z-editor-native-retirement-committed-and-qualified-for-next-foundation-unit-d5d0fa4b2d4d46e49596dfdc339c4b32.md) - Pins eleven actual native trajectories to commit 8856a16, records all review corrections and remaining R4 scopes, and preserves the complete foundation goal.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Session Handoff**: [Compiled failure projection committed and real Snap consumer initially passing](sessions/2026-10/2026-10-25T103839Z-compiled-failure-projection-committed-and-real-snap-consumer-initially-passing-b98096de3c6149249a0389e9faacb5d5.md) - R1/F2 and F3 are locally committed with scoped qualification; three uncommitted Snap consumer files pass five focused workflows and still need review, broader checks and a precise commit.
 - **Verification Evidence**: [Compiled domain failure projection and truthful publication observations](verification/2026-10/2026-10-25T100841Z-compiled-domain-failure-projection-and-truthful-publication-observations-8b995496a82b411184e95f6f462b48f8.md) - Records R1/F3's real compiled-domain code-loss regression, bounded replacement, complete review and physical-outcome corrections; full R1 and the foundation remain open.
 - **Work Progress**: [Persistence attempts committed and compiled domain diagnostic projection checkpoint](progress/2026-10/2026-10-25T091355Z-persistence-attempts-committed-and-compiled-domain-diagnostic-projection-checkpoint-1ee496d678dc41b4953eb4665f625ca7.md) - Commits qualified R1/F2, records the real F3 code-loss regression and bounded implementation, and separates active compiled qualification from the unintegrated Snap artifact.
-- **Verification Evidence**: [Exact persistence attempts and terminal observation qualification](verification/2026-10/2026-10-25T081443Z-exact-persistence-attempts-and-terminal-observation-qualification-332f36f3c0f94f93ae1eb2721e981359.md) - Records owner-issued attempt correlation, exact observation acknowledgment, unchanged physical custody, public workflow evidence and scoped review corrections; complete R1 remains open.
 
 # Integration Notes
 

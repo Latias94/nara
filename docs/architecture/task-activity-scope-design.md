@@ -1,7 +1,8 @@
 # Task Facilities And Activity Custody
 
-Status: the [first R4b custody unit is qualified](../knowledge/engineering/verification/2026-10/2026-10-25T155728Z-independent-task-activity-custody-and-shared-image-runtime-qualification-13caef5f8c39471aa58529789ae9c530.md); product deployment and the comparison
-with lazy per-Runtime facilities remain open. The [rebaseline plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md)
+Status: the [first R4b custody unit is qualified](../knowledge/engineering/verification/2026-10/2026-10-25T155728Z-independent-task-activity-custody-and-shared-image-runtime-qualification-13caef5f8c39471aa58529789ae9c530.md).
+Optional demand activation and a [bounded lazy/shared comparison](../benchmarks/2026-10-26-task-facility-locality.md)
+now have separate evidence; actual Editor lifecycle/deployment qualification remains open. The [rebaseline plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md)
 owns the complete scope. This document does not qualify R4c, Future I/O or real-time callbacks.
 
 ## Pressure And Ownership
@@ -108,6 +109,86 @@ scope. Facilities can be closed by their owner while scopes remain; this cancels
 does not manufacture scope completion. Normal Host shutdown retires scopes before worker join.
 
 ## Verification And Remaining Decisions
+
+### Concrete Product Admission And Retirement Work
+
+Read-only tracing at `c62ff32` identifies the trusted Editor authoring/preview plus same-process
+Play consumer in `src/project_host/runtime/tests/editor_scene_travel.rs`. It also exposes required
+work beyond replacing a Tasks plugin:
+
+- `PluginDefinition::exact_eq` compares canonical definition identity and factory type, not
+  captured runtime objects. A repeatable definition must not capture an otherwise unrepresented
+  facilities Arc; pointer bytes must not become a canonical configuration fingerprint.
+- Prefer one move-only typed candidate input installed after pure definition preparation and
+  before the existing commit/seal/admit path. A two-phase construction owner is a valid alternative
+  but adds another abandonment contract without a second real input consumer. Do not add an
+  arbitrary App callback, service locator or Tasks dependency to App.
+- The ordinary configured Tasks plugin consumes the input, checks full `TaskPoolConfig` equality,
+  registers an activity owner that also retains the physical facilities Arc, then exposes its
+  facade. Conflicting explicit shared-plugin input, existing facade or config mismatch refuses
+  construction. The plan and its canonical Tasks definition remain unchanged.
+- A concrete Session owns facilities outside the Play running slot. Stop/Restart and failed
+  startup retire only their activity; content-refresh replacements use the same facilities with
+  fresh activity identity. A later start cannot merge or silently reconfigure physical policy.
+  Shared deployment explicitly replaces authoring's fixed 2/1/1 policy with the Host-selected
+  policy; those former numbers are not per-scope reservations.
+- `EditorAuthoringRuntime::shutdown_tasks` currently expects only `TaskShutdownReport`. Separate
+  activity return from final Session physical shutdown before enabling shared facilities, or a
+  stopped authoring Runtime would remain falsely incomplete. Final public physical close receipts
+  must still describe actual joined facilities.
+- `advance_close` must account for Preparing, Starting, AwaitingGameTarget, Active and failed Play
+  owners using the existing trusted-workspace retirement choreography, not merely an empty
+  `ProjectHost` slot. Preserve Scene-request Tasks custody after its local cancellation completes.
+- Content refresh currently can replace the old authoring Runtime or drop a failed replacement.
+  Retain those complete owners through retirement and gate another refresh until they finish;
+  preserve exact `HostCustody::transfer_to` for file owners. Drop/quarantine is not evidence of
+  normal predecessor completion.
+- Authoring startup failure currently projects to `DiagnosticReport`. Retain its retryable failure
+  owner through Open/refresh failure instead of treating diagnostic projection as cleanup proof.
+- Expose nonblocking physical close progress for the concrete Session. Do not call the standalone
+  `shutdown_blocking` driver from a per-frame Editor close poll and imply responsiveness.
+
+These are source-derived redesign obligations, not completed implementation or new public Host
+abstractions. Qualify the actual A-to-B-to-A Scene consumer with held Play work, authoring
+Save/Image progress, Stop/Restart/failed start, config refusal, refresh predecessor retirement and
+final Session physical completion before selecting a shared product deployment.
+
+### Demand-Activation Comparison Candidate
+
+The demand-activation candidate creates bounded queues and a physical close owner without workers. The
+first submission to a worker kind activates only that kind. First use may perform OS thread
+creation on the submitter and concurrent first submissions may wait for the same activation;
+measure that wall time separately from accepted-admission-to-start. There is no caller-thread
+execution fallback. An already closed scope must not activate facilities.
+
+Activation serializes on one private worker-ownership lock and uses the existing queue lock for
+live-worker reservations. Physical close atomically prevents further activation and closes the
+queue without waiting for OS thread creation; join polls the worker lock without blocking. All
+successfully created handles, including partial activation, stay in the physical owner's shared
+private custody. Abnormal Drop transfers that same custody object to the reaper, not a possibly
+incomplete handle snapshot. A failed activation closes that kind and returns a typed spawn
+rejection before admitting its closure; it does not retry implicitly or manufacture completion.
+Other worker kinds remain independent. The existing physical close protocol joins any partial
+workers. Scope return still describes accepted work only, not physical worker joining.
+
+Activation precedes the scope admission gate. A competing scope close can therefore complete
+while a first-use submission is still creating facilities, provided no work was yet accepted.
+That submission is refused when it later reaches the gate; its input disposal remains the
+submitter's unadmitted responsibility. A scope already known closed never starts activation.
+
+This is an optional measured candidate, not a new default. Comparing explicit Host preactivation
+with lazy first-use activation can distinguish latency policy from scope ownership without a
+universal executor trait, per-task native-thread creation or a process-global pool. Shared and
+per-Runtime facilities must use the same activation mechanism and job consumer so that the
+comparison does not silently reward one candidate with an eager warmup or extra worker budget.
+
+The [bounded release comparison](../benchmarks/2026-10-26-task-facility-locality.md) now records the
+same two-active-Image consumer with matched aggregate worker/queue capacity. Both start with no
+workers; private facilities preserve sibling progress under owner-0 occupancy while the shared
+queue waits for held work. This challenges unconditional sharing as the preferred interactive
+deployment. Activity custody remains useful independently; select physical isolation domains
+from required progress guarantees, then qualify actual Editor deployment. No product default
+has yet changed.
 
 | Criterion | Required evidence |
 |---|---|

@@ -714,12 +714,14 @@ fn image_reload_diagnostic_matrix_preserves_codes_and_typed_privacy_fields() {
         TaskRejectReason::QueueFull { capacity: 7 },
         TaskRejectReason::PoolClosed,
         TaskRejectReason::ScopeClosed,
+        TaskRejectReason::WorkerStartupFailed,
         TaskRejectReason::TaskIdExhausted,
     ] {
         let reason_text = match reason {
             TaskRejectReason::QueueFull { .. } => "queue-full",
             TaskRejectReason::PoolClosed => "pool-closed",
             TaskRejectReason::ScopeClosed => "scope-closed",
+            TaskRejectReason::WorkerStartupFailed => "worker-startup-failed",
             TaskRejectReason::TaskIdExhausted => "task-id-exhausted",
         };
         cases.push(ImageDiagnosticCase::new(

@@ -421,6 +421,15 @@ evidence is independent of facility join. Compare typed composite owners with a 
 close-completion dependency plan; prefer the latter only where composition needs it. Do not
 build a universal ServiceHub/startup/update/restore graph.
 
+**Measured refinement (2026-10-26).** The
+[matched lazy/shared Image comparison](../benchmarks/2026-10-26-task-facility-locality.md) confirms
+that logical activity isolation is not execution-progress isolation: arbitrary blocking work
+can consume both shared workers while an independent lazy facility preserves sibling progress at
+the same aggregate capacity. Prefer isolation domains selected by required progress, not fewer
+facility objects. Keep shared scopes explicit, and qualify lazy private facilities as a stronger
+interactive Editor candidate before changing product defaults. This does not admit a universal
+fairness scheduler or complete R4b's product lifecycle qualification.
+
 ```text
 close scope: stop admission -> cancel/suppress publication -> await owned work/disposal
 close provider: only after its physical dependents complete -> release native state

@@ -74,3 +74,53 @@ fn renamed_root_and_direct_tasks_share_facilities_with_independent_runtime_custo
     stop(&mut second);
     assert!(facilities.shutdown_blocking().unwrap().is_complete());
 }
+
+#[test]
+fn lazy_facilities_expose_first_use_without_allocating_unused_worker_kinds() {
+    let facilities = Arc::new(
+        nara_engine::tasks::TaskFacilities::try_new_lazy(
+            TaskPoolConfig::threaded(ItemLimit::ONE, ItemLimit::ONE, ItemLimit::ONE).unwrap(),
+        )
+        .unwrap(),
+    );
+    let mut app = App::new();
+    app.add_plugin(nara_tasks::TaskPlugin::shared(facilities.clone()))
+        .unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    for kind in TaskPoolKind::ALL {
+        assert_eq!(facilities.stats().for_kind(kind).live_workers, 0);
+    }
+    let mut task = runtime
+        .world()
+        .resource::<TaskPools>()
+        .spawn(
+            TaskPoolKind::Io,
+            TaskSpawnRequest::new(2, TaskDomainKey::new(7)),
+            |_| 41,
+        )
+        .into_handle()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while task.return_observer().state() == nara_engine::tasks::TaskReturnState::Pending {
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    assert_eq!(task.try_take(), Some(TaskTerminal::Completed(41)));
+    assert!(task.admission_to_start().is_some());
+    assert_eq!(
+        facilities.stats().for_kind(TaskPoolKind::Io).live_workers,
+        1
+    );
+    assert_eq!(
+        facilities
+            .stats()
+            .for_kind(TaskPoolKind::Compute)
+            .live_workers,
+        0
+    );
+    stop(&mut runtime);
+    let report = facilities.shutdown_blocking().unwrap();
+    assert!(report.is_complete());
+    assert_eq!(report.for_kind(TaskPoolKind::Io).joined_workers, 1);
+    assert_eq!(report.for_kind(TaskPoolKind::Compute).joined_workers, 0);
+}

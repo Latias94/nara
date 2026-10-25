@@ -1309,6 +1309,7 @@ fn task_rejection_reason(reason: nara_tasks::TaskRejectReason) -> &'static str {
         nara_tasks::TaskRejectReason::QueueFull { .. } => "queue-full",
         nara_tasks::TaskRejectReason::PoolClosed => "pool-closed",
         nara_tasks::TaskRejectReason::ScopeClosed => "scope-closed",
+        nara_tasks::TaskRejectReason::WorkerStartupFailed => "worker-startup-failed",
         nara_tasks::TaskRejectReason::TaskIdExhausted => "task-id-exhausted",
     }
 }

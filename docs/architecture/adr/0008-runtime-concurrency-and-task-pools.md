@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-25
+**Last Revised**: 2026-10-26
 **Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0052: Task Backpressure,
 Cancellation, and Long-Running Diagnostics; ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
@@ -68,6 +68,11 @@ Core rules:
   `TaskFacilities`. Each activity closes its own admission and waits for accepted executor-owned
   work/disposal; only the facility owner joins workers. This optional Tasks contract does not
   select shared facilities as the default product deployment or a process-global service model.
+- Activity custody is not a progress reservation. Arbitrary blocking work can occupy every
+  shared worker; a latency-sensitive sibling needs an explicitly selected physical isolation
+  policy or separately qualified reservation mechanism. The bounded R4b comparison supports
+  keeping lazy private facilities as an interactive candidate rather than selecting shared
+  facilities merely to reduce facility objects. Product defaults need their own workflow proof.
 - Headless/server execution uses real bounded workers without blocking a simulation tick; domains
   choose explicit ordered main-thread integration when completion order must not affect state.
 - Render threading is a future optimization, not a Phase 1 requirement.
@@ -118,6 +123,10 @@ Core rules:
   interface without worker-close authority. [The R4b design](../task-activity-scope-design.md)
   records the bounded custody implementation and remaining lazy/product comparison; the complete
   long-term execution model remains under the rebaseline plan.
+- `TaskPools::try_new_lazy` and `TaskFacilities::try_new_lazy` retain the same bounded execution
+  and close mechanics while starting only a used kind on first submission. First-use OS startup
+  is explicit submitter cost and can fail before admission; ADR 0052 defines partial-worker
+  retention. This does not by itself select shared facilities or lazy activation for every Host.
 - `TaskPools::inline_for_tests` plus `run_pending_for_tests` is an explicit test harness. It admits
   work through the same bounded queue and terminal state machine; it is not a server/project mode.
 - The std worker backend owns IO, compute, and async-compute workers. Tokio and async-std remain
