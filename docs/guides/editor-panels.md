@@ -452,9 +452,13 @@ let observed = context.read_document_property(request)?;
 // Preparation remains read-only; commit still consumes the candidate after paint.
 ```
 
-An observation is historical, not an edit capability. In particular a Defaulted descendant of an
-omitted root is readable, but existing property replacement still requires a stored root; reading
-does not silently materialize it. Use an explicit legal root edit when source creation is intended.
+An observation is historical, not an edit capability. Reading never materializes source. A prepared
+nested property write can initialize only its omitted declared root from the default, modify it
+in the private candidate, then commit through the ordinary root patch/history owner. Undo restores
+authored absence rather than an explicit default-equal value. Empty selector steps assign the
+supplied root directly, including an optional root with no default. Neither route creates missing
+storage parents/list slots or merges an explicit Null/partial value with defaults. Such targets
+remain explicit refusals; the same default can be readable without being writable in that layout.
 
 The independent consumer discovers an editable integer in non-active Scene and Prefab documents,
 reads its current value and computes the replacement before preparing one ordinary source edit,

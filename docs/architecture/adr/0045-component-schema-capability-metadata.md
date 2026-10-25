@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-20
+**Last Revised**: 2026-10-25
 **Implemented Slice**: RGF-U1 canonical-v1 vocabulary on 2026-07-12
 **Refines**: ADR 0004, ADR 0011, ADR 0015, ADR 0021, ADR 0027, ADR 0028, ADR 0029
 **Refined By**: ADR 0051: Persistent File Envelope, Migration, and Golden Fixtures;
@@ -128,6 +128,11 @@ an optional field without a default remains absent. Missing Map ancestors may be
 host declared defaults. Fixed List locators may append a contiguous suffix, but cannot synthesize
 Null padding for sparse indexes. Explicit incompatible ancestors reject instead of being replaced.
 Record members have no independent default metadata, and creation templates are not decode defaults.
+
+That effective projection does not publish authored source. An explicit Source property write may
+initialize only its touched omitted root from the declared default under ADR 0026, then use the
+ordinary root-field patch and absence-restoring inverse. It does not call the all-default projection
+as a source-write operation or inherit its ancestor/list construction policy.
 
 Materialization uses explicit finite logical-value node, byte and depth limits. If nothing is
 inserted, the borrowed input remains borrowed and an owned input is moved without scanning opaque

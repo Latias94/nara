@@ -144,6 +144,9 @@ impl AuthoringConstructionDraft {
         entity: impl Into<ConstructionEntity>,
         component: ComponentTypeId,
     ) -> Result<(), ScenePatchReport> {
+        if component.as_str().len() > ComponentTypeId::MAX_BYTES {
+            return Err(rejected());
+        }
         self.admit_declaration()?;
         let entity = entity.into();
         self.admit_entity(&entity)?;
@@ -201,6 +204,9 @@ impl AuthoringConstructionDraft {
     }
 
     fn push_write(&mut self, write: PropertyWrite) -> Result<(), ScenePatchReport> {
+        if write.component.as_str().len() > ComponentTypeId::MAX_BYTES {
+            return Err(rejected());
+        }
         self.admit_entity(&write.entity)?;
         if self.writes.len() >= MAX_AUTHORING_FIELD_WRITES {
             return Err(rejected());

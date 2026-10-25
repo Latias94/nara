@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-13
 **Accepted**: 2026-08-18
-**Last Revised**: 2026-10-22 (source-local reference editing and document-bound target choices)
+**Last Revised**: 2026-10-25 (source-owned first writes and omission-preserving inverse)
 **Owner**: `nara_reflect`, `nara_scene`, `nara_tooling`, and persistent document owners
 **Admission Trigger**: Scene/prefab fixtures with a missing provider, known schema without its
 required native or Adapter-specific runtime binding, missing migration, and future component schema
@@ -92,6 +92,13 @@ omission with an inverse field Set. Setting an absent map member records inverse
 removing a present member records inverse Set, including an explicit Null. Forward and inverse
 obey the same transaction budgets, complete candidate validation and unavailable-manifest
 preservation before one history publication. No native codec or project callback is introduced.
+
+Stable-property first writes may initialize only the selected missing declared root in the private
+candidate under ADR 0026. The final complete root and its inverse still pass this port's existing
+replay/reference/capability budgets. Defaults in other roots remain omitted, explicit/partial roots
+are not merged, and missing storage parents/list positions do not become implicit source edits.
+Temporary copying remains bounded by the admitted Schema/default contract, not by a claim that
+all preparation allocation fits the much smaller final field-patch budget.
 
 ## Decision
 

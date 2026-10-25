@@ -985,8 +985,13 @@ fn retained_construction_charges_resolved_local_bytes_before_overwritten_roots_c
     .unwrap();
     let original = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("existing"))]);
     let session = open_with_bundle(&original, &bundle, SceneAuthoringHistoryLimits::default());
-    // Three selectors cost 14 bytes; a resolved generated SceneLocal ID costs exactly 22.
-    for (bytes, accepted) in [(65_536 - 14, false), (65_536 - 14 - 22, true)] {
+    // Each write retains its target ID (22 bytes) and component ID before root coalescing.
+    // Three selectors cost 14 bytes; the resolved SceneLocal replacement costs another 22.
+    let target_bytes = 3 * (22 + component.as_str().len());
+    for (bytes, accepted) in [
+        (65_536 - 14 - target_bytes, false),
+        (65_536 - 14 - target_bytes - 22, true),
+    ] {
         let mut draft = session
             .begin_authoring_construction(session.revision())
             .unwrap();

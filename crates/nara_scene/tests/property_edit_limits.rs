@@ -12,7 +12,7 @@ use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringPropertyEdit,
     MAX_AUTHORING_FIELD_WRITES, PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate,
     SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SceneEntityRecord,
+    SceneEntityId, SceneEntityRecord, ScenePatchOperation,
 };
 
 fn id() -> SceneEntityId {
@@ -151,6 +151,63 @@ fn selector_bytes_are_admitted_before_private_candidate_work() {
             .is_err()
     );
     assert_eq!(session.history_status().undo_depth, 0);
+}
+
+#[test]
+fn construction_rejects_oversized_component_ids_before_retaining_intent() {
+    let session = open();
+    for declaration in [false, true] {
+        let mut draft = session
+            .begin_authoring_construction(session.revision())
+            .unwrap();
+        draft
+            .set_property(
+                id(),
+                ComponentTypeId::new("test.PropertyLimits"),
+                ComponentPropertyPath::new(ComponentFieldId::new("weights"))
+                    .with_steps([ComponentPropertyStep::MapEntry("private-key".into())]),
+                ComponentValue::U64(6),
+            )
+            .unwrap();
+        let huge = ComponentTypeId::new("private-unadmitted".repeat(8192));
+        let result = if declaration {
+            draft.add_component(id(), huge)
+        } else {
+            draft.set_property(
+                id(),
+                huge,
+                edit("unused").property,
+                ComponentValue::String("unused".into()),
+            )
+        };
+        assert!(result.is_err());
+        let valid = edit("after");
+        draft
+            .set_property(valid.entity, valid.component, valid.property, valid.value)
+            .unwrap();
+        let prepared = session.prepare_authoring_construction(&draft).unwrap();
+        assert_eq!(
+            prepared.patch().operations,
+            vec![
+                ScenePatchOperation::SetField {
+                    entity: id(),
+                    component: ComponentTypeId::new("test.PropertyLimits"),
+                    component_version: ComponentSchemaVersion::ONE,
+                    field: ComponentFieldId::new("data"),
+                    value: ComponentValue::map([("text", ComponentValue::String("after".into()),)]),
+                },
+                ScenePatchOperation::SetField {
+                    entity: id(),
+                    component: ComponentTypeId::new("test.PropertyLimits"),
+                    component_version: ComponentSchemaVersion::ONE,
+                    field: ComponentFieldId::new("weights"),
+                    value: ComponentValue::map([("private-key", ComponentValue::U64(6))]),
+                },
+            ]
+        );
+        assert_eq!(session.document(), &document());
+        assert_eq!(session.history_status().undo_depth, 0);
+    }
 }
 
 #[test]

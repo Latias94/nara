@@ -82,6 +82,10 @@ Rules:
   target. Optional absence, missing keys and retired selectors remain typed resolution failures.
   Finite selector scan work and copied output cost are independent limits; neither a scalar result
   nor an admitted source makes a keyed-list scan free.
+- Reading a default does not itself publish authored source. A later prepared property mutation
+  may privately initialize only its missing root under ADR 0026, then use the same complete
+  candidate/inverse/history owner. Cancel, stale rejection and failed final operations retain
+  absence; successful Undo restores it. Explicit values and missing storage parents remain distinct.
 - Copied query observations admit aggregate metadata and requested value costs before cloning.
   Source-owned indexes may retain positions into the jointly published document/classification,
   not another document or history. Discovery must not read every value, and a selected root read

@@ -130,17 +130,17 @@ impl ComponentPropertyPath {
         let mut bytes = self.root.as_str().len();
         self.root
             .validate()
-            .map_err(|_| ComponentPropertyError::InvalidFieldId(self.root.clone()))?;
+            .map_err(|_| ComponentPropertyError::InvalidFieldId)?;
         for step in &self.steps {
             bytes = bytes.saturating_add(match step {
                 ComponentPropertyStep::Member(id) => {
                     id.validate()
-                        .map_err(|_| ComponentPropertyError::InvalidFieldId(id.clone()))?;
+                        .map_err(|_| ComponentPropertyError::InvalidFieldId)?;
                     id.as_str().len()
                 }
                 ComponentPropertyStep::ListItem { by, key } => {
                     by.validate()
-                        .map_err(|_| ComponentPropertyError::InvalidFieldId(by.clone()))?;
+                        .map_err(|_| ComponentPropertyError::InvalidFieldId)?;
                     by.as_str().len().saturating_add(match key {
                         ComponentPropertyKey::String(key) => key.len(),
                         _ => 8,
@@ -217,7 +217,8 @@ pub enum ComponentPropertyError {
     ReadBudgetExceeded,
     PathDepthLimit,
     PathByteLimit,
-    InvalidFieldId(ComponentFieldId),
+    /// Invalid caller IDs are not retained: they may be arbitrarily large unadmitted candidates.
+    InvalidFieldId,
     VersionMismatch {
         expected: ComponentSchemaVersion,
         actual: ComponentSchemaVersion,

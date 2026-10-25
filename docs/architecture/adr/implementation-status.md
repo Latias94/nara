@@ -142,7 +142,17 @@ limits and borrowed explicit/default provenance. A real non-active Scene/Prefab 
 edits from selected nested values through history and persistence. Review's P2 hidden root-tombstone
 scan is corrected with admitted sorted-slice lookup and independent follow-up. Final focused41,
 public5 and static evidence are separate from the earlier broad/native cohorts; their exact source
-and limits are retained. Defaulted-root first-write mutation, nested discovery and full R2 stay open.
+and limits are retained. At that checkpoint defaulted-root mutation was unimplemented; its separately
+qualified successor follows. Nested discovery and full R2 stay open.
+
+The [first-write qualification](../../knowledge/engineering/verification/2026-10/2026-10-25T060130Z-source-owned-first-property-writes-and-bounded-selector-error-qualification-0dfaa18252de473b90ff57ef150e64b0.md)
+uses the existing Source candidate/root-patch/inverse/history chain to initialize only a selected
+omitted default root for nested writes, or assign an explicit root directly. Undo restores authored
+absence; unrelated defaults remain omitted. Static invalid-ID errors and append-time construction
+ID limits remove the observed unadmitted-identity copies. Actual public defaulted read/computed-edit/
+Undo/Redo/clean-Save refusal/dirty Save/Reopen evidence retains its scope. Complete templates still
+cannot omit fields, and missing storage ancestors/list slots remain refused; no new framework,
+default projection policy, full R2 or foundation completion is implied.
 
 The [R5c custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md)
 implements typed per-document Scene/Prefab file custody under ADRs 0047/0118. Save retains its

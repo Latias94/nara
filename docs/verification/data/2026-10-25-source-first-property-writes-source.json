@@ -1,0 +1,34 @@
+[
+  {
+    "path": "crates/nara_reflect/src/property.rs",
+    "sha256": "0c61033058f6d4bb79b917f0004cdcd1cb7fa7676216d8789b7aec288168e19b"
+  },
+  {
+    "path": "crates/nara_reflect/tests/property_selector_errors.rs",
+    "sha256": "cd3e53ecb32bd8cae4b5304f607ca6503b3ab3d346e0709b60dcdc80d382aa50"
+  },
+  {
+    "path": "crates/nara_scene/src/authoring/construction.rs",
+    "sha256": "73353d82ec2c37900287724c839be47d50de22b55f846eecb4ccbe6c116f3237"
+  },
+  {
+    "path": "crates/nara_scene/src/authoring/property.rs",
+    "sha256": "bb2a6c2b11942974756279acf85137ea981b5b3d5536a21fea79a12d1ee5c9ae"
+  },
+  {
+    "path": "crates/nara_scene/tests/default_property_writes.rs",
+    "sha256": "cce24ccbcd1ea95f7abfaf5e4637d64793ee7f68c680466e3645234f628c4442"
+  },
+  {
+    "path": "crates/nara_scene/tests/prepared_authoring.rs",
+    "sha256": "e8e1699ef4929ff038e33ec8f8eeb1a0269818e3323de77da2de5ab80ee52497"
+  },
+  {
+    "path": "crates/nara_scene/tests/property_edit_limits.rs",
+    "sha256": "9a212cfa7d66058cb4cfb8b644e997cf556b90b1f446349d360cb64a00b02c2a"
+  },
+  {
+    "path": "tests/fixtures/module-consumer/editor-panel-consumer/tests/support/property_read.rs",
+    "sha256": "c0870508595fa9720924c585328324ceff4053db999d4b044afbcb15315234d5"
+  }
+]

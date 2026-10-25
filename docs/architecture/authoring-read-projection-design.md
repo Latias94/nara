@@ -85,8 +85,11 @@ qualified by the [scoped successor evidence](../knowledge/engineering/verificati
 not qualification of nested discovery, value pagination or full R2. Root field/tombstone lookups
 reuse the admitted catalog's sorted slices; they do not hide full retired-root scans. Storage-path
 lookup still has its admitted bound and may build diagnostic prefixes; this is not allocation-free.
-Readable defaulted descendants do not make an omitted root editable: first-write default
-materialization remains a separate source-mutation obligation.
+Reading never creates source. The source-mutation successor under ADR 0026 may initialize only
+the target missing root in its private candidate, using a declared default for nested writes and
+the supplied value for an explicit root write. It does not merge explicit/partial roots, create
+storage ancestors or materialize unrelated defaults. The existing root patch supplies the exact
+absence-restoring inverse; read permission alone still grants no mutation authority.
 
 Add a borrowed semantic view of one admitted direct source entity. The owning session retains
 its document and classification together. Reuse the canonical sorted entity sequence for binary

@@ -85,6 +85,20 @@ Rules:
   not private selector keys or replacement values.
   Scoped member IDs, declaration-path tombstones and keyed-item policy follow ADRs 0011/0081.
   This adds neither a second Undo owner nor durable Prefab overlay semantics to operation patches.
+- The source owner may initialize a missing target root from its admitted declared default before
+  a nested property write, exclusively in the evolving private candidate. It must not materialize
+  unrelated defaults, merge an explicit/partial value, create optional or keyed descendants, or
+  manufacture missing storage parents/list slots. A root-only write may explicitly create its
+  field through the same existing storage contract. The ordinary root patch/inverse/history owns
+  publication; Undo restores original field absence rather than persisting a default-equal value.
+  Missing parents, complete replay limits, capabilities and stale/history refusals remain real
+  admission conditions. Complete Reflect resolution does not implicitly synthesize source values.
+- Invalid selector IDs are unadmitted caller data and are never retained in property-error objects.
+  Original mutation-byte admission includes target identities as well as selectors/replacements;
+  generic diagnostics cannot require copying an arbitrarily large rejected ID first.
+  Retained construction rejects component IDs above their existing Schema-ID byte ceiling at
+  append, before later lowering can clone them. Length admission does not certify that an ID
+  names an admitted component, provider or template; preparation retains those semantic checks.
 - Patches should be serializable so AI tools, editor UI, and tests can share the same mutation format.
 
 ```mermaid

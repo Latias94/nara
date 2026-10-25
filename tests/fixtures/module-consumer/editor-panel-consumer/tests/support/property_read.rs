@@ -77,6 +77,14 @@ fn schemas() -> AuthoringSchemaBundle {
                         ComponentValue::map([("wire_score", ComponentValue::U64(13))]),
                     )
                     .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+                    ComponentFieldSchema::optional_with_default(
+                        ComponentFieldId::new("untouched_default"),
+                        "Untouched default",
+                        ComponentFieldPath::from_fields(["wire_untouched_default"]),
+                        ComponentValueKind::U64,
+                        ComponentValue::U64(99),
+                    )
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING),
                 ]),
             ],
             ..Default::default()
@@ -244,6 +252,73 @@ impl ImguiEditorPanel for PropertyPanel {
     }
 }
 
+struct DefaultedPanel(PropertyPanel);
+
+impl ImguiEditorPanel for DefaultedPanel {
+    fn show(&mut self, ui: &dear_imgui_rs::Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
+        if let Some(request) = self.0.request.take() {
+            let observed = context.read_document_property(request.clone()).unwrap();
+            assert_eq!(observed.target, request.target);
+            assert_eq!(observed.value_nodes, 1);
+            assert_eq!(observed.value_logical_bytes, 8);
+            let EditorPropertyValue::Defaulted(ComponentValue::U64(original)) = observed.value
+            else {
+                panic!("the omitted root must supply its declared default before preparation");
+            };
+            assert_eq!(original, 13);
+            let edits = [AuthoringPropertyEdit {
+                entity: observed.target.entity.clone(),
+                component: observed.target.component.clone(),
+                component_version: ComponentSchemaVersion::ONE,
+                property: observed.target.property.clone(),
+                value: ComponentValue::U64(original.checked_add(2).unwrap()),
+            }];
+            let cancelled = context
+                .prepare_authoring_property_edit(&observed.target.basis, &edits)
+                .unwrap();
+            assert_eq!(cancelled.document(), observed.target.basis.document);
+            assert_eq!(cancelled.base_revision(), observed.target.basis.revision);
+            assert_eq!(
+                cancelled.patch().operations.as_slice(),
+                &[ScenePatchOperation::SetField {
+                    entity: observed.target.entity.clone(),
+                    component: observed.target.component.clone(),
+                    component_version: ComponentSchemaVersion::ONE,
+                    field: ComponentFieldId::new("defaults"),
+                    value: ComponentValue::map([("wire_score", ComponentValue::U64(15))]),
+                }]
+            );
+            assert_eq!(
+                cancelled.inverse().operations.as_slice(),
+                &[ScenePatchOperation::RemoveField {
+                    entity: observed.target.entity.clone(),
+                    component: observed.target.component.clone(),
+                    component_version: ComponentSchemaVersion::ONE,
+                    field: ComponentFieldId::new("defaults"),
+                }]
+            );
+            drop(cancelled);
+            self.0.prepared = Some(
+                context
+                    .prepare_authoring_property_edit(&observed.target.basis, &edits)
+                    .unwrap(),
+            );
+            self.0.stale = Some(
+                context
+                    .prepare_authoring_property_edit(&observed.target.basis, &edits)
+                    .unwrap(),
+            );
+            self.0.evidence.borrow_mut().observation = Some(observed);
+            return;
+        }
+        self.0.show(ui, context);
+    }
+
+    fn action_finished(&mut self, id: PanelSubmissionId, result: PanelActionDispatch) {
+        self.0.action_finished(id, result);
+    }
+}
+
 fn assert_navigation(
     app: &EditorApplication,
     document: EditorDocumentId,
@@ -285,6 +360,120 @@ fn assert_navigation(
     }
 }
 
+struct PropertyFixture {
+    project: text_project::TextProject,
+    app: Application,
+    startup: String,
+    contents: String,
+    active: EditorDocumentId,
+    document: EditorDocumentId,
+}
+
+fn property_fixture(kind: EditorDocumentKind, source: &str) -> PropertyFixture {
+    let project = text_project::TextProject::new();
+    fs::write(
+        project.root.join("schema/authoring.bundle.json"),
+        schemas().to_json_string().unwrap(),
+    )
+    .unwrap();
+    let startup = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("active"))])
+        .to_json_string()
+        .unwrap();
+    fs::write(project.root.join("scenes/startup.scene.json"), &startup).unwrap();
+    let records = [SceneEntityRecord::new(id("anchor"))
+        .with_component(
+            ComponentTypeId::new(COMPONENT),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, component_value(ORIGINAL))
+                .with_owner(PersistentComponentSchemaOwnerId::try_new(OWNER).unwrap()),
+        )
+        .with_component(
+            ComponentTypeId::new("consumer.Unknown"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion(7),
+                ComponentValue::map([(
+                    "opaque",
+                    ComponentValue::String("preserve exactly".into()),
+                )]),
+            ),
+        )];
+    let contents = match kind {
+        EditorDocumentKind::Scene => SceneDocument::from_ordered_roots(records)
+            .to_json_string()
+            .unwrap(),
+        EditorDocumentKind::Prefab => PrefabDocument::from_ordered_roots(records)
+            .to_json_string()
+            .unwrap(),
+        _ => unreachable!(),
+    };
+    fs::write(project.root.join(source), &contents).unwrap();
+    let mut app = Application(EditorApplication::new(EditorLaunchOptions::new(
+        &project.root,
+    )));
+    app.native_shell_ready();
+    wait(&mut app, |frame| {
+        !frame.project_browser().has_pending_work()
+    });
+    let active = frame(&app).workspace().active_document.unwrap();
+    let opening = submit(
+        &mut app,
+        EditorAction::ProjectBrowser(EditorProjectBrowserAction::Open {
+            relative_path: source.into(),
+        }),
+    );
+    let [
+        EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::ProjectBrowser(
+            EditorProjectBrowserActionOutcome::Preparing {
+                request: open_request,
+            },
+        )),
+    ] = opening.actions()
+    else {
+        panic!("named source Open was not admitted: {opening:?}");
+    };
+    let open_request = *open_request;
+    wait(&mut app, |frame| frame.document_open().result().is_some());
+    let EditorDocumentOpenResult::Opened {
+        request: completed,
+        document,
+    } = frame(&app).document_open().result().unwrap()
+    else {
+        panic!("the property source did not open");
+    };
+    assert_eq!(completed, open_request);
+    let acknowledged = submit(
+        &mut app,
+        EditorAction::ProjectBrowser(EditorProjectBrowserAction::AcknowledgeOpen {
+            request: open_request,
+        }),
+    );
+    assert!(matches!(acknowledged.actions(), [
+        EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::ProjectBrowser(
+            EditorProjectBrowserActionOutcome::OpenAcknowledged { request: accepted }
+        ))
+    ] if *accepted == open_request));
+    for action in [
+        EditorNavigationAction::SetActiveDocument { document: active },
+        EditorNavigationAction::SelectEntity {
+            document: active,
+            entity: Some(id("active")),
+        },
+    ] {
+        assert!(
+            matches!(submit(&mut app, EditorAction::Navigate(action)).actions(), [
+            EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))
+        ] if report.applied)
+        );
+    }
+    PropertyFixture {
+        project,
+        app,
+        startup,
+        contents,
+        active,
+        document,
+    }
+}
+
 #[test]
 fn a_panel_reads_a_keyed_scalar_then_commits_it_without_copying_or_activating_its_root() {
     for (kind, source) in [
@@ -294,100 +483,14 @@ fn a_panel_reads_a_keyed_scalar_then_commits_it_without_copying_or_activating_it
             "prefabs/property-read.prefab.json",
         ),
     ] {
-        let project = text_project::TextProject::new();
-        fs::write(
-            project.root.join("schema/authoring.bundle.json"),
-            schemas().to_json_string().unwrap(),
-        )
-        .unwrap();
-        let startup = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("active"))])
-            .to_json_string()
-            .unwrap();
-        fs::write(project.root.join("scenes/startup.scene.json"), &startup).unwrap();
-        let records = [SceneEntityRecord::new(id("anchor"))
-            .with_component(
-                ComponentTypeId::new(COMPONENT),
-                SceneComponentRecord::new(ComponentSchemaVersion::ONE, component_value(ORIGINAL))
-                    .with_owner(PersistentComponentSchemaOwnerId::try_new(OWNER).unwrap()),
-            )
-            .with_component(
-                ComponentTypeId::new("consumer.Unknown"),
-                SceneComponentRecord::new(
-                    ComponentSchemaVersion(7),
-                    ComponentValue::map([(
-                        "opaque",
-                        ComponentValue::String("preserve exactly".into()),
-                    )]),
-                ),
-            )];
-        let contents = match kind {
-            EditorDocumentKind::Scene => SceneDocument::from_ordered_roots(records)
-                .to_json_string()
-                .unwrap(),
-            EditorDocumentKind::Prefab => PrefabDocument::from_ordered_roots(records)
-                .to_json_string()
-                .unwrap(),
-            _ => unreachable!(),
-        };
-        fs::write(project.root.join(source), &contents).unwrap();
-        let mut app = Application(EditorApplication::new(EditorLaunchOptions::new(
-            &project.root,
-        )));
-        app.native_shell_ready();
-        wait(&mut app, |frame| {
-            !frame.project_browser().has_pending_work()
-        });
-        let active = frame(&app).workspace().active_document.unwrap();
-        let opening = submit(
-            &mut app,
-            EditorAction::ProjectBrowser(EditorProjectBrowserAction::Open {
-                relative_path: source.into(),
-            }),
-        );
-        let [
-            EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::ProjectBrowser(
-                EditorProjectBrowserActionOutcome::Preparing {
-                    request: open_request,
-                },
-            )),
-        ] = opening.actions()
-        else {
-            panic!("named source Open was not admitted: {opening:?}");
-        };
-        let open_request = *open_request;
-        wait(&mut app, |frame| frame.document_open().result().is_some());
-        let EditorDocumentOpenResult::Opened {
-            request: completed,
+        let PropertyFixture {
+            project,
+            mut app,
+            startup,
+            contents,
+            active,
             document,
-        } = frame(&app).document_open().result().unwrap()
-        else {
-            panic!("the property source did not open");
-        };
-        assert_eq!(completed, open_request);
-        let acknowledged = submit(
-            &mut app,
-            EditorAction::ProjectBrowser(EditorProjectBrowserAction::AcknowledgeOpen {
-                request: open_request,
-            }),
-        );
-        assert!(matches!(acknowledged.actions(), [
-            EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::ProjectBrowser(
-                EditorProjectBrowserActionOutcome::OpenAcknowledged { request: accepted }
-            ))
-        ] if *accepted == open_request));
-        for action in [
-            EditorNavigationAction::SetActiveDocument { document: active },
-            EditorNavigationAction::SelectEntity {
-                document: active,
-                entity: Some(id("active")),
-            },
-        ] {
-            assert!(
-                matches!(submit(&mut app, EditorAction::Navigate(action)).actions(), [
-                EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))
-            ] if report.applied)
-            );
-        }
+        } = property_fixture(kind, source);
         let initial = frame(&app);
         assert_eq!(initial.workspace().document(document).unwrap().kind, kind);
         assert!(
@@ -679,5 +782,419 @@ fn a_panel_reads_a_keyed_scalar_then_commits_it_without_copying_or_activating_it
             app.close(),
             "the property-read project did not physically retire"
         );
+    }
+}
+
+fn default_score_path() -> ComponentPropertyPath {
+    ComponentPropertyPath::new(ComponentFieldId::new("defaults")).with_steps([
+        ComponentPropertyStep::Member(ComponentFieldId::new("score")),
+    ])
+}
+
+fn assert_default_score(
+    app: &mut EditorApplication,
+    document: EditorDocumentId,
+    expected: EditorPropertyValue,
+) {
+    let captured = basis(app, document);
+    let observed = root_read(app, request(captured, default_score_path())).unwrap();
+    assert_eq!(observed.value, expected);
+    assert_eq!(observed.value_nodes, 1);
+    assert_eq!(observed.value_logical_bytes, 8);
+}
+
+fn save_property_source(
+    app: &mut EditorApplication,
+    saving: &EditorDocumentQueryBasis,
+    path: &std::path::Path,
+    expected: &serde_json::Value,
+) -> Vec<u8> {
+    let dirty = frame(app)
+        .workspace()
+        .document(saving.document)
+        .unwrap()
+        .dirty;
+    let submitted = submit(
+        app,
+        EditorAction::Persistence(EditorPersistenceAction::Save {
+            document: saving.document,
+            base_revision: saving.revision,
+        }),
+    );
+    if dirty {
+        assert!(matches!(
+            submitted.actions(),
+            [EditorApplicationActionDispatch::Dispatched(
+                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+            )]
+        ));
+        settle_persistence(app);
+        assert!(matches!(
+        frame(app).persistence().result(),
+        Some(EditorPersistenceResult::Saved { document, revision, .. })
+            if document == saving.document && revision == saving.revision
+        ));
+    } else {
+        assert!(matches!(
+            submitted.actions(),
+            [EditorApplicationActionDispatch::Dispatched(
+                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Rejected(
+                    nara_tooling::EditorPersistenceRejection::NotDirty
+                ))
+            )]
+        ));
+        assert!(matches!(frame(app).persistence().result(),
+            Some(EditorPersistenceResult::Rejected { document: Some(document), reason: nara_tooling::EditorPersistenceRejection::NotDirty, .. })
+                if document == saving.document));
+    }
+    assert!(
+        !frame(app)
+            .workspace()
+            .document(saving.document)
+            .unwrap()
+            .dirty
+    );
+    let saved = fs::read(path).unwrap();
+    assert_eq!(
+        &serde_json::from_slice::<serde_json::Value>(&saved).unwrap(),
+        expected,
+        "only wire_defaults may change; settings, the large subtree and unknown component survive"
+    );
+    submit(
+        app,
+        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+    );
+    saved
+}
+
+#[test]
+fn a_panel_first_writes_a_defaulted_leaf_and_undo_restores_absent_source_storage() {
+    use nara::project_host::EditorEditPreparationError;
+
+    for (kind, source) in [
+        (EditorDocumentKind::Scene, "scenes/default-write.scene.json"),
+        (
+            EditorDocumentKind::Prefab,
+            "prefabs/default-write.prefab.json",
+        ),
+    ] {
+        // Reopen retires history, so qualify the Undo and Redo checkpoints independently.
+        for reopen_after_redo in [false, true] {
+            let PropertyFixture {
+                project,
+                mut app,
+                startup,
+                contents,
+                active,
+                document,
+            } = property_fixture(kind, source);
+            let initial = frame(&app);
+            let tab = initial.workspace().document(document).unwrap();
+            assert_eq!(tab.kind, kind);
+            assert!(tab.source_binding.is_some());
+            assert!(!tab.dirty);
+            assert_eq!(tab.history.undo_depth, 0);
+            assert_eq!(tab.history.redo_depth, 0);
+            let captured = basis(&app, document);
+            let selected = request(captured.clone(), default_score_path());
+            let observed = root_read(&mut app, selected.clone()).unwrap();
+            let EditorPropertyValue::Defaulted(ComponentValue::U64(original)) = observed.value
+            else {
+                panic!("the source must begin with an omitted default root");
+            };
+            assert_eq!(original, 13);
+            let edit = AuthoringPropertyEdit {
+                entity: observed.target.entity.clone(),
+                component: observed.target.component.clone(),
+                component_version: ComponentSchemaVersion::ONE,
+                property: observed.target.property.clone(),
+                value: ComponentValue::U64(original.checked_add(2).unwrap()),
+            };
+            let mut missing_item = edit.clone();
+            missing_item.property = score_path("absent");
+            let Err(EditorEditPreparationError::Document(rejected)) = app
+                .prepare_authoring_property_edit(
+                    document,
+                    captured.revision,
+                    &[edit.clone(), missing_item],
+                )
+            else {
+                panic!("the late missing-item edit must reject the entire default-write batch");
+            };
+            assert!(!rejected.applied);
+            assert!(rejected.patch_report.as_ref().unwrap().inverse.is_none());
+            assert!(rejected.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code().as_str() == "scene.authoring-property-edit-rejected"
+                    && diagnostic.fields().iter().any(|field| {
+                        field.key().as_str() == "operation-index"
+                            && field.value() == nara::diagnostic::DiagnosticValueRef::Unsigned(1)
+                    })
+                    && diagnostic.fields().iter().any(|field| {
+                        field.key().as_str() == "property-error-kind"
+                            && field.value()
+                                == nara::diagnostic::DiagnosticValueRef::Identifier(
+                                    "list-item-not-found",
+                                )
+                    })
+            }));
+            assert_default_score(
+                &mut app,
+                document,
+                EditorPropertyValue::Defaulted(ComponentValue::U64(13)),
+            );
+            assert_eq!(
+                frame(&app).workspace().documents,
+                initial.workspace().documents
+            );
+            assert_eq!(
+                fs::read_to_string(project.root.join(source)).unwrap(),
+                contents
+            );
+            let stale_after_undo = app
+                .prepare_authoring_property_edit(
+                    document,
+                    captured.revision,
+                    std::slice::from_ref(&edit),
+                )
+                .unwrap();
+
+            let evidence = Rc::new(RefCell::new(PanelEvidence::default()));
+            let shared = Rc::clone(&evidence);
+            let panel_request = selected.clone();
+            let mut composition = EditorNativeComposition::new();
+            composition
+                .register_panel(
+                    EditorPanelDescriptor::new(
+                        "consumer.defaulted-property",
+                        "Defaulted property",
+                        EditorPanelMultiplicity::Single,
+                        EditorPanelPlacement::Floating,
+                        true,
+                    ),
+                    move || {
+                        DefaultedPanel(PropertyPanel {
+                            request: Some(panel_request.clone()),
+                            prepared: None,
+                            stale: None,
+                            evidence: Rc::clone(&shared),
+                        })
+                    },
+                )
+                .unwrap();
+            let mut frontend = composition.install_panels(&mut app).unwrap();
+            let mut context = dear_imgui_rs::Context::create();
+            context.set_ini_filename::<PathBuf>(None).unwrap();
+            context.io_mut().set_display_size([1200.0, 800.0]);
+            context.io_mut().set_delta_time(1.0 / 60.0);
+            context
+                .io_mut()
+                .set_config_flags(dear_imgui_rs::ConfigFlags::DOCKING_ENABLE);
+            context
+                .font_atlas()
+                .try_claim_legacy_renderer()
+                .unwrap()
+                .build();
+            for _ in 0..8 {
+                assert_default_score(
+                    &mut app,
+                    document,
+                    EditorPropertyValue::Defaulted(ComponentValue::U64(13)),
+                );
+                let draw = context.begin_frame();
+                let candidate = frontend.show(draw.ui(), &mut app).unwrap();
+                drop(draw);
+                assert_eq!(
+                    frame(&app).workspace().documents,
+                    initial.workspace().documents,
+                    "default reads, preparation, drop, holding and enqueue must not publish"
+                );
+                assert_eq!(
+                    fs::read_to_string(project.root.join(source)).unwrap(),
+                    contents
+                );
+                assert!(evidence.borrow().completions.is_empty());
+                if let Some(candidate) = candidate {
+                    frontend.submit_and_drive(&mut app, candidate, Duration::ZERO);
+                }
+                assert_navigation(&app, document, &initial);
+                if evidence.borrow().completions.len() == 2 {
+                    break;
+                }
+            }
+            {
+                let retained = evidence.borrow();
+                assert_eq!(retained.observation.as_ref(), Some(&observed));
+                assert_eq!(retained.held_frames, 2);
+                assert_eq!(retained.submissions.len(), 2);
+                assert_ne!(retained.submissions[0], retained.submissions[1]);
+                let [
+                    (
+                        accepted_id,
+                        PanelActionDispatch::Dispatched(EditorActionOutcome::Workspace(accepted)),
+                    ),
+                    (
+                        stale_id,
+                        PanelActionDispatch::Dispatched(EditorActionOutcome::Workspace(stale)),
+                    ),
+                ] = retained.completions.as_slice()
+                else {
+                    panic!("the defaulted panel must receive both exact consuming results");
+                };
+                assert_eq!(*accepted_id, retained.submissions[0]);
+                assert_eq!(*stale_id, retained.submissions[1]);
+                assert!(accepted.applied, "{:?}", accepted.diagnostics);
+                assert_eq!(accepted.document, Some(document));
+                assert_eq!(accepted.active_document, Some(active));
+                assert!(!stale.applied);
+                assert_eq!(stale.document, Some(document));
+                assert!(stale.diagnostics.iter().any(|diagnostic| {
+                    diagnostic.code().as_str() == "tooling.workspace-stale-document-revision"
+                }));
+            }
+            drop(context);
+            drop(frontend);
+            let edited = frame(&app);
+            let tab = edited.workspace().document(document).unwrap();
+            assert!(tab.dirty);
+            assert_eq!(tab.history.undo_depth, 1);
+            assert_eq!(tab.history.redo_depth, 0);
+            assert_eq!(tab.revision.source_id(), captured.revision.source_id());
+            assert_default_score(
+                &mut app,
+                document,
+                EditorPropertyValue::Present(ComponentValue::U64(15)),
+            );
+            assert_scalar(&mut app, document, ORIGINAL);
+            assert_eq!(
+                root_read(&mut app, selected.clone()),
+                Err(EditorDocumentQueryRejection::StaleRevision)
+            );
+
+            let mut stale_after_undo = Some(stale_after_undo);
+            for redo in [false, true] {
+                let base_revision = basis(&app, document).revision;
+                let mutation = if redo {
+                    EditorDocumentMutation::Redo {
+                        document,
+                        base_revision,
+                    }
+                } else {
+                    EditorDocumentMutation::Undo {
+                        document,
+                        base_revision,
+                    }
+                };
+                assert!(matches!(
+                    submit(&mut app, EditorAction::Mutate(mutation)).actions(),
+                    [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))]
+                        if report.applied
+                ));
+                let value = if redo {
+                    EditorPropertyValue::Present(ComponentValue::U64(15))
+                } else {
+                    EditorPropertyValue::Defaulted(ComponentValue::U64(13))
+                };
+                assert_default_score(&mut app, document, value.clone());
+                assert_scalar(&mut app, document, ORIGINAL);
+                let current = frame(&app);
+                let tab = current.workspace().document(document).unwrap();
+                assert_eq!(tab.dirty, redo);
+                assert_eq!(tab.history.undo_depth, usize::from(redo));
+                assert_eq!(tab.history.redo_depth, usize::from(!redo));
+                assert_eq!(tab.revision.source_id(), captured.revision.source_id());
+                if !redo {
+                    let rejected =
+                        app.commit_authoring_edit(stale_after_undo.take().unwrap(), Duration::ZERO);
+                    assert!(matches!(
+                        rejected.actions(),
+                        [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))]
+                            if !report.applied && report.diagnostics.iter().any(|diagnostic| {
+                                diagnostic.code().as_str() == "tooling.workspace-stale-document-revision"
+                            })
+                    ));
+                    assert!(matches!(
+                        app.prepare_authoring_property_edit(document, captured.revision, std::slice::from_ref(&edit)),
+                        Err(EditorEditPreparationError::Document(report))
+                            if !report.applied && report.diagnostics.iter().any(|diagnostic| {
+                                diagnostic.code().as_str() == "tooling.workspace-stale-document-revision"
+                            })
+                    ));
+                    assert_default_score(&mut app, document, value.clone());
+                    assert_eq!(
+                        frame(&app).workspace().documents,
+                        current.workspace().documents,
+                        "stale preparation and consumption cannot materialize an undone default root"
+                    );
+                    assert_eq!(
+                        fs::read_to_string(project.root.join(source)).unwrap(),
+                        contents
+                    );
+                }
+                assert_navigation(&app, document, &initial);
+                let saving = basis(&app, document);
+                let mut expected: serde_json::Value = serde_json::from_str(&contents).unwrap();
+                let mut expected_value = component_value(ORIGINAL);
+                assert!(expected_value.get("wire_defaults").is_none());
+                if redo {
+                    assert!(
+                        expected_value
+                            .set_path(
+                                &ComponentFieldPath::from_fields(["wire_defaults"]),
+                                ComponentValue::map([("wire_score", ComponentValue::U64(15))]),
+                            )
+                            .unwrap()
+                            .is_none()
+                    );
+                }
+                expected["payload"]["entities"][0]["components"][COMPONENT]["value"] =
+                    serde_json::to_value(expected_value).unwrap();
+                let saved =
+                    save_property_source(&mut app, &saving, &project.root.join(source), &expected);
+                assert_navigation(&app, document, &initial);
+                if redo != reopen_after_redo {
+                    continue;
+                }
+                assert!(matches!(
+                    submit(
+                        &mut app,
+                        EditorAction::Persistence(EditorPersistenceAction::Reopen {
+                            target: EditorReopenTarget::OpenDocument {
+                                document,
+                                base_revision: saving.revision,
+                            },
+                        })
+                    )
+                    .actions(),
+                    [EditorApplicationActionDispatch::Dispatched(
+                        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+                    )]
+                ));
+                settle_persistence(&mut app);
+                assert!(matches!(
+                    frame(&app).persistence().result(),
+                    Some(EditorPersistenceResult::Opened { document: opened, .. })
+                        if opened == document
+                ));
+                let reopened = basis(&app, document);
+                assert_ne!(reopened.revision.source_id(), saving.revision.source_id());
+                assert_eq!(
+                    root_read(&mut app, selected.clone()),
+                    Err(EditorDocumentQueryRejection::StaleIncarnation)
+                );
+                assert_default_score(&mut app, document, value);
+                assert_scalar(&mut app, document, ORIGINAL);
+                assert_eq!(fs::read(project.root.join(source)).unwrap(), saved);
+                assert_eq!(
+                    fs::read_to_string(project.root.join("scenes/startup.scene.json")).unwrap(),
+                    startup
+                );
+                assert_navigation(&app, document, &initial);
+                break;
+            }
+            assert!(
+                app.close(),
+                "the default-write project did not physically retire"
+            );
+        }
     }
 }

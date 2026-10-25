@@ -137,6 +137,11 @@ replaces root-only read operations with the existing property selector and separ
 budgets. Actual nested observations drive non-active Scene/Prefab panel edits; indexed root
 retirement, provenance and failure distinctions have scoped owner/public evidence. It does not
 materialize a defaulted root for mutation or qualify nested discovery/full R2.
+The [first-write successor](../knowledge/engineering/verification/2026-10/2026-10-25T060130Z-source-owned-first-property-writes-and-bounded-selector-error-qualification-0dfaa18252de473b90ff57ef150e64b0.md)
+adds Source-owned initialization of only the touched omitted root and an absence-restoring inverse.
+Invalid selector errors retain no unadmitted IDs, and construction bounds component IDs at append.
+Explicit values, storage-parent/list-slot limits and complete creation-template admission remain
+distinct from decode defaults. These bounded corrections do not complete the foundation Goal.
 
 The [prepared-panel design](editor-prepared-panel-design.md) selects finite read-only preparation
 and consuming commands through existing panel submission, rather than mutable paint access or

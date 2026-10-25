@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use nara_reflect::{
-    ComponentFieldId, ComponentPropertyError, ComponentPropertyPath, ComponentSchema,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, replace_component_property,
+    ComponentFieldId, ComponentFieldPathError, ComponentPropertyError, ComponentPropertyPath,
+    ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    replace_component_property,
 };
 
 use super::{
@@ -82,6 +83,12 @@ pub(super) fn lower<'a>(
     let mut nodes = 0usize;
     let mut bytes = 0usize;
     for (operation_index, edit) in edits.iter().enumerate() {
+        bytes = bytes
+            .saturating_add(edit.entity.as_str().len())
+            .saturating_add(edit.component.as_str().len());
+        if bytes > MAX_AUTHORING_FIELD_LOGICAL_BYTES {
+            return Err(rejected_at(operation_index));
+        }
         let selector_bytes = edit
             .property
             .logical_bytes()
@@ -142,6 +149,8 @@ pub(super) fn lower<'a>(
                 entry.insert((schema, target.value.clone()))
             }
         };
+        initialize_missing_root(schema, candidate, edit)
+            .map_err(|error| property_rejection(&error, schema, operation_index))?;
         replace_component_property(
             schema,
             edit.component_version,
@@ -182,6 +191,39 @@ pub(super) fn lower<'a>(
     Ok(ScenePatchDocument::new(operations))
 }
 
+fn initialize_missing_root(
+    schema: &ComponentSchema,
+    candidate: &mut ComponentValue,
+    edit: &AuthoringPropertyEdit,
+) -> Result<(), ComponentPropertyError> {
+    let Some(field) = schema
+        .fields()
+        .iter()
+        .find(|field| field.id() == &edit.property.root)
+    else {
+        return Ok(());
+    };
+    if matches!(
+        candidate.get_path(field.path()),
+        Err(ComponentFieldPathError::MissingField { .. }
+            | ComponentFieldPathError::IndexOutOfBounds { .. })
+    ) {
+        let value = if edit.property.steps.is_empty() {
+            &edit.value
+        } else if let Some(default) = field.default_value() {
+            default
+        } else {
+            return Ok(());
+        };
+        // The ordinary root patch will retain original absence as RemoveField. Never create
+        // ancestors or merge an explicit root; set_path keeps that existing storage contract.
+        candidate
+            .set_path(field.path(), value.clone())
+            .map_err(ComponentPropertyError::ValueUnavailable)?;
+    }
+    Ok(())
+}
+
 fn rejected() -> ScenePatchReport {
     history_error_report(
         "scene.authoring-property-edit-rejected",
@@ -219,7 +261,7 @@ fn property_rejection(
         ComponentPropertyError::ReadBudgetExceeded => ("read-budget", None),
         ComponentPropertyError::PathDepthLimit => ("path-depth-limit", None),
         ComponentPropertyError::PathByteLimit => ("path-byte-limit", None),
-        ComponentPropertyError::InvalidFieldId(_) => ("invalid-field-id", None),
+        ComponentPropertyError::InvalidFieldId => ("invalid-field-id", None),
         ComponentPropertyError::VersionMismatch { .. } => ("version-mismatch", None),
         ComponentPropertyError::InvalidSchema(_) => ("invalid-schema", None),
         ComponentPropertyError::ValueBudget(_) => ("value-budget", None),
