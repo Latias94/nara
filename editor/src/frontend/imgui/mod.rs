@@ -592,7 +592,9 @@ impl ImguiEditorFrontend {
             #[cfg(test)]
             ui_interaction_tests::record_control(ui, "Workspace menu");
             ui.text(detachment);
-            if application.failed_open_close_evidence().is_some() {
+            if application.failed_open_close_evidence().is_some()
+                || application.failed_session_close_receipt().is_some()
+            {
                 ui.text("Project cleanup completed with errors.");
             }
         });

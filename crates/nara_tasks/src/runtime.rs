@@ -3972,7 +3972,15 @@ fn wait_unpoisoned<'a, T>(condvar: &Condvar, guard: MutexGuard<'a, T>) -> MutexG
 #[derive(Debug, Default, Clone)]
 pub struct TaskPlugin {
     config: TaskPoolConfig,
-    facilities: Option<Arc<TaskFacilities>>,
+    facilities: TaskPluginFacilities,
+}
+
+#[derive(Debug, Default, Clone)]
+enum TaskPluginFacilities {
+    #[default]
+    Eager,
+    Lazy,
+    Shared(Arc<TaskFacilities>),
 }
 
 pub const TASK_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.tasks");
@@ -3980,7 +3988,8 @@ const TASK_PLUGIN_DEFINITION_ID: nara_app::PluginDefinitionId =
     nara_app::PluginDefinitionId::new("nara.tasks.configured", 1);
 pub const TASK_POOLS_SHUTDOWN_OBLIGATION: nara_app::PluginShutdownObligationId =
     nara_app::PluginShutdownObligationId::new("nara.tasks.pools");
-const TASK_POOLS_CLOSE_PARTICIPANT: RuntimeCloseParticipantId =
+/// Identifies the Tasks participant in managed close acquisition evidence.
+pub const TASK_POOLS_CLOSE_PARTICIPANT: RuntimeCloseParticipantId =
     RuntimeCloseParticipantId::new("nara.tasks.pools");
 pub const TASK_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(TASK_PLUGIN_ID, nara_app::PluginCategory::Service)
@@ -3991,7 +4000,22 @@ impl TaskPlugin {
     pub const fn new(config: TaskPoolConfig) -> Self {
         Self {
             config,
-            facilities: None,
+            facilities: TaskPluginFacilities::Eager,
+        }
+    }
+
+    /// Installs private facilities whose workers start on first use of each kind.
+    ///
+    /// The plugin retains the physical close owner before exposing the facade. First submission
+    /// may wait for OS worker creation or reject with [`TaskRejectReason::WorkerStartupFailed`];
+    /// partial workers remain owned until physical retirement. Unused kinds acquire no workers.
+    /// Installation requires an unoccupied task facade so an external owner cannot bypass this
+    /// physical ownership contract.
+    #[must_use]
+    pub const fn lazy(config: TaskPoolConfig) -> Self {
+        Self {
+            config,
+            facilities: TaskPluginFacilities::Lazy,
         }
     }
 
@@ -4004,7 +4028,7 @@ impl TaskPlugin {
     pub fn shared(facilities: Arc<TaskFacilities>) -> Self {
         Self {
             config: *facilities.config(),
-            facilities: Some(facilities),
+            facilities: TaskPluginFacilities::Shared(facilities),
         }
     }
 }
@@ -4012,17 +4036,36 @@ impl TaskPlugin {
 /// Creates a repeatable task plugin definition with canonical pool settings.
 #[must_use]
 pub fn plugin(config: TaskPoolConfig) -> nara_app::PluginDefinition {
-    let canonical_configuration = task_plugin_configuration(config);
+    task_plugin_definition(config, false)
+}
+
+/// Creates a repeatable owned-lazy task plugin with an explicit activation identity.
+///
+/// See [`TaskPlugin::lazy`] for first-use costs, failure and physical close ownership.
+#[must_use]
+pub fn lazy_plugin(config: TaskPoolConfig) -> nara_app::PluginDefinition {
+    task_plugin_definition(config, true)
+}
+
+fn task_plugin_definition(config: TaskPoolConfig, lazy: bool) -> nara_app::PluginDefinition {
+    let canonical_configuration = task_plugin_configuration(config, lazy);
     nara_app::PluginDefinition::infallible::<TaskPlugin, _>(
         TASK_PLUGIN_DEFINITION_ID,
         canonical_configuration,
-        move || TaskPlugin::new(config),
+        move || {
+            if lazy {
+                TaskPlugin::lazy(config)
+            } else {
+                TaskPlugin::new(config)
+            }
+        },
     )
 }
 
-fn task_plugin_configuration(config: TaskPoolConfig) -> Vec<u8> {
+fn task_plugin_configuration(config: TaskPoolConfig, lazy: bool) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(96);
     bytes.extend_from_slice(b"nara.tasks.plugin-config.v1\0");
+    bytes.push(u8::from(lazy));
     for kind in TaskPoolKind::ALL {
         let kind = config.kind(kind);
         bytes.extend_from_slice(&(kind.workers().get() as u64).to_le_bytes());
@@ -4046,62 +4089,75 @@ impl Plugin for TaskPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        if let Some(facilities) = &self.facilities {
-            if app.world().contains_resource::<TaskPools>() {
+        let construction = match &self.facilities {
+            TaskPluginFacilities::Shared(facilities) => {
+                if app.world().contains_resource::<TaskPools>() {
+                    return Err(PluginError::SetupFailed {
+                        plugin: TASK_PLUGIN_ID,
+                        message: "shared task installation requires an unoccupied task facade"
+                            .to_owned(),
+                    });
+                }
+                let scope = facilities.scope();
+                let spawner = scope.spawner();
+                app.register_plugin_runtime_close_participant(
+                    TASK_POOLS_SHUTDOWN_OBLIGATION,
+                    TASK_POOLS_CLOSE_PARTICIPANT,
+                    scope,
+                )?;
+                app.insert_resource(spawner)?;
+                return Ok(());
+            }
+            TaskPluginFacilities::Lazy if app.world().contains_resource::<TaskPools>() => {
                 return Err(PluginError::SetupFailed {
                     plugin: TASK_PLUGIN_ID,
-                    message: "shared task installation requires an unoccupied task facade"
+                    message: "owned lazy task installation requires an unoccupied task facade"
                         .to_owned(),
                 });
             }
-            let scope = facilities.scope();
-            let spawner = scope.spawner();
-            app.register_plugin_runtime_close_participant(
-                TASK_POOLS_SHUTDOWN_OBLIGATION,
-                TASK_POOLS_CLOSE_PARTICIPANT,
-                scope,
-            )?;
-            app.insert_resource(spawner)?;
-            return Ok(());
-        }
-        if !app.world().contains_resource::<TaskPools>() {
-            let mut pools = match TaskPools::try_new_retained(self.config) {
-                Ok(pools) => pools,
-                Err(failure) => {
-                    let (error, close_owner) = failure.into_parts();
-                    if let Some(close_owner) = close_owner {
-                        app.register_plugin_runtime_close_participant(
-                            TASK_POOLS_SHUTDOWN_OBLIGATION,
-                            TASK_POOLS_CLOSE_PARTICIPANT,
-                            TaskPoolsCloseParticipant {
-                                instance_token: None,
-                                close_owner,
-                            },
-                        )?;
-                    }
-                    return Err(PluginError::SetupFailed {
-                        plugin: TASK_PLUGIN_ID,
-                        message: error.to_string(),
-                    });
+            TaskPluginFacilities::Eager if app.world().contains_resource::<TaskPools>() => {
+                // A pre-existing pool is externally owned and participates only in shutdown.
+                app.register_plugin_shutdown_obligation(TASK_POOLS_SHUTDOWN_OBLIGATION)?;
+                return Ok(());
+            }
+            TaskPluginFacilities::Eager => TaskPools::try_new_retained(self.config),
+            TaskPluginFacilities::Lazy => {
+                TaskPools::try_new_lazy(self.config).map_err(TaskPoolsConstructionFailure::invalid)
+            }
+        };
+        let mut pools = match construction {
+            Ok(pools) => pools,
+            Err(failure) => {
+                let (error, close_owner) = failure.into_parts();
+                if let Some(close_owner) = close_owner {
+                    app.register_plugin_runtime_close_participant(
+                        TASK_POOLS_SHUTDOWN_OBLIGATION,
+                        TASK_POOLS_CLOSE_PARTICIPANT,
+                        TaskPoolsCloseParticipant {
+                            instance_token: None,
+                            close_owner,
+                        },
+                    )?;
                 }
-            };
-            let instance_token = pools.ownership_token();
-            let close_owner = pools
-                .take_close_owner()
-                .expect("new task pools retain their close owner");
-            app.register_plugin_runtime_close_participant(
-                TASK_POOLS_SHUTDOWN_OBLIGATION,
-                TASK_POOLS_CLOSE_PARTICIPANT,
-                TaskPoolsCloseParticipant {
-                    instance_token: Some(instance_token),
-                    close_owner,
-                },
-            )?;
-            app.insert_resource(pools)?;
-        } else {
-            // A pre-existing pool is externally owned and participates only in plugin shutdown.
-            app.register_plugin_shutdown_obligation(TASK_POOLS_SHUTDOWN_OBLIGATION)?;
-        }
+                return Err(PluginError::SetupFailed {
+                    plugin: TASK_PLUGIN_ID,
+                    message: error.to_string(),
+                });
+            }
+        };
+        let instance_token = pools.ownership_token();
+        let close_owner = pools
+            .take_close_owner()
+            .expect("new task pools retain their close owner");
+        app.register_plugin_runtime_close_participant(
+            TASK_POOLS_SHUTDOWN_OBLIGATION,
+            TASK_POOLS_CLOSE_PARTICIPANT,
+            TaskPoolsCloseParticipant {
+                instance_token: Some(instance_token),
+                close_owner,
+            },
+        )?;
+        app.insert_resource(pools)?;
         Ok(())
     }
 }

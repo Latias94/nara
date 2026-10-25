@@ -289,6 +289,22 @@ Trusted synchronous Open likewise returns failed custody to its caller rather th
 into a diagnostic-only application error. These initial-failure paths need their own tests/native
 qualification; retained refresh evidence alone cannot establish them.
 
+The authoring Runtime and each trusted in-process Play use separately owned, demand-activated
+Tasks facilities under ADRs 0008/0052. Their configured capacities remain bounded; an unused worker
+kind stays dormant. First-use OS startup can fail before admission and must reach the concrete
+operation's terminal outcome. Existing physical close ownership includes all workers actually
+created, including partial activation. This private deployment does not select shared queues,
+change shipping Tasks defaults or promise a frame-latency bound.
+
+The Session's physical Close includes every trusted Play owner it holds, including unpublished
+and failed attempts, as well as authoring and file custody. A direct Close caller does not need
+Application's workspace Exit choreography to obtain this guarantee. Irreversible Close quiesces
+new Play publication and cannot complete a pending Restart by starting a successor. Actual
+in-flight native activation and accepted work remain retained until their responsibility returns.
+Reports combine disjoint completed owners once; terminal Play cleanup failure remains observable
+after World disposal and reaches the Application/native final result independently of completion.
+An external supervised child remains Application-owned and follows its separate close protocol.
+
 Project Open separates transportable startup-closure preparation from session publication. Its
 linear attempt owns the exact project/schema capabilities, budgets and prepared result. Background
 reads, decode, dependency traversal and pure schema classification may remain pending across

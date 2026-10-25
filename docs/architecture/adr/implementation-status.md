@@ -83,6 +83,24 @@ mixed path/stable-ID Prefab references. This corrects the source-confirmed cause
 starter's runtime-facts refusal; its actual Ready/Stop/clean Editor Exit rerun passes within the
 247-case Editor cohort. This does not qualify full source-free delivery or CAS.
 
+The [private-lazy Editor and whole-Session close successor](../../knowledge/engineering/verification/2026-10/2026-10-25T213241Z-private-lazy-editor-tasks-and-whole-session-physical-close-qualification-4c62c82789e4449dba02bb60f145760c.md)
+deploys explicit owned-lazy Tasks for authoring and trusted Play, retaining physical participants
+and canonical activation identity. Irreversible Session close owns prepared, failed and active
+Play retirement without gameplay or successor Restart; existing activation/candidate return stays
+accountable. Disjoint reports aggregate once, and completed cleanup errors survive Session release,
+Application replacement and the native final result. ADRs 0003/0008/0052/0118 own these contracts.
+The linked evidence distinguishes actual owner/public/native checks from the original review
+findings and their closure. Shipping/default Tasks remain eager; worker counts are not latency
+or CPU/memory measurements. Actual product worker-start failure injection, standalone Open Host
+retry/final shutdown, held native quiet-close, R4c and the remaining foundation waves stay open.
+
+The separate [Reopen preparation-fidelity correction](../../knowledge/engineering/verification/2026-10/2026-10-25T220113Z-reopen-preparation-failure-fidelity-before-native-source-admission-9e51c9e94971464ab4876bdf2ff2ff07.md)
+preserves already determined file/decode/validation failures instead of masking them with an
+independent source probe. Successful Scene/Prefab candidates prove admitted/read/current identity
+before native callbacks and retain final publication revalidation. Unchanged public failure
+assertions, actual callback negative/positive controls and scoped source/test reviews qualify the
+bounded ADR 0047 correction; they do not claim strong filesystem CAS or a new persistence protocol.
+
 The [R5c disposable projection qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md) binds `207bbcc` to complete-domain Scene epoch ownership, unchanged shared authoring facilities, a stable preview renderer producer and fresh presentation authority after identical-content recovery. Held Image/Save work, the joined public edit/history/Save/Reopen/picking/Close consumer, independent Prefab consumers and six actual Windows/DX12 trajectories pass. This closes the selected preview lifetime mismatch, not incremental projection, durable property addressing or the full foundation rebaseline.
 
 The [canonical native-source admission checkpoint](../../knowledge/engineering/verification/2026-10/2026-10-24T-project-content-source-admission-and-prefab-binding-qualification.md)

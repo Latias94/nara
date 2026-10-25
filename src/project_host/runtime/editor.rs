@@ -812,6 +812,7 @@ struct TrustedCompiledEditorLane {
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     game_view_config: Option<game_view::EditorGameViewCaptureConfig>,
     runtime_host: ProjectHost,
+    close_summary: trusted_play::EditorPlayCloseSummary,
     runtime_owner: EditorRuntimeOwnerState,
     pending_control: Option<PendingEditorControl>,
     reported_close_failure_generation: Option<u64>,
@@ -891,19 +892,25 @@ pub struct EditorProjectSession {
     ui_authoring_projection_cache: Option<EditorUiAuthoringProjectionCache>,
 }
 
-/// Evidence that session-local tasks and pending file publication cleanup completed shutdown.
+/// Evidence that authoring, trusted Play and pending file publication completed physical cleanup.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EditorProjectCloseReceipt {
     task_shutdown: TaskShutdownReport,
     authoring_cleanup_failed: bool,
+    play_cleanup_failure: Option<super::ProjectRuntimeCloseObservation>,
 }
 
 impl EditorProjectCloseReceipt {
-    fn new(task_shutdown: TaskShutdownReport, authoring_cleanup_failed: bool) -> Self {
+    fn new(
+        task_shutdown: TaskShutdownReport,
+        authoring_cleanup_failed: bool,
+        play_cleanup_failure: Option<super::ProjectRuntimeCloseObservation>,
+    ) -> Self {
         debug_assert!(task_shutdown.is_complete());
         Self {
             task_shutdown,
             authoring_cleanup_failed,
+            play_cleanup_failure,
         }
     }
 
@@ -917,17 +924,38 @@ impl EditorProjectCloseReceipt {
     pub const fn has_authoring_cleanup_failure(&self) -> bool {
         self.authoring_cleanup_failed
     }
+
+    /// Sticky failure from a physically completed trusted Play owner, independent of completion.
+    #[must_use]
+    pub const fn has_play_cleanup_failure(&self) -> bool {
+        self.play_cleanup_failure.is_some()
+    }
+
+    #[must_use]
+    pub fn play_close_evidence(&self) -> Option<&nara_app::RuntimeCloseEvidence> {
+        self.play_cleanup_failure
+            .as_ref()
+            .and_then(|failure| failure.close_evidence.as_ref())
+    }
+
+    #[must_use]
+    pub fn has_cleanup_failure(&self) -> bool {
+        self.authoring_cleanup_failed
+            || self.has_play_cleanup_failure()
+            || self.task_shutdown.has_cleanup_failure()
+    }
 }
 
-/// One bounded attempt to retire task and file publication owners of an Editor project session.
+/// One bounded attempt to retire every physical owner of an Editor project session.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EditorProjectCloseProgress {
-    /// Task or file cleanup remains incomplete and owned by this session.
+    /// Authoring, trusted Play or file cleanup remains incomplete and owned by this session.
     Incomplete {
         task_shutdown: TaskShutdownReport,
         file_cleanup_pending: bool,
+        play_cleanup_pending: bool,
     },
-    /// Every session-local task owner and pending file cleanup completed shutdown.
+    /// Every session-local owner completed physical cleanup; failure evidence remains observable.
     Complete(EditorProjectCloseReceipt),
 }
 
@@ -973,6 +1001,7 @@ impl EditorProjectSession {
     #[doc(hidden)]
     pub fn advance_close(&mut self) -> EditorProjectCloseProgress {
         self.closing = true;
+        let play_closed = self.advance_session_play_close();
         self.advance_authoring_retirement();
         self.cancel_pending_document_open();
         if let Some(project) = self.authoring_project_mut() {
@@ -982,10 +1011,9 @@ impl EditorProjectSession {
         self.advance_persistence();
         if self.persistence.has_pending_work() {
             return EditorProjectCloseProgress::Incomplete {
-                task_shutdown: self
-                    .authoring_retirements
-                    .report_with(&TaskShutdownReport::default()),
+                task_shutdown: self.session_task_shutdown(&TaskShutdownReport::default()),
                 file_cleanup_pending: true,
+                play_cleanup_pending: !play_closed,
             };
         }
         self.image_import.cancel_pending();
@@ -995,26 +1023,40 @@ impl EditorProjectSession {
         match self.authoring_runtime.shutdown_tasks() {
             authoring_runtime::EditorAuthoringRuntimeCloseProgress::Incomplete(task_shutdown) => {
                 EditorProjectCloseProgress::Incomplete {
-                    task_shutdown: self.authoring_retirements.report_with(&task_shutdown),
+                    task_shutdown: self.session_task_shutdown(&task_shutdown),
                     file_cleanup_pending: !files_closed,
+                    play_cleanup_pending: !play_closed,
                 }
             }
             authoring_runtime::EditorAuthoringRuntimeCloseProgress::Complete(task_shutdown) => {
-                let task_shutdown = self.authoring_retirements.report_with(&task_shutdown);
-                if files_closed && !self.authoring_retirements.is_pending() {
+                let task_shutdown = self.session_task_shutdown(&task_shutdown);
+                if files_closed && !self.authoring_retirements.is_pending() && play_closed {
                     EditorProjectCloseProgress::Complete(EditorProjectCloseReceipt::new(
                         task_shutdown,
                         self.authoring_retirements.failed()
                             || self.authoring_runtime.has_close_failure(),
+                        self.trusted_compiled()
+                            .and_then(|lane| lane.close_summary.failure().cloned()),
                     ))
                 } else {
                     EditorProjectCloseProgress::Incomplete {
                         task_shutdown,
-                        file_cleanup_pending: true,
+                        file_cleanup_pending: !files_closed,
+                        play_cleanup_pending: !play_closed,
                     }
                 }
             }
         }
+    }
+
+    fn session_task_shutdown(&self, live_authoring: &TaskShutdownReport) -> TaskShutdownReport {
+        let authoring = self.authoring_retirements.report_with(live_authoring);
+        let Some(lane) = self.trusted_compiled() else {
+            return authoring;
+        };
+        let current = lane.runtime_host.current_task_shutdown();
+        let play = lane.close_summary.report_with(current.as_ref());
+        TaskShutdownReport::aggregate([&authoring, &play])
     }
 
     fn accepts_new_work(&self) -> bool {
@@ -1715,6 +1757,7 @@ impl EditorProjectSession {
                         #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
                         game_view_config,
                         runtime_host: ProjectHost::new(cleanup_policy),
+                        close_summary: trusted_play::EditorPlayCloseSummary::default(),
                         runtime_owner: EditorRuntimeOwnerState::Empty,
                         pending_control: None,
                         reported_close_failure_generation: None,
@@ -1850,6 +1893,9 @@ impl EditorProjectSession {
         &mut self,
         expected: EditorGameStartRequest,
     ) -> Result<EditorGameStartActivation, EditorGameViewBridgeFailure> {
+        if self.closing {
+            return Err(EditorGameViewBridgeFailure::RuntimeUnavailable);
+        }
         let EditorExecutionLane::TrustedCompiled(lane) = &mut self.execution else {
             return Err(EditorGameViewBridgeFailure::RuntimeUnavailable);
         };
@@ -1959,6 +2005,16 @@ impl EditorProjectSession {
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     #[doc(hidden)]
     pub fn take_game_view_candidate(
+        &mut self,
+    ) -> Result<Option<EditorGameViewCandidate>, EditorGameViewBridgeFailure> {
+        if self.closing {
+            return Err(EditorGameViewBridgeFailure::RuntimeUnavailable);
+        }
+        self.take_existing_game_view_candidate()
+    }
+
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    fn take_existing_game_view_candidate(
         &mut self,
     ) -> Result<Option<EditorGameViewCandidate>, EditorGameViewBridgeFailure> {
         let EditorExecutionLane::TrustedCompiled(lane) = &mut self.execution else {
@@ -2080,6 +2136,9 @@ impl EditorProjectSession {
         active: bool,
         retirement_message: &'static str,
     ) -> Result<(), EditorGameViewBridgeFailure> {
+        if self.closing && active {
+            return Err(EditorGameViewBridgeFailure::RuntimeUnavailable);
+        }
         let source_is_idle = self.trusted_compiled().is_some_and(|lane| {
             matches!(
                 lane.runtime_owner,
@@ -2106,7 +2165,8 @@ impl EditorProjectSession {
             game_view::set_capture_enabled(runtime, false)?;
         }
 
-        if let Some(candidate) = self.take_game_view_candidate()? {
+        // Retirement must return an already-produced candidate after new capture admission closes.
+        if let Some(candidate) = self.take_existing_game_view_candidate()? {
             let completion = candidate.content_rejected(retirement_message);
             self.complete_game_view_candidate(completion)
                 .map_err(|_| EditorGameViewBridgeFailure::CompletionAuthorityMismatch)?;
@@ -2128,6 +2188,9 @@ impl EditorProjectSession {
         &mut self,
         extent: Extent2d,
     ) -> Result<bool, EditorGameViewBridgeFailure> {
+        if self.closing {
+            return Ok(false);
+        }
         let Some(lane) = self.trusted_compiled() else {
             return Err(EditorGameViewBridgeFailure::RuntimeUnavailable);
         };

@@ -92,7 +92,10 @@ impl PluginGroup for ProjectProfilePlugins {
 
     fn build(self) -> PluginGroupBuilder {
         let _ = &self.primary_window;
-        let task_plugin = nara_tasks::plugin(self.task_config);
+        let task_plugin = match self.placement {
+            ProjectProfilePlacement::Shipping => nara_tasks::plugin(self.task_config),
+            ProjectProfilePlacement::EditorPlay => nara_tasks::lazy_plugin(self.task_config),
+        };
         let product_group_includes_minimal = self
             .capabilities
             .contains(nara_project::ProductCapability::Runtime2d)

@@ -33,14 +33,18 @@ impl EditorProjectSession {
         real_delta: Duration,
         drive_runtime: bool,
     ) -> Arc<EditorFrameModel> {
+        if self.closing {
+            self.advance_close();
+            let scan_work_observed = match &mut self.execution {
+                super::EditorExecutionLane::Authoring(project) => project.observe_source_index(),
+                super::EditorExecutionLane::TrustedCompiled(_) => false,
+            };
+            return self.publish_editor_frame(scan_work_observed);
+        }
         let open_before = self.document_open_view();
         let mut scan_work_observed = match &mut self.execution {
             super::EditorExecutionLane::Authoring(project) => {
-                if self.closing {
-                    project.observe_source_index()
-                } else {
-                    project.advance_source_index(self.authoring_runtime.persistence_tasks())
-                }
+                project.advance_source_index(self.authoring_runtime.persistence_tasks())
             }
             super::EditorExecutionLane::TrustedCompiled(_) => false,
         };

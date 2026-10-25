@@ -36,6 +36,7 @@ use nara_reflect::{
     ComponentRegistrySnapshot, SchemaCompositionFingerprint, component_registry,
     validate_component_registry_authority,
 };
+use nara_tasks::TaskShutdownReport;
 use nara_tilemap::TileSet;
 use plugin_diagnostics::{append_plugin_shutdown_diagnostics, runtime_construction_failure_report};
 
@@ -286,6 +287,7 @@ enum ProjectHostSlot {
     Cleaning {
         epoch: u64,
         owner: Box<CleanupOwner>,
+        task_report_required: bool,
     },
 }
 
@@ -329,10 +331,84 @@ enum CleanupDriveOutcome {
     Complete {
         failed: bool,
         diagnostics: DiagnosticReport,
+        observation: Option<ProjectRuntimeCloseObservation>,
     },
 }
 
+/// Concrete product observations captured before a physically retired World is released.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProjectRuntimeCloseObservation {
+    epoch: u64,
+    task_shutdown: Option<TaskShutdownReport>,
+    close_evidence: Option<RuntimeCloseEvidence>,
+    task_report_required: bool,
+}
+
+impl ProjectRuntimeCloseObservation {
+    fn capture(
+        epoch: u64,
+        world: Option<&World>,
+        close_evidence: Option<&RuntimeCloseEvidence>,
+        task_report_required: bool,
+    ) -> Self {
+        Self {
+            epoch,
+            task_shutdown: world
+                .and_then(|world| world.get_resource::<TaskShutdownReport>())
+                .cloned(),
+            close_evidence: close_evidence.cloned(),
+            task_report_required,
+        }
+    }
+
+    fn task_report_invalid(&self) -> bool {
+        self.task_shutdown
+            .as_ref()
+            .map_or(self.task_report_required, |report| !report.is_complete())
+    }
+
+    fn has_cleanup_failure(&self) -> bool {
+        self.task_report_invalid()
+            || self
+                .task_shutdown
+                .as_ref()
+                .is_some_and(TaskShutdownReport::has_cleanup_failure)
+            || self
+                .close_evidence
+                .as_ref()
+                .is_some_and(RuntimeCloseEvidence::has_terminal_failure)
+    }
+
+    fn completed_tasks(&self) -> Option<&TaskShutdownReport> {
+        self.task_shutdown
+            .as_ref()
+            .filter(|report| report.is_complete())
+    }
+}
+
 impl CleanupOwner {
+    fn world(&self) -> Option<&World> {
+        match self {
+            Self::Construction(owner) => owner.world(),
+            Self::Candidate(owner) => Some(owner.world()),
+            Self::Publication(owner) => Some(owner.world()),
+            Self::Startup(owner) => Some(owner.world()),
+        }
+    }
+
+    fn close_observation(
+        &self,
+        epoch: u64,
+        task_report_required: bool,
+    ) -> ProjectRuntimeCloseObservation {
+        ProjectRuntimeCloseObservation::capture(
+            epoch,
+            self.world(),
+            self.close_evidence(),
+            task_report_required,
+        )
+    }
+
     fn state(&self) -> RuntimeCandidateRetirementState {
         match self {
             Self::Construction(owner) => owner.retirement_state(),
@@ -543,6 +619,44 @@ impl ProjectHost {
         true
     }
 
+    fn stopped_close_observation(&self) -> Option<ProjectRuntimeCloseObservation> {
+        let ProjectHostSlot::Running(published) = &self.slot else {
+            return None;
+        };
+        (published.runtime().state() == RuntimeState::Stopped).then(|| {
+            ProjectRuntimeCloseObservation::capture(
+                published.epoch,
+                Some(published.runtime().world()),
+                Some(published.runtime().close_evidence()),
+                project_requires_task_report(&published._plan),
+            )
+        })
+    }
+
+    fn current_task_shutdown(&self) -> Option<TaskShutdownReport> {
+        let world = match &self.slot {
+            // A caller-held prepared activation still owns its Runtime outside this slot.
+            ProjectHostSlot::Empty => {
+                return self
+                    .start_claim
+                    .any_active()
+                    .then(TaskShutdownReport::default);
+            }
+            ProjectHostSlot::Running(published) => Some(published.runtime().world()),
+            ProjectHostSlot::Cleaning { owner, .. } => owner.world(),
+        };
+        Some(
+            world
+                .and_then(|world| world.get_resource::<TaskShutdownReport>())
+                .cloned()
+                .unwrap_or_default(),
+        )
+    }
+
+    fn has_runtime_custody(&self) -> bool {
+        !matches!(self.slot, ProjectHostSlot::Empty) || self.start_claim.any_active()
+    }
+
     fn begin_start(
         &mut self,
         snapshot: ProjectContentSnapshot,
@@ -664,6 +778,7 @@ impl ProjectHost {
             obligations,
             scene_preparation,
         } = inputs;
+        let task_report_required = project_requires_task_report(&plan);
 
         let mut candidate = match plan.plugin_plan().instantiate_runtime_candidate(
             reservation,
@@ -675,7 +790,11 @@ impl ProjectHost {
                 let mut diagnostics =
                     runtime_construction_failure_report(owner.error(), owner.plugin_failure());
                 append_plugin_shutdown_diagnostics(&mut diagnostics, owner.plugin_failure_report());
-                self.install_start_cleanup(epoch, CleanupOwner::Construction(owner));
+                self.install_start_cleanup(
+                    epoch,
+                    CleanupOwner::Construction(owner),
+                    task_report_required,
+                );
                 return Err(HostFault::new(diagnostics));
             }
         };
@@ -723,6 +842,7 @@ impl ProjectHost {
             self.install_start_cleanup(
                 epoch,
                 CleanupOwner::Candidate(candidate.begin_retirement()),
+                task_report_required,
             );
             let admission_fault = match &admission {
                 Ok(outcome) => outcome.post_operation_fault.as_ref(),
@@ -749,6 +869,7 @@ impl ProjectHost {
                 self.install_start_cleanup(
                     epoch,
                     CleanupOwner::Candidate(candidate.begin_retirement()),
+                    task_report_required,
                 );
                 return Err(fault);
             }
@@ -756,6 +877,7 @@ impl ProjectHost {
                 self.install_start_cleanup(
                     epoch,
                     CleanupOwner::Candidate(candidate.begin_retirement()),
+                    task_report_required,
                 );
                 let diagnostics = match &admission {
                     Ok(outcome) => outcome.post_operation_fault.as_ref(),
@@ -778,7 +900,11 @@ impl ProjectHost {
             Ok(ready) => ready,
             Err(owner) => {
                 let diagnostics = runtime_startup_failure_report(owner.fault());
-                self.install_start_cleanup(epoch, CleanupOwner::Startup(owner));
+                self.install_start_cleanup(
+                    epoch,
+                    CleanupOwner::Startup(owner),
+                    task_report_required,
+                );
                 return Err(HostFault::new(diagnostics));
             }
         };
@@ -793,7 +919,11 @@ impl ProjectHost {
         match ready.publish_into(&mut runtime) {
             Ok(()) => {}
             Err(owner) => {
-                self.install_start_cleanup(epoch, CleanupOwner::Publication(owner));
+                self.install_start_cleanup(
+                    epoch,
+                    CleanupOwner::Publication(owner),
+                    task_report_required,
+                );
                 return Err(HostFault::new(single_error(
                     "project.run.publication-faulted",
                     "Project runtime faulted at the publication boundary",
@@ -846,12 +976,17 @@ impl ProjectHost {
 
     fn abort_prepared_start(&mut self, mut prepared: PreparedRuntimeStart) {
         let epoch = prepared.claim.epoch();
+        let task_report_required = project_requires_task_report(&prepared.plan);
         let runtime = prepared
             .runtime
             .take()
             .expect("a prepared runtime start owns one inactive publication");
         drop(prepared);
-        self.install_start_cleanup(epoch, CleanupOwner::Candidate(runtime.begin_retirement()));
+        self.install_start_cleanup(
+            epoch,
+            CleanupOwner::Candidate(runtime.begin_retirement()),
+            task_report_required,
+        );
     }
 
     fn drive_one_frame(&mut self, real_delta: Duration) -> Result<Option<AppExit>, HostFault> {
@@ -997,6 +1132,7 @@ impl ProjectHost {
                 "Project runtime is not available for bounded stop",
             )));
         };
+        let task_report_required = project_requires_task_report(&published._plan);
         if matches!(
             published
                 .runtime_mut()
@@ -1007,6 +1143,7 @@ impl ProjectHost {
             self.install_cleanup(
                 epoch,
                 CleanupOwner::Candidate(published.take_runtime().begin_retirement()),
+                task_report_required,
             );
             return Err(HostFault::new(single_error(
                 "project.run.stop-rejected",
@@ -1023,6 +1160,7 @@ impl ProjectHost {
                 self.install_cleanup(
                     epoch,
                     CleanupOwner::Candidate(published.take_runtime().begin_retirement()),
+                    task_report_required,
                 );
                 return Err(HostFault::new(single_error(
                     "project.run.stop-drive-failed",
@@ -1068,6 +1206,7 @@ impl ProjectHost {
                 self.install_cleanup(
                     epoch,
                     CleanupOwner::Candidate(published.take_runtime().begin_retirement()),
+                    task_report_required,
                 );
                 Err(HostFault::new(diagnostics))
             }
@@ -1079,6 +1218,7 @@ impl ProjectHost {
                 self.install_cleanup(
                     epoch,
                     CleanupOwner::Candidate(published.take_runtime().begin_retirement()),
+                    task_report_required,
                 );
                 Err(HostFault::new(single_error(
                     "project.run.stop-drive-failed",
@@ -1092,28 +1232,43 @@ impl ProjectHost {
         let slot = std::mem::replace(&mut self.slot, ProjectHostSlot::Empty);
         if let ProjectHostSlot::Running(mut published) = slot {
             let epoch = published.epoch;
+            let task_report_required = project_requires_task_report(&published._plan);
             self.install_cleanup(
                 epoch,
                 CleanupOwner::Candidate(published.take_runtime().begin_retirement()),
+                task_report_required,
             );
         } else {
             self.slot = slot;
         }
     }
 
-    fn install_start_cleanup(&mut self, epoch: u64, owner: CleanupOwner) {
-        self.install_cleanup(epoch, owner);
+    fn install_start_cleanup(
+        &mut self,
+        epoch: u64,
+        owner: CleanupOwner,
+        task_report_required: bool,
+    ) {
+        self.install_cleanup(epoch, owner, task_report_required);
     }
 
-    fn install_cleanup(&mut self, epoch: u64, owner: CleanupOwner) {
+    fn install_cleanup(&mut self, epoch: u64, owner: CleanupOwner, task_report_required: bool) {
         debug_assert!(matches!(self.slot, ProjectHostSlot::Empty));
-        self.slot = if owner.state() == RuntimeCandidateRetirementState::Retired {
-            ProjectHostSlot::Empty
-        } else {
-            ProjectHostSlot::Cleaning {
-                epoch,
-                owner: Box::new(owner),
-            }
+        let task_report_required = match &owner {
+            // Construction can fail before acquisition, or after a later hook removes the facade.
+            // Capture the actual obligation now, before polling removes completed participants.
+            CleanupOwner::Construction(owner) => owner.close_evidence().is_some_and(|evidence| {
+                evidence.pending_participants().iter().any(|pending| {
+                    pending.participant() == nara_tasks::TASK_POOLS_CLOSE_PARTICIPANT
+                })
+            }),
+            _ => task_report_required,
+        };
+        // Even immediate completion has observations that its consumer must receive once.
+        self.slot = ProjectHostSlot::Cleaning {
+            epoch,
+            owner: Box::new(owner),
+            task_report_required,
         };
     }
 
@@ -1123,32 +1278,65 @@ impl ProjectHost {
 
     fn drive_cleanup_once(&mut self) -> CleanupDriveOutcome {
         let slot = std::mem::replace(&mut self.slot, ProjectHostSlot::Empty);
-        let ProjectHostSlot::Cleaning { epoch, mut owner } = slot else {
+        let ProjectHostSlot::Cleaning {
+            epoch,
+            mut owner,
+            task_report_required,
+        } = slot
+        else {
             self.slot = slot;
             return CleanupDriveOutcome::Complete {
                 failed: false,
                 diagnostics: DiagnosticReport::default(),
+                observation: None,
             };
         };
-        let state = owner.drive();
+        let state = if owner.state() == RuntimeCandidateRetirementState::Retired {
+            RuntimeCandidateRetirementState::Retired
+        } else {
+            owner.drive()
+        };
         match state {
             RuntimeCandidateRetirementState::Retired => {
-                let diagnostics = owner.completion_failure_report();
+                let observation = owner.close_observation(epoch, task_report_required);
+                let mut diagnostics = owner.completion_failure_report();
+                if observation.task_report_invalid() {
+                    diagnostics.extend(single_error(
+                        "project.run.task-shutdown-report-invalid",
+                        "Project runtime completed cleanup without its required complete task report",
+                    ));
+                }
                 CleanupDriveOutcome::Complete {
                     failed: diagnostics.has_errors(),
                     diagnostics,
+                    observation: Some(observation),
                 }
             }
             RuntimeCandidateRetirementState::Retiring => {
-                self.slot = ProjectHostSlot::Cleaning { epoch, owner };
+                self.slot = ProjectHostSlot::Cleaning {
+                    epoch,
+                    owner,
+                    task_report_required,
+                };
                 CleanupDriveOutcome::Retiring
             }
             RuntimeCandidateRetirementState::RetirementIncomplete => {
-                self.slot = ProjectHostSlot::Cleaning { epoch, owner };
+                self.slot = ProjectHostSlot::Cleaning {
+                    epoch,
+                    owner,
+                    task_report_required,
+                };
                 CleanupDriveOutcome::RetirementIncomplete
             }
         }
     }
+}
+
+fn project_requires_task_report(plan: &RuntimePlan) -> bool {
+    plan.plugin_plan()
+        .entries()
+        .iter()
+        .any(|entry| entry.plugin_id() == nara_tasks::TASK_PLUGIN_ID)
 }
 
 fn materialize_project_runtime(

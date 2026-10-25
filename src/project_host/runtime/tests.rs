@@ -32,6 +32,8 @@ mod owned_save;
 mod project_scene_requests;
 #[cfg(feature = "tooling")]
 mod source_import_refresh;
+#[cfg(feature = "tooling")]
+mod task_facilities;
 
 use std::{
     error::Error,
@@ -6808,6 +6810,7 @@ fn real_task_shutdown_retains_the_host_epoch_and_owner_until_later_drives_comple
     let ProjectHostSlot::Cleaning {
         epoch: retained_epoch,
         owner,
+        ..
     } = &host.slot
     else {
         panic!("unfinished task cleanup did not retain Host custody");
@@ -7036,6 +7039,7 @@ fn drive_host_cleanup_to_completion(host: &mut ProjectHost) -> (bool, Diagnostic
         if let CleanupDriveOutcome::Complete {
             failed,
             diagnostics,
+            ..
         } = host.drive_cleanup_once()
         {
             return (failed, diagnostics);

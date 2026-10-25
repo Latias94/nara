@@ -1160,6 +1160,12 @@ impl std::error::Error for RuntimeAdmissionRetirement {
 }
 
 impl RuntimeAdmissionRetirement {
+    /// Borrows retained domain observations without allowing managed execution.
+    #[must_use]
+    pub fn world(&self) -> &World {
+        &self.owner.world
+    }
+
     #[must_use]
     pub fn plugin_failure_report(&self) -> Option<&PluginFailureReport> {
         self.owner.plugin_failure_report.as_ref()
@@ -1530,6 +1536,12 @@ pub struct RuntimePublicationFailure {
 }
 
 impl RuntimePublicationFailure {
+    /// Borrows retained domain observations, including physical close reports.
+    #[must_use]
+    pub fn world(&self) -> &World {
+        self.retirement.world()
+    }
+
     #[must_use]
     pub fn plugin_failure_report(&self) -> Option<&PluginFailureReport> {
         self.retirement.plugin_failure_report()
@@ -1776,6 +1788,12 @@ impl Display for RuntimeRetirement {
 impl std::error::Error for RuntimeRetirement {}
 
 impl RuntimeRetirement {
+    /// Borrows retained domain observations, including physical close reports.
+    #[must_use]
+    pub fn world(&self) -> &World {
+        &self.owner.world
+    }
+
     #[must_use]
     pub fn plugin_failure_report(&self) -> Option<&PluginFailureReport> {
         self.owner.plugin_failure_report.as_ref()

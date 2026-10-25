@@ -119,6 +119,11 @@ impl EditorProjectSession {
                 unreachable!("editor runtime state is not observed during a transition")
             }
         };
+        let state = if self.closing && state != EditorPlayState::Empty {
+            EditorPlayState::RetiringPlay
+        } else {
+            state
+        };
         let running_content_revision = lane.runtime_host.running_content_revision();
         let out_of_date = running_content_revision.is_some()
             && (source_revision
@@ -137,6 +142,18 @@ impl EditorProjectSession {
     }
 
     pub(crate) fn request_play(&mut self, command: EditorPlayCommand) -> EditorPlayRequestResult {
+        if self.closing
+            && !matches!(
+                command,
+                EditorPlayCommand::Stop
+                    | EditorPlayCommand::Cancel
+                    | EditorPlayCommand::RetryClose
+                    | EditorPlayCommand::RetryRetirement
+                    | EditorPlayCommand::AcknowledgeResult
+            )
+        {
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
+        }
         if (!self.accepts_new_work() || self.reopen_pending())
             && matches!(
                 command,

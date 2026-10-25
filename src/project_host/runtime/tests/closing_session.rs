@@ -161,7 +161,7 @@ fn closing_session_rejects_retained_construction_at_owning_ingress() {
 }
 
 #[test]
-fn closing_session_rejects_new_runtime_edits_while_still_allowing_stop() {
+fn closing_session_rejects_new_runtime_edits_and_retires_play_without_stop() {
     use nara_tooling::{EditorRuntimeEditRejection, EditorRuntimeEditRequest};
 
     let (_project, mut editor) = running_editor_for_close("closing-runtime-edit");
@@ -177,12 +177,12 @@ fn closing_session_rejects_new_runtime_edits_while_still_allowing_stop() {
     };
     let _ = editor.advance_close();
     let submitted = editor.request_runtime_edit_request(request);
-    stop_and_close(&mut editor);
+    complete_session_close(&mut editor);
     assert_eq!(submitted, Err(EditorRuntimeEditRejection::Busy));
 }
 
 #[test]
-fn closing_session_rejects_new_apply_changes_while_still_allowing_stop() {
+fn closing_session_rejects_new_apply_changes_and_retires_play_without_stop() {
     use nara_tooling::{EditorApplyChangesRejection, SceneApplyChangesRequest};
 
     let (_project, mut editor) = running_editor_for_close("closing-apply-changes");
@@ -191,7 +191,7 @@ fn closing_session_rejects_new_apply_changes_while_still_allowing_stop() {
         nara_identity::SceneEntityId::new("player").unwrap(),
         [ComponentTypeId::new("nara.sprite.Sprite")],
     ));
-    stop_and_close(&mut editor);
+    complete_session_close(&mut editor);
     assert_eq!(submitted, Err(EditorApplyChangesRejection::Busy));
 }
 
@@ -243,7 +243,7 @@ fn closing_session_rejects_previously_queued_apply_changes_before_source_publica
     editor.drive_editor_frame(Duration::ZERO);
     let after = document_state(&editor, document);
     let result = editor.apply_changes_result().cloned();
-    stop_and_close(&mut editor);
+    complete_session_close(&mut editor);
     assert_eq!(
         after, before,
         "queued Apply Changes must not publish through a closed workspace"
@@ -285,23 +285,13 @@ fn running_editor_for_close(label: &str) -> (TestProject, editor::EditorProjectS
     (project, editor)
 }
 
-fn stop_and_close(editor: &mut editor::EditorProjectSession) {
-    use nara_tooling::{EditorPlayCommand, EditorPlayRequestResult, EditorPlayState};
+fn complete_session_close(editor: &mut editor::EditorProjectSession) {
+    use nara_tooling::EditorPlayState;
 
-    assert_eq!(
-        editor.request_play(EditorPlayCommand::Stop),
-        EditorPlayRequestResult::Accepted
-    );
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while editor.play_view().state() != EditorPlayState::Empty {
-        assert!(
-            Instant::now() < deadline,
-            "closing must retain Stop admission"
-        );
-        editor.drive_editor_frame(Duration::ZERO);
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    let _ = drive_editor_close_to_completion(editor);
+    let closed = drive_editor_close_to_completion(editor);
+    assert!(closed.task_shutdown().is_complete());
+    assert!(!closed.task_shutdown().has_cleanup_failure());
+    assert_eq!(editor.play_view().state(), EditorPlayState::Empty);
 }
 
 #[test]

@@ -131,6 +131,7 @@ pub(super) fn run_application(
         host.error,
         &host.retirement_errors,
         host.application.failed_open_close_evidence(),
+        host.application.failed_session_close_receipt(),
     )
 }
 
@@ -138,6 +139,7 @@ fn editor_run_result(
     primary: Option<EditorRunError>,
     native_cleanup: &NativeCloseErrors,
     project_cleanup: Option<&nara::app::RuntimeCloseEvidence>,
+    session_cleanup: Option<&nara::project_host::EditorProjectCloseReceipt>,
 ) -> Result<(), EditorRunError> {
     let mut cleanup = String::new();
     if !native_cleanup.is_empty() {
@@ -149,6 +151,14 @@ fn editor_run_result(
         }
         cleanup.push_str(&format!(
             "failed project Open retired with cleanup errors: {evidence:?}"
+        ));
+    }
+    if let Some(receipt) = session_cleanup.filter(|receipt| receipt.has_cleanup_failure()) {
+        if !cleanup.is_empty() {
+            cleanup.push_str("; ");
+        }
+        cleanup.push_str(&format!(
+            "project Session retired with cleanup errors: {receipt:?}"
         ));
     }
     match (primary, cleanup.is_empty()) {
@@ -190,8 +200,7 @@ mod result_tests {
         }
     }
 
-    #[test]
-    fn physical_cleanup_failure_reaches_editor_result_and_keeps_the_primary_error() {
+    fn failed_open_cleanup_evidence() -> nara::app::RuntimeCloseEvidence {
         let mut app = App::new();
         app.add_plugin(RejectedShutdown).unwrap();
         let mut retirement = RuntimeInstance::start(app).unwrap().begin_retirement();
@@ -199,14 +208,21 @@ mod result_tests {
             retirement.drive_retirement(),
             RuntimeCandidateRetirementState::Retired
         );
-        let evidence = retirement.close_evidence();
+        let evidence = retirement.close_evidence().clone();
         assert!(evidence.has_terminal_failure());
+        evidence
+    }
+
+    #[test]
+    fn physical_cleanup_failure_reaches_editor_result_and_keeps_the_primary_error() {
+        let evidence = failed_open_cleanup_evidence();
         let mut native = NativeCloseErrors::default();
         native.record("native cleanup probe");
         let result = editor_run_result(
             Some(EditorRunError::Usage("primary probe".to_owned())),
             &native,
-            Some(evidence),
+            Some(&evidence),
+            None,
         );
         let text = result.as_ref().unwrap_err().to_string();
         assert!(
@@ -220,8 +236,63 @@ mod result_tests {
         ] {
             assert!(text.contains(fact), "missing {fact}: {text}");
         }
-        assert!(editor_run_result(None, &NativeCloseErrors::default(), Some(evidence)).is_err());
-        assert!(editor_run_result(None, &NativeCloseErrors::default(), None).is_ok());
+        assert!(
+            editor_run_result(None, &NativeCloseErrors::default(), Some(&evidence), None).is_err()
+        );
+        assert!(editor_run_result(None, &NativeCloseErrors::default(), None, None).is_ok());
+        assert!(matches!(
+            editor_run_result(
+                Some(EditorRunError::Usage("primary only".to_owned())),
+                &NativeCloseErrors::default(),
+                None,
+                None,
+            ),
+            Err(EditorRunError::Usage(message)) if message == "primary only"
+        ));
+    }
+
+    #[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
+    #[test]
+    fn trusted_session_cleanup_failure_reaches_editor_result_and_preserves_every_cleanup_source() {
+        let receipt = crate::app::failed_trusted_session_close_receipt();
+        let session_only =
+            editor_run_result(None, &NativeCloseErrors::default(), None, Some(&receipt))
+                .unwrap_err()
+                .to_string();
+        for fact in ["project Session", "PluginShutdown"] {
+            assert!(
+                session_only.contains(fact),
+                "missing {fact}: {session_only}"
+            );
+        }
+
+        let evidence = failed_open_cleanup_evidence();
+        let mut native = NativeCloseErrors::default();
+        native.record("native cleanup probe");
+        let result = editor_run_result(
+            Some(EditorRunError::EventLoop(
+                "primary event loop probe".to_owned(),
+            )),
+            &native,
+            Some(&evidence),
+            Some(&receipt),
+        );
+        let text = result.as_ref().unwrap_err().to_string();
+        assert!(matches!(
+            result,
+            Err(EditorRunError::Cleanup { primary, .. })
+                if matches!(primary.as_ref(), EditorRunError::EventLoop(message)
+                    if message == "primary event loop probe")
+        ));
+        for fact in [
+            "primary event loop probe",
+            "native cleanup probe",
+            "failed project Open",
+            "project Session",
+        ] {
+            assert!(text.contains(fact), "missing {fact}: {text}");
+        }
+        assert_eq!(text.matches("PluginShutdown").count(), 2, "{text}");
     }
 }
 

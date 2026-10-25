@@ -182,6 +182,12 @@ flowchart TD
   retained work rather than false `Stopped` evidence.
 - `TaskPlugin` closes only pools it created. Externally inserted pools remain caller-owned; a
   completed plugin-owned close publishes the typed report in the world for inspection.
+- Explicit eager-owned and lazy-owned plugin compositions register the same physical owner before
+  exposing their facade. Lazy first-use refusal cannot remove that owner or manufacture a joined
+  worker; reports count created workers, not configured capacity. Repeatable plugin identity
+  includes activation policy. Owned-lazy installation requires an unoccupied facade; it cannot
+  silently adopt an externally owned pool. The existing eager plugin retains its explicit external
+  pool contract, and shared-activity composition remains a separate close contract.
 
 ### Optional shared facilities and activity close
 
@@ -265,6 +271,10 @@ work.
 
 ## Consequences
 
+- Failed construction retains the completed report obligation once the Tasks physical participant
+  is acquired, even if facade removal or a later Finish failure prevents Runtime publication.
+  Hosts capture this acquisition before polling retirement; only pre-acquisition failure can waive
+  the missing-report check. The Tasks-owned participant identity is distinct from plan membership.
 - Project task settings configure real `TaskPoolConfig` values before `TaskPlugin` installation.
 - Server profiles use threaded bounded pools; deterministic-friendly simulation comes from typed
   admission/application order, not inline execution.

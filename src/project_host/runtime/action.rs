@@ -446,6 +446,7 @@ impl DesktopRun {
                 CleanupDriveOutcome::Complete {
                     failed,
                     diagnostics,
+                    ..
                 } => {
                     cleanup_failed |= failed;
                     self.diagnostics.extend(diagnostics);
@@ -1298,6 +1299,7 @@ where
                 CleanupDriveOutcome::Complete {
                     failed: true,
                     diagnostics,
+                    ..
                 } => {
                     self.diagnostics.extend(diagnostics);
                     HeadlessRunState::Failed

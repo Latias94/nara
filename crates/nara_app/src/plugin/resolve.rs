@@ -607,6 +607,15 @@ pub struct RuntimeConstructionFailure {
 }
 
 impl RuntimeConstructionFailure {
+    /// Borrows retained domain observations when construction acquired an App.
+    #[must_use]
+    pub fn world(&self) -> Option<&World> {
+        match &self.cleanup {
+            RuntimeConstructionCleanup::Plugin(retirement) => retirement.world(),
+            RuntimeConstructionCleanup::Admission(retirement) => Some(retirement.world()),
+        }
+    }
+
     fn plugin(
         error: PluginInstantiationError,
         failure: Option<PluginFailure>,

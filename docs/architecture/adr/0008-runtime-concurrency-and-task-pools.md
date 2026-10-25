@@ -127,6 +127,12 @@ Core rules:
   and close mechanics while starting only a used kind on first submission. First-use OS startup
   is explicit submitter cost and can fail before admission; ADR 0052 defines partial-worker
   retention. This does not by itself select shared facilities or lazy activation for every Host.
+- The integrated Editor selects private demand activation for its authoring Runtime and trusted
+  in-process Play. Explicit owned-lazy plugin installation retains the ordinary physical close
+  participant, and activation policy participates in canonical composition identity. Configured
+  worker/queue bounds remain unchanged; unused kinds acquire no workers. Ordinary Tasks defaults
+  and shipping composition remain eager. Actual deployment and first-use failure qualification
+  belong in the implementation ledger; this decision is not a product latency claim.
 - `TaskPools::inline_for_tests` plus `run_pending_for_tests` is an explicit test harness. It admits
   work through the same bounded queue and terminal state machine; it is not a server/project mode.
 - The std worker backend owns IO, compute, and async-compute workers. Tokio and async-std remain

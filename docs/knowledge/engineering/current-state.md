@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "9052795c0a161ce81757f070fb255c7b19fec351aab991f4b525c7ea8be7ceb7"
+source_fingerprint: "04a85815487bd18c4fd37d223cedc25acc13cad0c21164408d24d3bbdc412959"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "9052795c0a161ce81757f070fb255c7b19fec351aab991f4b525c7ea8be
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `9052795c0a161ce81757f070fb255c7b19fec351aab991f4b525c7ea8be7ceb7`
-- Immutable records: 929
+- Source fingerprint: `04a85815487bd18c4fd37d223cedc25acc13cad0c21164408d24d3bbdc412959`
+- Immutable records: 933
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,10 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Reopen preparation failure fidelity before native source admission](verification/2026-10/2026-10-25T220113Z-reopen-preparation-failure-fidelity-before-native-source-admission-9e51c9e94971464ab4876bdf2ff2ff07.md) - Records the source-confirmed prior Reopen error-priority defect, bounded Scene/Prefab correction, unchanged public failure assertions and source-gated native callback ordering.
+- **Verification Evidence**: [Private lazy Editor tasks and whole Session physical close qualification](verification/2026-10/2026-10-25T213241Z-private-lazy-editor-tasks-and-whole-session-physical-close-qualification-4c62c82789e4449dba02bb60f145760c.md) - Binds the bounded Editor deployment and trusted Play close contract to actual owner, failure, public-consumer and native evidence, without closing all R4b or the foundation Goal.
+- **Subagent Finding**: [Startup preparation facility retry and final Host custody follow-up](subagents/2026-10/2026-10-25T210930Z-startup-preparation-facility-retry-and-final-host-custody-follow-up-8a1cb30c55e442498e0e752712d65439.md) - Source-grounded next bounded R4b design, distinguishing activation failure from ordinary pressure and whole Session cleanup from the separate Open Host.
+- **Session Handoff**: [Initial authoring custody merged and private lazy Editor facilities design](sessions/2026-10/2026-10-25T195253Z-initial-authoring-custody-merged-and-private-lazy-editor-facilities-design-d80d2ecede8147fab5bcdedddd4a37d2.md) - Pins the qualified initial construction/Open custody stage to main and the next bounded private-lazy Editor deployment, without reducing the full foundation Goal.
 - **Verification Evidence**: [Native document metadata in supervised Play source closure facts](verification/2026-10/2026-10-25T194117Z-native-document-metadata-in-supervised-play-source-closure-facts-0fb93990d7d44da9a8111b48f82aee59.md) - Records the actual generated-starter handshake refusal, its source-fact owner correction and matched Editor/Runtime metadata-closure regression evidence.
 - **Verification Evidence**: [Initial authoring construction and failed Open physical custody qualification](verification/2026-10/2026-10-25T191539Z-initial-authoring-construction-and-failed-open-physical-custody-qualification-ad41f2c430ac4e56bdaf88fbb457f1cd.md) - Binds initial App and failed Session publication custody to actual owner, public Open, Application and selected native evidence, with explicit remaining deployment limits.
 - **Session Handoff**: [Authoring retirement merged and initial construction custody design in progress](sessions/2026-10/2026-10-25T181535Z-authoring-retirement-merged-and-initial-construction-custody-design-in-progress-e1574e61206a4dc885356b44896703b0.md) - Pins the verified retained authoring unit to main and preserves the next raw App versus planned candidate design question without claiming initial Open custody or full R4b complete.
@@ -77,10 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Demand activation custody and matched lazy shared Image comparison](verification/2026-10/2026-10-25T164306Z-demand-activation-custody-and-matched-lazy-shared-image-comparison-c5d3a638a3884807b489a85f0b7b0b1a.md) - Qualifies lazy per-kind workers, concurrent physical retirement, actual joined retention and a matched release Image comparison that challenges unconditional physical sharing.
 - **Session Handoff**: [R4b task activity custody merged and ready for lazy facility comparison](sessions/2026-10/2026-10-25T160206Z-r4b-task-activity-custody-merged-and-ready-for-lazy-facility-comparison-48eac0b948164958bb8efff8a892bcab.md) - Pins the qualified optional custody substrate to local main while preserving the full foundation Goal and remaining workload/product selection.
 - **Verification Evidence**: [Independent task activity custody and shared Image runtime qualification](verification/2026-10/2026-10-25T155728Z-independent-task-activity-custody-and-shared-image-runtime-qualification-13caef5f8c39471aa58529789ae9c530.md) - R4b first custody unit, isolated reaper recovery correction and actual two-Runtime Image evidence; deployment and lazy comparison remain open.
-- **Session Handoff**: [Editor native retirement committed and qualified for next foundation unit](sessions/2026-10/2026-10-25T151327Z-editor-native-retirement-committed-and-qualified-for-next-foundation-unit-d5d0fa4b2d4d46e49596dfdc339c4b32.md) - Pins eleven actual native trajectories to commit 8856a16, records all review corrections and remaining R4 scopes, and preserves the complete foundation goal.
-- **Verification Evidence**: [Retained Editor native graphics retirement and physical completion qualification](verification/2026-10/2026-10-25T145420Z-retained-editor-native-graphics-retirement-and-physical-completion-qualification-2665523023e84aba979458cba3f2affc.md) - Records exact GPU drain custody, partial construction return, phased native retirement, exit decision continuity and scoped Windows DX12 evidence; full foundation and remaining R4 work stay open.
-- **Verification Evidence**: [Owner-local close custody and bounded completion dependency comparison](verification/2026-10/2026-10-25T135422Z-owner-local-close-custody-and-bounded-completion-dependency-comparison-3a6ad83ba4f649ec973982d9de3a0ec9.md) - Qualifies local Rust close owners, exact registration custody and typed dependent release through public Runtime consumers; actual native graphics integration remains open.
-- **Session Handoff**: [Finite child Snap committed and native close dependency proof prepared](sessions/2026-10/2026-10-25T123619Z-finite-child-snap-committed-and-native-close-dependency-proof-prepared-620c8f2fd359440abdf7733d70a33816.md) - Commits the qualified real child proposal unit; records R4a source pressure and an uncompiled public probe as the next lower-level comparison, with full foundation scope active.
 
 # Integration Notes
 

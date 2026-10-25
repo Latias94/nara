@@ -15,9 +15,9 @@ fn settle_authoring_retirement(editor: &mut EditorProjectSession) {
     }
 }
 
-fn assert_closed_generations(
+fn assert_closed_workers(
     editor: &mut EditorProjectSession,
-    generations: usize,
+    joined: [usize; 3],
     cleanup_failed: bool,
 ) {
     close(editor);
@@ -27,15 +27,11 @@ fn assert_closed_generations(
     };
     let report = receipt.task_shutdown();
     assert!(report.is_complete());
-    for (kind, workers) in [
-        (TaskPoolKind::Io, 2),
-        (TaskPoolKind::Compute, 1),
-        (TaskPoolKind::AsyncCompute, 1),
-    ] {
+    for (kind, workers) in TaskPoolKind::ALL.into_iter().zip(joined) {
         assert_eq!(
             report.for_kind(kind).joined_workers,
-            workers * generations,
-            "each {kind} worker must be counted once per authoring Runtime"
+            workers,
+            "each activated {kind} worker must be counted exactly once"
         );
     }
     assert_eq!(report.has_cleanup_failure(), cleanup_failed);
@@ -160,7 +156,8 @@ fn successful_prefab_refresh_retains_predecessor_and_gates_the_next_saved_genera
         assert_eq!(successor.returned.state(), TaskReturnState::Pending);
     }
     successor.release_and_wait(TaskReturnState::Returned);
-    assert_closed_generations(&mut editor, 3, false);
+    // Two generations perform I/O and held Compute; the final unused successor stays dormant.
+    assert_closed_workers(&mut editor, [4, 2, 0], false);
 }
 
 #[test]
@@ -221,7 +218,7 @@ fn rejected_started_prefab_candidate_remains_owned_and_blocks_session_close_unti
     }
 
     candidate.release_and_wait(TaskReturnState::Returned);
-    assert_closed_generations(&mut editor, 2, false);
+    assert_closed_workers(&mut editor, [2, 1, 0], false);
 }
 
 #[test]
@@ -314,7 +311,7 @@ fn final_custody_refusal_preserves_incumbent_catalog_and_save_reopen_through_can
         assert_eq!(candidate.returned.state(), TaskReturnState::Pending);
     }
     candidate.release_and_wait(TaskReturnState::Returned);
-    assert_closed_generations(&mut editor, 2, false);
+    assert_closed_workers(&mut editor, [2, 1, 0], false);
 }
 
 #[test]
@@ -375,7 +372,8 @@ fn retired_predecessor_or_candidate_cleanup_failure_survives_slot_reuse_and_fina
             assert!(editor.authoring_retirements.failed());
         }
         assert_eq!(retirement_failure_count(&editor), 1);
-        assert_closed_generations(&mut editor, 3, true);
+        let io_workers = if reject_candidate { 2 } else { 4 };
+        assert_closed_workers(&mut editor, [io_workers, 1, 0], true);
         assert_eq!(retirement_failure_count(&editor), 1);
     }
 }

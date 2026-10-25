@@ -182,6 +182,13 @@ failed-owner views permit domains to inspect their physical reports without gran
 authority. Quarantine remains abnormal fallback; diagnostic projection alone cannot transfer
 cleanup responsibility.
 
+Retained preparation, admission, construction, Startup, publication and Runtime retirement owners
+permit read-only World observation while they retain that World. This lets a concrete Host capture
+domain-owned close reports before disposal without a second lifecycle driver or mutable execution
+entry. Core/App does not interpret Tasks, render or other domain report types. Physical completion
+and transfer of the final observation are separate: a Host may retain an already-complete owner
+until it has published that observation exactly once.
+
 ADRs 0010/0042/0082/0084 distinguish shutdown callback order from dependency-safe physical
 release. A runtime-local dependent aggregate has one typed close owner on its construction
 thread. Its owner retains the providers and completion state; a second lifecycle driver or

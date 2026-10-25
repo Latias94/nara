@@ -2,7 +2,9 @@
 
 Status: the [first R4b custody unit is qualified](../knowledge/engineering/verification/2026-10/2026-10-25T155728Z-independent-task-activity-custody-and-shared-image-runtime-qualification-13caef5f8c39471aa58529789ae9c530.md).
 Optional demand activation and a [bounded lazy/shared comparison](../benchmarks/2026-10-26-task-facility-locality.md)
-now have separate evidence; actual Editor lifecycle/deployment qualification remains open. The [rebaseline plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md)
+now have separate evidence. The [Editor deployment successor](../knowledge/engineering/verification/2026-10/2026-10-25T213241Z-private-lazy-editor-tasks-and-whole-session-physical-close-qualification-4c62c82789e4449dba02bb60f145760c.md)
+records its bounded owner/public/native qualification and remaining failure/Host/quiet-close work.
+The [rebaseline plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md)
 owns the complete scope. This document does not qualify R4c, Future I/O or real-time callbacks.
 
 ## Pressure And Ownership
@@ -274,6 +276,96 @@ retirements. The transportable startup-preparation attempt remains separate from
 authoring custody. This selection and source wiring do not establish qualification before the
 configuration, real source-drift, lifecycle and native gates execute.
 
+### Private Lazy Editor Deployment
+
+The initial construction/Open custody successor at `f69ac87` permits the next bounded deployment
+without relying on Drop for an unpublished owner. Select private demand-activated facilities for
+the fixed authoring App and each trusted in-process Editor Play. The matched release comparison
+supports physical isolation when arbitrary sibling work can block; it does not justify sharing
+all interactive queues merely to reduce the number of facility objects.
+
+Expose an explicit owned-lazy Tasks plugin and repeatable definition alongside the existing eager
+and shared compositions. Register the same physical close participant before publishing the lazy
+facade. Activation policy participates in canonical plugin configuration, so composition cannot
+silently treat eager and lazy definitions as identical. Do not preinsert an externally owned pool,
+change the default Tasks constructor, introduce a service registry or add a persistent project
+setting for this private placement decision.
+
+Authoring and trusted Play retain their configured per-kind worker and queue limits. Unused kinds
+start no worker; first use activates the selected kind and retains partial OS-spawn ownership.
+Shipping composition remains explicitly eager. The standalone startup-preparation Host stays
+eager in this unit. A mechanical lazy substitution would store a permanently failed I/O kind in
+the persistent Open Host and make later Retry reuse it. A separate owner-local retry design must
+distinguish permanent activation failure from ordinary pressure, retire the old physical facility
+and qualify replacement without abandoning other accepted preparations. This does not place a
+thread-bound Runtime in the transportable attempt. Broader domain deployment requires its own
+concrete consumer rather than a repository-wide constructor replacement.
+
+Qualify the actual plugin registration and immutable definition identity, then the complete
+Authoring/Play/Scene-request/Save/Reopen/refresh/close consumer. First-use failure must leave a
+typed failed operation rather than permanent Loading; physical retirement must retain every
+created worker and every accepted capture/late result. Existing eager tests must distinguish
+configured capacity from created workers while preserving their custody assertions. Observe
+unused-kind zero workers directly; do not infer a product CPU, memory or frame-time improvement
+from worker counts. Record first-use wall time separately from accepted-admission-to-start if
+making a latency comparison. Native held-cleanup and whole Session-close evidence keep their own
+scope, and the implementation ledger records what actually ran.
+
+### Whole Session Close And Trusted Play
+
+At `f69ac87`, `EditorProjectSession::advance_close` proves authoring/file/retained-authoring close
+but does not drive the complete trusted Play owner. Its receipt describes session-local task
+completion, so a direct caller must not receive Complete while that same Session still owns an
+active or unpublished Play Runtime. Application's earlier workspace Exit choreography does not
+repair this owning contract for independent callers.
+
+Irreversible Session close must stop new publication, cancel unstarted preparation, retain and
+retire any unpublished Runtime, and physically close the active Play owner before completing.
+It must not fulfill a pending Restart by starting a successor. An accepted in-flight native-target
+activation remains accountable rather than invalidating a linear token or freeing its prepared
+Runtime early. Use the existing ProjectHost/Runtime retirement protocol; do not introduce another
+task executor or mirror the Play state machine in a generic Session-close registry.
+
+Task reports from disjoint completed owners aggregate once, including Play owners actually held
+by the Session. Successive polls replace current evidence rather than incrementing counts. Keep a
+bounded sticky summary after releasing a completed World, and preserve terminal cleanup failure
+independently of physical completion. The receipt and Application/native final result need real
+consumers of that failure; diagnostics that disappear when the Session is discarded are not a
+successful shutdown report. An external supervised child remains owned by Application and is
+closed through its existing owner before the Session/native provider boundary is released.
+
+Compare reuse of the current Play transitions with a concrete fixed Session aggregate using the
+same held-work consumer. Select the form that retains actual responsibility and observations with
+the fewest independent states. Qualify direct Close with held active Play, body then late-result
+disposal, failed Startup and accepted publication stages; ordinary Stop, Restart and source-local
+document Close retain their existing contracts. A source study or authoring-only report does not
+complete this follow-up.
+
+The selected implementation uses the Session's existing concrete owners rather than another
+participant aggregate. Irreversible Play quiescing reuses `ProjectHost` retirement and never drives
+a gameplay frame or fulfills a queued Restart. ProjectHost extracts a typed task/close observation
+before releasing a stopped or retired World, including already-complete cleanup owners. Core/App
+provides only read-only retained World observations; Tasks types stay in the concrete product Host.
+The trusted lane keeps completed counts and the first terminal cleanup failure, and Application
+retains the first failed Session receipt through manager/replacement before the native runner
+consumes it. A required missing or incomplete Tasks report is an explicit contract failure, not a
+silent zero-worker success. The selected plugin plan determines the admitted Runtime obligation.
+For failed construction, capture actual Tasks physical-participant acquisition from the initial
+close evidence before polling removes completed participants. A later Finish/admission failure
+does not waive that acquired obligation; failure before Tasks acquisition remains distinct.
+
+An already physically Stopped lower Runtime can end its owned epoch without invoking unavailable
+Game frame ports or fabricating an acknowledgement of a returned completion. A live Runtime still
+retains actual in-flight candidate/activation responsibility. Dropping or returning an externally
+owned packet never grants a successor the predecessor's logical presentation authority.
+
+Closing public capture admission must not fence the private drain of a candidate produced before
+Close. The exact existing completion remains admissible, including after its native-target
+activation returns; new activation and capture requests remain refused. A caller-held prepared
+activation contributes an incomplete task observation while its Runtime is outside the Host slot.
+Missing or incomplete required task reports also fail ordinary Stop and gate Restart before a
+successor is prepared; recording the failure only in the eventual Session receipt is insufficient.
+
 ### Demand-Activation Comparison Candidate
 
 The demand-activation candidate creates bounded queues and a physical close owner without workers. The
@@ -297,7 +389,7 @@ while a first-use submission is still creating facilities, provided no work was 
 That submission is refused when it later reaches the gate; its input disposal remains the
 submitter's unadmitted responsibility. A scope already known closed never starts activation.
 
-This is an optional measured candidate, not a new default. Comparing explicit Host preactivation
+Demand activation is an explicit placement policy, not the Tasks default. Comparing Host preactivation
 with lazy first-use activation can distinguish latency policy from scope ownership without a
 universal executor trait, per-task native-thread creation or a process-global pool. Shared and
 per-Runtime facilities must use the same activation mechanism and job consumer so that the
@@ -308,8 +400,8 @@ same two-active-Image consumer with matched aggregate worker/queue capacity. Bot
 workers; private facilities preserve sibling progress under owner-0 occupancy while the shared
 queue waits for held work. This challenges unconditional sharing as the preferred interactive
 deployment. Activity custody remains useful independently; select physical isolation domains
-from required progress guarantees, then qualify actual Editor deployment. No product default
-has yet changed.
+from required progress guarantees, then qualify actual Editor deployment. The comparison itself
+did not change product allocation; the selected Editor deployment above has separate evidence.
 
 | Criterion | Required evidence |
 |---|---|

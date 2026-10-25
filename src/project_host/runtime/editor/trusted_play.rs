@@ -1,6 +1,191 @@
 use super::*;
 
+pub(super) struct EditorPlayCloseSummary {
+    completed: TaskShutdownReport,
+    first_failure: Option<super::super::ProjectRuntimeCloseObservation>,
+}
+
+impl Default for EditorPlayCloseSummary {
+    fn default() -> Self {
+        Self {
+            completed: TaskShutdownReport::aggregate([]),
+            first_failure: None,
+        }
+    }
+}
+
+impl EditorPlayCloseSummary {
+    fn record(&mut self, observation: super::super::ProjectRuntimeCloseObservation) {
+        self.completed = TaskShutdownReport::aggregate(
+            std::iter::once(&self.completed).chain(observation.completed_tasks()),
+        );
+        if observation.has_cleanup_failure() && self.first_failure.is_none() {
+            self.first_failure = Some(observation);
+        }
+    }
+
+    pub(super) fn report_with(&self, current: Option<&TaskShutdownReport>) -> TaskShutdownReport {
+        TaskShutdownReport::aggregate(std::iter::once(&self.completed).chain(current))
+    }
+
+    pub(super) fn failure(&self) -> Option<&super::super::ProjectRuntimeCloseObservation> {
+        self.first_failure.as_ref()
+    }
+}
+
 impl EditorProjectSession {
+    /// Irreversible Session close drains the existing owner without fulfilling new Play work.
+    pub(super) fn advance_session_play_close(&mut self) -> bool {
+        let Some(lane) = self.trusted_compiled() else {
+            return true;
+        };
+        if matches!(lane.runtime_owner, EditorRuntimeOwnerState::Active { .. }) {
+            let already_stopped =
+                lane.runtime_host.running_runtime_state() == Some(RuntimeState::Stopped);
+            if already_stopped {
+                // A lower owner may already have physically stopped. End that owned Runtime epoch
+                // without invoking unavailable frame ports or fabricating a completion acknowledgement.
+                self.cancel_pending_runtime_edit_without_port();
+            } else {
+                self.cancel_pending_runtime_edit();
+            }
+            if let Some(lane) = self.trusted_compiled_mut()
+                && let Some(pending) = lane.pending_apply_changes.take()
+            {
+                lane.apply_changes_result = Some(EditorApplyChangesResult::Rejected {
+                    request: pending.request,
+                    reason: EditorApplyChangesRejection::Busy,
+                    report: None,
+                });
+            }
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            if !already_stopped {
+                let has_game = matches!(
+                    self.trusted_compiled().map(|lane| &lane.runtime_owner),
+                    Some(EditorRuntimeOwnerState::Active { game: Some(_), .. })
+                );
+                if has_game
+                    && self
+                        .set_game_view_source_active(false, "the Editor Session is closing")
+                        .is_err()
+                {
+                    return false;
+                }
+                if self.game_view_retirement_blocked() {
+                    return false;
+                }
+            }
+        }
+        let Some(state) = self.take_trusted_runtime_owner() else {
+            return true;
+        };
+        let next = match state {
+            EditorRuntimeOwnerState::Empty => EditorRuntimeOwnerState::Empty,
+            EditorRuntimeOwnerState::Preparing { operation, .. } => {
+                self.play_result = Some(EditorPlayOperationResult::Cancelled { operation });
+                EditorRuntimeOwnerState::Empty
+            }
+            EditorRuntimeOwnerState::Starting {
+                operation, attempt, ..
+            } => self
+                .drive_cancelled_start(EditorPlayOperationResult::Cancelled { operation }, attempt),
+            EditorRuntimeOwnerState::CancellingStart {
+                terminal, attempt, ..
+            } => self.drive_cancelled_start(terminal, attempt),
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            EditorRuntimeOwnerState::AwaitingGameTarget {
+                source,
+                operation,
+                prepared,
+                ..
+            } => {
+                if let Some(lane) = self.trusted_compiled_mut() {
+                    lane.runtime_host.abort_prepared_start(prepared);
+                }
+                self.drive_start_retirement(
+                    source,
+                    EditorPlayOperationResult::Cancelled { operation },
+                )
+            }
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            state @ EditorRuntimeOwnerState::CommittingGameTarget { .. } => {
+                // The caller still owns an accepted activation. Its matching commit remains valid.
+                state
+            }
+            EditorRuntimeOwnerState::Active { source, .. } => {
+                let previous_failure = self
+                    .play_result
+                    .filter(|result| matches!(result, EditorPlayOperationResult::Failed { .. }));
+                let lane = self
+                    .trusted_compiled_mut()
+                    .expect("retain the trusted lane");
+                let generation = lane.runtime_host.running_runtime_generation();
+                let pending = lane.pending_control.take();
+                #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                {
+                    lane.pending_step_presentation = None;
+                }
+                let terminal = previous_failure.unwrap_or_else(|| match pending {
+                    Some(pending)
+                        if !matches!(
+                            pending.operation,
+                            EditorPlayOperation::Stop | EditorPlayOperation::RetryClose
+                        ) =>
+                    {
+                        EditorPlayOperationResult::Cancelled {
+                            operation: pending.operation,
+                        }
+                    }
+                    _ => EditorPlayOperationResult::Applied {
+                        operation: EditorPlayOperation::Stop,
+                        generation,
+                    },
+                });
+                lane.runtime_host.retire_running();
+                self.drive_start_retirement(source, terminal)
+            }
+            EditorRuntimeOwnerState::RetiringPlay { source, terminal }
+            | EditorRuntimeOwnerState::RetirementIncomplete { source, terminal } => {
+                self.drive_start_retirement(source, terminal)
+            }
+            EditorRuntimeOwnerState::Transitioning => {
+                unreachable!("Session close cannot observe an unfinished owner transition")
+            }
+        };
+        let _ = self.install_trusted_runtime_owner(next);
+        // An immediate failed construction can leave a Host observation after the public owner
+        // state becomes Empty. Consume that physical completion instead of trusting the enum alone.
+        let orphaned_cleanup = self.trusted_compiled().is_some_and(|lane| {
+            matches!(lane.runtime_owner, EditorRuntimeOwnerState::Empty)
+                && lane.runtime_host.has_cleanup_owner()
+        });
+        if orphaned_cleanup {
+            let outcome = self
+                .trusted_compiled_mut()
+                .expect("retain the trusted lane")
+                .runtime_host
+                .drive_cleanup_once();
+            if let super::super::CleanupDriveOutcome::Complete {
+                diagnostics,
+                observation,
+                ..
+            } = outcome
+            {
+                self.diagnostics.extend(diagnostics);
+                if let Some(observation) = observation {
+                    self.trusted_compiled_mut()
+                        .expect("retain the trusted lane")
+                        .close_summary
+                        .record(observation);
+                }
+            }
+        }
+        self.trusted_compiled().is_none_or(|lane| {
+            matches!(lane.runtime_owner, EditorRuntimeOwnerState::Empty)
+                && !lane.runtime_host.has_runtime_custody()
+        })
+    }
+
     pub(super) fn request_start(
         &mut self,
         operation: EditorPlayOperation,
@@ -464,7 +649,14 @@ impl EditorProjectSession {
             super::super::CleanupDriveOutcome::Complete {
                 failed,
                 diagnostics,
+                observation,
             } => {
+                if let Some(observation) = observation {
+                    self.trusted_compiled_mut()
+                        .expect("retain the trusted lane")
+                        .close_summary
+                        .record(observation);
+                }
                 let _ = self.diagnostics.extend(diagnostics);
                 let cleanup_replaces_terminal =
                     failed && !matches!(terminal, EditorPlayOperationResult::Failed { .. });
@@ -566,7 +758,7 @@ impl EditorProjectSession {
             self.diagnostics.extend(diagnostics);
         }
         if runtime_state == Some(RuntimeState::Stopped) {
-            let (pending, control_failed, generation) = {
+            let (pending, control_failed, generation, observation_failed, report_invalid) = {
                 let Some(lane) = self.trusted_compiled_mut() else {
                     return EditorRuntimeOwnerState::Empty;
                 };
@@ -578,12 +770,34 @@ impl EditorProjectSession {
                     )
                 });
                 let generation = lane.runtime_host.running_runtime_generation();
+                let observation = lane.runtime_host.stopped_close_observation();
+                let observation_failed = observation
+                    .as_ref()
+                    .is_some_and(super::super::ProjectRuntimeCloseObservation::has_cleanup_failure);
+                let report_invalid = observation
+                    .as_ref()
+                    .is_some_and(super::super::ProjectRuntimeCloseObservation::task_report_invalid);
+                if let Some(observation) = observation {
+                    lane.close_summary.record(observation);
+                }
                 let released = lane.runtime_host.release_stopped_runtime();
                 debug_assert!(released);
-                (pending, control_failed, generation)
+                (
+                    pending,
+                    control_failed,
+                    generation,
+                    observation_failed,
+                    report_invalid,
+                )
             };
+            if report_invalid {
+                self.diagnostics.extend(single_error(
+                    "project.run.task-shutdown-report-invalid",
+                    "Project runtime completed cleanup without its required complete task report",
+                ));
+            }
             let operation = pending.map_or(EditorPlayOperation::Stop, |pending| pending.operation);
-            if control_failed || close_failed {
+            if control_failed || close_failed || observation_failed {
                 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
                 {
                     if let Some(lane) = self.trusted_compiled_mut() {

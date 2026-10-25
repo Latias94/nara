@@ -99,8 +99,10 @@ The [Tasks activity-custody design](task-activity-scope-design.md) separates opt
 physical facilities from independently retired activities. It retains scope-local admission,
 coalescing and executor-owned return without claiming shared worker joins. The
 [bounded lazy/shared release comparison](../benchmarks/2026-10-26-task-facility-locality.md)
-challenges unconditional sharing for interactive progress. R4b's actual Editor lifecycle and
-deployment qualification remain open.
+challenges unconditional sharing for interactive progress. The separate
+[Editor deployment and whole-Session close successor](../knowledge/engineering/verification/2026-10/2026-10-25T213241Z-private-lazy-editor-tasks-and-whole-session-physical-close-qualification-4c62c82789e4449dba02bb60f145760c.md)
+records bounded owner/public/native evidence; first-use product failure injection, standalone
+Open Host retirement/retry and held native quiet-close remain open.
 
 The [complete conversation reassessment](foundation-architecture-reassessment.md) revisits 36
 foundation topics and [all 103 baseline ADRs](../audits/2026-10-23-foundation-architecture-coverage.md),

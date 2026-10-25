@@ -5,14 +5,20 @@ use std::{
 };
 
 use nara::{
+    ProductRecipe,
+    app::{
+        App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
+        PluginShutdownContext,
+    },
+    project_host::{EditorProjectCloseReceipt, TrustedCompiledEditorProjectIntent},
     scene::{
-        SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-        ScenePlacementOwner,
+        SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+        ScenePlacement, ScenePlacementOwner,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentMutation,
         EditorPersistenceAction, EditorPersistenceOperation, EditorPersistenceRequestResult,
-        EditorPersistenceResult,
+        EditorPersistenceResult, EditorPlayAction, EditorPlayRequestResult, EditorPlayState,
     },
 };
 
@@ -284,6 +290,149 @@ fn terminal_open_cleanup_evidence_survives_clean_failure_slot_reuse_and_manager_
     assert_eq!(application.state(), EditorApplicationState::ProjectManager);
     assert!(application.request_exit().exit_ready());
     assert_eq!(application.failed_open_close_evidence(), Some(&first));
+}
+
+#[derive(Default)]
+struct SessionShutdownFailure;
+
+impl Plugin for SessionShutdownFailure {
+    fn declaration() -> &'static PluginDeclaration {
+        static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("nara.test.session-sticky-cleanup"),
+            PluginCategory::Runtime,
+        );
+        &DECLARATION
+    }
+
+    fn build(&self, _: &mut App) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn shutdown(&self, _: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
+        Err(PluginError::SetupFailed {
+            plugin: Self::declaration().id,
+            message: "Session cleanup probe".to_owned(),
+        })
+    }
+}
+
+fn start_trusted_play(application: &mut EditorApplication) {
+    let frame = application.current_frame().unwrap();
+    let scene = frame.workspace().active_scene.as_ref().unwrap();
+    let dispatch = application.dispatch_editor_actions(EditorActionBatch::new(
+        frame.revision(),
+        [EditorAction::Play(EditorPlayAction::Play {
+            document: scene.document,
+            base_revision: scene.revision,
+        })],
+    ));
+    assert!(matches!(
+        dispatch.feedback().unwrap().unwrap().outcomes(),
+        [EditorActionOutcome::Play(EditorPlayRequestResult::Accepted)]
+    ));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while application.current_frame().unwrap().play().state() != EditorPlayState::Running {
+        assert!(Instant::now() < deadline, "trusted Play did not start");
+        application.drive_editor_frame(Duration::ZERO, false, true);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+// Shared with the native result tests: this receipt comes from public trusted construction,
+// public Play dispatch and actual whole-Session close, without a seeded receipt or close hook.
+pub(crate) fn failed_trusted_session_close_receipt() -> EditorProjectCloseReceipt {
+    let fixture = PersistenceFixture::trusted();
+    let mut application = fixture.open_with_shutdown_failure();
+    assert!(application.failed_session_close_receipt().is_none());
+    start_trusted_play(&mut application);
+    close(&mut application);
+    assert_eq!(application.state(), EditorApplicationState::ProjectManager);
+    let receipt = application.failed_session_close_receipt().unwrap().clone();
+    assert!(receipt.has_cleanup_failure());
+    assert!(receipt.has_play_cleanup_failure());
+    assert!(!receipt.has_authoring_cleanup_failure());
+    assert!(receipt.task_shutdown().is_complete());
+    assert!(!receipt.task_shutdown().has_cleanup_failure());
+    receipt
+}
+
+#[test]
+fn session_cleanup_failure_survives_manager_reopen_and_clean_exit() {
+    let fixture = PersistenceFixture::trusted();
+    let mut application = fixture.open_with_shutdown_failure();
+    start_trusted_play(&mut application);
+    application.request_close_project();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while application.current_frame().is_some() {
+        assert!(
+            Instant::now() < deadline,
+            "Session did not return to manager"
+        );
+        assert!(
+            !application
+                .drive_editor_frame(Duration::ZERO, false, true)
+                .exit_ready()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(application.state(), EditorApplicationState::ProjectManager);
+    let first = application.failed_session_close_receipt().unwrap().clone();
+    assert!(first.has_play_cleanup_failure());
+    application.submit_shell_action(super::EditorProjectShellAction::OpenProject {
+        project_root: fixture.root.clone(),
+        profile: Some("desktop".to_owned()),
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while application.current_frame().is_none() {
+        assert!(Instant::now() < deadline, "manager Open did not publish");
+        application.advance_project_open();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(application.failed_session_close_receipt(), Some(&first));
+    close(&mut application);
+    assert_eq!(application.failed_session_close_receipt(), Some(&first));
+    assert!(application.request_exit().exit_ready());
+}
+
+#[test]
+fn replacement_handoff_retains_session_cleanup_failure_through_a_clean_successor() {
+    let fixture = PersistenceFixture::trusted();
+    let mut application = fixture.open_with_shutdown_failure();
+    start_trusted_play(&mut application);
+    let mut first = None;
+    for _ in 0..2 {
+        let incumbent = application.current_frame().unwrap();
+        assert!(application.request_project_replacement(&fixture.root, Some("desktop".to_owned())));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while application.state() == EditorApplicationState::OpeningReplacement {
+            assert!(
+                Instant::now() < deadline,
+                "replacement handoff did not finish"
+            );
+            assert!(!application.advance_project_open().exit_ready());
+            assert!(
+                !application
+                    .drive_editor_frame(Duration::ZERO, false, true)
+                    .exit_ready()
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
+        assert!(!std::sync::Arc::ptr_eq(
+            &incumbent,
+            &application.current_frame().unwrap()
+        ));
+        let receipt = application.failed_session_close_receipt().unwrap();
+        assert!(receipt.has_play_cleanup_failure());
+        assert!(receipt.task_shutdown().is_complete());
+        if let Some(first) = &first {
+            assert_eq!(receipt, first);
+        } else {
+            first = Some(receipt.clone());
+        }
+    }
+    close(&mut application);
+    assert_eq!(application.failed_session_close_receipt(), first.as_ref());
 }
 
 #[test]
@@ -640,8 +789,9 @@ fn close(application: &mut EditorApplication) {
     let mut exited = application.request_exit().exit_ready();
     let deadline = Instant::now() + Duration::from_secs(10);
     while !exited && Instant::now() < deadline {
+        // Workspace Exit must drive the trusted Play lifecycle before physical Session close.
         exited = application
-            .drive_editor_frame(Duration::ZERO, false, false)
+            .drive_editor_frame(Duration::ZERO, false, true)
             .exit_ready();
         std::thread::sleep(Duration::from_millis(1));
     }
@@ -653,6 +803,39 @@ struct PersistenceFixture {
 }
 
 impl PersistenceFixture {
+    fn trusted() -> Self {
+        let fixture = Self::new();
+        let bundle = nara::reflect::AuthoringSchemaBundle::from_trusted_provider_definitions(
+            nara::project_host::advanced::built_in_schema_providers(),
+        )
+        .unwrap();
+        fs::write(
+            fixture.root.join("catalogs/authoring.bundle.json"),
+            bundle.to_json_string().unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            fixture.root.join("worlds/entry.scene.json"),
+            SceneDocument::default().to_json_string().unwrap(),
+        )
+        .unwrap();
+        fixture
+    }
+
+    fn open_with_shutdown_failure(&self) -> EditorApplication {
+        EditorApplication::open_trusted_compiled(
+            EditorLaunchOptions::new(&self.root).with_profile("desktop"),
+            TrustedCompiledEditorProjectIntent::new()
+                .with_profile("desktop")
+                .with_recipe(
+                    ProductRecipe::new()
+                        .add_plugin::<SessionShutdownFailure>()
+                        .unwrap(),
+                ),
+        )
+        .unwrap()
+    }
+
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
             "nara-editor-persistence-{}-{}",

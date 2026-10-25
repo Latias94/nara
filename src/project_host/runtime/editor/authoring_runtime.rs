@@ -699,10 +699,9 @@ fn configure_authoring_app(app: &mut App) -> Result<(), DiagnosticReport> {
         nara_hierarchy::HierarchyPlugin,
         nara_scene::SceneComponentsPlugin,
         nara_diagnostic::DiagnosticsPlugin::default(),
-        // The fixed authoring composition currently submits only I/O-class work. The task API
-        // requires each class to retain at least one worker; reassess this allocation when adding
-        // a non-I/O authoring consumer.
-        nara_tasks::TaskPlugin::new(task_config),
+        // Keep configured per-kind capacity while acquiring workers only for actual work.
+        // The plugin registers the private physical owner before exposing its task facade.
+        nara_tasks::TaskPlugin::lazy(task_config),
         nara_asset::AssetPlugin,
         nara_transform::TransformPlugin,
         nara_render::RenderComponentsPlugin,
@@ -791,6 +790,9 @@ mod task_config_tests {
             .get_resource::<TaskPools>()
             .expect("the authoring app installs its task pools");
         assert_eq!(installed.config(), &expected);
+        for kind in TaskPoolKind::ALL {
+            assert_eq!(installed.stats().for_kind(kind).live_workers, 0);
+        }
 
         let mut runtime = RuntimeInstance::start(app).expect("the authoring runtime starts");
         assert!(matches!(
@@ -807,6 +809,11 @@ mod task_config_tests {
                 .drive(Duration::ZERO)
                 .expect("the authoring runtime remains healthy while stopping");
             std::thread::sleep(Duration::from_millis(1));
+        }
+        let report = runtime.world().resource::<TaskShutdownReport>();
+        assert!(report.is_complete());
+        for kind in TaskPoolKind::ALL {
+            assert_eq!(report.for_kind(kind).joined_workers, 0);
         }
     }
 }

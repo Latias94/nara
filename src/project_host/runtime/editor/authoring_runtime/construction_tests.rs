@@ -224,9 +224,9 @@ fn configuration_failure_retains_authoring_app_until_body_and_late_result_return
     assert!(report.is_complete());
     assert!(!report.has_cleanup_failure());
     for (kind, joined) in [
-        (TaskPoolKind::Io, 2),
+        (TaskPoolKind::Io, 0),
         (TaskPoolKind::Compute, 1),
-        (TaskPoolKind::AsyncCompute, 1),
+        (TaskPoolKind::AsyncCompute, 0),
     ] {
         assert_eq!(report.for_kind(kind).joined_workers, joined);
     }
@@ -416,9 +416,9 @@ fn startup_failure_retains_actual_candidate_through_body_and_late_result_disposa
     assert!(report.is_complete());
     assert!(!report.has_cleanup_failure());
     for (kind, joined) in [
-        (TaskPoolKind::Io, 2),
+        (TaskPoolKind::Io, 0),
         (TaskPoolKind::Compute, 1),
-        (TaskPoolKind::AsyncCompute, 1),
+        (TaskPoolKind::AsyncCompute, 0),
     ] {
         assert_eq!(report.for_kind(kind).joined_workers, joined);
     }
