@@ -98,6 +98,13 @@ impl EditorProjectSession {
             EditorAction::ReadDocumentRoot(request) => {
                 EditorActionOutcome::DocumentRoot(self.workspace.read_document_root(request))
             }
+            EditorAction::CommitAuthoringEdit(prepared) => self.commit_authoring_edit(prepared),
+            EditorAction::CommitAuthoringConstruction(prepared) => {
+                match self.commit_authoring_construction(prepared) {
+                    Ok(committed) => EditorActionOutcome::AuthoringConstruction(committed),
+                    Err(outcome) => outcome,
+                }
+            }
             EditorAction::Mutate(action) => self.dispatch_document_mutation(action),
             EditorAction::Extension(action) => {
                 if let Err(rejection) =
@@ -356,6 +363,7 @@ impl EditorProjectSession {
             EditorActionOutcome::DocumentEntities(_)
             | EditorActionOutcome::DocumentAuthoring(_)
             | EditorActionOutcome::DocumentRoot(_)
+            | EditorActionOutcome::AuthoringConstruction(_)
             | EditorActionOutcome::Persistence(_)
             | EditorActionOutcome::ProjectBrowser(_)
             | EditorActionOutcome::ImageImport(_)

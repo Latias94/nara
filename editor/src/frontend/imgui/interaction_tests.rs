@@ -267,8 +267,24 @@ impl Interaction {
         let ui = self.context.frame();
         let batch = self.frontend.show(ui, &mut self.application).unwrap();
         let _ = self.context.render_legacy();
-        if let Some(batch) = batch {
-            self.actions.extend(batch.batch.clone().into_actions());
+        if let Some(mut batch) = batch {
+            let revision = batch.batch.frame_revision();
+            let actions = std::mem::replace(&mut batch.batch, EditorActionBatch::new(revision, []))
+                .into_actions();
+            self.actions
+                .extend(actions.iter().map(|action| match action {
+                    EditorAction::Navigate(action) => EditorAction::Navigate(action.clone()),
+                    EditorAction::Mutate(action) => EditorAction::Mutate(action.clone()),
+                    EditorAction::Persistence(action) => EditorAction::Persistence(action.clone()),
+                    EditorAction::WorkspaceIntent(action) => {
+                        EditorAction::WorkspaceIntent(action.clone())
+                    }
+                    EditorAction::ReportFieldValidation(action) => {
+                        EditorAction::ReportFieldValidation(action.clone())
+                    }
+                    _ => panic!("unexpected action in the field interaction fixture: {action:?}"),
+                }));
+            batch.batch = EditorActionBatch::new(revision, actions);
             self.frontend
                 .submit_and_drive(&mut self.application, batch, Duration::ZERO);
         }

@@ -25,12 +25,11 @@ fn preparing_cancel_uses_the_exact_request_and_later_phases_do_not_offer_it() {
     let preparing = pending(EditorDocumentOpenPhase::Preparing);
     let mut context = context();
     let cancel = settle(&mut context, &preparing);
-    assert_eq!(
-        click(&mut context, &preparing, cancel),
-        vec![EditorAction::ProjectBrowser(
-            EditorProjectBrowserAction::CancelOpen { request }
-        )]
-    );
+    assert!(matches!(
+        click(&mut context, &preparing, cancel).as_slice(),
+        [EditorAction::ProjectBrowser(EditorProjectBrowserAction::CancelOpen { request: actual })]
+            if *actual == request
+    ));
 
     let cancelling = pending(EditorDocumentOpenPhase::Cancelling);
     settle(&mut context, &cancelling);
@@ -59,11 +58,12 @@ fn every_terminal_result_dismisses_only_its_exact_request() {
         let frame = base.with_document_open(EditorDocumentOpenView::new(None, Some(result)));
         let mut context = context();
         let dismiss = settle(&mut context, &frame);
-        assert_eq!(
-            click(&mut context, &frame, dismiss),
-            vec![EditorAction::ProjectBrowser(
-                EditorProjectBrowserAction::AcknowledgeOpen { request }
-            )],
+        assert!(
+            matches!(
+                click(&mut context, &frame, dismiss).as_slice(),
+                [EditorAction::ProjectBrowser(EditorProjectBrowserAction::AcknowledgeOpen { request: actual })]
+                    if *actual == request
+            ),
             "{result:?}"
         );
     }

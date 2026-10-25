@@ -449,22 +449,14 @@ impl ImguiEditorFrontend {
         };
         // Built-in consumers retain their original batch indices, including filtered holes.
         if let Some(dispatch) = dispatch.filter(|_| reason.is_none()) {
-            if let Some(Ok(report)) = dispatch.feedback() {
-                let outcomes = dispatch
-                    .original_slots()
-                    .iter()
-                    .enumerate()
-                    .map(|(slot, _)| {
-                        dispatch.original_outcome(slot).cloned().unwrap_or(
-                            nara::tooling::EditorActionOutcome::Rejected(
-                                nara::tooling::EditorActionRejection::NoPublishedFrame,
-                            ),
-                        )
-                    });
-                let original =
-                    nara::tooling::EditorActionBatchReport::new(report.frame_revision(), outcomes);
+            if let Some(Ok(_)) = dispatch.feedback() {
+                let missing = nara::tooling::EditorActionOutcome::Rejected(
+                    nara::tooling::EditorActionRejection::NoPublishedFrame,
+                );
+                let outcomes = (0..dispatch.original_slots().len())
+                    .map(|slot| dispatch.original_outcome(slot).unwrap_or(&missing));
                 self.presentation
-                    .observe_report_for(&original, &pending.panels);
+                    .observe_report_for(outcomes, &pending.panels);
             } else if !dispatch.original_slots().is_empty() {
                 self.presentation.observe_rejection_for(
                     dispatch
@@ -661,7 +653,7 @@ impl ImguiEditorFrontend {
             read_only,
             canvas_presented,
         };
-        let workspace = application.panel_workspace_mut();
+        let (preparation, workspace) = application.panel_workspace_with_authoring_preparation();
         self.presentation.painted.clear();
         for reason in workspace.restore_reasons() {
             ui.window("Workspace notices")
@@ -798,6 +790,7 @@ impl ImguiEditorFrontend {
                     ui,
                     &mut ImguiEditorPanelContext {
                         model: crate::workspace::EditorPanelModel::new(&frame, instance),
+                        preparation: &preparation,
                         widgets,
                         input: &input,
                         actions: &mut actions,

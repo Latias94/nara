@@ -335,15 +335,18 @@ fn a_failed_canvas_frame_rolls_back_the_drag_without_dispatching_unpresented_act
             },
         )],
     ));
-    let batch = interaction
+    let mut batch = interaction
         .frontend
         .reject_canvas_frame(released, Some(&frame))
         .unwrap();
-    let actions = batch.batch.clone().into_actions();
+    let revision = batch.batch.frame_revision();
+    let actions =
+        std::mem::replace(&mut batch.batch, EditorActionBatch::new(revision, [])).into_actions();
     assert!(matches!(
         actions.as_slice(),
         [EditorAction::Gesture(EditorGestureAction::Cancel { .. })]
     ));
+    batch.batch = EditorActionBatch::new(revision, actions);
     interaction
         .frontend
         .submit_and_drive(&mut interaction.application, batch, Duration::ZERO);

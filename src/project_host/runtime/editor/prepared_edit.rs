@@ -6,8 +6,8 @@ use nara_scene::{
 };
 use nara_tooling::{
     CommittedEditorDocumentConstruction, EditorActionOutcome, EditorActionRejection,
-    EditorDocumentId, EditorDocumentKind, EditorWorkspaceCommandReport,
-    PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
+    EditorDocumentId, EditorDocumentKind, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
+    EditorWorkspaceCommandReport, PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
 };
 
 use super::{EditorProjectSession, editor_workspace_command_rejected};
@@ -20,11 +20,27 @@ pub enum EditorEditPreparationError {
     Closing,
     #[error("the edit requires its specialized document-domain contract")]
     StructureContractMismatch { document: EditorDocumentId },
+    #[error("the captured document-query basis is no longer admitted: {0}")]
+    QueryBasis(EditorDocumentQueryRejection),
     #[error("the document owner rejected edit preparation")]
     Document(Box<EditorWorkspaceCommandReport>),
 }
 
 impl EditorProjectSession {
+    /// Validates a retained observation before source-owned preparation, without refreshing it.
+    /// Commit still revalidates the actual candidate and the current lifecycle independently.
+    pub fn validate_authoring_query_basis(
+        &self,
+        basis: &EditorDocumentQueryBasis,
+    ) -> Result<(), EditorEditPreparationError> {
+        if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
+            return Err(EditorEditPreparationError::Closing);
+        }
+        self.workspace
+            .validate_document_query_basis(basis)
+            .map_err(EditorEditPreparationError::QueryBasis)
+    }
+
     /// Captures source-owned construction intent; no IDs or document state are published.
     pub fn begin_authoring_construction(
         &self,

@@ -245,11 +245,19 @@ impl AuthoringConstructionDraft {
 }
 
 /// The fixed mapping chosen by one preparation; it never reallocates IDs at commit.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConstructionEntityMap {
     scope: Arc<ConstructionScope>,
     entities: Vec<SceneEntityId>,
 }
+
+impl PartialEq for ConstructionEntityMap {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.scope, &other.scope) && self.entities == other.entities
+    }
+}
+
+impl Eq for ConstructionEntityMap {}
 
 impl ConstructionEntityMap {
     #[must_use]
@@ -270,7 +278,7 @@ impl ConstructionEntityMap {
 }
 
 /// A successful source publication and its exact local mapping, not proof of later existence.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CommittedAuthoringConstruction {
     entities: ConstructionEntityMap,
     report: ScenePatchReport,
@@ -573,6 +581,62 @@ fn foreign_local() -> ScenePatchReport {
 mod tests {
     use super::*;
     use nara_core::{ByteLimit, ItemLimit};
+
+    #[test]
+    fn committed_mapping_equality_retains_construction_scope_and_resolved_ids() {
+        let scope = Arc::new(ConstructionScope);
+        let entity = SceneEntityId::new("created").unwrap();
+        let mapping = ConstructionEntityMap {
+            scope: Arc::clone(&scope),
+            entities: vec![entity.clone()],
+        };
+        let local = LocalConstructionEntity {
+            scope: Arc::clone(&scope),
+            index: 0,
+        };
+        let cloned = mapping.clone();
+        assert_eq!(mapping, cloned);
+        assert_eq!(cloned.entity(&local), Some(&entity));
+
+        let foreign = ConstructionEntityMap {
+            scope: Arc::new(ConstructionScope),
+            entities: vec![entity],
+        };
+        assert_ne!(mapping, foreign);
+        assert!(foreign.entity(&local).is_none());
+
+        let different_ids = ConstructionEntityMap {
+            scope,
+            entities: vec![SceneEntityId::new("other").unwrap()],
+        };
+        assert_ne!(mapping, different_ids);
+    }
+
+    #[test]
+    fn cloned_committed_receipt_preserves_local_resolution_and_report_equality() {
+        let scope = Arc::new(ConstructionScope);
+        let local = LocalConstructionEntity {
+            scope: Arc::clone(&scope),
+            index: 0,
+        };
+        let entity = SceneEntityId::new("created").unwrap();
+        let committed = CommittedAuthoringConstruction {
+            entities: ConstructionEntityMap {
+                scope,
+                entities: vec![entity.clone()],
+            },
+            report: ScenePatchReport {
+                applied: true,
+                inverse: Some(ScenePatchDocument::new([])),
+                diagnostics: Default::default(),
+            },
+        };
+        let mut cloned = committed.clone();
+        assert_eq!(cloned, committed);
+        assert_eq!(cloned.entity(&local), Some(&entity));
+        cloned.report.applied = false;
+        assert_ne!(cloned, committed);
+    }
 
     #[test]
     fn borrowed_template_payload_gate_keeps_exact_independent_history_and_replay_limits() {

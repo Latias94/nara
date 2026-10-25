@@ -208,12 +208,66 @@ value is insufficient if its inverse cannot be replayed under the same field lim
 existing field-value limits remain separate. This is not cross-document atomicity or atomic
 multi-file Save.
 
-This first mixed-construction interface uses explicit persistent `SceneEntityId` values and declared
-component templates. It does not yet provide transaction-local ID allocation/remapping or a
-panel-context prepared-edit hook. Schema-relative nested replacements have their separate
+Raw mixed patches use explicit persistent `SceneEntityId` values and declared component templates;
+use [retained construction](#construct-with-transaction-local-references) for source-owned
+transaction-local allocation and references. Schema-relative nested replacements have their separate
 [property-edit interface](persistent-components.md#stable-nested-properties). Panels can submit
 ordinary atomic patches through the existing mutation action; direct Application clients use the retained
-candidate interface above. No compatibility wrapper or second Undo authority is required.
+candidate interface above. Registered source-built panels can retain the same candidates through
+the finite context methods below. No compatibility wrapper or second Undo authority is required.
+
+## Prepare And Retain An Edit In A Panel
+
+Prepare from the complete basis returned with a document query, not a newly sampled revision.
+The context borrows only finite read-only preparation access; it exposes no mutable Application,
+Session, source document or persistence Host:
+
+```rust,ignore
+let prepared = context.prepare_authoring_property_edit(&observation.target.basis, &edits)?;
+preview_changes(prepared.patch(), prepared.inverse());
+self.prepared = Some(prepared);
+```
+
+`prepare_authoring_edit(&basis, &patch)` supports an existing atomic patch.
+`begin_authoring_construction(&basis)` and
+`prepare_authoring_construction(document, &draft)` reuse the existing source-owned draft and
+fixed local-reference mapping. The source owners retain validation, inverse and history authority.
+Preparing, inspecting or retaining a candidate changes no document, selection or dirty state.
+Drop it to cancel before submission; changing tool inputs should replace the candidate rather
+than edit it as a second document.
+
+When the user accepts, consume that same candidate through the current frontend submission:
+
+```rust,ignore
+if let Some(prepared) = self.prepared.take() {
+    match context.commit_authoring_edit(prepared) {
+        Ok(id) => self.pending = Some(id),
+        Err((error, prepared)) => {
+            self.prepared = Some(prepared);
+            show_queue_refusal(error);
+        }
+    }
+}
+```
+
+`commit_authoring_construction` similarly returns an unqueued candidate on refusal. A refused
+entry has no completion callback. Successful enqueue transfers ownership to the existing ordered
+action route; it does not apply during paint and is not a promise of cancellability afterward.
+Use `action_finished` and the exact `PanelSubmissionId`. The successful construction outcome is
+`EditorActionOutcome::AuthoringConstruction`, containing the actual owner report and mapping;
+failed commit retains its ordinary owner rejection. Never infer success from selection or dirty.
+
+Candidate-bearing `EditorAction` and `EditorActionBatch` values are move-only. Historical outcomes
+remain owned observations. A commit-only batch uses source-candidate admission; mixing navigation
+or other frame-sensitive work retains whole-batch frame admission. Two candidates prepared from
+the same basis can accept then reject stale, and several actions are not one transaction.
+Existing supersede, origin retirement and project-generation rules still apply. A panel that
+retires after publication cannot roll the source back.
+
+Use a Workspace-target panel to operate on a named non-active document. Existing Source-target
+activation behavior is unchanged. The [bounded panel design](../architecture/editor-prepared-panel-design.md)
+records alternatives and qualification scope; this does not implement inline Inspector tools,
+dynamic installation, asynchronous preparation or a second preview/history service.
 
 ## Create A Source Entity
 
@@ -382,5 +436,6 @@ source interpretation; they are not a second document or a promise of allocation
 The independent consumer discovers an editable integer in non-active Scene and Prefab documents,
 reads its current value and computes the replacement before preparing one ordinary source edit,
 Undo/Redo and Save/Reopen. Full query qualification is tracked separately from this guide; the
-experiment does not implement arbitrary nested reads, unopened-source querying or prepared panel
-submission.
+experiment does not implement arbitrary nested reads or unopened-source querying. Prepared panel
+submission has its own contract and qualification scope rather than following from read-only
+query outcomes.

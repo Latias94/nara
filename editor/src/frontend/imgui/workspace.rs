@@ -1,10 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use dear_imgui_rs::Ui;
+use nara::project_host::{EditorEditPreparationError, EditorProjectSession};
+use nara::scene::{AuthoringConstructionDraft, AuthoringPropertyEdit, ScenePatchDocument};
 use nara::tooling::{
-    EditorAction, EditorActionBatchReport, EditorActionOutcome, EditorActionRejection,
-    EditorDocumentId, EditorGestureAction, EditorGestureCancelReason, EditorGestureId,
-    EditorGestureOutcome, EditorGestureView,
+    EditorAction, EditorActionOutcome, EditorActionRejection, EditorDocumentId,
+    EditorDocumentQueryBasis, EditorGestureAction, EditorGestureCancelReason, EditorGestureId,
+    EditorGestureOutcome, EditorGestureView, PreparedEditorDocumentConstruction,
+    PreparedEditorDocumentEdit,
 };
 
 use crate::workspace::{
@@ -20,7 +23,7 @@ use super::{PanelActionDispatch, PanelSubmissionId, PanelSubmitError};
 /// State survives docking, window movement and GPU reconstruction. Closing or hiding the panel,
 /// changing its target/resolved document, replacing the project, or restoring/resetting the layout
 /// retires it. A later paint creates a fresh instance through the registered factory.
-/// Only read-only projections and admitted application actions cross this interface.
+/// Only read-only projections, finite source preparation and admitted actions cross this interface.
 pub trait ImguiEditorPanel {
     fn show(&mut self, ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>);
 
@@ -42,6 +45,8 @@ impl ImguiEditorPanel for BuiltinPanel {
 
 pub struct ImguiEditorPanelContext<'scope, 'frame> {
     pub(super) model: EditorPanelModel<'frame>,
+    pub(super) preparation:
+        &'scope Result<&'scope EditorProjectSession, EditorEditPreparationError>,
     pub(super) widgets: &'scope mut ImguiPanelWidgets,
     pub(super) input: &'scope ImguiPanelInput<'frame>,
     pub(super) actions: &'scope mut Vec<EditorAction>,
@@ -54,6 +59,85 @@ impl ImguiEditorPanelContext<'_, '_> {
     #[must_use]
     pub fn model(&self) -> EditorPanelModel<'_> {
         self.model
+    }
+
+    /// Prepares an unpublished edit against the complete retained observation basis.
+    /// Keeping or inspecting the candidate publishes nothing; dropping it cancels the edit.
+    pub fn prepare_authoring_edit(
+        &self,
+        basis: &EditorDocumentQueryBasis,
+        patch: &ScenePatchDocument,
+    ) -> Result<PreparedEditorDocumentEdit, EditorEditPreparationError> {
+        let session = self.authoring_preparation()?;
+        session.validate_authoring_query_basis(basis)?;
+        session.prepare_authoring_edit(basis.document, basis.revision, patch)
+    }
+
+    /// Prepares stable-property replacements without changing active tabs or selection.
+    pub fn prepare_authoring_property_edit(
+        &self,
+        basis: &EditorDocumentQueryBasis,
+        edits: &[AuthoringPropertyEdit],
+    ) -> Result<PreparedEditorDocumentEdit, EditorEditPreparationError> {
+        let session = self.authoring_preparation()?;
+        session.validate_authoring_query_basis(basis)?;
+        session.prepare_authoring_property_edit(basis.document, basis.revision, edits)
+    }
+
+    /// Starts source-owned construction at the exact captured basis without allocating live IDs.
+    pub fn begin_authoring_construction(
+        &self,
+        basis: &EditorDocumentQueryBasis,
+    ) -> Result<AuthoringConstructionDraft, EditorEditPreparationError> {
+        let session = self.authoring_preparation()?;
+        session.validate_authoring_query_basis(basis)?;
+        session.begin_authoring_construction(basis.document, basis.revision)
+    }
+
+    /// Resolves a retained draft into one unpublished candidate and its fixed local ID mapping.
+    pub fn prepare_authoring_construction(
+        &self,
+        document: EditorDocumentId,
+        draft: &AuthoringConstructionDraft,
+    ) -> Result<PreparedEditorDocumentConstruction, EditorEditPreparationError> {
+        self.authoring_preparation()?
+            .prepare_authoring_construction(document, draft)
+    }
+
+    fn authoring_preparation(&self) -> Result<&EditorProjectSession, EditorEditPreparationError> {
+        self.preparation.clone()
+    }
+
+    /// Queues the exact owned candidate for commit after paint and application admission.
+    /// Refusal returns it unchanged and produces no action or completion callback.
+    pub fn commit_authoring_edit(
+        &mut self,
+        prepared: PreparedEditorDocumentEdit,
+    ) -> Result<PanelSubmissionId, (PanelSubmitError, PreparedEditorDocumentEdit)> {
+        match self.enqueue_submission(Recipient::Contribution) {
+            Ok(id) => {
+                self.actions
+                    .push(EditorAction::CommitAuthoringEdit(prepared));
+                Ok(id)
+            }
+            Err(error) => Err((error, prepared)),
+        }
+    }
+
+    /// Queues construction through the same ordered action slots and panel result delivery.
+    /// A successful dispatch retains the source owner's actual committed entity mapping.
+    pub fn commit_authoring_construction(
+        &mut self,
+        prepared: PreparedEditorDocumentConstruction,
+    ) -> Result<PanelSubmissionId, (PanelSubmitError, PreparedEditorDocumentConstruction)> {
+        match self.enqueue_submission(Recipient::Contribution) {
+            Ok(id) => {
+                self.actions
+                    .push(EditorAction::CommitAuthoringConstruction(prepared));
+                Ok(id)
+            }
+            Err(error) => Err((error, prepared)),
+        }
     }
 
     /// Queues an action for the current frontend candidate.
@@ -78,7 +162,16 @@ impl ImguiEditorPanelContext<'_, '_> {
         action: EditorAction,
         recipient: Recipient,
     ) -> Result<PanelSubmissionId, PanelSubmitError> {
-        let id = submission::enqueue(
+        let id = self.enqueue_submission(recipient)?;
+        self.actions.push(action);
+        Ok(id)
+    }
+
+    fn enqueue_submission(
+        &mut self,
+        recipient: Recipient,
+    ) -> Result<PanelSubmissionId, PanelSubmitError> {
+        submission::enqueue(
             self.next_submission,
             self.submissions,
             PanelOrigin {
@@ -87,9 +180,7 @@ impl ImguiEditorPanelContext<'_, '_> {
             },
             self.actions.len(),
             recipient,
-        )?;
-        self.actions.push(action);
-        Ok(id)
+        )
     }
 }
 
@@ -225,9 +316,9 @@ impl ImguiPanelPresentation {
         }
     }
 
-    pub fn observe_report_for(
+    pub fn observe_report_for<'a>(
         &mut self,
-        report: &EditorActionBatchReport,
+        outcomes: impl DoubleEndedIterator<Item = &'a EditorActionOutcome> + Clone,
         origins: &[PanelOrigin],
     ) {
         let live = origins
@@ -246,7 +337,7 @@ impl ImguiPanelPresentation {
                 continue;
             }
             if let Some(EditorActionOutcome::Gesture(EditorGestureOutcome::Began(view))) =
-                report.outcomes().get(pending.action_index)
+                outcomes.clone().nth(pending.action_index)
             {
                 self.gesture_owner = Some((pending.instance, pending.target, view.stamp().id()));
                 self.gesture_owner_retired = false;
@@ -264,8 +355,8 @@ impl ImguiPanelPresentation {
             if !live.contains(id) {
                 continue;
             }
-            widgets.ui_authoring.observe_report(report);
-            widgets.project.observe_action_report(report);
+            widgets.ui_authoring.observe_report(outcomes.clone());
+            widgets.project.observe_action_report(outcomes.clone());
         }
     }
 
@@ -342,6 +433,160 @@ pub(super) fn show_panel_instances(ui: &Ui, workspace: &mut EditorPanelWorkspace
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frontend_borrowed_gesture_result_keeps_its_owner_after_a_filtered_origin_and_cancels_on_retirement()
+     {
+        use super::super::{submission_tests::Harness, ui_interaction_tests::UiProject};
+        use nara::{
+            project_host::TrustedCompiledEditorProjectIntent,
+            tooling::{EditorActionBatch, EditorNavigationAction},
+        };
+        use std::time::Duration;
+
+        let mut harness = Harness::new(2);
+        let project = UiProject::new();
+        let mut application = crate::EditorApplication::open_trusted_compiled(
+            crate::EditorLaunchOptions::new(&project.0).with_profile("desktop"),
+            TrustedCompiledEditorProjectIntent::new(),
+        )
+        .unwrap();
+        application.native_shell_ready();
+        // Reuse the registered Probes and native context with the trusted UI source required
+        // by the real gesture owner; no synthetic Began outcome seeds presentation ownership.
+        *application.panel_workspace_mut() =
+            std::mem::take(harness.application.panel_workspace_mut());
+        harness.application = application;
+        let frame = harness.application.current_frame().unwrap();
+        let scene = frame.workspace().active_scene.as_ref().unwrap();
+        harness.application.submit_and_drive(
+            EditorActionBatch::new(
+                frame.revision(),
+                [
+                    EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                        document: scene.document,
+                        entity: Some(nara::scene::SceneEntityId::new("ui-anchor").unwrap()),
+                    }),
+                    EditorAction::Navigate(EditorNavigationAction::OpenPrefabSource {
+                        document: scene.document,
+                        base_revision: scene.revision,
+                        entity: nara::scene::SceneEntityId::new("ui-anchor").unwrap(),
+                    }),
+                ],
+            ),
+            Duration::ZERO,
+        );
+        let authoring = harness.application.current_ui_authoring_frame().unwrap();
+        let document = authoring.document();
+        let field = authoring
+            .projection()
+            .unwrap()
+            .fields()
+            .iter()
+            .find(|field| {
+                field.key().entity().as_str() == "image-node"
+                    && field.key().component().as_str() == "nara.ui.UiNode"
+                    && field.key().primary_field().as_str() == "style.flex_grow"
+            })
+            .unwrap();
+        let baseline = authoring
+            .lower_field_edit(field.key(), field.value().clone())
+            .unwrap();
+        let before = harness.application.current_frame().unwrap();
+        harness.panels[0].1.borrow_mut().paint = Some(Box::new(move |context| {
+            context
+                .submit(EditorAction::Navigate(
+                    EditorNavigationAction::SelectEntity {
+                        document,
+                        entity: None,
+                    },
+                ))
+                .unwrap();
+        }));
+        let mut baseline = Some(baseline);
+        harness.panels[1].1.borrow_mut().paint = Some(Box::new(move |context| {
+            context
+                .submit(EditorAction::Gesture(EditorGestureAction::Begin {
+                    baseline: baseline.take().unwrap(),
+                }))
+                .unwrap();
+        }));
+        let candidate = harness.draw();
+        let owner = harness.panels[1].0;
+        harness
+            .application
+            .panel_workspace_mut()
+            .layout_mut()
+            .set_visible(harness.panels[0].0, false);
+        let dispatch = harness
+            .frontend
+            .dispatch_submission(&mut harness.application, candidate)
+            .unwrap();
+        assert_eq!(dispatch.original_slots(), &[None, Some(0)]);
+        let Some(EditorActionOutcome::Gesture(EditorGestureOutcome::Began(began))) =
+            dispatch.original_outcome(1)
+        else {
+            panic!("the real source owner must begin the pending gesture at original slot one");
+        };
+        let gesture = began.stamp().id();
+        harness
+            .application
+            .drive_editor_frame(Duration::ZERO, dispatch.actions_observed(), true);
+        harness
+            .frontend
+            .finish_dispatch(&harness.application, &dispatch);
+        assert_eq!(
+            harness.frontend.presentation.gesture_owner,
+            Some((owner, EditorPanelTarget::ActiveDocument, gesture))
+        );
+        assert!(!harness.frontend.presentation.gesture_owner_retired);
+        let authoring = harness.application.current_ui_authoring_frame().unwrap();
+        let active = authoring.gesture().unwrap();
+        assert_eq!(active.stamp().id(), gesture);
+        let mut actions = Vec::new();
+        harness.frontend.presentation.reconcile_gesture(
+            harness.application.panel_workspace(),
+            Some(active),
+            &mut actions,
+        );
+        assert!(
+            actions.is_empty(),
+            "retiring the filtered panel must not cancel the live owner's gesture"
+        );
+        harness
+            .application
+            .panel_workspace_mut()
+            .layout_mut()
+            .set_visible(owner, false);
+        harness.frontend.reconcile_application(&harness.application);
+        harness.frontend.presentation.reconcile_gesture(
+            harness.application.panel_workspace(),
+            Some(active),
+            &mut actions,
+        );
+        assert!(
+            matches!(actions.as_slice(), [EditorAction::Gesture(EditorGestureAction::Cancel {
+            gesture: actual, reason: EditorGestureCancelReason::TargetRetired,
+        })] if *actual == gesture)
+        );
+        let frame = harness.application.current_frame().unwrap();
+        harness.application.submit_and_drive(
+            EditorActionBatch::new(frame.revision(), actions),
+            Duration::ZERO,
+        );
+        let authoring = harness.application.current_ui_authoring_frame().unwrap();
+        assert!(authoring.gesture().is_none());
+        assert_eq!(
+            authoring.last_gesture_cancellation(),
+            Some(EditorGestureCancelReason::TargetRetired)
+        );
+        let after = harness.application.current_frame().unwrap();
+        assert_eq!(
+            after.workspace().document(document),
+            before.workspace().document(document)
+        );
+        drop(harness);
+    }
 
     #[test]
     fn inspector_instances_keep_distinct_native_identity_across_title_changes() {

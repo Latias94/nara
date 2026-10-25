@@ -70,7 +70,7 @@ impl PreparedEditorDocumentConstruction {
 }
 
 /// Exact successful publication; the mapping is historical result data, not current existence.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CommittedEditorDocumentConstruction {
     entities: ConstructionEntityMap,
     report: EditorWorkspaceCommandReport,

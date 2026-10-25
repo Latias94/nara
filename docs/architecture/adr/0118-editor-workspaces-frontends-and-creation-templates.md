@@ -206,6 +206,16 @@ aggregate copied metadata includes page/continuation identity, not only each row
 The [bounded read design](../authoring-read-projection-design.md) is an implementation experiment,
 not a claim that root-query actions or prepared panel submission are already qualified.
 
+Source-built panels may borrow finite, read-only preparation access during paint. The existing
+Session and document owners validate the exact captured document-query basis and return an owned,
+unpublished candidate; panels do not acquire mutable Session, document or persistence access.
+Preparation and inspecting the candidate's patch/inverse publish nothing. Dropping a retained
+candidate cancels before submission. Commit consumes that same candidate through the existing
+ordered action routing and panel-incarnation result delivery; it never re-prepares from a patch.
+Candidate-bearing commands are move-only. Queue refusal returns the unqueued candidate, while
+successful construction reports retain the actual source-owner mapping. Neither a candidate
+registry nor another history, preview validator or result-inference path is introduced.
+
 This completion means dispatch, not eventual Save/Play completion. Several actions remain ordered;
 same-basis document writes can conflict and are never silently rebased. A cohesive multi-field
 operation uses one existing atomic patch. No generic bus, polling-ticket framework, asynchronous

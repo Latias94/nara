@@ -10,6 +10,15 @@ use crate::{
 };
 
 impl EditorWorkspace {
+    /// Checks a captured read basis before an adapter prepares an edit from its observation.
+    /// This does not reserve a revision or replace the candidate's commit-time admission.
+    pub fn validate_document_query_basis(
+        &self,
+        basis: &EditorDocumentQueryBasis,
+    ) -> Result<(), EditorDocumentQueryRejection> {
+        self.resolve_document_query_slot(basis, None).map(|_| ())
+    }
+
     pub(super) fn resolve_document_query_slot(
         &self,
         basis: &EditorDocumentQueryBasis,

@@ -482,6 +482,21 @@ impl EditorApplication {
         &mut self.panel_workspace
     }
 
+    pub(crate) fn panel_workspace_with_authoring_preparation(
+        &mut self,
+    ) -> (
+        Result<
+            &nara::project_host::EditorProjectSession,
+            nara::project_host::EditorEditPreparationError,
+        >,
+        &mut crate::workspace::EditorPanelWorkspace,
+    ) {
+        (
+            Self::authoring_edit_session_for(&self.state, self.session_retirement.is_some()),
+            &mut self.panel_workspace,
+        )
+    }
+
     pub(crate) fn install_supervised_play_wake(&mut self, wake: SupervisedPlayWake) {
         self.supervised_play_wake = wake.clone();
         match &mut self.state {
@@ -932,11 +947,21 @@ impl EditorApplication {
         &nara::project_host::EditorProjectSession,
         nara::project_host::EditorEditPreparationError,
     > {
+        Self::authoring_edit_session_for(&self.state, self.session_retirement.is_some())
+    }
+
+    fn authoring_edit_session_for(
+        state: &EditorProductState,
+        retiring: bool,
+    ) -> Result<
+        &nara::project_host::EditorProjectSession,
+        nara::project_host::EditorEditPreparationError,
+    > {
         use nara::project_host::EditorEditPreparationError;
-        if self.session_retirement.is_some() {
+        if retiring {
             return Err(EditorEditPreparationError::Closing);
         }
-        match &self.state {
+        match state {
             EditorProductState::AuthoringReady(project)
             | EditorProductState::AuthoringDegraded(project) => Ok(&project.session),
             EditorProductState::OpeningReplacement(OpeningReplacementState::Closing { .. }) => {

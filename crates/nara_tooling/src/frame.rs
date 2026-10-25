@@ -598,7 +598,7 @@ pub enum EditorPlayAction {
 }
 
 /// UI-neutral action applied by the concrete Editor Host in list order.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub enum EditorAction {
     Navigate(EditorNavigationAction),
     /// Reads direct source entity identities at an explicit open-document basis.
@@ -607,6 +607,10 @@ pub enum EditorAction {
     QueryDocumentAuthoring(crate::EditorAuthoringQuery),
     /// Copies one selected complete root after source and logical-cost admission.
     ReadDocumentRoot(crate::EditorRootRead),
+    /// Consumes the source owner's unpublished edit without preparing it again.
+    CommitAuthoringEdit(crate::PreparedEditorDocumentEdit),
+    /// Consumes the source owner's construction and retains its exact successful mapping.
+    CommitAuthoringConstruction(crate::PreparedEditorDocumentConstruction),
     Mutate(EditorDocumentMutation),
     Extension(crate::EditorExtensionCommand),
     Persistence(EditorPersistenceAction),
@@ -652,6 +656,8 @@ impl EditorAction {
             | Self::QueryDocumentEntities(_)
             | Self::QueryDocumentAuthoring(_)
             | Self::ReadDocumentRoot(_)
+            | Self::CommitAuthoringEdit(_)
+            | Self::CommitAuthoringConstruction(_)
             | Self::Extension(_)
             | Self::Persistence(_)
             | Self::ProjectContent(_)
@@ -682,7 +688,7 @@ impl EditorAction {
 }
 
 /// Ordered commands with their originating frame for geometry-sensitive admission.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub struct EditorActionBatch {
     frame_revision: EditorFrameRevision,
     actions: Vec<EditorAction>,
@@ -814,6 +820,8 @@ fn inspector_field_target(
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditorActionOutcome {
     Workspace(EditorWorkspaceCommandReport),
+    /// Exact source-owner receipt after successful construction publication.
+    AuthoringConstruction(crate::CommittedEditorDocumentConstruction),
     /// Owned read-only page or exact query rejection; not a document mutation result.
     DocumentEntities(Result<crate::EditorEntityPage, crate::EditorDocumentQueryRejection>),
     DocumentAuthoring(Result<crate::EditorAuthoringPage, crate::EditorDocumentQueryRejection>),
@@ -881,21 +889,13 @@ mod entity_query_tests {
                 source_id: 1,
                 generation: 0,
             };
-            assert!(
-                !EditorActionBatch::new(frame_revision, [query.clone()]).requires_current_frame()
-            );
-            assert!(
-                EditorActionBatch::new(
-                    frame_revision,
-                    [
-                        query,
-                        EditorAction::Navigate(EditorNavigationAction::SetActiveDocument {
-                            document
-                        }),
-                    ],
-                )
-                .requires_current_frame()
-            );
+            let batch = EditorActionBatch::new(frame_revision, [query]);
+            assert!(!batch.requires_current_frame());
+            let mut actions = batch.into_actions();
+            actions.push(EditorAction::Navigate(
+                EditorNavigationAction::SetActiveDocument { document },
+            ));
+            assert!(EditorActionBatch::new(frame_revision, actions).requires_current_frame());
         }
     }
 }

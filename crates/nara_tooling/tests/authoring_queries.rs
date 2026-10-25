@@ -534,6 +534,44 @@ fn continuations_bind_workspace_target_and_basis_and_charge_the_complete_observa
 }
 
 #[test]
+fn preparation_basis_reuses_exact_query_admission_without_changing_state() {
+    for prefab in [false, true] {
+        let (mut workspace, document) = fixture(prefab);
+        let captured = basis(&workspace, document);
+        workspace
+            .open_scene_session(
+                "other",
+                SceneAuthoringSession::new(SceneDocument::default()),
+            )
+            .unwrap();
+        let before = workspace.authoring_model();
+        assert_eq!(workspace.validate_document_query_basis(&captured), Ok(()));
+        let mut wrong_schema = captured.clone();
+        wrong_schema.schema = None;
+        assert_eq!(
+            workspace.validate_document_query_basis(&wrong_schema),
+            Err(EditorDocumentQueryRejection::StaleSchema)
+        );
+        assert_eq!(workspace.authoring_model(), before);
+        let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
+            entity: id("item"),
+            component: ComponentTypeId::new("game.Data"),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("amount"),
+            value: ComponentValue::U64(9),
+        }]);
+        let prepared = workspace
+            .prepare_authoring_edit(document, captured.revision, &patch)
+            .unwrap();
+        assert!(workspace.commit_authoring_edit(prepared).applied);
+        assert_eq!(
+            workspace.validate_document_query_basis(&captured),
+            Err(EditorDocumentQueryRejection::StaleRevision)
+        );
+    }
+}
+
+#[test]
 fn multi_row_discovery_charges_aggregate_metadata_before_copying() {
     for prefab in [false, true] {
         let (workspace, document) = fixture(prefab);

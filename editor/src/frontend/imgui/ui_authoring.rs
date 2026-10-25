@@ -6,9 +6,9 @@ use nara::{
     render::DisplayRect,
     scene::{SceneAuthoringRevision, SceneEntityId, ScenePlacement, ScenePlacementAnchor},
     tooling::{
-        EditorAction, EditorActionBatchReport, EditorActionOutcome, EditorActionRejection,
-        EditorDocumentId, EditorGestureAction, EditorGestureCancelReason, EditorGestureStamp,
-        EditorNavigationAction, PrefabCompositionOutcome,
+        EditorAction, EditorActionOutcome, EditorActionRejection, EditorDocumentId,
+        EditorGestureAction, EditorGestureCancelReason, EditorGestureStamp, EditorNavigationAction,
+        PrefabCompositionOutcome,
     },
     ui::{
         __private::{
@@ -170,11 +170,14 @@ impl ImguiUiAuthoringPanels {
         }
     }
 
-    pub(super) fn observe_report(&mut self, report: &EditorActionBatchReport) {
+    pub(super) fn observe_report<'a>(
+        &mut self,
+        mut outcomes: impl Iterator<Item = &'a EditorActionOutcome>,
+    ) {
         let Some(index) = self.structure_pending.take() else {
             return;
         };
-        match report.outcomes().get(index) {
+        match outcomes.nth(index) {
             Some(EditorActionOutcome::Workspace(report))
                 if report.prefab_composition_outcome.is_some() =>
             {
@@ -1276,6 +1279,207 @@ mod tests {
     use nara::tooling::EditorActionBatch;
 
     use super::*;
+
+    #[test]
+    fn frontend_structure_observation_keeps_its_original_index_and_rejects_a_filtered_slot() {
+        use super::super::submission_tests::Harness;
+        use crate::workspace::EditorPanelTarget;
+        use nara::scene::ScenePatchDocument;
+        use nara::tooling::{
+            EditorCloseDecision, EditorDocumentMutation, EditorWorkspaceIntent,
+            EditorWorkspaceIntentAction, PrefabCompositionCommand,
+        };
+
+        for closing in [false, true] {
+            let mut harness = Harness::new(2);
+            let frame = harness.application.current_frame().unwrap();
+            let scene = frame.workspace().active_scene.as_ref().unwrap();
+            harness.application.submit_and_drive(
+                EditorActionBatch::new(
+                    frame.revision(),
+                    [
+                        EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                            document: scene.document,
+                            entity: Some(SceneEntityId::new("prefab-anchor").unwrap()),
+                        }),
+                        EditorAction::Navigate(EditorNavigationAction::OpenPrefabSource {
+                            document: scene.document,
+                            base_revision: scene.revision,
+                            entity: SceneEntityId::new("prefab-anchor").unwrap(),
+                        }),
+                    ],
+                ),
+                Duration::ZERO,
+            );
+            let frame = harness.application.current_frame().unwrap();
+            let document = frame.workspace().active_document.unwrap();
+            let revision = frame.workspace().document(document).unwrap().revision;
+            // Establish a dirty Prefab before opening the close prompt, without touching the
+            // component that the pending structure action will add.
+            let edit = harness
+                .application
+                .prepare_authoring_edit(
+                    document,
+                    revision,
+                    &ScenePatchDocument::new([nara::scene::ScenePatchOperation::AddEntity {
+                        entity: nara::scene::SceneEntityRecord::new(
+                            SceneEntityId::new("structure-baseline").unwrap(),
+                        ),
+                        placement: ScenePlacement::last(nara::scene::ScenePlacementOwner::Root),
+                    }]),
+                )
+                .unwrap();
+            harness.application.submit_and_drive(
+                EditorActionBatch::new(frame.revision(), [EditorAction::CommitAuthoringEdit(edit)]),
+                Duration::ZERO,
+            );
+            if closing {
+                let frame = harness.application.current_frame().unwrap();
+                harness.application.submit_and_drive(
+                    EditorActionBatch::new(
+                        frame.revision(),
+                        [EditorAction::WorkspaceIntent(
+                            EditorWorkspaceIntentAction::Request(
+                                EditorWorkspaceIntent::CloseDocument { document },
+                            ),
+                        )],
+                    ),
+                    Duration::ZERO,
+                );
+            }
+            harness.panels[0].1.borrow_mut().paint = Some(Box::new(move |context| {
+                context
+                    .submit(EditorAction::Navigate(
+                        EditorNavigationAction::SelectEntity {
+                            document,
+                            entity: None,
+                        },
+                    ))
+                    .unwrap();
+            }));
+            harness.panels[1].1.borrow_mut().paint = Some(Box::new(move |context| {
+                let first = if closing {
+                    EditorAction::WorkspaceIntent(
+                        context
+                            .model()
+                            .frame()
+                            .workspace_intent()
+                            .decision_prompt()
+                            .unwrap()
+                            .resolve(EditorCloseDecision::Cancel),
+                    )
+                } else {
+                    EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                        document,
+                        entity: None,
+                    })
+                };
+                context.submit(first).unwrap();
+                let entity = SceneEntityId::new("preserved").unwrap();
+                let revision = context
+                    .model()
+                    .frame()
+                    .workspace()
+                    .document(document)
+                    .unwrap()
+                    .revision;
+                context.widgets.ui_authoring.structure =
+                    Some(StructureDialog::Delete(entity.clone()));
+                context.widgets.ui_authoring.structure_error = Some("previous attempt".to_owned());
+                context.widgets.ui_authoring.structure_pending = Some(context.actions.len());
+                context
+                    .submit(EditorAction::Mutate(
+                        EditorDocumentMutation::ComposePrefab {
+                            document,
+                            base_revision: revision,
+                            command: PrefabCompositionCommand::AddComponent {
+                                entity,
+                                component: nara::reflect::ComponentTypeId::new(
+                                    super::super::interaction_tests::CUSTOM_COMPONENT,
+                                ),
+                            },
+                        },
+                    ))
+                    .unwrap();
+                context
+                    .submit(EditorAction::Navigate(
+                        EditorNavigationAction::SelectEntity {
+                            document,
+                            entity: None,
+                        },
+                    ))
+                    .unwrap();
+            }));
+            let candidate = harness.draw();
+            let owner = harness.panels[1].0;
+            assert_eq!(
+                harness.frontend.presentation.widgets[&owner]
+                    .ui_authoring
+                    .structure_pending,
+                Some(2)
+            );
+            harness
+                .application
+                .panel_workspace_mut()
+                .layout_mut()
+                .set_visible(harness.panels[0].0, false);
+            let dispatch = harness
+                .frontend
+                .dispatch_submission(&mut harness.application, candidate)
+                .unwrap();
+            assert_eq!(
+                dispatch.original_slots(),
+                if closing {
+                    &[None, Some(0), None, None][..]
+                } else {
+                    &[None, Some(0), Some(1), Some(2)][..]
+                }
+            );
+            harness.application.drive_editor_frame(
+                Duration::ZERO,
+                dispatch.actions_observed(),
+                true,
+            );
+            harness
+                .frontend
+                .finish_dispatch(&harness.application, &dispatch);
+            let widgets = &harness.frontend.presentation.widgets[&owner].ui_authoring;
+            assert!(widgets.structure_pending.is_none());
+            if closing {
+                assert!(widgets.structure.is_some());
+                assert_eq!(
+                    widgets.structure_error.as_deref(),
+                    Some("Structure change rejected: NoPublishedFrame")
+                );
+                assert!(widgets.focus_entity.is_none());
+            } else {
+                let Some(EditorActionOutcome::Workspace(report)) = dispatch.original_outcome(2)
+                else {
+                    panic!("the structure result must retain original slot two");
+                };
+                assert!(matches!(&report.prefab_composition_outcome,
+                    Some(PrefabCompositionOutcome::ComponentAdded { entity, .. })
+                        if entity.as_str() == "preserved"));
+                assert!(widgets.structure.is_none());
+                assert!(widgets.structure_error.is_none());
+                assert_eq!(
+                    widgets.focus_entity.as_ref().map(SceneEntityId::as_str),
+                    Some("preserved")
+                );
+                assert!(!widgets.focus_hierarchy);
+            }
+            assert_eq!(
+                harness
+                    .application
+                    .panel_workspace()
+                    .layout()
+                    .instance(owner)
+                    .unwrap()
+                    .target(),
+                &EditorPanelTarget::ActiveDocument
+            );
+        }
+    }
 
     struct TrustedUiFixture(PathBuf);
 

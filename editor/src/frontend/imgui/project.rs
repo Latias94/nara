@@ -2,21 +2,21 @@ use std::{path::PathBuf, sync::Arc};
 
 use dear_imgui_rs::{ListClipper, Ui};
 use nara::tooling::{
-    EditorAction, EditorActionBatchReport, EditorActionOutcome, EditorActionRejection,
-    EditorExternalPlayCompilerLevel, EditorExternalPlayMessageKind, EditorExternalPlayState,
-    EditorFrameModel, EditorImageColorSpace, EditorImageImportAttemptView,
-    EditorImageImportAvailabilityView, EditorImageImportDetailRevision,
-    EditorImageImportFailureReason, EditorImageImportFreshness, EditorImageImportMetadataIssue,
-    EditorImageImportMetadataView, EditorImageImportSettings, EditorImageImportView,
-    EditorPlayAction, EditorPlayControl, EditorPlayFailure, EditorPlayOperation,
-    EditorPlayOperationResult, EditorPlayRejection, EditorPlayState, EditorProjectBrowserAction,
-    EditorProjectBrowserActionOutcome, EditorProjectBrowserDiagnosticPhase,
-    EditorProjectBrowserDiagnosticView, EditorProjectBrowserKindFilter,
-    EditorProjectBrowserLocalAction, EditorProjectBrowserPendingWork, EditorProjectBrowserStatus,
-    EditorProjectBrowserView, EditorProjectContentAction, EditorProjectContentRefreshFailure,
-    EditorProjectContentView, EditorProjectSourceInspectReason, EditorProjectSourceKind,
-    EditorProjectSourceOpenCapability, EditorRuntimeUnavailableReason, EditorSceneModel,
-    EditorWorkspaceIntentAction, EditorWorkspaceIntentResult,
+    EditorAction, EditorActionOutcome, EditorActionRejection, EditorExternalPlayCompilerLevel,
+    EditorExternalPlayMessageKind, EditorExternalPlayState, EditorFrameModel,
+    EditorImageColorSpace, EditorImageImportAttemptView, EditorImageImportAvailabilityView,
+    EditorImageImportDetailRevision, EditorImageImportFailureReason, EditorImageImportFreshness,
+    EditorImageImportMetadataIssue, EditorImageImportMetadataView, EditorImageImportSettings,
+    EditorImageImportView, EditorPlayAction, EditorPlayControl, EditorPlayFailure,
+    EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection, EditorPlayState,
+    EditorProjectBrowserAction, EditorProjectBrowserActionOutcome,
+    EditorProjectBrowserDiagnosticPhase, EditorProjectBrowserDiagnosticView,
+    EditorProjectBrowserKindFilter, EditorProjectBrowserLocalAction,
+    EditorProjectBrowserPendingWork, EditorProjectBrowserStatus, EditorProjectBrowserView,
+    EditorProjectContentAction, EditorProjectContentRefreshFailure, EditorProjectContentView,
+    EditorProjectSourceInspectReason, EditorProjectSourceKind, EditorProjectSourceOpenCapability,
+    EditorRuntimeUnavailableReason, EditorSceneModel, EditorWorkspaceIntentAction,
+    EditorWorkspaceIntentResult,
 };
 
 use super::{ImguiTextOwner, observe_text_owner};
@@ -424,16 +424,14 @@ impl ImguiProjectPanels {
         }
     }
 
-    pub(super) fn observe_action_report(&mut self, report: &EditorActionBatchReport) {
-        if let Some(outcome) = report
-            .outcomes()
-            .iter()
-            .rev()
-            .find_map(|outcome| match outcome {
-                EditorActionOutcome::ProjectBrowser(outcome) => Some(*outcome),
-                _ => None,
-            })
-        {
+    pub(super) fn observe_action_report<'a>(
+        &mut self,
+        outcomes: impl DoubleEndedIterator<Item = &'a EditorActionOutcome>,
+    ) {
+        if let Some(outcome) = outcomes.rev().find_map(|outcome| match outcome {
+            EditorActionOutcome::ProjectBrowser(outcome) => Some(*outcome),
+            _ => None,
+        }) {
             self.browser_notice = Some(match outcome {
                 EditorProjectBrowserActionOutcome::RefreshRequested => "Project refresh requested",
                 EditorProjectBrowserActionOutcome::RefreshAlreadyPending => {
@@ -1070,6 +1068,96 @@ mod tests {
     use super::*;
 
     #[test]
+    fn frontend_browser_observation_uses_the_latest_result_across_retired_origin_holes() {
+        use super::super::submission_tests::Harness;
+        use nara::tooling::{EditorDocumentOpenId, EditorNavigationAction};
+        use std::time::Duration;
+
+        let mut harness = Harness::new(5);
+        let frame = harness.application.current_frame().unwrap();
+        let document = frame.workspace().active_document.unwrap();
+        let request = EditorDocumentOpenId::new(frame.revision(), 17);
+        for index in [0, 2, 4] {
+            harness.panels[index].1.borrow_mut().paint = Some(Box::new(move |context| {
+                context
+                    .submit(EditorAction::Navigate(
+                        EditorNavigationAction::SelectEntity {
+                            document,
+                            entity: None,
+                        },
+                    ))
+                    .unwrap();
+            }));
+        }
+        harness.panels[1].1.borrow_mut().paint = Some(Box::new(|context| {
+            context
+                .submit(EditorAction::ProjectBrowser(
+                    EditorProjectBrowserAction::Refresh,
+                ))
+                .unwrap();
+        }));
+        harness.panels[3].1.borrow_mut().paint = Some(Box::new(move |context| {
+            context
+                .submit(EditorAction::ProjectBrowser(
+                    EditorProjectBrowserAction::AcknowledgeOpen { request },
+                ))
+                .unwrap();
+        }));
+        let candidate = harness.draw();
+        for index in [0, 2, 4] {
+            harness
+                .application
+                .panel_workspace_mut()
+                .layout_mut()
+                .set_visible(harness.panels[index].0, false);
+        }
+        let dispatch = harness
+            .frontend
+            .dispatch_submission(&mut harness.application, candidate)
+            .unwrap();
+        assert_eq!(
+            dispatch.original_slots(),
+            &[None, Some(0), None, Some(1), None]
+        );
+        assert!(matches!(
+            dispatch.original_outcome(1),
+            Some(EditorActionOutcome::ProjectBrowser(
+                EditorProjectBrowserActionOutcome::RefreshRequested
+                    | EditorProjectBrowserActionOutcome::RefreshAlreadyPending
+            ))
+        ));
+        assert!(matches!(
+            dispatch.original_outcome(3),
+            Some(EditorActionOutcome::ProjectBrowser(
+                EditorProjectBrowserActionOutcome::Rejected { .. }
+            ))
+        ));
+        harness
+            .application
+            .drive_editor_frame(Duration::ZERO, dispatch.actions_observed(), true);
+        harness
+            .frontend
+            .finish_dispatch(&harness.application, &dispatch);
+        for index in [1, 3] {
+            assert_eq!(
+                harness.frontend.presentation.widgets[&harness.panels[index].0]
+                    .project
+                    .browser_notice,
+                Some("Project Browser action was safely rejected")
+            );
+        }
+        for index in [0, 2, 4] {
+            assert!(
+                !harness
+                    .frontend
+                    .presentation
+                    .widgets
+                    .contains_key(&harness.panels[index].0)
+            );
+        }
+    }
+
+    #[test]
     #[cfg(any(
         all(target_os = "windows", target_arch = "x86_64"),
         all(target_os = "linux", target_arch = "x86_64")
@@ -1259,12 +1347,17 @@ mod tests {
                 .io_mut()
                 .add_mouse_button_event(MouseButton::Left, false);
             let actions = paint(&mut context, &frame);
-            let expected = if expected {
-                vec![EditorAction::Play(EditorPlayAction::Stop)]
+            if expected {
+                assert!(
+                    matches!(
+                        actions.as_slice(),
+                        [EditorAction::Play(EditorPlayAction::Stop)]
+                    ),
+                    "{label}"
+                );
             } else {
-                Vec::new()
-            };
-            assert_eq!(actions, expected, "{label}");
+                assert!(actions.is_empty(), "{label}");
+            }
         }
     }
 
@@ -1505,10 +1598,12 @@ mod tests {
                 .unwrap(),
             }),
         );
-        let request = EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Request(
-            EditorWorkspaceIntent::CloseDocument { document },
-        ));
-        submit(&mut application, request.clone());
+        let request =
+            EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::CloseDocument { document });
+        submit(
+            &mut application,
+            EditorAction::WorkspaceIntent(request.clone()),
+        );
         let requested = application.current_frame().unwrap();
         submit(
             &mut application,
@@ -1546,12 +1641,18 @@ mod tests {
             .io_mut()
             .add_mouse_button_event(MouseButton::Left, false);
         let actions = paint(&mut context, &cancelled).0;
+        assert!(matches!(
+            actions.as_slice(),
+            [EditorAction::WorkspaceIntent(
+                EditorWorkspaceIntentAction::AcknowledgeResult
+            )]
+        ));
         application.submit_and_drive(
-            EditorActionBatch::new(cancelled.revision(), actions.clone()),
+            EditorActionBatch::new(cancelled.revision(), actions),
             Duration::ZERO,
         );
         let acknowledged = application.current_frame().unwrap();
-        submit(&mut application, request);
+        submit(&mut application, EditorAction::WorkspaceIntent(request));
         let requested_again = application.current_frame().unwrap();
         submit(
             &mut application,
@@ -1590,12 +1691,6 @@ mod tests {
         assert!(matches!(
             cancelled.workspace_intent().result(),
             Some(EditorWorkspaceIntentResult::Cancelled { .. })
-        ));
-        assert!(matches!(
-            actions.as_slice(),
-            [EditorAction::WorkspaceIntent(
-                EditorWorkspaceIntentAction::AcknowledgeResult
-            )]
         ));
         assert!(acknowledged.workspace_intent().result().is_none());
         assert!(requested_again.workspace_intent().phase().is_some());

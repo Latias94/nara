@@ -3897,17 +3897,18 @@ fn duplicate_close_decision_cannot_approve_the_next_dirty_document() {
     );
     let frame = editor.drive_editor_frame(Duration::ZERO);
     let first = frame.workspace_intent().decision_document().unwrap();
-    let decision = EditorAction::WorkspaceIntent(
-        frame
-            .workspace_intent()
-            .decision_prompt()
-            .unwrap()
-            .resolve(nara_tooling::EditorCloseDecision::Discard),
-    );
+    let decision = frame
+        .workspace_intent()
+        .decision_prompt()
+        .unwrap()
+        .resolve(nara_tooling::EditorCloseDecision::Discard);
     let report = editor
         .dispatch_editor_actions(EditorActionBatch::new(
             frame.revision(),
-            [decision.clone(), decision],
+            [
+                EditorAction::WorkspaceIntent(decision.clone()),
+                EditorAction::WorkspaceIntent(decision),
+            ],
         ))
         .unwrap();
     assert!(matches!(
