@@ -92,6 +92,12 @@ impl EditorProjectSession {
             EditorAction::QueryDocumentEntities(query) => {
                 EditorActionOutcome::DocumentEntities(self.workspace.query_document_entities(query))
             }
+            EditorAction::QueryDocumentAuthoring(query) => EditorActionOutcome::DocumentAuthoring(
+                self.workspace.query_document_authoring(query),
+            ),
+            EditorAction::ReadDocumentRoot(request) => {
+                EditorActionOutcome::DocumentRoot(self.workspace.read_document_root(request))
+            }
             EditorAction::Mutate(action) => self.dispatch_document_mutation(action),
             EditorAction::Extension(action) => {
                 if let Err(rejection) =
@@ -348,6 +354,8 @@ impl EditorProjectSession {
                 ));
             }
             EditorActionOutcome::DocumentEntities(_)
+            | EditorActionOutcome::DocumentAuthoring(_)
+            | EditorActionOutcome::DocumentRoot(_)
             | EditorActionOutcome::Persistence(_)
             | EditorActionOutcome::ProjectBrowser(_)
             | EditorActionOutcome::ImageImport(_)

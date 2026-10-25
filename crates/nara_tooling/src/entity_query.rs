@@ -1,10 +1,9 @@
 //! Bounded, selection-independent enumeration of open authoring source records.
 
-use std::{error::Error, fmt, sync::Arc};
+use nara_scene::SceneEntityId;
 
-use nara_scene::{AuthoringSchemaBasis, SceneAuthoringRevision, SceneEntityId};
-
-use crate::{EditorDocumentId, EditorDocumentKind};
+use crate::document_query::EditorDocumentQueryOwner;
+use crate::{EditorDocumentKind, EditorDocumentQueryBasis, EditorDocumentQueryRejection};
 
 /// Maximum source records inspected by one entity page operation.
 pub const MAX_EDITOR_ENTITY_QUERY_SCAN_RECORDS: usize = 4_096;
@@ -26,11 +25,11 @@ impl EditorEntityQueryLimits {
     pub fn new(
         max_scan_records: usize,
         max_rows: usize,
-    ) -> Result<Self, EditorEntityQueryRejection> {
+    ) -> Result<Self, EditorDocumentQueryRejection> {
         if !(1..=MAX_EDITOR_ENTITY_QUERY_SCAN_RECORDS).contains(&max_scan_records)
             || !(1..=MAX_EDITOR_ENTITY_QUERY_ROWS).contains(&max_rows)
         {
-            return Err(EditorEntityQueryRejection::InvalidLimits {
+            return Err(EditorDocumentQueryRejection::InvalidLimits {
                 max_scan_records,
                 max_rows,
             });
@@ -54,22 +53,10 @@ impl EditorEntityQueryLimits {
     }
 }
 
-/// Exact open-document facts used to begin enumeration or describe an owned page.
-///
-/// Obtain these facts from the document tab model. The revision includes its source
-/// incarnation; a source locator or saved content identity is not a substitute.
-/// `schema` is `None` for sessions without an authoring Schema admission, not a wildcard.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EditorEntityQueryBasis {
-    pub document: EditorDocumentId,
-    pub revision: SceneAuthoringRevision,
-    pub schema: Option<AuthoringSchemaBasis>,
-}
-
 /// Starts at an exact document basis or replays an owner-created continuation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditorEntityQueryPosition {
-    Start(EditorEntityQueryBasis),
+    Start(EditorDocumentQueryBasis),
     Continue(EditorEntityCursor),
 }
 
@@ -92,8 +79,8 @@ pub struct EditorEntityQuery {
 /// its basis is current.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorEntityCursor {
-    pub(crate) owner: EditorEntityQueryOwner,
-    pub(crate) basis: EditorEntityQueryBasis,
+    pub(crate) owner: EditorDocumentQueryOwner,
+    pub(crate) basis: EditorDocumentQueryBasis,
     pub(crate) kind: EditorDocumentKind,
     pub(crate) next_record: usize,
 }
@@ -106,80 +93,8 @@ pub struct EditorEntityCursor {
 /// remain historical observations after their basis becomes stale, not current edit authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorEntityPage {
-    pub basis: EditorEntityQueryBasis,
+    pub basis: EditorDocumentQueryBasis,
     pub entities: Vec<SceneEntityId>,
     pub scanned_records: usize,
     pub next: Option<EditorEntityCursor>,
 }
-
-/// Exact rejection of a query without changing document or presentation state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EditorEntityQueryRejection {
-    /// The continuation belongs to another workspace, including a replaced project workspace.
-    WrongWorkspace,
-    /// The explicitly named document is no longer open, or was never open here.
-    DocumentNotOpen { document: EditorDocumentId },
-    /// Only direct Scene and Prefab source records are supported.
-    UnsupportedDocumentKind { kind: EditorDocumentKind },
-    /// The slot no longer has the source kind captured by the continuation.
-    DocumentKindChanged {
-        expected: EditorDocumentKind,
-        actual: EditorDocumentKind,
-    },
-    /// The document was reopened or replaced; a matching locator cannot rebase the query.
-    StaleIncarnation,
-    /// The document changed within the captured incarnation, even if Undo restores its content.
-    StaleRevision,
-    /// The exact retained Schema admission changed; equal catalogs are not equal admissions.
-    StaleSchema,
-    /// A positive limit exceeded its cap, or either limit was zero.
-    InvalidLimits {
-        max_scan_records: usize,
-        max_rows: usize,
-    },
-    /// The owner-created continuation does not identify a valid position in its exact revision.
-    InvalidContinuation,
-}
-
-impl fmt::Display for EditorEntityQueryRejection {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::WrongWorkspace => {
-                formatter.write_str("entity query belongs to another workspace")
-            }
-            Self::DocumentNotOpen { .. } => {
-                formatter.write_str("entity query document is not open")
-            }
-            Self::UnsupportedDocumentKind { .. } => {
-                formatter.write_str("entity query requires a Scene or Prefab source")
-            }
-            Self::DocumentKindChanged { .. } => {
-                formatter.write_str("entity query document kind changed")
-            }
-            Self::StaleIncarnation => {
-                formatter.write_str("entity query source incarnation changed")
-            }
-            Self::StaleRevision => formatter.write_str("entity query document revision changed"),
-            Self::StaleSchema => formatter.write_str("entity query Schema admission changed"),
-            Self::InvalidLimits { .. } => {
-                formatter.write_str("entity query limits are out of range")
-            }
-            Self::InvalidContinuation => {
-                formatter.write_str("entity query continuation is invalid")
-            }
-        }
-    }
-}
-
-impl Error for EditorEntityQueryRejection {}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct EditorEntityQueryOwner(Arc<()>);
-
-impl PartialEq for EditorEntityQueryOwner {
-    fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
-    }
-}
-
-impl Eq for EditorEntityQueryOwner {}

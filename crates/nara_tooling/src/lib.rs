@@ -1,7 +1,9 @@
 //! UI-agnostic Editor domain models and command seams.
 
+mod authoring_query;
 mod composition;
 mod diagnostic;
+mod document_query;
 mod entity_query;
 mod frame;
 mod gesture;
@@ -14,14 +16,22 @@ mod snapshot;
 mod source_asset_import;
 mod workspace;
 
+pub use authoring_query::{
+    EditorAuthoringCursor, EditorAuthoringPage, EditorAuthoringProjection, EditorAuthoringQuery,
+    EditorAuthoringQueryLimits, EditorAuthoringQueryPosition, EditorAuthoringQueryTarget,
+    EditorAuthoringRow, EditorRootObservation, EditorRootRead, EditorRootReadLimits,
+    EditorRootTarget, EditorRootValue, MAX_EDITOR_AUTHORING_QUERY_ENTRIES,
+    MAX_EDITOR_AUTHORING_QUERY_METADATA_BYTES, MAX_EDITOR_ROOT_READ_LOGICAL_BYTES,
+    MAX_EDITOR_ROOT_READ_VALUE_NODES,
+};
 pub use composition::{
     PrefabCompositionCommand, PrefabCompositionDraftError, PrefabCompositionEntityDraft,
     PrefabCompositionOutcome, SceneCompositionCommand, SceneCompositionEntityKind,
 };
+pub use document_query::{EditorDocumentQueryBasis, EditorDocumentQueryRejection};
 pub use entity_query::{
-    EditorEntityCursor, EditorEntityPage, EditorEntityQuery, EditorEntityQueryBasis,
-    EditorEntityQueryLimits, EditorEntityQueryPosition, EditorEntityQueryRejection,
-    MAX_EDITOR_ENTITY_QUERY_ROWS, MAX_EDITOR_ENTITY_QUERY_SCAN_RECORDS,
+    EditorEntityCursor, EditorEntityPage, EditorEntityQuery, EditorEntityQueryLimits,
+    EditorEntityQueryPosition, MAX_EDITOR_ENTITY_QUERY_ROWS, MAX_EDITOR_ENTITY_QUERY_SCAN_RECORDS,
 };
 #[doc(hidden)]
 pub use frame::EditorFrameClock;

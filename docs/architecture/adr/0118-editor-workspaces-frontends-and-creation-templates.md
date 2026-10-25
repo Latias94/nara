@@ -197,6 +197,15 @@ Schema admission. Querying a non-active source never changes navigation or selec
 direct-record enumeration is not expanded Prefab/field/project query support or a latency bound
 for normal frame publication.
 
+Further authoring projections retain the same named-source and exact-result responsibilities.
+Actual component/root discovery is separate from copying selected values; borrowed source views
+do not grant a panel mutable document access. Owned observations distinguish defaulted, omitted
+and explicit-null values, and preserve unavailable-record readiness without interpreting its
+payload as editable data. Continuations fix the complete entity/component/projection target;
+aggregate copied metadata includes page/continuation identity, not only each row separately.
+The [bounded read design](../authoring-read-projection-design.md) is an implementation experiment,
+not a claim that root-query actions or prepared panel submission are already qualified.
+
 This completion means dispatch, not eventual Save/Play completion. Several actions remain ordered;
 same-basis document writes can conflict and are never silently rebased. A cohesive multi-field
 operation uses one existing atomic patch. No generic bus, polling-ticket framework, asynchronous

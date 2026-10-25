@@ -124,6 +124,15 @@ Native registry/database-aware and Published admission retain their distinct own
 transaction-local draft and direct public adapters have separately scoped pinned qualification;
 the bounded owner cost comparison does not complete R2's field-query, panel or full ergonomics work.
 
+The [authoring read-projection experiment](authoring-read-projection-design.md) separates actual
+component/root discovery from selected value copying. Source-owned borrowed views retain admission
+and default interpretation; Tooling must provide bounded owned observations and exact target/basis
+fencing. The [read-query qualification](../knowledge/engineering/verification/2026-10/2026-10-25T002933Z-bounded-authoring-query-complete-review-and-aggregate-budget-qualification-893b5a3ffa104ec8bc7c7413c12e0c5d.md)
+records actual read/computed-edit workflows, affected native/static evidence, source simplification,
+complete review and its multi-row budget proof correction. Prepared panel submission, broader
+index-maintenance costs and full R2 remain separate from this bounded workflow and the
+[timing baseline](../benchmarks/2026-10-25-authoring-root-read.md).
+
 The [source-context and logical-occurrence proposal](scene-source-and-occurrence-identity-design.md)
 addresses the separately reproduced same-World/two-Scene UI key collision. It compares a required
 source-bound envelope with embedded document identity, retains the independent runtime incarnation,

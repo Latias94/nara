@@ -660,6 +660,18 @@ impl PrefabAuthoringSession {
             .published()?
             .available_component_schema(entity, component)
     }
+
+    /// Borrows actual direct records without changing the source or interpreting unavailable values.
+    #[cfg(feature = "serde")]
+    pub fn authoring_entity_view(
+        &self,
+        entity: &crate::SceneEntityId,
+    ) -> Result<crate::AuthoringEntityView<'_>, crate::AuthoringReadError> {
+        self.authority
+            .published()
+            .ok_or(crate::AuthoringReadError::NotAdmitted)?
+            .entity_view(&self.document.entities, entity)
+    }
     #[must_use]
     pub fn new(document: PrefabDocument) -> Self {
         Self::new_with_history_limits(document, SceneAuthoringHistoryLimits::default())
@@ -1237,6 +1249,18 @@ impl SceneAuthoringSession {
         self.authority
             .published()?
             .available_component_schema(entity, component)
+    }
+
+    /// Borrows actual direct records without constructing an Inspector or Runtime projection.
+    #[cfg(feature = "serde")]
+    pub fn authoring_entity_view(
+        &self,
+        entity: &crate::SceneEntityId,
+    ) -> Result<crate::AuthoringEntityView<'_>, crate::AuthoringReadError> {
+        self.authority
+            .published()
+            .ok_or(crate::AuthoringReadError::NotAdmitted)?
+            .entity_view(&self.document.entities, entity)
     }
 
     #[must_use]

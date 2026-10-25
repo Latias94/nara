@@ -603,6 +603,10 @@ pub enum EditorAction {
     Navigate(EditorNavigationAction),
     /// Reads direct source entity identities at an explicit open-document basis.
     QueryDocumentEntities(crate::EditorEntityQuery),
+    /// Discovers actual component/root metadata at an explicit source basis.
+    QueryDocumentAuthoring(crate::EditorAuthoringQuery),
+    /// Copies one selected complete root after source and logical-cost admission.
+    ReadDocumentRoot(crate::EditorRootRead),
     Mutate(EditorDocumentMutation),
     Extension(crate::EditorExtensionCommand),
     Persistence(EditorPersistenceAction),
@@ -646,6 +650,8 @@ impl EditorAction {
             Self::Play(action) => matches!(action, EditorPlayAction::Play { .. }),
             Self::Mutate(_)
             | Self::QueryDocumentEntities(_)
+            | Self::QueryDocumentAuthoring(_)
+            | Self::ReadDocumentRoot(_)
             | Self::Extension(_)
             | Self::Persistence(_)
             | Self::ProjectContent(_)
@@ -809,7 +815,9 @@ fn inspector_field_target(
 pub enum EditorActionOutcome {
     Workspace(EditorWorkspaceCommandReport),
     /// Owned read-only page or exact query rejection; not a document mutation result.
-    DocumentEntities(Result<crate::EditorEntityPage, crate::EditorEntityQueryRejection>),
+    DocumentEntities(Result<crate::EditorEntityPage, crate::EditorDocumentQueryRejection>),
+    DocumentAuthoring(Result<crate::EditorAuthoringPage, crate::EditorDocumentQueryRejection>),
+    DocumentRoot(Result<crate::EditorRootObservation, crate::EditorDocumentQueryRejection>),
     Persistence(EditorPersistenceRequestResult),
     ProjectBrowser(EditorProjectBrowserActionOutcome),
     ImageImport(EditorImageImportActionOutcome),
@@ -828,38 +836,67 @@ pub enum EditorActionOutcome {
 mod entity_query_tests {
     use super::*;
     use crate::{
-        EditorEntityQuery, EditorEntityQueryBasis, EditorEntityQueryLimits,
+        EditorDocumentQueryBasis, EditorEntityQuery, EditorEntityQueryLimits,
         EditorEntityQueryPosition,
     };
 
     #[test]
     fn query_uses_document_basis_but_mixed_navigation_batch_keeps_frame_admission() {
         let document = EditorDocumentId::from_raw(1);
+        let basis = EditorDocumentQueryBasis {
+            document,
+            revision: SceneAuthoringRevision::initial(),
+            schema: None,
+        };
         let query = EditorAction::QueryDocumentEntities(EditorEntityQuery {
-            position: EditorEntityQueryPosition::Start(EditorEntityQueryBasis {
-                document,
-                revision: SceneAuthoringRevision::initial(),
-                schema: None,
-            }),
+            position: EditorEntityQueryPosition::Start(basis.clone()),
             limits: EditorEntityQueryLimits::new(1, 1).unwrap(),
         });
-        assert!(!query.requires_current_frame());
-        assert!(query.field_target().is_none());
-        let frame_revision = EditorFrameRevision {
-            source_id: 1,
-            generation: 0,
-        };
-        assert!(!EditorActionBatch::new(frame_revision, [query.clone()]).requires_current_frame());
-        assert!(
-            EditorActionBatch::new(
-                frame_revision,
-                [
-                    query,
-                    EditorAction::Navigate(EditorNavigationAction::SetActiveDocument { document }),
-                ],
-            )
-            .requires_current_frame()
-        );
+        let queries = [
+            query,
+            EditorAction::QueryDocumentAuthoring(crate::EditorAuthoringQuery {
+                position: crate::EditorAuthoringQueryPosition::Start(
+                    crate::EditorAuthoringQueryTarget {
+                        basis: basis.clone(),
+                        entity: SceneEntityId::new("item").unwrap(),
+                        projection: crate::EditorAuthoringProjection::Components,
+                    },
+                ),
+                limits: crate::EditorAuthoringQueryLimits::new(1, 1, 1024).unwrap(),
+            }),
+            EditorAction::ReadDocumentRoot(crate::EditorRootRead {
+                target: crate::EditorRootTarget {
+                    basis,
+                    entity: SceneEntityId::new("item").unwrap(),
+                    component: ComponentTypeId::new("game.Data"),
+                    field: ComponentFieldId::new("amount"),
+                },
+                limits: crate::EditorRootReadLimits::new(1024, 1, 8).unwrap(),
+            }),
+        ];
+        for query in queries {
+            assert!(!query.requires_current_frame());
+            assert!(query.field_target().is_none());
+            let frame_revision = EditorFrameRevision {
+                source_id: 1,
+                generation: 0,
+            };
+            assert!(
+                !EditorActionBatch::new(frame_revision, [query.clone()]).requires_current_frame()
+            );
+            assert!(
+                EditorActionBatch::new(
+                    frame_revision,
+                    [
+                        query,
+                        EditorAction::Navigate(EditorNavigationAction::SetActiveDocument {
+                            document
+                        }),
+                    ],
+                )
+                .requires_current_frame()
+            );
+        }
     }
 }
 

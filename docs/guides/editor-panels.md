@@ -289,7 +289,7 @@ its public tab facts, not from the active Inspector:
 
 ```rust,ignore
 let query = EditorEntityQuery {
-    position: EditorEntityQueryPosition::Start(EditorEntityQueryBasis {
+    position: EditorEntityQueryPosition::Start(EditorDocumentQueryBasis {
         document: tab.document,
         revision: tab.revision,
         schema: tab.authoring_schema_basis.clone(),
@@ -314,10 +314,73 @@ Scan-record and returned-row caps are independently checked. This concrete enume
 one ID for each inspected record; it does not first construct a complete Inspector. These caps
 do not bound ID bytes, total work across a batch, or the subsequent normal Application drive.
 Expanded Prefab identities, field queries, unopened sources and project-wide indexing are not
-part of this interface.
+part of entity enumeration; the separate bounded authoring-read experiment follows below.
 
 The integrated Host retains a concrete file lane for every open Scene/Prefab document. Opening
 another source of the same kind adds a slot; it does not trigger Close or discard dirty history.
 The independent consumer keeps two Scenes and two Prefabs and queries, edits, saves, reopens and
 explicitly closes non-active documents without retargeting the active source. This does not
 introduce cross-document transactions, concurrent Save, or one preview Runtime per document.
+
+## Discover Components And Read A Selected Root
+
+The bounded authoring-read experiment uses the same `EditorDocumentQueryBasis`, direct submission
+and action/outcome routing. Discover actual components with
+`EditorAuthoringProjection::Components`, then discover an Available component's declared root
+IDs with `EditorAuthoringProjection::Roots { component }`:
+
+```rust,ignore
+let discovery = EditorAuthoringQuery {
+    position: EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
+        basis: document_basis.clone(),
+        entity: entity.clone(),
+        projection: EditorAuthoringProjection::Components,
+    }),
+    limits: EditorAuthoringQueryLimits::new(64, 16, 4096)?,
+};
+let action = EditorAction::QueryDocumentAuthoring(discovery);
+// Consume DocumentAuthoring through the ordinary owned dispatch result or panel callback.
+```
+
+This is actual presence, not the creation catalog: unavailable and zero-root components are not
+lost merely because they have no editable roots. Root rows contain compact kind/required/Edit-
+capability facts, not recursive shapes, aliases, defaults or payload trees. `edit_capability`
+reports a declaration; ordinary source candidate admission still decides whether an edit is legal.
+Continuation fixes the complete entity/component/projection and exact basis, not only its page
+offset. A copied page remains historical after that basis changes.
+
+Read only the root selected by the tool:
+
+```rust,ignore
+let read = EditorRootRead {
+    target: EditorRootTarget {
+        basis: document_basis,
+        entity,
+        component,
+        field,
+    },
+    limits: EditorRootReadLimits::new(4096, 256, 16 * 1024)?,
+};
+let action = EditorAction::ReadDocumentRoot(read);
+// DocumentRoot returns the exact target and Present / Defaulted / Missing observation.
+```
+
+Explicit Null is `Present(ComponentValue::Null)`; a supplied Null default is `Defaulted`, not
+Missing. Missing describes only an omitted declared root with no default. A missing entity or
+component, an unknown field, an unavailable record and a stale basis return distinct rejections.
+An oversized selected root returns `ValueBudgetExceeded` without partial data. Metadata discovery
+still advances independently of that value's size; it never copies the whole component first.
+
+Discovery independently caps scans, rows and aggregate UTF-8 metadata, including duplicated page/
+cursor/anchor IDs. Root reads independently cap UTF-8 target metadata and complete-value nodes/
+logical bytes before cloning. Fixed-size metadata is bounded by the row/type shape; these limits
+are not wire size, RSS, allocator isolation, total batch work or the subsequent frame-drive budget.
+The experiment caps discovery at 256 entries / 64 KiB metadata and selected roots at 4,096 nodes /
+256 KiB logical payload. Callers choose smaller positive limits. Borrowed Scene/Prefab views supply
+source interpretation; they are not a second document or a promise of allocation-free path lookup.
+
+The independent consumer discovers an editable integer in non-active Scene and Prefab documents,
+reads its current value and computes the replacement before preparing one ordinary source edit,
+Undo/Redo and Save/Reopen. Full query qualification is tracked separately from this guide; the
+experiment does not implement arbitrary nested reads, unopened-source querying or prepared panel
+submission.

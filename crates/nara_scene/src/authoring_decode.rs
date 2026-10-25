@@ -1,8 +1,12 @@
 //! Registry-free Scene and Prefab admission for persistent authoring.
 
 mod field_candidate;
+mod read;
 mod structure;
 
+pub use read::{
+    AuthoringComponentView, AuthoringEntityView, AuthoringReadError, AuthoringRootValue,
+};
 use structure::{authoring_structure_rejection, prepare_scene_authoring_structure};
 
 use std::{
@@ -1163,8 +1167,7 @@ pub(crate) struct AuthoringDocumentState {
     kind: AuthoringDocumentKind,
     readiness: AuthoringDocumentReadiness,
     record_facts: Vec<AuthoringRecordFact>,
-    available_direct_records:
-        BTreeMap<SceneEntityId, BTreeMap<ComponentTypeId, ComponentSchemaVersion>>,
+    direct_record_facts: BTreeMap<SceneEntityId, BTreeMap<ComponentTypeId, usize>>,
     unavailable_manifest: UnavailableRecordManifest,
     diagnostics: DiagnosticReport,
     basis: Arc<AuthoringClassificationBasis>,
@@ -1232,12 +1235,16 @@ impl AuthoringDocumentState {
         entity: &SceneEntityId,
         component: &ComponentTypeId,
     ) -> Option<&ComponentSchema> {
-        let version = self.available_direct_records.get(entity)?.get(component)?;
+        let fact = self.direct_record_facts.get(entity)?.get(component)?;
+        let fact = &self.record_facts[*fact];
+        if !fact.readiness.is_available() {
+            return None;
+        }
         self.basis
             .schemas
             .get(component)
             .map(|entry| &entry.schema)
-            .filter(|schema| schema.version() == *version)
+            .filter(|schema| schema.version() == fact.version)
     }
 
     pub(crate) const fn unavailable_manifest(&self) -> &UnavailableRecordManifest {
@@ -1569,17 +1576,13 @@ fn classify_scene_document(
     } else {
         AuthoringDocumentReadiness::Degraded
     };
-    // The state and its document are published together. Index only exact direct Available
-    // facts so schema projection needs neither a document scan nor a second fact scan.
-    let mut available_direct_records = BTreeMap::<_, BTreeMap<_, _>>::new();
-    for fact in &record_facts {
-        if fact.readiness == AuthoringRecordReadiness::Available
-            && let AuthoringRecordLocation::EntityComponent { entity } = &fact.location
-        {
-            available_direct_records
+    let mut direct_record_facts = BTreeMap::<_, BTreeMap<_, _>>::new();
+    for (index, fact) in record_facts.iter().enumerate() {
+        if let AuthoringRecordLocation::EntityComponent { entity } = &fact.location {
+            direct_record_facts
                 .entry(entity.clone())
                 .or_default()
-                .insert(fact.component.clone(), fact.version);
+                .insert(fact.component.clone(), index);
         }
     }
     Ok(AuthoringDocumentState {
@@ -1587,7 +1590,7 @@ fn classify_scene_document(
         kind,
         readiness,
         record_facts,
-        available_direct_records,
+        direct_record_facts,
         unavailable_manifest,
         diagnostics,
         basis,

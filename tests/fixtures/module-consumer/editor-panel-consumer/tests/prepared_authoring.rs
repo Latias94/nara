@@ -29,14 +29,17 @@ use nara_editor::{
     workspace::{EditorPanelDescriptor, EditorPanelMultiplicity, EditorPanelPlacement},
 };
 use nara_tooling::{
-    EditorAction, EditorActionBatch, EditorActionOutcome, EditorCloseDecision, EditorDocumentId,
-    EditorDocumentKind, EditorDocumentMutation, EditorDocumentOpenResult, EditorEntityPage,
-    EditorEntityQuery, EditorEntityQueryBasis, EditorEntityQueryLimits, EditorEntityQueryPosition,
-    EditorEntityQueryRejection, EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
-    EditorPersistenceOperation, EditorPersistenceRequestResult, EditorPersistenceResult,
-    EditorProjectBrowserAction, EditorProjectBrowserActionOutcome, EditorReopenTarget,
-    EditorWorkspaceIntent, EditorWorkspaceIntentAction, EditorWorkspaceIntentRequestResult,
-    EditorWorkspaceIntentResult,
+    EditorAction, EditorActionBatch, EditorActionOutcome, EditorAuthoringPage,
+    EditorAuthoringProjection, EditorAuthoringQuery, EditorAuthoringQueryLimits,
+    EditorAuthoringQueryPosition, EditorAuthoringQueryTarget, EditorAuthoringRow,
+    EditorCloseDecision, EditorDocumentId, EditorDocumentKind, EditorDocumentMutation,
+    EditorDocumentOpenResult, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
+    EditorEntityPage, EditorEntityQuery, EditorEntityQueryLimits, EditorEntityQueryPosition,
+    EditorFrameModel, EditorNavigationAction, EditorPersistenceAction, EditorPersistenceOperation,
+    EditorPersistenceRequestResult, EditorPersistenceResult, EditorProjectBrowserAction,
+    EditorProjectBrowserActionOutcome, EditorReopenTarget, EditorRootObservation, EditorRootRead,
+    EditorRootReadLimits, EditorRootTarget, EditorRootValue, EditorWorkspaceIntent,
+    EditorWorkspaceIntentAction, EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult,
 };
 
 #[path = "support/text_project.rs"]
@@ -244,10 +247,10 @@ fn construction(bundle: &AuthoringSchemaBundle, last_amount: u64) -> ScenePatchD
     ScenePatchDocument::new(operations)
 }
 
-fn basis(app: &EditorApplication, document: EditorDocumentId) -> EditorEntityQueryBasis {
+fn basis(app: &EditorApplication, document: EditorDocumentId) -> EditorDocumentQueryBasis {
     let current = frame(app);
     let tab = current.workspace().document(document).unwrap();
-    EditorEntityQueryBasis {
+    EditorDocumentQueryBasis {
         document,
         revision: tab.revision,
         schema: tab.authoring_schema_basis.clone(),
@@ -256,7 +259,7 @@ fn basis(app: &EditorApplication, document: EditorDocumentId) -> EditorEntityQue
 fn page(
     app: &mut EditorApplication,
     position: EditorEntityQueryPosition,
-) -> Result<EditorEntityPage, EditorEntityQueryRejection> {
+) -> Result<EditorEntityPage, EditorDocumentQueryRejection> {
     let submitted = submit(
         app,
         EditorAction::QueryDocumentEntities(EditorEntityQuery {
@@ -272,19 +275,247 @@ fn page(
     }
 }
 
+fn authoring_page(
+    app: &mut EditorApplication,
+    position: EditorAuthoringQueryPosition,
+) -> Result<EditorAuthoringPage, EditorDocumentQueryRejection> {
+    let result = submit(
+        app,
+        EditorAction::QueryDocumentAuthoring(EditorAuthoringQuery {
+            position,
+            limits: EditorAuthoringQueryLimits::new(1, 1, 1024).unwrap(),
+        }),
+    );
+    let [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::DocumentAuthoring(page))] =
+        result.actions()
+    else {
+        panic!("{result:?}")
+    };
+    page.clone()
+}
+
+fn root_read(
+    app: &mut EditorApplication,
+    request: EditorRootRead,
+) -> Result<EditorRootObservation, EditorDocumentQueryRejection> {
+    let result = submit(app, EditorAction::ReadDocumentRoot(request));
+    let [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::DocumentRoot(value))] =
+        result.actions()
+    else {
+        panic!("{result:?}")
+    };
+    value.clone()
+}
+
+fn exercise_discovered_computed_edit(
+    app: &mut EditorApplication,
+    document: EditorDocumentId,
+    entity: SceneEntityId,
+) {
+    let captured = basis(app, document);
+    let mut components = authoring_page(
+        app,
+        EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
+            basis: captured.clone(),
+            entity: entity.clone(),
+            projection: EditorAuthoringProjection::Components,
+        }),
+    )
+    .unwrap();
+    let mut selected = None;
+    loop {
+        for row in &components.rows {
+            let EditorAuthoringRow::Component {
+                component,
+                version,
+                readiness: nara::scene::AuthoringRecordReadiness::Available,
+            } = row
+            else {
+                continue;
+            };
+            let mut fields = authoring_page(
+                app,
+                EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
+                    basis: captured.clone(),
+                    entity: entity.clone(),
+                    projection: EditorAuthoringProjection::Roots {
+                        component: component.clone(),
+                    },
+                }),
+            )
+            .unwrap();
+            loop {
+                for row in &fields.rows {
+                    if let EditorAuthoringRow::Root {
+                        field,
+                        kind: ComponentValueKind::U64,
+                        edit_capability: true,
+                        ..
+                    } = row
+                    {
+                        selected = Some((component.clone(), *version, field.clone()));
+                    }
+                }
+                if selected.is_some() || fields.next.is_none() {
+                    break;
+                }
+                fields = authoring_page(
+                    app,
+                    EditorAuthoringQueryPosition::Continue(fields.next.unwrap()),
+                )
+                .unwrap();
+            }
+            if selected.is_some() {
+                break;
+            }
+        }
+        if selected.is_some() || components.next.is_none() {
+            break;
+        }
+        components = authoring_page(
+            app,
+            EditorAuthoringQueryPosition::Continue(components.next.unwrap()),
+        )
+        .unwrap();
+    }
+    let (component, component_version, field) =
+        selected.expect("discover a declared editable integer without knowing its field ID");
+    let request = |basis| EditorRootRead {
+        target: EditorRootTarget {
+            basis,
+            entity: entity.clone(),
+            component: component.clone(),
+            field: field.clone(),
+        },
+        limits: EditorRootReadLimits::new(1024, 1, 8).unwrap(),
+    };
+    let old_request = request(captured.clone());
+    let observed = root_read(app, old_request.clone()).unwrap();
+    let EditorRootValue::Present(ComponentValue::U64(original)) = observed.value else {
+        panic!("expected the discovered integer")
+    };
+    let expected = original.checked_add(2).unwrap();
+    let prepared = app
+        .prepare_authoring_property_edit(
+            document,
+            observed.target.basis.revision,
+            &[AuthoringPropertyEdit {
+                entity: observed.target.entity,
+                component: observed.target.component,
+                component_version,
+                property: ComponentPropertyPath::new(observed.target.field),
+                value: ComponentValue::U64(expected),
+            }],
+        )
+        .unwrap();
+    let committed = app.commit_authoring_edit(prepared, Duration::ZERO);
+    assert!(
+        matches!(committed.actions(), [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))] if report.applied)
+    );
+    assert_eq!(
+        frame(app)
+            .workspace()
+            .document(document)
+            .unwrap()
+            .history
+            .undo_depth,
+        1
+    );
+    assert_eq!(
+        root_read(app, old_request.clone()),
+        Err(EditorDocumentQueryRejection::StaleRevision)
+    );
+    for (redo, value) in [(false, original), (true, expected)] {
+        let base_revision = basis(app, document).revision;
+        let action = if redo {
+            EditorDocumentMutation::Redo {
+                document,
+                base_revision,
+            }
+        } else {
+            EditorDocumentMutation::Undo {
+                document,
+                base_revision,
+            }
+        };
+        assert!(
+            matches!(submit(app, EditorAction::Mutate(action)).actions(), [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))] if report.applied)
+        );
+        let current_basis = basis(app, document);
+        assert_eq!(
+            root_read(app, request(current_basis)).unwrap().value,
+            EditorRootValue::Present(ComponentValue::U64(value))
+        );
+    }
+    submit(
+        app,
+        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+    );
+    let saving_basis = basis(app, document);
+    assert!(matches!(
+        submit(
+            app,
+            EditorAction::Persistence(EditorPersistenceAction::Save {
+                document,
+                base_revision: saving_basis.revision
+            })
+        )
+        .actions(),
+        [EditorApplicationActionDispatch::Dispatched(
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        )]
+    ));
+    settle_persistence(app);
+    assert!(
+        matches!(frame(app).persistence().result(), Some(EditorPersistenceResult::Saved { document: saved, revision, .. }) if saved == document && revision == saving_basis.revision)
+    );
+    assert!(!frame(app).workspace().document(document).unwrap().dirty);
+    submit(
+        app,
+        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+    );
+    assert!(matches!(
+        submit(
+            app,
+            EditorAction::Persistence(EditorPersistenceAction::Reopen {
+                target: EditorReopenTarget::OpenDocument {
+                    document,
+                    base_revision: saving_basis.revision
+                }
+            })
+        )
+        .actions(),
+        [EditorApplicationActionDispatch::Dispatched(
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        )]
+    ));
+    settle_persistence(app);
+    let reopened = basis(app, document);
+    assert_ne!(
+        reopened.revision.source_id(),
+        saving_basis.revision.source_id()
+    );
+    assert!(
+        matches!(frame(app).persistence().result(), Some(EditorPersistenceResult::Opened { document: opened, .. }) if opened == document)
+    );
+    assert_eq!(
+        root_read(app, request(reopened)).unwrap().value,
+        EditorRootValue::Present(ComponentValue::U64(expected))
+    );
+    assert_eq!(
+        root_read(app, old_request),
+        Err(EditorDocumentQueryRejection::StaleIncarnation)
+    );
+}
+
 struct QueryPanel {
-    basis: Option<EditorEntityQueryBasis>,
+    actions: Vec<EditorAction>,
     result: Rc<RefCell<Vec<PanelActionDispatch>>>,
 }
 impl ImguiEditorPanel for QueryPanel {
     fn show(&mut self, _: &dear_imgui_rs::Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
-        if let Some(basis) = self.basis.take() {
-            context
-                .submit(EditorAction::QueryDocumentEntities(EditorEntityQuery {
-                    position: EditorEntityQueryPosition::Start(basis),
-                    limits: EditorEntityQueryLimits::new(1, 1).unwrap(),
-                }))
-                .unwrap();
+        for action in std::mem::take(&mut self.actions) {
+            context.submit(action).unwrap();
         }
     }
     fn action_finished(&mut self, _: PanelSubmissionId, result: PanelActionDispatch) {
@@ -520,7 +751,31 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
                     true,
                 ),
                 move || QueryPanel {
-                    basis: Some(captured.clone()),
+                    actions: vec![
+                        EditorAction::QueryDocumentEntities(EditorEntityQuery {
+                            position: EditorEntityQueryPosition::Start(captured.clone()),
+                            limits: EditorEntityQueryLimits::new(1, 1).unwrap(),
+                        }),
+                        EditorAction::QueryDocumentAuthoring(EditorAuthoringQuery {
+                            position: EditorAuthoringQueryPosition::Start(
+                                EditorAuthoringQueryTarget {
+                                    basis: captured.clone(),
+                                    entity: id("anchor"),
+                                    projection: EditorAuthoringProjection::Components,
+                                },
+                            ),
+                            limits: EditorAuthoringQueryLimits::new(1, 1, 1024).unwrap(),
+                        }),
+                        EditorAction::ReadDocumentRoot(EditorRootRead {
+                            target: EditorRootTarget {
+                                basis: captured.clone(),
+                                entity: id("anchor"),
+                                component: ComponentTypeId::new("consumer.Unknown"),
+                                field: ComponentFieldId::new("must-not-interpret"),
+                            },
+                            limits: EditorRootReadLimits::new(1024, 1, 8).unwrap(),
+                        }),
+                    ],
                     result: Rc::clone(&shared),
                 },
             )
@@ -546,9 +801,11 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
                 frontend.submit_and_drive(&mut app, candidate, Duration::ZERO);
             }
         }
-        assert!(
-            matches!(evidence.borrow().as_slice(), [PanelActionDispatch::Dispatched(EditorActionOutcome::DocumentEntities(Ok(result)))] if result.entities == [id("anchor")])
-        );
+        assert!(matches!(evidence.borrow().as_slice(), [
+                PanelActionDispatch::Dispatched(EditorActionOutcome::DocumentEntities(Ok(result))),
+                PanelActionDispatch::Dispatched(EditorActionOutcome::DocumentAuthoring(Ok(actual))),
+                PanelActionDispatch::Dispatched(EditorActionOutcome::DocumentRoot(Err(EditorDocumentQueryRejection::Source(nara::scene::AuthoringReadError::UnavailableComponent { readiness: nara::scene::AuthoringRecordReadiness::UnknownSchema })))),
+            ] if result.entities == [id("anchor")] && matches!(actual.rows.as_slice(), [EditorAuthoringRow::Component { component, readiness: nara::scene::AuthoringRecordReadiness::UnknownSchema, .. }] if component.as_str() == "consumer.Unknown")));
         assert_eq!(frame(&app).workspace().documents, tabs);
 
         assert_untargeted(&app);
@@ -594,7 +851,7 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
         assert_untargeted(&app);
         assert_eq!(
             page(&mut app, EditorEntityQueryPosition::Continue(cursor)),
-            Err(EditorEntityQueryRejection::StaleRevision)
+            Err(EditorDocumentQueryRejection::StaleRevision)
         );
         let result = app.commit_authoring_edit(stale, Duration::ZERO);
         assert!(
@@ -746,6 +1003,7 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
                 id("tail")
             ]
         );
+        exercise_discovered_computed_edit(&mut app, document, entities[1].clone());
         assert!(!frame(&app).workspace().document(document).unwrap().dirty);
         assert_untargeted(&app);
         submit(

@@ -16,5 +16,6 @@ nara_reflect.workspace = true
 nara_scene = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
+nara_app.workspace = true
 nara_sprite.workspace = true
 nara_transform.workspace = true

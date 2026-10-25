@@ -70,6 +70,17 @@ Rules:
   history or dirty state. Bounded entity enumeration binds continuation to its document,
   incarnation, revision and retained Schema admission. Scan work and returned row limits are
   distinct; truncating an eagerly constructed Inspector is not bounded query execution.
+- Actual component inventory is distinct from catalog creation capabilities and from semantic
+  readability. Scene/Prefab own classification, root declaration/default interpretation and
+  source-relative lookup. Available/current records may expose borrowed roots; unavailable records
+  retain presence/readiness without gaining editable payload access. Root reads distinguish an
+  explicit value (including Null), a supplied default and an omitted declared value. A missing
+  component, unknown root or incompatible path is not an omitted value.
+- Copied query observations admit aggregate metadata and requested value costs before cloning.
+  Source-owned indexes may retain positions into the jointly published document/classification,
+  not another document or history. Discovery must not read every value, and a selected root read
+  must not materialize an unrelated sibling. The [bounded read design](../authoring-read-projection-design.md)
+  develops the paged inventory/finite-read interface; its presence is not implementation evidence.
 - Prepared edits remain owned by the document session. Workspace/Editor adapters carry their
   exact target and operation result without rebuilding validation, inverse or history logic.
 - Retained construction uses that same source owner. Workspace routes an explicit document plus

@@ -153,10 +153,7 @@ fn assert_same(actual: &AuthoringDocumentState, expected: &AuthoringDocumentStat
     assert_eq!(actual.kind, expected.kind);
     assert_eq!(actual.readiness, expected.readiness);
     assert_eq!(actual.record_facts, expected.record_facts);
-    assert_eq!(
-        actual.available_direct_records,
-        expected.available_direct_records
-    );
+    assert_eq!(actual.direct_record_facts, expected.direct_record_facts);
     assert_eq!(actual.unavailable_manifest, expected.unavailable_manifest);
     assert_eq!(actual.diagnostics, expected.diagnostics);
     assert_eq!(actual.limits, expected.limits);

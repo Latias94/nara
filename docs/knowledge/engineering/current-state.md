@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "8a5ddb0263d45642b59dfefb5e44eb871d8fb7d1f4e637e8d5a0dec8a31cfe69"
+source_fingerprint: "609ba3ba33681dec7167be7b795152e89d5d86c5ace4ff22e4ecc30e18e0cf59"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "8a5ddb0263d45642b59dfefb5e44eb871d8fb7d1f4e637e8d5a0dec8a31
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `8a5ddb0263d45642b59dfefb5e44eb871d8fb7d1f4e637e8d5a0dec8a31cfe69`
-- Immutable records: 901
+- Source fingerprint: `609ba3ba33681dec7167be7b795152e89d5d86c5ace4ff22e4ecc30e18e0cf59`
+- Immutable records: 904
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,9 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Bounded authoring query complete review and aggregate budget qualification](verification/2026-10/2026-10-25T002933Z-bounded-authoring-query-complete-review-and-aggregate-budget-qualification-893b5a3ffa104ec8bc7c7413c12e0c5d.md) - Nine-lens review completed; the confirmed multi-row budget proof gap is closed by focused tests and independent follow-up.
+- **Work Progress**: [Bounded authoring query public workflow and simplification checkpoint](progress/2026-10/2026-10-24T234726Z-bounded-authoring-query-public-workflow-and-simplification-checkpoint-032e0546f45246c1b04dcc4eb2fc64a5.md) - Paged actual inventory and bounded root reads reach existing public actions and computed edits; final qualification and complete review remain separate.
+- **Work Progress**: [Retained construction committed and source read projection checkpoint](progress/2026-10/2026-10-24T231507Z-retained-construction-committed-and-source-read-projection-checkpoint-843e9e4a886c4d7fa8e9f89ea8433591.md) - Construction is locally committed; bounded read design and borrowed source prototype advance R2 while public query transport remains open.
 - **Verification Evidence**: [Retained source construction pinned public and native qualification](verification/2026-10/2026-10-24T224939Z-retained-source-construction-pinned-public-and-native-qualification-e1813acad6f04a93898a1e342989fa44.md) - Rust 1.95.0 qualifies retained construction through owner/public/Session lifecycle paths, final static checks and selected Windows native regressions; full R2 remains open.
 - **Work Progress**: [Retained construction complete review and pinned qualification correction](progress/2026-10/2026-10-24T224111Z-retained-construction-complete-review-and-pinned-qualification-correction-5fc5eada19d14468877fc065bb2ff7ff.md) - Actual eight-lens CE receipt completed with one direct Session test gap; simplification applied and explicit Rust 1.95.0 qualification supersedes unsupported historical toolchain labels.
 - **Verification Evidence**: [Retained construction owner public and lifecycle regression checkpoint](verification/2026-10/2026-10-24T215522Z-retained-construction-owner-public-and-lifecycle-regression-checkpoint-82b171c17ee24213934e375e976c3e0c.md) - Source-owned retained construction passes owner, independent Application, lifecycle and root/Editor regressions; final static review and selected native qualification remain open.
@@ -78,9 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Source-owned creation implemented; generated export qualification pending](progress/2026-10/2026-10-24T202546Z-source-owned-creation-implemented-generated-export-qualification-pending-982fcd60eda3477aa06a6ba835da0c56.md) - R2 ordinary creation owns IDs and publication; owner/public/native checks pass while a real release export remains live.
 - **Subagent Finding**: [R2 transaction local construction ownership and allocation alternatives](subagents/2026-10/2026-10-24T185535Z-r2-transaction-local-construction-ownership-and-allocation-alternatives-a12471c958dc470097f9b8c7337c0533.md) - Read-only next-unit findings identify caller-owned construction choreography and compare owner drafts, declarative intents and scoped builders without adopting an allocator.
 - **Verification Evidence**: [Complete persistent UI identity and neutral conformance successor](verification/2026-10/2026-10-24T185535Z-complete-persistent-ui-identity-and-neutral-conformance-successor-0cf84bdfd2f54766be84f3ca206f7931.md) - Qualified Runtime and Canvas complete-key adoption with exact public inventory, neutral assertions, independent consumers and Windows DX12 evidence.
-- **Verification Evidence**: [Owned ordinary Scene preparation and complete support admission qualification](verification/2026-10/2026-10-24T164025Z-owned-ordinary-scene-preparation-and-complete-support-admission-qualification-e94d2a95cbf94dd7a0cbbd371aedf55c.md) - Serial owner, public, independent and native qualification of move-only unbound Scene preparation and complete support-resource admission.
-- **Subagent Finding**: [Complete UI key representation constraints and bounded experiment](subagents/2026-10/2026-10-24T162730Z-complete-ui-key-representation-constraints-and-bounded-experiment-cf1460fb992640a7a0d9addfd0f2de54.md) - Mixed-context UI trees rule out implicit local-source inheritance; exact-sharing storage needs a bounded comparison before refreeze.
-- **Work Progress**: [Ordinary Scene preparation and complete resource-effect admission checkpoint](progress/2026-10/2026-10-24T160924Z-ordinary-scene-preparation-and-complete-resource-effect-admission-checkpoint-20639c6f67a24f389226e694eba5ba2d.md) - Owned unbound Scene preparation, separate execution and Host bases, and cached resource-target admission are implemented; final serial qualification remains in progress.
 
 # Integration Notes
 

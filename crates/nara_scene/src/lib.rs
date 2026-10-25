@@ -45,13 +45,14 @@ pub use authoring::{
 };
 #[cfg(feature = "serde")]
 pub use authoring_decode::{
-    AuthoringAdapterEvidence, AuthoringAdapterIdentity, AuthoringDocumentKind,
-    AuthoringDocumentPublicationError, AuthoringDocumentReadiness, AuthoringDocumentReadmission,
-    AuthoringDocumentSource, AuthoringFieldEdit, AuthoringFieldEditError, AuthoringFieldWrite,
-    AuthoringPatchRecordSlot, AuthoringPatchTargetKind, AuthoringRecordFact,
-    AuthoringRecordLocation, AuthoringRecordOwnerClaim, AuthoringRecordReadiness,
-    AuthoringSchemaBasis, AuthoringSessionReopenError, MAX_AUTHORING_EDIT_OPERATIONS,
-    MAX_AUTHORING_FIELD_WRITES, PrefabAuthoringDocumentCandidate, PublishedAuthoringPrefabDocument,
+    AuthoringAdapterEvidence, AuthoringAdapterIdentity, AuthoringComponentView,
+    AuthoringDocumentKind, AuthoringDocumentPublicationError, AuthoringDocumentReadiness,
+    AuthoringDocumentReadmission, AuthoringDocumentSource, AuthoringEntityView, AuthoringFieldEdit,
+    AuthoringFieldEditError, AuthoringFieldWrite, AuthoringPatchRecordSlot,
+    AuthoringPatchTargetKind, AuthoringReadError, AuthoringRecordFact, AuthoringRecordLocation,
+    AuthoringRecordOwnerClaim, AuthoringRecordReadiness, AuthoringRootValue, AuthoringSchemaBasis,
+    AuthoringSessionReopenError, MAX_AUTHORING_EDIT_OPERATIONS, MAX_AUTHORING_FIELD_WRITES,
+    PrefabAuthoringDocumentCandidate, PublishedAuthoringPrefabDocument,
     PublishedAuthoringSceneDocument, SceneAuthoringDocumentCandidate, UnavailableEntityReference,
     UnavailablePatchTarget, UnavailableRecord, UnavailableRecordManifest,
     UnavailableRecordManifestEntry, UnavailableValuePathSegment,

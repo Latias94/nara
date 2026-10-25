@@ -27,14 +27,15 @@ use crate::composition::{
 };
 use crate::diagnostic;
 use crate::entity_query::{
-    EditorEntityCursor, EditorEntityPage, EditorEntityQuery, EditorEntityQueryOwner,
-    EditorEntityQueryPosition, EditorEntityQueryRejection,
+    EditorEntityCursor, EditorEntityPage, EditorEntityQuery, EditorEntityQueryPosition,
 };
 use crate::inspector::{SceneInspectorCommand, SceneInspectorCommandReport};
 use crate::play::{SceneEditorModel, SceneEditorState};
 use crate::snapshot::WorldIdentitySnapshot;
 use crate::{EditorAtomicFieldEdit, EditorFieldTarget};
+use crate::{EditorDocumentQueryRejection, document_query::EditorDocumentQueryOwner};
 
+mod authoring_query;
 mod construction;
 mod extension;
 mod prepared_edit;
@@ -285,7 +286,7 @@ impl WorkspaceDocumentContext {
 #[derive(Debug, Default)]
 pub struct EditorWorkspace {
     persistence_identity: Arc<EditorWorkspacePersistenceIdentity>,
-    entity_query_owner: EditorEntityQueryOwner,
+    document_query_owner: EditorDocumentQueryOwner,
     next_document_id: u64,
     active_document: Option<EditorDocumentId>,
     documents: BTreeMap<EditorDocumentId, EditorDocumentSlot>,
@@ -583,50 +584,28 @@ impl EditorWorkspace {
     pub fn query_document_entities(
         &self,
         query: EditorEntityQuery,
-    ) -> Result<EditorEntityPage, EditorEntityQueryRejection> {
+    ) -> Result<EditorEntityPage, EditorDocumentQueryRejection> {
         let (basis, expected_kind, next_record) = match query.position {
             EditorEntityQueryPosition::Start(basis) => (basis, None, 0),
             EditorEntityQueryPosition::Continue(cursor) => {
-                if cursor.owner != self.entity_query_owner {
-                    return Err(EditorEntityQueryRejection::WrongWorkspace);
+                if cursor.owner != self.document_query_owner {
+                    return Err(EditorDocumentQueryRejection::WrongWorkspace);
                 }
                 (cursor.basis, Some(cursor.kind), cursor.next_record)
             }
         };
-        let slot = self.documents.get(&basis.document).ok_or(
-            EditorEntityQueryRejection::DocumentNotOpen {
-                document: basis.document,
-            },
-        )?;
+        let slot = self.resolve_document_query_slot(&basis, expected_kind)?;
         let kind = slot.kind();
         let records = match slot {
             EditorDocumentSlot::Scene(slot) => &slot.session.document().entities,
             EditorDocumentSlot::Prefab(slot) => &slot.session.document().entities,
             EditorDocumentSlot::Extension(_) => {
-                return Err(EditorEntityQueryRejection::UnsupportedDocumentKind { kind });
+                return Err(EditorDocumentQueryRejection::UnsupportedDocumentKind { kind });
             }
         };
-        if let Some(expected) = expected_kind
-            && expected != kind
-        {
-            return Err(EditorEntityQueryRejection::DocumentKindChanged {
-                expected,
-                actual: kind,
-            });
-        }
-        let revision = slot.revision();
-        if basis.revision.source_id() != revision.source_id() {
-            return Err(EditorEntityQueryRejection::StaleIncarnation);
-        }
-        if basis.revision != revision {
-            return Err(EditorEntityQueryRejection::StaleRevision);
-        }
-        if basis.schema != slot.authoring_schema_basis() {
-            return Err(EditorEntityQueryRejection::StaleSchema);
-        }
         let remaining = records
             .get(next_record..)
-            .ok_or(EditorEntityQueryRejection::InvalidContinuation)?;
+            .ok_or(EditorDocumentQueryRejection::InvalidContinuation)?;
         let scanned_records = remaining
             .len()
             .min(query.limits.max_scan_records())
@@ -637,7 +616,7 @@ impl EditorWorkspace {
             .collect();
         let next_record = next_record + scanned_records;
         let next = (next_record < records.len()).then(|| EditorEntityCursor {
-            owner: self.entity_query_owner.clone(),
+            owner: self.document_query_owner.clone(),
             basis: basis.clone(),
             kind,
             next_record,
@@ -3476,7 +3455,7 @@ mod tests {
     mod entity_queries {
         use super::*;
         use crate::{
-            EditorEntityQueryBasis, EditorEntityQueryLimits, MAX_EDITOR_ENTITY_QUERY_ROWS,
+            EditorDocumentQueryBasis, EditorEntityQueryLimits, MAX_EDITOR_ENTITY_QUERY_ROWS,
             MAX_EDITOR_ENTITY_QUERY_SCAN_RECORDS,
         };
 
@@ -3488,7 +3467,7 @@ mod tests {
         ) -> EditorEntityQuery {
             let slot = workspace.documents.get(&document).unwrap();
             EditorEntityQuery {
-                position: EditorEntityQueryPosition::Start(EditorEntityQueryBasis {
+                position: EditorEntityQueryPosition::Start(EditorDocumentQueryBasis {
                     document,
                     revision: slot.revision(),
                     schema: slot.authoring_schema_basis(),
@@ -3586,7 +3565,7 @@ mod tests {
             ] {
                 assert_eq!(
                     EditorEntityQueryLimits::new(scan, rows),
-                    Err(EditorEntityQueryRejection::InvalidLimits {
+                    Err(EditorDocumentQueryRejection::InvalidLimits {
                         max_scan_records: scan,
                         max_rows: rows,
                     })
@@ -3631,7 +3610,7 @@ mod tests {
                         position: EditorEntityQueryPosition::Start(basis),
                         limits: request.limits,
                     }),
-                    Err(EditorEntityQueryRejection::DocumentNotOpen { document: unknown })
+                    Err(EditorDocumentQueryRejection::DocumentNotOpen { document: unknown })
                 );
                 assert_eq!(workspace.active_document(), Some(document));
                 assert_eq!(facts(&workspace, document), before);
@@ -3705,13 +3684,13 @@ mod tests {
             let mut other = EditorWorkspace::new();
             assert_eq!(
                 other.query_document_entities(resume(cursor.clone(), 1, 1)),
-                Err(EditorEntityQueryRejection::WrongWorkspace)
+                Err(EditorDocumentQueryRejection::WrongWorkspace)
             );
             let other_document = open_scene(&mut other, "other", SceneDocument::default());
             assert_eq!(document, other_document);
             assert_eq!(
                 other.query_document_entities(resume(cursor, 1, 1)),
-                Err(EditorEntityQueryRejection::WrongWorkspace)
+                Err(EditorDocumentQueryRejection::WrongWorkspace)
             );
         }
 
@@ -3746,7 +3725,7 @@ mod tests {
             let edited_b = facts(&workspace, b);
             assert_eq!(
                 workspace.query_document_entities(resume(cursor.clone(), 1, 1)),
-                Err(EditorEntityQueryRejection::StaleRevision)
+                Err(EditorDocumentQueryRejection::StaleRevision)
             );
             assert_eq!(facts(&workspace, b), edited_b);
             assert!(undo(&mut workspace, &registry, b).applied);
@@ -3756,7 +3735,7 @@ mod tests {
             );
             assert_eq!(
                 workspace.query_document_entities(resume(cursor, 1, 1)),
-                Err(EditorEntityQueryRejection::StaleRevision)
+                Err(EditorDocumentQueryRejection::StaleRevision)
             );
             assert_eq!(workspace.active_document(), Some(a));
         }
@@ -3787,11 +3766,11 @@ mod tests {
             let before = facts(&workspace, document);
             assert_eq!(
                 workspace.query_document_entities(resume(cursor.clone(), 1, 1)),
-                Err(EditorEntityQueryRejection::StaleIncarnation)
+                Err(EditorDocumentQueryRejection::StaleIncarnation)
             );
             assert_eq!(
                 workspace.query_document_entities(request),
-                Err(EditorEntityQueryRejection::StaleIncarnation)
+                Err(EditorDocumentQueryRejection::StaleIncarnation)
             );
             assert_eq!(facts(&workspace, document), before);
             assert!(
@@ -3804,7 +3783,7 @@ mod tests {
             );
             assert_eq!(
                 workspace.query_document_entities(resume(cursor, 1, 1)),
-                Err(EditorEntityQueryRejection::DocumentNotOpen { document })
+                Err(EditorDocumentQueryRejection::DocumentNotOpen { document })
             );
         }
 
@@ -3846,7 +3825,7 @@ mod tests {
                 .authoring_schema_basis();
             assert_eq!(
                 workspace.query_document_entities(request.clone()),
-                Err(EditorEntityQueryRejection::StaleSchema)
+                Err(EditorDocumentQueryRejection::StaleSchema)
             );
             let EditorEntityQueryPosition::Start(basis) = &mut request.position else {
                 unreachable!();
@@ -3854,7 +3833,7 @@ mod tests {
             basis.schema = None;
             assert_eq!(
                 workspace.query_document_entities(request.clone()),
-                Err(EditorEntityQueryRejection::StaleSchema)
+                Err(EditorDocumentQueryRejection::StaleSchema)
             );
             let EditorEntityQueryPosition::Start(basis) = &mut request.position else {
                 unreachable!();
@@ -3862,7 +3841,7 @@ mod tests {
             basis.revision = basis.revision.next();
             assert_eq!(
                 workspace.query_document_entities(request.clone()),
-                Err(EditorEntityQueryRejection::StaleRevision)
+                Err(EditorDocumentQueryRejection::StaleRevision)
             );
             let EditorEntityQueryPosition::Start(basis) = &mut request.position else {
                 unreachable!();
@@ -3870,7 +3849,7 @@ mod tests {
             basis.revision = workspace.document_revision(second).unwrap();
             assert_eq!(
                 workspace.query_document_entities(request),
-                Err(EditorEntityQueryRejection::StaleIncarnation)
+                Err(EditorDocumentQueryRejection::StaleIncarnation)
             );
         }
     }
