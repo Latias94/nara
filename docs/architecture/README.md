@@ -162,6 +162,13 @@ This does not close full R2 or installable-tool workflows; the
 [pinned editing/format study](../research/2026-10-25-editing-versus-format-admission.md) keeps
 equivalent locality and a deliberate editing/Save contract redesign as separate alternatives.
 
+The [exact persistence-attempt recommendation](editor-persistence-attempt-design.md) develops
+R1/F2's missing observation correlation: one owner-issued attempt through dispatch, pending and
+terminal state, with exact acknowledgment and explicit retry supersession. It proposes replacing
+parallel private lifecycle slots, not adding a result bus or observer registry. The design does
+not qualify implementation, change file/worker custody or complete R1; ADRs 0047/0118 must be
+reconciled before the corresponding production replacement.
+
 The [source-context and logical-occurrence proposal](scene-source-and-occurrence-identity-design.md)
 addresses the separately reproduced same-World/two-Scene UI key collision. It compares a required
 source-bound envelope with embedded document identity, retains the independent runtime incarnation,

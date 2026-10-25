@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "478ad304fa1655ecdfd2e2ad51bb74f58d12f31cdc16808694dd7ae3342eb694"
+source_fingerprint: "caa761aa649bbd3544577cbc62ac16df0baeda5c05ab12eeb9a3e325717f4d65"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "478ad304fa1655ecdfd2e2ad51bb74f58d12f31cdc16808694dd7ae3342
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `478ad304fa1655ecdfd2e2ad51bb74f58d12f31cdc16808694dd7ae3342eb694`
-- Immutable records: 910
+- Source fingerprint: `caa761aa649bbd3544577cbc62ac16df0baeda5c05ab12eeb9a3e325717f4d65`
+- Immutable records: 911
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Work Progress**: [First writes committed and exact persistence redesign started](progress/2026-10/2026-10-25T063656Z-first-writes-committed-and-exact-persistence-redesign-started-1c12dd152e894de3a109c0d072338cf3.md) - Commits the qualified Source first-write correction and records the next R1 persistence observation owner design without claiming its implementation.
 - **Verification Evidence**: [Source owned first property writes and bounded selector error qualification](verification/2026-10/2026-10-25T060130Z-source-owned-first-property-writes-and-bounded-selector-error-qualification-0dfaa18252de473b90ff57ef150e64b0.md) - Qualifies selected default-root initialization, exact authored absence Undo, bounded rejected IDs and real non-active panel persistence while retaining complete template and storage contracts.
 - **Verification Evidence**: [Selector directed property reads and indexed root retirement qualification](verification/2026-10/2026-10-25T051125Z-selector-directed-property-reads-and-indexed-root-retirement-qualification-bd267ec01e4d44d3ad5f2a2d4543514d.md) - Qualifies borrowed nested source observations, independent scan and copy budgets, real computed panel editing and the reviewed root-tombstone correction; full R2 remains open.
 - **Verification Evidence**: [Finite reference shape certificate and clean-source public native qualification](verification/2026-10/2026-10-25T041346Z-finite-reference-shape-certificate-and-clean-source-public-native-qualification-d2673296c2bb413c9fd2b05bdf78a0c4.md) - Qualifies finite typed-reference certification, direct zero-preflight observations, restored-source comparisons and affected serial coverage; full R2 remains open.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Retained construction committed and source read projection checkpoint](progress/2026-10/2026-10-24T231507Z-retained-construction-committed-and-source-read-projection-checkpoint-843e9e4a886c4d7fa8e9f89ea8433591.md) - Construction is locally committed; bounded read design and borrowed source prototype advance R2 while public query transport remains open.
 - **Verification Evidence**: [Retained source construction pinned public and native qualification](verification/2026-10/2026-10-24T224939Z-retained-source-construction-pinned-public-and-native-qualification-e1813acad6f04a93898a1e342989fa44.md) - Rust 1.95.0 qualifies retained construction through owner/public/Session lifecycle paths, final static checks and selected Windows native regressions; full R2 remains open.
 - **Work Progress**: [Retained construction complete review and pinned qualification correction](progress/2026-10/2026-10-24T224111Z-retained-construction-complete-review-and-pinned-qualification-correction-5fc5eada19d14468877fc065bb2ff7ff.md) - Actual eight-lens CE receipt completed with one direct Session test gap; simplification applied and explicit Rust 1.95.0 qualification supersedes unsupported historical toolchain labels.
-- **Verification Evidence**: [Retained construction owner public and lifecycle regression checkpoint](verification/2026-10/2026-10-24T215522Z-retained-construction-owner-public-and-lifecycle-regression-checkpoint-82b171c17ee24213934e375e976c3e0c.md) - Source-owned retained construction passes owner, independent Application, lifecycle and root/Editor regressions; final static review and selected native qualification remain open.
 
 # Integration Notes
 
