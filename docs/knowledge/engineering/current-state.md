@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "9040824da944e8b336db671cb35e9ddc6149ef13ef999b113c150649982538d8"
+source_fingerprint: "2cc22cc75915abb8c3496d7c98ad95c5b67155cd71a63fc64fd68f8365fea0ae"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "9040824da944e8b336db671cb35e9ddc6149ef13ef999b113c150649982
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `9040824da944e8b336db671cb35e9ddc6149ef13ef999b113c150649982538d8`
-- Immutable records: 920
+- Source fingerprint: `2cc22cc75915abb8c3496d7c98ad95c5b67155cd71a63fc64fd68f8365fea0ae`
+- Immutable records: 921
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Session Handoff**: [Editor native retirement committed and qualified for next foundation unit](sessions/2026-10/2026-10-25T151327Z-editor-native-retirement-committed-and-qualified-for-next-foundation-unit-d5d0fa4b2d4d46e49596dfdc339c4b32.md) - Pins eleven actual native trajectories to commit 8856a16, records all review corrections and remaining R4 scopes, and preserves the complete foundation goal.
 - **Verification Evidence**: [Retained Editor native graphics retirement and physical completion qualification](verification/2026-10/2026-10-25T145420Z-retained-editor-native-graphics-retirement-and-physical-completion-qualification-2665523023e84aba979458cba3f2affc.md) - Records exact GPU drain custody, partial construction return, phased native retirement, exit decision continuity and scoped Windows DX12 evidence; full foundation and remaining R4 work stay open.
 - **Verification Evidence**: [Owner-local close custody and bounded completion dependency comparison](verification/2026-10/2026-10-25T135422Z-owner-local-close-custody-and-bounded-completion-dependency-comparison-3a6ad83ba4f649ec973982d9de3a0ec9.md) - Qualifies local Rust close owners, exact registration custody and typed dependent release through public Runtime consumers; actual native graphics integration remains open.
 - **Session Handoff**: [Finite child Snap committed and native close dependency proof prepared](sessions/2026-10/2026-10-25T123619Z-finite-child-snap-committed-and-native-close-dependency-proof-prepared-620c8f2fd359440abdf7733d70a33816.md) - Commits the qualified real child proposal unit; records R4a source pressure and an uncompiled public probe as the next lower-level comparison, with full foundation scope active.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Exact persistence attempts and terminal observation qualification](verification/2026-10/2026-10-25T081443Z-exact-persistence-attempts-and-terminal-observation-qualification-332f36f3c0f94f93ae1eb2721e981359.md) - Records owner-issued attempt correlation, exact observation acknowledgment, unchanged physical custody, public workflow evidence and scoped review corrections; complete R1 remains open.
 - **Work Progress**: [First writes committed and exact persistence redesign started](progress/2026-10/2026-10-25T063656Z-first-writes-committed-and-exact-persistence-redesign-started-1c12dd152e894de3a109c0d072338cf3.md) - Commits the qualified Source first-write correction and records the next R1 persistence observation owner design without claiming its implementation.
 - **Verification Evidence**: [Source owned first property writes and bounded selector error qualification](verification/2026-10/2026-10-25T060130Z-source-owned-first-property-writes-and-bounded-selector-error-qualification-0dfaa18252de473b90ff57ef150e64b0.md) - Qualifies selected default-root initialization, exact authored absence Undo, bounded rejected IDs and real non-active panel persistence while retaining complete template and storage contracts.
-- **Verification Evidence**: [Selector directed property reads and indexed root retirement qualification](verification/2026-10/2026-10-25T051125Z-selector-directed-property-reads-and-indexed-root-retirement-qualification-bd267ec01e4d44d3ad5f2a2d4543514d.md) - Qualifies borrowed nested source observations, independent scan and copy budgets, real computed panel editing and the reviewed root-tombstone correction; full R2 remains open.
 
 # Integration Notes
 
