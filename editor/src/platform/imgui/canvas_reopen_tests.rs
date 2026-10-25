@@ -21,7 +21,12 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use super::{NativeImgui, canvas_tests::retire_application, imgui_next_deadline};
+use super::{
+    NativeImgui,
+    canvas_tests::retire_application,
+    imgui_next_deadline,
+    retirement::{finish_graphics_for_test, initialize_native_for_test},
+};
 use crate::{
     EditorApplication, EditorLaunchOptions,
     frontend::imgui::{UiProject, clear_controls, control_clip, control_rect, control_visible},
@@ -185,8 +190,7 @@ fn run_with_observer<T>(
             )
             .map_err(|error| error.to_string())?,
     );
-    let mut native =
-        NativeImgui::new(event_loop, Arc::clone(&window)).map_err(|error| error.to_string())?;
+    let mut native = initialize_native_for_test(event_loop, Arc::clone(&window))?;
     let mut flags = native.context.io().config_flags();
     flags.remove(ConfigFlags::VIEWPORTS_ENABLE);
     flags.insert(ConfigFlags::NO_MOUSE_CURSOR_CHANGE);
@@ -199,7 +203,7 @@ fn run_with_observer<T>(
     let mut application = match opened {
         Ok(application) => application,
         Err(error) => {
-            let cleanup = native.shutdown_graphics();
+            let cleanup = finish_graphics_for_test(&mut native);
             return Err(match cleanup {
                 Ok(()) => error.to_string(),
                 Err(cleanup) => format!("{error}; graphics cleanup also failed: {cleanup}"),
@@ -208,7 +212,7 @@ fn run_with_observer<T>(
     };
     application.native_shell_ready();
     let result = observer(event_loop, &mut native, &mut application);
-    let graphics = native.shutdown_graphics();
+    let graphics = finish_graphics_for_test(&mut native);
     drop(native);
     drop(window);
     let retirement = retire_application(&mut application);

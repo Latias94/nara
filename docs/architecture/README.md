@@ -87,8 +87,11 @@ gating, quiesce/release phases and local controller admission. The
 [owner-local close design](native-close-ownership-design.md) selects a typed composite for fixed
 dependent aggregates and admits local Rust participants through the existing managed owner.
 The source study itself remains historical research. The local Rust custody boundary and bounded
-candidate comparison have separate evidence; actual Editor graphics migration and full R4a remain
-open.
+candidate comparison have separate evidence. The
+[retained graphics successor](../knowledge/engineering/verification/2026-10/2026-10-25T145420Z-retained-editor-native-graphics-retirement-and-physical-completion-qualification-2665523023e84aba979458cba3f2affc.md)
+adds the concrete Editor Host retirement phases and selected Windows/DX12 qualification. Actual
+SDK failure coverage and full R4 remain bounded by that evidence; the source study does not
+establish their completion.
 
 ## Background Designs
 

@@ -39,6 +39,12 @@ pub enum EditorRunError {
     Platform(String),
     #[error("native Editor GPU execution failed: {0}")]
     Gpu(#[source] WgpuEditorExecutionError),
+    #[error("{primary}; native Editor cleanup also failed: {cleanup}")]
+    NativeCleanup {
+        #[source]
+        primary: Box<EditorRunError>,
+        cleanup: String,
+    },
     #[error(transparent)]
     Composition(#[from] EditorCompositionError),
 }
@@ -53,6 +59,7 @@ impl EditorRunError {
     pub fn diagnostics(&self) -> Option<&nara::diagnostic::DiagnosticReport> {
         match self {
             Self::TrustedOpen(error) => error.diagnostics(),
+            Self::NativeCleanup { primary, .. } => primary.diagnostics(),
             Self::Usage(_)
             | Self::EventLoop(_)
             | Self::Platform(_)

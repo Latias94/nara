@@ -311,7 +311,11 @@ mod binding_tests {
         window::{Window, WindowId},
     };
 
-    use super::super::{NativeImgui, canvas_tests::retire_application};
+    use super::super::{
+        NativeImgui,
+        canvas_tests::retire_application,
+        retirement::{finish_graphics_for_test, initialize_native_for_test},
+    };
     use super::*;
     use crate::{EditorApplication, EditorLaunchOptions, frontend::imgui::UiProject};
 
@@ -413,8 +417,7 @@ mod binding_tests {
                 )
                 .map_err(|error| error.to_string())?,
         );
-        let mut native =
-            NativeImgui::new(event_loop, Arc::clone(&window)).map_err(|error| error.to_string())?;
+        let mut native = initialize_native_for_test(event_loop, Arc::clone(&window))?;
         native.layout_loaded = true;
         let mut flags = native.context.io().config_flags() | ConfigFlags::NO_MOUSE_CURSOR_CHANGE;
         flags.remove(ConfigFlags::VIEWPORTS_ENABLE);
@@ -428,9 +431,7 @@ mod binding_tests {
             event_loop,
         }
         .run(canvas_priority);
-        let graphics = native
-            .shutdown_graphics()
-            .map_err(|error| error.to_string());
+        let graphics = finish_graphics_for_test(&mut native);
         drop(native);
         drop(window);
         let session = retire_application(&mut application);

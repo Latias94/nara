@@ -228,6 +228,9 @@ fn run_native_cadence(
         application,
         supervised_play_wake: SupervisedPlayWake::default(),
         native: None,
+        retiring: None,
+        retirement_action: NativeRetirementAction::Hold,
+        retirement_errors: NativeCloseErrors::default(),
         window: Some(window),
         retained: None,
         gpu_recovery: EditorGpuRecovery::Ready,
@@ -393,12 +396,9 @@ fn run_native_cadence(
             fixed_after,
         })
     })();
-    let graphics = host
-        .native
-        .as_mut()
-        .map_or(Ok(()), NativeImgui::shutdown_graphics)
-        .map_err(|error| error.to_string());
+    let graphics = retirement::finish_host_graphics_for_test(&mut host);
     host.native.take();
+    host.retiring.take();
     host.window.take();
     let retirement = super::canvas_tests::retire_application(&mut host.application);
     match (result, graphics, retirement) {

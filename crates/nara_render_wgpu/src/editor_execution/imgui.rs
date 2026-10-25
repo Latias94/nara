@@ -1,4 +1,4 @@
-use dear_imgui_rs::{Context, FrameToken};
+use dear_imgui_rs::{Context, ContextId, FrameToken};
 use dear_imgui_wgpu::{
     ExternalTextureBinding, ExternalTextureId, WgpuDrawDependencies, WgpuFrameStage, WgpuInitInfo,
     WgpuRenderer,
@@ -14,6 +14,9 @@ use super::{
     WgpuEditorViewportSample, WgpuEditorWindowFrame, join_composite_receipts,
 };
 use crate::presented::{WgpuEditorWindowPresentedReceipt, WgpuSubmittedImageReceipt};
+
+mod retirement;
+pub use retirement::WgpuEditorGpuRetirement;
 
 fn delegated_window_id(primary: WindowId, instance: u64) -> Option<WindowId> {
     let raw = if instance >= primary.get() {
@@ -36,12 +39,58 @@ enum RendererOwner {
 #[doc(hidden)]
 pub struct WgpuEditorImguiRenderer {
     owner: RendererOwner,
+    context_id: ContextId,
     device: wgpu::Device,
     queue: wgpu::Queue,
     backend_instance_id: u64,
     device_epoch: u64,
     bindings: Vec<(ExternalTextureBinding, wgpu::TextureView)>,
     last_secondary_scope: Option<dear_imgui_wgpu::WgpuFrameScope>,
+    closed: bool,
+}
+
+/// Renderer construction failure retaining any renderer returned by native route attachment.
+///
+/// A failure from the SDK renderer constructor has no renderer to return. The caller must retain
+/// a separate GPU retirement token even for that case, because initialization may queue uploads.
+#[doc(hidden)]
+pub struct WgpuEditorImguiRendererFailure {
+    error: WgpuEditorExecutionError,
+    renderer: Option<Box<WgpuEditorImguiRenderer>>,
+}
+
+impl WgpuEditorImguiRendererFailure {
+    #[must_use]
+    pub fn error(&self) -> &WgpuEditorExecutionError {
+        &self.error
+    }
+
+    #[must_use]
+    pub fn into_parts(self) -> (WgpuEditorExecutionError, Option<WgpuEditorImguiRenderer>) {
+        (self.error, self.renderer.map(|renderer| *renderer))
+    }
+}
+
+impl std::fmt::Debug for WgpuEditorImguiRendererFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WgpuEditorImguiRendererFailure")
+            .field("error", &self.error)
+            .field("retains_renderer", &self.renderer.is_some())
+            .finish()
+    }
+}
+
+impl std::fmt::Display for WgpuEditorImguiRendererFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.error, formatter)
+    }
+}
+
+impl std::error::Error for WgpuEditorImguiRendererFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
 }
 
 /// Move-only prepared UI work, retaining the toolkit's frame ownership.
@@ -58,56 +107,77 @@ impl WgpuEditorDeviceScope<'_> {
         &self,
         context: &mut Context,
         native_platform: Option<&WinitPlatform>,
-    ) -> Result<WgpuEditorImguiRenderer, WgpuEditorExecutionError> {
+    ) -> Result<WgpuEditorImguiRenderer, WgpuEditorImguiRendererFailure> {
         let mut renderer = WgpuRenderer::new(
             WgpuInitInfo::new(self.device.clone(), self.queue.clone(), self.surface_format)
                 .with_instance(self.instance.clone())
                 .with_adapter(self.adapter.clone()),
             context,
         )
-        .map_err(|error| WgpuEditorExecutionError::toolkit_paint(error.to_string()))?;
+        .map_err(|error| WgpuEditorImguiRendererFailure {
+            error: WgpuEditorExecutionError::toolkit_paint(error.to_string()),
+            renderer: None,
+        })?;
         renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
         let owner = if let Some(platform) = native_platform {
             match WinitViewportRoute::attach(context, platform, renderer) {
                 Ok(route) => RendererOwner::Native(route),
                 Err(failure) => {
-                    let (error, mut renderer) = failure.into_parts();
-                    self.queue.submit([]);
-                    let drain = self.device.poll(wgpu::PollType::Wait {
-                        submission_index: None,
-                        timeout: Some(std::time::Duration::from_secs(5)),
+                    let (error, renderer) = failure.into_parts();
+                    return Err(WgpuEditorImguiRendererFailure {
+                        error: WgpuEditorExecutionError::toolkit_paint(error.to_string()),
+                        renderer: Some(Box::new(WgpuEditorImguiRenderer::from_owner(
+                            RendererOwner::Docked(renderer),
+                            self,
+                            context.id(),
+                        ))),
                     });
-                    let cleanup = renderer.shutdown(context);
-                    return Err(WgpuEditorExecutionError::toolkit_paint(
-                        match (drain, cleanup) {
-                            (Ok(_), Ok(())) => error.to_string(),
-                            (drain, cleanup) => format!(
-                                "{error}; initialization cleanup: drain={drain:?}, renderer={cleanup:?}"
-                            ),
-                        },
-                    ));
                 }
             }
         } else {
             RendererOwner::Docked(renderer)
         };
-        Ok(WgpuEditorImguiRenderer {
+        Ok(WgpuEditorImguiRenderer::from_owner(
             owner,
-            device: self.device.clone(),
-            queue: self.queue.clone(),
-            backend_instance_id: self.backend_instance_id,
-            device_epoch: self.device_epoch,
-            bindings: Vec::new(),
-            last_secondary_scope: None,
-        })
+            self,
+            context.id(),
+        ))
     }
 }
 
 impl WgpuEditorImguiRenderer {
+    fn from_owner(
+        owner: RendererOwner,
+        scope: &WgpuEditorDeviceScope<'_>,
+        context_id: ContextId,
+    ) -> Self {
+        Self {
+            owner,
+            context_id,
+            device: scope.device.clone(),
+            queue: scope.queue.clone(),
+            backend_instance_id: scope.backend_instance_id,
+            device_epoch: scope.device_epoch,
+            bindings: Vec::new(),
+            last_secondary_scope: None,
+            closed: false,
+        }
+    }
+
+    fn ensure_open(&self) -> Result<(), WgpuEditorExecutionError> {
+        if self.closed {
+            return Err(WgpuEditorExecutionError::toolkit_paint(
+                "the renderer is closed",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn register_external_texture(
         &mut self,
         view: &wgpu::TextureView,
     ) -> Result<ExternalTextureId, WgpuEditorExecutionError> {
+        self.ensure_open()?;
         let texture = match &mut self.owner {
             RendererOwner::Docked(renderer) => renderer
                 .register_external_texture(view)
@@ -125,6 +195,7 @@ impl WgpuEditorImguiRenderer {
         &self,
         texture: ExternalTextureId,
     ) -> Result<ExternalTextureBinding, WgpuEditorExecutionError> {
+        self.ensure_open()?;
         match &self.owner {
             RendererOwner::Docked(renderer) => renderer
                 .external_texture_binding(texture)
@@ -141,6 +212,7 @@ impl WgpuEditorImguiRenderer {
         texture: ExternalTextureId,
         view: &wgpu::TextureView,
     ) -> Result<(), WgpuEditorExecutionError> {
+        self.ensure_open()?;
         match &mut self.owner {
             RendererOwner::Docked(renderer) => renderer
                 .update_external_texture(texture, view)
@@ -165,6 +237,7 @@ impl WgpuEditorImguiRenderer {
         &mut self,
         texture: ExternalTextureId,
     ) -> Result<(), WgpuEditorExecutionError> {
+        self.ensure_open()?;
         match &mut self.owner {
             RendererOwner::Docked(renderer) => renderer
                 .unregister_external_texture(texture)
@@ -184,7 +257,19 @@ impl WgpuEditorImguiRenderer {
         })
     }
 
+    /// Detaches the SDK owner, then releases this adapter's texture references and observations.
+    ///
+    /// Errors preserve adapter custody for retry, including native errors reported after physical
+    /// teardown. Only an actual successful SDK result closes this adapter. Success is idempotent.
     pub fn shutdown(&mut self, context: &mut Context) -> Result<(), WgpuEditorExecutionError> {
+        if context.id() != self.context_id {
+            return Err(WgpuEditorExecutionError::toolkit_paint(
+                "the renderer belongs to another Context",
+            ));
+        }
+        if self.closed {
+            return Ok(());
+        }
         match &mut self.owner {
             RendererOwner::Docked(renderer) => renderer
                 .shutdown(context)
@@ -192,7 +277,11 @@ impl WgpuEditorImguiRenderer {
             RendererOwner::Native(route) => route
                 .shutdown(context)
                 .map_err(|error| WgpuEditorExecutionError::toolkit_paint(error.to_string())),
-        }
+        }?;
+        self.closed = true;
+        self.bindings.clear();
+        self.last_secondary_scope = None;
+        Ok(())
     }
 
     pub fn paint(
@@ -201,6 +290,7 @@ impl WgpuEditorImguiRenderer {
         frame: &mut WgpuEditorWindowFrame<'_>,
         clear: wgpu::Color,
     ) -> Result<(), WgpuEditorExecutionError> {
+        self.ensure_open()?;
         if frame.device != &self.device || frame.queue != &self.queue {
             return Err(WgpuEditorExecutionError::toolkit_paint(
                 "the renderer belongs to another GPU device or queue",
@@ -275,6 +365,7 @@ impl WgpuEditorExecution {
         viewport_submissions: &[WgpuSubmittedImageReceipt],
         outcomes: &mut Vec<WgpuEditorFrameOutcome>,
     ) -> Result<WgpuEditorImguiFrame<'context>, WgpuEditorExecutionError> {
+        renderer.ensure_open()?;
         let host_frame_index = self
             .host_frame_index
             .ok_or(WgpuEditorExecutionError::FrameTransactionUnavailable)?;

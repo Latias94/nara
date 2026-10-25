@@ -587,6 +587,9 @@ fn native_views_detach_minimize_reopen_recover_and_retire_with_exact_receipts() 
             application,
             supervised_play_wake: SupervisedPlayWake::default(),
             native: None,
+            retiring: None,
+            retirement_action: NativeRetirementAction::Hold,
+            retirement_errors: NativeCloseErrors::default(),
             window: None,
             retained: None,
             gpu_recovery: EditorGpuRecovery::Ready,
@@ -625,14 +628,7 @@ fn native_views_detach_minimize_reopen_recover_and_retire_with_exact_receipts() 
         }
     }
     // All behavior assertions follow the real renderer -> platform -> Session cleanup.
-    let graphics = test
-        .host
-        .native
-        .as_mut()
-        .map_or(Ok(()), NativeImgui::shutdown_graphics);
-    if let Some(native) = &test.host.native {
-        native.publish_render_views(test.host.application.panel_workspace_mut());
-    }
+    let graphics = retirement::finish_host_graphics_for_test(&mut test.host);
     let semantic_views_retired = test
         .host
         .application
@@ -641,14 +637,20 @@ fn native_views_detach_minimize_reopen_recover_and_retire_with_exact_receipts() 
         .instances()
         .iter()
         .all(|panel| panel.render_view().is_none());
-    let cleanup_order = test.host.native.as_ref().is_some_and(|native| {
-        native.renderer_shutdown
-            && native.platform_shutdown
-            && native.scene.view.is_none()
-            && native.game.view.is_none()
-            && native.context.platform_io().viewports_iter().count() == 1
-    });
+    let cleanup_order = (test.host.native.is_some() || test.host.retiring.is_some())
+        && test
+            .host
+            .native
+            .iter()
+            .chain(test.host.retiring.iter())
+            .all(|native| {
+                native.close.is_complete()
+                    && native.scene.view.is_none()
+                    && native.game.view.is_none()
+                    && native.context.platform_io().viewports_iter().count() == 1
+            });
     test.host.native.take();
+    test.host.retiring.take();
     test.host.window.take();
     let retirement = super::canvas_tests::retire_application(&mut test.host.application);
     let failure = test.host.error.take();

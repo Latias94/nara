@@ -16,9 +16,9 @@ use nara::{
     },
     render_wgpu::__private::{
         WgpuEditorExecution, WgpuEditorExecutionError, WgpuEditorFrameOutcome,
-        WgpuEditorImguiFrame, WgpuEditorImguiRenderer, WgpuEditorUiImageSubmission,
-        WgpuEditorViewId, WgpuEditorViewportIdentity, WgpuEditorWindowFrame,
-        WgpuSubmittedImageReceipt,
+        WgpuEditorGpuRetirement, WgpuEditorImguiFrame, WgpuEditorImguiRenderer,
+        WgpuEditorUiImageSubmission, WgpuEditorViewId, WgpuEditorViewportIdentity,
+        WgpuEditorWindowFrame, WgpuSubmittedImageReceipt,
     },
     tooling::{EditorActionBatch, EditorPlayState, EditorRuntimeAvailability},
     window::{WindowId as NaraWindowId, backend::WindowHandleProvider},
@@ -57,7 +57,13 @@ mod input;
 #[cfg(all(test, target_os = "windows"))]
 mod manager_workflow_tests;
 mod repaint;
+mod retirement;
+#[cfg(all(test, target_os = "windows"))]
+mod retirement_tests;
 use canvas::ImguiUiCanvasPresenter;
+use retirement::{
+    NativeClose, NativeCloseErrors, NativeInitializationFailure, NativeRetirementAction,
+};
 #[cfg(all(test, target_os = "windows"))]
 mod game_input_tests;
 #[cfg(all(test, target_os = "windows"))]
@@ -100,22 +106,43 @@ pub(super) fn run_application(
         host.error
             .get_or_insert_with(|| EditorRunError::EventLoop(error.to_string()));
     }
+    // Ordinary exit has already retired graphics while the event loop was alive. A terminal
+    // event-loop failure can still leave an owner; attempt finite local cleanup without claiming
+    // that a lost event pump can satisfy arbitrary external close dependencies.
+    host.retire_native();
     let shutdown = host
-        .native
+        .retiring
         .as_mut()
         .map_or(Ok(()), NativeImgui::shutdown_graphics);
-    if let Some(native) = &host.native {
+    if let Some(native) = &host.retiring {
+        if !native.close.is_complete() {
+            eprintln!(
+                "Nara Editor cannot release unfinished native custody after its event loop ended: {shutdown:?}"
+            );
+            std::process::abort();
+        }
         native.publish_render_views(host.application.panel_workspace_mut());
     }
+    host.retiring.take();
+    if let Err(error) = shutdown {
+        host.retirement_errors.record(error);
+    }
     if let Some(error) = host.error {
-        if let Err(shutdown) = shutdown {
-            return Err(imgui_error(format!(
-                "{error}; Editor cleanup also failed: {shutdown}"
-            )));
+        if !host.retirement_errors.is_empty() {
+            return Err(EditorRunError::NativeCleanup {
+                primary: Box::new(error),
+                cleanup: host.retirement_errors.to_string(),
+            });
         }
         return Err(error);
     }
-    shutdown
+    if !host.retirement_errors.is_empty() {
+        return Err(imgui_error(format!(
+            "native graphics retired with errors: {}",
+            host.retirement_errors
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,6 +154,9 @@ struct NativeEditorHost {
     application: EditorApplication,
     supervised_play_wake: SupervisedPlayWake,
     native: Option<NativeImgui>,
+    retiring: Option<NativeImgui>,
+    retirement_action: NativeRetirementAction,
+    retirement_errors: NativeCloseErrors,
     window: Option<Arc<Window>>,
     retained: Option<PendingImguiFrontend>,
     gpu_recovery: EditorGpuRecovery,
@@ -166,8 +196,7 @@ struct NativeImgui {
     layout: Option<crate::workspace::EditorWorkspaceLayout>,
     next_view: u64,
     scene_extent: Option<Extent2d>,
-    renderer_shutdown: bool,
-    platform_shutdown: bool,
+    close: NativeClose,
     rejected_completion: Option<EditorGameViewCompletion>,
     input: ImguiInput,
     game_candidate: Option<EditorGameViewCandidateIdentity>,
@@ -181,17 +210,23 @@ struct NativeImgui {
     submitted_game_observation: Option<game_input_tests::SubmittedGameObservation>,
 }
 
-struct ImguiRenderer(WgpuEditorImguiRenderer);
+struct ImguiRenderer(Option<WgpuEditorImguiRenderer>);
 
 impl ImguiRenderer {
-    fn register(&mut self, view: &wgpu::TextureView) -> Result<ExternalTextureId, EditorRunError> {
+    fn owner(&mut self) -> Result<&mut WgpuEditorImguiRenderer, EditorRunError> {
         self.0
+            .as_mut()
+            .ok_or_else(|| imgui_error("the Editor renderer has not been initialized"))
+    }
+
+    fn register(&mut self, view: &wgpu::TextureView) -> Result<ExternalTextureId, EditorRunError> {
+        self.owner()?
             .register_external_texture(view)
             .map_err(platform_gpu_error)
     }
 
     fn unregister(&mut self, texture: ExternalTextureId) -> Result<(), EditorRunError> {
-        self.0
+        self.owner()?
             .unregister_external_texture(texture)
             .map_err(platform_gpu_error)
     }
@@ -207,7 +242,7 @@ impl ImguiRenderer {
     ) -> Result<WgpuEditorImguiFrame<'frame>, EditorRunError> {
         gpu.prepare_imgui_frame(
             window,
-            &mut self.0,
+            self.owner()?,
             event_loop,
             frame,
             submissions,
@@ -227,11 +262,19 @@ impl ImguiRenderer {
             b: 0.075,
             a: 1.0,
         };
-        self.0.paint(prepared, frame, clear)
+        self.0
+            .as_mut()
+            .ok_or_else(|| {
+                WgpuEditorExecutionError::toolkit_paint("the renderer is uninitialized")
+            })?
+            .paint(prepared, frame, clear)
     }
 
     fn shutdown(&mut self, context: &mut Context) -> Result<(), EditorRunError> {
-        self.0.shutdown(context).map_err(platform_gpu_error)
+        match self.0.as_mut() {
+            Some(renderer) => renderer.shutdown(context).map_err(platform_gpu_error),
+            None => Ok(()),
+        }
     }
 }
 
@@ -311,8 +354,9 @@ impl ImguiTarget {
         gpu: &mut WgpuEditorExecution,
         renderer: &mut ImguiRenderer,
     ) -> Result<(), EditorRunError> {
-        if let Some(texture) = self.texture.take() {
+        if let Some(texture) = self.texture {
             renderer.unregister(texture)?;
+            self.texture = None;
         }
         if let Some(view) = self.view.take() {
             gpu.retire_view(view);
@@ -381,10 +425,13 @@ impl PendingGameImage {
 }
 
 impl NativeImgui {
-    fn new(event_loop: &ActiveEventLoop, window: Arc<Window>) -> Result<Self, EditorRunError> {
+    fn new(
+        event_loop: &ActiveEventLoop,
+        window: Arc<Window>,
+    ) -> Result<Self, NativeInitializationFailure> {
         // Context teardown may own deferred renderer resources after an initialization error.
         // Declare the engine GPU owner first so those resources retire before it on every return.
-        let mut gpu = WgpuEditorExecution::new(
+        let gpu = WgpuEditorExecution::new(
             NaraWindowId::PRIMARY,
             WindowHandleProvider::new(Arc::clone(&window)),
         )
@@ -408,43 +455,13 @@ impl NativeImgui {
                 .add_font(&[FontSource::stb_truetype_with_size(data, 16.0)
                     .with_config(FontConfig::new().size_pixels(16.0).merge_mode(true))]);
         }
-        let mut platform = WinitPlatform::new(&mut context).map_err(imgui_error)?;
-        platform
-            .attach_window(Arc::clone(&window), HiDpiMode::Default, &mut context)
-            .map_err(imgui_error)?;
+        let platform = WinitPlatform::new(&mut context).map_err(imgui_error)?;
         let native_detachment = native_detachment_supported(event_loop);
-        if native_detachment {
-            context.enable_multi_viewport();
-            platform
-                .enable_viewports(&mut context)
-                .map_err(imgui_error)?;
-            context.io_mut().set_config_dpi_scale_fonts(true);
-            context.io_mut().set_config_dpi_scale_viewports(true);
-        }
-        let renderer = gpu
-            .with_device(editor_window_packet(&window), |scope| {
-                scope.create_imgui_renderer(&mut context, native_detachment.then_some(&platform))
-            })
-            .map_err(platform_gpu_error)
-            .and_then(|renderer| renderer.map_err(platform_gpu_error));
-        let renderer = match renderer {
-            Ok(renderer) => ImguiRenderer(renderer),
-            Err(error) => {
-                // Renderer construction may submit initialization work before its first frame.
-                // Drain it before Context teardown releases any deferred renderer resources.
-                if let Err(cleanup) = gpu.wait_for_idle() {
-                    return Err(imgui_error(format!(
-                        "{error}; initialization GPU drain also failed: {cleanup}"
-                    )));
-                }
-                return Err(error);
-            }
-        };
-        Ok(Self {
+        let mut native = Self {
             window,
             context,
             platform,
-            renderer,
+            renderer: ImguiRenderer(None),
             gpu,
             frontend: ImguiEditorFrontend::default(),
             scene: ImguiTarget::default(),
@@ -462,8 +479,7 @@ impl NativeImgui {
             layout: None,
             next_view: 0,
             scene_extent: None,
-            renderer_shutdown: false,
-            platform_shutdown: false,
+            close: NativeClose::default(),
             rejected_completion: None,
             input: ImguiInput::default(),
             game_candidate: None,
@@ -475,7 +491,50 @@ impl NativeImgui {
             lifecycle_frame: None,
             #[cfg(all(test, target_os = "windows"))]
             submitted_game_observation: None,
-        })
+        };
+        if let Err(error) = native.initialize_graphics(native_detachment) {
+            return Err(NativeInitializationFailure::retained(error, native));
+        }
+        Ok(native)
+    }
+
+    fn initialize_graphics(&mut self, native_detachment: bool) -> Result<(), EditorRunError> {
+        self.platform
+            .attach_window(
+                Arc::clone(&self.window),
+                HiDpiMode::Default,
+                &mut self.context,
+            )
+            .map_err(imgui_error)?;
+        if native_detachment && retirement::enable_native_platform_for_construction() {
+            self.context.enable_multi_viewport();
+            self.platform
+                .enable_viewports(&mut self.context)
+                .map_err(imgui_error)?;
+            self.context.io_mut().set_config_dpi_scale_fonts(true);
+            self.context.io_mut().set_config_dpi_scale_viewports(true);
+        }
+        let (drain, result) = self
+            .gpu
+            .with_device(editor_window_packet(&self.window), |scope| {
+                let drain = scope.gpu_retirement();
+                let renderer = scope.create_imgui_renderer(
+                    &mut self.context,
+                    native_detachment.then_some(&self.platform),
+                );
+                (drain, renderer)
+            })
+            .map_err(platform_gpu_error)?;
+        self.close.drain = Some(drain);
+        match result {
+            Ok(renderer) => self.renderer.0 = Some(renderer),
+            Err(failure) => {
+                let (error, renderer) = failure.into_parts();
+                self.renderer.0 = renderer;
+                return Err(platform_gpu_error(error));
+            }
+        }
+        Ok(())
     }
 
     fn redraw(
@@ -1329,47 +1388,6 @@ impl NativeImgui {
         }
         Ok(())
     }
-
-    fn shutdown_graphics(&mut self) -> Result<(), EditorRunError> {
-        self.input.invalidate(true);
-        self.context.end_frame();
-        let mut failure = self.gpu.wait_for_idle().map_err(platform_gpu_error).err();
-        if !self.renderer_shutdown {
-            for target in [&mut self.scene, &mut self.game] {
-                if let Err(error) = target.retire(&mut self.gpu, &mut self.renderer) {
-                    failure.get_or_insert(error);
-                }
-            }
-            match self.renderer.shutdown(&mut self.context) {
-                Ok(()) => self.renderer_shutdown = true,
-                Err(error) => {
-                    failure.get_or_insert(error);
-                }
-            }
-        }
-        if self.platform.viewports_enabled() {
-            if let Err(error) = self
-                .platform
-                .disable_viewports(&mut self.context)
-                .map_err(imgui_error)
-            {
-                failure.get_or_insert(error);
-            }
-        }
-        if !self.platform_shutdown {
-            match self
-                .platform
-                .shutdown(&mut self.context)
-                .map_err(imgui_error)
-            {
-                Ok(()) => self.platform_shutdown = true,
-                Err(error) => {
-                    failure.get_or_insert(error);
-                }
-            }
-        }
-        failure.map_or(Ok(()), Err)
-    }
 }
 
 impl NativeEditorHost {
@@ -1382,6 +1400,9 @@ impl NativeEditorHost {
             application,
             supervised_play_wake,
             native: None,
+            retiring: None,
+            retirement_action: NativeRetirementAction::Hold,
+            retirement_errors: NativeCloseErrors::default(),
             window: None,
             retained: Some(PendingImguiFrontend::Fresh(frontend)),
             gpu_recovery: EditorGpuRecovery::Ready,
@@ -1392,12 +1413,22 @@ impl NativeEditorHost {
     }
 
     fn install_native(&mut self, event_loop: &ActiveEventLoop) -> Result<(), EditorRunError> {
+        if self.native.is_some() || self.retiring.is_some() {
+            return Err(imgui_error("the predecessor native owner has not retired"));
+        }
         let window = self
             .window
             .as_ref()
             .cloned()
             .ok_or_else(|| imgui_error("the primary window is unavailable"))?;
-        let mut native = NativeImgui::new(event_loop, window)?;
+        let mut native = match NativeImgui::new(event_loop, window) {
+            Ok(native) => native,
+            Err(failure) => {
+                let (error, native) = failure.into_parts();
+                self.retiring = native;
+                return Err(error);
+            }
+        };
         if let Some(retained) = self.retained.take() {
             match retained {
                 PendingImguiFrontend::Fresh(frontend) => native.frontend = frontend,
@@ -1421,24 +1452,100 @@ impl NativeEditorHost {
 
     fn retire_native(&mut self) {
         self.application.set_scene_preview_extent(None);
-        if let Some(mut native) = self.native.take() {
-            let mut layout = String::new();
-            native.context.save_ini_settings(&mut layout);
-            if let Err(error) = native.shutdown_graphics() {
-                eprintln!("Nara Editor GPU retirement: {error}");
+        if self.retiring.is_none() {
+            self.retiring = self.native.take();
+        }
+    }
+
+    fn drive_native_retirement(&mut self, event_loop: &ActiveEventLoop) {
+        if self.retirement_action == NativeRetirementAction::AwaitingExitReady {
+            if !self.application.has_pending_exit() {
+                // A cancelled/rejected semantic close returns authority to the live frontend.
+                self.retirement_action = if self.native.is_some() {
+                    NativeRetirementAction::Hold
+                } else {
+                    NativeRetirementAction::Install
+                };
             }
+        }
+        if let Some(native) = &mut self.retiring {
+            if !native.poll_graphics_close() {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    Instant::now() + Duration::from_millis(16),
+                ));
+                return;
+            }
+        }
+        if let Some(mut native) = self.retiring.take() {
+            let layout = native.close.saved_layout.take().unwrap_or_default();
+            if !native.close.errors.is_empty() {
+                eprintln!("Nara Editor GPU retirement: {}", native.close.errors);
+            }
+            self.retirement_errors
+                .append(std::mem::take(&mut native.close.errors));
             native.publish_render_views(self.application.panel_workspace_mut());
-            self.retained = Some(PendingImguiFrontend::Recovered(ImguiRetainedState {
-                frontend: std::mem::take(&mut native.frontend),
-                layout,
-                saved_layout: native.layout.take(),
-                frame_index: native.frame_index,
-                next_view: native.next_view,
-            }));
+            // A construction failure has no frontend to recover; keep the preceding one.
+            if self.retained.is_none() {
+                self.retained = Some(PendingImguiFrontend::Recovered(ImguiRetainedState {
+                    frontend: std::mem::take(&mut native.frontend),
+                    layout,
+                    saved_layout: native.layout.take(),
+                    frame_index: native.frame_index,
+                    next_view: native.next_view,
+                }));
+            }
+        }
+        match self.retirement_action {
+            NativeRetirementAction::Install | NativeRetirementAction::InstallForExit => {
+                self.retirement_action =
+                    if self.retirement_action == NativeRetirementAction::InstallForExit {
+                        NativeRetirementAction::AwaitingExitReady
+                    } else {
+                        NativeRetirementAction::Hold
+                    };
+                if let Err(error) = self.install_native(event_loop) {
+                    self.await_explicit_retry(&error);
+                }
+            }
+            NativeRetirementAction::Exit => {
+                event_loop.exit();
+            }
+            NativeRetirementAction::Hold | NativeRetirementAction::AwaitingExitReady => {}
+        }
+    }
+
+    fn exit_after_native_retirement(&mut self, event_loop: &ActiveEventLoop) {
+        if self.application.request_exit().exit_ready() {
+            self.retirement_action = NativeRetirementAction::Exit;
+            self.retire_native();
+        } else {
+            self.retirement_action = if matches!(
+                self.retirement_action,
+                NativeRetirementAction::Install | NativeRetirementAction::InstallForExit
+            ) {
+                NativeRetirementAction::InstallForExit
+            } else {
+                NativeRetirementAction::AwaitingExitReady
+            };
+            if let Some(native) = &self.native {
+                native.window.request_redraw();
+            }
+        }
+        self.drive_native_retirement(event_loop);
+        if self.retirement_action.needs_exit_maintenance() {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(16),
+            ));
         }
     }
 
     fn await_explicit_retry(&mut self, error: &EditorRunError) {
+        if self.retirement_action == NativeRetirementAction::InstallForExit {
+            // Preserve the close decision but stop automatic reconstruction after a failed retry.
+            self.retirement_action = NativeRetirementAction::AwaitingExitReady;
+        } else if !self.retirement_action.needs_exit_maintenance() {
+            self.retirement_action = NativeRetirementAction::Hold;
+        }
         self.retire_native();
         self.gpu_recovery.require_explicit_retry();
         if let Some(window) = &self.window {
@@ -1448,10 +1555,16 @@ impl NativeEditorHost {
     }
 
     fn replace_native(&mut self, event_loop: &ActiveEventLoop) {
-        self.retire_native();
-        if let Err(error) = self.install_native(event_loop) {
-            self.await_explicit_retry(&error);
+        if self.retirement_action == NativeRetirementAction::Exit {
+            return;
         }
+        self.retirement_action = if self.retirement_action.needs_exit_maintenance() {
+            NativeRetirementAction::InstallForExit
+        } else {
+            NativeRetirementAction::Install
+        };
+        self.retire_native();
+        self.drive_native_retirement(event_loop);
     }
 
     fn handle_gpu_failure(
@@ -1460,6 +1573,12 @@ impl NativeEditorHost {
         error: EditorRunError,
     ) -> Result<(), EditorRunError> {
         if let Some(native) = &mut self.native {
+            native.close.device_lost = matches!(
+                &error,
+                EditorRunError::Gpu(WgpuEditorExecutionError::Backend(
+                    nara::render_wgpu::WgpuRenderError::DeviceLost
+                ))
+            );
             native.input.invalidate(true);
             native.input.flush(&mut self.application)?;
         }
@@ -1503,7 +1622,7 @@ impl NativeEditorHost {
             return;
         }
         if self.application.drive_gpu_recovery_pause().exit_ready() {
-            event_loop.exit();
+            self.exit_after_native_retirement(event_loop);
             return;
         }
         let state = self
@@ -1538,7 +1657,7 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
                     .application
                     .drive_supervised_play_effects(Instant::now());
                 if update.exit_ready() {
-                    event_loop.exit();
+                    self.exit_after_native_retirement(event_loop);
                     return;
                 }
                 if update.actions_observed()
@@ -1556,12 +1675,20 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
                     Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
                     None => event_loop.set_control_flow(ControlFlow::Wait),
                 }
+                if self.retiring.is_some() || self.retirement_action.needs_exit_maintenance() {
+                    event_loop.set_control_flow(ControlFlow::WaitUntil(
+                        Instant::now() + Duration::from_millis(16),
+                    ));
+                }
             }
         }
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.native.is_some() {
+        if self.native.is_some()
+            || self.retiring.is_some()
+            || self.retirement_action == NativeRetirementAction::Exit
+        {
             return;
         }
         if self.window.is_none() {
@@ -1573,7 +1700,7 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
                 Ok(window) => self.window = Some(Arc::new(window)),
                 Err(error) => {
                     self.error = Some(imgui_error(error));
-                    event_loop.exit();
+                    self.exit_after_native_retirement(event_loop);
                     return;
                 }
             }
@@ -1584,7 +1711,7 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
             }
             Err(error) => {
                 self.error = Some(error);
-                event_loop.exit();
+                self.exit_after_native_retirement(event_loop);
             }
         }
     }
@@ -1608,9 +1735,7 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
                 return;
             }
             if matches!(event, WindowEvent::CloseRequested) && self.native.is_none() {
-                if self.application.request_exit().exit_ready() {
-                    event_loop.exit();
-                }
+                self.exit_after_native_retirement(event_loop);
                 return;
             }
         }
@@ -1624,7 +1749,7 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
                 .any(|snapshot| snapshot.window_id == window_id),
             Err(error) => {
                 self.error = Some(imgui_error(error));
-                event_loop.exit();
+                self.exit_after_native_retirement(event_loop);
                 return;
             }
         };
@@ -1651,7 +1776,7 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
                 }
                 Err(error) => {
                     self.error = Some(imgui_error(error));
-                    event_loop.exit();
+                    self.exit_after_native_retirement(event_loop);
                     return;
                 }
             }
@@ -1660,21 +1785,19 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
         };
         if let Err(error) = native.input.flush(&mut self.application) {
             self.error = Some(error);
-            event_loop.exit();
+            self.exit_after_native_retirement(event_loop);
             return;
         }
         match event {
             WindowEvent::CloseRequested if is_primary => {
-                if self.application.request_exit().exit_ready() {
-                    event_loop.exit();
-                }
+                self.exit_after_native_retirement(event_loop);
             }
             WindowEvent::RedrawRequested if is_primary => {
                 let running_before = self.application.current_frame().is_some_and(|frame| {
                     imgui_play_cadence(frame.play().state(), frame.runtime_availability()).running
                 });
                 match native.redraw(event_loop, &mut self.application) {
-                    Ok(true) => event_loop.exit(),
+                    Ok(true) => self.exit_after_native_retirement(event_loop),
                     Ok(false) => {
                         if native.presented {
                             self.gpu_recovery.mark_presentation_ready();
@@ -1683,7 +1806,7 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
                     Err(error) => {
                         if let Err(error) = self.handle_gpu_failure(event_loop, error) {
                             self.error = Some(error);
-                            event_loop.exit();
+                            self.exit_after_native_retirement(event_loop);
                         }
                     }
                 }
@@ -1702,10 +1825,19 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.drive_native_retirement(event_loop);
+        if self.retirement_action == NativeRetirementAction::Exit {
+            if self.retiring.is_some() {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    Instant::now() + Duration::from_millis(16),
+                ));
+            }
+            return;
+        }
         let now = Instant::now();
         let open_update = self.application.advance_project_open();
         if open_update.exit_ready() {
-            event_loop.exit();
+            self.exit_after_native_retirement(event_loop);
             return;
         }
         let play_before = self
@@ -1733,7 +1865,7 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
             self.application
                 .drive_editor_frame(delta, open_update.actions_observed(), running);
         if update.exit_ready() {
-            event_loop.exit();
+            self.exit_after_native_retirement(event_loop);
             return;
         }
         self.advance_recovery(event_loop);
@@ -1770,6 +1902,9 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
         } else {
             self.repaint_deadline = None;
             event_loop.set_control_flow(ControlFlow::Wait);
+        }
+        if self.retiring.is_some() || self.retirement_action.needs_exit_maintenance() {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(now + Duration::from_millis(16)));
         }
     }
 }

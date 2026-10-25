@@ -291,7 +291,25 @@ fn run_native_panels(
         let old_backend = host.native.as_ref().unwrap().gpu.backend_instance_id();
         let old_frame = host.native.as_ref().unwrap().frame_index;
         let old_next_view = host.native.as_ref().unwrap().next_view;
+        let replacement_deadline = Instant::now() + Duration::from_secs(5);
         host.replace_native(event_loop);
+        while host.native.is_none() {
+            if let Some(error) = &host.error {
+                return Err(format!("native GPU reconstruction failed: {error}"));
+            }
+            if host.gpu_recovery == EditorGpuRecovery::AwaitingExplicitRetry {
+                return Err("native GPU reconstruction requires an explicit retry".to_owned());
+            }
+            if Instant::now() >= replacement_deadline {
+                return Err(
+                    "native GPU reconstruction did not finish within five seconds".to_owned(),
+                );
+            }
+            host.drive_native_retirement(event_loop);
+            if host.native.is_none() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
         configure_test_input(&mut host)?;
         let reconstruction_preserved_frame_counter = host.native.as_ref().unwrap().frame_index
             == old_frame
@@ -369,11 +387,7 @@ fn run_native_panels(
             presents,
         })
     })();
-    let graphics = host
-        .native
-        .as_mut()
-        .map_or(Ok(()), NativeImgui::shutdown_graphics)
-        .map_err(|error| error.to_string());
+    let graphics = retirement::finish_host_graphics_for_test(&mut host);
     let session = super::canvas_tests::retire_application(&mut host.application);
     drop(host);
     match (result, graphics, session) {

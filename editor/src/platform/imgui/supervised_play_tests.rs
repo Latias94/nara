@@ -20,8 +20,11 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use super::NativeImgui;
-use super::supervised_play_support::SupervisedPlayTestFixture;
+use super::{
+    NativeImgui,
+    retirement::{finish_graphics_for_test, initialize_native_for_test},
+    supervised_play_support::SupervisedPlayTestFixture,
+};
 use crate::{
     EditorApplication, EditorLaunchOptions,
     frontend::imgui::{clear_controls, control_clip, control_rect, control_visible},
@@ -427,7 +430,7 @@ impl SupervisedPlayTestHost {
 
     fn cleanup(&mut self) {
         if let Some(mut native) = self.native.take() {
-            if let Err(error) = native.shutdown_graphics() {
+            if let Err(error) = finish_graphics_for_test(&mut native) {
                 self.record_cleanup_failure(format!("native graphics cleanup failed: {error}"));
             }
             drop(native);
@@ -507,8 +510,7 @@ impl ApplicationHandler for SupervisedPlayTestHost {
                     )
                     .map_err(|error| error.to_string())?,
             );
-            let mut native =
-                NativeImgui::new(event_loop, window).map_err(|error| error.to_string())?;
+            let mut native = initialize_native_for_test(event_loop, window)?;
             native.layout_loaded = true;
             let mut flags = native.context.io().config_flags();
             flags.remove(ConfigFlags::VIEWPORTS_ENABLE);

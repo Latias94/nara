@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-24 (additive source Open and explicit Close separation)
+**Last Revised**: 2026-10-25 (retained native graphics retirement)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -281,6 +281,19 @@ prepared Hosts retire through existing Host custody rather than accumulating unt
 The native Host retains one event loop, device-creation authority and accountable close/recovery lifecycle.
 It may delegate secondary window/surface ownership to the selected platform/renderer adapter with explicit shutdown ordering.
 The adapter uses the engine-created GPU lineage rather than a second device/runtime.
+The concrete Host keeps live graphics and a retained retiring predecessor distinct. It admits no
+replacement until the predecessor's drain, renderer, view and platform phases complete, including
+after partial initialization. Retirement retains the primary window and event loop; normal Exit
+waits for semantic Session close and native completion before ending the loop. The old frontend
+and saved pre-teardown layout move to a successor only after physical retirement. Native graphics
+belong to this Editor Host, not to a Play Runtime's obligation ledger.
+
+Close retains bounded error facts separately from physical completion, including SDK errors exposed
+after teardown. Repeated observations do not erase an earlier error; truncation and capacity loss
+are explicit. A terminal event-loop failure receives one finite local cleanup attempt. If native
+custody still cannot retire without that lost driver, the product terminates rather than destroying
+unfinished SDK state or reporting clean shutdown. This does not promise arbitrary SDK recovery,
+exception containment or a general native quarantine service.
 The private toolkit adapter must own the renderer and external texture registrations it certifies;
 caller-supplied observation metadata alone cannot grant Nara presentation authority.
 Delegated presentation receipts identify the exact native registration and UI attempt observed by

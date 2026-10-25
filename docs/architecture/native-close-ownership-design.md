@@ -86,27 +86,64 @@ arbitrary SDK can close without its event loop.
 
 ## Concrete Native Follow-Up
 
-`NativeImgui` is an Editor Host aggregate, not a Play-generation resource. Its current
-`shutdown_graphics` is a manually ordered best-effort sequence and `retire_native` drops the
-aggregate after logging an error. Do not move it into a Play Runtime to reuse the local ledger.
+`NativeImgui` is an Editor Host aggregate, not a Play-generation resource. The incumbent at
+`ccc1318` used a manually ordered best-effort `shutdown_graphics` sequence, and `retire_native`
+dropped the aggregate after logging an error. Do not move it into a Play Runtime to reuse the
+local ledger.
 The [native outcome inventory](../research/2026-10-25-native-graphics-retirement-outcomes.md)
 distinguishes preflight refusal, retained shutdown and errors reported after release in the actual
 locked GPU/toolkit/platform implementations; it is source evidence for the next native unit.
 
-Before changing that path:
+The selected native integration keeps a live aggregate and a retained retiring predecessor in
+the concrete Editor Host. Installation refuses while either slot is occupied. Transferring the
+live owner to retirement stops rendering admission but keeps its Context, toolkit, exact device,
+queue, primary window and event loop available. The phase owner is shared by successful and
+partial construction, rather than a second teardown path for each constructor failure.
 
-1. Classify actual GPU/toolkit/platform shutdown outcomes by physical completion and retained
-   leases. An ordinary `Result<(), Error>` alone does not establish incomplete responsibility.
-2. Separate stopped admission from release while retaining any required window/event pumping.
-3. Keep a concrete retiring native aggregate in the Editor Host while close is incomplete; refuse
-   conflicting reinstallation, and retain all relevant errors rather than only the first.
-4. Reuse existing surface/provider typed leases and completion acknowledgments. A new graph must
-   not replace a resource owner's release authority.
-5. Qualify normal close, partial initialization, delayed cleanup, failed cleanup, device loss and
-   explicit recovery on the actual affected native platform.
+| Phase | Completion rule and retained custody |
+| --- | --- |
+| Quiesce | Save the layout before toolkit teardown, invalidate input and finish an open frame. |
+| GPU drain | Capture device/queue before renderer construction. Flush initialization uploads once, then nonblocking poll. An invalidated-device discard explicitly destroys that exact device, then still polls for actual queue-empty completion of accepted work. |
+| Renderer | Drive the owned SDK route to successful shutdown. A refusal retains the whole aggregate. An error returned after SDK release remains evidence; the idempotent next success confirms the adapter phase. Successful adapter shutdown clears its own binding clones and secondary observations. |
+| Views | Bulk renderer shutdown already revoked registrations. Retire Scene/Game views and their presentation authority without fallible per-texture unregister choreography. |
+| Platform | Drive platform shutdown after renderer completion; retain Context and window while refused. |
+| Release | Drop the complete aggregate before admitting a replacement. Existing surface/provider leases still enforce their own release and acknowledgment rules. |
 
-R4b facility sharing/activity scopes and R4c execution phases remain separate work. Neither the
-local trait change nor the comparison closes native graphics migration or dynamic-code custody.
+The drain token survives backend namespace invalidation and failed renderer construction. A failed
+native route attachment returns its original docked renderer instead of trying cleanup and losing
+custody inside an error conversion. Constructor failure before a renderer exists still retains the
+captured GPU drain when initialization may have queued uploads. A first-party Host consumes these
+failures and retains all successfully acquired owners until their phases complete.
+
+Semantic Exit and native retirement are separate facts. A pending document decision keeps a live
+frontend for Save/Discard/Cancel. The Host observes the Application's current exit custody rather
+than inferring cancellation from a retained frame result. Only an actual `exit_ready` update grants
+final process exit; pending close and native retirement retain maintenance wakes even without a
+redraw. GPU reconstruction needed for a close decision preserves that intent and frontend state.
+Cancellation returns control to a live frontend or reinstalls one after a predecessor retires.
+An Exit arriving during a queued rebuild preserves that installation as a decision frontend; it
+cannot overwrite reconstruction with a state that waits for UI it just removed. Failed installation
+retains the decision but stops automatic retries until the explicit recovery action.
+
+Normal exit ends the event loop after both semantic and native completion. A terminal event-loop
+failure gets a finite local cleanup attempt; if SDK custody remains unfinished without the lost
+driver, the executable fails stop rather than entering unsafe destructor ordering. This is not
+arbitrary exception recovery or a new native quarantine facility. The Runtime's separately
+qualified owner-thread quarantine remains unchanged.
+
+The Host retains bounded, deduplicated phase errors, with explicit truncation/overflow evidence;
+it cannot reconstruct errors already discarded inside the SDK. A final primary product error
+keeps its typed source when secondary cleanup facts are attached. These facts do not grant
+release permission. Native tests must qualify ordinary close, pre-presentation exit, partial
+initialization, exposed completed-error retry, device loss and explicit recovery on the actual
+affected platform. Outstanding detached epochs and arbitrary native teardown failures must retain
+their own honest proof scope; safe synchronous Context borrowing is not bypassed to manufacture a
+test.
+
+The [native successor evidence](../knowledge/engineering/verification/2026-10/2026-10-25T145420Z-retained-editor-native-graphics-retirement-and-physical-completion-qualification-2665523023e84aba979458cba3f2affc.md)
+records the concrete Host implementation and selected Windows/DX12 trajectories separately from
+the earlier Rust models. R4b facility sharing/activity scopes, R4c execution phases and dynamic-code
+custody remain separate work; selected native evidence does not close every SDK failure branch.
 
 ## Pinned References
 

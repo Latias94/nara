@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 #[cfg(feature = "editor-imgui")]
 mod imgui;
 #[cfg(feature = "editor-imgui")]
-pub use imgui::{WgpuEditorImguiFrame, WgpuEditorImguiRenderer};
+pub use imgui::{
+    WgpuEditorGpuRetirement, WgpuEditorImguiFrame, WgpuEditorImguiRenderer,
+    WgpuEditorImguiRendererFailure,
+};
 #[cfg(feature = "ui-submitter")]
 use std::sync::Arc;
 

@@ -22,6 +22,17 @@ select the composite, with a separate renamed-root consumer. ADRs 0003/0010/0042
 the scoped ownership contract. Actual Editor graphics/SDK migration, arbitrary dependency graphs,
 R4b/R4c and full R4a remain open; this is not native cleanup qualification.
 
+The [retained native-graphics successor](../../knowledge/engineering/verification/2026-10/2026-10-25T145420Z-retained-editor-native-graphics-retirement-and-physical-completion-qualification-2665523023e84aba979458cba3f2affc.md)
+replaces the Editor's best-effort drop/reinstall path with retained partial/live graphics custody,
+an exact device/queue drain token and completion-gated renderer/view/platform phases. Semantic
+Exit keeps the frontend through dirty decisions and retains maintenance wakes; only observed
+semantic readiness and physical graphics completion permit exit. Eleven selected actual
+Windows/DX12 trajectories pass, including SDK completed-error retry, pre-presentation exit,
+dirty Exit during queued reconstruction, partial initialization and the existing secondary/device-recovery workflow. Adapter tests retain
+separate GPU/readback scope. ADRs 0078/0118 adopt this concrete Host contract. Arbitrary SDK
+exceptions, detached outstanding epochs and every native failure branch are not qualified; R4b,
+R4c, dynamic-code custody and full foundation rebaseline remain open.
+
 The [R5c disposable projection qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md) binds `207bbcc` to complete-domain Scene epoch ownership, unchanged shared authoring facilities, a stable preview renderer producer and fresh presentation authority after identical-content recovery. Held Image/Save work, the joined public edit/history/Save/Reopen/picking/Close consumer, independent Prefab consumers and six actual Windows/DX12 trajectories pass. This closes the selected preview lifetime mismatch, not incremental projection, durable property addressing or the full foundation rebaseline.
 
 The [canonical native-source admission checkpoint](../../knowledge/engineering/verification/2026-10/2026-10-24T-project-content-source-admission-and-prefab-binding-qualification.md)

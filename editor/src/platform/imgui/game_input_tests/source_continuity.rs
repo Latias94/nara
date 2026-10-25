@@ -48,8 +48,7 @@ fn run_source_continuity(event_loop: &ActiveEventLoop, project: &Path) -> Result
     let intent = game_view_intent()?;
     let window = hidden_window(event_loop, "Nara native Play source continuity")
         .map_err(|error| error.to_string())?;
-    let mut native =
-        NativeImgui::new(event_loop, Arc::clone(&window)).map_err(|error| error.to_string())?;
+    let mut native = initialize_native_for_test(event_loop, Arc::clone(&window))?;
     native.layout_loaded = true;
     let mut flags = native.context.io().config_flags() | ConfigFlags::NO_MOUSE_CURSOR_CHANGE;
     flags.remove(ConfigFlags::VIEWPORTS_ENABLE);
@@ -61,7 +60,7 @@ fn run_source_continuity(event_loop: &ActiveEventLoop, project: &Path) -> Result
     ) {
         Ok(application) => application,
         Err(error) => {
-            let cleanup = native.shutdown_graphics();
+            let cleanup = finish_graphics_for_test(&mut native);
             return Err(format!(
                 "trusted Open failed: {error:?}; diagnostics={:?}; graphics cleanup: {cleanup:?}",
                 error.diagnostics()
@@ -94,9 +93,8 @@ fn run_source_continuity(event_loop: &ActiveEventLoop, project: &Path) -> Result
         }
         .source_continuity()
     })();
-    let graphics = native
-        .shutdown_graphics()
-        .map_err(|error| format!("graphics cleanup: {error}"));
+    let graphics =
+        finish_graphics_for_test(&mut native).map_err(|error| format!("graphics cleanup: {error}"));
     drop(native);
     drop(window);
     let retirement =

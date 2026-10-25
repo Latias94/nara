@@ -47,6 +47,9 @@ fn native_external_running_maintenance_stays_quiet_and_presents_child_exit() {
             application,
             supervised_play_wake: SupervisedPlayWake::default(),
             native: None,
+            retiring: None,
+            retirement_action: NativeRetirementAction::Hold,
+            retirement_errors: NativeCloseErrors::default(),
             window: None,
             retained: None,
             gpu_recovery: EditorGpuRecovery::Ready,
@@ -83,12 +86,9 @@ fn native_external_running_maintenance_stays_quiet_and_presents_child_exit() {
     });
     // Release this one copied child on every error path before retiring its actual owner.
     let release = fs::write(&test.exit_marker, b"exit");
-    let graphics = test
-        .host
-        .native
-        .as_mut()
-        .map_or(Ok(()), NativeImgui::shutdown_graphics);
+    let graphics = retirement::finish_host_graphics_for_test(&mut test.host);
     test.host.native.take();
+    test.host.retiring.take();
     test.host.window.take();
     let retirement = super::canvas_tests::retire_application(&mut test.host.application);
     assert!(result.is_ok(), "native event loop failed: {result:?}");

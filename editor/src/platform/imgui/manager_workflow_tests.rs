@@ -17,7 +17,11 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use super::{NativeImgui, canvas_tests::retire_application};
+use super::{
+    NativeImgui,
+    canvas_tests::retire_application,
+    retirement::{finish_graphics_for_test, initialize_native_for_test},
+};
 use crate::{
     EditorApplication, EditorApplicationState, EditorLaunchOptions,
     app::EditorProjectShellModel,
@@ -107,8 +111,7 @@ fn run_manager(
             )
             .map_err(|error| error.to_string())?,
     );
-    let mut native =
-        NativeImgui::new(event_loop, Arc::clone(&window)).map_err(|error| error.to_string())?;
+    let mut native = initialize_native_for_test(event_loop, Arc::clone(&window))?;
     native.layout_loaded = true;
     let mut flags = native.context.io().config_flags() | ConfigFlags::NO_MOUSE_CURSOR_CHANGE;
     flags.remove(ConfigFlags::VIEWPORTS_ENABLE);
@@ -123,9 +126,7 @@ fn run_manager(
         deadline: Instant::now() + Duration::from_secs(40),
     }
     .run(project, replacement);
-    let graphics = native
-        .shutdown_graphics()
-        .map_err(|error| error.to_string());
+    let graphics = finish_graphics_for_test(&mut native);
     drop(native);
     drop(window);
     let session = retire_application(&mut application);

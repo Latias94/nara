@@ -13,6 +13,361 @@ fn secondary_identity_mapping_excludes_any_primary_without_reusing_surfaces() {
     assert!(delegated_window_id(WindowId::PRIMARY, u64::MAX).is_none());
 }
 
+struct OffscreenGpu {
+    instance: wgpu::Instance,
+    adapter: wgpu::Adapter,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+}
+
+impl OffscreenGpu {
+    fn new() -> Option<Self> {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let force_fallback_adapter = match std::env::var("NARA_WGPU_FORCE_FALLBACK").as_deref() {
+            Ok("1") => true,
+            Ok("0") | Err(std::env::VarError::NotPresent) => false,
+            value => panic!("invalid NARA_WGPU_FORCE_FALLBACK: {value:?}"),
+        };
+        let adapter =
+            match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::LowPower,
+                compatible_surface: None,
+                force_fallback_adapter,
+                ..Default::default()
+            })) {
+                Ok(adapter) => adapter,
+                Err(error)
+                    if std::env::var("DEAR_IMGUI_REQUIRE_WGPU_ADAPTER").as_deref() != Ok("1") =>
+                {
+                    eprintln!("skipping renderer lifetime test without a WGPU adapter: {error}");
+                    return None;
+                }
+                Err(error) => panic!("the required WGPU adapter is unavailable: {error}"),
+            };
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+        Some(Self {
+            instance,
+            adapter,
+            device,
+            queue,
+        })
+    }
+
+    fn scope(&self) -> super::WgpuEditorDeviceScope<'_> {
+        super::WgpuEditorDeviceScope {
+            instance: &self.instance,
+            adapter: &self.adapter,
+            device: &self.device,
+            queue: &self.queue,
+            surface_format: wgpu::TextureFormat::Rgba8Unorm,
+            surface_extent: nara_render::Extent2d::new(128, 128).unwrap(),
+            backend_instance_id: 1,
+            device_epoch: 1,
+        }
+    }
+}
+
+fn drain_gpu(retirement: &mut super::WgpuEditorGpuRetirement) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !retirement.poll().unwrap() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "GPU retirement did not complete"
+        );
+        std::thread::yield_now();
+    }
+    assert!(retirement.poll().unwrap(), "completion must remain stable");
+}
+
+fn lifetime_context() -> dear_imgui_rs::Context {
+    let mut context = dear_imgui_rs::Context::create();
+    context
+        .set_ini_filename(None::<std::path::PathBuf>)
+        .unwrap();
+    context
+        .font_atlas()
+        .add_font(&[dear_imgui_rs::FontSource::default_font_with_size(16.0)]);
+    context.io_mut().set_display_size([128.0, 128.0]);
+    context
+}
+
+#[test]
+fn gpu_retirement_flushes_pending_initializer_transfers_before_renderer_shutdown() {
+    let Some(gpu) = OffscreenGpu::new() else {
+        return;
+    };
+    let mut context = lifetime_context();
+    let mut retirement = gpu.scope().gpu_retirement();
+    let mut renderer = gpu
+        .scope()
+        .create_imgui_renderer(&mut context, None)
+        .unwrap();
+    // The SDK constructor queued its fallback-texture upload without submitting. This sentinel
+    // shares that pending-write batch and lets the test read back an actual transferred payload.
+    let readback = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("nara_imgui_initializer_retirement"),
+        size: 4,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    gpu.queue.write_buffer(&readback, 0, &[19, 37, 73, 127]);
+    assert!(
+        gpu.device
+            .poll(wgpu::PollType::Poll)
+            .unwrap()
+            .is_queue_empty()
+    );
+    drain_gpu(&mut retirement);
+    // No additional queue submission is needed to observe the completed initialization batch.
+    let (sender, receiver) = std::sync::mpsc::channel();
+    readback.map_async(wgpu::MapMode::Read, .., move |result| {
+        sender.send(result).unwrap();
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        gpu.device.poll(wgpu::PollType::Poll).unwrap();
+        if let Ok(result) = receiver.try_recv() {
+            result.unwrap();
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "readback did not complete"
+        );
+        std::thread::yield_now();
+    }
+    assert_eq!(&*readback.get_mapped_range(..).unwrap(), &[19, 37, 73, 127]);
+    readback.unmap();
+    renderer.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn renderer_shutdown_preserves_rejected_state_and_releases_bindings_idempotently() {
+    let Some(gpu) = OffscreenGpu::new() else {
+        return;
+    };
+    let mut context = lifetime_context();
+    let mut retirement = gpu.scope().gpu_retirement();
+    let mut renderer = gpu
+        .scope()
+        .create_imgui_renderer(&mut context, None)
+        .unwrap();
+    let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("nara_imgui_shutdown_binding"),
+        size: wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let id = renderer.register_external_texture(&view).unwrap();
+    let binding = renderer.external_binding(id).unwrap();
+    let observed_scope = dear_imgui_wgpu::WgpuFrameScope {
+        context_id: context.id(),
+        epoch: None,
+        frame_count: 0,
+    };
+    renderer.last_secondary_scope = Some(observed_scope);
+    let suspended = context.suspend_or_panic();
+    let mut foreign = dear_imgui_rs::Context::create();
+    assert!(matches!(
+        renderer.shutdown(&mut foreign),
+        Err(super::WgpuEditorExecutionError::ToolkitPaint { .. })
+    ));
+    assert!(!renderer.closed);
+    assert_eq!(renderer.bindings, vec![(binding, view.clone())]);
+    assert_eq!(renderer.last_secondary_scope, Some(observed_scope));
+    drop(foreign);
+    let mut context = suspended.activate().unwrap();
+    // A real synchronous epoch retains the Context borrow until drop. Unlike detached snapshots,
+    // safe SDK callers cannot pass that Context to shutdown while the epoch is outstanding.
+    let super::RendererOwner::Docked(inner) = &renderer.owner else {
+        unreachable!()
+    };
+    let pending = context
+        .begin_frame()
+        .try_render(inner.renderer_consumer().unwrap())
+        .unwrap();
+    drop(pending);
+    drain_gpu(&mut retirement);
+    renderer.shutdown(&mut context).unwrap();
+    assert!(renderer.closed);
+    assert!(renderer.bindings.is_empty());
+    assert!(renderer.last_secondary_scope.is_none());
+    let suspended = context.suspend_or_panic();
+    let mut foreign = dear_imgui_rs::Context::create();
+    assert!(matches!(
+        renderer.shutdown(&mut foreign),
+        Err(super::WgpuEditorExecutionError::ToolkitPaint { message })
+            if message == "the renderer belongs to another Context"
+    ));
+    drop(foreign);
+    let mut context = suspended.activate().unwrap();
+    for result in [
+        renderer.register_external_texture(&view).map(|_| ()),
+        renderer.unregister_external_texture(id),
+    ] {
+        assert!(matches!(
+            result,
+            Err(super::WgpuEditorExecutionError::ToolkitPaint { message })
+                if message == "the renderer is closed"
+        ));
+    }
+    // A second shutdown must not re-enter the detached SDK owner or touch its successor.
+    let mut successor = gpu
+        .scope()
+        .create_imgui_renderer(&mut context, None)
+        .unwrap();
+    let successor_data = context.io().backend_renderer_user_data();
+    assert!(!successor_data.is_null());
+    renderer.shutdown(&mut context).unwrap();
+    assert_eq!(context.io().backend_renderer_user_data(), successor_data);
+    let super::RendererOwner::Docked(inner) = &mut successor.owner else {
+        unreachable!()
+    };
+    let pending = context
+        .begin_frame()
+        .try_render(inner.renderer_consumer().unwrap())
+        .unwrap();
+    let prepared = inner.reconcile_frame(pending).unwrap();
+    let mut encoder = gpu
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let mut leading_command_buffers = Vec::new();
+    let mut sampled_viewports = Vec::new();
+    let mut frame = super::WgpuEditorWindowFrame {
+        device: &gpu.device,
+        queue: &gpu.queue,
+        encoder: &mut encoder,
+        target_view: &view,
+        surface_format: wgpu::TextureFormat::Rgba8Unorm,
+        surface_extent: nara_render::Extent2d::new(1, 1).unwrap(),
+        viewports: &[],
+        viewport_textures: &[],
+        leading_command_buffers: &mut leading_command_buffers,
+        sampled_viewports: &mut sampled_viewports,
+    };
+    assert!(matches!(
+        renderer.paint(
+            super::WgpuEditorImguiFrame(super::PreparedFrame::Docked(prepared)),
+            &mut frame,
+            wgpu::Color::BLACK,
+        ),
+        Err(super::WgpuEditorExecutionError::ToolkitPaint { message })
+            if message == "the renderer is closed"
+    ));
+    let mut successor_retirement = gpu.scope().gpu_retirement();
+    drain_gpu(&mut successor_retirement);
+    successor.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn failed_native_attach_returns_live_docked_renderer_custody() {
+    let Some(gpu) = OffscreenGpu::new() else {
+        return;
+    };
+    let mut context = lifetime_context();
+    let mut platform = dear_imgui_winit::WinitPlatform::new(&mut context).unwrap();
+    let mut retirement = gpu.scope().gpu_retirement();
+    // No native runtime was enabled: public SDK attach fails transactionally before OS work.
+    let failure = gpu
+        .scope()
+        .create_imgui_renderer(&mut context, Some(&platform))
+        .err()
+        .expect("an inactive native platform cannot accept a renderer route");
+    let message = failure.error().to_string();
+    assert_eq!(failure.to_string(), message);
+    assert!(format!("{failure:?}").contains("retains_renderer: true"));
+    let (error, renderer) = failure.into_parts();
+    assert_eq!(error.to_string(), message);
+    let mut renderer = renderer.expect("attach failure must return the original SDK renderer");
+    assert!(matches!(&renderer.owner, super::RendererOwner::Docked(_)));
+    assert!(!renderer.closed);
+    assert!(!context.io().backend_renderer_user_data().is_null());
+    let super::RendererOwner::Docked(inner) = &renderer.owner else {
+        unreachable!()
+    };
+    assert_eq!(
+        inner.renderer_consumer().unwrap().context_id(),
+        context.id()
+    );
+    drain_gpu(&mut retirement);
+    renderer.shutdown(&mut context).unwrap();
+    platform.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn gpu_retirement_outlives_scope_when_sdk_constructor_returns_no_renderer() {
+    let Some(gpu) = OffscreenGpu::new() else {
+        return;
+    };
+    let mut context = lifetime_context();
+    let mut scope = gpu.scope();
+    let mut retirement = scope.gpu_retirement();
+    scope.surface_format = wgpu::TextureFormat::Rgba8Uint;
+    let failure = scope
+        .create_imgui_renderer(&mut context, None)
+        .err()
+        .expect("the SDK must reject an unblendable render target");
+    let (_, renderer) = failure.into_parts();
+    assert!(renderer.is_none());
+    assert!(context.io().backend_renderer_user_data().is_null());
+    drop(gpu);
+    drain_gpu(&mut retirement);
+}
+
+#[test]
+fn gpu_retirement_discard_destroys_device_but_still_drains_accepted_submissions() {
+    let Some(gpu) = OffscreenGpu::new() else {
+        return;
+    };
+    let mut context = lifetime_context();
+    let mut retirement = gpu.scope().gpu_retirement();
+    let mut renderer = gpu
+        .scope()
+        .create_imgui_renderer(&mut context, None)
+        .unwrap();
+    gpu.queue.submit([]);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    gpu.queue
+        .on_submitted_work_done(move || sender.send(()).unwrap());
+    retirement.begin(true);
+    retirement.begin(false);
+    drain_gpu(&mut retirement);
+    receiver
+        .try_recv()
+        .expect("accepted work must finish before retirement");
+    renderer.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn gpu_retirement_flush_tolerates_device_loss_before_submission() {
+    let Some(gpu) = OffscreenGpu::new() else {
+        return;
+    };
+    let mut context = lifetime_context();
+    let mut retirement = gpu.scope().gpu_retirement();
+    let mut renderer = gpu
+        .scope()
+        .create_imgui_renderer(&mut context, None)
+        .unwrap();
+    retirement.begin(false);
+    // Deterministically exercise loss between branch selection and the flush attempt. WGPU
+    // reports this rejected submission through loss handling, not its fatal validation handler.
+    gpu.device.destroy();
+    drain_gpu(&mut retirement);
+    renderer.shutdown(&mut context).unwrap();
+}
+
 #[test]
 fn owned_renderer_records_exact_external_binding_revisions_and_excludes_clipped_images() {
     use super::{RendererOwner, WgpuEditorDeviceScope};

@@ -1641,6 +1641,11 @@ impl EditorApplication {
         }
     }
 
+    /// Current process-exit custody, rather than inference from a retained frame result.
+    pub(crate) fn has_pending_exit(&self) -> bool {
+        self.session_retirement == Some(EditorSessionRetirement::ExitProcess)
+    }
+
     fn start_initial_open(&mut self, request: EditorProjectRequest) {
         let opening = self.new_opening(request);
         self.state = EditorProductState::OpeningInitial(opening);

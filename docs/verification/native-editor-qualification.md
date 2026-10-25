@@ -130,6 +130,23 @@ cargo +1.95.0 nextest run -p nara_render_wgpu --locked --features editor-imgui -
 
 This gate tests Nara's integration with the production WGPU 30 dependency resolution.
 Its offscreen tests do not replace the actual native trajectories above.
+For changes to native retirement, partial graphics construction or shutdown/replacement gating,
+also execute the five focused hidden-window trajectories:
+
+```powershell
+cargo +1.95.0 nextest run -p nara-editor --lib --locked --run-ignored only -E 'test(platform::imgui::retirement_tests::)' --test-threads=1
+```
+
+They cover exit before first presentation without unrelated events, a real dirty Scene edit and
+Cancel, dirty Exit arriving during queued reconstruction, SDK callback drift reported after
+renderer release, and actual SDK attach refusal after renderer construction. They observe retained
+Context/backend identity and destruction before a
+replacement. The adapter gate separately checks initialization-upload readback, retained
+device/queue drain after destruction, failed attach custody, and shutdown/binding idempotence.
+These checks do not qualify arbitrary SDK exceptions, detached outstanding epochs, foreign
+sidecar recovery or OS window destruction. The complete lifecycle trajectory above owns actual
+secondary presentation and device replacement.
+
 For renderer identity/binding changes, also execute the real delegated-window bridge:
 
 ```powershell

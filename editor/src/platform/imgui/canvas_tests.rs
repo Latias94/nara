@@ -25,7 +25,10 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use super::{NativeImgui, editor_window_packet};
+use super::{
+    NativeImgui, editor_window_packet,
+    retirement::{finish_graphics_for_test, initialize_native_for_test},
+};
 use crate::{EditorApplication, EditorLaunchOptions, frontend::imgui::UiProject};
 
 struct CanvasObservation {
@@ -113,8 +116,7 @@ fn run_native_canvas(
             )
             .map_err(|error| error.to_string())?,
     );
-    let mut native =
-        NativeImgui::new(event_loop, Arc::clone(&window)).map_err(|error| error.to_string())?;
+    let mut native = initialize_native_for_test(event_loop, Arc::clone(&window))?;
     let opened = EditorApplication::open_trusted_compiled(
         EditorLaunchOptions::new(project).with_profile("desktop"),
         TrustedCompiledEditorProjectIntent::new(),
@@ -122,7 +124,7 @@ fn run_native_canvas(
     let mut application = match opened {
         Ok(application) => application,
         Err(error) => {
-            let shutdown = native.shutdown_graphics();
+            let shutdown = finish_graphics_for_test(&mut native);
             return Err(match shutdown {
                 Ok(()) => error.to_string(),
                 Err(cleanup) => format!("{error}; native cleanup also failed: {cleanup}"),
@@ -131,9 +133,7 @@ fn run_native_canvas(
     };
     application.native_shell_ready();
     let result = record_pending_canvas(&mut native, &mut application);
-    let shutdown = native
-        .shutdown_graphics()
-        .map_err(|error| error.to_string());
+    let shutdown = finish_graphics_for_test(&mut native);
     drop(native);
     drop(window);
     let retirement = retire_application(&mut application);

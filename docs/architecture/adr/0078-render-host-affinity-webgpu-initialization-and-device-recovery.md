@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-08-16
+**Last Revised**: 2026-10-25 (retained native graphics retirement)
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0032](0032-render-backend-integration-boundary.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md), and
@@ -138,6 +138,16 @@ stateDiagram-v2
   device creation, the assigned device epoch before they may change current state.
 - An explicit replacement does not drive the old host through recovery. The old authority enters
   `ShuttingDown`; a new authority starts its own initialization generation independently.
+- Within the integrated Editor, the concrete Host retains its predecessor graphics aggregate
+  through quiescence, queue drain, renderer release, view release and platform shutdown. Pending
+  or refused teardown blocks replacement. SDK errors returned after release remain diagnostics;
+  the adapter's idempotent success observation establishes that its phase may advance. Removing
+  an old backend namespace does not release the retained device/queue or prove queue completion.
+- The native drain captures the exact device/queue before renderer initialization. Normal close
+  flushes pending initialization uploads once and polls without GPU waits. Discard of an invalidated
+  epoch explicitly destroys that captured device and discards unsubmitted uploads, then still
+  requires its actual queue-empty observation for accepted work. Device loss alone is not a drain
+  completion fact. This is private first-party close plumbing, not a public raw-GPU authority.
 - `wgpu::DeviceLostReason::Destroyed` is expected completion only when shutdown or replacement
   invalidated that host generation before destroying the device. It does not retry or publish a
   device-fault diagnostic. Every uncorrelated `Destroyed` callback and every other loss reason is
