@@ -91,16 +91,20 @@ The exact Link fixture contains `EntityReference::SceneLocal`, which the current
 shape certificate declines. Format validation therefore retains the encoded JSON/RON buffers
 and parser prechecks. Certificate success would still perform both full encodings. Local
 classification can reuse admitted facts independently of this format decision; unknown siblings
-do not by themselves force full classification. Actual branch counters were not measured, so
-this is source-path evidence, not a dynamic claim that local classification ran every time.
+do not by themselves force full classification. At this source-tracing checkpoint actual branch
+counters were not measured. The subsequent
+[phase attribution](2026-10-25-reference-preparation-phases.md) now records the actual branches
+and disposal-inclusive timing; do not reinterpret this earlier trace as that dynamic evidence.
 See `crates/nara_scene/src/authoring/property.rs`,
 `crates/nara_scene/src/authoring_decode/field_candidate.rs`,
 `crates/nara_scene/src/format/publication_shape.rs` and the
 [earlier scalar attribution](2026-10-20-scalar-preparation.md).
 
-Next, keep this real 257-Link/257-unknown source and measure owner format validation versus
-classification/manifest work within the actual preparation call, with branch evidence and
-per-call total timing. Include canonicalization and internal disposal in their owning phases;
+The following experiment entry required this real 257-Link/257-unknown source, owner format
+validation versus classification/manifest work within the actual preparation call, branch evidence
+and per-call total timing. Its [execution](2026-10-25-reference-preparation-phases.md) locates the
+populated instrumented wall time in format admission, not full classification. Include
+canonicalization and internal disposal in their owning phases;
 do not allocate time by subtracting unrelated P50s, remove references/unknown data, weaken the
 format limits, or choose an async facility before attribution. This remains an explicit R2
 shared-owner locality obligation, not a reason to mislabel the bounded panel transport complete

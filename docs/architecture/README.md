@@ -140,7 +140,11 @@ a candidate registry. ADR 0118 adopts that boundary; the
 records complete review, independently checked proof corrections, actual public workflows and
 affected-existing-native/static evidence. The
 [bounded panel comparison](../benchmarks/2026-10-25-prepared-panel.md) now records actual
-preparation/enqueue/dispatch measurements and leaves shared-owner phase attribution explicit.
+preparation/enqueue/dispatch measurements. The subsequent
+[owner phase attribution](../benchmarks/2026-10-25-reference-preparation-phases.md) records actual
+reference-certificate fallback and local classification, locating populated instrumented wall time
+in complete format admission. Disturbance and uninstrumented latency remain unqualified; no
+optimized certificate or permanent profiling API is introduced by that diagnosis.
 This does not close full R2 or installable-tool workflows; the
 [pinned editing/format study](../research/2026-10-25-editing-versus-format-admission.md) keeps
 equivalent locality and a deliberate editing/Save contract redesign as separate alternatives.

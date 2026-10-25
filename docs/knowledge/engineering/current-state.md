@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "ee36a34656d1dc0d1a09b37f3c78fa473336327c6397272ebc9a29c2a1d52cf8"
+source_fingerprint: "0e46944b878d5d75d63dcfe8f93a4c88652e58f1fed5bfc4d71dc567c4b071db"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "ee36a34656d1dc0d1a09b37f3c78fa473336327c6397272ebc9a29c2a1d
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `ee36a34656d1dc0d1a09b37f3c78fa473336327c6397272ebc9a29c2a1d52cf8`
-- Immutable records: 906
+- Source fingerprint: `0e46944b878d5d75d63dcfe8f93a4c88652e58f1fed5bfc4d71dc567c4b071db`
+- Immutable records: 907
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Reference-bearing preparation phase attribution and clean-source controls](verification/2026-10/2026-10-25T031736Z-reference-bearing-preparation-phase-attribution-and-clean-source-controls-aec33a24b30247b786582270db721766.md) - Five executions locate populated instrumented preparation wall time in format admission; explicit disturbance limits, corrected analyzer and exact source cleanup retain full R2 as open.
 - **Verification Evidence**: [Prepared panel complete review and scoped workflow qualification](verification/2026-10/2026-10-25T024527Z-prepared-panel-complete-review-and-scoped-workflow-qualification-49e27d9779054a5b8fda1142add06519.md) - Qualified finite panel preparation and consuming source candidates after complete review, nine added regressions and independent recheck; shared-owner locality and full foundation remain open.
 - **Work Progress**: [Prepared panel implementation and scoped public qualification checkpoint](progress/2026-10/2026-10-25T011645Z-prepared-panel-implementation-and-scoped-public-qualification-checkpoint-2b1d6218ef0042ae8c83303e6aabfbf1.md) - Read queries are committed; real registered panels now prepare and consume source candidates with serial owner, public, native and static evidence; full review remains open.
 - **Verification Evidence**: [Bounded authoring query complete review and aggregate budget qualification](verification/2026-10/2026-10-25T002933Z-bounded-authoring-query-complete-review-and-aggregate-budget-qualification-893b5a3ffa104ec8bc7c7413c12e0c5d.md) - Nine-lens review completed; the confirmed multi-row budget proof gap is closed by focused tests and independent follow-up.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Subagent Finding**: [R2 selection independent field reading seam](subagents/2026-10/2026-10-24T215152Z-r2-selection-independent-field-reading-seam-389b97a2cf8f4275abbae7eeaa84bc6d.md) - Read-only investigation identifies the missing component/root-value observation workflow and bounded source-owner seams without selecting a general query language.
 - **Work Progress**: [Retained construction owner and public adapter checkpoint](progress/2026-10/2026-10-24T214058Z-retained-construction-owner-and-public-adapter-checkpoint-a65bea496a9442b18628572e20667490.md) - Owner prototype and direct Application construction are implemented; independent workflows pass while strengthened boundary, cost and final qualification remain in flight.
 - **Verification Evidence**: [Source-owned entity creation and generated product qualification](verification/2026-10/2026-10-24T203944Z-source-owned-entity-creation-and-generated-product-qualification-c5fd5454223046e38fc1761338ddffb0.md) - Qualified ordinary Scene/Prefab source-owned creation, removal of Workspace ordinals, independent persistence and Windows DX12 product workflows; full R2 remains open.
-- **Work Progress**: [Source-owned creation implemented; generated export qualification pending](progress/2026-10/2026-10-24T202546Z-source-owned-creation-implemented-generated-export-qualification-pending-982fcd60eda3477aa06a6ba835da0c56.md) - R2 ordinary creation owns IDs and publication; owner/public/native checks pass while a real release export remains live.
 
 # Integration Notes
 

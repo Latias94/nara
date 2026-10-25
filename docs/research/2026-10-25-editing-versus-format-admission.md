@@ -279,6 +279,23 @@ admission or accepted inverse replay as a performance patch.
 
 # Recommended Next Experiment
 
+## Measured Follow-Up
+
+The [subsequent owner attribution](../benchmarks/2026-10-25-reference-preparation-phases.md)
+locates approximately 97% of populated-case instrumented preparation wall time in complete
+format admission. All observed source calls take the local classification branch while the
+reference shape certificate declines. Absolute timing disturbance remains unisolated; this is not
+a speedup or native-latency claim. The archived apparatus is removed from production source.
+
+This changes the cheapest next comparison: first test the finite reference-shape certificate (C)
+against the complete oracle, retaining both real encoders, before investing in exact retained
+summaries/fragments (A/B). If encoding still dominates, compare a conservative format-owned
+accept-only byte bound with full fallback before adding stateful summaries. None of these is yet
+implemented or qualified. A deliberately different editing/Save/repair boundary (D) remains open;
+the measurement does not choose that contract or make existing acceptance immutable.
+
+## Original Experiment Direction
+
 This is a first experiment under the current contract, not a decision that edit-time dual-format
 admission is the best long-term product boundary. The fearless rebaseline may compare D against
 exact-locality alternatives on the same complete editing/history/Save/repair workflow and revise
@@ -286,9 +303,10 @@ the owning ADRs. Existing acceptance does not settle that comparison, and refere
 does not prove it. Phase measurements should expose the cost of the current boundary before such
 a choice is frozen.
 
-Prefer **A as the first locality hypothesis**, using B only if exact fragment ownership is
-simpler than maintaining equivalent contextual summaries. First follow the report's pending
-phase-attribution experiment: instrument actual preparation with per-call total, canonical
+The original direction preferred **A as the first locality hypothesis**, using B only if exact
+fragment ownership was simpler than equivalent contextual summaries. The measured follow-up
+above supersedes that ordering. It first required the report's phase-attribution experiment:
+instrument actual preparation with per-call total, canonical
 envelope, encoding/shape admission, classification/manifest and disposal-inclusive phase
 costs, plus actual certificate/fallback evidence. Keep the existing 257-Link/257-unknown
 Scene and Prefab fixtures and real references. Do not infer phase cost by subtracting

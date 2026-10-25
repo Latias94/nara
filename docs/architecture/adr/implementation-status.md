@@ -121,8 +121,13 @@ selected actual Windows/DX12 cases precede only test/documentation corrections. 
 source-simplification lanes ran; built-in original-slot result observers now borrow outcomes instead
 of cloning an intermediate full report. The
 [two-run cost comparison](../../benchmarks/2026-10-25-prepared-panel.md) separates preparation,
-enqueue and consuming dispatch. Shared preparation still costs about 30 ms in debug for 257
-reference-bearing/degraded entities and requires owner phase attribution. The earlier read-query
+enqueue and consuming dispatch. The
+[subsequent phase attribution](../../benchmarks/2026-10-25-reference-preparation-phases.md) records
+two instrumented and three control runs with all temporary source changes removed. The populated
+instrumented format boundary occupies about 97% of public preparation wall time; every observed
+call uses local classification and declines reference-shape certification. Absolute disturbance
+remains unisolated; no latency improvement, permanent profiling API or new admission proof is
+qualified. The finite format-owner comparison remains open. The earlier read-query
 receipt remains separate; this qualification does not complete R2 or the foundation rebaseline.
 
 The [R5c custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md)

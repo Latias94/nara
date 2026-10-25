@@ -1,0 +1,516 @@
+{
+  "source_commit": "5ebe751cffeb34a93dbe0e023e0db863b5e638b7",
+  "workload": "Existing prepared_panel_property_cost_diagnostic; Scene/Prefab x1/257 entities xDirect/Panel; every entity has a known Link with a real SceneLocal reference plus an unknown component.",
+  "configuration": {
+    "os": "Windows",
+    "cpu": "Intel Core i9-13900KF",
+    "toolchain": "Rust1.95.0",
+    "profile": "unoptimized+debuginfo",
+    "cargo_build_jobs": 1,
+    "test_threads": 1,
+    "warmups_per_case": 8,
+    "samples_per_case": 64,
+    "root_target_reused": true,
+    "machine_isolation": false
+  },
+  "phase_names": [
+    "lower",
+    "candidate",
+    "format",
+    "classify_manifest",
+    "history",
+    "canonical_envelope",
+    "certificate",
+    "json",
+    "ron",
+    "json_encode",
+    "json_preflight",
+    "ron_encode",
+    "ron_preflight"
+  ],
+  "baseline": {
+    "run_id": "0691f176-bcdd-4d5b-8255-d2c6ef70001a",
+    "cases": [
+      {
+        "kind": "Scene",
+        "extra_entities": 0,
+        "mode": "Direct",
+        "p50_ns": 250500,
+        "p95_ns": 461500
+      },
+      {
+        "kind": "Scene",
+        "extra_entities": 0,
+        "mode": "Panel",
+        "p50_ns": 287600,
+        "p95_ns": 337200
+      },
+      {
+        "kind": "Scene",
+        "extra_entities": 256,
+        "mode": "Direct",
+        "p50_ns": 31539100,
+        "p95_ns": 34354100
+      },
+      {
+        "kind": "Scene",
+        "extra_entities": 256,
+        "mode": "Panel",
+        "p50_ns": 49431100,
+        "p95_ns": 61081400
+      },
+      {
+        "kind": "Prefab",
+        "extra_entities": 0,
+        "mode": "Direct",
+        "p50_ns": 496900,
+        "p95_ns": 559600
+      },
+      {
+        "kind": "Prefab",
+        "extra_entities": 0,
+        "mode": "Panel",
+        "p50_ns": 510600,
+        "p95_ns": 582300
+      },
+      {
+        "kind": "Prefab",
+        "extra_entities": 256,
+        "mode": "Direct",
+        "p50_ns": 39029400,
+        "p95_ns": 56076400
+      },
+      {
+        "kind": "Prefab",
+        "extra_entities": 256,
+        "mode": "Panel",
+        "p50_ns": 35626400,
+        "p95_ns": 46918800
+      }
+    ]
+  },
+  "instrumented_runs": [
+    {
+      "run": "instrumented-1",
+      "run_id": "0dc6e1b9-6ca9-4415-9b84-376f3266bb43",
+      "cases": [
+        {
+          "kind": "Scene",
+          "entities": 1,
+          "mode": "Direct",
+          "public_p50_ns": 250300,
+          "public_p95_ns": 306400,
+          "format_share_p50": 0.7243047158403869,
+          "covered_share_total": 0.9683578348790882,
+          "min_covered_share": 0.9491593274619696
+        },
+        {
+          "kind": "Scene",
+          "entities": 1,
+          "mode": "Panel",
+          "public_p50_ns": 289900,
+          "public_p95_ns": 316200,
+          "format_share_p50": 0.6727402643801358,
+          "covered_share_total": 0.9490849453949085,
+          "min_covered_share": 0.9357142857142857
+        },
+        {
+          "kind": "Scene",
+          "entities": 257,
+          "mode": "Direct",
+          "public_p50_ns": 30988500,
+          "public_p95_ns": 32721600,
+          "format_share_p50": 0.9725103801528889,
+          "covered_share_total": 0.9991146321284435,
+          "min_covered_share": 0.9988009710169141
+        },
+        {
+          "kind": "Scene",
+          "entities": 257,
+          "mode": "Panel",
+          "public_p50_ns": 38324600,
+          "public_p95_ns": 48538800,
+          "format_share_p50": 0.9715328498624609,
+          "covered_share_total": 0.9988013332784594,
+          "min_covered_share": 0.9961988527038603
+        },
+        {
+          "kind": "Prefab",
+          "entities": 1,
+          "mode": "Direct",
+          "public_p50_ns": 278400,
+          "public_p95_ns": 622200,
+          "format_share_p50": 0.7146176185866409,
+          "covered_share_total": 0.9633438898540427,
+          "min_covered_share": 0.9162313096739326
+        },
+        {
+          "kind": "Prefab",
+          "entities": 1,
+          "mode": "Panel",
+          "public_p50_ns": 515100,
+          "public_p95_ns": 606700,
+          "format_share_p50": 0.6915367483296214,
+          "covered_share_total": 0.9516181680936286,
+          "min_covered_share": 0.9228613812427888
+        },
+        {
+          "kind": "Prefab",
+          "entities": 257,
+          "mode": "Direct",
+          "public_p50_ns": 34604700,
+          "public_p95_ns": 45036800,
+          "format_share_p50": 0.97527823076703,
+          "covered_share_total": 0.9991809430289853,
+          "min_covered_share": 0.9987791565198856
+        },
+        {
+          "kind": "Prefab",
+          "entities": 257,
+          "mode": "Panel",
+          "public_p50_ns": 38337100,
+          "public_p95_ns": 50852500,
+          "format_share_p50": 0.9741815885194325,
+          "covered_share_total": 0.9988327369604345,
+          "min_covered_share": 0.9977759134748863
+        }
+      ]
+    },
+    {
+      "run": "instrumented-2",
+      "run_id": "40a91949-7aa8-4431-9328-8aba1ae592e9",
+      "cases": [
+        {
+          "kind": "Scene",
+          "entities": 1,
+          "mode": "Direct",
+          "public_p50_ns": 262800,
+          "public_p95_ns": 324600,
+          "format_share_p50": 0.7172334734428735,
+          "covered_share_total": 0.9638828789845666,
+          "min_covered_share": 0.7939179214644227
+        },
+        {
+          "kind": "Scene",
+          "entities": 1,
+          "mode": "Panel",
+          "public_p50_ns": 292000,
+          "public_p95_ns": 331900,
+          "format_share_p50": 0.6716016150740243,
+          "covered_share_total": 0.947775649043917,
+          "min_covered_share": 0.919732441471572
+        },
+        {
+          "kind": "Scene",
+          "entities": 257,
+          "mode": "Direct",
+          "public_p50_ns": 30711200,
+          "public_p95_ns": 31973000,
+          "format_share_p50": 0.9729155341904132,
+          "covered_share_total": 0.9991385354738243,
+          "min_covered_share": 0.998468606431853
+        },
+        {
+          "kind": "Scene",
+          "entities": 257,
+          "mode": "Panel",
+          "public_p50_ns": 43266100,
+          "public_p95_ns": 57384100,
+          "format_share_p50": 0.9739307936351786,
+          "covered_share_total": 0.9989000383616765,
+          "min_covered_share": 0.9974547824269325
+        },
+        {
+          "kind": "Prefab",
+          "entities": 1,
+          "mode": "Direct",
+          "public_p50_ns": 258300,
+          "public_p95_ns": 508400,
+          "format_share_p50": 0.7164586583463338,
+          "covered_share_total": 0.9680126815492907,
+          "min_covered_share": 0.960513643659711
+        },
+        {
+          "kind": "Prefab",
+          "entities": 1,
+          "mode": "Panel",
+          "public_p50_ns": 336200,
+          "public_p95_ns": 561000,
+          "format_share_p50": 0.6740971142215311,
+          "covered_share_total": 0.9508413923868656,
+          "min_covered_share": 0.9270422535211268
+        },
+        {
+          "kind": "Prefab",
+          "entities": 257,
+          "mode": "Direct",
+          "public_p50_ns": 46501700,
+          "public_p95_ns": 56959600,
+          "format_share_p50": 0.9752142919618648,
+          "covered_share_total": 0.9992540266340545,
+          "min_covered_share": 0.998849898504868
+        },
+        {
+          "kind": "Prefab",
+          "entities": 257,
+          "mode": "Panel",
+          "public_p50_ns": 36799500,
+          "public_p95_ns": 52712100,
+          "format_share_p50": 0.9745528669121515,
+          "covered_share_total": 0.9988514785220969,
+          "min_covered_share": 0.9966985395556824
+        }
+      ]
+    }
+  ],
+  "disabled_control": {
+    "run_id": "0ee35f6b-7783-4e49-8d2b-a3e668ffc61d",
+    "cases": [
+      {
+        "kind": "Scene",
+        "extra_entities": 0,
+        "mode": "Direct",
+        "p50_ns": 255400,
+        "p95_ns": 398000
+      },
+      {
+        "kind": "Scene",
+        "extra_entities": 0,
+        "mode": "Panel",
+        "p50_ns": 292900,
+        "p95_ns": 430700
+      },
+      {
+        "kind": "Scene",
+        "extra_entities": 256,
+        "mode": "Direct",
+        "p50_ns": 30870700,
+        "p95_ns": 33952800
+      },
+      {
+        "kind": "Scene",
+        "extra_entities": 256,
+        "mode": "Panel",
+        "p50_ns": 32487700,
+        "p95_ns": 42777400
+      },
+      {
+        "kind": "Prefab",
+        "extra_entities": 0,
+        "mode": "Direct",
+        "p50_ns": 471500,
+        "p95_ns": 586300
+      },
+      {
+        "kind": "Prefab",
+        "extra_entities": 0,
+        "mode": "Panel",
+        "p50_ns": 297200,
+        "p95_ns": 590100
+      },
+      {
+        "kind": "Prefab",
+        "extra_entities": 256,
+        "mode": "Direct",
+        "p50_ns": 38435500,
+        "p95_ns": 53886000
+      },
+      {
+        "kind": "Prefab",
+        "extra_entities": 256,
+        "mode": "Panel",
+        "p50_ns": 45058400,
+        "p95_ns": 59170400
+      }
+    ],
+    "same_binary_no_active_recording": true,
+    "attestation": "Unchanged source and Cargo log with no recompilation; executable digest not captured; no independent binary-identity authentication."
+  },
+  "restored_control": {
+    "run_id": "a474bfff-7faf-4e67-a58c-ebcebe77466e",
+    "cases": [
+      {
+        "kind": "Scene",
+        "extra_entities": 0,
+        "mode": "Direct",
+        "p50_ns": 248600,
+        "p95_ns": 321700
+      },
+      {
+        "kind": "Scene",
+        "extra_entities": 0,
+        "mode": "Panel",
+        "p50_ns": 285400,
+        "p95_ns": 361900
+      },
+      {
+        "kind": "Scene",
+        "extra_entities": 256,
+        "mode": "Direct",
+        "p50_ns": 30868600,
+        "p95_ns": 31551900
+      },
+      {
+        "kind": "Scene",
+        "extra_entities": 256,
+        "mode": "Panel",
+        "p50_ns": 32719500,
+        "p95_ns": 49366500
+      },
+      {
+        "kind": "Prefab",
+        "extra_entities": 0,
+        "mode": "Direct",
+        "p50_ns": 267300,
+        "p95_ns": 537600
+      },
+      {
+        "kind": "Prefab",
+        "extra_entities": 0,
+        "mode": "Panel",
+        "p50_ns": 299900,
+        "p95_ns": 564400
+      },
+      {
+        "kind": "Prefab",
+        "extra_entities": 256,
+        "mode": "Direct",
+        "p50_ns": 31105400,
+        "p95_ns": 36206600
+      },
+      {
+        "kind": "Prefab",
+        "extra_entities": 256,
+        "mode": "Panel",
+        "p50_ns": 35592100,
+        "p95_ns": 50275500
+      }
+    ],
+    "clean_source_recompiled": true
+  },
+  "source_restored_byte_for_byte": true,
+  "source_files": [
+    {
+      "path": "crates/nara_scene/src/lib.rs",
+      "original_sha256": "3291777991f332cbdc0ad235c704f451aff1f89df148df783308a0bc8ba872d9",
+      "instrumented_sha256": "d936038d3b26d2c49418ccbb06526028b7e9d18bf2100044e5c0f0b83b683d7b"
+    },
+    {
+      "path": "crates/nara_scene/src/authoring/property.rs",
+      "original_sha256": "8e41e24d0cdb2b449ada3e39f58ef85fd68a8c0b2e953f33be3b668fd1176dd9",
+      "instrumented_sha256": "6f95269fe237ae7284a4c3fec87001a224a3e711269e67d86ef024da5f289913"
+    },
+    {
+      "path": "crates/nara_scene/src/authoring/prepared.rs",
+      "original_sha256": "5013ab3e0c1f9ca9f9201f34f7f2edf9b4c63db9b36979378a524c4df6a666e5",
+      "instrumented_sha256": "a3d03820fe0bdbf5110af0186754bdf0a28be9674298e4db4c00fb208466f0a1"
+    },
+    {
+      "path": "crates/nara_scene/src/authoring_decode.rs",
+      "original_sha256": "9b84fb3ce1f3907a0801ea7a84e9fc87a0207f358b4569cda487665f264d5957",
+      "instrumented_sha256": "cc69764279de12ffd2b002336feb8e64a91f86552108ef99cf4a343e8b82ef67"
+    },
+    {
+      "path": "crates/nara_scene/src/authoring_decode/field_candidate.rs",
+      "original_sha256": "20d377e6b50bc969e4ad5d4dcacb2cd36f1a86714d178e7fdd883fd6cfaea42a",
+      "instrumented_sha256": "f7e0dd4167cb0f04730c61cb09093caf59218b0dd86ea33143e00107ea03ad6e"
+    },
+    {
+      "path": "crates/nara_scene/src/format.rs",
+      "original_sha256": "eb8263c5d806c69167235380bbc9d6da43737964c536b9da440753193ba429b2",
+      "instrumented_sha256": "867fa960c35880e5e694a811d30f27a7c2aee7c7790430760ae451d7b322be63"
+    },
+    {
+      "path": "tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prepared_panel_cost.rs",
+      "original_sha256": "3a5399090618dc7835429f93fb0ee26b2ff7a35ad7e6d4ccb23fb204aadb4619",
+      "instrumented_sha256": "059a7655f0b09a4309f806f96067a183e3ff3a88b255a0cf1f1f0171315c2f6a"
+    }
+  ],
+  "created_file": {
+    "path": "crates/nara_scene/src/preparation_cost_probe.rs",
+    "sha256": "85dae809480106686f31f4be45272e193dbd63bca09b3afba8143c8941267cee",
+    "removed": true
+  },
+  "apparatus_review": {
+    "outcome": "One P2 exact case-order guard gap corrected; original8tuple order and nested timing bounds now asserted; deliberately swapped same-size Direct/Panel labels rejected before output.",
+    "runtime_remeasurement_for_analyzer_correction": false,
+    "semantic_changes_identified": false,
+    "limits": [
+      "Wall-clock residency, not CPU time.",
+      "public-minus-root contains bookkeeping and is not pure adapter cost.",
+      "Parent-minus-child is not an isolated destructor measurement.",
+      "10percent disturbance trigger investigated with same-binary disabled and restored-source controls; background/instrumentation contributions remain unisolated."
+    ]
+  },
+  "summary": {
+    "optimization_implemented": false,
+    "native_or_release_latency_qualified": false,
+    "full_r2_complete": false
+  },
+  "artifacts": [
+    {
+      "path": "baseline.log.gz",
+      "sha256": "bb9ee227a179c7b55ca3295f316346cab325101025eda6d69985bd63f84e9a36",
+      "uncompressed_sha256": "42b4d88d430b7a1110954a4e24be3503b90f5c1864aaf5b3bd06e66c32b5413e",
+      "uncompressed_bytes": 16812
+    },
+    {
+      "path": "instrumented-1.log.gz",
+      "sha256": "1b870e66703519d082a544c885d62fe2b864405c744dcdbd20f29a2cf2b0e022",
+      "uncompressed_sha256": "a573d6473c3277e87b4ee3ff0e70389398c5714f794c8da21cc4cb12642da8b1",
+      "uncompressed_bytes": 170587
+    },
+    {
+      "path": "instrumented-2.log.gz",
+      "sha256": "1a13a2f7e91e333a3b73551cd0ec7ebd3ce0ffa4ccfc74d8d779dc85b545f14e",
+      "uncompressed_sha256": "4a14d8f82f625369dd1f6d5b15091eb099c7621bc29bf59b209b223b1e6892f4",
+      "uncompressed_bytes": 169980
+    },
+    {
+      "path": "disabled.log.gz",
+      "sha256": "3e19f3c81c4188868825457a9e21344b434e7e3b3624f7c2f529a6f4dd074b95",
+      "uncompressed_sha256": "a15b5fd040a5972a518f4ad1bd0022798ce67a8d37335df75b1aa9bb9ef1e95c",
+      "uncompressed_bytes": 22089
+    },
+    {
+      "path": "restored.log.gz",
+      "sha256": "36139b09d3daa209724b8836a8ffd027a257bbcc2aab58cc8043be3d0d34fe5f",
+      "uncompressed_sha256": "27d78102d3c9d1b0c37b4446f21b7f1c56b91cbc25c6458663a7c6df20dca499",
+      "uncompressed_bytes": 17391
+    },
+    {
+      "path": "instrumentation.patch.gz",
+      "sha256": "fa4f5dc1fafb56c4a365c27c0f3e7df31fe06944f46eb68a299ab5b1779b7a7d",
+      "uncompressed_sha256": "1d45fa0fd5bf7ce495d757cd1fd208e88f232aaf3a864bd1bab074813f442312",
+      "uncompressed_bytes": 17677
+    },
+    {
+      "path": "analyze.py.gz",
+      "sha256": "cdf52cdc09ad9d03101fc50cbd1483957714a20ebff89216054debf8a5898676",
+      "uncompressed_sha256": "ea86d99d43f8c541c560c1566ba716778814f90840984a377e345ce9f7b050ae",
+      "uncompressed_bytes": 3455
+    },
+    {
+      "path": "observations.json.gz",
+      "sha256": "134d048801d997478fa237e3fdedf27d39154cb3ea6406afce68ee5ffe4fd44c",
+      "uncompressed_sha256": "4a1fe8175f55038fd53c4603c476187dcf5301a118af743d9c9b18c0d29158b4",
+      "uncompressed_bytes": 85470
+    }
+  ],
+  "entry": {
+    "source": "5ebe751:docs/benchmarks/2026-10-25-prepared-panel.md#owner-phase-experiment-entry",
+    "attribution_target_share": 0.9,
+    "disturbance_investigation_ratio": 1.1,
+    "scope": "diagnostic stop rules, not interactive SLA or optimization target"
+  },
+  "results_review": {
+    "independent_recomputation": "Report tables, context summaries, branch counts, parent/child bounds and raw artifacts verified; no new actionable findings.",
+    "source_cleanup": "Seven original files and HEAD bytes match; temporary eighth module absent; archived patch reconstructs all eight instrumented hashes.",
+    "negative_probe": "Reviewer independently rejected same-size Direct/Panel label swaps on both logs without writing output.",
+    "limits": "Source/data audit only; no Cargo or runtime re-execution; same-provider Codex agents, not cross-provider review."
+  },
+  "observation_details": {
+    "path": "observations.json.gz",
+    "content": "Lossless snapshot of all reviewed case/phase quantiles, control sample arrays and full context before compaction; raw observations also remain in the complete logs."
+  }
+}
