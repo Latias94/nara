@@ -1489,6 +1489,20 @@ impl App {
         Ok(self)
     }
 
+    /// Retains this configured App for owner-thread retirement without sealing or running Startup.
+    ///
+    /// This transfer closes admission without polling shutdown hooks or close participants.
+    /// Keep the returned owner and drive its retirement until physical completion, including
+    /// after a configuration operation fails. Dropping unfinished custody uses the existing
+    /// quarantine fallback rather than certifying successful cleanup.
+    #[doc(hidden)]
+    pub fn begin_retirement(
+        self,
+        close_policy: RuntimeClosePolicy,
+    ) -> RuntimePreparationRetirement {
+        RuntimePreparationRetirement::from_app(self, close_policy)
+    }
+
     /// Freezes configuration and admits every installed schedule graph without executing startup.
     ///
     /// Ordinary execution consumes configuration directly through [`RuntimeInstance::start`].
@@ -2332,6 +2346,7 @@ mod tests {
         ready: Arc<AtomicBool>,
         begins: Arc<AtomicUsize>,
         polls: Arc<AtomicUsize>,
+        finishes: Arc<AtomicUsize>,
     }
 
     impl RuntimeCloseParticipant for ControlledClose {
@@ -2382,6 +2397,11 @@ mod tests {
                     message: "injected build failure after close registration".to_owned(),
                 });
             }
+            Ok(())
+        }
+
+        fn finish(&self, _app: &mut App) -> Result<(), PluginError> {
+            self.close.finishes.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
     }
@@ -3889,6 +3909,244 @@ mod tests {
         );
         assert!(!evidence.plugin_shutdown_failed());
         assert_eq!(close.begins.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn configured_app_retirement_does_not_finish_or_execute_startup() {
+        let close = ControlledClose::default();
+        let startup_runs = Arc::new(AtomicUsize::new(0));
+        let mut app = App::new();
+        app.add_plugin(ControlledClosePlugin {
+            close: close.clone(),
+            reject_build: false,
+        })
+        .unwrap();
+        let startup = Arc::clone(&startup_runs);
+        app.add_systems(StartupStage::Runtime, move || {
+            startup.fetch_add(1, Ordering::SeqCst);
+        })
+        .unwrap();
+
+        let world = app.world().id();
+        let mut retirement = app.begin_retirement(RuntimeClosePolicy::new(Duration::ZERO));
+        let retained_world = retirement.world().unwrap().id();
+        let initial = retirement.retirement_state();
+        let begins_before_poll = close.begins.load(Ordering::SeqCst);
+        let polls_before_poll = close.polls.load(Ordering::SeqCst);
+        let pending = retirement.drive_retirement();
+        close.ready.store(true, Ordering::SeqCst);
+        let completed = retirement.drive_retirement();
+        drop(retirement);
+
+        assert_eq!(initial, RuntimeCandidateRetirementState::Retiring);
+        assert_eq!(begins_before_poll, 0);
+        assert_eq!(polls_before_poll, 0);
+        assert_eq!(
+            pending,
+            RuntimeCandidateRetirementState::RetirementIncomplete
+        );
+        assert_eq!(completed, RuntimeCandidateRetirementState::Retired);
+        assert_eq!(retained_world, world);
+        assert_eq!(close.begins.load(Ordering::SeqCst), 1);
+        assert_eq!(close.finishes.load(Ordering::SeqCst), 0);
+        assert_eq!(startup_runs.load(Ordering::SeqCst), 0);
+        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
+    }
+
+    #[test]
+    fn configured_candidate_preparation_failure_returns_before_polling_close() {
+        let close = ControlledClose::default();
+        let mut app = App::new();
+        let world = app.world().id();
+        assert!(
+            app.add_plugin(ControlledClosePlugin {
+                close: close.clone(),
+                reject_build: true,
+            })
+            .is_err()
+        );
+        let mut failure = RuntimeInstance::prepare(
+            app,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::new(Duration::ZERO),
+        )
+        .unwrap_err();
+        let retained_world = failure.world().id();
+        let preparation_failed = matches!(failure.error(), RuntimeStartError::Preparation(_));
+        let initial = failure.retirement_state();
+        let begins_before_poll = close.begins.load(Ordering::SeqCst);
+        let polls_before_poll = close.polls.load(Ordering::SeqCst);
+        let pending = failure.drive_retirement();
+        close.ready.store(true, Ordering::SeqCst);
+        let completed = failure.drive_retirement();
+        drop(failure);
+
+        assert!(preparation_failed);
+        assert_eq!(retained_world, world);
+        assert_eq!(initial, RuntimeCandidateRetirementState::Retiring);
+        assert_eq!(begins_before_poll, 0);
+        assert_eq!(polls_before_poll, 0);
+        assert_eq!(
+            pending,
+            RuntimeCandidateRetirementState::RetirementIncomplete
+        );
+        assert_eq!(completed, RuntimeCandidateRetirementState::Retired);
+        assert_eq!(close.begins.load(Ordering::SeqCst), 1);
+        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
+    }
+
+    #[test]
+    fn configured_candidate_refusal_retains_plugin_and_transferred_host_obligations() {
+        for collide in [false, true] {
+            let plugin_close = ControlledClose::default();
+            let host_close = ControlledClose::default();
+            let mut app = App::new();
+            app.add_plugin(ControlledClosePlugin {
+                close: plugin_close.clone(),
+                reject_build: false,
+            })
+            .unwrap();
+            let world = app.world().id();
+            let mut settings = app
+                .get_schedule(CoreStage::FixedUpdate)
+                .unwrap()
+                .get_build_settings();
+            settings.auto_insert_apply_deferred = false;
+            app.set_schedule_build_settings(CoreStage::FixedUpdate, settings)
+                .unwrap();
+            let mut obligations = RuntimeObligationLedger::new();
+            obligations
+                .register(
+                    if collide {
+                        RAW_APP_CLOSE_PARTICIPANT_ID
+                    } else {
+                        RuntimeCloseParticipantId::new("nara.test.configured-host")
+                    },
+                    host_close.clone(),
+                )
+                .unwrap();
+            let mut failure =
+                RuntimeInstance::prepare(app, obligations, RuntimeClosePolicy::new(Duration::ZERO))
+                    .unwrap_err();
+            let expected_error = if collide {
+                matches!(failure.error(), RuntimeStartError::Admission(_))
+            } else {
+                matches!(
+                    failure.error(),
+                    RuntimeStartError::Preparation(PluginError::ScheduleCompatibility(_))
+                )
+            };
+            let same_world = failure.world().id() == world;
+            let begins_before_poll = plugin_close.begins.load(Ordering::SeqCst)
+                + host_close.begins.load(Ordering::SeqCst);
+            let pending = failure.drive_retirement();
+            plugin_close.ready.store(true, Ordering::SeqCst);
+            host_close.ready.store(true, Ordering::SeqCst);
+            let completed = failure.drive_retirement();
+            drop(failure);
+
+            assert!(expected_error);
+            assert!(same_world);
+            assert_eq!(begins_before_poll, 0);
+            assert_eq!(
+                pending,
+                RuntimeCandidateRetirementState::RetirementIncomplete
+            );
+            assert_eq!(completed, RuntimeCandidateRetirementState::Retired);
+            assert_eq!(plugin_close.begins.load(Ordering::SeqCst), 1);
+            assert_eq!(host_close.begins.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                plugin_close.finishes.load(Ordering::SeqCst),
+                usize::from(!collide)
+            );
+            assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
+        }
+    }
+
+    #[test]
+    fn configured_candidate_separates_admission_from_startup_and_retirement() {
+        let close = ControlledClose::default();
+        let startup_runs = Arc::new(AtomicUsize::new(0));
+        let mut app = App::new();
+        app.add_plugin(ControlledClosePlugin {
+            close: close.clone(),
+            reject_build: false,
+        })
+        .unwrap();
+        let startup = Arc::clone(&startup_runs);
+        app.add_systems(StartupStage::Runtime, move || {
+            startup.fetch_add(1, Ordering::SeqCst);
+        })
+        .unwrap();
+        let candidate = RuntimeInstance::prepare(
+            app,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::new(Duration::ZERO),
+        )
+        .unwrap();
+        let prepared_runs = startup_runs.load(Ordering::SeqCst);
+        let generation = candidate.generation();
+        let world = candidate.world().id();
+        let runtime = candidate.complete_startup().unwrap().promote();
+        let same_generation = runtime.generation() == generation;
+        let same_world = runtime.world().id() == world;
+        let mut retirement = runtime.begin_retirement();
+        let pending = retirement.drive_retirement();
+        close.ready.store(true, Ordering::SeqCst);
+        let completed = retirement.drive_retirement();
+        drop(retirement);
+
+        assert_eq!(prepared_runs, 0);
+        assert_eq!(startup_runs.load(Ordering::SeqCst), 1);
+        assert_eq!(close.finishes.load(Ordering::SeqCst), 1);
+        assert!(same_generation);
+        assert!(same_world);
+        assert_eq!(
+            pending,
+            RuntimeCandidateRetirementState::RetirementIncomplete
+        );
+        assert_eq!(completed, RuntimeCandidateRetirementState::Retired);
+        assert_eq!(close.begins.load(Ordering::SeqCst), 1);
+        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
+    }
+
+    #[test]
+    fn configured_candidate_startup_failure_does_not_attempt_synchronous_close() {
+        let close = ControlledClose::default();
+        let mut app = App::new();
+        app.add_plugin(ControlledClosePlugin {
+            close: close.clone(),
+            reject_build: false,
+        })
+        .unwrap();
+        app.add_systems(StartupStage::Runtime, fail_managed_system)
+            .unwrap();
+        let candidate = RuntimeInstance::prepare(
+            app,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::new(Duration::ZERO),
+        )
+        .unwrap();
+        let world = candidate.world().id();
+        let mut failure = candidate.complete_startup().unwrap_err();
+        let retained_world = failure.world().id();
+        let initial = failure.retirement_state();
+        let begins_before_poll = close.begins.load(Ordering::SeqCst);
+        let pending = failure.drive_retirement();
+        close.ready.store(true, Ordering::SeqCst);
+        let completed = failure.drive_retirement();
+        drop(failure);
+
+        assert_eq!(initial, RuntimeCandidateRetirementState::Retiring);
+        assert_eq!(retained_world, world);
+        assert_eq!(begins_before_poll, 0);
+        assert_eq!(
+            pending,
+            RuntimeCandidateRetirementState::RetirementIncomplete
+        );
+        assert_eq!(completed, RuntimeCandidateRetirementState::Retired);
+        assert_eq!(close.begins.load(Ordering::SeqCst), 1);
+        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
     }
 
     #[test]

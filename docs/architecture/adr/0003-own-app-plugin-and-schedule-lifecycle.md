@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-25 (owner-local close custody refinement)
+**Last Revised**: 2026-10-26 (configured App retirement and staged admission)
 **Refined By**: ADR 0010: Plugin Lifecycle, Dependencies, and Failure Containment; ADR 0046:
 Plugin Metadata and Default Plugin Groups; ADR 0056: Headless Runtime and Dedicated Server Readiness;
 [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): 2D Foundation Ownership and Authoring Contracts
@@ -166,6 +166,21 @@ owner. App is configuration-only; ordinary code-first embedding uses `RuntimeIns
 with one World and schedule authority. First-party Hosts retain hidden sealed-App/candidate stages
 for unpublished preparation and publication. Raw App runners are removed as a competing production
 lifecycle. Startup failure and incomplete close retain retryable physical retirement ownership.
+
+First-party responsive Hosts may consume a configured App with `RuntimeInstance::prepare` before
+Startup and publication. This seals and admits the same owner and retains every failed preparation
+or admission without a synchronous close attempt. `complete_startup` retains its own failed
+candidate. Ordinary `start_with_options` uses that same admission implementation and preserves its
+finite failure-close convenience; staged admission is not background execution of configuration or
+finish hooks.
+
+Configuration may already have acquired physical resources before sealing is attempted. A Host
+aborting that configuration consumes the App with `begin_retirement`, without finish or Startup,
+and polls the existing close protocol. The returned `RuntimePreparationRetirement` is a concrete
+App owner, not a second close driver. Its read-only World observations and the corresponding
+failed-owner views permit domains to inspect their physical reports without granting execution
+authority. Quarantine remains abnormal fallback; diagnostic projection alone cannot transfer
+cleanup responsibility.
 
 ADRs 0010/0042/0082/0084 distinguish shutdown callback order from dependency-safe physical
 release. A runtime-local dependent aggregate has one typed close owner on its construction

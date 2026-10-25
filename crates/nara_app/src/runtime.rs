@@ -1338,14 +1338,15 @@ impl RuntimeCandidate {
     }
 }
 
-/// Retryable owner retained when a repeatable plugin plan cannot be instantiated.
+/// Retryable ownership of an App that will not proceed to managed execution.
 ///
-/// Retained-only preparation may fail before an `App` exists and therefore start complete.
-/// Managed runtime construction creates the `App` with the Host ledger before preparation, so its
-/// preparation, build, and finish failures retain that `App` and every registered runtime close
-/// participant until cleanup completes or ownership moves to process quarantine during unwinding.
+/// Configured Apps and failed managed construction retain every registered close participant.
+/// Retained-only plan preparation may fail before an App exists and therefore start complete.
+/// Transfer itself does not poll close callbacks; the owner thread drives physical retirement.
+/// Dropping incomplete custody retains the existing process quarantine fallback.
+#[doc(hidden)]
 #[must_use = "failed runtime preparation retains close authority until cleanup completes"]
-pub(crate) struct RuntimePreparationRetirement {
+pub struct RuntimePreparationRetirement {
     owner: Option<RuntimeOwner>,
 }
 
@@ -1359,6 +1360,12 @@ impl Debug for RuntimePreparationRetirement {
 }
 
 impl RuntimePreparationRetirement {
+    /// Borrows retained World observations, including domain-owned physical close reports.
+    #[must_use]
+    pub fn world(&self) -> Option<&World> {
+        self.owner.as_ref().map(|owner| &owner.world)
+    }
+
     pub(crate) fn plugin_failure_report(&self) -> Option<&PluginFailureReport> {
         self.owner
             .as_ref()
@@ -1685,6 +1692,12 @@ impl Display for RuntimeCandidateFailure {
 impl std::error::Error for RuntimeCandidateFailure {}
 
 impl RuntimeCandidateFailure {
+    /// Borrows observations from the failed candidate without granting execution authority.
+    #[must_use]
+    pub fn world(&self) -> &World {
+        &self.retirement.owner.world
+    }
+
     #[must_use]
     pub fn plugin_failure_report(&self) -> Option<&PluginFailureReport> {
         self.retirement.plugin_failure_report()
@@ -1981,6 +1994,14 @@ impl std::error::Error for RuntimeStartFailure {
 }
 
 impl RuntimeStartFailure {
+    /// Borrows retained World observations, including domain-owned physical close reports.
+    #[must_use]
+    pub fn world(&self) -> &World {
+        self.retirement
+            .world()
+            .expect("ordinary startup failures always retain their runtime owner")
+    }
+
     #[must_use]
     pub fn plugin_failure_report(&self) -> Option<&PluginFailureReport> {
         self.retirement.plugin_failure_report()
@@ -2086,10 +2107,33 @@ impl RuntimeInstance {
     }
 
     fn start_inner(
-        mut app: App,
+        app: App,
         obligations: RuntimeObligationLedger,
         close_policy: RuntimeClosePolicy,
     ) -> Result<Self, RuntimeStartFailure> {
+        let candidate = Self::prepare(app, obligations, close_policy)?;
+        match candidate.complete_startup() {
+            Ok(ready) => Ok(ready.promote()),
+            Err(failure) => {
+                let error = RuntimeStartError::Startup(failure.fault().clone());
+                let RuntimeRetirement { owner, .. } = *failure.retirement;
+                Err(RuntimeStartFailure::from_owner(error, owner))
+            }
+        }
+    }
+
+    /// Seals and admits a configured App without executing Startup or publishing a Runtime.
+    ///
+    /// Success transfers the same complete owner into a candidate. Every failure retains that
+    /// owner, all transferred Host obligations and registered participants without performing a
+    /// synchronous close attempt. Responsive Hosts keep the failure and poll its retirement.
+    /// Configuration and finish hooks remain synchronous; this is not background preparation.
+    #[doc(hidden)]
+    pub fn prepare(
+        mut app: App,
+        obligations: RuntimeObligationLedger,
+        close_policy: RuntimeClosePolicy,
+    ) -> Result<RuntimeCandidate, RuntimeStartFailure> {
         app.owner.close_policy = close_policy;
         if let Err(error) = app.owner.prepend_host_obligations(obligations) {
             return Err(RuntimeStartFailure::from_owner(
@@ -2112,25 +2156,16 @@ impl RuntimeInstance {
                 RuntimePreparationRetirement::from_reserved_app(app, reservation, close_policy),
             ));
         }
-        let candidate = match reservation.admit(
-            SealedApp { app },
-            RuntimeObligationLedger::new(),
-            close_policy,
-        ) {
-            Ok(candidate) => candidate,
-            Err(mut failure) => {
+        reservation
+            .admit(
+                SealedApp { app },
+                RuntimeObligationLedger::new(),
+                close_policy,
+            )
+            .map_err(|mut failure| {
                 let error = RuntimeStartError::Admission(failure.error());
-                return Err(RuntimeStartFailure::from_owner(error, failure.take_owner()));
-            }
-        };
-        match candidate.complete_startup() {
-            Ok(ready) => Ok(ready.promote()),
-            Err(failure) => {
-                let error = RuntimeStartError::Startup(failure.fault().clone());
-                let RuntimeRetirement { owner, .. } = *failure.retirement;
-                Err(RuntimeStartFailure::from_owner(error, owner))
-            }
-        }
+                RuntimeStartFailure::from_owner(error, failure.take_owner())
+            })
     }
 
     fn from_promotion(

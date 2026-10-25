@@ -26,6 +26,8 @@ mod preview;
 mod project_browser;
 mod source_admission;
 mod source_asset_import;
+#[cfg(test)]
+mod test_fixtures;
 mod trusted_play;
 #[cfg(feature = "runtime-ui")]
 mod ui_authoring;
@@ -440,19 +442,65 @@ impl TrustedCompiledEditorProjectIntent {
 }
 
 #[derive(Debug)]
+#[must_use = "a failed Open can retain authoring cleanup until physical retirement"]
 pub struct EditorProjectOpenError {
     diagnostics: DiagnosticReport,
+    retirement: Option<Box<authoring_runtime::EditorAuthoringRetirement>>,
 }
 
 impl EditorProjectOpenError {
+    fn new(diagnostics: DiagnosticReport) -> Self {
+        Self {
+            diagnostics,
+            retirement: None,
+        }
+    }
+
+    fn with_runtime(mut self, runtime: authoring_runtime::EditorAuthoringRuntime) -> Self {
+        assert!(
+            self.retirement.is_none(),
+            "one unpublished authoring owner belongs to this failure"
+        );
+        self.retirement = Some(Box::new(runtime.into()));
+        self
+    }
+
     #[must_use]
     pub const fn diagnostics(&self) -> &DiagnosticReport {
         &self.diagnostics
     }
 
+    /// Candidate refusal does not establish physical cleanup completion.
     #[must_use]
-    pub fn into_diagnostics(self) -> DiagnosticReport {
-        self.diagnostics
+    pub fn retirement_state(&self) -> nara_app::RuntimeCandidateRetirementState {
+        self.retirement.as_ref().map_or(
+            nara_app::RuntimeCandidateRetirementState::Retired,
+            |owner| owner.state(),
+        )
+    }
+
+    #[must_use]
+    pub fn close_evidence(&self) -> Option<&nara_app::RuntimeCloseEvidence> {
+        self.retirement
+            .as_ref()
+            .and_then(|owner| owner.close_evidence())
+    }
+
+    /// Advances retained cleanup once on the App's construction thread.
+    pub fn advance_retirement(&mut self) -> nara_app::RuntimeCandidateRetirementState {
+        if let Some(owner) = self.retirement.as_mut() {
+            let _ = owner.poll();
+        }
+        self.retirement_state()
+    }
+}
+
+impl From<authoring_runtime::EditorAuthoringConstructionFailure> for EditorProjectOpenError {
+    fn from(failure: authoring_runtime::EditorAuthoringConstructionFailure) -> Self {
+        Self {
+            diagnostics: failure.diagnostics,
+            retirement: Some(Box::new(failure.retirement)),
+        }
     }
 }
 
@@ -1325,7 +1373,12 @@ impl EditorProjectSession {
         true
     }
 
-    pub(crate) fn open(receipt: AuthoringProjectReceipt) -> Result<Self, EditorProjectOpenError> {
+    fn open(
+        receipt: AuthoringProjectReceipt,
+        #[cfg(test)] publication_hook: Option<
+            Box<dyn FnOnce(&authoring_runtime::EditorAuthoringRuntime)>,
+        >,
+    ) -> Result<Self, EditorProjectOpenError> {
         let parts = receipt.into_session_parts().map_err(|_| {
             editor_open_error("project.editor.authoring-receipt-consumption-failed")
         })?;
@@ -1335,147 +1388,166 @@ impl EditorProjectSession {
             &parts.snapshot,
             &preview_registry,
         )
-        .map_err(|diagnostics| EditorProjectOpenError { diagnostics })?;
-        let mut image_import = image_import::EditorImageImportHost::default();
-        image_import.initialize_authoring_hydration(&parts.snapshot);
-        #[cfg(feature = "runtime-ui")]
-        let authoring_images = authoring_images::EditorAuthoringImageHost::capture_selected(
-            &authoring_runtime,
-            &image_import.authoring_image_asset_ids(),
-        )
-        .map_err(|_| editor_open_error("project.editor.authoring-image-init-failed"))?;
-        #[cfg(feature = "presentation-ui")]
-        let ui_preview = ui_preview::EditorUiPreviewSession::new().map_err(|_error| {
-            editor_open_error("project.editor.authoring-ui-preview-init-failed")
-        })?;
-        let project_root = parts.snapshot.project_root();
-        let settings = parts.snapshot.settings();
-        let scenes_path = RelativePath::new(settings.paths.scenes.as_str())
-            .map_err(|_| editor_open_error("project.editor.scenes-path-invalid"))?;
-        let scenes = project_root
-            .open_directory(&scenes_path)
-            .map_err(|_| editor_open_error("project.editor.scenes-open-failed"))?;
-        let startup = settings
-            .startup
-            .default_scene
-            .as_ref()
-            .ok_or_else(|| editor_open_error("project.editor.startup-scene-missing"))?;
-        let startup_title = startup.as_str().to_owned();
-        let startup_project_path: Arc<str> = Arc::from(format!(
-            "{}/{}",
-            settings.paths.scenes.as_str(),
-            startup.as_str()
-        ));
-        let startup_source = parts.snapshot.startup_source();
-        parts
-            .snapshot
-            .startup_native_source()
-            .revalidate(&project_root)
-            .map_err(|error| editor_open_error(error.code()))?;
-        let startup_source_key = parts.snapshot.startup_native_source().key().clone();
-        let (persistence, opened_digest) = ScenePersistenceHost::bind_authoring_source(
-            &scenes,
-            startup.as_str(),
-            startup_source.identity(),
-            startup_source.digest(),
-        )
-        .map_err(editor_persistence_open_error)?;
-        let diagnostics = parts.startup_scene.diagnostics().clone();
-        let (mut workspace, mut persistence_authority) = EditorWorkspace::new_hosted();
-        let report = workspace
-            .open_authoring_scene_document(
-                startup_title.clone(),
-                nara_tooling::EditorDocumentSourceBinding::new(startup_title.clone()),
-                parts.startup_scene,
-            )
-            .map_err(|_| editor_open_error("project.editor.scene-publication-failed"))?;
-        let document = report
-            .opened_document
-            .ok_or_else(|| editor_open_error("project.editor.scene-publication-failed"))?;
-        let binding = persistence_authority.bind_opened_source_digest(
-            &mut workspace,
-            document,
-            opened_digest,
-        );
-        if !binding.applied {
-            return Err(editor_open_error(
-                "project.editor.persistence-authority-invalid",
-            ));
+        .map_err(EditorProjectOpenError::from)?;
+        #[cfg(test)]
+        if let Some(hook) = publication_hook {
+            hook(&authoring_runtime);
         }
-
-        let mut session = Self {
-            closing: false,
-            workspace,
-            persistence_authority,
-            scene_lanes: BTreeMap::from([(
-                document,
-                EditorScenePersistenceLane {
-                    project_path: startup_project_path,
-                    source_key: startup_source_key,
-                    document,
-                    host: authoring_runtime
-                        .host_custody()
-                        .retain_scene(persistence)
-                        .ok_or_else(|| {
-                            editor_open_error("project.editor.persistence-owner-closed")
-                        })?,
-                },
-            )]),
-            scene_preview_document: Some(document),
-            execution: EditorExecutionLane::Authoring(parts.snapshot),
-            project_content: EditorProjectContentView::NotInstalled,
-            next_project_content_generation: 1,
-            prefab_content_refresh: BTreeMap::new(),
-            prefab_lanes: BTreeMap::new(),
-            extension_documents: extension_documents::EditorExtensionDocumentsHost::default(),
-            pending_document_open: None,
-            next_document_open_request: 0,
-            document_open_result: None,
-            #[cfg(test)]
-            next_document_open_gate: None,
-            project_browser: project_browser::EditorProjectBrowserHost::new(),
-            image_import,
-            source_asset_import: source_asset_import::EditorSourceAssetImportHost::default(),
-            authoring_prefab_source_observations: BTreeMap::new(),
-            #[cfg(test)]
-            reject_next_prefab_source_binding: false,
-            persistence: persistence::PersistenceState::Idle,
-            next_persistence_attempt: 0,
-            #[cfg(test)]
-            next_save_gate: None,
-            #[cfg(test)]
-            next_reopen_gate: None,
-            last_persistence_receipt: None,
-            diagnostics,
-            field_feedback: None,
-            play_result: None,
-            external_play_request: None,
-            external_play_attempt: None,
-            external_play_view: None,
-            external_play_bound_source_digest: None,
-            current_saved_source_digest: None,
-            next_external_play_attempt: 1,
-            pending_workspace_intent: None,
-            workspace_intent_result: None,
-            frame_clock: EditorFrameClock::new(),
-            published_frame: None,
-            gestures: EditorGestureController::default(),
-            last_gesture_cancellation: None,
-            authoring_runtime,
-            authoring_retirements: Default::default(),
-            #[cfg(test)]
-            next_authoring_refresh_hook: None,
+        let mut unpublished = Some(authoring_runtime);
+        let publication: Result<Self, EditorProjectOpenError> = (|| {
+            let authoring_runtime = unpublished
+                .as_ref()
+                .expect("the unpublished authoring owner is retained");
+            let mut image_import = image_import::EditorImageImportHost::default();
+            image_import.initialize_authoring_hydration(&parts.snapshot);
             #[cfg(feature = "runtime-ui")]
-            authoring_images,
+            let authoring_images = authoring_images::EditorAuthoringImageHost::capture_selected(
+                &authoring_runtime,
+                &image_import.authoring_image_asset_ids(),
+            )
+            .map_err(|_| editor_open_error("project.editor.authoring-image-init-failed"))?;
             #[cfg(feature = "presentation-ui")]
-            ui_preview,
-            #[cfg(feature = "runtime-ui")]
-            ui_authoring_frame: None,
-            #[cfg(feature = "runtime-ui")]
-            ui_authoring_projection_cache: None,
-        };
-        session.publish_editor_frame(false);
-        Ok(session)
+            let ui_preview = ui_preview::EditorUiPreviewSession::new().map_err(|_error| {
+                editor_open_error("project.editor.authoring-ui-preview-init-failed")
+            })?;
+            let project_root = parts.snapshot.project_root();
+            let settings = parts.snapshot.settings();
+            let scenes_path = RelativePath::new(settings.paths.scenes.as_str())
+                .map_err(|_| editor_open_error("project.editor.scenes-path-invalid"))?;
+            let scenes = project_root
+                .open_directory(&scenes_path)
+                .map_err(|_| editor_open_error("project.editor.scenes-open-failed"))?;
+            let startup = settings
+                .startup
+                .default_scene
+                .as_ref()
+                .ok_or_else(|| editor_open_error("project.editor.startup-scene-missing"))?;
+            let startup_title = startup.as_str().to_owned();
+            let startup_project_path: Arc<str> = Arc::from(format!(
+                "{}/{}",
+                settings.paths.scenes.as_str(),
+                startup.as_str()
+            ));
+            let startup_source = parts.snapshot.startup_source();
+            parts
+                .snapshot
+                .startup_native_source()
+                .revalidate(&project_root)
+                .map_err(|error| editor_open_error(error.code()))?;
+            let startup_source_key = parts.snapshot.startup_native_source().key().clone();
+            let (persistence, opened_digest) = ScenePersistenceHost::bind_authoring_source(
+                &scenes,
+                startup.as_str(),
+                startup_source.identity(),
+                startup_source.digest(),
+            )
+            .map_err(editor_persistence_open_error)?;
+            let diagnostics = parts.startup_scene.diagnostics().clone();
+            let (mut workspace, mut persistence_authority) = EditorWorkspace::new_hosted();
+            let report = workspace
+                .open_authoring_scene_document(
+                    startup_title.clone(),
+                    nara_tooling::EditorDocumentSourceBinding::new(startup_title.clone()),
+                    parts.startup_scene,
+                )
+                .map_err(|_| editor_open_error("project.editor.scene-publication-failed"))?;
+            let document = report
+                .opened_document
+                .ok_or_else(|| editor_open_error("project.editor.scene-publication-failed"))?;
+            let binding = persistence_authority.bind_opened_source_digest(
+                &mut workspace,
+                document,
+                opened_digest,
+            );
+            if !binding.applied {
+                return Err(editor_open_error(
+                    "project.editor.persistence-authority-invalid",
+                ));
+            }
+
+            let mut session = Self {
+                closing: false,
+                workspace,
+                persistence_authority,
+                scene_lanes: BTreeMap::from([(
+                    document,
+                    EditorScenePersistenceLane {
+                        project_path: startup_project_path,
+                        source_key: startup_source_key,
+                        document,
+                        host: authoring_runtime
+                            .host_custody()
+                            .retain_scene(persistence)
+                            .ok_or_else(|| {
+                                editor_open_error("project.editor.persistence-owner-closed")
+                            })?,
+                    },
+                )]),
+                scene_preview_document: Some(document),
+                execution: EditorExecutionLane::Authoring(parts.snapshot),
+                project_content: EditorProjectContentView::NotInstalled,
+                next_project_content_generation: 1,
+                prefab_content_refresh: BTreeMap::new(),
+                prefab_lanes: BTreeMap::new(),
+                extension_documents: extension_documents::EditorExtensionDocumentsHost::default(),
+                pending_document_open: None,
+                next_document_open_request: 0,
+                document_open_result: None,
+                #[cfg(test)]
+                next_document_open_gate: None,
+                project_browser: project_browser::EditorProjectBrowserHost::new(),
+                image_import,
+                source_asset_import: source_asset_import::EditorSourceAssetImportHost::default(),
+                authoring_prefab_source_observations: BTreeMap::new(),
+                #[cfg(test)]
+                reject_next_prefab_source_binding: false,
+                persistence: persistence::PersistenceState::Idle,
+                next_persistence_attempt: 0,
+                #[cfg(test)]
+                next_save_gate: None,
+                #[cfg(test)]
+                next_reopen_gate: None,
+                last_persistence_receipt: None,
+                diagnostics,
+                field_feedback: None,
+                play_result: None,
+                external_play_request: None,
+                external_play_attempt: None,
+                external_play_view: None,
+                external_play_bound_source_digest: None,
+                current_saved_source_digest: None,
+                next_external_play_attempt: 1,
+                pending_workspace_intent: None,
+                workspace_intent_result: None,
+                frame_clock: EditorFrameClock::new(),
+                published_frame: None,
+                gestures: EditorGestureController::default(),
+                last_gesture_cancellation: None,
+                authoring_runtime: unpublished
+                    .take()
+                    .expect("publication transfers the authoring owner once"),
+                authoring_retirements: Default::default(),
+                #[cfg(test)]
+                next_authoring_refresh_hook: None,
+                #[cfg(feature = "runtime-ui")]
+                authoring_images,
+                #[cfg(feature = "presentation-ui")]
+                ui_preview,
+                #[cfg(feature = "runtime-ui")]
+                ui_authoring_frame: None,
+                #[cfg(feature = "runtime-ui")]
+                ui_authoring_projection_cache: None,
+            };
+            session.publish_editor_frame(false);
+            Ok(session)
+        })();
+        publication.map_err(|error| {
+            error.with_runtime(
+                unpublished
+                    .take()
+                    .expect("a rejected publication retains the authoring owner"),
+            )
+        })
     }
 
     /// Opens the explicitly advanced in-process Editor lane compiled with project Runtime code.
@@ -1510,12 +1582,8 @@ impl EditorProjectSession {
         let manifest = project_root
             .open_file(&manifest_path)
             .map_err(|_| editor_open_error("project.editor.manifest-open-failed"))?;
-        let candidate =
-            ingest_project_manifest(&manifest, profile.as_deref()).map_err(|error| {
-                EditorProjectOpenError {
-                    diagnostics: error.diagnostics().clone(),
-                }
-            })?;
+        let candidate = ingest_project_manifest(&manifest, profile.as_deref())
+            .map_err(|error| EditorProjectOpenError::new(error.diagnostics().clone()))?;
         drop(manifest);
 
         let host_policy = runtime_host_policy_contribution(editor_runtime_bridge_definition());
@@ -1531,15 +1599,10 @@ impl EditorProjectSession {
         let host_policy = host_policy;
         let request =
             editor_play_runtime_plugins_with_recipe(&candidate, recipe, overlay, Some(host_policy));
-        let plan = resolve_project_runtime_request(&candidate, request).map_err(|error| {
-            EditorProjectOpenError {
-                diagnostics: runtime_plan_failure_report(&error),
-            }
-        })?;
+        let plan = resolve_project_runtime_request(&candidate, request)
+            .map_err(|error| EditorProjectOpenError::new(runtime_plan_failure_report(&error)))?;
         let runtime_agreement = prepare_runtime_schema_agreement(&project_root, &candidate, &plan)
-            .map_err(|error| EditorProjectOpenError {
-                diagnostics: error.diagnostics().clone(),
-            })?;
+            .map_err(|error| EditorProjectOpenError::new(error.diagnostics().clone()))?;
 
         let prefabs_path = RelativePath::new(candidate.settings().paths.prefabs.as_str())
             .map_err(|_| editor_open_error("project.editor.prefabs-path-invalid"))?;
@@ -1547,179 +1610,188 @@ impl EditorProjectSession {
             .open_directory(&prefabs_path)
             .map_err(|_| editor_open_error("project.editor.prefabs-open-failed"))?;
 
-        let loader = ProjectContentLoader::new(project_root.share()).map_err(|error| {
-            EditorProjectOpenError {
-                diagnostics: error.diagnostics().clone(),
-            }
-        })?;
+        let loader = ProjectContentLoader::new(project_root.share())
+            .map_err(|error| EditorProjectOpenError::new(error.diagnostics().clone()))?;
         let snapshot = loader
             .load_with_runtime_agreement(&candidate, &plan, runtime_agreement)
-            .map_err(|error| EditorProjectOpenError {
-                diagnostics: error.diagnostics().clone(),
-            })?;
+            .map_err(|error| EditorProjectOpenError::new(error.diagnostics().clone()))?;
         let authoring_runtime = authoring_runtime::EditorAuthoringRuntime::new(
             snapshot.clone(),
             plan.schema_validation().snapshot(),
         )
-        .map_err(|diagnostics| EditorProjectOpenError { diagnostics })?;
-        let initial_content_generation = EditorProjectContentGeneration::new(1);
-        #[cfg(feature = "runtime-ui")]
-        let authoring_images = authoring_images::EditorAuthoringImageHost::capture(
-            &authoring_runtime,
-        )
-        .map_err(|_| EditorProjectOpenError {
-            diagnostics: single_error(
-                "project.editor.authoring-image-init-failed",
-                "the Editor authoring image catalog could not be initialized",
-            ),
-        })?;
-        #[cfg(feature = "presentation-ui")]
-        let ui_preview =
-            ui_preview::EditorUiPreviewSession::new().map_err(|_error| EditorProjectOpenError {
-                diagnostics: single_error(
+        .map_err(EditorProjectOpenError::from)?;
+        let mut unpublished = Some(authoring_runtime);
+        let publication: Result<Self, EditorProjectOpenError> = (|| {
+            let authoring_runtime = unpublished
+                .as_ref()
+                .expect("the unpublished authoring owner is retained");
+            let initial_content_generation = EditorProjectContentGeneration::new(1);
+            #[cfg(feature = "runtime-ui")]
+            let authoring_images = authoring_images::EditorAuthoringImageHost::capture(
+                &authoring_runtime,
+            )
+            .map_err(|_| {
+                EditorProjectOpenError::new(single_error(
+                    "project.editor.authoring-image-init-failed",
+                    "the Editor authoring image catalog could not be initialized",
+                ))
+            })?;
+            #[cfg(feature = "presentation-ui")]
+            let ui_preview = ui_preview::EditorUiPreviewSession::new().map_err(|_error| {
+                EditorProjectOpenError::new(single_error(
                     "project.editor.ui-preview-init-failed",
                     "the Editor UI preview owner could not be initialized",
-                ),
+                ))
             })?;
-        let scenes_path = RelativePath::new(candidate.settings().paths.scenes.as_str())
-            .map_err(|_| editor_open_error("project.editor.scenes-path-invalid"))?;
-        let scenes = project_root
-            .open_directory(&scenes_path)
-            .map_err(|_| editor_open_error("project.editor.scenes-open-failed"))?;
-        let startup = candidate
-            .settings()
-            .startup
-            .default_scene
-            .as_ref()
-            .ok_or_else(|| editor_open_error("project.editor.startup-scene-missing"))?;
-        let startup_project_path: Arc<str> = Arc::from(format!(
-            "{}/{}",
-            candidate.settings().paths.scenes.as_str(),
-            startup.as_str()
-        ));
-        let opened = ScenePersistenceHost::open(
-            &scenes,
-            startup.as_str(),
-            plan.schema_validation().registry(),
-        )
-        .map_err(editor_persistence_open_error)?;
-
-        let (mut workspace, mut persistence_authority) = EditorWorkspace::new_hosted();
-        let report = workspace
-            .open_scene_session(startup.as_str(), opened.session)
-            .map_err(|error| EditorProjectOpenError {
-                diagnostics: error.report().diagnostics.clone(),
-            })?;
-        let document = report
-            .opened_document
-            .expect("opening one editor scene publishes one document identity");
-        let binding = persistence_authority.bind_opened_source_digest(
-            &mut workspace,
-            document,
-            opened.digest,
-        );
-        if !binding.applied {
-            return Err(editor_open_error(
-                "project.editor.persistence-authority-invalid",
+            let scenes_path = RelativePath::new(candidate.settings().paths.scenes.as_str())
+                .map_err(|_| editor_open_error("project.editor.scenes-path-invalid"))?;
+            let scenes = project_root
+                .open_directory(&scenes_path)
+                .map_err(|_| editor_open_error("project.editor.scenes-open-failed"))?;
+            let startup = candidate
+                .settings()
+                .startup
+                .default_scene
+                .as_ref()
+                .ok_or_else(|| editor_open_error("project.editor.startup-scene-missing"))?;
+            let startup_project_path: Arc<str> = Arc::from(format!(
+                "{}/{}",
+                candidate.settings().paths.scenes.as_str(),
+                startup.as_str()
             ));
-        }
+            let opened = ScenePersistenceHost::open(
+                &scenes,
+                startup.as_str(),
+                plan.schema_validation().registry(),
+            )
+            .map_err(editor_persistence_open_error)?;
 
-        let mut diagnostics = runtime_plan_selected_report(&plan);
-        let _ = diagnostics.extend(report.diagnostics);
-        let mut session = Self {
-            closing: false,
-            workspace,
-            persistence_authority,
-            scene_lanes: BTreeMap::from([(
+            let (mut workspace, mut persistence_authority) = EditorWorkspace::new_hosted();
+            let report = workspace
+                .open_scene_session(startup.as_str(), opened.session)
+                .map_err(|error| EditorProjectOpenError::new(error.report().diagnostics.clone()))?;
+            let document = report
+                .opened_document
+                .expect("opening one editor scene publishes one document identity");
+            let binding = persistence_authority.bind_opened_source_digest(
+                &mut workspace,
                 document,
-                EditorScenePersistenceLane {
-                    project_path: startup_project_path,
-                    source_key: snapshot.selected_scene_source_key().clone(),
+                opened.digest,
+            );
+            if !binding.applied {
+                return Err(editor_open_error(
+                    "project.editor.persistence-authority-invalid",
+                ));
+            }
+
+            let mut diagnostics = runtime_plan_selected_report(&plan);
+            let _ = diagnostics.extend(report.diagnostics);
+            let mut session = Self {
+                closing: false,
+                workspace,
+                persistence_authority,
+                scene_lanes: BTreeMap::from([(
                     document,
-                    host: authoring_runtime
-                        .host_custody()
-                        .retain_scene(opened.host)
-                        .ok_or_else(|| {
-                            editor_open_error("project.editor.persistence-owner-closed")
-                        })?,
+                    EditorScenePersistenceLane {
+                        project_path: startup_project_path,
+                        source_key: snapshot.selected_scene_source_key().clone(),
+                        document,
+                        host: authoring_runtime
+                            .host_custody()
+                            .retain_scene(opened.host)
+                            .ok_or_else(|| {
+                                editor_open_error("project.editor.persistence-owner-closed")
+                            })?,
+                    },
+                )]),
+                scene_preview_document: Some(document),
+                execution: EditorExecutionLane::TrustedCompiled(Box::new(
+                    TrustedCompiledEditorLane {
+                        plan,
+                        content_candidate: candidate,
+                        content_loader: Arc::new(loader),
+                        snapshot,
+                        prefab_root,
+                        #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                        game_view_config,
+                        runtime_host: ProjectHost::new(cleanup_policy),
+                        runtime_owner: EditorRuntimeOwnerState::Empty,
+                        pending_control: None,
+                        reported_close_failure_generation: None,
+                        #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                        pending_step_presentation: None,
+                        runtime_edit_result: None,
+                        #[cfg(test)]
+                        fault_after_next_runtime_edit: false,
+                        pending_apply_changes: None,
+                        apply_changes_result: None,
+                    },
+                )),
+                project_content: EditorProjectContentView::Current {
+                    generation: initial_content_generation,
                 },
-            )]),
-            scene_preview_document: Some(document),
-            execution: EditorExecutionLane::TrustedCompiled(Box::new(TrustedCompiledEditorLane {
-                plan,
-                content_candidate: candidate,
-                content_loader: Arc::new(loader),
-                snapshot,
-                prefab_root,
-                #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-                game_view_config,
-                runtime_host: ProjectHost::new(cleanup_policy),
-                runtime_owner: EditorRuntimeOwnerState::Empty,
-                pending_control: None,
-                reported_close_failure_generation: None,
-                #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-                pending_step_presentation: None,
-                runtime_edit_result: None,
+                next_project_content_generation: 2,
+                prefab_content_refresh: BTreeMap::new(),
+                prefab_lanes: BTreeMap::new(),
+                extension_documents: extension_documents::EditorExtensionDocumentsHost::default(),
+                pending_document_open: None,
+                next_document_open_request: 0,
+                document_open_result: None,
                 #[cfg(test)]
-                fault_after_next_runtime_edit: false,
-                pending_apply_changes: None,
-                apply_changes_result: None,
-            })),
-            project_content: EditorProjectContentView::Current {
-                generation: initial_content_generation,
-            },
-            next_project_content_generation: 2,
-            prefab_content_refresh: BTreeMap::new(),
-            prefab_lanes: BTreeMap::new(),
-            extension_documents: extension_documents::EditorExtensionDocumentsHost::default(),
-            pending_document_open: None,
-            next_document_open_request: 0,
-            document_open_result: None,
-            #[cfg(test)]
-            next_document_open_gate: None,
-            project_browser: project_browser::EditorProjectBrowserHost::new(),
-            image_import: image_import::EditorImageImportHost::default(),
-            source_asset_import: source_asset_import::EditorSourceAssetImportHost::default(),
-            authoring_prefab_source_observations: BTreeMap::new(),
-            #[cfg(test)]
-            reject_next_prefab_source_binding: false,
-            persistence: persistence::PersistenceState::Idle,
-            next_persistence_attempt: 0,
-            #[cfg(test)]
-            next_save_gate: None,
-            #[cfg(test)]
-            next_reopen_gate: None,
-            last_persistence_receipt: None,
-            diagnostics,
-            field_feedback: None,
-            play_result: None,
-            external_play_request: None,
-            external_play_attempt: None,
-            external_play_view: None,
-            external_play_bound_source_digest: None,
-            current_saved_source_digest: None,
-            next_external_play_attempt: 1,
-            pending_workspace_intent: None,
-            workspace_intent_result: None,
-            frame_clock: EditorFrameClock::new(),
-            published_frame: None,
-            gestures: EditorGestureController::default(),
-            last_gesture_cancellation: None,
-            authoring_runtime,
-            authoring_retirements: Default::default(),
-            #[cfg(test)]
-            next_authoring_refresh_hook: None,
-            #[cfg(feature = "runtime-ui")]
-            authoring_images,
-            #[cfg(feature = "presentation-ui")]
-            ui_preview,
-            #[cfg(feature = "runtime-ui")]
-            ui_authoring_frame: None,
-            #[cfg(feature = "runtime-ui")]
-            ui_authoring_projection_cache: None,
-        };
-        session.publish_editor_frame(false);
-        Ok(session)
+                next_document_open_gate: None,
+                project_browser: project_browser::EditorProjectBrowserHost::new(),
+                image_import: image_import::EditorImageImportHost::default(),
+                source_asset_import: source_asset_import::EditorSourceAssetImportHost::default(),
+                authoring_prefab_source_observations: BTreeMap::new(),
+                #[cfg(test)]
+                reject_next_prefab_source_binding: false,
+                persistence: persistence::PersistenceState::Idle,
+                next_persistence_attempt: 0,
+                #[cfg(test)]
+                next_save_gate: None,
+                #[cfg(test)]
+                next_reopen_gate: None,
+                last_persistence_receipt: None,
+                diagnostics,
+                field_feedback: None,
+                play_result: None,
+                external_play_request: None,
+                external_play_attempt: None,
+                external_play_view: None,
+                external_play_bound_source_digest: None,
+                current_saved_source_digest: None,
+                next_external_play_attempt: 1,
+                pending_workspace_intent: None,
+                workspace_intent_result: None,
+                frame_clock: EditorFrameClock::new(),
+                published_frame: None,
+                gestures: EditorGestureController::default(),
+                last_gesture_cancellation: None,
+                authoring_runtime: unpublished
+                    .take()
+                    .expect("publication transfers the authoring owner once"),
+                authoring_retirements: Default::default(),
+                #[cfg(test)]
+                next_authoring_refresh_hook: None,
+                #[cfg(feature = "runtime-ui")]
+                authoring_images,
+                #[cfg(feature = "presentation-ui")]
+                ui_preview,
+                #[cfg(feature = "runtime-ui")]
+                ui_authoring_frame: None,
+                #[cfg(feature = "runtime-ui")]
+                ui_authoring_projection_cache: None,
+            };
+            session.publish_editor_frame(false);
+            Ok(session)
+        })();
+        publication.map_err(|error| {
+            error.with_runtime(
+                unpublished
+                    .take()
+                    .expect("a rejected publication retains the authoring owner"),
+            )
+        })
     }
 
     #[cfg(feature = "presentation-2d")]
@@ -3129,9 +3201,7 @@ impl EditorProjectSession {
 }
 
 fn editor_open_error(code: &'static str) -> EditorProjectOpenError {
-    EditorProjectOpenError {
-        diagnostics: single_error(code, "Editor project could not be opened"),
-    }
+    EditorProjectOpenError::new(single_error(code, "Editor project could not be opened"))
 }
 
 fn editor_persistence_open_error(stage: EditorPersistenceFailureStage) -> EditorProjectOpenError {

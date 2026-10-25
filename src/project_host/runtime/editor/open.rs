@@ -39,16 +39,33 @@ pub enum EditorProjectOpenFailureImpact {
 }
 
 #[derive(Debug)]
+#[must_use = "a rejected Open can retain cleanup independently of publication"]
 pub struct EditorProjectOpenFailure {
     phase: EditorProjectOpenPhase,
     source: EditorProjectOpenFailureSource,
     relative_source: Option<Arc<str>>,
     impact: EditorProjectOpenFailureImpact,
     repair_hint: &'static str,
-    diagnostics: DiagnosticReport,
+    error: EditorProjectOpenError,
 }
 
 impl EditorProjectOpenFailure {
+    /// Publication refusal and physical retirement are independent observations.
+    #[must_use]
+    pub fn retirement_state(&self) -> nara_app::RuntimeCandidateRetirementState {
+        self.error.retirement_state()
+    }
+
+    #[must_use]
+    pub fn close_evidence(&self) -> Option<&nara_app::RuntimeCloseEvidence> {
+        self.error.close_evidence()
+    }
+
+    /// Advances cleanup once on the failed App's construction thread.
+    pub fn advance_retirement(&mut self) -> nara_app::RuntimeCandidateRetirementState {
+        self.error.advance_retirement()
+    }
+
     #[must_use]
     pub const fn phase(&self) -> EditorProjectOpenPhase {
         self.phase
@@ -76,7 +93,7 @@ impl EditorProjectOpenFailure {
 
     #[must_use]
     pub const fn diagnostics(&self) -> &DiagnosticReport {
-        &self.diagnostics
+        self.error.diagnostics()
     }
 }
 
@@ -90,6 +107,9 @@ pub struct EditorProjectOpenHost {
     admission: AuthoringProjectAdmissionHost,
     preparation: StartupPreparationHost,
     source_asset_importers: super::EditorSourceAssetImporters,
+    #[cfg(test)]
+    pub(in crate::project_host::runtime::editor) next_authoring_publication_hook:
+        Option<Box<dyn FnOnce(&super::authoring_runtime::EditorAuthoringRuntime)>>,
 }
 
 impl EditorProjectOpenHost {
@@ -200,7 +220,11 @@ impl EditorProjectOpenHost {
                 }
             }
             EditorProjectOpenAttemptState::SessionPublication(receipt) => {
-                match EditorProjectSession::open(receipt) {
+                match EditorProjectSession::open(
+                    receipt,
+                    #[cfg(test)]
+                    self.next_authoring_publication_hook.take(),
+                ) {
                     Ok(mut session) => {
                         session.source_asset_import.importers = self.source_asset_importers.clone();
                         EditorProjectOpenProgress::Opened(session)
@@ -408,13 +432,14 @@ fn startup_worker_failure() -> EditorProjectOpenFailure {
 }
 
 fn session_failure(error: EditorProjectOpenError) -> EditorProjectOpenFailure {
-    failure(
-        EditorProjectOpenPhase::SessionPublication,
-        EditorProjectOpenFailureSource::SessionPublication,
-        None,
-        "Repair the source authority conflict and retry; no candidate session was published.",
-        error.into_diagnostics(),
-    )
+    EditorProjectOpenFailure {
+        phase: EditorProjectOpenPhase::SessionPublication,
+        source: EditorProjectOpenFailureSource::SessionPublication,
+        relative_source: None,
+        impact: EditorProjectOpenFailureImpact::CandidateNotPublished,
+        repair_hint: "Repair the source authority conflict and retry; no candidate session was published.",
+        error,
+    }
 }
 
 fn source_directory_name(kind: AuthoringSourceKind) -> Option<&'static str> {
@@ -438,6 +463,6 @@ fn failure(
         relative_source: relative_source.map(Arc::from),
         impact: EditorProjectOpenFailureImpact::CandidateNotPublished,
         repair_hint,
-        diagnostics,
+        error: EditorProjectOpenError::new(diagnostics),
     }
 }

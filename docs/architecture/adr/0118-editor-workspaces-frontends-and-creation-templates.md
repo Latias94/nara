@@ -268,6 +268,27 @@ and the final close receipt. Dropping an incomplete Session still uses quarantin
 safety fallback, not normal-completion evidence. Initial App/Open construction failure and the
 selected lazy product deployment retain their separately required qualification.
 
+Initial authoring configuration, admission and Startup failures preserve their concrete App or
+candidate retirement owner. A complete Runtime created before Session publication stays retained
+when later image/UI, source binding or Workspace publication rejects. Open error/failure objects
+carry both diagnostic observation and owner-thread cleanup progress; consuming only diagnostics
+cannot certify cleanup or discard that responsibility.
+
+Application holds one failed-Open owner independently of Recovery presentation, project-manager
+navigation or the incumbent project. While it remains Pending, Retry and new candidate construction
+are unavailable, maintenance continues without a presentation cadence, and process Exit waits for
+physical completion. A rejected replacement keeps the incumbent usable. A later process Exit
+upgrades an earlier Close Project request while retaining its cleanup, including when the incumbent
+is already physically closed and only failed-Open custody delays its removal. Completed cleanup preserves
+the first terminal close-failure evidence separately from the original Open diagnostic. The
+frontend displays that sticky failure and the native runner includes it in its final error result,
+preserving any earlier primary error and independently observed graphics cleanup errors. A later
+clean retirement cannot turn that result into successful shutdown. The
+transportable startup-closure preparation attempt does not acquire thread-bound Runtime custody.
+Trusted synchronous Open likewise returns failed custody to its caller rather than collapsing it
+into a diagnostic-only application error. These initial-failure paths need their own tests/native
+qualification; retained refresh evidence alone cannot establish them.
+
 Project Open separates transportable startup-closure preparation from session publication. Its
 linear attempt owns the exact project/schema capabilities, budgets and prepared result. Background
 reads, decode, dependency traversal and pure schema classification may remain pending across

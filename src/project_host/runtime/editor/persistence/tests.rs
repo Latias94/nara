@@ -16,6 +16,7 @@ use super::*;
 
 mod attempts;
 mod content_refresh;
+mod initial_open;
 #[cfg(feature = "presentation-2d")]
 mod preview_epoch;
 
@@ -105,7 +106,7 @@ impl Fixture {
             .admit_startup_closure()
             .unwrap()
             .publish();
-        let mut editor = EditorProjectSession::open(receipt).unwrap();
+        let mut editor = EditorProjectSession::open(receipt, None).unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         while editor.project_source_index_work_pending() {
             editor.drive_editor_frame(Duration::ZERO);

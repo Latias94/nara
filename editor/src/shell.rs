@@ -260,7 +260,7 @@ impl RecoveryState {
         entry_generation: u64,
         attempt_generation: u64,
         request: EditorProjectRequest,
-        failure: EditorProjectOpenFailure,
+        failure: &EditorProjectOpenFailure,
     ) -> Self {
         let phase = open_phase_label(failure.phase()).to_owned();
         let relative_source = failure.relative_source().map(str::to_owned);
@@ -420,6 +420,7 @@ pub(crate) enum EditorProjectShellModel<'a> {
     ProjectManager {
         entry_generation: u64,
         suggested_request: &'a EditorProjectRequest,
+        open_available: bool,
     },
     Opening {
         entry_generation: u64,
@@ -434,6 +435,7 @@ pub(crate) enum EditorProjectShellModel<'a> {
         attempt_generation: u64,
         request: &'a EditorProjectRequest,
         diagnostics: &'a [RecoveryDiagnostic],
+        retry_available: bool,
     },
 }
 

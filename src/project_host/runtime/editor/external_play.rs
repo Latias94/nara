@@ -699,6 +699,9 @@ fn external_command_allowed(state: EditorExternalPlayState, command: EditorPlayC
     }
 }
 
+#[cfg(all(test, any(windows, all(target_os = "linux", target_arch = "x86_64"))))]
+mod source_fact_tests;
+
 #[cfg(test)]
 mod tests {
     use nara_project::ProjectPath;

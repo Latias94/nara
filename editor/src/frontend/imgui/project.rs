@@ -62,6 +62,7 @@ impl ImguiProjectPanels {
             EditorProjectShellModel::ProjectManager {
                 entry_generation,
                 suggested_request,
+                open_available,
             } => {
                 let focus = self.synchronize_manager(
                     entry_generation,
@@ -74,7 +75,11 @@ impl ImguiProjectPanels {
                 ui.text("Project Manager");
                 ui.text_wrapped("Open an existing Nara project without loading project code.");
                 self.show_open_fields(ui, focus, text_owner);
-                if shell_button(ui, "Open Project") {
+                let open = {
+                    let _disabled = ui.begin_disabled_with_cond(!open_available);
+                    shell_button(ui, "Open Project")
+                };
+                if open {
                     return Some(EditorProjectShellAction::OpenProject {
                         project_root: PathBuf::from(self.project_path.trim()),
                         profile: Some(self.profile.clone()),
@@ -110,6 +115,7 @@ impl ImguiProjectPanels {
                 attempt_generation,
                 request,
                 diagnostics,
+                retry_available,
                 ..
             } => {
                 ui.text("Project recovery");
@@ -140,7 +146,11 @@ impl ImguiProjectPanels {
                             ui.text_wrapped(&diagnostic.repair_hint);
                         }
                     });
-                if shell_button(ui, "Retry") {
+                let retry = {
+                    let _disabled = ui.begin_disabled_with_cond(!retry_available);
+                    shell_button(ui, "Retry")
+                };
+                if retry {
                     return Some(EditorProjectShellAction::Retry);
                 }
                 ui.same_line();

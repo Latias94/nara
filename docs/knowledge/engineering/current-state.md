@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "5552d5c201f6c04d5b4ed111e9b684eebdf0bb48c2e112ae09c92d3b6d54f847"
+source_fingerprint: "9052795c0a161ce81757f070fb255c7b19fec351aab991f4b525c7ea8be7ceb7"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "5552d5c201f6c04d5b4ed111e9b684eebdf0bb48c2e112ae09c92d3b6d5
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `5552d5c201f6c04d5b4ed111e9b684eebdf0bb48c2e112ae09c92d3b6d54f847`
-- Immutable records: 926
+- Source fingerprint: `9052795c0a161ce81757f070fb255c7b19fec351aab991f4b525c7ea8be7ceb7`
+- Immutable records: 929
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,9 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Native document metadata in supervised Play source closure facts](verification/2026-10/2026-10-25T194117Z-native-document-metadata-in-supervised-play-source-closure-facts-0fb93990d7d44da9a8111b48f82aee59.md) - Records the actual generated-starter handshake refusal, its source-fact owner correction and matched Editor/Runtime metadata-closure regression evidence.
+- **Verification Evidence**: [Initial authoring construction and failed Open physical custody qualification](verification/2026-10/2026-10-25T191539Z-initial-authoring-construction-and-failed-open-physical-custody-qualification-ad41f2c430ac4e56bdaf88fbb457f1cd.md) - Binds initial App and failed Session publication custody to actual owner, public Open, Application and selected native evidence, with explicit remaining deployment limits.
+- **Session Handoff**: [Authoring retirement merged and initial construction custody design in progress](sessions/2026-10/2026-10-25T181535Z-authoring-retirement-merged-and-initial-construction-custody-design-in-progress-e1574e61206a4dc885356b44896703b0.md) - Pins the verified retained authoring unit to main and preserves the next raw App versus planned candidate design question without claiming initial Open custody or full R4b complete.
 - **Verification Evidence**: [Retained authoring replacement and physical retirement qualification](verification/2026-10/2026-10-25T172648Z-retained-authoring-replacement-and-physical-retirement-qualification-f93efd28e9324ff4accf45fc3d38311c.md) - Bounded predecessor and rejected candidate custody, exact file Host transfer, sticky disjoint completion and affected Editor maintenance evidence.
 - **Session Handoff**: [Demand activation merged with measured task isolation direction](sessions/2026-10/2026-10-25T164658Z-demand-activation-merged-with-measured-task-isolation-direction-b4f47bf5eb9346d092120ce798f90f90.md) - Pins the qualified lazy/shared comparison and local source commit, records the next concrete Editor deployment and retirement obligations, and preserves the full foundation Goal.
 - **Verification Evidence**: [Demand activation custody and matched lazy shared Image comparison](verification/2026-10/2026-10-25T164306Z-demand-activation-custody-and-matched-lazy-shared-image-comparison-c5d3a638a3884807b489a85f0b7b0b1a.md) - Qualifies lazy per-kind workers, concurrent physical retirement, actual joined retention and a matched release Image comparison that challenges unconditional physical sharing.
@@ -78,9 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Retained Editor native graphics retirement and physical completion qualification](verification/2026-10/2026-10-25T145420Z-retained-editor-native-graphics-retirement-and-physical-completion-qualification-2665523023e84aba979458cba3f2affc.md) - Records exact GPU drain custody, partial construction return, phased native retirement, exit decision continuity and scoped Windows DX12 evidence; full foundation and remaining R4 work stay open.
 - **Verification Evidence**: [Owner-local close custody and bounded completion dependency comparison](verification/2026-10/2026-10-25T135422Z-owner-local-close-custody-and-bounded-completion-dependency-comparison-3a6ad83ba4f649ec973982d9de3a0ec9.md) - Qualifies local Rust close owners, exact registration custody and typed dependent release through public Runtime consumers; actual native graphics integration remains open.
 - **Session Handoff**: [Finite child Snap committed and native close dependency proof prepared](sessions/2026-10/2026-10-25T123619Z-finite-child-snap-committed-and-native-close-dependency-proof-prepared-620c8f2fd359440abdf7733d70a33816.md) - Commits the qualified real child proposal unit; records R4a source pressure and an uncompiled public probe as the next lower-level comparison, with full foundation scope active.
-- **Verification Evidence**: [Finite child Snap proposal and physical custody qualification](verification/2026-10/2026-10-25T122634Z-finite-child-snap-proposal-and-physical-custody-qualification-ce23b00e49cc4a758017b5a2eba63913.md) - Qualifies the opt-in real child proposal through the existing source owner after error-fact regressions, complete review and controlled Reopen proof correction; broader R1 and R1b remain open.
-- **Verification Evidence**: [Source local Snap public consumer and installer qualification](verification/2026-10/2026-10-25T112059Z-source-local-snap-public-consumer-and-installer-qualification-f89f21479f7d4c06a81ab5bc63b5ff87.md) - Qualifies the source-built R1 Snap planner, exact panel candidate and independent inactive Session workflow after complete review and direct installer proof correction; child tools and full R1 remain open.
-- **Session Handoff**: [Compiled failure projection committed and real Snap consumer initially passing](sessions/2026-10/2026-10-25T103839Z-compiled-failure-projection-committed-and-real-snap-consumer-initially-passing-b98096de3c6149249a0389e9faacb5d5.md) - R1/F2 and F3 are locally committed with scoped qualification; three uncommitted Snap consumer files pass five focused workflows and still need review, broader checks and a precise commit.
 
 # Integration Notes
 

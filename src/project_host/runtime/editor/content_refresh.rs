@@ -280,12 +280,14 @@ impl EditorProjectSession {
             .rebuild_for_project(successor.clone(), &preview_registry)
         {
             Ok(runtime) => runtime,
-            Err(report) => {
+            Err(failure) => {
+                self.authoring_retirements.retain(failure.retirement);
+                self.advance_authoring_retirement();
                 self.reject_project_content_refresh(
                     request,
                     EditorProjectContentRefreshFailure::PreviewRejected,
                 );
-                let _ = self.diagnostics.extend(report);
+                let _ = self.diagnostics.extend(failure.diagnostics);
                 return;
             }
         };

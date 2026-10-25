@@ -1,112 +1,10 @@
 use super::*;
 use crate::project_content::ProjectContentRevision;
-use crate::project_host::runtime::editor::authoring_runtime::EditorAuthoringRuntime;
-use nara_tasks::{
-    TaskDomainKey, TaskHandle, TaskPoolKind, TaskReturnObserver, TaskReturnState, TaskSpawnRequest,
-    TaskTerminal,
-};
+use crate::project_host::runtime::editor::test_fixtures::HeldCompute;
+use nara_tasks::{TaskPoolKind, TaskReturnState, TaskTerminal};
 use std::sync::mpsc;
 
 const WAIT: Duration = Duration::from_secs(5);
-const HOLD: Duration = Duration::from_secs(30);
-
-struct HeldDrop {
-    started: mpsc::Sender<()>,
-    release: mpsc::Receiver<()>,
-}
-
-impl Drop for HeldDrop {
-    fn drop(&mut self) {
-        let _ = self.started.send(());
-        self.release
-            .recv_timeout(HOLD)
-            .expect("release late result");
-    }
-}
-
-struct HeldCompute {
-    release: Option<mpsc::Sender<()>>,
-    release_drop: Option<mpsc::Sender<()>>,
-    dropping: mpsc::Receiver<()>,
-    handle: TaskHandle<HeldDrop>,
-    returned: TaskReturnObserver,
-}
-
-impl HeldCompute {
-    fn start(
-        runtime: &EditorAuthoringRuntime,
-        after_release: impl FnOnce() + Send + 'static,
-    ) -> Self {
-        let (started_tx, started_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let (dropping_tx, dropping_rx) = mpsc::channel();
-        let (release_drop_tx, release_drop_rx) = mpsc::channel();
-        let handle = runtime
-            .persistence_tasks()
-            .spawn(
-                TaskPoolKind::Compute,
-                TaskSpawnRequest::new(0, TaskDomainKey::new(1)),
-                move |_| {
-                    let _ = started_tx.send(());
-                    release_rx.recv_timeout(HOLD).expect("release Compute body");
-                    after_release();
-                    HeldDrop {
-                        started: dropping_tx,
-                        release: release_drop_rx,
-                    }
-                },
-            )
-            .into_handle()
-            .expect("the authoring Runtime must admit the held Compute task");
-        let returned = handle.return_observer();
-        let held = Self {
-            release: Some(release_tx),
-            release_drop: Some(release_drop_tx),
-            dropping: dropping_rx,
-            handle,
-            returned,
-        };
-        started_rx.recv_timeout(WAIT).expect("Compute must start");
-        assert_eq!(held.returned.state(), TaskReturnState::Pending);
-        held
-    }
-
-    fn release(&mut self) {
-        for release in [&mut self.release, &mut self.release_drop] {
-            if let Some(release) = release.take() {
-                let _ = release.send(());
-            }
-        }
-    }
-
-    fn release_body_until_drop(&mut self) {
-        if let Some(release) = self.release.take() {
-            let _ = release.send(());
-        }
-        self.dropping
-            .recv_timeout(WAIT)
-            .expect("the cancelled task must dispose its late result");
-        assert!(self.handle.is_finished());
-        assert_eq!(self.returned.state(), TaskReturnState::Pending);
-    }
-
-    fn release_and_wait(&mut self, expected: TaskReturnState) {
-        self.release();
-        let deadline = Instant::now() + WAIT;
-        while self.returned.state() == TaskReturnState::Pending {
-            assert!(Instant::now() < deadline, "the Compute task did not return");
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        assert_eq!(self.returned.state(), expected);
-        assert!(self.handle.is_finished());
-    }
-}
-
-impl Drop for HeldCompute {
-    fn drop(&mut self) {
-        self.release();
-    }
-}
 
 fn settle_authoring_retirement(editor: &mut EditorProjectSession) {
     let deadline = Instant::now() + WAIT;
@@ -170,7 +68,8 @@ fn successful_prefab_refresh_retains_predecessor_and_gates_the_next_saved_genera
     let (mut editor, [p, q]) = fixture.two_prefabs();
     let original = content_identity(&editor);
     let original_custody = editor.authoring_runtime.host_custody().clone();
-    let mut predecessor = HeldCompute::start(&editor.authoring_runtime, || {});
+    let mut predecessor = HeldCompute::start(editor.authoring_runtime.persistence_tasks(), || {});
+    assert_eq!(predecessor.returned.state(), TaskReturnState::Pending);
 
     save_entity(&mut editor, p, "first-p");
     editor.advance_project_content_refresh();
@@ -217,6 +116,8 @@ fn successful_prefab_refresh_retains_predecessor_and_gates_the_next_saved_genera
     for late_result in [false, true] {
         if late_result {
             predecessor.release_body_until_drop();
+            assert!(predecessor.handle.is_finished());
+            assert_eq!(predecessor.returned.state(), TaskReturnState::Pending);
         }
         for _ in 0..4 {
             let frame = editor.drive_editor_frame(Duration::ZERO);
@@ -238,7 +139,8 @@ fn successful_prefab_refresh_retains_predecessor_and_gates_the_next_saved_genera
             .publish_editor_frame(false)
             .authoring_retirement_pending()
     );
-    let mut successor = HeldCompute::start(&editor.authoring_runtime, || {});
+    let mut successor = HeldCompute::start(editor.authoring_runtime.persistence_tasks(), || {});
+    assert_eq!(successor.returned.state(), TaskReturnState::Pending);
     editor.advance_project_content_refresh();
     assert!(editor.project_content.is_current());
     let second = content_identity(&editor);
@@ -247,6 +149,8 @@ fn successful_prefab_refresh_retains_predecessor_and_gates_the_next_saved_genera
     assert!(editor.next_authoring_refresh_hook.is_none());
     successor.handle.cancel();
     successor.release_body_until_drop();
+    assert!(successor.handle.is_finished());
+    assert_eq!(successor.returned.state(), TaskReturnState::Pending);
     for _ in 0..4 {
         assert!(matches!(
             editor.advance_close(),
@@ -269,7 +173,7 @@ fn rejected_started_prefab_candidate_remains_owned_and_blocks_session_close_unti
     editor.next_authoring_refresh_hook = Some(Box::new(move |runtime| {
         assert!(
             candidate_tx
-                .send(HeldCompute::start(runtime, || {}))
+                .send(HeldCompute::start(runtime.persistence_tasks(), || {}))
                 .is_ok()
         );
     }));
@@ -280,6 +184,7 @@ fn rejected_started_prefab_candidate_remains_owned_and_blocks_session_close_unti
     let mut candidate = candidate_rx
         .recv_timeout(WAIT)
         .expect("capacity rejection must happen after the candidate Runtime starts");
+    assert_eq!(candidate.returned.state(), TaskReturnState::Pending);
     assert!(matches!(
         editor.project_content,
         EditorProjectContentView::Stale {
@@ -302,6 +207,8 @@ fn rejected_started_prefab_candidate_remains_owned_and_blocks_session_close_unti
         Some(TaskTerminal::Cancelled(_))
     ));
     candidate.release_body_until_drop();
+    assert!(candidate.handle.is_finished());
+    assert_eq!(candidate.returned.state(), TaskReturnState::Pending);
     for _ in 0..4 {
         let progress = editor.advance_close();
         assert!(matches!(
@@ -327,7 +234,7 @@ fn final_custody_refusal_preserves_incumbent_catalog_and_save_reopen_through_can
     let original_images = editor.editor_authoring_image_catalog_facts();
     let (candidate_tx, candidate_rx) = mpsc::channel();
     editor.next_authoring_refresh_hook = Some(Box::new(move |runtime| {
-        let held = HeldCompute::start(runtime, || {});
+        let held = HeldCompute::start(runtime.persistence_tasks(), || {});
         runtime.host_custody().close_admission();
         assert!(candidate_tx.send(held).is_ok());
     }));
@@ -337,6 +244,7 @@ fn final_custody_refusal_preserves_incumbent_catalog_and_save_reopen_through_can
     let mut candidate = candidate_rx
         .recv_timeout(WAIT)
         .expect("candidate must start");
+    assert_eq!(candidate.returned.state(), TaskReturnState::Pending);
     assert!(matches!(
         editor.project_content,
         EditorProjectContentView::Stale {
@@ -358,6 +266,8 @@ fn final_custody_refusal_preserves_incumbent_catalog_and_save_reopen_through_can
         Some(TaskTerminal::Cancelled(_))
     ));
     candidate.release_body_until_drop();
+    assert!(candidate.handle.is_finished());
+    assert_eq!(candidate.returned.state(), TaskReturnState::Pending);
     save_entity(&mut editor, q, "saved-q");
     edit(&mut editor, q, "unsaved-q");
     assert!(matches!(
@@ -419,7 +329,7 @@ fn retired_predecessor_or_candidate_cleanup_failure_survives_slot_reuse_and_fina
             editor.next_authoring_refresh_hook = Some(Box::new(move |runtime| {
                 assert!(
                     candidate_tx
-                        .send(HeldCompute::start(runtime, || {
+                        .send(HeldCompute::start(runtime.persistence_tasks(), || {
                             panic!("intentional retired candidate task panic");
                         }))
                         .is_ok()
@@ -427,9 +337,12 @@ fn retired_predecessor_or_candidate_cleanup_failure_survives_slot_reuse_and_fina
             }));
             None
         } else {
-            Some(HeldCompute::start(&editor.authoring_runtime, || {
-                panic!("intentional retired predecessor task panic");
-            }))
+            Some(HeldCompute::start(
+                editor.authoring_runtime.persistence_tasks(),
+                || {
+                    panic!("intentional retired predecessor task panic");
+                },
+            ))
         };
 
         save_entity(&mut editor, p, "failure-p");

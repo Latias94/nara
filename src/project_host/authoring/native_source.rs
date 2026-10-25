@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use nara_asset::{AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath, AssetSourceKind};
 use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity, RelativePath};
 use nara_project::{
@@ -6,7 +8,12 @@ use nara_project::{
 use nara_scene::{SourceDocumentKey, SourceDocumentKind};
 
 use super::document::AuthoringDocumentAdmissionError;
-use super::{AuthoringProjectAdmissionBudget, project::AuthoringProjectSourceAdmissionError};
+use super::{
+    AuthoringProjectAdmissionBudget,
+    project::{
+        AuthoringProjectSourceAdmissionError, AuthoringSourceFact, source_fact_retained_bytes,
+    },
+};
 
 #[derive(Clone)]
 pub(crate) struct NativeDocumentSourcePolicy {
@@ -38,6 +45,7 @@ impl NativeDocumentSourcePolicy {
             None,
             kind,
             expected_identity,
+            0,
             AssetMetaFileLimits::default().encoded_bytes().get(),
         )
     }
@@ -58,6 +66,7 @@ impl NativeDocumentSourcePolicy {
             Some(logical_path),
             kind,
             expected_identity,
+            0,
             AssetMetaFileLimits::default().encoded_bytes().get(),
         )
     }
@@ -68,6 +77,7 @@ impl NativeDocumentSourcePolicy {
         path: &str,
         kind: SourceDocumentKind,
         expected_identity: FileIdentity,
+        dependency_depth: usize,
         retained_native_handles: usize,
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<AdmittedNativeDocumentSource, AuthoringProjectSourceAdmissionError> {
@@ -85,7 +95,11 @@ impl NativeDocumentSourcePolicy {
         budget.admit_handle_peak(handle_peak)?;
         let (metadata_limit, aggregate_limited) = if stable {
             budget.charge_open_file(handle_peak)?;
-            budget.charge_reference(path.len().saturating_add(".meta".len()), 0, false)?;
+            budget.charge_reference(
+                path.len().saturating_add(".meta".len()),
+                dependency_depth,
+                false,
+            )?;
             budget.read_limit(AssetMetaFileLimits::default().encoded_bytes().get())?
         } else {
             (0, false)
@@ -97,6 +111,9 @@ impl NativeDocumentSourcePolicy {
                     .components()
                     .saturating_mul(std::mem::size_of::<nara_fs::RelativeComponent>())
                     .saturating_add(path.len().saturating_add(".meta".len()).saturating_mul(2))
+                    .saturating_add(std::mem::size_of::<AuthoringSourceFact>())
+                    .saturating_add(std::mem::size_of::<Arc<AuthoringSourceFact>>())
+                    .saturating_add(path.len().saturating_add(".meta".len()))
             } else {
                 path.len().saturating_add(2 * std::mem::size_of::<usize>())
             });
@@ -117,6 +134,7 @@ impl NativeDocumentSourcePolicy {
                 None,
                 kind,
                 expected_identity,
+                dependency_depth,
                 metadata_limit,
             )
             .map_err(|error| match error {
@@ -140,7 +158,7 @@ impl NativeDocumentSourcePolicy {
         let encoded_bytes = admitted
             .metadata
             .as_ref()
-            .map_or(0, |metadata| metadata.encoded_bytes);
+            .map_or(0, |metadata| metadata.source.encoded_bytes());
         let retained_bytes = admitted
             .retained_bytes()
             .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
@@ -157,6 +175,7 @@ impl NativeDocumentSourcePolicy {
         declaration_path: Option<&str>,
         kind: SourceDocumentKind,
         expected_identity: FileIdentity,
+        dependency_depth: usize,
         metadata_limit: usize,
     ) -> Result<AdmittedNativeDocumentSource, AuthoringDocumentAdmissionError> {
         let relative =
@@ -226,9 +245,15 @@ impl NativeDocumentSourcePolicy {
             source_identity: file.identity(),
             metadata: Some(NativeMetadataObservation {
                 path: metadata_path,
-                identity: metadata_file.identity(),
-                digest,
-                encoded_bytes,
+                source: Arc::new(AuthoringSourceFact::native_metadata(
+                    ProjectPath::new(format!("{path}.meta"))
+                        .map_err(AuthoringDocumentAdmissionError::ProjectPath)?,
+                    metadata_file.identity(),
+                    metadata_file.parent_identity(),
+                    digest,
+                    encoded_bytes,
+                    dependency_depth,
+                )),
             }),
         })
     }
@@ -244,9 +269,7 @@ pub(crate) struct AdmittedNativeDocumentSource {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct NativeMetadataObservation {
     path: RelativePath,
-    identity: FileIdentity,
-    digest: ContentDigest,
-    encoded_bytes: usize,
+    source: Arc<AuthoringSourceFact>,
 }
 
 impl AdmittedNativeDocumentSource {
@@ -258,9 +281,14 @@ impl AdmittedNativeDocumentSource {
         self.source_identity
     }
 
+    pub(super) fn metadata_source(&self) -> Option<&Arc<AuthoringSourceFact>> {
+        self.metadata.as_ref().map(|metadata| &metadata.source)
+    }
+
     pub(crate) fn retained_bytes(&self) -> Option<usize> {
         let mut bytes = std::mem::size_of::<Self>().checked_add(self.key.retained_bytes())?;
         if let Some(metadata) = &self.metadata {
+            bytes = bytes.checked_add(source_fact_retained_bytes(&metadata.source).ok()?)?;
             for component in metadata.path.components() {
                 let spelling = component.to_str()?;
                 bytes = bytes
@@ -286,8 +314,8 @@ impl AdmittedNativeDocumentSource {
         let bytes = file
             .read_to_end_bounded(AssetMetaFileLimits::default().encoded_bytes().get() as u64)
             .map_err(AuthoringDocumentAdmissionError::ReadSource)?;
-        if file.identity() != observed.identity
-            || ContentDigest::of_bytes(&bytes) != observed.digest
+        if file.identity() != observed.source.identity()
+            || ContentDigest::of_bytes(&bytes) != observed.source.digest()
         {
             return Err(AuthoringDocumentAdmissionError::SourceIdentityChanged);
         }

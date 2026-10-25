@@ -21,6 +21,271 @@ use super::{
     EditorSessionRetirement, OpeningReplacementState,
 };
 
+fn advance_to_session_publication(application: &mut EditorApplication) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let opening = match &application.state {
+            super::EditorProductState::OpeningInitial(opening) => opening,
+            super::EditorProductState::OpeningReplacement(OpeningReplacementState::Preparing {
+                opening,
+                ..
+            }) => opening,
+            other => panic!("Open did not reach Session publication: {other:?}"),
+        };
+        if matches!(&opening.step, super::OpeningProjectStep::Host(attempt)
+            if attempt.phase() == nara::project_host::EditorProjectOpenPhase::SessionPublication)
+        {
+            return;
+        }
+        assert!(Instant::now() < deadline, "Open did not prepare its source");
+        application.advance_project_open();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[test]
+fn failed_initial_open_retains_cleanup_across_retry_manager_and_exit() {
+    for return_to_manager in [false, true] {
+        let fixture = PersistenceFixture::new();
+        let source = fixture.root.join("worlds/entry.scene.json");
+        let original = fs::read(&source).unwrap();
+        let mut application =
+            EditorApplication::new(EditorLaunchOptions::new(&fixture.root).with_profile("desktop"));
+        application.native_shell_ready();
+        advance_to_session_publication(&mut application);
+        let mut changed = original.clone();
+        changed.extend_from_slice(b"\n");
+        fs::write(&source, changed).unwrap();
+        application.advance_project_open();
+        let rejected_state = application.state();
+        let initially_pending = application.project_open_retirement_pending();
+        let early_retry = application.retry_project_open();
+        fs::write(&source, &original).unwrap();
+        let mut exit_ready = false;
+        if return_to_manager {
+            application
+                .submit_shell_action(super::EditorProjectShellAction::ReturnToProjectManager);
+            let retained_in_manager = application.project_open_retirement_pending();
+            exit_ready = application.request_exit().exit_ready();
+            assert!(retained_in_manager);
+            assert!(!exit_ready);
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while application.project_open_retirement_pending() || return_to_manager && !exit_ready {
+            assert!(
+                Instant::now() < deadline,
+                "failed Open cleanup did not return"
+            );
+            exit_ready |= application.advance_project_open().exit_ready();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(rejected_state, EditorApplicationState::Recovery);
+        assert!(initially_pending);
+        assert!(!early_retry);
+        assert!(application.current_frame().is_none());
+        if return_to_manager {
+            assert_eq!(application.state(), EditorApplicationState::ProjectManager);
+            assert!(exit_ready);
+        } else {
+            assert!(application.retry_project_open());
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while application.current_frame().is_none() {
+                assert!(
+                    Instant::now() < deadline,
+                    "retry after physical return did not open"
+                );
+                application.advance_project_open();
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            queue_save(&mut application);
+            close(&mut application);
+        }
+    }
+}
+
+#[test]
+fn failed_replacement_open_preserves_the_incumbent_while_cleanup_gates_another_candidate() {
+    let fixture = PersistenceFixture::new();
+    let mut application = fixture.open();
+    let incumbent = application.current_frame().unwrap();
+    let source = fixture.root.join("worlds/entry.scene.json");
+    let original = fs::read(&source).unwrap();
+    assert!(application.request_project_replacement(&fixture.root, Some("desktop".to_owned())));
+    advance_to_session_publication(&mut application);
+    let mut changed = original.clone();
+    changed.extend_from_slice(b"\n");
+    fs::write(&source, changed).unwrap();
+    application.advance_project_open();
+    let same_incumbent = std::sync::Arc::ptr_eq(&incumbent, &application.current_frame().unwrap());
+    let pending = application.project_open_retirement_pending();
+    let early_replacement =
+        application.request_project_replacement(&fixture.root, Some("desktop".to_owned()));
+    fs::write(&source, original).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while application.project_open_retirement_pending() {
+        assert!(
+            Instant::now() < deadline,
+            "failed replacement cleanup did not return"
+        );
+        application.drive_editor_frame(Duration::ZERO, true, false);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    queue_save(&mut application);
+    close(&mut application);
+    assert!(same_incumbent);
+    assert!(pending);
+    assert!(!early_replacement);
+}
+
+#[test]
+fn exit_upgrades_close_project_while_failed_replacement_retirement_keeps_the_session() {
+    let fixture = PersistenceFixture::new();
+    let mut application = fixture.open();
+    let source = fixture.root.join("worlds/entry.scene.json");
+    let original = fs::read(&source).unwrap();
+    assert!(application.request_project_replacement(&fixture.root, Some("desktop".to_owned())));
+    advance_to_session_publication(&mut application);
+    let mut changed = original.clone();
+    changed.extend_from_slice(b"\n");
+    fs::write(&source, changed).unwrap();
+    application.advance_project_open();
+    fs::write(&source, original).unwrap();
+    let initially_pending = application.project_open_retirement_pending();
+    application.request_close_project();
+
+    // Drive the incumbent independently. The actual rejected Open remains unpolled so its
+    // separate custody deterministically keeps the physically closed Session in place.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let project = application.state.workspace_mut().unwrap();
+        super::drive_project_frame(project, Duration::ZERO, false);
+        let complete = matches!(
+            project.session.advance_close(),
+            nara::project_host::EditorProjectCloseProgress::Complete(_)
+        );
+        application.session_close_retry_at = None;
+        application.finish_session_retirement(false);
+        if complete {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the incumbent did not physically close"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let closed_incumbent_retained = application.state.workspace().is_some();
+    let close_intent = application.session_retirement;
+    let immediate_exit = application.request_exit().exit_ready();
+    let exit_remembered = application.has_pending_exit();
+    let promoted_intent = application.session_retirement;
+    let mut eventual_exit = immediate_exit;
+    while application.project_open_retirement_pending() || application.state.workspace().is_some() {
+        assert!(
+            Instant::now() < deadline,
+            "the retained owners did not return"
+        );
+        application.session_close_retry_at = None;
+        eventual_exit |= application
+            .drive_editor_frame(Duration::ZERO, false, false)
+            .exit_ready();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
+    // Assert only after releasing both owners, including when the original Exit-loss bug fires.
+    assert!(initially_pending);
+    assert!(closed_incumbent_retained);
+    assert_eq!(close_intent, Some(EditorSessionRetirement::CloseProject));
+    assert!(!immediate_exit);
+    assert!(
+        exit_remembered,
+        "a single process Exit must survive an existing Close Project"
+    );
+    assert_eq!(promoted_intent, Some(EditorSessionRetirement::ExitProcess));
+    assert!(
+        eventual_exit,
+        "maintenance must finish the original Exit request"
+    );
+    assert_eq!(application.state(), EditorApplicationState::ProjectManager);
+}
+
+#[test]
+fn terminal_open_cleanup_evidence_survives_clean_failure_slot_reuse_and_manager_navigation() {
+    use nara::app::{
+        App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
+        PluginShutdownContext, RuntimeCandidateRetirementState, RuntimeInstance,
+    };
+
+    struct RejectedShutdown;
+    impl Plugin for RejectedShutdown {
+        fn declaration() -> &'static PluginDeclaration {
+            static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+                PluginId::new("nara.test.open-sticky-cleanup"),
+                PluginCategory::Runtime,
+            );
+            &DECLARATION
+        }
+        fn build(&self, _: &mut App) -> Result<(), PluginError> {
+            Ok(())
+        }
+        fn shutdown(&self, _: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
+            Err(PluginError::SetupFailed {
+                plugin: Self::declaration().id,
+                message: "sticky cleanup probe".to_owned(),
+            })
+        }
+    }
+
+    let mut app = App::new();
+    app.add_plugin(RejectedShutdown).unwrap();
+    let mut retirement = RuntimeInstance::start(app).unwrap().begin_retirement();
+    assert_eq!(
+        retirement.drive_retirement(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    let first = retirement.close_evidence().clone();
+    assert!(first.has_terminal_failure());
+
+    let fixture = PersistenceFixture::new();
+    let source = fixture.root.join("worlds/entry.scene.json");
+    let original = fs::read(&source).unwrap();
+    let mut application =
+        EditorApplication::new(EditorLaunchOptions::new(&fixture.root).with_profile("desktop"));
+    // Seed real terminal evidence at the private consumer boundary. The fixed authoring
+    // composition has no public plugin-failure injection API; subsequent Open failures are real.
+    application.failed_open_close_evidence = Some(first.clone());
+    application.native_shell_ready();
+    for return_to_manager in [false, true] {
+        advance_to_session_publication(&mut application);
+        let mut changed = original.clone();
+        changed.extend_from_slice(b"\n");
+        fs::write(&source, changed).unwrap();
+        application.advance_project_open();
+        fs::write(&source, &original).unwrap();
+        assert!(application.project_open_retirement_pending());
+        if return_to_manager {
+            application
+                .submit_shell_action(super::EditorProjectShellAction::ReturnToProjectManager);
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while application.project_open_retirement_pending() {
+            assert!(
+                Instant::now() < deadline,
+                "clean failed Open did not return"
+            );
+            application.advance_project_open();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(application.failed_open_close_evidence(), Some(&first));
+        if !return_to_manager {
+            assert!(application.retry_project_open());
+        }
+    }
+    assert_eq!(application.state(), EditorApplicationState::ProjectManager);
+    assert!(application.request_exit().exit_ready());
+    assert_eq!(application.failed_open_close_evidence(), Some(&first));
+}
+
 #[test]
 fn startup_preparation_exit_revokes_initial_and_replacement_publication() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../reference-game");

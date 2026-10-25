@@ -76,6 +76,25 @@ pub(crate) struct AuthoringSourceFact {
 }
 
 impl AuthoringSourceFact {
+    pub(super) fn native_metadata(
+        project_path: ProjectPath,
+        identity: FileIdentity,
+        parent_identity: Option<FileIdentity>,
+        digest: ContentDigest,
+        encoded_bytes: usize,
+        dependency_depth: usize,
+    ) -> Self {
+        Self {
+            kind: AuthoringSourceKind::AssetMetadata,
+            project_path,
+            identity,
+            parent_identity,
+            digest,
+            encoded_bytes,
+            dependency_depth,
+        }
+    }
+
     #[must_use]
     pub(crate) const fn kind(&self) -> AuthoringSourceKind {
         self.kind
@@ -793,6 +812,7 @@ impl PreparedAuthoringProject {
             startup_source.project_path().as_str(),
             nara_scene::SourceDocumentKind::Scene,
             startup_source.identity(),
+            0,
             3, // Project root, manifest and schema bundle; the startup read handle is closed.
             &mut self.schema.budget,
         )?;
@@ -803,6 +823,7 @@ impl PreparedAuthoringProject {
             startup_source.project_path().as_str().to_owned(),
             Arc::clone(&startup_source),
         );
+        include_native_metadata_source(&startup_native_source, &mut identities, &mut source_facts)?;
 
         let mut pending = BTreeSet::new();
         let mut queued_depths = BTreeMap::new();
@@ -865,6 +886,7 @@ impl PreparedAuthoringProject {
                 opened.project_path.as_str(),
                 nara_scene::SourceDocumentKind::Prefab,
                 opened.identity,
+                depth,
                 5, // Schema handles, Prefab directory and original unread Prefab file.
                 &mut self.schema.budget,
             )?;
@@ -878,6 +900,7 @@ impl PreparedAuthoringProject {
                     super::AuthoringDocumentAdmissionError::NativeSourceIdentityConflict,
                 ));
             }
+            include_native_metadata_source(&native_source, &mut identities, &mut source_facts)?;
 
             if let Some(loaded) = identities.get(&opened.identity) {
                 let LoadedIdentity::Prefab { source, document } = loaded else {
@@ -967,7 +990,20 @@ impl PreparedAuthoringProject {
                 AuthoringSourceKind::Prefab,
                 &mut self.schema.budget,
             )?;
-            for path in prefabs.keys() {
+            for (path, prefab) in &prefabs {
+                if let (Some(source), nara_scene::SourceDocumentOrigin::StableAsset { stable_id }) = (
+                    prefab.native_source.metadata_source(),
+                    prefab.native_source.key().origin(),
+                ) {
+                    // Native admission already owns this exact observation and its byte charge.
+                    // Compare the catalogue evidence without reopening or retaining another fact.
+                    catalogue.verify_metadata(path, true, source)?;
+                    let record =
+                        AssetRecord::new(*stable_id, path.clone(), AssetSourceKind::Prefab);
+                    charge_database_record(&record, &mut self.schema.budget)?;
+                    insert_asset_record(&mut asset_database, record)?;
+                    continue;
+                }
                 if let Some((record, source)) =
                     catalogue.admit_prefab_metadata(&directory, path, &mut self.schema.budget)?
                 {
@@ -1219,6 +1255,31 @@ enum LoadedIdentity {
     },
 }
 
+fn include_native_metadata_source(
+    native_source: &AdmittedNativeDocumentSource,
+    identities: &mut HashMap<FileIdentity, LoadedIdentity>,
+    source_facts: &mut BTreeMap<String, Arc<AuthoringSourceFact>>,
+) -> Result<(), AuthoringProjectSourceAdmissionError> {
+    let Some(source) = native_source.metadata_source() else {
+        return Ok(());
+    };
+    let path = source.project_path();
+    if source_facts
+        .get(path.as_str())
+        .is_some_and(|existing| existing == source)
+    {
+        return Ok(());
+    }
+    if identities.contains_key(&source.identity()) || source_facts.contains_key(path.as_str()) {
+        return Err(
+            AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict { path: path.clone() },
+        );
+    }
+    identities.insert(source.identity(), LoadedIdentity::AssetMetadata);
+    source_facts.insert(path.as_str().to_owned(), Arc::clone(source));
+    Ok(())
+}
+
 struct OpenedAuthoringSource {
     kind: AuthoringSourceKind,
     project_path: ProjectPath,
@@ -1409,7 +1470,7 @@ fn asset_record_retained_bytes(
     ])
 }
 
-fn source_fact_retained_bytes(
+pub(super) fn source_fact_retained_bytes(
     source: &AuthoringSourceFact,
 ) -> Result<usize, AuthoringProjectSourceAdmissionError> {
     checked_sum([

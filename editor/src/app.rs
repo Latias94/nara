@@ -15,9 +15,9 @@ use nara::{
     project_host::{
         EditorGameInputBatch, EditorGameStartActivation, EditorGameStartRequest,
         EditorGameViewBridgeFailure, EditorGameViewCandidate, EditorGameViewCompletion,
-        EditorPreviewCandidate, EditorProjectCloseProgress, EditorProjectOpenHost,
-        EditorProjectOpenProgress, EditorUiAuthoringFrame, EditorUiPreviewCandidate,
-        TrustedCompiledEditorProjectIntent,
+        EditorPreviewCandidate, EditorProjectCloseProgress, EditorProjectOpenFailure,
+        EditorProjectOpenHost, EditorProjectOpenProgress, EditorUiAuthoringFrame,
+        EditorUiPreviewCandidate, TrustedCompiledEditorProjectIntent,
     },
     render::Extent2d,
     scene::UnavailableRecordManifest,
@@ -132,6 +132,22 @@ impl EditorApplicationOpenError {
             Self::MissingProjectRoot
             | Self::ProjectRootOpen { .. }
             | Self::ProjectRootCapability { .. } => None,
+        }
+    }
+
+    /// Trusted synchronous Open still returns any failed physical owner to its caller.
+    #[must_use]
+    pub fn retirement_state(&self) -> nara::app::RuntimeCandidateRetirementState {
+        match self {
+            Self::Project(error) => error.retirement_state(),
+            _ => nara::app::RuntimeCandidateRetirementState::Retired,
+        }
+    }
+
+    pub fn advance_retirement(&mut self) -> nara::app::RuntimeCandidateRetirementState {
+        match self {
+            Self::Project(error) => error.advance_retirement(),
+            _ => nara::app::RuntimeCandidateRetirementState::Retired,
         }
     }
 }
@@ -371,6 +387,9 @@ pub struct EditorApplication {
     panel_workspace: crate::workspace::EditorPanelWorkspace,
     state: EditorProductState,
     open_host: EditorProjectOpenHost,
+    failed_open: Option<EditorProjectOpenFailure>,
+    failed_open_close_evidence: Option<nara::app::RuntimeCloseEvidence>,
+    exit_after_open_retirement: bool,
     initial_request: Option<EditorProjectRequest>,
     native_ready: bool,
     next_entry_generation: u64,
@@ -415,6 +434,9 @@ impl EditorApplication {
                 suggested_request,
             )),
             open_host: EditorProjectOpenHost::new().with_source_asset_importers(importers),
+            failed_open: None,
+            failed_open_close_evidence: None,
+            exit_after_open_retirement: false,
             initial_request,
             native_ready: false,
             next_entry_generation: 2,
@@ -457,6 +479,9 @@ impl EditorApplication {
                 supervised_play_wake.clone(),
             )),
             open_host,
+            failed_open: None,
+            failed_open_close_evidence: None,
+            exit_after_open_retirement: false,
             initial_request: None,
             native_ready: false,
             next_entry_generation: 2,
@@ -566,6 +591,17 @@ impl EditorApplication {
     /// Advances at most one bounded project-open phase at the current frame boundary.
     #[doc(hidden)]
     pub fn advance_project_open(&mut self) -> EditorApplicationUpdate {
+        let cleanup_changed = self.advance_failed_open_retirement();
+        if self.exit_after_open_retirement && !self.project_open_retirement_pending() {
+            self.exit_after_open_retirement = false;
+            return EditorApplicationUpdate {
+                actions_observed: cleanup_changed,
+                exit_ready: true,
+            };
+        }
+        if self.project_open_retirement_pending() {
+            return EditorApplicationUpdate::idle();
+        }
         let state = self.take_state();
         match state {
             EditorProductState::OpeningInitial(opening) => {
@@ -586,7 +622,10 @@ impl EditorApplication {
             }
             other => {
                 self.state = other;
-                EditorApplicationUpdate::idle()
+                EditorApplicationUpdate {
+                    actions_observed: cleanup_changed,
+                    exit_ready: false,
+                }
             }
         }
     }
@@ -598,6 +637,8 @@ impl EditorApplication {
                 Some(EditorProjectShellModel::ProjectManager {
                     entry_generation: manager.entry_generation,
                     suggested_request: &manager.suggested_request,
+                    open_available: !self.project_open_retirement_pending()
+                        && !self.exit_after_open_retirement,
                 })
             }
             EditorProductState::OpeningInitial(opening) => Some(EditorProjectShellModel::Opening {
@@ -623,6 +664,8 @@ impl EditorApplication {
                 attempt_generation: recovery.attempt_generation,
                 request: &recovery.request,
                 diagnostics: &recovery.diagnostics,
+                retry_available: !self.project_open_retirement_pending()
+                    && !self.exit_after_open_retirement,
             }),
             EditorProductState::AuthoringReady(_) | EditorProductState::AuthoringDegraded(_) => {
                 None
@@ -644,6 +687,9 @@ impl EditorApplication {
                 project_root,
                 profile,
             } => {
+                if self.project_open_retirement_pending() || self.exit_after_open_retirement {
+                    return false;
+                }
                 let request = EditorProjectRequest::new(project_root, profile);
                 let state = self.take_state();
                 match state {
@@ -802,7 +848,10 @@ impl EditorApplication {
     }
 
     fn start_project_replacement(&mut self, request: EditorProjectRequest) -> bool {
-        if self.session_retirement.is_some() {
+        if self.session_retirement.is_some()
+            || self.project_open_retirement_pending()
+            || self.exit_after_open_retirement
+        {
             return false;
         }
         let state = self.take_state();
@@ -827,6 +876,9 @@ impl EditorApplication {
     /// Retries the exact rejected project request with a fresh attempt generation.
     #[must_use]
     pub fn retry_project_open(&mut self) -> bool {
+        if self.project_open_retirement_pending() || self.exit_after_open_retirement {
+            return false;
+        }
         let state = self.take_state();
         match state {
             EditorProductState::Recovery(recovery) => {
@@ -1118,6 +1170,15 @@ impl EditorApplication {
         drive_runtime: bool,
         now: Instant,
     ) -> EditorApplicationUpdate {
+        let cleanup_changed = self.advance_failed_open_retirement();
+        let actions_observed = actions_observed || cleanup_changed;
+        if self.exit_after_open_retirement && !self.project_open_retirement_pending() {
+            self.exit_after_open_retirement = false;
+            return EditorApplicationUpdate {
+                actions_observed,
+                exit_ready: true,
+            };
+        }
         if let EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
             retained,
             ..
@@ -1509,6 +1570,13 @@ impl EditorApplication {
                         exit_ready: false,
                     };
                 };
+                if self.project_open_retirement_pending() {
+                    self.defer_session_close_retry();
+                    return EditorApplicationUpdate {
+                        actions_observed,
+                        exit_ready: false,
+                    };
+                }
                 self.session_close_retry_at = None;
                 let state = self.take_state();
                 match state {
@@ -1588,6 +1656,20 @@ impl EditorApplication {
     }
 
     pub fn request_exit(&mut self) -> EditorApplicationUpdate {
+        if self.session_retirement == Some(EditorSessionRetirement::CloseProject) {
+            self.session_retirement = Some(EditorSessionRetirement::ExitProcess);
+            return EditorApplicationUpdate {
+                actions_observed: true,
+                exit_ready: false,
+            };
+        }
+        if self.project_open_retirement_pending() && self.state.workspace().is_none() {
+            self.exit_after_open_retirement = true;
+            return EditorApplicationUpdate {
+                actions_observed: true,
+                exit_ready: false,
+            };
+        }
         if self.session_retirement.is_some() {
             return EditorApplicationUpdate::idle();
         }
@@ -1643,7 +1725,8 @@ impl EditorApplication {
 
     /// Current process-exit custody, rather than inference from a retained frame result.
     pub(crate) fn has_pending_exit(&self) -> bool {
-        self.session_retirement == Some(EditorSessionRetirement::ExitProcess)
+        self.exit_after_open_retirement
+            || self.session_retirement == Some(EditorSessionRetirement::ExitProcess)
     }
 
     fn start_initial_open(&mut self, request: EditorProjectRequest) {
@@ -2020,12 +2103,14 @@ impl EditorApplication {
                         ))
                     }
                     EditorProjectOpenProgress::Rejected(failure) => {
-                        OpenStepResult::Rejected(RecoveryState::from_host_failure(
+                        let recovery = RecoveryState::from_host_failure(
                             opening.entry_generation,
                             opening.attempt_generation,
                             opening.request.clone(),
-                            failure,
-                        ))
+                            &failure,
+                        );
+                        self.retain_failed_open(failure);
+                        OpenStepResult::Rejected(recovery)
                     }
                 }
             }
@@ -2035,6 +2120,53 @@ impl EditorApplication {
     fn enter_recovery(&mut self, recovery: RecoveryState) {
         self.session_close_retry_at = None;
         self.state = EditorProductState::Recovery(recovery);
+    }
+
+    /// Failed Open owns cleanup independently of replaceable Recovery presentation state.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn project_open_retirement_pending(&self) -> bool {
+        self.failed_open.is_some()
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn failed_open_close_evidence(&self) -> Option<&nara::app::RuntimeCloseEvidence> {
+        self.failed_open_close_evidence.as_ref()
+    }
+
+    fn retain_failed_open(&mut self, failure: EditorProjectOpenFailure) {
+        assert!(
+            self.failed_open.is_none(),
+            "Open construction waits for prior failure retirement"
+        );
+        if failure.retirement_state() != nara::app::RuntimeCandidateRetirementState::Retired {
+            self.failed_open = Some(failure);
+        } else if let Some(evidence) = failure
+            .close_evidence()
+            .filter(|evidence| evidence.has_terminal_failure())
+        {
+            self.failed_open_close_evidence
+                .get_or_insert_with(|| evidence.clone());
+        }
+    }
+
+    fn advance_failed_open_retirement(&mut self) -> bool {
+        let Some(failure) = self.failed_open.as_mut() else {
+            return false;
+        };
+        if failure.advance_retirement() != nara::app::RuntimeCandidateRetirementState::Retired {
+            return false;
+        }
+        if let Some(evidence) = failure
+            .close_evidence()
+            .filter(|evidence| evidence.has_terminal_failure())
+        {
+            self.failed_open_close_evidence
+                .get_or_insert_with(|| evidence.clone());
+        }
+        self.failed_open = None;
+        true
     }
 
     fn session_close_retry_deferred(&self) -> bool {

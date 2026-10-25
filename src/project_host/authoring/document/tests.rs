@@ -492,6 +492,7 @@ fn native_metadata_read_preserves_aggregate_source_and_io_failure_classes() {
             SCENE_PATH,
             SourceDocumentKind::Scene,
             identity,
+            0,
             3,
             &mut budget
         ),
@@ -507,6 +508,7 @@ fn native_metadata_read_preserves_aggregate_source_and_io_failure_classes() {
             SCENE_PATH,
             SourceDocumentKind::Scene,
             identity,
+            0,
             3,
             &mut budget,
         )
@@ -515,6 +517,7 @@ fn native_metadata_read_preserves_aggregate_source_and_io_failure_classes() {
         budget.usage().retained_candidate_bytes(),
         admitted.retained_bytes().unwrap()
     );
+    assert_eq!(budget.usage().aggregate_encoded_bytes(), metadata.len());
     project.write(&metadata_path, &vec![b' '; 65_537]);
     let mut budget =
         AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
@@ -524,6 +527,7 @@ fn native_metadata_read_preserves_aggregate_source_and_io_failure_classes() {
             SCENE_PATH,
             SourceDocumentKind::Scene,
             identity,
+            0,
             3,
             &mut budget
         ),
@@ -546,6 +550,7 @@ fn native_metadata_read_preserves_aggregate_source_and_io_failure_classes() {
             SCENE_PATH,
             SourceDocumentKind::Scene,
             identity,
+            0,
             3,
             &mut budget
         ),
@@ -585,6 +590,7 @@ fn native_source_retention_is_admitted_before_opening_and_reconciled_after_succe
                 "scenes/missing.scene.json",
                 SourceDocumentKind::Scene,
                 identity,
+                0,
                 3,
                 &mut budget
             ),
@@ -602,6 +608,7 @@ fn native_source_retention_is_admitted_before_opening_and_reconciled_after_succe
             SCENE_PATH,
             SourceDocumentKind::Scene,
             identity,
+            0,
             3,
             &mut budget,
         )

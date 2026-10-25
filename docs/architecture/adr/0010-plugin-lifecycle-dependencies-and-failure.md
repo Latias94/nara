@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-25
+**Last Revised**: 2026-10-26
 **Refines**: ADR 0003
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0046:
 Plugin Metadata and Default Plugin Groups
@@ -173,6 +173,13 @@ error and never stop later shutdown hooks.
 - `App::seal` consumes the configurable App and returns a `SealedApp` after finish hooks and
   obligation validation succeed. The former public `finish_plugins` and `cleanup_plugins` aliases
   are removed rather than retained as competing lifecycle entry points.
+- Responsive first-party Hosts use `RuntimeInstance::prepare` for retained configured-App
+  sealing/admission instead of consuming `App::seal` and losing its failed owner. Aborted raw
+  configuration transfers through `App::begin_retirement` without finish or Startup. Both paths
+  reuse the same ledger and explicit retirement protocol; the transfer does not poll physical
+  close callbacks. Already committed build/finish failure shutdown hooks retain their existing
+  immediate failure-containment semantics. Ordinary start still performs its finite failed-close
+  convenience before returning retained failure custody.
 
 `shutdown` is deliberately not named `cleanup`. In Bevy, `Plugin::cleanup` is a startup hook that
 runs after `finish` and before the first update; nara's hook is terminal reverse-order teardown.

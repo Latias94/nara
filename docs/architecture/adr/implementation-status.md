@@ -59,9 +59,29 @@ successor Save/Reopen but gates another refresh; Session close observes late-res
 aggregates disjoint physical reports once, with sticky cleanup failure. The four real Prefab
 owner tests and final 420-case root/198-case ordinary Editor cohorts pass, together with eleven
 selected Windows/DX12 trajectories including the critical group and refreshed Canvas source.
-ADRs 0052/0118 adopt this boundary. Initial App/Open construction failure custody, trusted Play's
-complete Session close and lazy-private product deployment are separate open work, as are R4c
-and the full plan.
+ADRs 0052/0118 adopt this boundary. The initial App/Open custody successor has its own evidence
+below. Trusted Play's complete Session close, lazy-private product deployment, R4c and the full
+plan remain separate open work.
+
+The [initial construction/Open custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-25T191539Z-initial-authoring-construction-and-failed-open-physical-custody-qualification-ad41f2c430ac4e56bdaf88fbb457f1cd.md)
+retains raw App configuration, admission, failed Startup and unpublished Runtime owners through
+physical return. Public Open failure preserves that owner; Application maintains a bounded failed
+attempt independently of Recovery, gates Retry/replacement, waits on Exit and exposes sticky
+cleanup errors through the frontend and final runner result. A later process Exit upgrades an
+existing Close Project intent while preserving cleanup. ADRs 0003/0010/0118 adopt these boundaries.
+The full seven-reviewer round confirms lost Exit and missing real Startup evidence; both have
+separate fixes and independent scoped closure. Real held-body/late-result owner proofs, source
+refusal, complete root425, expanded Editor247 and selected Windows/DX12 native10 pass. Final
+integration limits remain bound to the linked record; this does not qualify held authoring native
+quiet cycles, trusted Play's complete Session close, lazy product deployment or all R4b.
+
+The [native metadata source-fact correction](../../knowledge/engineering/verification/2026-10/2026-10-25T194117Z-native-document-metadata-in-supervised-play-source-closure-facts-0fb93990d7d44da9a8111b48f82aee59.md)
+adds already admitted Scene/Prefab sidecars to the same source closure used by supervised Play.
+It shares identity/digest/read accounting, retains catalogue revalidation and exact handshake
+comparison, and passes direct Editor receipt/strict Runtime digest comparisons for repeated and
+mixed path/stable-ID Prefab references. This corrects the source-confirmed cause of the generated
+starter's runtime-facts refusal; its actual Ready/Stop/clean Editor Exit rerun passes within the
+247-case Editor cohort. This does not qualify full source-free delivery or CAS.
 
 The [R5c disposable projection qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md) binds `207bbcc` to complete-domain Scene epoch ownership, unchanged shared authoring facilities, a stable preview renderer producer and fresh presentation authority after identical-content recovery. Held Image/Save work, the joined public edit/history/Save/Reopen/picking/Close consumer, independent Prefab consumers and six actual Windows/DX12 trajectories pass. This closes the selected preview lifetime mismatch, not incremental projection, durable property addressing or the full foundation rebaseline.
 

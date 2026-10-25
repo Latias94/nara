@@ -1404,6 +1404,44 @@ mod tests {
                         expected_peak
                     );
                     assert_eq!(receipt.snapshot().prefabs().len(), 1);
+                    let snapshot = receipt.snapshot();
+                    assert_eq!(snapshot.source_facts().len(), if stable { 4 } else { 2 });
+                    if stable {
+                        let metadata = snapshot.prefabs()[0]
+                            .native_source()
+                            .metadata_source()
+                            .unwrap();
+                        let fact = snapshot
+                            .source_facts()
+                            .find(|fact| fact.project_path() == metadata.project_path())
+                            .unwrap();
+                        assert!(std::ptr::eq(metadata.as_ref(), fact));
+                    }
+                    assert_eq!(
+                        snapshot
+                            .source_facts()
+                            .filter(|fact| fact.kind() == AuthoringSourceKind::AssetMetadata)
+                            .map(|fact| fact.project_path().as_str())
+                            .collect::<Vec<_>>(),
+                        if stable {
+                            vec![
+                                "prefabs/p.prefab.json.meta",
+                                "scenes/startup.scene.json.meta",
+                            ]
+                        } else {
+                            Vec::new()
+                        }
+                    );
+                    let usage = snapshot.usage();
+                    assert_eq!(
+                        usage.aggregate_encoded_bytes(),
+                        usage.manifest_encoded_bytes()
+                            + usage.bundle_encoded_bytes()
+                            + snapshot
+                                .source_facts()
+                                .map(|fact| fact.encoded_bytes())
+                                .sum::<usize>()
+                    );
                 }
             }
         }

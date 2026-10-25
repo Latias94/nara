@@ -195,19 +195,19 @@ App that failed configuration, a failed Startup, or a successful authoring Runti
 Session publication subsequently rejects. Those stages need their own concrete Host custody;
 do not expand the refresh slot into a universal failure registry.
 
-The current source has three explicit boundaries to replace:
+The source investigation at baseline `a1ff454` identified three boundaries to replace:
 
-- `build_authoring_app` creates a local App and installs Tasks before other fallible configuration.
-  A later error returns only diagnostics. The Tasks plugin already registers successful and
+- `build_authoring_app` created a local App and installed Tasks before other fallible configuration.
+  A later error returned only diagnostics. The Tasks plugin already registers successful and
   partial worker construction in the App ledger; this is loss of the enclosing retry owner, not
   proof that Tasks forgot its threads.
-- `EditorAuthoringRuntime::new` and `new_authoring` project `RuntimeStartFailure` to diagnostics.
+- `EditorAuthoringRuntime::new` and `new_authoring` projected `RuntimeStartFailure` to diagnostics.
   That failure already carries retained retirement. Earlier preview/asset preparation errors also
   exit after resource acquisition.
-- Ordinary and trusted `EditorProjectSession` Open create their authoring Runtime before later
+- Ordinary and trusted `EditorProjectSession` Open created their authoring Runtime before later
   image/UI, source-file and Workspace publication checks. `EditorProjectOpenError`, the public
-  Open failure and Shell Recovery currently carry diagnostics without that candidate owner.
-  Retry, return to the manager and failed project replacement therefore cannot poll its exact
+  Open failure and Shell Recovery carried diagnostics without that candidate owner.
+  Retry, return to the manager and failed project replacement therefore could not poll its exact
   ordinary cleanup responsibility.
 
 `RuntimeOwner::drop` attempts finite close and retains incomplete custody through quarantine.
@@ -223,8 +223,8 @@ incumbent project. Pair this real failure with private held-work instrumentation
 Pending, disposal return and final close; source reachability alone does not prove a long-lived
 unfinished owner or quarantine abort in the ordinary built-in path.
 
-Compare a narrow retained raw-App admission/abort boundary with converting the concrete authoring
-builder to the existing `PluginPlan` candidate path. Reuse `RuntimePreparationRetirement`,
+The comparison considered a narrow retained raw-App admission/abort boundary and converting the
+concrete authoring builder to the existing `PluginPlan` candidate path. Reuse `RuntimePreparationRetirement`,
 `RuntimeCandidate`, `RuntimeStartFailure` and the existing ledger rather than adding a second close
 machine. Configuration must borrow an already accountable owner; do not start an invalid App merely
 to obtain a retirement handle. Keep any post-start unpublished Runtime in the same failed-attempt
@@ -256,6 +256,23 @@ Acceptance for this separate unit covers configuration failure after acquisition
 with held disposal, actual public source-drift rejection, Retry/manager/Exit and project replacement
 while cleanup is Pending, then successful Open/edit/Save/Reopen/Close after physical completion.
 No new release migration guide, global executor, generic erasure or lazy-default claim follows.
+
+The selected concrete implementation keeps raw-App configuration. Preview installation requires
+pre-seal resource/system mutation and returns a separate preview session; moving that workflow into
+repeatable plugin factories would require another input/output transfer mechanism. The narrow
+`App::begin_retirement` and `RuntimeInstance::prepare` bridges instead reuse the existing owner and
+ledger. Ordinary start reuses the same admission prefix. Authoring configuration borrows an App
+whose failure boundary already exists, and its error retains configuration/admission/Startup
+custody. A successfully started but unpublished authoring Runtime remains in that boundary until
+complete Session publication or transfer into the Open failure.
+
+The public Open error/failure owns cleanup separately from its diagnostic observation. Application
+holds at most one such failed owner independently of Recovery/manager/retained-project state, polls
+it through maintenance, refuses Retry or new construction while Pending, and withholds Exit until
+physical completion. It retains the first terminal failed-close evidence across later clean
+retirements. The transportable startup-preparation attempt remains separate from thread-bound
+authoring custody. This selection and source wiring do not establish qualification before the
+configuration, real source-drift, lifecycle and native gates execute.
 
 ### Demand-Activation Comparison Candidate
 

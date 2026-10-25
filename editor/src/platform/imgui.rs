@@ -127,22 +127,102 @@ pub(super) fn run_application(
     if let Err(error) = shutdown {
         host.retirement_errors.record(error);
     }
-    if let Some(error) = host.error {
-        if !host.retirement_errors.is_empty() {
-            return Err(EditorRunError::NativeCleanup {
-                primary: Box::new(error),
-                cleanup: host.retirement_errors.to_string(),
-            });
+    editor_run_result(
+        host.error,
+        &host.retirement_errors,
+        host.application.failed_open_close_evidence(),
+    )
+}
+
+fn editor_run_result(
+    primary: Option<EditorRunError>,
+    native_cleanup: &NativeCloseErrors,
+    project_cleanup: Option<&nara::app::RuntimeCloseEvidence>,
+) -> Result<(), EditorRunError> {
+    let mut cleanup = String::new();
+    if !native_cleanup.is_empty() {
+        cleanup = format!("native graphics retired with errors: {native_cleanup}");
+    }
+    if let Some(evidence) = project_cleanup {
+        if !cleanup.is_empty() {
+            cleanup.push_str("; ");
         }
-        return Err(error);
+        cleanup.push_str(&format!(
+            "failed project Open retired with cleanup errors: {evidence:?}"
+        ));
     }
-    if !host.retirement_errors.is_empty() {
-        return Err(imgui_error(format!(
-            "native graphics retired with errors: {}",
-            host.retirement_errors
-        )));
+    match (primary, cleanup.is_empty()) {
+        (Some(primary), false) => Err(EditorRunError::Cleanup {
+            primary: Box::new(primary),
+            cleanup,
+        }),
+        (Some(primary), true) => Err(primary),
+        (None, false) => Err(imgui_error(cleanup)),
+        (None, true) => Ok(()),
     }
-    Ok(())
+}
+
+#[cfg(test)]
+mod result_tests {
+    use super::*;
+    use nara::app::{
+        App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
+        PluginShutdownContext, RuntimeCandidateRetirementState, RuntimeInstance,
+    };
+
+    struct RejectedShutdown;
+    impl Plugin for RejectedShutdown {
+        fn declaration() -> &'static PluginDeclaration {
+            static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+                PluginId::new("nara.test.open-result-cleanup"),
+                PluginCategory::Runtime,
+            );
+            &DECLARATION
+        }
+        fn build(&self, _: &mut App) -> Result<(), PluginError> {
+            Ok(())
+        }
+        fn shutdown(&self, _: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
+            Err(PluginError::SetupFailed {
+                plugin: Self::declaration().id,
+                message: "cleanup probe".to_owned(),
+            })
+        }
+    }
+
+    #[test]
+    fn physical_cleanup_failure_reaches_editor_result_and_keeps_the_primary_error() {
+        let mut app = App::new();
+        app.add_plugin(RejectedShutdown).unwrap();
+        let mut retirement = RuntimeInstance::start(app).unwrap().begin_retirement();
+        assert_eq!(
+            retirement.drive_retirement(),
+            RuntimeCandidateRetirementState::Retired
+        );
+        let evidence = retirement.close_evidence();
+        assert!(evidence.has_terminal_failure());
+        let mut native = NativeCloseErrors::default();
+        native.record("native cleanup probe");
+        let result = editor_run_result(
+            Some(EditorRunError::Usage("primary probe".to_owned())),
+            &native,
+            Some(evidence),
+        );
+        let text = result.as_ref().unwrap_err().to_string();
+        assert!(
+            matches!(result, Err(EditorRunError::Cleanup { primary, .. }) if matches!(*primary, EditorRunError::Usage(_)))
+        );
+        for fact in [
+            "primary probe",
+            "native cleanup probe",
+            "failed project Open",
+            "PluginShutdown",
+        ] {
+            assert!(text.contains(fact), "missing {fact}: {text}");
+        }
+        assert!(editor_run_result(None, &NativeCloseErrors::default(), Some(evidence)).is_err());
+        assert!(editor_run_result(None, &NativeCloseErrors::default(), None).is_ok());
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1922,7 +2002,8 @@ fn imgui_next_deadline(
         application.state(),
         crate::EditorApplicationState::OpeningInitial
             | crate::EditorApplicationState::OpeningReplacement
-    ) {
+    ) || application.project_open_retirement_pending()
+    {
         deadline = earliest_deadline(deadline, Some(now + Duration::from_millis(16)));
     }
     if let Some(frame) = application.current_frame() {

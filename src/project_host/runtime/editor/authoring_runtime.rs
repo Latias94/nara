@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use nara_app::{
-    __RuntimeDriverPort, App, RuntimeControl, RuntimeInstance, RuntimeState,
-    RuntimeWorldAccessError,
+    __RuntimeDriverPort, App, RuntimeClosePolicy, RuntimeControl, RuntimeInstance,
+    RuntimeObligationLedger, RuntimeState, RuntimeWorldAccessError,
 };
 #[cfg(feature = "runtime-ui")]
 use nara_asset::AssetId;
@@ -29,11 +29,13 @@ use nara_tasks::{
 };
 use nara_tilemap::TileSetAssetPlugin;
 
+#[cfg(test)]
+mod construction_tests;
 mod retirement;
 mod tilesets;
 #[cfg(feature = "presentation-2d")]
 use nara_tooling::{EditorDocumentId, WorldIdentitySnapshot};
-pub(super) use retirement::EditorAuthoringRetirements;
+pub(super) use retirement::{EditorAuthoringRetirement, EditorAuthoringRetirements};
 pub(super) use tilesets::EditorTileSetSourceUpdate;
 
 #[cfg(test)]
@@ -169,6 +171,12 @@ pub(super) enum EditorAuthoringRuntimeCloseProgress {
     Complete(TaskShutdownReport),
 }
 
+#[derive(Debug)]
+pub(super) struct EditorAuthoringConstructionFailure {
+    pub(super) diagnostics: DiagnosticReport,
+    pub(super) retirement: EditorAuthoringRetirement,
+}
+
 /// Owns the Editor's single task and image-asset world.
 ///
 /// Scene preview is an optional private subsystem of this runtime. Other authoring workflows must
@@ -200,26 +208,44 @@ impl EditorAuthoringRuntime {
     pub(super) fn new(
         project: ProjectContentSnapshot,
         registry: &ComponentRegistrySnapshot,
-    ) -> Result<Self, DiagnosticReport> {
+    ) -> Result<Self, EditorAuthoringConstructionFailure> {
         #[cfg(not(feature = "presentation-2d"))]
         let _ = registry;
-        let mut app = build_authoring_app()?;
-        #[cfg(feature = "presentation-2d")]
-        let preview = EditorPreviewSession::install_trusted(&mut app, project.clone(), registry)?;
-        publish_snapshot_assets(
-            app.world_mut()
-                .map_err(|_| runtime_error("project.editor.preview-world-unavailable"))?,
-            &project,
-        )
-        .map_err(|error| error.diagnostics)?;
-        let runtime = RuntimeInstance::start(app)
-            .map_err(|_| runtime_error("project.editor.preview-runtime-start-failed"))?;
+        let mut app = App::new();
+        let preparation = (|| {
+            configure_authoring_app(&mut app)?;
+            #[cfg(feature = "presentation-2d")]
+            let preview =
+                EditorPreviewSession::install_trusted(&mut app, project.clone(), registry)?;
+            publish_snapshot_assets(
+                app.world_mut()
+                    .map_err(|_| runtime_error("project.editor.preview-world-unavailable"))?,
+                &project,
+            )
+            .map_err(|error| error.diagnostics)?;
+            #[cfg(feature = "presentation-2d")]
+            return Ok(preview);
+            #[cfg(not(feature = "presentation-2d"))]
+            Ok::<(), DiagnosticReport>(())
+        })();
+        let _preview = match preparation {
+            Ok(preview) => preview,
+            Err(diagnostics) => {
+                return Err(EditorAuthoringConstructionFailure {
+                    diagnostics,
+                    retirement: EditorAuthoringRetirement::Configuration(
+                        app.begin_retirement(RuntimeClosePolicy::default()),
+                    ),
+                });
+            }
+        };
+        let runtime = start_authoring_app(app)?;
         Ok(Self {
             runtime,
             tileset_records: Vec::new(),
             image_revocation_failure: None,
             #[cfg(feature = "presentation-2d")]
-            preview,
+            preview: _preview,
             #[cfg(feature = "presentation-2d")]
             image_publication_revision: 0,
             #[cfg(test)]
@@ -232,20 +258,40 @@ impl EditorAuthoringRuntime {
     pub(super) fn new_authoring(
         project: &AuthoringProjectSessionSnapshot,
         registry: &ComponentRegistrySnapshot,
-    ) -> Result<Self, DiagnosticReport> {
+    ) -> Result<Self, EditorAuthoringConstructionFailure> {
         #[cfg(not(feature = "presentation-2d"))]
         let _ = registry;
-        let mut app = build_authoring_app()?;
-        #[cfg(feature = "presentation-2d")]
-        let preview =
-            EditorPreviewSession::install_authoring(&mut app, registry, project.asset_database())?;
-        publish_authoring_image_records(
-            app.world_mut()
-                .map_err(|_| runtime_error("project.editor.preview-world-unavailable"))?,
-            project,
-        )?;
-        let runtime = RuntimeInstance::start(app)
-            .map_err(|_| runtime_error("project.editor.preview-runtime-start-failed"))?;
+        let mut app = App::new();
+        let preparation = (|| {
+            configure_authoring_app(&mut app)?;
+            #[cfg(feature = "presentation-2d")]
+            let preview = EditorPreviewSession::install_authoring(
+                &mut app,
+                registry,
+                project.asset_database(),
+            )?;
+            publish_authoring_image_records(
+                app.world_mut()
+                    .map_err(|_| runtime_error("project.editor.preview-world-unavailable"))?,
+                project,
+            )?;
+            #[cfg(feature = "presentation-2d")]
+            return Ok(preview);
+            #[cfg(not(feature = "presentation-2d"))]
+            Ok::<(), DiagnosticReport>(())
+        })();
+        let _preview = match preparation {
+            Ok(preview) => preview,
+            Err(diagnostics) => {
+                return Err(EditorAuthoringConstructionFailure {
+                    diagnostics,
+                    retirement: EditorAuthoringRetirement::Configuration(
+                        app.begin_retirement(RuntimeClosePolicy::default()),
+                    ),
+                });
+            }
+        };
+        let runtime = start_authoring_app(app)?;
         Ok(Self {
             runtime,
             tileset_records: project
@@ -257,7 +303,7 @@ impl EditorAuthoringRuntime {
                 .collect(),
             image_revocation_failure: None,
             #[cfg(feature = "presentation-2d")]
-            preview,
+            preview: _preview,
             #[cfg(feature = "presentation-2d")]
             image_publication_revision: 0,
             #[cfg(test)]
@@ -271,7 +317,7 @@ impl EditorAuthoringRuntime {
         &self,
         project: ProjectContentSnapshot,
         registry: &ComponentRegistrySnapshot,
-    ) -> Result<Self, DiagnosticReport> {
+    ) -> Result<Self, EditorAuthoringConstructionFailure> {
         let replacement = Self::new(project, registry)?;
         #[cfg(feature = "presentation-2d")]
         let replacement = {
@@ -619,10 +665,35 @@ fn map_image_import_error(error: &ImageImportError) -> EditorImageRuntimeFailure
     }
 }
 
+fn start_authoring_app(app: App) -> Result<RuntimeInstance, EditorAuthoringConstructionFailure> {
+    let candidate = RuntimeInstance::prepare(
+        app,
+        RuntimeObligationLedger::new(),
+        RuntimeClosePolicy::default(),
+    )
+    .map_err(|owner| EditorAuthoringConstructionFailure {
+        diagnostics: runtime_error("project.editor.preview-runtime-start-failed"),
+        retirement: EditorAuthoringRetirement::Admission(owner),
+    })?;
+    candidate
+        .complete_startup()
+        .map(|ready| ready.promote())
+        .map_err(|owner| EditorAuthoringConstructionFailure {
+            diagnostics: runtime_error("project.editor.preview-runtime-start-failed"),
+            retirement: EditorAuthoringRetirement::Startup(owner),
+        })
+}
+
+#[cfg(test)]
 fn build_authoring_app() -> Result<App, DiagnosticReport> {
+    let mut app = App::new();
+    configure_authoring_app(&mut app)?;
+    Ok(app)
+}
+
+fn configure_authoring_app(app: &mut App) -> Result<(), DiagnosticReport> {
     let task_config = authoring_task_pool_config()
         .ok_or_else(|| runtime_error("project.editor.authoring-task-config-invalid"))?;
-    let mut app = App::new();
     app.add_plugins((
         ComponentRegistryPlugin,
         nara_hierarchy::HierarchyPlugin,
@@ -640,7 +711,7 @@ fn build_authoring_app() -> Result<App, DiagnosticReport> {
     .and_then(|app| app.add_plugins(nara_image::ImagePlugin::default()))
     .and_then(|app| app.add_plugins(TileSetAssetPlugin))
     .map_err(|_| runtime_error("project.editor.preview-plugin-install-failed"))?;
-    tilesets::install(&mut app)?;
+    tilesets::install(app)?;
     app.insert_resource(EditorImageAdmissionPort)
         .and_then(|app| app.insert_resource(EditorImagePublicationPort))
         .and_then(|app| app.insert_resource(EditorImageRevocationPort))
@@ -667,7 +738,7 @@ fn build_authoring_app() -> Result<App, DiagnosticReport> {
         nara_sprite_render::SpriteRenderPlugin,
     ))
     .map_err(|_| runtime_error("project.editor.preview-plugin-install-failed"))?;
-    Ok(app)
+    Ok(())
 }
 
 fn authoring_task_pool_config() -> Option<TaskPoolConfig> {
