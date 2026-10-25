@@ -131,7 +131,7 @@ cargo +1.95.0 nextest run -p nara_render_wgpu --locked --features editor-imgui -
 This gate tests Nara's integration with the production WGPU 30 dependency resolution.
 Its offscreen tests do not replace the actual native trajectories above.
 For changes to native retirement, partial graphics construction or shutdown/replacement gating,
-also execute the five focused hidden-window trajectories:
+also execute the focused retirement trajectories:
 
 ```powershell
 cargo +1.95.0 nextest run -p nara-editor --lib --locked --run-ignored only -E 'test(platform::imgui::retirement_tests::)' --test-threads=1
@@ -139,7 +139,15 @@ cargo +1.95.0 nextest run -p nara-editor --lib --locked --run-ignored only -E 't
 
 They cover exit before first presentation without unrelated events, a real dirty Scene edit and
 Cancel, dirty Exit arriving during queued reconstruction, SDK callback drift reported after
-renderer release, and actual SDK attach refusal after renderer construction. They observe retained
+renderer release, actual SDK attach refusal after renderer construction, and healthy Open Host
+worker return before graphics/process Exit. The healthy-Host trajectory uses a staged real event
+handler: it dismisses the manager's initially focused text field with Escape through the owned
+Context input. After initial and CloseRequested presentation settles, at least three actual
+maintenance deadline wakes must deliver no new redraw or presentation while the worker remains held. Only
+after release may physical Tasks return and native destruction finish. It starts with a hidden,
+inactive window; if Windows withholds presentation, it shows the same inactive window after
+500 ms and records that fallback. It does not inject OS pointer or keyboard input. The other
+retirement trajectories remain hidden. They observe retained
 Context/backend identity and destruction before a
 replacement. The adapter gate separately checks initialization-upload readback, retained
 device/queue drain after destruction, failed attach custody, and shutdown/binding idempotence.

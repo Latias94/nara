@@ -125,8 +125,8 @@ pub use runtime::{
     EditorEditPreparationError, EditorProjectCloseProgress, EditorProjectCloseReceipt,
     EditorProjectOpenAttempt, EditorProjectOpenError, EditorProjectOpenFailure,
     EditorProjectOpenFailureImpact, EditorProjectOpenFailureSource, EditorProjectOpenHost,
-    EditorProjectOpenPhase, EditorProjectOpenProgress, EditorProjectSession,
-    SupervisedDesktopSourceAdmissionError, SupervisedDesktopSourceAuthority,
+    EditorProjectOpenPhase, EditorProjectOpenProgress, EditorProjectOpenTasksCloseReport,
+    EditorProjectSession, SupervisedDesktopSourceAdmissionError, SupervisedDesktopSourceAuthority,
     TrustedCompiledEditorProjectIntent, admit_supervised_desktop_source_receipt,
 };
 #[cfg(all(

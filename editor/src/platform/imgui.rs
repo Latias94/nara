@@ -90,9 +90,22 @@ pub(super) fn run_application(
             .panel_workspace_mut()
             .set_preferences(preferences);
     }
-    let event_loop = EventLoop::<EditorUserEvent>::with_user_event()
-        .build()
-        .map_err(|error| EditorRunError::EventLoop(error.to_string()))?;
+    let event_loop = match EventLoop::<EditorUserEvent>::with_user_event().build() {
+        Ok(event_loop) => event_loop,
+        Err(error) => {
+            let open_tasks = finish_open_host_shutdown(
+                &mut application,
+                Instant::now() + Duration::from_secs(5),
+            );
+            return editor_run_result(
+                Some(EditorRunError::EventLoop(error.to_string())),
+                &NativeCloseErrors::default(),
+                application.failed_open_close_evidence(),
+                application.failed_session_close_receipt(),
+                Some(&open_tasks),
+            );
+        }
+    };
     event_loop.set_control_flow(ControlFlow::Wait);
     let proxy = event_loop.create_proxy();
     let supervised_play_wake = SupervisedPlayWake::new(move || {
@@ -127,12 +140,30 @@ pub(super) fn run_application(
     if let Err(error) = shutdown {
         host.retirement_errors.record(error);
     }
+    let open_tasks = finish_open_host_shutdown(
+        &mut host.application,
+        Instant::now() + Duration::from_secs(5),
+    );
     editor_run_result(
         host.error,
         &host.retirement_errors,
         host.application.failed_open_close_evidence(),
         host.application.failed_session_close_receipt(),
+        Some(&open_tasks),
     )
+}
+
+fn finish_open_host_shutdown(
+    application: &mut EditorApplication,
+    deadline: Instant,
+) -> nara::project_host::EditorProjectOpenTasksCloseReport {
+    loop {
+        let report = application.poll_open_host_shutdown();
+        if report.is_complete() || Instant::now() >= deadline {
+            return report;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 fn editor_run_result(
@@ -140,6 +171,7 @@ fn editor_run_result(
     native_cleanup: &NativeCloseErrors,
     project_cleanup: Option<&nara::app::RuntimeCloseEvidence>,
     session_cleanup: Option<&nara::project_host::EditorProjectCloseReceipt>,
+    open_tasks: Option<&nara::project_host::EditorProjectOpenTasksCloseReport>,
 ) -> Result<(), EditorRunError> {
     let mut cleanup = String::new();
     if !native_cleanup.is_empty() {
@@ -160,6 +192,19 @@ fn editor_run_result(
         cleanup.push_str(&format!(
             "project Session retired with cleanup errors: {receipt:?}"
         ));
+    }
+    if let Some(report) =
+        open_tasks.filter(|report| !report.is_complete() || report.has_cleanup_failure())
+    {
+        if !cleanup.is_empty() {
+            cleanup.push_str("; ");
+        }
+        let status = if report.is_complete() {
+            "retired with cleanup errors"
+        } else {
+            "retirement remains incomplete"
+        };
+        cleanup.push_str(&format!("project Open Host Tasks {status}: {report:?}"));
     }
     match (primary, cleanup.is_empty()) {
         (Some(primary), false) => Err(EditorRunError::Cleanup {
@@ -223,6 +268,7 @@ mod result_tests {
             &native,
             Some(&evidence),
             None,
+            None,
         );
         let text = result.as_ref().unwrap_err().to_string();
         assert!(
@@ -237,13 +283,21 @@ mod result_tests {
             assert!(text.contains(fact), "missing {fact}: {text}");
         }
         assert!(
-            editor_run_result(None, &NativeCloseErrors::default(), Some(&evidence), None).is_err()
+            editor_run_result(
+                None,
+                &NativeCloseErrors::default(),
+                Some(&evidence),
+                None,
+                None
+            )
+            .is_err()
         );
-        assert!(editor_run_result(None, &NativeCloseErrors::default(), None, None).is_ok());
+        assert!(editor_run_result(None, &NativeCloseErrors::default(), None, None, None).is_ok());
         assert!(matches!(
             editor_run_result(
                 Some(EditorRunError::Usage("primary only".to_owned())),
                 &NativeCloseErrors::default(),
+                None,
                 None,
                 None,
             ),
@@ -255,10 +309,15 @@ mod result_tests {
     #[test]
     fn trusted_session_cleanup_failure_reaches_editor_result_and_preserves_every_cleanup_source() {
         let receipt = crate::app::failed_trusted_session_close_receipt();
-        let session_only =
-            editor_run_result(None, &NativeCloseErrors::default(), None, Some(&receipt))
-                .unwrap_err()
-                .to_string();
+        let session_only = editor_run_result(
+            None,
+            &NativeCloseErrors::default(),
+            None,
+            Some(&receipt),
+            None,
+        )
+        .unwrap_err()
+        .to_string();
         for fact in ["project Session", "PluginShutdown"] {
             assert!(
                 session_only.contains(fact),
@@ -276,6 +335,7 @@ mod result_tests {
             &native,
             Some(&evidence),
             Some(&receipt),
+            None,
         );
         let text = result.as_ref().unwrap_err().to_string();
         assert!(matches!(
@@ -293,6 +353,108 @@ mod result_tests {
             assert!(text.contains(fact), "missing {fact}: {text}");
         }
         assert_eq!(text.matches("PluginShutdown").count(), 2, "{text}");
+    }
+
+    #[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
+    #[test]
+    fn abnormal_open_host_cleanup_reports_incomplete_and_keeps_errors_after_physical_return() {
+        let (mut application, release, probe) =
+            crate::app::startup_retirement_tests::held_startup_application();
+        application.submit_project_action(crate::app::EditorProjectAction::CloseProject);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while application.current_frame().is_some() {
+            assert!(Instant::now() < deadline, "Session did not close");
+            application.drive_editor_frame(Duration::ZERO, false, false);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let incomplete = finish_open_host_shutdown(&mut application, Instant::now());
+        assert!(!incomplete.is_complete());
+        assert_eq!(probe.exited(), 0);
+        let result = editor_run_result(
+            Some(EditorRunError::EventLoop("lost event pump".to_owned())),
+            &NativeCloseErrors::default(),
+            None,
+            None,
+            Some(&incomplete),
+        );
+        let text = result.unwrap_err().to_string();
+        assert!(text.contains("lost event pump"), "{text}");
+        assert!(
+            text.contains("Open Host Tasks retirement remains incomplete"),
+            "{text}"
+        );
+        assert!(
+            editor_run_result(
+                None,
+                &NativeCloseErrors::default(),
+                None,
+                None,
+                Some(&incomplete),
+            )
+            .is_err()
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !application
+            .open_host_tasks_close_report()
+            .has_cleanup_failure()
+        {
+            assert!(
+                Instant::now() < deadline,
+                "held worker never reached its join timeout"
+            );
+            application.poll_open_host_shutdown();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        release.send(()).unwrap();
+        let complete =
+            finish_open_host_shutdown(&mut application, Instant::now() + Duration::from_secs(5));
+        assert!(complete.is_complete());
+        assert!(complete.has_cleanup_failure());
+        assert_eq!(
+            complete
+                .tasks()
+                .for_kind(nara_tasks::TaskPoolKind::Io)
+                .joined_workers,
+            1
+        );
+        assert_eq!(probe.exited(), 1);
+        assert!(application.request_exit().exit_ready());
+        assert_eq!(application.open_host_tasks_close_report(), complete);
+        let evidence = failed_open_cleanup_evidence();
+        let mut native = NativeCloseErrors::default();
+        native.record("native cleanup probe");
+        let result = editor_run_result(
+            Some(EditorRunError::EventLoop("lost event pump".to_owned())),
+            &native,
+            Some(&evidence),
+            None,
+            Some(&complete),
+        );
+        let text = result.as_ref().unwrap_err().to_string();
+        assert!(
+            matches!(result, Err(EditorRunError::Cleanup { primary, .. })
+            if matches!(primary.as_ref(), EditorRunError::EventLoop(_)))
+        );
+        for fact in [
+            "lost event pump",
+            "native cleanup probe",
+            "failed project Open",
+            "Open Host Tasks retired with cleanup errors",
+            "join_timed_out: true",
+        ] {
+            assert!(text.contains(fact), "missing {fact}: {text}");
+        }
+        assert!(
+            editor_run_result(
+                None,
+                &NativeCloseErrors::default(),
+                None,
+                None,
+                Some(&complete),
+            )
+            .is_err()
+        );
     }
 }
 
@@ -2294,6 +2456,40 @@ mod opening_tests {
         assert_eq!(imgui_next_deadline(&application, None, now), None);
         let manager = EditorApplication::new(EditorLaunchOptions::project_manager());
         assert_eq!(imgui_next_deadline(&manager, None, now), None);
+    }
+
+    #[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
+    #[test]
+    fn startup_failure_keeps_maintenance_in_recovery_and_manager_without_presentation() {
+        let mut application = crate::app::startup_retirement_tests::preparing_application();
+        nara_tasks::TaskPools::with_worker_spawn_failure_for_tests(
+            nara_tasks::TaskPoolKind::Io,
+            0,
+            || application.advance_project_open(),
+        );
+        let now = Instant::now();
+        assert_eq!(application.state(), crate::EditorApplicationState::Recovery);
+        assert_eq!(
+            imgui_next_deadline(&application, None, now),
+            Some(now + Duration::from_millis(16))
+        );
+        assert_eq!(
+            imgui_next_presentation_deadline(&application, None, now),
+            None
+        );
+        application
+            .submit_shell_action(crate::app::EditorProjectShellAction::ReturnToProjectManager);
+        assert_eq!(
+            application.state(),
+            crate::EditorApplicationState::ProjectManager
+        );
+        assert_eq!(
+            imgui_next_deadline(&application, None, now),
+            Some(now + Duration::from_millis(16))
+        );
+        application.advance_project_open();
+        assert_eq!(imgui_next_deadline(&application, None, now), None);
+        assert!(application.request_exit().exit_ready());
     }
 
     #[test]

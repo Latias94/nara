@@ -17,7 +17,8 @@ use nara::{
         EditorGameViewBridgeFailure, EditorGameViewCandidate, EditorGameViewCompletion,
         EditorPreviewCandidate, EditorProjectCloseProgress, EditorProjectCloseReceipt,
         EditorProjectOpenFailure, EditorProjectOpenHost, EditorProjectOpenProgress,
-        EditorUiAuthoringFrame, EditorUiPreviewCandidate, TrustedCompiledEditorProjectIntent,
+        EditorProjectOpenTasksCloseReport, EditorUiAuthoringFrame, EditorUiPreviewCandidate,
+        TrustedCompiledEditorProjectIntent,
     },
     render::Extent2d,
     scene::UnavailableRecordManifest,
@@ -390,7 +391,7 @@ pub struct EditorApplication {
     failed_open: Option<EditorProjectOpenFailure>,
     failed_open_close_evidence: Option<nara::app::RuntimeCloseEvidence>,
     failed_session_close_receipt: Option<EditorProjectCloseReceipt>,
-    exit_after_open_retirement: bool,
+    final_exit_committed: bool,
     initial_request: Option<EditorProjectRequest>,
     native_ready: bool,
     next_entry_generation: u64,
@@ -438,7 +439,7 @@ impl EditorApplication {
             failed_open: None,
             failed_open_close_evidence: None,
             failed_session_close_receipt: None,
-            exit_after_open_retirement: false,
+            final_exit_committed: false,
             initial_request,
             native_ready: false,
             next_entry_generation: 2,
@@ -484,7 +485,7 @@ impl EditorApplication {
             failed_open: None,
             failed_open_close_evidence: None,
             failed_session_close_receipt: None,
-            exit_after_open_retirement: false,
+            final_exit_committed: false,
             initial_request: None,
             native_ready: false,
             next_entry_generation: 2,
@@ -571,7 +572,7 @@ impl EditorApplication {
     /// Arms the initial request after the native window and GPU owner exist.
     #[doc(hidden)]
     pub fn native_shell_ready(&mut self) -> EditorApplicationUpdate {
-        if self.native_ready {
+        if self.native_ready || self.final_exit_committed {
             return EditorApplicationUpdate::idle();
         }
         self.native_ready = true;
@@ -595,15 +596,11 @@ impl EditorApplication {
     #[doc(hidden)]
     pub fn advance_project_open(&mut self) -> EditorApplicationUpdate {
         let cleanup_changed = self.advance_failed_open_retirement();
-        if self.exit_after_open_retirement && !self.project_open_retirement_pending() {
-            self.exit_after_open_retirement = false;
-            return EditorApplicationUpdate {
-                actions_observed: cleanup_changed,
-                exit_ready: true,
-            };
+        if self.final_exit_committed {
+            return self.finish_process_exit(cleanup_changed);
         }
         if self.project_open_retirement_pending() {
-            return EditorApplicationUpdate::idle();
+            return EditorApplicationUpdate::from_action(cleanup_changed, false);
         }
         let state = self.take_state();
         match state {
@@ -641,7 +638,7 @@ impl EditorApplication {
                     entry_generation: manager.entry_generation,
                     suggested_request: &manager.suggested_request,
                     open_available: !self.project_open_retirement_pending()
-                        && !self.exit_after_open_retirement,
+                        && !self.final_exit_committed,
                 })
             }
             EditorProductState::OpeningInitial(opening) => Some(EditorProjectShellModel::Opening {
@@ -668,7 +665,7 @@ impl EditorApplication {
                 request: &recovery.request,
                 diagnostics: &recovery.diagnostics,
                 retry_available: !self.project_open_retirement_pending()
-                    && !self.exit_after_open_retirement,
+                    && !self.final_exit_committed,
             }),
             EditorProductState::AuthoringReady(_) | EditorProductState::AuthoringDegraded(_) => {
                 None
@@ -680,6 +677,9 @@ impl EditorApplication {
         &mut self,
         action: EditorProjectShellAction,
     ) -> EditorApplicationUpdate {
+        if matches!(action, EditorProjectShellAction::Exit) {
+            return self.request_exit();
+        }
         let exit_ready = self.apply_shell_action(action);
         EditorApplicationUpdate::from_action(true, exit_ready)
     }
@@ -690,7 +690,7 @@ impl EditorApplication {
                 project_root,
                 profile,
             } => {
-                if self.project_open_retirement_pending() || self.exit_after_open_retirement {
+                if self.project_open_retirement_pending() || self.final_exit_committed {
                     return false;
                 }
                 let request = EditorProjectRequest::new(project_root, profile);
@@ -766,7 +766,7 @@ impl EditorApplication {
                 }
                 false
             }
-            EditorProjectShellAction::Exit => true,
+            EditorProjectShellAction::Exit => self.request_exit().exit_ready(),
         }
     }
 
@@ -853,7 +853,7 @@ impl EditorApplication {
     fn start_project_replacement(&mut self, request: EditorProjectRequest) -> bool {
         if self.session_retirement.is_some()
             || self.project_open_retirement_pending()
-            || self.exit_after_open_retirement
+            || self.final_exit_committed
         {
             return false;
         }
@@ -879,7 +879,7 @@ impl EditorApplication {
     /// Retries the exact rejected project request with a fresh attempt generation.
     #[must_use]
     pub fn retry_project_open(&mut self) -> bool {
-        if self.project_open_retirement_pending() || self.exit_after_open_retirement {
+        if self.project_open_retirement_pending() || self.final_exit_committed {
             return false;
         }
         let state = self.take_state();
@@ -1175,12 +1175,8 @@ impl EditorApplication {
     ) -> EditorApplicationUpdate {
         let cleanup_changed = self.advance_failed_open_retirement();
         let actions_observed = actions_observed || cleanup_changed;
-        if self.exit_after_open_retirement && !self.project_open_retirement_pending() {
-            self.exit_after_open_retirement = false;
-            return EditorApplicationUpdate {
-                actions_observed,
-                exit_ready: true,
-            };
+        if self.final_exit_committed {
+            return self.finish_process_exit(actions_observed);
         }
         if let EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
             retained,
@@ -1473,7 +1469,7 @@ impl EditorApplication {
     }
 
     fn request_close_project(&mut self) -> EditorApplicationUpdate {
-        if self.session_retirement.is_some() {
+        if self.session_retirement.is_some() || self.final_exit_committed {
             return EditorApplicationUpdate::idle();
         }
         self.start_session_retirement(EditorSessionRetirement::CloseProject)
@@ -1596,9 +1592,13 @@ impl EditorApplication {
                     other => self.state = other,
                 }
                 self.session_retirement = None;
-                EditorApplicationUpdate {
-                    actions_observed,
-                    exit_ready: retirement == EditorSessionRetirement::ExitProcess,
+                if retirement == EditorSessionRetirement::ExitProcess {
+                    self.finish_process_exit(actions_observed)
+                } else {
+                    EditorApplicationUpdate {
+                        actions_observed,
+                        exit_ready: false,
+                    }
                 }
             }
             _ if frame.workspace_intent().phase() == Some(EditorWorkspaceIntentPhase::Prepared)
@@ -1660,6 +1660,10 @@ impl EditorApplication {
     }
 
     pub fn request_exit(&mut self) -> EditorApplicationUpdate {
+        if self.final_exit_committed {
+            let changed = self.advance_failed_open_retirement();
+            return self.finish_process_exit(changed);
+        }
         if self.session_retirement == Some(EditorSessionRetirement::CloseProject) {
             self.session_retirement = Some(EditorSessionRetirement::ExitProcess);
             return EditorApplicationUpdate {
@@ -1668,11 +1672,7 @@ impl EditorApplication {
             };
         }
         if self.project_open_retirement_pending() && self.state.workspace().is_none() {
-            self.exit_after_open_retirement = true;
-            return EditorApplicationUpdate {
-                actions_observed: true,
-                exit_ready: false,
-            };
+            return self.finish_process_exit(true);
         }
         if self.session_retirement.is_some() {
             return EditorApplicationUpdate::idle();
@@ -1683,19 +1683,13 @@ impl EditorApplication {
                 self.session_retirement = None;
                 self.session_close_retry_at = None;
                 self.state = EditorProductState::ProjectManager(manager);
-                EditorApplicationUpdate {
-                    actions_observed: false,
-                    exit_ready: true,
-                }
+                self.finish_process_exit(false)
             }
             EditorProductState::Recovery(recovery) => {
                 self.session_retirement = None;
                 self.session_close_retry_at = None;
                 self.state = EditorProductState::Recovery(recovery);
-                EditorApplicationUpdate {
-                    actions_observed: false,
-                    exit_ready: true,
-                }
+                self.finish_process_exit(false)
             }
             EditorProductState::OpeningInitial(opening) => {
                 self.session_retirement = None;
@@ -1705,10 +1699,7 @@ impl EditorApplication {
                     entry_generation,
                     opening.request,
                 ));
-                EditorApplicationUpdate {
-                    actions_observed: true,
-                    exit_ready: true,
-                }
+                self.finish_process_exit(true)
             }
             EditorProductState::OpeningReplacement(replacement) => {
                 let retained = match replacement {
@@ -1729,8 +1720,30 @@ impl EditorApplication {
 
     /// Current process-exit custody, rather than inference from a retained frame result.
     pub(crate) fn has_pending_exit(&self) -> bool {
-        self.exit_after_open_retirement
+        self.final_exit_committed
             || self.session_retirement == Some(EditorSessionRetirement::ExitProcess)
+    }
+
+    fn finish_process_exit(&mut self, actions_observed: bool) -> EditorApplicationUpdate {
+        let before = self.open_host_tasks_close_report();
+        let newly_committed = !self.final_exit_committed;
+        self.final_exit_committed = true;
+        self.initial_request = None;
+        let report = self.poll_open_host_shutdown();
+        EditorApplicationUpdate {
+            actions_observed: actions_observed || newly_committed || before != report,
+            exit_ready: self.failed_open.is_none() && report.is_complete(),
+        }
+    }
+
+    /// Also used after an abnormal event-loop return; this does not resolve dirty decisions.
+    pub(crate) fn poll_open_host_shutdown(&mut self) -> EditorProjectOpenTasksCloseReport {
+        self.open_host.poll_shutdown()
+    }
+
+    /// Canonical cumulative Tasks evidence, independent of failed-Open Runtime evidence.
+    pub(crate) fn open_host_tasks_close_report(&self) -> EditorProjectOpenTasksCloseReport {
+        self.open_host.tasks_close_report()
     }
 
     fn start_initial_open(&mut self, request: EditorProjectRequest) {
@@ -2127,11 +2140,11 @@ impl EditorApplication {
         self.state = EditorProductState::Recovery(recovery);
     }
 
-    /// Failed Open owns cleanup independently of replaceable Recovery presentation state.
+    /// Failed Open and the persistent preparation Host retain cleanup independently of shell state.
     #[doc(hidden)]
     #[must_use]
     pub fn project_open_retirement_pending(&self) -> bool {
-        self.failed_open.is_some()
+        self.failed_open.is_some() || self.open_host.retirement_pending()
     }
 
     #[doc(hidden)]
@@ -2170,11 +2183,13 @@ impl EditorApplication {
     }
 
     fn advance_failed_open_retirement(&mut self) -> bool {
+        let before = self.open_host.tasks_close_report();
+        let changed = self.open_host.advance_retirement() != before;
         let Some(failure) = self.failed_open.as_mut() else {
-            return false;
+            return changed;
         };
         if failure.advance_retirement() != nara::app::RuntimeCandidateRetirementState::Retired {
-            return false;
+            return changed;
         }
         if let Some(evidence) = failure
             .close_evidence()
@@ -2542,6 +2557,9 @@ fn open_directory(path: &Path) -> io::Result<File> {
 #[cfg(all(test, any(windows, all(target_os = "linux", target_arch = "x86_64"))))]
 #[path = "app/persistence_tests.rs"]
 mod persistence_tests;
+
+#[cfg(all(test, any(windows, all(target_os = "linux", target_arch = "x86_64"))))]
+pub(crate) mod startup_retirement_tests;
 
 #[cfg(all(test, any(windows, all(target_os = "linux", target_arch = "x86_64"))))]
 pub(crate) use persistence_tests::failed_trusted_session_close_receipt;

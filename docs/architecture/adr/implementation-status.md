@@ -101,6 +101,17 @@ before native callbacks and retain final publication revalidation. Unchanged pub
 assertions, actual callback negative/positive controls and scoped source/test reviews qualify the
 bounded ADR 0047 correction; they do not claim strong filesystem CAS or a new persistence protocol.
 
+The [standalone startup-owner successor](../../knowledge/engineering/verification/2026-10/2026-10-25T232708Z-startup-preparation-owner-retry-and-final-application-shutdown-4281deb3281042fc9095f7cf2e247c4b.md)
+implements a reusable lazy Open Host facility outside every Session, exact pre-admission rejection
+and unadmitted cleanup evidence, retained partial-worker retirement, explicit same-Host retry and
+irreversible final Application shutdown. Close Project and dirty Cancel preserve actual reuse.
+The standalone single-poll and blocking drivers share the original physical owner without holding
+its mutex across blocking waits. ADRs 0008/0052/0118 own this bounded contract. The linked evidence
+records real first-submission/partial-worker proof, independent review findings and closure,
+passing owner/public/integrated cohorts, and the final native qualification results and limits.
+It does not extend the predecessor's historical qualification, select shared product queues,
+qualify every trusted authoring/Play activation failure or complete R4b/R4c and the foundation plan.
+
 The [R5c disposable projection qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md) binds `207bbcc` to complete-domain Scene epoch ownership, unchanged shared authoring facilities, a stable preview renderer producer and fresh presentation authority after identical-content recovery. Held Image/Save work, the joined public edit/history/Save/Reopen/picking/Close consumer, independent Prefab consumers and six actual Windows/DX12 trajectories pass. This closes the selected preview lifetime mismatch, not incremental projection, durable property addressing or the full foundation rebaseline.
 
 The [canonical native-source admission checkpoint](../../knowledge/engineering/verification/2026-10/2026-10-24T-project-content-source-admission-and-prefab-binding-qualification.md)

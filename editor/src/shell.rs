@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use nara::{
     project_host::{
-        EditorProjectOpenAttempt, EditorProjectOpenFailure, EditorProjectOpenPhase,
-        EditorProjectSession,
+        EditorProjectOpenAttempt, EditorProjectOpenFailure, EditorProjectOpenFailureSource,
+        EditorProjectOpenPhase, EditorProjectSession,
     },
     tooling::EditorAuthoringReadiness,
 };
@@ -262,7 +262,18 @@ impl RecoveryState {
         request: EditorProjectRequest,
         failure: &EditorProjectOpenFailure,
     ) -> Self {
-        let phase = open_phase_label(failure.phase()).to_owned();
+        let phase = match failure.source() {
+            EditorProjectOpenFailureSource::StartupPreparation => "Startup preparation",
+            EditorProjectOpenFailureSource::ProjectManifest
+            | EditorProjectOpenFailureSource::ProjectProfile
+            | EditorProjectOpenFailureSource::AuthoringSchemaBundle
+            | EditorProjectOpenFailureSource::AuthoringAdapter
+            | EditorProjectOpenFailureSource::ProjectSource
+            | EditorProjectOpenFailureSource::SessionPublication => {
+                open_phase_label(failure.phase())
+            }
+        }
+        .to_owned();
         let relative_source = failure.relative_source().map(str::to_owned);
         let impact = "Candidate session was not published".to_owned();
         let repair_hint = failure.repair_hint().to_owned();

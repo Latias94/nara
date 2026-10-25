@@ -133,6 +133,12 @@ Core rules:
   worker/queue bounds remain unchanged; unused kinds acquire no workers. Ordinary Tasks defaults
   and shipping composition remain eager. Actual deployment and first-use failure qualification
   belong in the implementation ledger; this decision is not a product latency claim.
+- The persistent Editor Open Host owns a separate reusable, demand-activated startup-preparation
+  facility outside every Session. Permanent first-use worker creation failure retires that same
+  facility before a later explicit Open can acquire a replacement. Ordinary pressure, cancelled
+  interest, source refusal and admitted task-body failure do not replace healthy facilities.
+  Normal Application Exit explicitly retires this owner; Session completion and emergency Drop
+  retention cannot stand in for its worker-join evidence.
 - `TaskPools::inline_for_tests` plus `run_pending_for_tests` is an explicit test harness. It admits
   work through the same bounded queue and terminal state machine; it is not a server/project mode.
 - The std worker backend owns IO, compute, and async-compute workers. Tokio and async-std remain

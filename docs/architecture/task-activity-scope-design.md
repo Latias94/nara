@@ -366,6 +366,35 @@ activation contributes an incomplete task observation while its Runtime is outsi
 Missing or incomplete required task reports also fail ordinary Stop and gate Restart before a
 successor is prepared; recording the failure only in the eventual Session receipt is insufficient.
 
+### Persistent Startup Preparation Owner
+
+The Editor Open Host outlives Sessions and owns one reusable lazy startup-preparation pool.
+It submits only to I/O; unused worker kinds remain dormant. A linear attempt retains its result
+handle and publication interest, not the physical facility or thread-bound Runtime authority.
+Dropping an attempt cancels interest without proving that a running read or its captures returned.
+
+On `WorkerStartupFailed`, the Host removes that facility from reuse and retains it in one concrete
+retirement slot. The rejected Open shares custody of that same owner, so either outer lifetime
+can keep the partial workers accountable. Both observe the existing standalone shutdown protocol;
+they do not create two close owners or duplicate reports. Only after physical completion may the
+next explicit Open create a replacement. Maintenance never creates one. Queue pressure, source
+refusal, cancellation and admitted task failure do not trigger replacement.
+
+The Host settles a completed facility's report once before clearing its slot. Rejected input
+cleanup failure remains a separate sticky fact because rejected captures were never admitted
+pool obligations. Neither fact is converted into a fictitious Runtime participant. Application
+maintenance drives retirement even after Recovery navigation, and gates Retry until physical
+return. Process Exit irreversibly closes the healthy Host too; Close Project and a cancelled dirty
+Exit keep it reusable. The native final result consumes Host cleanup evidence independently of
+Session and graphics results. Emergency Drop retention is not successful normal final shutdown.
+
+Pinned Bevy `85503941e488152711a4695bbe248e9ed9f453fc` joins TaskPool workers in
+`bevy_tasks/src/task_pool.rs`; pinned Godot `81ab961f91066a63bcbf3ec340962bb1a1ada558`
+joins its explicitly owned worker pool in `core/object/worker_thread_pool.cpp::finish`. These
+support explicit physical ownership, not a claim that either provides this cross-frame failed
+Open/Retry protocol. No facility-generation list, process-global service, automatic retry loop
+or executor extension trait is needed for this owner.
+
 ### Demand-Activation Comparison Candidate
 
 The demand-activation candidate creates bounded queues and a physical close owner without workers. The

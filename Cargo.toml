@@ -187,6 +187,7 @@ windows-sys = { workspace = true, features = [
 rustix = { workspace = true, features = ["net"], optional = true }
 
 [dev-dependencies]
+nara_tasks = { workspace = true, features = ["test-support"] }
 bevy_ecs.workspace = true
 image.workspace = true
 proc-macro2.workspace = true

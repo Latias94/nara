@@ -315,6 +315,18 @@ OS read stopped. A bounded preparation owner retains running captures through th
 retirement path. Unchanged pending polls need maintenance, not repeated presentation. Retained
 replacement projects and persistence-before-preparation/Save-before-refresh ordering stay intact.
 
+The persistent Open Host, not a Session or an attempt, owns startup-preparation facilities.
+Permanent first-use worker startup failure refuses that Open with its actual rejection and
+retains the same physical facility until return. The failed Open and Host may share custody of
+that concrete owner; they must not duplicate or manufacture Runtime close evidence for it.
+Only a subsequent explicit Open can acquire a replacement after physical completion. Pressure,
+source refusal, cancellation and task-body panic do not trigger facility replacement. Rejected
+unadmitted capture cleanup failure remains separate from clean admitted-work shutdown evidence.
+Application maintenance observes failed retirement in Recovery and Project Manager without
+requiring presentation. Process Exit also closes healthy Open Host facilities and waits for their
+physical return; Close Project keeps that reusable Host alive. Cleanup failures remain visible in
+the final native result independently of physical completion and Recovery presentation lifetime.
+
 Project Browser scan preparation runs as one finite owned attempt on the existing I/O task pool.
 Its generation reservation, absolute budgets, capability-bound paths and final lineage checks
 remain with the source-index owner. The owner polls progress without waiting, preserves last-good

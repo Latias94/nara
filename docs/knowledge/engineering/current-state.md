@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "04a85815487bd18c4fd37d223cedc25acc13cad0c21164408d24d3bbdc412959"
+source_fingerprint: "e41815712b5481b025d5b9d35279488f864edebcd8aa598c463083726281916c"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "04a85815487bd18c4fd37d223cedc25acc13cad0c21164408d24d3bbdc4
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `04a85815487bd18c4fd37d223cedc25acc13cad0c21164408d24d3bbdc412959`
-- Immutable records: 933
+- Source fingerprint: `e41815712b5481b025d5b9d35279488f864edebcd8aa598c463083726281916c`
+- Immutable records: 934
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Startup preparation owner retry and final Application shutdown](verification/2026-10/2026-10-25T232708Z-startup-preparation-owner-retry-and-final-application-shutdown-4281deb3281042fc9095f7cf2e247c4b.md) - Bounded R4b standalone startup facility ownership, exact failure evidence, independent review and serial qualification.
 - **Verification Evidence**: [Reopen preparation failure fidelity before native source admission](verification/2026-10/2026-10-25T220113Z-reopen-preparation-failure-fidelity-before-native-source-admission-9e51c9e94971464ab4876bdf2ff2ff07.md) - Records the source-confirmed prior Reopen error-priority defect, bounded Scene/Prefab correction, unchanged public failure assertions and source-gated native callback ordering.
 - **Verification Evidence**: [Private lazy Editor tasks and whole Session physical close qualification](verification/2026-10/2026-10-25T213241Z-private-lazy-editor-tasks-and-whole-session-physical-close-qualification-4c62c82789e4449dba02bb60f145760c.md) - Binds the bounded Editor deployment and trusted Play close contract to actual owner, failure, public-consumer and native evidence, without closing all R4b or the foundation Goal.
 - **Subagent Finding**: [Startup preparation facility retry and final Host custody follow-up](subagents/2026-10/2026-10-25T210930Z-startup-preparation-facility-retry-and-final-host-custody-follow-up-8a1cb30c55e442498e0e752712d65439.md) - Source-grounded next bounded R4b design, distinguishing activation failure from ordinary pressure and whole Session cleanup from the separate Open Host.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Session Handoff**: [Demand activation merged with measured task isolation direction](sessions/2026-10/2026-10-25T164658Z-demand-activation-merged-with-measured-task-isolation-direction-b4f47bf5eb9346d092120ce798f90f90.md) - Pins the qualified lazy/shared comparison and local source commit, records the next concrete Editor deployment and retirement obligations, and preserves the full foundation Goal.
 - **Verification Evidence**: [Demand activation custody and matched lazy shared Image comparison](verification/2026-10/2026-10-25T164306Z-demand-activation-custody-and-matched-lazy-shared-image-comparison-c5d3a638a3884807b489a85f0b7b0b1a.md) - Qualifies lazy per-kind workers, concurrent physical retirement, actual joined retention and a matched release Image comparison that challenges unconditional physical sharing.
 - **Session Handoff**: [R4b task activity custody merged and ready for lazy facility comparison](sessions/2026-10/2026-10-25T160206Z-r4b-task-activity-custody-merged-and-ready-for-lazy-facility-comparison-48eac0b948164958bb8efff8a892bcab.md) - Pins the qualified optional custody substrate to local main while preserving the full foundation Goal and remaining workload/product selection.
-- **Verification Evidence**: [Independent task activity custody and shared Image runtime qualification](verification/2026-10/2026-10-25T155728Z-independent-task-activity-custody-and-shared-image-runtime-qualification-13caef5f8c39471aa58529789ae9c530.md) - R4b first custody unit, isolated reaper recovery correction and actual two-Runtime Image evidence; deployment and lazy comparison remain open.
 
 # Integration Notes
 

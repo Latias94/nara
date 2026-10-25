@@ -20,6 +20,8 @@ use crate::{EditorLaunchOptions, frontend::imgui::UiProject};
 
 const RETIREMENT_TIMEOUT: Duration = Duration::from_secs(15);
 
+mod quiet_exit;
+
 type NativeProof = fn(&mut NativeEditorHost, &ActiveEventLoop) -> Result<(), String>;
 
 struct RetirementTestHost {
@@ -325,6 +327,12 @@ fn native_close_before_first_presentation_retires_before_exit() {
             "clean pre-presentation close retained an error",
         )
     });
+}
+
+#[test]
+#[ignore = "requires a Windows desktop and an actual DX12 Dear ImGui/WGPU renderer"]
+fn native_quiet_exit_waits_for_healthy_open_host_worker_before_graphics_and_process_exit() {
+    quiet_exit::qualify();
 }
 
 fn dirty_active_scene(

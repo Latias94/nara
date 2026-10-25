@@ -2108,6 +2108,7 @@ dependencies = [
  "dunce",
  "nara",
  "nara_render_wgpu",
+ "nara_tasks",
  "rustix 1.1.4",
  "serde",
  "serde_json",

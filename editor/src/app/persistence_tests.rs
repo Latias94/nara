@@ -288,7 +288,8 @@ fn terminal_open_cleanup_evidence_survives_clean_failure_slot_reuse_and_manager_
         }
     }
     assert_eq!(application.state(), EditorApplicationState::ProjectManager);
-    assert!(application.request_exit().exit_ready());
+    close(&mut application);
+    assert!(application.open_host_tasks_close_report().is_complete());
     assert_eq!(application.failed_open_close_evidence(), Some(&first));
 }
 
@@ -454,6 +455,19 @@ fn startup_preparation_exit_revokes_initial_and_replacement_publication() {
             assert!(application.request_project_replacement(&root, Some("desktop".to_owned())));
         }
         let retained = application.current_frame();
+        let retained_entry = application.workspace_generation();
+        let assert_no_candidate_publication = |application: &EditorApplication| {
+            if let Some(generation) = application.workspace_generation() {
+                assert_eq!(
+                    Some(generation),
+                    retained_entry,
+                    "Exit published the startup candidate instead of retaining its incumbent"
+                );
+            }
+            if !replacement {
+                assert!(application.current_frame().is_none());
+            }
+        };
         super::tests::advance_to_startup_preparation(&mut application);
         assert!(!application.advance_project_open().actions_observed());
         if let Some(before) = retained {
@@ -467,17 +481,25 @@ fn startup_preparation_exit_revokes_initial_and_replacement_publication() {
 
         // Exit revokes publication; it does not claim that the OS read has already returned.
         let mut exited = application.request_exit().exit_ready();
+        assert_no_candidate_publication(&application);
         let deadline = Instant::now() + Duration::from_secs(10);
         while !exited && Instant::now() < deadline {
-            assert!(!application.advance_project_open().actions_observed());
-            exited = application
+            exited |= application.advance_project_open().exit_ready();
+            assert_no_candidate_publication(&application);
+            exited |= application
                 .drive_editor_frame(Duration::ZERO, false, false)
                 .exit_ready();
+            assert_no_candidate_publication(&application);
+            assert!(!matches!(
+                application.state(),
+                EditorApplicationState::OpeningInitial | EditorApplicationState::OpeningReplacement
+            ));
             std::thread::sleep(Duration::from_millis(1));
         }
         assert!(exited);
         assert_eq!(application.state(), EditorApplicationState::ProjectManager);
         assert!(application.current_frame().is_none());
+        assert!(application.open_host_tasks_close_report().is_complete());
         assert!(!application.advance_project_open().actions_observed());
         assert!(application.current_frame().is_none());
         assert_eq!(fs::read(&source).unwrap(), original);
@@ -501,7 +523,10 @@ fn pending_save_retries_close_project_and_exit_after_its_receipt() {
             EditorSessionRetirement::ExitProcess => application.request_exit().exit_ready(),
         };
         let deadline = Instant::now() + Duration::from_secs(10);
-        while application.current_frame().is_some() && Instant::now() < deadline {
+        while (application.current_frame().is_some()
+            || (retirement == EditorSessionRetirement::ExitProcess && !exited))
+            && Instant::now() < deadline
+        {
             exited |= application
                 .drive_editor_frame(Duration::ZERO, false, false)
                 .exit_ready();
@@ -509,6 +534,10 @@ fn pending_save_retries_close_project_and_exit_after_its_receipt() {
         }
         assert_eq!(application.state(), EditorApplicationState::ProjectManager);
         assert_eq!(exited, retirement == EditorSessionRetirement::ExitProcess);
+        assert_eq!(
+            application.open_host_tasks_close_report().is_complete(),
+            exited
+        );
         assert!(
             fs::read_to_string(fixture.root.join("worlds/entry.scene.json"))
                 .unwrap()
@@ -534,7 +563,10 @@ fn pending_reopen_retries_close_project_and_exit_after_owner_publication() {
             EditorSessionRetirement::ExitProcess => application.request_exit().exit_ready(),
         };
         let deadline = Instant::now() + Duration::from_secs(10);
-        while application.current_frame().is_some() && Instant::now() < deadline {
+        while (application.current_frame().is_some()
+            || (retirement == EditorSessionRetirement::ExitProcess && !exited))
+            && Instant::now() < deadline
+        {
             exited |= application
                 .drive_editor_frame(Duration::ZERO, false, false)
                 .exit_ready();
@@ -542,6 +574,10 @@ fn pending_reopen_retries_close_project_and_exit_after_owner_publication() {
         }
         assert_eq!(application.state(), EditorApplicationState::ProjectManager);
         assert_eq!(exited, retirement == EditorSessionRetirement::ExitProcess);
+        assert_eq!(
+            application.open_host_tasks_close_report().is_complete(),
+            exited
+        );
         assert_eq!(
             fs::read(fixture.root.join("worlds/entry.scene.json")).unwrap(),
             original

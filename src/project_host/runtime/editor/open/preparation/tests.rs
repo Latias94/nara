@@ -217,7 +217,7 @@ fn assert_safe_unavailable(failure: &EditorProjectOpenFailure) {
     assert_eq!(failure.phase(), EditorProjectOpenPhase::StartupClosure);
     assert_eq!(
         failure.source(),
-        EditorProjectOpenFailureSource::ProjectSource
+        EditorProjectOpenFailureSource::StartupPreparation
     );
     assert_eq!(
         failure.impact(),
@@ -240,6 +240,10 @@ fn held_real_worker_keeps_owner_poll_pending_and_attempt_transportable() {
     let mut gate = GateControl::install(&mut host, StartupTestPhase::BeforeRead, false);
     let attempt = expect_pending(host.advance(ready));
     gate.wait();
+    let stats = host.preparation.pools.as_ref().unwrap().stats();
+    assert_eq!(stats.for_kind(TaskPoolKind::Io).live_workers, 1);
+    assert_eq!(stats.for_kind(TaskPoolKind::Compute).live_workers, 0);
+    assert_eq!(stats.for_kind(TaskPoolKind::AsyncCompute).live_workers, 0);
     let mut foreign_host = EditorProjectOpenHost::new();
     // The worker is still held: this owner call must return without waiting for its read.
     let attempt = expect_pending(foreign_host.advance(attempt));
@@ -368,4 +372,216 @@ fn worker_panic_returns_safe_startup_failure_without_a_candidate() {
     gate.release();
     assert_unavailable(drive_startup(&mut host, attempt));
     wait_retired(&host.preparation.active);
+    assert!(host.preparation.retiring.is_none());
+}
+
+fn rejected(progress: EditorProjectOpenProgress) -> EditorProjectOpenFailure {
+    let EditorProjectOpenProgress::Rejected(failure) = progress else {
+        panic!("startup refusal published or retained an attempt");
+    };
+    failure
+}
+
+#[test]
+fn first_submission_failure_is_exact_and_same_host_retries_only_after_partial_worker_join() {
+    let project = StartupProject::new();
+    let mut host = EditorProjectOpenHost::new();
+    host.preparation.config = Some(
+        startup_pool_config()
+            .unwrap()
+            .with_kind(
+                TaskPoolKind::Io,
+                TaskKindConfig::new(ItemLimit::new(2).unwrap(), ItemLimit::new(4).unwrap()),
+            )
+            .unwrap(),
+    );
+    let ready = project.ready(&mut host);
+    let (release, held) = mpsc::channel();
+    let (progress, probe) =
+        TaskPools::with_worker_spawn_failure_for_tests(TaskPoolKind::Io, 1, || {
+            TaskPools::hold_partial_worker_exit_for_tests(held);
+            host.advance(ready)
+        });
+    let mut failure = rejected(progress);
+    let refusal = failure.startup_task_rejection().unwrap();
+    assert_eq!(refusal.reason, TaskRejectReason::WorkerStartupFailed);
+    assert_eq!(refusal.return_state, TaskReturnState::Returned);
+    assert_eq!(
+        failure.diagnostics().iter().next().unwrap().code().as_str(),
+        "project.editor.startup-worker-startup-failed"
+    );
+    assert!(failure.close_evidence().is_none());
+    assert_eq!(probe.started(), 1);
+    assert_eq!(probe.exited(), 0);
+    assert_eq!(host.preparation.active.load(Ordering::Acquire), 0);
+    for _ in 0..3 {
+        assert!(host.retirement_pending());
+        assert!(!host.advance_retirement().is_complete());
+        assert_ne!(
+            failure.advance_retirement(),
+            nara_app::RuntimeCandidateRetirementState::Retired
+        );
+        assert!(host.preparation.pools.is_none());
+    }
+    let ready = project.ready(&mut host);
+    assert_unavailable(host.advance(ready));
+    assert_eq!(probe.started(), 1);
+    release.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while failure.advance_retirement() != nara_app::RuntimeCandidateRetirementState::Retired {
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    let report = host.advance_retirement();
+    assert!(report.is_complete());
+    assert!(!report.has_cleanup_failure());
+    assert_eq!(report.tasks().for_kind(TaskPoolKind::Io).joined_workers, 1);
+    assert_eq!(probe.exited(), 1);
+    assert_eq!(host.advance_retirement(), report);
+    assert!(
+        host.preparation.pools.is_none(),
+        "maintenance cannot create a replacement"
+    );
+    let ready = project.ready(&mut host);
+    let attempt = expect_pending(host.advance(ready));
+    let candidate = expect_pending(drive_startup(&mut host, attempt));
+    assert_eq!(
+        candidate.phase(),
+        EditorProjectOpenPhase::SessionPublication
+    );
+    assert_eq!(
+        host.preparation
+            .pools
+            .as_ref()
+            .unwrap()
+            .stats()
+            .for_kind(TaskPoolKind::Io)
+            .live_workers,
+        2
+    );
+    assert_eq!(failure.startup_tasks_close_report().unwrap(), report);
+    let report = close_host(&mut host);
+    assert_eq!(report.tasks().for_kind(TaskPoolKind::Io).joined_workers, 3);
+    assert_eq!(host.poll_shutdown(), report);
+    assert_unavailable(host.advance(candidate));
+}
+
+fn close_host(host: &mut EditorProjectOpenHost) -> super::super::EditorProjectOpenTasksCloseReport {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let report = host.poll_shutdown();
+        if report.is_complete() {
+            return report;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "startup facility did not physically close"
+        );
+        std::thread::yield_now();
+    }
+}
+
+#[test]
+fn failed_open_retains_partial_worker_after_its_host_is_dropped() {
+    let project = StartupProject::new();
+    let mut host = EditorProjectOpenHost::new();
+    host.preparation.config = Some(
+        startup_pool_config()
+            .unwrap()
+            .with_kind(
+                TaskPoolKind::Io,
+                TaskKindConfig::new(ItemLimit::new(2).unwrap(), ItemLimit::new(4).unwrap()),
+            )
+            .unwrap(),
+    );
+    let ready = project.ready(&mut host);
+    let (release, held) = mpsc::channel();
+    let (progress, probe) =
+        TaskPools::with_worker_spawn_failure_for_tests(TaskPoolKind::Io, 1, || {
+            TaskPools::hold_partial_worker_exit_for_tests(held);
+            host.advance(ready)
+        });
+    let mut failure = rejected(progress);
+    drop(host);
+    assert_ne!(
+        failure.advance_retirement(),
+        nara_app::RuntimeCandidateRetirementState::Retired
+    );
+    assert_eq!(probe.exited(), 0);
+    release.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while failure.advance_retirement() != nara_app::RuntimeCandidateRetirementState::Retired {
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        failure
+            .startup_tasks_close_report()
+            .unwrap()
+            .tasks()
+            .for_kind(TaskPoolKind::Io)
+            .joined_workers,
+        1
+    );
+}
+
+#[test]
+fn final_host_shutdown_waits_for_cancelled_capture_and_is_irreversible() {
+    let project = StartupProject::new();
+    let mut host = EditorProjectOpenHost::new();
+    let ready = project.ready(&mut host);
+    let mut gate = GateControl::install(&mut host, StartupTestPhase::BeforeRead, false);
+    let attempt = expect_pending(host.advance(ready));
+    gate.wait();
+    drop(attempt);
+    assert!(!host.poll_shutdown().is_complete());
+    assert!(host.retirement_pending());
+    assert_eq!(host.preparation.active.load(Ordering::Acquire), 1);
+    gate.release();
+    let report = close_host(&mut host);
+    assert!(report.is_complete());
+    assert_eq!(report.tasks().for_kind(TaskPoolKind::Io).joined_workers, 1);
+    for kind in [TaskPoolKind::Compute, TaskPoolKind::AsyncCompute] {
+        assert_eq!(report.tasks().for_kind(kind).joined_workers, 0);
+    }
+    assert_eq!(host.preparation.active.load(Ordering::Acquire), 0);
+    assert_eq!(host.poll_shutdown(), report);
+    let capability = DirectoryCapability::from_host_handle(
+        open_directory(&project.root),
+        HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::TrustedLocal),
+    )
+    .unwrap();
+    let attempt = host.begin(capability, None);
+    assert_unavailable(host.advance(attempt));
+}
+
+#[test]
+fn unadmitted_capture_cleanup_failure_survives_clean_facility_close() {
+    let project = StartupProject::new();
+    let mut host = EditorProjectOpenHost::new();
+    let ready = project.ready(&mut host);
+    host.preparation.panic_on_capture_drop = true;
+    let (progress, _) =
+        TaskPools::with_worker_spawn_failure_for_tests(TaskPoolKind::Io, 0, || host.advance(ready));
+    let failure = rejected(progress);
+    assert_eq!(
+        failure.startup_task_rejection().unwrap().return_state,
+        TaskReturnState::CleanupFailed
+    );
+    assert!(
+        failure
+            .startup_tasks_close_report()
+            .unwrap()
+            .rejected_input_cleanup_failed()
+    );
+    assert!(failure.close_evidence().is_none());
+    let report = close_host(&mut host);
+    assert!(report.is_complete());
+    assert!(report.has_cleanup_failure());
+    assert!(report.rejected_input_cleanup_failed());
+    assert!(
+        !report.tasks().has_cleanup_failure(),
+        "unadmitted disposal is not admitted work"
+    );
+    assert_eq!(report.tasks().for_kind(TaskPoolKind::Io).joined_workers, 0);
 }

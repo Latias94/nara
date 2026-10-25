@@ -594,8 +594,11 @@ impl ImguiEditorFrontend {
             ui.text(detachment);
             if application.failed_open_close_evidence().is_some()
                 || application.failed_session_close_receipt().is_some()
+                || application
+                    .open_host_tasks_close_report()
+                    .has_cleanup_failure()
             {
-                ui.text("Project cleanup completed with errors.");
+                ui.text("Project cleanup reported errors.");
             }
         });
 

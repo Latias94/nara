@@ -60,7 +60,7 @@ pub(crate) use image_import::{
 pub use open::{
     EditorProjectOpenAttempt, EditorProjectOpenFailure, EditorProjectOpenFailureImpact,
     EditorProjectOpenFailureSource, EditorProjectOpenHost, EditorProjectOpenPhase,
-    EditorProjectOpenProgress,
+    EditorProjectOpenProgress, EditorProjectOpenTasksCloseReport,
 };
 #[cfg(test)]
 pub(crate) use persistence::{ReopenTestPhase, SaveTestPhase};

@@ -20,6 +20,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 winit.workspace = true
 
+[dev-dependencies]
+nara_tasks = { workspace = true, features = ["test-support"] }
+
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
 rustix = { workspace = true, features = ["event", "fs", "process"] }
 

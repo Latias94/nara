@@ -1,12 +1,13 @@
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
 };
 
 use nara_core::ItemLimit;
 use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskKindConfig, TaskPoolConfig, TaskPoolKind, TaskPools,
-    TaskShutdownPolicy, TaskSpawnRequest, TaskTerminal,
+    TaskRejectReason, TaskRejection, TaskReturnState, TaskShutdownPolicy, TaskShutdownReport,
+    TaskSpawnRequest, TaskTerminal,
 };
 
 use crate::project_host::authoring::{
@@ -24,25 +25,52 @@ type StartupResult = Result<AuthoringProjectCandidate, AuthoringProjectSourceAdm
 #[derive(Default)]
 pub(super) struct StartupPreparationHost {
     pools: Option<TaskPools>,
+    retiring: Option<StartupRetirement>,
+    completed: Option<TaskShutdownReport>,
+    rejected_input_cleanup_failed: bool,
+    closing: bool,
     active: Arc<AtomicUsize>,
     #[cfg(test)]
     pub(super) gate: Option<StartupTestGate>,
+    #[cfg(test)]
+    config: Option<TaskPoolConfig>,
+    #[cfg(test)]
+    panic_on_capture_drop: bool,
 }
 
 impl StartupPreparationHost {
+    pub(super) const fn is_closing(&self) -> bool {
+        self.closing
+    }
+
     pub(super) fn start(
         &mut self,
         prepared: PreparedAuthoringProject,
-    ) -> Option<StartupPreparation> {
-        let permit = StartupPermit::acquire(&self.active)?;
+    ) -> Result<StartupPreparation, StartupPreparationFailure> {
+        self.advance_retirement();
+        if self.closing || self.retiring.is_some() {
+            return Err(StartupPreparationFailure::unavailable());
+        }
+        let permit = StartupPermit::acquire(&self.active)
+            .ok_or_else(StartupPreparationFailure::unavailable)?;
         if self.pools.is_none() {
-            self.pools = Some(TaskPools::try_new(startup_pool_config()?).ok()?);
+            let config =
+                startup_pool_config().ok_or_else(StartupPreparationFailure::unavailable)?;
+            #[cfg(test)]
+            let config = self.config.unwrap_or(config);
+            self.pools = Some(
+                TaskPools::try_new_lazy(config)
+                    .map_err(|_| StartupPreparationFailure::unavailable())?,
+            );
         }
         #[cfg(test)]
         let mut gate = self.gate.take();
+        #[cfg(test)]
+        let capture_drop = CaptureDropProbe(std::mem::take(&mut self.panic_on_capture_drop));
         let task = self
             .pools
-            .as_ref()?
+            .as_ref()
+            .expect("startup facilities were acquired")
             .spawn(
                 TaskPoolKind::Io,
                 TaskSpawnRequest::new(0, TaskDomainKey::new(0x7374_6172_7475_70)),
@@ -50,6 +78,8 @@ impl StartupPreparationHost {
                     // Logical cancellation is not physical retirement. This guard stays with
                     // the closure, including queued disposal and unwinding after a panic.
                     let _permit = permit;
+                    #[cfg(test)]
+                    let _capture_drop = capture_drop;
                     if cancellation.is_cancelled() {
                         return None;
                     }
@@ -67,9 +97,168 @@ impl StartupPreparationHost {
                     Some(result)
                 },
             )
-            .into_handle()
-            .ok()?;
-        Some(StartupPreparation { task })
+            .into_handle();
+        match task {
+            Ok(task) => Ok(StartupPreparation { task }),
+            Err(rejection) => {
+                self.rejected_input_cleanup_failed |=
+                    rejection.return_state == TaskReturnState::CleanupFailed;
+                let retirement = if rejection.reason == TaskRejectReason::WorkerStartupFailed {
+                    let retirement = StartupRetirement::new(
+                        self.pools
+                            .take()
+                            .expect("rejected startup retains its facility"),
+                    );
+                    self.retiring = Some(retirement.clone());
+                    Some(retirement)
+                } else {
+                    None
+                };
+                Err(StartupPreparationFailure {
+                    rejection: Some(rejection),
+                    retirement,
+                })
+            }
+        }
+    }
+
+    pub(super) fn retirement_pending(&self) -> bool {
+        self.retiring
+            .as_ref()
+            .is_some_and(|owner| !owner.is_complete())
+    }
+
+    pub(super) fn advance_retirement(&mut self) -> super::EditorProjectOpenTasksCloseReport {
+        if let Some(owner) = &self.retiring {
+            owner.poll();
+            if owner.is_complete() {
+                let report = owner.report();
+                self.completed = Some(TaskShutdownReport::aggregate(
+                    self.completed.iter().chain(std::iter::once(&report)),
+                ));
+                self.retiring = None;
+            }
+        }
+        self.report()
+    }
+
+    pub(super) fn poll_shutdown(&mut self) -> super::EditorProjectOpenTasksCloseReport {
+        self.closing = true;
+        if let Some(pools) = self.pools.take() {
+            debug_assert!(self.retiring.is_none());
+            self.retiring = Some(StartupRetirement::new(pools));
+        }
+        self.advance_retirement()
+    }
+
+    pub(super) fn report(&self) -> super::EditorProjectOpenTasksCloseReport {
+        let retiring = self.retiring.as_ref().map(StartupRetirement::report);
+        let live = self.pools.as_ref().map(|_| TaskShutdownReport::default());
+        super::EditorProjectOpenTasksCloseReport {
+            tasks: TaskShutdownReport::aggregate(
+                self.completed
+                    .iter()
+                    .chain(retiring.iter())
+                    .chain(live.iter()),
+            ),
+            rejected_input_cleanup_failed: self.rejected_input_cleanup_failed,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct StartupRetirement(Arc<Mutex<RetiringStartup>>);
+
+struct RetiringStartup {
+    pools: TaskPools,
+    report: TaskShutdownReport,
+}
+
+impl StartupRetirement {
+    fn new(pools: TaskPools) -> Self {
+        Self(Arc::new(Mutex::new(RetiringStartup {
+            pools,
+            report: TaskShutdownReport::default(),
+        })))
+    }
+
+    fn poll(&self) {
+        let mut owner = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        owner.report = owner
+            .pools
+            .poll_shutdown()
+            .expect("startup preparation retains standalone physical ownership");
+    }
+
+    fn is_complete(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .report
+            .is_complete()
+    }
+
+    fn report(&self) -> TaskShutdownReport {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .report
+            .clone()
+    }
+}
+
+impl std::fmt::Debug for StartupRetirement {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.report().fmt(formatter)
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct StartupPreparationFailure {
+    pub(super) rejection: Option<TaskRejection>,
+    retirement: Option<StartupRetirement>,
+}
+
+impl StartupPreparationFailure {
+    fn unavailable() -> Self {
+        Self {
+            rejection: None,
+            retirement: None,
+        }
+    }
+
+    pub(super) fn is_complete(&self) -> bool {
+        self.retirement
+            .as_ref()
+            .is_none_or(StartupRetirement::is_complete)
+    }
+
+    pub(super) fn report(&self) -> super::EditorProjectOpenTasksCloseReport {
+        super::EditorProjectOpenTasksCloseReport {
+            tasks: self.retirement.as_ref().map_or_else(
+                || TaskShutdownReport::aggregate([]),
+                StartupRetirement::report,
+            ),
+            rejected_input_cleanup_failed: self
+                .rejection
+                .is_some_and(|rejection| rejection.return_state == TaskReturnState::CleanupFailed),
+        }
+    }
+
+    pub(super) fn advance_retirement(&mut self) {
+        if let Some(owner) = &self.retirement {
+            owner.poll();
+        }
+    }
+}
+
+#[cfg(test)]
+struct CaptureDropProbe(bool);
+
+#[cfg(test)]
+impl Drop for CaptureDropProbe {
+    fn drop(&mut self) {
+        assert!(!self.0, "injected startup capture cleanup failure");
     }
 }
 

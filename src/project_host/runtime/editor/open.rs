@@ -13,7 +13,44 @@ use super::{EditorProjectOpenError, EditorProjectSession, single_error};
 
 mod preparation;
 
-use preparation::{StartupPreparation, StartupPreparationHost, StartupPreparationProgress};
+use preparation::{
+    StartupPreparation, StartupPreparationFailure, StartupPreparationHost,
+    StartupPreparationProgress,
+};
+
+/// Standalone Open Host custody, separate from every Session's Runtime close ledger.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorProjectOpenTasksCloseReport {
+    tasks: nara_tasks::TaskShutdownReport,
+    rejected_input_cleanup_failed: bool,
+}
+
+impl EditorProjectOpenTasksCloseReport {
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        self.tasks.is_complete()
+    }
+
+    #[must_use]
+    pub fn has_cleanup_failure(&self) -> bool {
+        self.rejected_input_cleanup_failed
+            || self.tasks.has_cleanup_failure()
+            || self.tasks.timed_out()
+            || nara_tasks::TaskPoolKind::ALL
+                .into_iter()
+                .any(|kind| self.tasks.for_kind(kind).panicked_workers != 0)
+    }
+
+    #[must_use]
+    pub const fn tasks(&self) -> &nara_tasks::TaskShutdownReport {
+        &self.tasks
+    }
+
+    #[must_use]
+    pub const fn rejected_input_cleanup_failed(&self) -> bool {
+        self.rejected_input_cleanup_failed
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorProjectOpenPhase {
@@ -30,6 +67,7 @@ pub enum EditorProjectOpenFailureSource {
     AuthoringSchemaBundle,
     AuthoringAdapter,
     ProjectSource,
+    StartupPreparation,
     SessionPublication,
 }
 
@@ -47,13 +85,24 @@ pub struct EditorProjectOpenFailure {
     impact: EditorProjectOpenFailureImpact,
     repair_hint: &'static str,
     error: EditorProjectOpenError,
+    startup: Option<StartupPreparationFailure>,
 }
 
 impl EditorProjectOpenFailure {
     /// Publication refusal and physical retirement are independent observations.
     #[must_use]
     pub fn retirement_state(&self) -> nara_app::RuntimeCandidateRetirementState {
-        self.error.retirement_state()
+        let runtime = self.error.retirement_state();
+        if runtime == nara_app::RuntimeCandidateRetirementState::Retired
+            && self
+                .startup
+                .as_ref()
+                .is_some_and(|failure| !failure.is_complete())
+        {
+            nara_app::RuntimeCandidateRetirementState::Retiring
+        } else {
+            runtime
+        }
     }
 
     #[must_use]
@@ -63,7 +112,22 @@ impl EditorProjectOpenFailure {
 
     /// Advances cleanup once on the failed App's construction thread.
     pub fn advance_retirement(&mut self) -> nara_app::RuntimeCandidateRetirementState {
-        self.error.advance_retirement()
+        self.error.advance_retirement();
+        if let Some(startup) = &mut self.startup {
+            startup.advance_retirement();
+        }
+        self.retirement_state()
+    }
+
+    /// Exact pre-admission refusal; unadmitted input cleanup is not Runtime evidence.
+    #[must_use]
+    pub fn startup_task_rejection(&self) -> Option<nara_tasks::TaskRejection> {
+        self.startup.as_ref().and_then(|failure| failure.rejection)
+    }
+
+    #[must_use]
+    pub fn startup_tasks_close_report(&self) -> Option<EditorProjectOpenTasksCloseReport> {
+        self.startup.as_ref().map(StartupPreparationFailure::report)
     }
 
     #[must_use]
@@ -118,6 +182,29 @@ impl EditorProjectOpenHost {
         Self::default()
     }
 
+    /// Observes failed facility retirement once without closing reusable healthy facilities.
+    pub fn advance_retirement(&mut self) -> EditorProjectOpenTasksCloseReport {
+        self.preparation.advance_retirement()
+    }
+
+    #[must_use]
+    pub fn retirement_pending(&self) -> bool {
+        self.preparation.retirement_pending()
+    }
+
+    /// Irreversibly closes this Host's preparation admission and polls physical return once.
+    ///
+    /// Session Close does not cover this independent owner. Continue polling during process Exit;
+    /// completion and cleanup success are independent. This cannot interrupt a running OS read.
+    pub fn poll_shutdown(&mut self) -> EditorProjectOpenTasksCloseReport {
+        self.preparation.poll_shutdown()
+    }
+
+    #[must_use]
+    pub fn tasks_close_report(&self) -> EditorProjectOpenTasksCloseReport {
+        self.preparation.report()
+    }
+
     /// Selects only trusted code compiled into the Editor; project files cannot add contributors.
     #[must_use]
     pub fn with_source_asset_importers(
@@ -135,6 +222,9 @@ impl EditorProjectOpenHost {
         project_root: DirectoryCapability,
         intent: super::TrustedCompiledEditorProjectIntent,
     ) -> Result<EditorProjectSession, super::EditorProjectOpenError> {
+        if self.preparation.is_closing() {
+            return Err(startup_worker_failure(None).error);
+        }
         let mut session = EditorProjectSession::open_trusted_compiled(project_root, intent)?;
         session.source_asset_import.importers = self.source_asset_importers.clone();
         Ok(session)
@@ -155,6 +245,9 @@ impl EditorProjectOpenHost {
 
     #[must_use]
     pub fn advance(&mut self, attempt: EditorProjectOpenAttempt) -> EditorProjectOpenProgress {
+        if self.preparation.is_closing() {
+            return EditorProjectOpenProgress::Rejected(startup_worker_failure(None));
+        }
         match attempt.state {
             EditorProjectOpenAttemptState::ManifestAndProfile {
                 project_root,
@@ -197,10 +290,12 @@ impl EditorProjectOpenHost {
             }
             EditorProjectOpenAttemptState::StartupClosure(prepared) => {
                 match self.preparation.start(prepared) {
-                    Some(preparation) => {
+                    Ok(preparation) => {
                         pending(EditorProjectOpenAttemptState::StartupPreparing(preparation))
                     }
-                    None => EditorProjectOpenProgress::Rejected(startup_worker_failure()),
+                    Err(refusal) => {
+                        EditorProjectOpenProgress::Rejected(startup_worker_failure(Some(refusal)))
+                    }
                 }
             }
             EditorProjectOpenAttemptState::StartupPreparing(mut preparation) => {
@@ -215,7 +310,7 @@ impl EditorProjectOpenHost {
                         EditorProjectOpenProgress::Rejected(source_failure(error))
                     }
                     StartupPreparationProgress::Unavailable => {
-                        EditorProjectOpenProgress::Rejected(startup_worker_failure())
+                        EditorProjectOpenProgress::Rejected(startup_worker_failure(None))
                     }
                 }
             }
@@ -418,17 +513,34 @@ fn source_failure(error: AuthoringProjectSourceAdmissionError) -> EditorProjectO
     )
 }
 
-fn startup_worker_failure() -> EditorProjectOpenFailure {
-    failure(
-        EditorProjectOpenPhase::StartupClosure,
-        EditorProjectOpenFailureSource::ProjectSource,
-        None,
-        "Retry project Open after other startup preparation has finished.",
-        single_error(
+fn startup_worker_failure(startup: Option<StartupPreparationFailure>) -> EditorProjectOpenFailure {
+    let (code, summary) = match startup
+        .as_ref()
+        .and_then(|failure| failure.rejection)
+        .map(|rejection| rejection.reason)
+    {
+        Some(nara_tasks::TaskRejectReason::WorkerStartupFailed) => (
+            "project.editor.startup-worker-startup-failed",
+            "The startup preparation worker could not be started",
+        ),
+        Some(nara_tasks::TaskRejectReason::QueueFull { .. }) => (
+            "project.editor.startup-preparation-busy",
+            "The startup preparation queue is full",
+        ),
+        _ => (
             "project.editor.startup-preparation-unavailable",
             "The startup authoring closure could not be prepared",
         ),
-    )
+    };
+    let mut failure = failure(
+        EditorProjectOpenPhase::StartupClosure,
+        EditorProjectOpenFailureSource::StartupPreparation,
+        None,
+        "Retry project Open after other startup preparation has finished.",
+        single_error(code, summary),
+    );
+    failure.startup = startup;
+    failure
 }
 
 fn session_failure(error: EditorProjectOpenError) -> EditorProjectOpenFailure {
@@ -439,6 +551,7 @@ fn session_failure(error: EditorProjectOpenError) -> EditorProjectOpenFailure {
         impact: EditorProjectOpenFailureImpact::CandidateNotPublished,
         repair_hint: "Repair the source authority conflict and retry; no candidate session was published.",
         error,
+        startup: None,
     }
 }
 
@@ -464,5 +577,6 @@ fn failure(
         impact: EditorProjectOpenFailureImpact::CandidateNotPublished,
         repair_hint,
         error: EditorProjectOpenError::new(diagnostics),
+        startup: None,
     }
 }
