@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Last Revised**: 2026-10-25
 **Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0052: Task Backpressure,
 Cancellation, and Long-Running Diagnostics; ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
@@ -62,6 +63,11 @@ Core rules:
   native domain cleanup retain separate owners; ADR 0052 defines the exact guarantee.
 - Asset loading and import work report results through asset state transitions/events.
 - The engine owns task pools; nara does not expose Tokio as the user-facing runtime contract.
+- Logical activity custody and physical worker ownership are distinct. A concrete owner may use
+  standalone facilities or explicitly create independent `TaskScope` activities on Host-owned
+  `TaskFacilities`. Each activity closes its own admission and waits for accepted executor-owned
+  work/disposal; only the facility owner joins workers. This optional Tasks contract does not
+  select shared facilities as the default product deployment or a process-global service model.
 - Headless/server execution uses real bounded workers without blocking a simulation tick; domains
   choose explicit ordered main-thread integration when completion order must not affect state.
 - Render threading is a future optimization, not a Phase 1 requirement.
@@ -107,6 +113,11 @@ Core rules:
 - `nara_tasks` exposes bounded `TaskPools`, per-kind `TaskPoolConfig`, monotonic `TaskId`, explicit
   `TaskDomainKey`/`TaskOrderKey`, typed `TaskHandle<T>` terminals, cancellation tokens, and pressure
   statistics. Production/project configuration is threaded only.
+- `TaskFacilities` and move-only `TaskScope` provide optional shared execution with distinct
+  physical and activity close evidence. The scoped `TaskPools` facade retains the submission
+  interface without worker-close authority. [The R4b design](../task-activity-scope-design.md)
+  records the bounded custody implementation and remaining lazy/product comparison; the complete
+  long-term execution model remains under the rebaseline plan.
 - `TaskPools::inline_for_tests` plus `run_pending_for_tests` is an explicit test harness. It admits
   work through the same bounded queue and terminal state machine; it is not a server/project mode.
 - The std worker backend owns IO, compute, and async-compute workers. Tokio and async-std remain

@@ -1308,6 +1308,7 @@ fn task_rejection_reason(reason: nara_tasks::TaskRejectReason) -> &'static str {
     match reason {
         nara_tasks::TaskRejectReason::QueueFull { .. } => "queue-full",
         nara_tasks::TaskRejectReason::PoolClosed => "pool-closed",
+        nara_tasks::TaskRejectReason::ScopeClosed => "scope-closed",
         nara_tasks::TaskRejectReason::TaskIdExhausted => "task-id-exhausted",
     }
 }
@@ -1317,5 +1318,6 @@ fn task_cancellation_reason(reason: TaskCancellationReason) -> &'static str {
         TaskCancellationReason::Requested => "requested",
         TaskCancellationReason::Coalesced { .. } => "coalesced",
         TaskCancellationReason::PoolShutdown => "pool-shutdown",
+        TaskCancellationReason::ScopeClosed => "scope-closed",
     }
 }

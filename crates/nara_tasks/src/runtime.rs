@@ -20,6 +20,10 @@ use nara_app::{
 use nara_core::{ItemLimit, TimeLimit};
 use nara_ecs::Resource;
 
+mod scope;
+pub use scope::{TaskFacilities, TaskScope, TaskScopeCloseReport};
+use scope::{TaskScopeShared, prepare_admission, same_scope};
+
 #[cfg(test)]
 use std::cell::RefCell;
 
@@ -593,6 +597,7 @@ impl TaskSpawnRequest {
 pub enum TaskRejectReason {
     QueueFull { capacity: usize },
     PoolClosed,
+    ScopeClosed,
     TaskIdExhausted,
 }
 
@@ -636,14 +641,18 @@ pub struct TaskReturnObserver {
 struct TaskReturnObservation {
     state: AtomicU8,
     cleanup_failed: AtomicBool,
+    admitted: AtomicBool,
+    scope: Option<Arc<TaskScopeShared>>,
 }
 
 impl TaskReturnObserver {
-    fn pending() -> Self {
+    fn for_scope(scope: Option<Arc<TaskScopeShared>>) -> Self {
         Self {
             observation: Arc::new(TaskReturnObservation {
                 state: AtomicU8::new(RETURN_PENDING),
                 cleanup_failed: AtomicBool::new(false),
+                admitted: AtomicBool::new(false),
+                scope,
             }),
         }
     }
@@ -678,18 +687,39 @@ impl TaskReturnObserver {
     }
 
     fn finish(&self) {
-        let _ = self.observation.state.compare_exchange(
-            RETURN_PENDING,
-            RETURN_COMPLETE,
-            Ordering::Release,
-            Ordering::Relaxed,
-        );
-        let _ = self.observation.state.compare_exchange(
-            RETURN_DISPOSING_FAILED,
-            RETURN_FAILED,
-            Ordering::Release,
-            Ordering::Relaxed,
-        );
+        let returned = self
+            .observation
+            .state
+            .compare_exchange(
+                RETURN_PENDING,
+                RETURN_COMPLETE,
+                Ordering::Release,
+                Ordering::Relaxed,
+            )
+            .is_ok()
+            || self
+                .observation
+                .state
+                .compare_exchange(
+                    RETURN_DISPOSING_FAILED,
+                    RETURN_FAILED,
+                    Ordering::Release,
+                    Ordering::Relaxed,
+                )
+                .is_ok();
+        if returned
+            && self.observation.admitted.load(Ordering::Acquire)
+            && let Some(scope) = &self.observation.scope
+        {
+            scope.finish_task(self.cleanup_outcome());
+        }
+    }
+
+    fn record_admission(&self) {
+        if let Some(scope) = &self.observation.scope {
+            scope.admit_task();
+            self.observation.admitted.store(true, Ordering::Release);
+        }
     }
 }
 
@@ -698,6 +728,7 @@ pub enum TaskCancellationReason {
     Requested,
     Coalesced { replacement: TaskId },
     PoolShutdown,
+    ScopeClosed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -808,6 +839,7 @@ struct TaskStateInner<T> {
     phase: TaskPhase,
     terminal: Option<TaskTerminal<T>>,
     completion_sequence: Option<u64>,
+    admission_to_start: Option<Duration>,
 }
 
 struct TaskState<T> {
@@ -820,27 +852,33 @@ struct TaskState<T> {
 }
 
 impl<T> TaskState<T> {
-    fn new(counters: SharedTaskCounters, instance_token: Arc<TaskPoolInstanceToken>) -> Self {
+    fn new(
+        counters: SharedTaskCounters,
+        instance_token: Arc<TaskPoolInstanceToken>,
+        scope: Option<Arc<TaskScopeShared>>,
+    ) -> Self {
         Self {
             inner: Mutex::new(TaskStateInner {
                 phase: TaskPhase::Pending,
                 terminal: None,
                 completion_sequence: None,
+                admission_to_start: None,
             }),
             finished: AtomicBool::new(false),
             token: TaskCancellationToken::new(),
             counters,
             instance_token,
-            returned: TaskReturnObserver::pending(),
+            returned: TaskReturnObserver::for_scope(scope),
         }
     }
 
-    fn mark_running(&self) -> bool {
+    fn mark_running(&self, admitted_at: Instant) -> bool {
         let mut inner = lock_unpoisoned(&self.inner);
         if inner.phase != TaskPhase::Pending {
             return false;
         }
         inner.phase = TaskPhase::Running;
+        inner.admission_to_start = Some(admitted_at.elapsed());
         drop(inner);
         update_counters(&self.counters, |counters| {
             counters.started = counters.started.saturating_add(1);
@@ -961,7 +999,7 @@ impl<T> Drop for TaskState<T> {
 
 trait ErasedTaskState: Send + Sync {
     fn return_observer(&self) -> TaskReturnObserver;
-    fn mark_running(&self) -> bool;
+    fn mark_running(&self, admitted_at: Instant) -> bool;
     fn cancel(&self, reason: TaskCancellationReason) -> bool;
     fn fail(&self, failure: TaskFailure) -> bool;
     fn is_terminal(&self) -> bool;
@@ -972,8 +1010,8 @@ impl<T: Send + 'static> ErasedTaskState for TaskState<T> {
         self.returned.clone()
     }
 
-    fn mark_running(&self) -> bool {
-        TaskState::mark_running(self)
+    fn mark_running(&self, admitted_at: Instant) -> bool {
+        TaskState::mark_running(self, admitted_at)
     }
 
     fn cancel(&self, reason: TaskCancellationReason) -> bool {
@@ -1048,6 +1086,15 @@ impl<T> TaskHandle<T> {
     #[must_use]
     pub fn return_observer(&self) -> TaskReturnObserver {
         self.state.returned.clone()
+    }
+
+    /// Time from accepted queue publication to execution authorization, when started.
+    ///
+    /// Rejected or cancelled-before-start work has no sample. This excludes submission setup,
+    /// queue-lock acquisition and any replaced capture disposal on the submitting thread.
+    #[must_use]
+    pub fn admission_to_start(&self) -> Option<Duration> {
+        lock_unpoisoned(&self.state.inner).admission_to_start
     }
 
     /// Publishes cancellation if no terminal result has already won.
@@ -1259,6 +1306,7 @@ pub struct TaskPoolStats {
     pub coalesced: u64,
     pub queued: usize,
     pub running: usize,
+    pub live_workers: usize,
     pub started: u64,
     pub completed: u64,
     pub failed: u64,
@@ -1329,15 +1377,19 @@ struct TaskPoolInstanceToken {
 ///
 /// Plugin-created pools transfer close ownership to the managed runtime. Removing or replacing
 /// their World-facing facade does not retire that owner's workers or close obligations.
+/// [`TaskScope::spawner`] supplies the same submission interface with activity-local admission
+/// and no physical worker-close authority. Its statistics describe the shared facilities, while
+/// completion cutoffs and pending-work coalescing remain local to that activity.
 #[derive(Resource)]
 pub struct TaskPools {
     config: TaskPoolConfig,
-    next_id: AtomicU64,
+    next_id: Arc<AtomicU64>,
     instance_token: Arc<TaskPoolInstanceToken>,
     io: TaskPoolExecutor,
     compute: TaskPoolExecutor,
     async_compute: TaskPoolExecutor,
     close_owner: Mutex<Option<TaskPoolsCloseOwner>>,
+    scope: Option<Arc<TaskScopeShared>>,
 }
 
 pub(crate) struct TaskPoolsConstructionFailure {
@@ -1448,12 +1500,13 @@ impl TaskPools {
         close_owner.insert(TaskPoolKind::AsyncCompute, async_compute_close_owner);
         Ok(Self {
             config,
-            next_id: AtomicU64::new(1),
+            next_id: Arc::new(AtomicU64::new(1)),
             instance_token: Arc::new(TaskPoolInstanceToken::default()),
             io,
             compute,
             async_compute,
             close_owner: Mutex::new(Some(close_owner)),
+            scope: None,
         })
     }
 
@@ -1467,7 +1520,7 @@ impl TaskPools {
             TaskPoolExecutor::inline(TaskPoolKind::AsyncCompute, config);
         Ok(Self {
             config,
-            next_id: AtomicU64::new(1),
+            next_id: Arc::new(AtomicU64::new(1)),
             instance_token: Arc::new(TaskPoolInstanceToken::default()),
             io,
             compute,
@@ -1477,6 +1530,7 @@ impl TaskPools {
                 compute_close_owner,
                 async_compute_close_owner,
             ))),
+            scope: None,
         })
     }
 
@@ -1591,7 +1645,11 @@ impl TaskPools {
             order_key,
         };
         let counters = self.executor(kind).shared.counters.clone();
-        let state = Arc::new(TaskState::new(counters, self.instance_token.clone()));
+        let state = Arc::new(TaskState::new(
+            counters,
+            self.instance_token.clone(),
+            self.scope.clone(),
+        ));
         let handle = TaskHandle {
             descriptor,
             state: state.clone(),
@@ -1607,6 +1665,7 @@ impl TaskPools {
             },
             admitted_at: Instant::now(),
             disposal_owner: None,
+            scope: self.scope.clone(),
             control,
             job: Box::new(TaskJob {
                 function: Some(function),
@@ -1812,8 +1871,9 @@ pub enum TaskShutdownError {
 impl Display for TaskShutdownError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::CloseOwnerTransferred => formatter
-                .write_str("task pool close ownership was transferred to the managed runtime"),
+            Self::CloseOwnerTransferred => {
+                formatter.write_str("this task facade does not own physical facility shutdown")
+            }
         }
     }
 }
@@ -1923,6 +1983,7 @@ struct PendingJob {
     coalesce_key: Option<TaskCoalesceKey>,
     admitted_at: Instant,
     disposal_owner: Option<Arc<ExecutorShared>>,
+    scope: Option<Arc<TaskScopeShared>>,
     control: TaskControl,
     job: Box<dyn ErasedJob>,
 }
@@ -1930,6 +1991,7 @@ struct PendingJob {
 struct RunningJob {
     control: Option<TaskControl>,
     started_at: Instant,
+    scope: Option<Arc<TaskScopeShared>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2043,6 +2105,7 @@ impl ExecutorShared {
             coalesced: counters.coalesced,
             queued,
             running,
+            live_workers: queue.live_workers,
             started: counters.started,
             completed: counters.completed,
             failed: counters.failed,
@@ -2062,7 +2125,7 @@ impl ExecutorShared {
                 return NextJob::Exit;
             }
             if let Some(pending) = queue.pending.front() {
-                if pending.control.state.mark_running() {
+                if pending.control.state.mark_running(pending.admitted_at) {
                     let pending = queue
                         .pending
                         .pop_front()
@@ -2072,6 +2135,7 @@ impl ExecutorShared {
                         RunningJob {
                             control: Some(pending.control.clone()),
                             started_at: Instant::now(),
+                            scope: pending.scope.clone(),
                         },
                     );
                     return NextJob::Ready(pending);
@@ -2256,12 +2320,16 @@ impl TaskPoolExecutor {
     }
 
     fn admit(&self, pending: PendingJob) -> AdmissionDecision {
+        let scope = pending.scope.clone();
+        let activity = scope.as_ref().map(|scope| scope.lock_admission());
         let mut pending = Some(pending);
         let mut discarded = Vec::new();
         let decision;
         {
             let mut queue = lock_unpoisoned(&self.shared.queue);
-            if queue.lifecycle == QueueLifecycle::Open
+            let scope_closed = activity.as_ref().is_some_and(|scope| scope.is_closed());
+            if !scope_closed
+                && queue.lifecycle == QueueLifecycle::Open
                 && queue.pending.len() >= self.shared.pending_capacity
             {
                 let mut retained = VecDeque::with_capacity(queue.pending.len());
@@ -2288,7 +2356,9 @@ impl TaskPoolExecutor {
                 queue.pending = retained;
             }
 
-            if queue.lifecycle != QueueLifecycle::Open {
+            if scope_closed {
+                decision = AdmissionDecision::Rejected(TaskRejectReason::ScopeClosed);
+            } else if queue.lifecycle != QueueLifecycle::Open {
                 decision = AdmissionDecision::Rejected(TaskRejectReason::PoolClosed);
             } else {
                 let coalesce_position = pending.as_ref().and_then(|new_job| {
@@ -2300,6 +2370,7 @@ impl TaskPoolExecutor {
                                 .admission_queue_visits
                                 .fetch_add(1, Ordering::Relaxed);
                             !queued.control.state.is_terminal()
+                                && same_scope(&queued.scope, &new_job.scope)
                                 && queued.descriptor.order_key().domain_key() == domain_key
                                 && queued.coalesce_key == Some(coalesce_key)
                         })
@@ -2321,7 +2392,8 @@ impl TaskPoolExecutor {
                             })
                     });
                     discarded.push(replaced);
-                    if cancellation_won && let Some(new_job) = pending.take() {
+                    if cancellation_won && let Some(mut new_job) = pending.take() {
+                        prepare_admission(&mut new_job);
                         queue.pending.insert(position, new_job);
                         coalesced = Some(AdmissionDecision::Coalesced {
                             replaced: replaced_id,
@@ -2331,7 +2403,8 @@ impl TaskPoolExecutor {
                 if let Some(coalesced) = coalesced {
                     decision = coalesced;
                 } else if queue.pending.len() < self.shared.pending_capacity {
-                    if let Some(new_job) = pending.take() {
+                    if let Some(mut new_job) = pending.take() {
+                        prepare_admission(&mut new_job);
                         queue.pending.push_back(new_job);
                         decision = AdmissionDecision::Accepted;
                     } else {
@@ -2350,6 +2423,8 @@ impl TaskPoolExecutor {
                 self.shared.changed.notify_one();
             }
         }
+        // Scope close must never wait for a user destructor on the submitting thread.
+        drop(activity);
 
         for stale in discarded {
             safe_drop_pending(stale);
@@ -3507,6 +3582,23 @@ fn retain_abandoned_task_owner(owner: AbandonedTaskPoolOwner) -> TaskOwnerReapRe
         return receipt;
     }
     let receipt = TaskOwnerReapReceipt::pending();
+    #[cfg(test)]
+    let owner = {
+        let mut owner = Some(owner);
+        TEST_TASK_OWNER_REAPER.with(|reaper| {
+            if let Some(reaper) = reaper.borrow_mut().as_mut() {
+                reaper.retain(TaskOwnerReapRequest::new(
+                    owner.take().unwrap(),
+                    receipt.clone(),
+                    false,
+                ));
+            }
+        });
+        let Some(owner) = owner else {
+            return receipt;
+        };
+        owner
+    };
     ABANDONED_TASK_OWNER_COUNT.fetch_add(1, Ordering::AcqRel);
     lock_unpoisoned(&TASK_OWNER_REAPER_SUPERVISOR).retain(TaskOwnerReapRequest::new(
         owner,
@@ -3521,7 +3613,43 @@ fn prewarm_task_owner_reaper() {
 }
 
 fn retry_task_owner_reaper() {
+    #[cfg(test)]
+    if TEST_TASK_OWNER_REAPER.with(|reaper| {
+        let mut reaper = reaper.borrow_mut();
+        if let Some(reaper) = reaper.as_mut() {
+            reaper.retry();
+            true
+        } else {
+            false
+        }
+    }) {
+        return;
+    }
     lock_unpoisoned(&TASK_OWNER_REAPER_SUPERVISOR).retry();
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_TASK_OWNER_REAPER: RefCell<Option<TaskOwnerReaperSupervisor>> = const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_reaper_spawn_failure_for_tests(operation: impl FnOnce()) {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            let supervisor = TEST_TASK_OWNER_REAPER.with(|reaper| reaper.borrow_mut().take());
+            if let Some(mut supervisor) = supervisor {
+                supervisor.shutdown();
+            }
+        }
+    }
+    TEST_TASK_OWNER_REAPER.with(|reaper| {
+        assert!(reaper.borrow().is_none(), "nested test reaper override");
+        *reaper.borrow_mut() = Some(TaskOwnerReaperSupervisor::with_spawn_failures(1));
+    });
+    let _reset = Reset;
+    operation();
 }
 
 fn reap_abandoned_task_owners(
@@ -3706,12 +3834,14 @@ impl TaskOwnerReaperHarness {
                 let state = Arc::new(TaskState::<()>::new(
                     Arc::clone(&counters),
                     Arc::clone(&instance_token),
+                    None,
                 ));
                 PendingJob {
                     descriptor,
                     coalesce_key: None,
                     admitted_at: Instant::now(),
                     disposal_owner: None,
+                    scope: None,
                     control: TaskControl { state },
                     job: Box::new(ReaperTestDropJob {
                         on_drop: Some(on_drop),
@@ -3757,6 +3887,7 @@ fn wait_unpoisoned<'a, T>(condvar: &Condvar, guard: MutexGuard<'a, T>) -> MutexG
 #[derive(Debug, Default, Clone)]
 pub struct TaskPlugin {
     config: TaskPoolConfig,
+    facilities: Option<Arc<TaskFacilities>>,
 }
 
 pub const TASK_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.tasks");
@@ -3773,7 +3904,23 @@ pub const TASK_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
 impl TaskPlugin {
     #[must_use]
     pub const fn new(config: TaskPoolConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            facilities: None,
+        }
+    }
+
+    /// Installs one independently retired activity on Host-selected shared facilities.
+    ///
+    /// The installed plugin retains this strong facilities owner. Keep an outer Host owner while
+    /// other manually created activities still need the workers. Last-owner Drop uses the existing
+    /// retained physical cleanup fallback; activity completion never reports shared worker join.
+    #[must_use]
+    pub fn shared(facilities: Arc<TaskFacilities>) -> Self {
+        Self {
+            config: *facilities.config(),
+            facilities: Some(facilities),
+        }
     }
 }
 
@@ -3814,6 +3961,24 @@ impl Plugin for TaskPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        if let Some(facilities) = &self.facilities {
+            if app.world().contains_resource::<TaskPools>() {
+                return Err(PluginError::SetupFailed {
+                    plugin: TASK_PLUGIN_ID,
+                    message: "shared task installation requires an unoccupied task facade"
+                        .to_owned(),
+                });
+            }
+            let scope = facilities.scope();
+            let spawner = scope.spawner();
+            app.register_plugin_runtime_close_participant(
+                TASK_POOLS_SHUTDOWN_OBLIGATION,
+                TASK_POOLS_CLOSE_PARTICIPANT,
+                scope,
+            )?;
+            app.insert_resource(spawner)?;
+            return Ok(());
+        }
         if !app.world().contains_resource::<TaskPools>() {
             let mut pools = match TaskPools::try_new_retained(self.config) {
                 Ok(pools) => pools,

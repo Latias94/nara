@@ -354,12 +354,13 @@ pub mod advanced_prelude {
     pub use nara_tasks::{
         OrderedTaskReadySnapshot, OrderedTaskResults, OrderedTaskTerminal, TaskCancellation,
         TaskCancellationReason, TaskCancellationToken, TaskCoalesceKey, TaskCompletionCutoff,
-        TaskCompletionCutoffError, TaskConfigError, TaskDescriptor, TaskDomainKey, TaskFailure,
-        TaskHandle, TaskId, TaskInlineRunReport, TaskKindConfig, TaskOrderKey, TaskOverloadPolicy,
-        TaskPlugin, TaskPoolConfig, TaskPoolError, TaskPoolKind, TaskPoolShutdownReport,
-        TaskPoolStats, TaskPools, TaskReadySnapshotError, TaskRejectReason, TaskRejection,
-        TaskReturnObserver, TaskReturnState, TaskShutdownPolicy, TaskShutdownReport,
-        TaskSpawnOutcome, TaskSpawnRequest, TaskStats, TaskTerminal, TaskTerminalState,
+        TaskCompletionCutoffError, TaskConfigError, TaskDescriptor, TaskDomainKey, TaskFacilities,
+        TaskFailure, TaskHandle, TaskId, TaskInlineRunReport, TaskKindConfig, TaskOrderKey,
+        TaskOverloadPolicy, TaskPlugin, TaskPoolConfig, TaskPoolError, TaskPoolKind,
+        TaskPoolShutdownReport, TaskPoolStats, TaskPools, TaskReadySnapshotError, TaskRejectReason,
+        TaskRejection, TaskReturnObserver, TaskReturnState, TaskScope, TaskScopeCloseReport,
+        TaskShutdownPolicy, TaskShutdownReport, TaskSpawnOutcome, TaskSpawnRequest, TaskStats,
+        TaskTerminal, TaskTerminalState,
     };
 
     #[cfg(feature = "runtime-core")]

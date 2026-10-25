@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-10-25 (owner-local dependent close custody)
+**Last Revised**: 2026-10-25 (owner-local close and optional task activity custody)
 **Owner**: `nara_app` and concrete executable hosts
 **Refined By**: [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): 2D Foundation Ownership and Authoring Contracts
 **Admission Trigger**: RGD-U2 through RGD-U6 replaced the plan/World behavior split, removed
@@ -177,10 +177,15 @@ need it.
   second time model. It delegates frame/fixed execution to its `App`.
 - The host owns project/edit documents, validated settings, the runtime recipe, and reconstruction
   authority. Those values do not become mutable runtime ECS state.
-- Each runtime has a non-reused generation. Runtime-owned identity domains, time debt, command and
-  task queues, mutable assets, backend sessions, control requests, and faults are not shared across
+- Each runtime has a non-reused generation. Runtime-owned identity domains, time debt, command
+  admission, task activity, mutable assets, backend sessions, control requests, and faults are not shared across
   generations. Deliberately shared caller-owned resources remain outside the runtime's isolation and
   `Stopped` proof unless the caller explicitly transfers a close obligation at App sealing.
+- Physical task workers/queues may be explicitly shared under ADRs 0008/0052. Each registered
+  activity retains separate admission, coalescing, completion-cutoff and physical-return custody.
+  Runtime `Stopped` proves that activity returned, not that the Host's shared workers joined.
+  This does not select a general Host service model or change the integrated product's default
+  construction topology.
 - Immutable, version-stamped project/schema/catalog snapshots may be shared only when the runtime
   recipe proves the same project revision and every consumer treats them as immutable.
 - Active runtime inspection and mutation use bounded observation and safe-point commands. Tooling

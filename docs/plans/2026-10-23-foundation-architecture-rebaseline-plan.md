@@ -248,9 +248,13 @@ Delete false universal TypeId/binding assumptions; preserve exact native candida
 
 ## R4: Domain Execution Rights, Activity Scopes And Native Close
 
-**Design:** D07, D08. **State:** R4a local custody and candidate comparison in progress under the
-[owner-local close design](../architecture/native-close-ownership-design.md); native integration,
-R4b and R4c remain open. **Owners:** App/Tasks, executable Host and domains.
+**Design:** D07, D08. **State:** R4a local custody, typed-composite selection and concrete retained
+Editor graphics have their bounded qualification under the
+[owner-local close design](../architecture/native-close-ownership-design.md). R4b's first
+[activity-custody unit](../architecture/task-activity-scope-design.md) has bounded Tasks/Image and
+independent-consumer qualification; lazy/shared
+product comparison, integrated deployment and R4c remain open.
+**Owners:** App/Tasks, executable Host and domains.
 
 Three independently verifiable sub-units:
 

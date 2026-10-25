@@ -33,6 +33,16 @@ separate GPU/readback scope. ADRs 0078/0118 adopt this concrete Host contract. A
 exceptions, detached outstanding epochs and every native failure branch are not qualified; R4b,
 R4c, dynamic-code custody and full foundation rebaseline remain open.
 
+The [R4b activity-custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-25T155728Z-independent-task-activity-custody-and-shared-image-runtime-qualification-13caef5f8c39471aa58529789ae9c530.md)
+adds optional Host-owned Tasks facilities and independently closed activities. ADRs 0008/0052
+adopt scope-local admission/coalescing/cutoffs and physical-return accounting; 0082/0084 distinguish
+that evidence from shared worker joins. Seventeen scope tests and two actual same-AssetId Image
+consumers are included in the 189-test all-feature Tasks/Image cohort; one direct/renamed-root
+consumer also passes. Independent review found and rechecked the corrected disposal-reaper
+restart gap. No default product allocation changed. Lazy per-Runtime versus shared workload
+measurement, trusted Editor deployment, R4c and the full rebaseline remain open; the new counters
+and timing sample are not performance qualification.
+
 The [R5c disposable projection qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md) binds `207bbcc` to complete-domain Scene epoch ownership, unchanged shared authoring facilities, a stable preview renderer producer and fresh presentation authority after identical-content recovery. Held Image/Save work, the joined public edit/history/Save/Reopen/picking/Close consumer, independent Prefab consumers and six actual Windows/DX12 trajectories pass. This closes the selected preview lifetime mismatch, not incremental projection, durable property addressing or the full foundation rebaseline.
 
 The [canonical native-source admission checkpoint](../../knowledge/engineering/verification/2026-10/2026-10-24T-project-content-source-admission-and-prefab-binding-qualification.md)

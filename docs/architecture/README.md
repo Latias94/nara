@@ -95,6 +95,11 @@ establish their completion.
 
 ## Background Designs
 
+The [Tasks activity-custody design](task-activity-scope-design.md) separates optional Host-owned
+physical facilities from independently retired activities. It retains scope-local admission,
+coalescing and executor-owned return without claiming shared worker joins. R4b's product
+deployment and lazy per-Runtime comparison remain open.
+
 The [complete conversation reassessment](foundation-architecture-reassessment.md) revisits 36
 foundation topics and [all 103 baseline ADRs](../audits/2026-10-23-foundation-architecture-coverage.md),
 including execution, Schema/storage, Prefab, asset/build delivery, rendering, packages and

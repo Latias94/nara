@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-10-25
 **Refines**: ADR 0008, ADR 0042, ADR 0048
 **Refined By**: ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
@@ -46,9 +46,13 @@ flowchart TD
   `TaskId`; together they form `TaskOrderKey`.
 - Admission returns `Accepted`, `Coalesced`, or `Rejected`. A rejected closure is discarded without
   execution and the caller receives a typed reason.
-- Coalescing matches `(TaskDomainKey, TaskCoalesceKey)`, applies only to pending work, and replaces a
+- Coalescing matches `(activity identity, TaskDomainKey, TaskCoalesceKey)`, applies only to pending work, and replaces a
   match even when the queue is not full. The old handle becomes terminally cancelled with the
   replacement ID; running work is never coalesced.
+- Scope admission and close use the same gate. Every accepted task registers physical-return
+  custody before queue publication; a later close cannot miss a successful concurrent spawn.
+  A closed activity refuses submission independently of the shared facility's lifecycle.
+  Task IDs are facility-local; completion cutoffs retain activity-local identity and sequencing.
 
 ### Execution, cancellation, and statistics
 
@@ -94,6 +98,10 @@ flowchart TD
   cancelled, taken, oldest queued/running age, shutdowns, and shutdown timeouts. A detached-worker
   count is not exposed because dropping an unfinished `JoinHandle` is not a valid shutdown result.
   U18/U31 decide retention and diagnostic bridging; this crate does not log policy decisions.
+- `live_workers` and other facade statistics describe the physical facility, including all its
+  activities. `TaskHandle::admission_to_start` observes accepted queue publication through execution
+  authorization, excluding submission setup and post-admission capture disposal. Work cancelled
+  before start has no timing sample. These observations alone are not latency qualification.
 
 ### Result integration
 
@@ -158,6 +166,34 @@ flowchart TD
   retained work rather than false `Stopped` evidence.
 - `TaskPlugin` closes only pools it created. Externally inserted pools remain caller-owned; a
   completed plugin-owned close publishes the typed report in the world for inspection.
+
+### Optional shared facilities and activity close
+
+- `TaskFacilities` is an explicit Host-owned physical owner. `TaskScope` is move-only and produces
+  activity-bound `TaskPools` submission facades. Those facades cannot mint another scope or close
+  shared workers. Standalone pools remain a valid convenience composition.
+- `TaskPlugin::shared` creates one activity, registers its owner before exposing the facade, and
+  refuses an occupied facade. Replacing/removing that facade does not remove the registered close
+  responsibility. The default plugin's physical-owner path and explicitly external standalone
+  pools keep their existing contracts.
+- Activity close immediately stops admission and requests cancellation; it has no whole-pool
+  drain phase. It borrows queued/running task controls in place without retaining output-owning
+  snapshots. Its queued captures transfer to the existing retained disposal lanes so they do not
+  wait behind a sibling's uncooperative worker.
+- Executor-owned return updates constant-space pending accounting after capture and rejected
+  late-result disposal. Reclamation/coalescing disposal stays counted after queue removal.
+  Rejected submissions are not admitted obligations. Nested work through the same facade is
+  counted on admission and refused after close; independently escaped work needs another owner.
+- `TaskScopeCloseReport` describes the registered Tasks activity, including sticky cleanup failure,
+  not the Runtime's entire ledger or worker joining. Pending or uncooperative work keeps managed
+  close incomplete; physically complete cleanup failure produces terminal close error. Published
+  outputs remain caller-owned and are not retained by the scope.
+- Scope Drop cancels and transfers pending disposal without waiting. The physical facility remains
+  independently owned. Normal Host shutdown retires activities before joining workers; emergency
+  physical shutdown can cancel all activities without manufacturing their physical completion.
+- Shared bounded queues provide no per-activity fairness, reservation or latency guarantee.
+  Default product deployment, lazy per-Runtime comparison and real workload policies remain open
+  under [R4b](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md).
 
 ## Alternatives Considered
 

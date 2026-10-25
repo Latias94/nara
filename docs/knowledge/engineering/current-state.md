@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "2cc22cc75915abb8c3496d7c98ad95c5b67155cd71a63fc64fd68f8365fea0ae"
+source_fingerprint: "56e41250484923f4b19e85578dbc9e61ec9d935c2d6eb64e74c0dc05f104072a"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "2cc22cc75915abb8c3496d7c98ad95c5b67155cd71a63fc64fd68f8365f
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `2cc22cc75915abb8c3496d7c98ad95c5b67155cd71a63fc64fd68f8365fea0ae`
-- Immutable records: 921
+- Source fingerprint: `56e41250484923f4b19e85578dbc9e61ec9d935c2d6eb64e74c0dc05f104072a`
+- Immutable records: 922
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Independent task activity custody and shared Image runtime qualification](verification/2026-10/2026-10-25T155728Z-independent-task-activity-custody-and-shared-image-runtime-qualification-13caef5f8c39471aa58529789ae9c530.md) - R4b first custody unit, isolated reaper recovery correction and actual two-Runtime Image evidence; deployment and lazy comparison remain open.
 - **Session Handoff**: [Editor native retirement committed and qualified for next foundation unit](sessions/2026-10/2026-10-25T151327Z-editor-native-retirement-committed-and-qualified-for-next-foundation-unit-d5d0fa4b2d4d46e49596dfdc339c4b32.md) - Pins eleven actual native trajectories to commit 8856a16, records all review corrections and remaining R4 scopes, and preserves the complete foundation goal.
 - **Verification Evidence**: [Retained Editor native graphics retirement and physical completion qualification](verification/2026-10/2026-10-25T145420Z-retained-editor-native-graphics-retirement-and-physical-completion-qualification-2665523023e84aba979458cba3f2affc.md) - Records exact GPU drain custody, partial construction return, phased native retirement, exit decision continuity and scoped Windows DX12 evidence; full foundation and remaining R4 work stay open.
 - **Verification Evidence**: [Owner-local close custody and bounded completion dependency comparison](verification/2026-10/2026-10-25T135422Z-owner-local-close-custody-and-bounded-completion-dependency-comparison-3a6ad83ba4f649ec973982d9de3a0ec9.md) - Qualifies local Rust close owners, exact registration custody and typed dependent release through public Runtime consumers; actual native graphics integration remains open.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Persistence attempts committed and compiled domain diagnostic projection checkpoint](progress/2026-10/2026-10-25T091355Z-persistence-attempts-committed-and-compiled-domain-diagnostic-projection-checkpoint-1ee496d678dc41b4953eb4665f625ca7.md) - Commits qualified R1/F2, records the real F3 code-loss regression and bounded implementation, and separates active compiled qualification from the unintegrated Snap artifact.
 - **Verification Evidence**: [Exact persistence attempts and terminal observation qualification](verification/2026-10/2026-10-25T081443Z-exact-persistence-attempts-and-terminal-observation-qualification-332f36f3c0f94f93ae1eb2721e981359.md) - Records owner-issued attempt correlation, exact observation acknowledgment, unchanged physical custody, public workflow evidence and scoped review corrections; complete R1 remains open.
 - **Work Progress**: [First writes committed and exact persistence redesign started](progress/2026-10/2026-10-25T063656Z-first-writes-committed-and-exact-persistence-redesign-started-1c12dd152e894de3a109c0d072338cf3.md) - Commits the qualified Source first-write correction and records the next R1 persistence observation owner design without claiming its implementation.
-- **Verification Evidence**: [Source owned first property writes and bounded selector error qualification](verification/2026-10/2026-10-25T060130Z-source-owned-first-property-writes-and-bounded-selector-error-qualification-0dfaa18252de473b90ff57ef150e64b0.md) - Qualifies selected default-root initialization, exact authored absence Undo, bounded rejected IDs and real non-active panel persistence while retaining complete template and storage contracts.
 
 # Integration Notes
 

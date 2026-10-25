@@ -81,7 +81,7 @@ impl Drop for PendingDropReleaseGuard {
     }
 }
 
-fn start_runtime(app: App, close_timeout: Duration) -> RuntimeInstance {
+pub(super) fn start_runtime(app: App, close_timeout: Duration) -> RuntimeInstance {
     let sealed = app.seal().unwrap();
     let candidate = RuntimeAdmissionReservation::try_acquire()
         .unwrap()
@@ -99,14 +99,14 @@ fn start_runtime(app: App, close_timeout: Duration) -> RuntimeInstance {
     }
 }
 
-fn request_stop(runtime: &mut RuntimeInstance) {
+pub(super) fn request_stop(runtime: &mut RuntimeInstance) {
     assert!(matches!(
         runtime.request_control(RuntimeControl::Stop),
         RuntimeControlRequestResult::Accepted(_)
     ));
 }
 
-fn drive_until_state(runtime: &mut RuntimeInstance, expected: RuntimeState) {
+pub(super) fn drive_until_state(runtime: &mut RuntimeInstance, expected: RuntimeState) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while runtime.state() != expected && Instant::now() < deadline {
         runtime.drive(Duration::ZERO).unwrap();

@@ -42,6 +42,9 @@ use crate::reload::{
     image_reload_diagnostic, record_image_reload_failure,
 };
 
+#[path = "tests/activity_scopes.rs"]
+mod activity_scopes;
+
 #[cfg(feature = "serde")]
 #[path = "tests/recovery_continuity.rs"]
 mod recovery_continuity;
@@ -710,11 +713,13 @@ fn image_reload_diagnostic_matrix_preserves_codes_and_typed_privacy_fields() {
     for reason in [
         TaskRejectReason::QueueFull { capacity: 7 },
         TaskRejectReason::PoolClosed,
+        TaskRejectReason::ScopeClosed,
         TaskRejectReason::TaskIdExhausted,
     ] {
         let reason_text = match reason {
             TaskRejectReason::QueueFull { .. } => "queue-full",
             TaskRejectReason::PoolClosed => "pool-closed",
+            TaskRejectReason::ScopeClosed => "scope-closed",
             TaskRejectReason::TaskIdExhausted => "task-id-exhausted",
         };
         cases.push(ImageDiagnosticCase::new(
@@ -752,6 +757,7 @@ fn image_reload_diagnostic_matrix_preserves_codes_and_typed_privacy_fields() {
             false,
         ),
         (TaskCancellationReason::PoolShutdown, "pool-shutdown", true),
+        (TaskCancellationReason::ScopeClosed, "scope-closed", true),
     ] {
         cases.push(ImageDiagnosticCase::new(
             format!("task-cancelled-{reason_text}"),

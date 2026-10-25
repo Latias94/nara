@@ -242,6 +242,11 @@ service may be runtime-local until a concrete multi-runtime or platform constrai
 shared authority is necessary. Shared mutable service state must still expose isolated,
 generation-stamped runtime sessions.
 
+ADRs 0008/0052 admit explicit shared task facilities with separately registered activity custody.
+That Tasks-library contract does not select the integrated Editor's deployment or a universal
+service-admission Interface. The concrete Host still chooses physical allocation and observes
+each Runtime activity before joining shared workers; R4b retains the lazy/shared product comparison.
+
 ### Outer-Scope Shutdown and Replacement
 
 Child scopes close before their parent authorities:
