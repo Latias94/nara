@@ -1,7 +1,7 @@
 ---
 title: Finite Snap Child Proposal Experiment
 date: 2026-10-25
-status: Researched experiment design; not implemented or qualified
+status: Bounded fixture implemented; implementation evidence tracked separately
 ---
 
 # Finite Snap Child Proposal Experiment
@@ -17,6 +17,9 @@ Research used Nara `3a31343` plus the in-progress source-built Snap consumer. It
 sources are Bevy `85503941e488152711a4695bbe248e9ed9f453fc` and Godot
 `81ab961f91066a63bcbf3ec340962bb1a1ada558`. Source inspection is not process-execution evidence.
 The recommendation below is disposable experiment policy, not an Accepted engine contract.
+The subsequent unpublished consumer implements the selected direct-child experiment. Its actual
+verification, review corrections and platform limits belong in the implementation ledger and
+engineering evidence; the design itself is not execution proof.
 
 ## Ownership Before Transport
 
@@ -24,9 +27,10 @@ The parent retains the two bounded scalar observations and their complete origin
 The helper receives grid/X/Y only and invokes the existing pure `snap_local_position` calculation.
 It cannot choose a document, entity, component, property selector or revision. A finite response
 is a proposal, never an `EditorAction`, prepared candidate or inverse.
-The existing `plan_snap_local_position` also computes on its caller: do not run it in the parent
-to manufacture an expected child answer. Split observation extraction and result attachment
-privately inside the consumer so the local and process placements share the same pure calculation.
+`plan_snap_local_position` composes consumer-local `SnapInput::capture`, local calculation and
+`SnapInput::proposal`. The process placement captures observations without calculating the answer,
+then attaches the trusted helper's result through that same input. This is an unpublished consumer
+API, not a new engine abstraction or a public cross-process document/candidate codec.
 
 ```mermaid
 sequenceDiagram
@@ -87,11 +91,12 @@ new public Host trait or declare the current source-built panel contract defecti
 
 ## Proposed Finite Exchange
 
-Use one fixed tool-specific binary request/response, not a universal wire SDK. Proposed request:
+Use one fixed tool-specific binary request/response, not a universal wire SDK. The fixture request is
 40 bytes, containing an eight-byte magic/version/tag header, eight-byte correlation sequence and
-three little-endian `f64` values. Proposed response: 32 bytes with an eight-byte header/result code,
-the sequence and two values. The canonical experiment version starts at 1. Exact frame layout
-and refusal-code assignment remain implementation details to verify before any reusable freeze.
+three little-endian `f64` values. The response is 32 bytes with an eight-byte header/result code,
+the sequence and two values. The canonical experiment version is 1. The private
+`tests/support/snap_child_wire.rs` owns the exact layout and bounded static refusal codes;
+neither this format nor its correlation sequence is frozen as a reusable SDK.
 
 Require one frame followed by EOF; reject short/extra frames, unknown tags/versions/reserved bits,
 wrong correlation, nonfinite/out-of-range values and nonzero exit. A valid-looking frame followed
@@ -127,7 +132,9 @@ Request correlation and document freshness are separate fences. Revoked/foreign 
 create a preview. For a still-interested response, validate the original Session query basis before
 preparing; edits, Undo/Redo, Reopen, Schema changes and project replacement must refuse stale work.
 Commit then revalidates the same retained candidate. Neither a sequence number nor a successful
-process exit grants document publication authority.
+process exit grants document publication authority. Cancellation does not overwrite an already
+observed failure, and joined worker panic remains a distinct failure even when the helper exits
+nonzero. Physical cleanup and semantic result selection are independent observations.
 
 ## Acceptance And Stop Conditions
 
@@ -158,3 +165,19 @@ process exit grants document publication authority.
 - Nara's [ADR 0116](../architecture/adr/0116-standalone-supervised-editor-play.md) and private Play
   implementation provide stronger process custody than the proposed trusted-helper premise.
   Their existing scope must not be weakened or advertised as new tool support by this study.
+
+## Consumer Build Topology Pressure
+
+The first implementation places the process proof in the existing panel-consumer package so both
+placements exercise the same calculator, observations and source candidate. A window-free Session
+test does not imply a GUI-free dependency graph. This package still depends on the native Editor,
+and Cargo integration-test builds also prepare its unrelated native canary binaries. Actual focused
+qualification encountered those canaries' large Windows PDB outputs before reaching test execution.
+This is build/dependency evidence, not a runtime memory or startup measurement.
+
+R1b's placement comparison must account for this author/dependency cost. Compare a separately
+consumed semantic module/driver with the current shared companion topology before freezing a
+reusable SDK or package boundary. Do not infer that semantic tooling intrinsically needs native
+UI/GPU dependencies, or move code into a new engine crate solely to bypass a failing build. The
+selected std-only helper imports the calculator source directly; its mathematical implementation
+is shared, while its executable has no document or UI authority.

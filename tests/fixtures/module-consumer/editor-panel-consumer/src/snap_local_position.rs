@@ -29,81 +29,8 @@ pub const PANEL_KIND: &str = "consumer.snap-local-position";
 const TRANSFORM: &str = "nara.transform.Transform2d";
 const TRANSLATION_ROOT_FIELD_IDS: [&str; 2] = ["translation.x", "translation.y"];
 
-/// Tool policy refusals, separate from source/query/preparation/dispatch errors.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SnapRejection {
-    InvalidGrid,
-    NonFinitePosition,
-    PositionOutOfRange,
-    ResultOutOfRange,
-    ObservationMismatch,
-    ValueUnavailable,
-}
-
-impl std::fmt::Display for SnapRejection {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::InvalidGrid => "Grid spacing must be a positive finite number",
-            Self::NonFinitePosition => "Both local coordinates must be finite",
-            Self::PositionOutOfRange => {
-                "Local position exceeds the Transform2d finite f32 decode range"
-            }
-            Self::ResultOutOfRange => {
-                "Snapped position exceeds the Transform2d finite f32 decode range"
-            }
-            Self::ObservationMismatch => {
-                "Preview requires coherent X/Y observations at the exact captured basis"
-            }
-            Self::ValueUnavailable => {
-                "Both Transform2d translation fields must be present F64 source values"
-            }
-        })
-    }
-}
-impl std::error::Error for SnapRejection {}
-
-/// Nearest local-zero grid point, with exact binary distance ties away from zero.
-///
-/// Source values stay f64. The range check is the real Transform codec's finite f32
-/// range, not an extra coordinate cap or an implicit f32 quantization.
-pub fn snap_local_position(position: [f64; 2], grid: f64) -> Result<[f64; 2], SnapRejection> {
-    if !grid.is_finite() || grid <= 0.0 {
-        return Err(SnapRejection::InvalidGrid);
-    }
-    if position.iter().any(|value| !value.is_finite()) {
-        return Err(SnapRejection::NonFinitePosition);
-    }
-    let max = f64::from(f32::MAX);
-    if position.iter().any(|value| value.abs() > max) {
-        return Err(SnapRejection::PositionOutOfRange);
-    }
-    let result = position.map(|value| {
-        let magnitude = value.abs();
-        // Do not form value/grid: legal subnormal spacing can overflow that quotient.
-        let remainder = magnitude % grid;
-        if remainder == 0.0 {
-            return value;
-        }
-        let up = grid - remainder;
-        let snapped = if remainder < up {
-            magnitude - remainder
-        } else {
-            magnitude + up
-        };
-        if snapped == 0.0 {
-            0.0
-        } else {
-            snapped.copysign(value)
-        }
-    });
-    if result
-        .iter()
-        .any(|value| !value.is_finite() || value.abs() > max)
-    {
-        return Err(SnapRejection::ResultOutOfRange);
-    }
-    Ok(result)
-}
+mod numeric;
+pub use numeric::{SnapRejection, snap_local_position};
 
 /// Exactly two root-scalar reads at one basis; no complete Inspector/component fallback.
 pub fn read_requests(
@@ -154,6 +81,83 @@ pub struct SnapProposal {
     after: [f64; 2],
 }
 
+/// Captured values and their exact source basis, not preparation or publication authority.
+/// A process adapter transfers only position/grid and attaches its result to this retained input.
+#[derive(Debug)]
+pub struct SnapInput {
+    basis: EditorDocumentQueryBasis,
+    entity: SceneEntityId,
+    grid: f64,
+    position: [f64; 2],
+}
+
+impl SnapInput {
+    pub fn capture(
+        x: &EditorPropertyObservation,
+        y: &EditorPropertyObservation,
+        grid: f64,
+    ) -> Result<Self, SnapRejection> {
+        if x.target.basis != y.target.basis
+            || x.target.entity != y.target.entity
+            || [x, y]
+                .into_iter()
+                .zip(TRANSLATION_ROOT_FIELD_IDS)
+                .any(|(observed, field)| {
+                    observed.target.component.as_str() != TRANSFORM
+                        || observed.target.property.root.as_str() != field
+                        || !observed.target.property.steps.is_empty()
+                })
+        {
+            return Err(SnapRejection::ObservationMismatch);
+        }
+        let scalar = |observed: &EditorPropertyObservation| match &observed.value {
+            EditorPropertyValue::Present(value) => {
+                value.as_f64().ok_or(SnapRejection::ValueUnavailable)
+            }
+            _ => Err(SnapRejection::ValueUnavailable),
+        };
+        let position = [scalar(x)?, scalar(y)?];
+        numeric::validate_input(position, grid)?;
+        Ok(Self {
+            basis: x.target.basis.clone(),
+            entity: x.target.entity.clone(),
+            grid,
+            position,
+        })
+    }
+
+    pub fn position(&self) -> [f64; 2] {
+        self.position
+    }
+    pub fn grid(&self) -> f64 {
+        self.grid
+    }
+    pub fn basis(&self) -> &EditorDocumentQueryBasis {
+        &self.basis
+    }
+
+    /// Attach a trusted placement's proposed coordinates without recomputing them locally.
+    /// This bounds values, not their semantic correctness or the captured basis's current liveness.
+    pub fn proposal(self, after: [f64; 2]) -> Result<SnapPlan, SnapRejection> {
+        if after
+            .iter()
+            .any(|value| !value.is_finite() || value.abs() > f64::from(f32::MAX))
+        {
+            return Err(SnapRejection::ResultOutOfRange);
+        }
+        if self.position == after {
+            return Ok(SnapPlan::NoChange);
+        }
+        Ok(SnapPlan::Change(SnapProposal {
+            basis: self.basis,
+            entity: self.entity,
+            grid: self.grid,
+            before: self.position,
+            after,
+        }))
+    }
+}
+
 impl SnapProposal {
     #[must_use]
     pub fn basis(&self) -> &EditorDocumentQueryBasis {
@@ -202,37 +206,9 @@ pub fn plan_snap_local_position(
     y: &EditorPropertyObservation,
     grid: f64,
 ) -> Result<SnapPlan, SnapRejection> {
-    if x.target.basis != y.target.basis
-        || x.target.entity != y.target.entity
-        || [x, y]
-            .into_iter()
-            .zip(TRANSLATION_ROOT_FIELD_IDS)
-            .any(|(observed, field)| {
-                observed.target.component.as_str() != TRANSFORM
-                    || observed.target.property.root.as_str() != field
-                    || !observed.target.property.steps.is_empty()
-            })
-    {
-        return Err(SnapRejection::ObservationMismatch);
-    }
-    let scalar = |observed: &EditorPropertyObservation| match &observed.value {
-        EditorPropertyValue::Present(value) => {
-            value.as_f64().ok_or(SnapRejection::ValueUnavailable)
-        }
-        _ => Err(SnapRejection::ValueUnavailable),
-    };
-    let before = [scalar(x)?, scalar(y)?];
-    let after = snap_local_position(before, grid)?;
-    if before == after {
-        return Ok(SnapPlan::NoChange);
-    }
-    Ok(SnapPlan::Change(SnapProposal {
-        basis: x.target.basis.clone(),
-        entity: x.target.entity.clone(),
-        grid,
-        before,
-        after,
-    }))
+    let input = SnapInput::capture(x, y, grid)?;
+    let after = snap_local_position(input.position(), input.grid())?;
+    input.proposal(after)
 }
 
 pub fn install(

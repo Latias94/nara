@@ -224,6 +224,46 @@ panel test uses Dear ImGui input and Application routing without a native window
 native rendering qualification. This source-built command does not establish inline Inspector
 customization, child-process isolation, install/update/disable/remove, or a stable tool protocol.
 
+### Explicit Finite Child Experiment
+
+The independently compiled consumer also contains a default-off `snap-child-experiment` feature.
+It selects a trusted fixture helper explicitly; opening project data and running the ordinary
+companion do not launch it. Its window-free driver keeps target/basis and Source ownership in the
+parent while the helper invokes the same pure numeric calculation in another process. The parent
+does not compute the expected answer and ask the child to echo it.
+
+`SnapInput::capture` validates coherent observations and finite tool input without checking current
+source liveness. Its `proposal(after)` attaches a trusted placement's finite coordinates to the
+retained target/basis; it does not certify that an arbitrary helper computed the right answer.
+The ordinary `plan_snap_local_position` now composes capture, local calculation and attachment.
+For the child placement, validate the original basis with the Session before preparing and previewing
+the same Source-owned edit. Reopen or intervening edits do not silently acquire a new basis.
+
+The private exchange admits one 40-byte request, one 32-byte response followed by EOF, and at most
+4096 stderr bytes. Extra bytes, malformed/version-mismatched frames, wrong request, invalid values,
+nonzero exit and I/O failure refuse the proposal. No raw stderr becomes a public diagnostic. A
+successful frame alone is insufficient: the driver retains custody through exit/reap and joined
+stdin/stdout/stderr workers. Cancellation revokes interest without overwriting an already observed
+failure; it is not proof of physical completion. A joined worker panic remains a distinct failure.
+One lane stays Busy until its physical result has returned and its terminal observation is consumed.
+
+The helper is selected by Cargo's absolute executable path, without a shell or project command
+discovery. It has a reviewed empty/allowlisted environment and an owned fixture CWD. This is trusted
+direct-child execution: the helper does not create descendants. Portable blocking std I/O does not
+guarantee bounded cleanup if that premise is violated. The fixture reports/retains incomplete cleanup;
+it does not claim sandboxing, child memory/CPU limits, arbitrary process-tree retirement or a native
+panel tool Host. A retired panel must not become the physical process owner by accident.
+
+Run the focused public workflows explicitly, serially with the repository's pinned Rust toolchain:
+
+```text
+cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/module-consumer/Cargo.toml --target-dir target -p nara-editor-panel-module-consumer --features snap-child-experiment --test snap_child_proposal --test snap_local_position --no-fail-fast --test-threads=1
+```
+
+The [experiment study](../research/2026-10-25-finite-snap-child-proposal.md) records alternatives and
+remaining qualification limits. This finite consumer does not select R1b placement, local package
+installation, an inline Inspector extension, or a reusable process/wire API.
+
 ## Prepare A Direct Document Edit
 
 Direct Application consumers can preview an edit of an explicitly named open Scene or Prefab

@@ -166,9 +166,11 @@ The [source-built Snap command](../guides/editor-panels.md#a-source-local-snap-t
 R1 consumer of those existing read/preparation/result owners, not another engine abstraction.
 Its [scoped qualification](../knowledge/engineering/verification/2026-10/2026-10-25T112059Z-source-local-snap-public-consumer-and-installer-qualification-f89f21479f7d4c06a81ab5bc63b5ff87.md)
 separates actual panel/Session and installer proof from native rendering and full tool lifecycle.
-The next [finite child-proposal study](../research/2026-10-25-finite-snap-child-proposal.md) examines
-explicit trust, bounded exchange, original-basis validation and physical custody after UI
-retirement. It is a researched experiment design, not implemented process/tool support.
+The [finite child-proposal study](../research/2026-10-25-finite-snap-child-proposal.md) selects a
+bounded trusted fixture, with [separate qualification](../knowledge/engineering/verification/2026-10/2026-10-25T122634Z-finite-child-snap-proposal-and-physical-custody-qualification-ce23b00e49cc4a758017b5a2eba63913.md)
+for real process output, original-basis validation and physical custody. It introduces no engine
+process API or installed-tool Host. Surviving UI retirement and GUI-independent dependency cost
+remain R1b placement questions rather than guarantees inferred from this finite driver.
 
 The [exact persistence-attempt design](editor-persistence-attempt-design.md) develops
 R1/F2's missing observation correlation: one owner-issued attempt through dispatch, pending and

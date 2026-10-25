@@ -103,6 +103,16 @@ Clippy and both format checks pass. No new engine API or ADR contract is introdu
 do not create a native window/GPU; child-process tools, inline Inspector, local install lifecycle,
 supplemental panel recovery coverage and full R1 remain open.
 
+The [finite child Snap qualification](../../knowledge/engineering/verification/2026-10/2026-10-25T122634Z-finite-child-snap-proposal-and-physical-custody-qualification-ce23b00e49cc4a758017b5a2eba63913.md)
+adds the explicitly enabled trusted helper experiment without an engine process API. Fixed frames
+carry only grid/coordinates; the parent retains source basis and physical custody until child reap
+and all I/O joins. Two reproduced error-fact losses are fixed. Complete nine-lens review's P2
+Reopen proof gap is corrected and independently rechecked. Final focused nextest13, feature-on
+all-target Clippy, default-off all-target check and both format checks pass. Held return, cancel,
+timeout, malformed output and actual inactive-document history/Save/Reopen retain their scope.
+This is trusted no-descendant Windows execution, not sandboxing, arbitrary process-tree cleanup,
+native Editor/GPU qualification, a runner-owned installed-tool lane or full R1/R1b completion.
+
 The [R2 source-owner qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T140847Z-prepared-source-editing-and-non-active-entity-query-qualification-d08c0cb5ab2c4f798dd7cd98c2a2e6c5.md)
 adds owned Scene/Prefab prepare/commit, mixed construction and bounded non-active direct-entity
 queries under ADRs 0026/0047/0118. Final serial evidence passes 826 library cases, 10 prepared

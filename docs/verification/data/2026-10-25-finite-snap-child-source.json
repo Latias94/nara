@@ -1,0 +1,11 @@
+{
+  "tests/fixtures/module-consumer/editor-panel-consumer/Cargo.toml": "dbb9f10154953c4c482f6a49fe0a38db7bdac348d30bb26b3304f219a2392f5d",
+  "tests/fixtures/module-consumer/editor-panel-consumer/src/snap_local_position/numeric.rs": "2b1e381f509cbfdbfcbc4d398dad7b8c778f4c5817fd723c4d09d15c2cca4fff",
+  "tests/fixtures/module-consumer/editor-panel-consumer/src/snap_local_position.rs": "8a01ebe549f8ad29564a975978ca15b46e680195b36c80fea3d739c82785da62",
+  "tests/fixtures/module-consumer/editor-panel-consumer/tests/snap_child_proposal.rs": "935239a59f20cef0842bef2620f1e6aa6176aa8dd6aa96397635c0dff9915e4f",
+  "tests/fixtures/module-consumer/editor-panel-consumer/tests/snap_local_position.rs": "d93008829bc76ca45dcef4cb042d7e6182e3468fccc210acd583ac173e3bd690",
+  "tests/fixtures/module-consumer/editor-panel-consumer/tests/support/snap_child_main.rs": "3697d436c98d5cb35e9cc69199acc3a676e16605ca3338d1afdf95fa5a017aa3",
+  "tests/fixtures/module-consumer/editor-panel-consumer/tests/support/snap_child_process.rs": "3e0e3437f0e3e15d32e826528165da5890f84f5a3b153059aa1678cbfc289659",
+  "tests/fixtures/module-consumer/editor-panel-consumer/tests/support/snap_child_wire.rs": "a33c15fc6b97e1f66f9c420cecf8cbd4cf34dacdce5684e1e8f22ad148396308",
+  "tests/fixtures/module-consumer/editor-panel-consumer/tests/support/snap_project.rs": "9a9ec27b306e22dfef95a3bc22c684261e6d4c32224691871991acafe10fbbb7"
+}

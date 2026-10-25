@@ -5,6 +5,16 @@ edition = "2024"
 rust-version = "1.95"
 publish = false
 
+[features]
+snap-child-experiment = []
+
+[[bin]]
+name = "snap_local_position_child"
+path = "tests/support/snap_child_main.rs"
+required-features = ["snap-child-experiment"]
+test = false
+bench = false
+
 [dependencies]
 dear-imgui-rs = "=0.21.0"
 nara = { path = "../../../..", default-features = false, features = ["tooling"] }
