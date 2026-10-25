@@ -162,6 +162,14 @@ This does not close full R2 or installable-tool workflows; the
 [pinned editing/format study](../research/2026-10-25-editing-versus-format-admission.md) keeps
 equivalent locality and a deliberate editing/Save contract redesign as separate alternatives.
 
+The [source-built Snap command](../guides/editor-panels.md#a-source-local-snap-tool) is a concrete
+R1 consumer of those existing read/preparation/result owners, not another engine abstraction.
+Its [scoped qualification](../knowledge/engineering/verification/2026-10/2026-10-25T112059Z-source-local-snap-public-consumer-and-installer-qualification-f89f21479f7d4c06a81ab5bc63b5ff87.md)
+separates actual panel/Session and installer proof from native rendering and full tool lifecycle.
+The next [finite child-proposal study](../research/2026-10-25-finite-snap-child-proposal.md) examines
+explicit trust, bounded exchange, original-basis validation and physical custody after UI
+retirement. It is a researched experiment design, not implemented process/tool support.
+
 The [exact persistence-attempt design](editor-persistence-attempt-design.md) develops
 R1/F2's missing observation correlation: one owner-issued attempt through dispatch, pending and
 terminal state, with exact acknowledgment and explicit retry supersession. ADRs 0047/0118 adopt

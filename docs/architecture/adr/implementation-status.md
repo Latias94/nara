@@ -93,6 +93,16 @@ correctness/suspicious lint and format checks pass. Actual failed-cleanup inject
 uncertainty projection are distinct proofs, not physical uncertainty reproduction. The useful
 semantic tool, finite child experiment, local install lifecycle and complete R1 remain open.
 
+The [source-built Snap qualification](../../knowledge/engineering/verification/2026-10/2026-10-25T112059Z-source-local-snap-public-consumer-and-installer-qualification-f89f21479f7d4c06a81ab5bc63b5ff87.md)
+adds a real local Transform2d command through two bounded observations, a pure planner and the
+existing Source-owned candidate/inverse/history. The actual Dear ImGui panel and an independent
+inactive-document Session consumer agree through exact results, one Undo and Save/Reopen.
+Complete nine-lens review's confirmed P2 installer-proof gap is corrected with a real
+installer-composition test and independent follow-up. Final consumer42 and focused6 pass; scoped
+Clippy and both format checks pass. No new engine API or ADR contract is introduced. These tests
+do not create a native window/GPU; child-process tools, inline Inspector, local install lifecycle,
+supplemental panel recovery coverage and full R1 remain open.
+
 The [R2 source-owner qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T140847Z-prepared-source-editing-and-non-active-entity-query-qualification-d08c0cb5ab2c4f798dd7cd98c2a2e6c5.md)
 adds owned Scene/Prefab prepare/commit, mixed construction and bounded non-active direct-entity
 queries under ADRs 0026/0047/0118. Final serial evidence passes 826 library cases, 10 prepared

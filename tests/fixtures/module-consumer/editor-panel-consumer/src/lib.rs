@@ -1,6 +1,7 @@
 //! A trusted source-built Editor contribution, independently compiled from the product module.
 
 pub mod dialogue;
+pub mod snap_local_position;
 pub mod text_import;
 
 use nara_editor::{
@@ -34,6 +35,7 @@ pub fn install(
 pub fn run(options: EditorLaunchOptions) -> Result<(), Box<EditorRunError>> {
     let mut composition = EditorNativeComposition::new();
     install(&mut composition).map_err(EditorRunError::from)?;
+    snap_local_position::install(&mut composition).map_err(EditorRunError::from)?;
     composition.run(options).map_err(Box::new)
 }
 

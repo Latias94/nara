@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "b0e46c2c939de3030b9d68d6772b8252c05ddadaf204f7e55108cea047ec8c7c"
+source_fingerprint: "6e864c5a4efa22426a040dba4e736ce81c783853a9a891b812ae1a9d57289ab7"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "b0e46c2c939de3030b9d68d6772b8252c05ddadaf204f7e55108cea047e
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `b0e46c2c939de3030b9d68d6772b8252c05ddadaf204f7e55108cea047ec8c7c`
-- Immutable records: 914
+- Source fingerprint: `6e864c5a4efa22426a040dba4e736ce81c783853a9a891b812ae1a9d57289ab7`
+- Immutable records: 916
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Source local Snap public consumer and installer qualification](verification/2026-10/2026-10-25T112059Z-source-local-snap-public-consumer-and-installer-qualification-f89f21479f7d4c06a81ab5bc63b5ff87.md) - Qualifies the source-built R1 Snap planner, exact panel candidate and independent inactive Session workflow after complete review and direct installer proof correction; child tools and full R1 remain open.
+- **Session Handoff**: [Compiled failure projection committed and real Snap consumer initially passing](sessions/2026-10/2026-10-25T103839Z-compiled-failure-projection-committed-and-real-snap-consumer-initially-passing-b98096de3c6149249a0389e9faacb5d5.md) - R1/F2 and F3 are locally committed with scoped qualification; three uncommitted Snap consumer files pass five focused workflows and still need review, broader checks and a precise commit.
 - **Verification Evidence**: [Compiled domain failure projection and truthful publication observations](verification/2026-10/2026-10-25T100841Z-compiled-domain-failure-projection-and-truthful-publication-observations-8b995496a82b411184e95f6f462b48f8.md) - Records R1/F3's real compiled-domain code-loss regression, bounded replacement, complete review and physical-outcome corrections; full R1 and the foundation remain open.
 - **Work Progress**: [Persistence attempts committed and compiled domain diagnostic projection checkpoint](progress/2026-10/2026-10-25T091355Z-persistence-attempts-committed-and-compiled-domain-diagnostic-projection-checkpoint-1ee496d678dc41b4953eb4665f625ca7.md) - Commits qualified R1/F2, records the real F3 code-loss regression and bounded implementation, and separates active compiled qualification from the unintegrated Snap artifact.
 - **Verification Evidence**: [Exact persistence attempts and terminal observation qualification](verification/2026-10/2026-10-25T081443Z-exact-persistence-attempts-and-terminal-observation-qualification-332f36f3c0f94f93ae1eb2721e981359.md) - Records owner-issued attempt correlation, exact observation acknowledgment, unchanged physical custody, public workflow evidence and scoped review corrections; complete R1 remains open.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Reference-bearing preparation phase attribution and clean-source controls](verification/2026-10/2026-10-25T031736Z-reference-bearing-preparation-phase-attribution-and-clean-source-controls-aec33a24b30247b786582270db721766.md) - Five executions locate populated instrumented preparation wall time in format admission; explicit disturbance limits, corrected analyzer and exact source cleanup retain full R2 as open.
 - **Verification Evidence**: [Prepared panel complete review and scoped workflow qualification](verification/2026-10/2026-10-25T024527Z-prepared-panel-complete-review-and-scoped-workflow-qualification-49e27d9779054a5b8fda1142add06519.md) - Qualified finite panel preparation and consuming source candidates after complete review, nine added regressions and independent recheck; shared-owner locality and full foundation remain open.
 - **Work Progress**: [Prepared panel implementation and scoped public qualification checkpoint](progress/2026-10/2026-10-25T011645Z-prepared-panel-implementation-and-scoped-public-qualification-checkpoint-2b1d6218ef0042ae8c83303e6aabfbf1.md) - Read queries are committed; real registered panels now prepare and consume source candidates with serial owner, public, native and static evidence; full review remains open.
-- **Verification Evidence**: [Bounded authoring query complete review and aggregate budget qualification](verification/2026-10/2026-10-25T002933Z-bounded-authoring-query-complete-review-and-aggregate-budget-qualification-893b5a3ffa104ec8bc7c7413c12e0c5d.md) - Nine-lens review completed; the confirmed multi-row budget proof gap is closed by focused tests and independent follow-up.
-- **Work Progress**: [Bounded authoring query public workflow and simplification checkpoint](progress/2026-10/2026-10-24T234726Z-bounded-authoring-query-public-workflow-and-simplification-checkpoint-032e0546f45246c1b04dcc4eb2fc64a5.md) - Paged actual inventory and bounded root reads reach existing public actions and computed edits; final qualification and complete review remain separate.
 
 # Integration Notes
 

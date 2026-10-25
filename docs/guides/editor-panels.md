@@ -187,6 +187,43 @@ The separately compiled consumer at
 selection-summary panel with a local note draft. This is a source extension interface, not a
 stable dynamic plugin ABI or a toolkit-independent widget framework.
 
+## A Source-Local Snap Tool
+
+The same consumer's `snap_local_position` module contributes a useful command without changing
+engine APIs. Call `snap_local_position::install(&mut composition)` before building/running the
+composition; its companion `run(options)` already includes this registration. Select one direct
+Scene source entity with `nara.transform.Transform2d`, set the grid spacing, and choose **Preview**.
+The panel shows the before/after coordinates and the Source owner's exact forward/inverse candidate.
+**Apply** consumes that candidate; **Cancel** drops it without a source or history change.
+
+This is a local-position tool, not a world-space transform operation. Its origin is local zero,
+including for parented entities. The default grid is 16 local units; any positive finite `f64`
+spacing is accepted. Rounding compares remainder distances, with exact binary ties away from zero.
+Input and output must fit the Transform codec's finite `f32` range, but stored values remain `f64`:
+there is no additional coordinate cap or hidden `f32` round trip. A no-op creates no candidate.
+Both coordinates must be explicitly present F64 values; omitted/defaulted fields are refused.
+
+`translation.x` and `translation.y` are dotted stable **root IDs**, not a `translation` root with
+Member steps. Each read admits one scalar/eight value bytes and explicitly bounds selector scan
+work to 64 entries/4096 logical bytes. A budget refusal is a tool error, not permission to copy
+the complete Inspector or component. The pure planner checks the two observations' exact target
+and basis; it neither checks current liveness nor mutates a document.
+
+The panel uses context preparation to validate that basis. A window-free Session consumer must
+explicitly call `validate_authoring_query_basis(proposal.basis())` before
+`prepare_authoring_property_edit(document, proposal.basis().revision, &proposal.property_edits())`,
+then consume the prepared edit through `commit_authoring_edit`. Only changed axes enter one
+Source-owned transaction and one Undo entry. No adapter constructs its own inverse or history.
+An intervening edit rejects the stale candidate rather than silently rebasing it. The panel retains
+the exact originating `PanelSubmissionId` and callback; a later unrelated drive cannot replace it.
+Selection or grid changes require a new preview.
+
+The independent `tests/snap_local_position.rs` exercises the real registered Dear ImGui panel and
+a separate inactive-document Session path through Undo/Redo and exact Save/Reopen attempts. Its
+panel test uses Dear ImGui input and Application routing without a native window/GPU; it is not
+native rendering qualification. This source-built command does not establish inline Inspector
+customization, child-process isolation, install/update/disable/remove, or a stable tool protocol.
+
 ## Prepare A Direct Document Edit
 
 Direct Application consumers can preview an edit of an explicitly named open Scene or Prefab
@@ -337,9 +374,10 @@ still share their independent eight-write and selector/value limits before coale
 
 The independent consumer covers non-active Scene/Prefab construction, exact successful IDs,
 one Undo/Redo and persistence. The separately scoped qualification also checks affected native
-structural/Canvas/preview regressions; it does not add a panel-construction widget. Registered
-panel contexts still expose ordered actions rather than these direct prepared hooks; this section
-does not qualify panel transactions, generalized field queries or installable tools.
+structural/Canvas/preview regressions. Registered panels use the later
+[finite preparation and consuming submission interface](#prepare-and-retain-an-edit-in-a-panel)
+for construction as well as property edits. Neither interface adds a general construction widget,
+unbounded field queries or installable tools.
 
 ## Query A Non-Active Document
 
