@@ -26,7 +26,7 @@ pub use scope::{TaskFacilities, TaskScope, TaskScopeCloseReport};
 use scope::{TaskScopeShared, prepare_admission, same_scope};
 use workers::{TaskWorkers, WorkerActivationError};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use std::cell::RefCell;
 
 pub const MAX_TASK_POOL_THREADS_PER_KIND: usize = 256;
@@ -1373,9 +1373,10 @@ struct TaskPoolInstanceToken {
 /// Tasks return owned data for their domain to integrate on its owner thread. This API does not
 /// accept or poll Futures; [`TaskPoolKind::AsyncCompute`] selects another closure worker queue.
 ///
-/// Standalone pools retain their close owner. [`Self::shutdown_blocking`] drives finite,
-/// retryable physical retirement. Dropping an unfinished standalone owner closes admission and
-/// publishes cancellation for pending and running handles before transferring unfinished work
+/// Standalone pools retain their close owner. [`Self::poll_shutdown`] observes physical retirement
+/// one poll at a time; [`Self::shutdown_blocking`] drives its finite, retryable protocol. Dropping
+/// an unfinished standalone owner closes admission and publishes cancellation for pending and
+/// running handles before transferring unfinished work
 /// to process-owned retention. This cancellation visits the bounded pending queue and is O(n);
 /// pending captures are disposed on internal drop lanes without waiting for uncooperative work.
 /// Physical capture disposal and worker joins can remain incomplete after Drop returns. Releasing
@@ -1583,8 +1584,16 @@ impl TaskPools {
         })
     }
 
-    #[cfg(test)]
-    pub(crate) fn with_worker_spawn_failure_for_tests<R>(
+    /// Injects a real worker spawn failure at the zero-based index for one pool kind.
+    ///
+    /// Injection applies only to worker creation on the calling thread during `operation` and is
+    /// reset on return or unwind. Earlier workers still use real threads and physical close custody.
+    ///
+    /// # Panics
+    ///
+    /// Panics if another worker spawn failure injection is already active on this thread.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_worker_spawn_failure_for_tests<R>(
         kind: TaskPoolKind,
         fail_index: usize,
         operation: impl FnOnce() -> R,
@@ -1597,6 +1606,7 @@ impl TaskPools {
                 started: probe.started.clone(),
                 exited: probe.exited.clone(),
                 cleanup_polls: probe.cleanup_polls.clone(),
+                exit_hold: Arc::default(),
             }))
         });
         assert!(
@@ -1605,6 +1615,26 @@ impl TaskPools {
         );
         let _reset = WorkerSpawnFailureReset;
         (operation(), probe)
+    }
+
+    /// Holds the first partial worker exit until a signal arrives or the sender is dropped.
+    ///
+    /// Call inside [`Self::with_worker_spawn_failure_for_tests`] before creating workers. The
+    /// worker finishes its real body but remains unjoinable and uncounted by the exit probe until
+    /// released. This does not hold any close-owner, queue, or worker-handle lock.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no worker spawn failure injection is active on this thread.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn hold_partial_worker_exit_for_tests(release: Receiver<()>) {
+        WORKER_SPAWN_FAILURE.with(|injection| {
+            let injection = injection.borrow();
+            let injection = injection
+                .as_ref()
+                .expect("partial worker exit hold requires a spawn failure injection");
+            *lock_unpoisoned(&injection.exit_hold) = Some(release);
+        });
     }
 
     #[must_use]
@@ -1749,6 +1779,22 @@ impl TaskPools {
         }
     }
 
+    /// Performs one poll of a standalone owner's drain, cancellation, and worker-join protocol.
+    ///
+    /// This starts close on first use and does not wait for running work or phase deadlines. An
+    /// incomplete report retains the same physical owner for a later poll or
+    /// [`Self::shutdown_blocking`]. Completion and historical failure evidence describe that owner,
+    /// not task handle terminals.
+    /// Managed and scoped facades return [`TaskShutdownError::CloseOwnerTransferred`].
+    pub fn poll_shutdown(&self) -> Result<TaskShutdownReport, TaskShutdownError> {
+        let mut close_owner = lock_unpoisoned(&self.close_owner);
+        let Some(owner) = close_owner.as_mut() else {
+            return Err(TaskShutdownError::CloseOwnerTransferred);
+        };
+        owner.poll_close();
+        Ok(owner.report())
+    }
+
     /// Drives a standalone owner's finite drain, cancellation, and worker-join protocol.
     ///
     /// An incomplete report retains the same physical work for a later call. A complete report
@@ -1756,24 +1802,20 @@ impl TaskPools {
     /// Terminal task handles alone prove neither. Plugin-managed pools return
     /// [`TaskShutdownError::CloseOwnerTransferred`] because their runtime owns this protocol.
     pub fn shutdown_blocking(&self) -> Result<TaskShutdownReport, TaskShutdownError> {
-        let mut close_owner = self
-            .close_owner
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(owner) = close_owner.as_mut() else {
-            return Err(TaskShutdownError::CloseOwnerTransferred);
-        };
-        if owner.is_complete() {
-            return Ok(owner.report());
-        }
-        owner.begin_close();
         loop {
-            match owner.poll_close() {
-                TaskPoolsCloseProgress::Complete | TaskPoolsCloseProgress::Incomplete => {
+            {
+                let mut close_owner = lock_unpoisoned(&self.close_owner);
+                let Some(owner) = close_owner.as_mut() else {
+                    return Err(TaskShutdownError::CloseOwnerTransferred);
+                };
+                if matches!(
+                    owner.poll_close(),
+                    TaskPoolsCloseProgress::Complete | TaskPoolsCloseProgress::Incomplete
+                ) {
                     return Ok(owner.report());
                 }
-                TaskPoolsCloseProgress::Pending => thread::sleep(Duration::from_millis(1)),
             }
+            thread::sleep(Duration::from_millis(1));
         }
     }
 
@@ -2320,7 +2362,7 @@ struct TaskPoolCloseOwner {
     close_phase: TaskPoolClosePhase,
     shutdown_report: TaskPoolShutdownReport,
     shutdown_recorded: bool,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     construction_cleanup_polls: Option<Arc<AtomicUsize>>,
 }
 
@@ -2367,7 +2409,7 @@ impl TaskPoolExecutor {
                         "worker activation is unavailable".to_owned()
                     }
                 };
-                #[cfg(test)]
+                #[cfg(any(test, feature = "test-support"))]
                 let close_owner = {
                     let mut close_owner = close_owner;
                     close_owner.construction_cleanup_polls = worker_spawn_failure_injection(kind)
@@ -2597,7 +2639,7 @@ impl TaskPoolCloseOwner {
             close_phase: TaskPoolClosePhase::Open,
             shutdown_report: TaskPoolShutdownReport::default(),
             shutdown_recorded: false,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             construction_cleanup_polls: None,
         }
     }
@@ -2624,7 +2666,7 @@ impl TaskPoolCloseOwner {
     }
 
     fn poll_close(&mut self) -> TaskPoolCloseProgress {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if let Some(polls) = &self.construction_cleanup_polls {
             polls.fetch_add(1, Ordering::AcqRel);
         }
@@ -2994,9 +3036,9 @@ fn spawn_task_worker(
     index: usize,
     shared: Arc<ExecutorShared>,
 ) -> std::io::Result<JoinHandle<()>> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     let injection = worker_spawn_failure_injection(kind);
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     if let Some(injection) = injection
         .as_ref()
         .filter(|injection| injection.fail_index == index)
@@ -3016,13 +3058,13 @@ fn spawn_task_worker(
 
     let name = format!("nara-{}-{index}", kind.as_str());
     thread::Builder::new().name(name).spawn(move || {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         let _lifetime = injection.map(WorkerLifetimeProbe::start);
         worker_main(shared);
     })
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Clone)]
 struct WorkerSpawnFailureInjection {
     kind: TaskPoolKind,
@@ -3030,16 +3072,17 @@ struct WorkerSpawnFailureInjection {
     started: Arc<AtomicUsize>,
     exited: Arc<AtomicUsize>,
     cleanup_polls: Arc<AtomicUsize>,
+    exit_hold: Arc<Mutex<Option<Receiver<()>>>>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     static WORKER_SPAWN_FAILURE: RefCell<Option<WorkerSpawnFailureInjection>> = const {
         RefCell::new(None)
     };
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 fn worker_spawn_failure_injection(kind: TaskPoolKind) -> Option<WorkerSpawnFailureInjection> {
     WORKER_SPAWN_FAILURE.with(|injection| {
         injection
@@ -3050,10 +3093,10 @@ fn worker_spawn_failure_injection(kind: TaskPoolKind) -> Option<WorkerSpawnFailu
     })
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 struct WorkerSpawnFailureReset;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl Drop for WorkerSpawnFailureReset {
     fn drop(&mut self) {
         WORKER_SPAWN_FAILURE.with(|injection| {
@@ -3062,33 +3105,40 @@ impl Drop for WorkerSpawnFailureReset {
     }
 }
 
-#[cfg(test)]
+/// Observations of real workers created under a test-only spawn failure injection.
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Default)]
-pub(crate) struct WorkerSpawnFailureProbe {
+pub struct WorkerSpawnFailureProbe {
     started: Arc<AtomicUsize>,
     exited: Arc<AtomicUsize>,
     cleanup_polls: Arc<AtomicUsize>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl WorkerSpawnFailureProbe {
-    pub(crate) fn started(&self) -> usize {
+    /// Number of injected-kind worker threads that entered their real worker body.
+    #[must_use]
+    pub fn started(&self) -> usize {
         self.started.load(Ordering::Acquire)
     }
 
-    pub(crate) fn exited(&self) -> usize {
+    /// Number of worker closures past the exit hold; this alone does not prove joining.
+    #[must_use]
+    pub fn exited(&self) -> usize {
         self.exited.load(Ordering::Acquire)
     }
 
-    pub(crate) fn cleanup_polls(&self) -> usize {
+    /// Number of polls of an eagerly constructed, failed executor's retained close owner.
+    #[must_use]
+    pub fn cleanup_polls(&self) -> usize {
         self.cleanup_polls.load(Ordering::Acquire)
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 struct WorkerLifetimeProbe(WorkerSpawnFailureInjection);
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl WorkerLifetimeProbe {
     fn start(injection: WorkerSpawnFailureInjection) -> Self {
         injection.started.fetch_add(1, Ordering::AcqRel);
@@ -3096,9 +3146,13 @@ impl WorkerLifetimeProbe {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl Drop for WorkerLifetimeProbe {
     fn drop(&mut self) {
+        let release = lock_unpoisoned(&self.0.exit_hold).take();
+        if let Some(release) = release {
+            let _ = release.recv();
+        }
         self.0.exited.fetch_add(1, Ordering::AcqRel);
     }
 }

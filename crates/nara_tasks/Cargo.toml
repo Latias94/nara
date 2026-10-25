@@ -13,3 +13,4 @@ nara_ecs.workspace = true
 
 [features]
 default = []
+test-support = []

@@ -155,6 +155,126 @@ fn caller_owned_pools_remain_explicitly_shutdown_capable_after_app_poison() {
 }
 
 #[test]
+fn shutdown_poll_returns_while_work_is_held_and_joins_once_after_release() {
+    let timeout = time(Duration::from_secs(2));
+    let config = test_config(1)
+        .with_shutdown_policy(TaskShutdownPolicy::new(timeout, timeout, timeout))
+        .unwrap();
+    let pools = TaskPools::try_new(config).unwrap();
+    let joined = pools.worker_join_probe_for_tests();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let _release_guard = PendingDropReleaseGuard(release_tx.clone());
+    let handle = accepted(pools.spawn(TaskPoolKind::Io, request(1), move |_| {
+        started_tx.send(()).unwrap();
+        let _ = release_rx.recv_timeout(Duration::from_secs(10));
+    }));
+    let returned = handle.return_observer();
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+
+    let started = Instant::now();
+    let first = pools.poll_shutdown().unwrap();
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert!(!first.is_complete());
+    assert!(!first.timed_out());
+    assert_eq!(
+        first.for_kind(TaskPoolKind::Io),
+        TaskPoolShutdownReport::default()
+    );
+    assert_eq!(returned.state(), TaskReturnState::Pending);
+    assert_eq!(joined.load(Ordering::Acquire), 0);
+    let repeated = pools.poll_shutdown().unwrap();
+    assert!(!repeated.is_complete());
+    assert_eq!(
+        repeated.for_kind(TaskPoolKind::Io),
+        first.for_kind(TaskPoolKind::Io)
+    );
+    for kind in TaskPoolKind::ALL {
+        assert!(matches!(
+            pools.spawn(kind, request(2), |_| ()),
+            TaskSpawnOutcome::Rejected(TaskRejection {
+                reason: TaskRejectReason::PoolClosed,
+                ..
+            })
+        ));
+    }
+
+    release_tx.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let completed = loop {
+        let report = pools.poll_shutdown().unwrap();
+        if report.is_complete() {
+            break report;
+        }
+        assert!(Instant::now() < deadline, "standalone workers did not join");
+        thread::yield_now();
+    };
+    assert_eq!(returned.state(), TaskReturnState::Returned);
+    assert_eq!(joined.load(Ordering::Acquire), 1);
+    for kind in TaskPoolKind::ALL {
+        assert_eq!(completed.for_kind(kind).joined_workers, 1);
+        assert_eq!(pools.stats().for_kind(kind).shutdowns, 1);
+    }
+    assert_eq!(pools.poll_shutdown().unwrap(), completed);
+    assert_eq!(pools.shutdown_blocking().unwrap(), completed);
+    assert_eq!(joined.load(Ordering::Acquire), 1);
+}
+
+#[test]
+fn blocking_shutdown_releases_the_owner_between_polls() {
+    let timeout = time(Duration::from_secs(2));
+    let config = test_config(1)
+        .with_shutdown_policy(TaskShutdownPolicy::new(timeout, timeout, timeout))
+        .unwrap();
+    let pools = Arc::new(TaskPools::try_new(config).unwrap());
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let _handle = accepted(pools.spawn(TaskPoolKind::Io, request(1), move |_| {
+        started_tx.send(()).unwrap();
+        let _ = release_rx.recv_timeout(Duration::from_secs(10));
+    }));
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let blocking_pools = Arc::clone(&pools);
+    let blocking = thread::spawn(move || blocking_pools.shutdown_blocking().unwrap());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if matches!(
+            pools.spawn(TaskPoolKind::Io, request(2), |_| ()),
+            TaskSpawnOutcome::Rejected(TaskRejection {
+                reason: TaskRejectReason::PoolClosed,
+                ..
+            })
+        ) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "blocking driver did not close admission"
+        );
+        thread::yield_now();
+    }
+    let (observed_tx, observed_rx) = mpsc::channel();
+    let polling_pools = Arc::clone(&pools);
+    let polling = thread::spawn(move || {
+        observed_tx
+            .send(polling_pools.poll_shutdown().unwrap())
+            .unwrap();
+    });
+    let observed = observed_rx.recv_timeout(Duration::from_millis(500));
+    release_tx.send(()).unwrap();
+    let completed = blocking.join().unwrap();
+    polling.join().unwrap();
+    let retained = observed.expect("one retirement poll waited for the blocking driver's deadline");
+    assert!(!retained.is_complete());
+    assert!(!retained.timed_out());
+    assert!(completed.is_complete());
+    assert!(!completed.timed_out());
+    assert_eq!(completed.for_kind(TaskPoolKind::Io).joined_workers, 1);
+    assert_eq!(pools.poll_shutdown().unwrap(), completed);
+    assert_eq!(pools.stats().for_kind(TaskPoolKind::Io).shutdowns, 1);
+}
+
+#[test]
 fn shutdown_retains_an_uncooperative_worker_and_completes_on_retry() {
     let pools = TaskPools::try_new(test_config(1)).unwrap();
     let (started_tx, started_rx) = mpsc::channel();
@@ -183,6 +303,9 @@ fn shutdown_retains_an_uncooperative_worker_and_completes_on_retry() {
             before_start: false,
         }))
     ));
+    let retained = pools.poll_shutdown().unwrap();
+    assert!(!retained.is_complete());
+    assert_eq!(retained.for_kind(TaskPoolKind::Io), io);
     drop(release_tx);
     exited_rx.recv_timeout(Duration::from_secs(10)).unwrap();
     let completed_report = pools.shutdown_blocking().unwrap();
@@ -1047,6 +1170,10 @@ fn plugin_managed_task_pools_reject_standalone_shutdown() {
             .unwrap()
             .resource_mut::<TaskPools>()
             .shutdown_blocking(),
+        Err(TaskShutdownError::CloseOwnerTransferred)
+    );
+    assert_eq!(
+        app.world().resource::<TaskPools>().poll_shutdown(),
         Err(TaskShutdownError::CloseOwnerTransferred)
     );
 }

@@ -163,9 +163,13 @@ flowchart TD
   close while retaining the same owner and `JoinHandle` values. `RetryClose` polls only unfinished
   work; it does not repeat cancellation, increment shutdown counts, or invoke plugin shutdown
   again. A managed runtime reaches `Stopped` only after all registered owners complete.
-- `TaskPools::shutdown_blocking` is the explicitly named standalone convenience driver over the same
+- `TaskPools::poll_shutdown` advances a standalone physical owner once without waiting for a
+  worker or looping over deadlines. Its latest report describes that same owner; repeated polls
+  are not disjoint reports. A transferred/scoped facade cannot drive physical shutdown.
+  `TaskPools::shutdown_blocking` is the explicitly named standalone convenience driver over the same
   close state machine. It may return an incomplete report at the configured deadline, and a later
-  call on the same pools continues the same owner.
+  call on the same pools continues the same owner. Its owner mutex is released between polls,
+  including before sleeping, so a concurrent single-poll observer does not inherit that wait.
 - Drop closes admission and publishes cancellation for pending and running handles before moving
   unfinished handles plus pending-job destruction into a process-owned retained quarantine. A
   blocked capture destructor cannot delay another abandoned pending handle's logical cancellation.

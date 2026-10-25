@@ -40,6 +40,10 @@ fn untouched_lazy_plugin_registers_physical_close_without_starting_workers() {
         pools.shutdown_blocking(),
         Err(TaskShutdownError::CloseOwnerTransferred)
     );
+    assert_eq!(
+        pools.poll_shutdown(),
+        Err(TaskShutdownError::CloseOwnerTransferred)
+    );
 
     let mut runtime = start_runtime(app, Duration::from_secs(2));
     for kind in TaskPoolKind::ALL {
@@ -252,12 +256,14 @@ fn lazy_facilities_activate_only_used_kinds_and_join_only_created_workers() {
 #[test]
 fn untouched_lazy_facilities_close_without_starting_a_worker() {
     let pools = TaskPools::try_new_lazy(test_config(4)).unwrap();
-    let report = pools.shutdown_blocking().unwrap();
+    let report = pools.poll_shutdown().unwrap();
     assert!(report.is_complete());
     for kind in TaskPoolKind::ALL {
-        assert_eq!(report.for_kind(kind).joined_workers, 0);
+        assert_eq!(report.for_kind(kind), TaskPoolShutdownReport::default());
         assert_eq!(workers(&pools, kind), 0);
     }
+    assert_eq!(pools.poll_shutdown().unwrap(), report);
+    assert_eq!(pools.shutdown_blocking().unwrap(), report);
     assert!(matches!(
         pools.spawn(TaskPoolKind::Io, request(1), |_| ()),
         TaskSpawnOutcome::Rejected(TaskRejection {
@@ -266,6 +272,26 @@ fn untouched_lazy_facilities_close_without_starting_a_worker() {
         })
     ));
     assert_eq!(workers(&pools, TaskPoolKind::Io), 0);
+}
+
+#[test]
+fn scoped_facade_cannot_poll_physical_shutdown_or_close_lazy_admission() {
+    let facilities = TaskFacilities::try_new_lazy(test_config(2)).unwrap();
+    let mut scope = facilities.scope();
+    let spawner = scope.spawner();
+    assert_eq!(
+        spawner.poll_shutdown(),
+        Err(TaskShutdownError::CloseOwnerTransferred)
+    );
+    for kind in TaskPoolKind::ALL {
+        assert_eq!(facilities.stats().for_kind(kind).live_workers, 0);
+    }
+    let handle = accepted(spawner.spawn(TaskPoolKind::Io, request(1), |_| ()));
+    wait_until(|| handle.return_observer().state() == TaskReturnState::Returned);
+    wait_until(|| scope.poll_close().is_complete());
+    let report = facilities.shutdown_blocking().unwrap();
+    assert!(report.is_complete());
+    assert_eq!(report.for_kind(TaskPoolKind::Io).joined_workers, 1);
 }
 
 #[test]
@@ -307,10 +333,12 @@ fn partial_first_use_failure_rejects_without_fallback_and_retains_its_workers() 
         .with_kind(TaskPoolKind::Io, TaskKindConfig::new(items(2), items(4)))
         .unwrap();
     let pools = TaskPools::try_new_lazy(config).unwrap();
+    let (release_tx, release_rx) = mpsc::channel();
     let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let calls = called.clone();
     let (outcome, probe) =
         TaskPools::with_worker_spawn_failure_for_tests(TaskPoolKind::Io, 1, || {
+            TaskPools::hold_partial_worker_exit_for_tests(release_rx);
             pools.spawn(TaskPoolKind::Io, request(1), move |_| {
                 calls.store(true, std::sync::atomic::Ordering::Release)
             })
@@ -334,6 +362,11 @@ fn partial_first_use_failure_rejects_without_fallback_and_retains_its_workers() 
     ));
     let independent = accepted(pools.spawn(TaskPoolKind::Compute, request(1), |_| 4));
     wait_until(|| independent.is_finished());
+    let retained = pools.poll_shutdown().unwrap();
+    assert!(!retained.is_complete());
+    assert_eq!(retained.for_kind(TaskPoolKind::Io).joined_workers, 0);
+    assert_eq!(probe.exited(), 0);
+    release_tx.send(()).unwrap();
     let report = pools.shutdown_blocking().unwrap();
     assert!(report.is_complete());
     assert_eq!(report.for_kind(TaskPoolKind::Io).joined_workers, 1);
