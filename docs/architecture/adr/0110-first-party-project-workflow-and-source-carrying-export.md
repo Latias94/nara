@@ -150,8 +150,24 @@ flowchart LR
   source manifests, Scene/Prefab documents, images, metadata and schema facts. It does not claim to
   contain undeclared and unreferenced project content, and it is neither a complete
   project backup nor a cooked/source-free catalog. ADR 0088 remains Proposed.
-- The compiled-project tool protocol uses version 2 and reports `content_members` for Check and
-  Export. Version 1 responses reject rather than mislabeling delivery counts as startup-only facts.
+- The unreleased compiled-project tool protocol uses canonical version 1 and reports
+  `content_members` for Check and Export. Superseded startup-only and string-failure response
+  shapes reject; no compatibility reader is retained.
+- Compiled-tool failure preserves a read-only operation/stage classification, bounded safe domain
+  code/severity/summary records and explicit upstream/projection loss through bootstrap and public
+  callers. CLI formatting is a sink, not the public result contract. General diagnostic fields,
+  arbitrary Error/Debug/source strings and runtime capability identities are not transported.
+  The [failure projection design](../compiled-project-failure-projection-design.md) specifies
+  eight records, 96-byte codes, 256-byte UTF-8 summaries, 16 KiB encoded failures and the separate
+  64 KiB stdout ceiling. A narrow missing-startup hint reuses existing project-relative and public
+  identifier admission, counts withheld values and preserves a selected profile or an explicit
+  placeholder. It grants no repair authority. JSON outcome and process exit must agree in both
+  directions; diagnostic omission never turns an operation failure into success.
+- Static projection preserves the owning physical outcome: Schema refresh distinguishes
+  rejected/failed/uncertain publication from independent pending cleanup; published Repair
+  distinguishes failed Check from changed prepared facts or incomplete publication evidence.
+  Repair content failures reuse the bounded report projection. The admitted repair hint is
+  publicly inspectable without parsing terminal prose and has no unbounded deserialization API.
 - All member and source-change validation precedes directory publication. Process acceptance occurs
   afterward. A published candidate that fails acceptance remains present and is reported as
   published-but-unaccepted; no rollback or in-place acceptance retry is claimed.

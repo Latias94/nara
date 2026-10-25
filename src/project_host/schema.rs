@@ -9,32 +9,57 @@ use super::{
 };
 use crate::ProductRecipe;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SchemaPublicationFailure {
+    Rejected,
+    Failed,
+    Uncertain,
+}
+
+/// Static owner facts only; cleanup state is independent of the publication outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SchemaRefreshError {
+    ManifestAccess,
+    ManifestAdmission,
+    DeclarationMissing,
+    InvalidPath,
+    Composition,
+    Encode,
+    BundleRead,
+    BundleOpen,
+    Stale,
+    Binding,
+    Publication {
+        outcome: SchemaPublicationFailure,
+        cleanup_pending: bool,
+    },
+}
+
 /// Refreshes only the manifest-declared data bundle; it never admits or starts gameplay.
 pub(crate) fn execute(
     root: &DirectoryCapability,
     profile: Option<&str>,
     recipe: ProductRecipe,
     write: bool,
-) -> Result<bool, String> {
+) -> Result<bool, SchemaRefreshError> {
     let manifest = root
         .open_file(&RelativePath::new("nara.toml").expect("the manifest path is valid"))
-        .map_err(|error| format!("cannot open the project manifest: {error}"))?;
+        .map_err(|_| SchemaRefreshError::ManifestAccess)?;
     let candidate = ingest_project_manifest(&manifest, profile)
-        .map_err(|error| format!("cannot resolve the selected project profile: {error}"))?;
+        .map_err(|_| SchemaRefreshError::ManifestAdmission)?;
     let path = candidate
         .settings()
         .authoring_schema_bundle
         .as_ref()
-        .ok_or("the project must declare authoring.schema_bundle before schema refresh")?;
-    let relative = RelativePath::new(path.as_str())
-        .map_err(|error| format!("invalid declared authoring schema bundle path: {error}"))?;
-    let plan = resolve_product_recipe(&candidate, recipe)
-        .map_err(|error| format!("cannot compose the project schema: {error}"))?;
+        .ok_or(SchemaRefreshError::DeclarationMissing)?;
+    let relative = RelativePath::new(path.as_str()).map_err(|_| SchemaRefreshError::InvalidPath)?;
+    let plan =
+        resolve_product_recipe(&candidate, recipe).map_err(|_| SchemaRefreshError::Composition)?;
     let bytes = plan
         .schema_validation()
         .authoring_schema_bundle()
         .to_json_string()
-        .map_err(|error| format!("cannot encode the project schema: {error}"))?
+        .map_err(|_| SchemaRefreshError::Encode)?
         .into_bytes();
     let limit = u64::try_from(AuthoringSchemaBundleLimits::default().encoded_bytes().get())
         .expect("the authoring bundle limit fits a filesystem byte limit");
@@ -42,17 +67,17 @@ pub(crate) fn execute(
         Ok(file) => {
             let bytes = file
                 .read_to_end_bounded(limit)
-                .map_err(|error| format!("cannot read the declared schema bundle: {error}"))?;
+                .map_err(|_| SchemaRefreshError::BundleRead)?;
             Some((file.identity(), bytes))
         }
         Err(FsError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => None,
-        Err(error) => return Err(format!("cannot open the declared schema bundle: {error}")),
+        Err(_) => return Err(SchemaRefreshError::BundleOpen),
     };
     if current.as_ref().is_some_and(|(_, actual)| *actual == bytes) {
         return Ok(false);
     }
     if !write {
-        return Err("the declared authoring schema bundle is missing or stale; run nara schema <project-directory> --write with the same profile".to_owned());
+        return Err(SchemaRefreshError::Stale);
     }
     let mut publication = match current {
         Some((identity, current)) => FilePublicationHost::bind_existing(
@@ -62,41 +87,37 @@ pub(crate) fn execute(
             ContentDigest::of_bytes(&current),
             limit,
         )
-        .map_err(|error| format!("cannot bind the declared schema bundle: {error:?}"))?,
+        .map_err(|_| SchemaRefreshError::Binding)?,
         None => FilePublicationHost::bind_missing(root, path.as_str(), limit)
-            .map_err(|error| format!("cannot bind the declared schema bundle: {error:?}"))?,
+            .map_err(|_| SchemaRefreshError::Binding)?,
     };
     publish(&mut publication, &bytes)
 }
 
-fn publish(publication: &mut FilePublicationHost, bytes: &[u8]) -> Result<bool, String> {
-    let mut diagnostic = match publication.publish(bytes) {
+fn publish(
+    publication: &mut FilePublicationHost,
+    bytes: &[u8],
+) -> Result<bool, SchemaRefreshError> {
+    let outcome = match publication.publish(bytes) {
         FilePublicationOutcome::Published(accepted) => {
             let (_, binding) = accepted.into_parts();
             publication.commit_published(binding);
             return Ok(true);
         }
-        FilePublicationOutcome::Rejected(reason) => {
-            format!("schema bundle publication was rejected: {reason:?}; prior bytes were retained")
-        }
-        FilePublicationOutcome::Failed(stage) => {
-            format!("schema bundle publication failed at {stage:?}; prior bytes were retained")
-        }
-        FilePublicationOutcome::Uncertain(_) => {
-            "schema bundle publication outcome is uncertain; reopen and check the declared file before retrying".to_owned()
-        }
+        FilePublicationOutcome::Rejected(_) => SchemaPublicationFailure::Rejected,
+        FilePublicationOutcome::Failed(_) => SchemaPublicationFailure::Failed,
+        FilePublicationOutcome::Uncertain(_) => SchemaPublicationFailure::Uncertain,
     };
-    if !publication.retry_cleanup() {
-        let cleanup = publication
+    let cleanup_pending = !publication.retry_cleanup();
+    if cleanup_pending {
+        let _ = publication
             .cleanup()
             .expect("failed cleanup retains its owner");
-        diagnostic.push_str(&format!(
-            "; cleanup pending: temporary schema bundle {:?}, identity {:?}; remove it before retrying schema write",
-            cleanup.name().to_str(),
-            cleanup.identity(),
-        ));
     }
-    Err(diagnostic)
+    Err(SchemaRefreshError::Publication {
+        outcome,
+        cleanup_pending,
+    })
 }
 
 #[cfg(test)]
@@ -178,12 +199,12 @@ requested = ["runtime-2d"]
         let root = host_fs::readable_directory(&project.0).unwrap();
         assert_eq!(root.options().rights(), CapabilityRights::ReadOnly);
         let error = execute(&root, None, ProductRecipe::new(), false).unwrap_err();
-        assert!(error.contains("missing or stale"));
+        assert_eq!(error, SchemaRefreshError::Stale);
         assert!(!project.bundle().exists());
 
         fs::write(project.bundle(), b"prior stale bundle").unwrap();
         let error = execute(&root, None, ProductRecipe::new(), false).unwrap_err();
-        assert!(error.contains("--write"));
+        assert_eq!(error, SchemaRefreshError::Stale);
         assert_eq!(fs::read(project.bundle()).unwrap(), b"prior stale bundle");
         assert_eq!(fs::read_dir(project.0.join("schema")).unwrap().count(), 1);
     }
@@ -200,10 +221,9 @@ requested = ["runtime-2d"]
         let root = host_fs::writable_directory(&project.0).unwrap();
         assert!(execute(&root, None, ProductRecipe::new(), true).unwrap());
         let built_in = fs::read(project.bundle()).unwrap();
-        assert!(
-            execute(&root, None, custom_game::custom_recipe().unwrap(), false)
-                .unwrap_err()
-                .contains("stale")
+        assert_eq!(
+            execute(&root, None, custom_game::custom_recipe().unwrap(), false).unwrap_err(),
+            SchemaRefreshError::Stale,
         );
         assert_eq!(fs::read(project.bundle()).unwrap(), built_in);
         assert!(execute(&root, None, custom_game::custom_recipe().unwrap(), true).unwrap());
@@ -237,7 +257,10 @@ requested = ["runtime-2d"]
     fn schema_refresh_requires_a_declaration_and_known_profile() {
         let project = TestProject::new();
         let root = host_fs::writable_directory(&project.0).unwrap();
-        assert!(execute(&root, Some("unknown"), ProductRecipe::new(), true).is_err());
+        assert_eq!(
+            execute(&root, Some("unknown"), ProductRecipe::new(), true).unwrap_err(),
+            SchemaRefreshError::ManifestAdmission,
+        );
         assert!(!project.bundle().exists());
         let manifest = fs::read_to_string(project.0.join("nara.toml")).unwrap();
         fs::write(
@@ -248,12 +271,76 @@ requested = ["runtime-2d"]
             ),
         )
         .unwrap();
-        assert!(
-            execute(&root, None, ProductRecipe::new(), true)
-                .unwrap_err()
-                .contains("must declare authoring.schema_bundle")
+        assert_eq!(
+            execute(&root, None, ProductRecipe::new(), true).unwrap_err(),
+            SchemaRefreshError::DeclarationMissing,
         );
         assert!(!project.bundle().exists());
+    }
+
+    #[test]
+    fn publication_projection_keeps_outcome_and_cleanup_independent() {
+        use SchemaPublicationFailure::{Failed, Rejected, Uncertain};
+
+        // Typed projection fixtures, not reproductions of filesystem publication uncertainty.
+        for (outcome, cleanup_pending, code, summary) in [
+            (
+                Rejected,
+                false,
+                "project.tool.schema-publication-rejected",
+                "Schema bundle publication was rejected; prior bytes were retained",
+            ),
+            (
+                Rejected,
+                true,
+                "project.tool.schema-publication-rejected-cleanup-pending",
+                "Schema bundle publication was rejected; prior bytes were retained; temporary schema bundle cleanup is pending before retrying schema write",
+            ),
+            (
+                Failed,
+                false,
+                "project.tool.schema-publication-failed",
+                "Schema bundle publication failed; prior bytes were retained",
+            ),
+            (
+                Failed,
+                true,
+                "project.tool.schema-publication-failed-cleanup-pending",
+                "Schema bundle publication failed; prior bytes were retained; temporary schema bundle cleanup is pending before retrying schema write",
+            ),
+            (
+                Uncertain,
+                false,
+                "project.tool.schema-publication-uncertain",
+                "Schema bundle publication outcome is uncertain; reopen and check the declared file before retrying",
+            ),
+            (
+                Uncertain,
+                true,
+                "project.tool.schema-publication-uncertain-cleanup-pending",
+                "Schema bundle publication outcome is uncertain; reopen and check the declared file and resolve pending temporary schema bundle cleanup before retrying schema write",
+            ),
+        ] {
+            let failure = crate::project_tooling::test_schema_failure_protocol_roundtrip(
+                SchemaRefreshError::Publication {
+                    outcome,
+                    cleanup_pending,
+                },
+            );
+            assert_eq!(failure.operation(), "schema-write");
+            assert_eq!(
+                failure.stage(),
+                crate::project_tooling::ProjectToolFailureStage::Schema,
+            );
+            assert_eq!(failure.code(), code);
+            assert_eq!(failure.summary(), summary);
+            assert!(failure.diagnostics().is_empty());
+            assert_eq!(
+                failure.loss(),
+                crate::project_tooling::ProjectToolDiagnosticLoss::default(),
+            );
+            assert!(failure.repair_hint().is_none());
+        }
     }
 
     #[cfg(windows)]
@@ -266,23 +353,65 @@ requested = ["runtime-2d"]
         let file = root
             .open_file(&RelativePath::new("schema/authoring.bundle.json").unwrap())
             .unwrap();
+        let original_identity = file.identity();
         let mut publication = FilePublicationHost::bind_existing(
             &root,
             "schema/authoring.bundle.json",
-            file.identity(),
+            original_identity,
             ContentDigest::of_bytes(prior),
             1024,
         )
         .unwrap();
+        let original_binding = publication.binding();
         drop(file);
         publication.test_fail_after_write();
         let error = publish(&mut publication, b"successor bundle").unwrap_err();
-        assert!(error.contains("prior bytes were retained"));
-        assert!(error.contains("cleanup pending"));
+        assert_eq!(
+            error,
+            SchemaRefreshError::Publication {
+                outcome: SchemaPublicationFailure::Failed,
+                cleanup_pending: true,
+            },
+        );
+        assert_eq!(publication.binding(), original_binding);
+        assert!(!publication.uncertain());
+        assert!(publication.has_cleanup());
+        assert_eq!(fs::read(project.bundle()).unwrap(), prior);
+        assert_eq!(
+            root.open_file(&RelativePath::new("schema/authoring.bundle.json").unwrap())
+                .unwrap()
+                .identity(),
+            original_identity,
+        );
+        assert_eq!(fs::read_dir(project.0.join("schema")).unwrap().count(), 2);
+
+        let failure = crate::project_tooling::test_schema_failure_protocol_roundtrip(error);
+        assert_eq!(failure.operation(), "schema-write");
+        assert_eq!(
+            failure.stage(),
+            crate::project_tooling::ProjectToolFailureStage::Schema,
+        );
+        assert_eq!(
+            failure.code(),
+            "project.tool.schema-publication-failed-cleanup-pending",
+        );
+        assert_eq!(
+            failure.summary(),
+            "Schema bundle publication failed; prior bytes were retained; temporary schema bundle cleanup is pending before retrying schema write",
+        );
+        assert!(failure.diagnostics().is_empty());
+        assert_eq!(
+            failure.loss(),
+            crate::project_tooling::ProjectToolDiagnosticLoss::default(),
+        );
+        assert!(failure.repair_hint().is_none());
+        assert!(publication.has_cleanup());
         assert_eq!(fs::read(project.bundle()).unwrap(), prior);
         assert_eq!(fs::read_dir(project.0.join("schema")).unwrap().count(), 2);
+
         publication.test_allow_cleanup();
         assert!(publication.retry_cleanup());
+        assert!(!publication.has_cleanup());
         assert_eq!(fs::read_dir(project.0.join("schema")).unwrap().count(), 1);
     }
 }

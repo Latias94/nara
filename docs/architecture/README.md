@@ -170,6 +170,14 @@ Its [scoped qualification](../knowledge/engineering/verification/2026-10/2026-10
 records exact owner/public correlation, unchanged independent file/worker custody and four selected
 actual Windows/DX12 workflows. This does not complete R1 or qualify installable tools.
 
+The [compiled-project failure design](compiled-project-failure-projection-design.md) replaces
+R1/F3's string boundary with bounded domain code/severity/summary observations, explicit loss and
+read-only admitted repair hints. ADR 0110 adopts canonical tool protocol 1 and truthful Schema/
+Repair publication outcomes; compiler/child stderr remains outside this projection's privacy
+claim. Its [verification record](../knowledge/engineering/verification/2026-10/2026-10-25T100841Z-compiled-domain-failure-projection-and-truthful-publication-observations-8b995496a82b411184e95f6f462b48f8.md)
+distinguishes the actual compiled-domain regression, complete review corrections and their
+qualification scope. This is not a general RPC or a completed semantic/installable-tool workflow.
+
 The [source-context and logical-occurrence proposal](scene-source-and-occurrence-identity-design.md)
 addresses the separately reproduced same-World/two-Scene UI key collision. It compares a required
 source-bound envelope with embedded document identity, retains the independent runtime incarnation,

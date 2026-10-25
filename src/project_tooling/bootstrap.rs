@@ -8,7 +8,7 @@ use std::{
 use serde_json::Value;
 use thiserror::Error;
 
-use super::{ProjectToolRequest, ProjectToolSummary, protocol};
+use super::{ProjectToolFailure, ProjectToolRequest, ProjectToolSummary, protocol};
 use crate::project_workflow::__private::{CargoHeadlessMetadataFacts, CargoJsonMessage};
 
 #[derive(Debug, Error)]
@@ -22,7 +22,7 @@ pub enum ProjectToolInvocationError {
     #[error("{0}")]
     Protocol(&'static str),
     #[error("{0}")]
-    Project(String),
+    Project(ProjectToolFailure),
 }
 
 /// Builds the existing headless entry and delegates an operation without admitting project data.
@@ -82,14 +82,63 @@ pub fn invoke_project_tool(
         }
     }
     let (status, bytes) = bounded_output(&mut command, protocol::MAX_RESPONSE_BYTES)?;
-    match protocol::decode_response(&bytes, request.operation())
+    finish_response(status.success(), &bytes, request.operation())
+}
+
+fn finish_response(
+    success: bool,
+    bytes: &[u8],
+    operation: &str,
+) -> Result<ProjectToolSummary, ProjectToolInvocationError> {
+    match protocol::decode_response(bytes, operation)
         .map_err(ProjectToolInvocationError::Protocol)?
     {
-        Ok(summary) if status.success() => Ok(summary),
+        Ok(summary) if success => Ok(summary),
         Ok(_) => Err(ProjectToolInvocationError::Protocol(
             "project tool reported success but exited unsuccessfully",
         )),
-        Err(diagnostic) => Err(ProjectToolInvocationError::Project(diagnostic)),
+        Err(_) if success => Err(ProjectToolInvocationError::Protocol(
+            "project tool reported failure but exited successfully",
+        )),
+        Err(failure) => Err(ProjectToolInvocationError::Project(failure)),
+    }
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+
+    #[test]
+    fn exit_and_structured_outcome_must_agree_in_both_directions() {
+        let success = protocol::encode_response(
+            "check",
+            Ok(ProjectToolSummary::Checked { content_members: 3 }),
+        )
+        .unwrap();
+        let failure =
+            protocol::encode_response("check", Err(super::super::ToolError::Recipe)).unwrap();
+        let success = serde_json::to_vec(&success).unwrap();
+        let failure = serde_json::to_vec(&failure).unwrap();
+        assert!(finish_response(true, &success, "check").is_ok());
+        assert!(matches!(
+            finish_response(false, &success, "check"),
+            Err(ProjectToolInvocationError::Protocol(_))
+        ));
+        assert!(matches!(
+            finish_response(true, &failure, "check"),
+            Err(ProjectToolInvocationError::Protocol(_))
+        ));
+        let Err(ProjectToolInvocationError::Project(failure)) =
+            finish_response(false, &failure, "check")
+        else {
+            panic!("ordinary project failure must stay structured")
+        };
+        assert_eq!(failure.operation(), "check");
+        assert_eq!(
+            failure.stage(),
+            super::super::ProjectToolFailureStage::Recipe
+        );
+        assert_eq!(failure.code(), "project.tool.recipe-failed");
     }
 }
 

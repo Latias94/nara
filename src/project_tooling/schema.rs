@@ -15,6 +15,6 @@ pub(super) fn execute(
         host_fs::readable_directory(&project)?
     };
     let written = crate::project_host::schema::execute(&root, profile.as_deref(), recipe, write)
-        .map_err(ToolError::Operation)?;
+        .map_err(ToolError::Schema)?;
     Ok(ProjectToolSummary::Schema { written })
 }

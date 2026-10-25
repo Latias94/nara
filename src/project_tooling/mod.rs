@@ -4,9 +4,7 @@
 //! agreement, and publication stay in the project process with its own typed product recipe.
 
 use std::{
-    error::Error,
     ffi::OsString,
-    fmt,
     io::{self, Write},
     path::PathBuf,
     process::ExitCode,
@@ -28,6 +26,10 @@ mod schema;
 pub use bootstrap::{ProjectToolInvocationError, invoke_project_tool};
 #[doc(hidden)]
 pub use product_observation::{ProductObservationTarget, record_product_observation};
+pub use protocol::{
+    ProjectToolDiagnostic, ProjectToolDiagnosticLoss, ProjectToolFailure, ProjectToolFailureStage,
+    ProjectToolRepairHint,
+};
 
 /// One operation delegated to the compiled project. Paths are native adapter inputs, not receipts.
 pub enum ProjectToolRequest {
@@ -104,7 +106,7 @@ pub enum ProjectToolSummary {
 ///
 /// Pass arguments without the executable name. `None` means normal gameplay was requested. The
 /// recipe factory is called once only after a valid tool request has been selected.
-pub fn run_project_tool_mode<E: fmt::Display>(
+pub fn run_project_tool_mode<E>(
     arguments: impl IntoIterator<Item = OsString>,
     recipe: impl FnOnce() -> Result<ProductRecipe, E>,
 ) -> Option<ExitCode> {
@@ -113,11 +115,13 @@ pub fn run_project_tool_mode<E: fmt::Display>(
         .as_ref()
         .map_or("invalid", ProjectToolRequest::operation);
     let result = request.map_err(ToolError::Protocol).and_then(|request| {
-        let recipe = recipe().map_err(|error| ToolError::Recipe(error.to_string()))?;
+        let recipe = recipe().map_err(|_| ToolError::Recipe)?;
         execute(request, recipe)
     });
     let success = result.is_ok();
-    let value = protocol::encode_response(operation, result);
+    let Ok(value) = protocol::encode_response(operation, result) else {
+        return Some(ExitCode::FAILURE);
+    };
     let mut stdout = io::stdout().lock();
     if serde_json::to_writer(&mut stdout, &value)
         .and_then(|()| stdout.write_all(b"\n").map_err(serde_json::Error::io))
@@ -136,44 +140,89 @@ pub fn run_project_tool_mode<E: fmt::Display>(
 enum ToolError {
     #[error("{0}")]
     Protocol(&'static str),
-    #[error("project recipe failed: {0}")]
-    Recipe(String),
+    #[error("project recipe construction failed")]
+    Recipe,
+    #[error("schema refresh failed")]
+    Schema(crate::project_host::schema::SchemaRefreshError),
     #[error(transparent)]
     Directory(#[from] host_fs::HostDirectoryError),
     #[error(transparent)]
     Check(#[from] crate::project_workflow::ProjectCheckError),
     #[error(transparent)]
     Export(#[from] export::ExportCommandError),
-    #[error("{0}")]
-    Operation(String),
+    #[error("startup Scene repair failed")]
+    Repair(crate::project_workflow::ProjectStartupSceneRepairError),
+    #[error("the manifest was published but repair acceptance could not be established")]
+    RepairPublished(crate::project_workflow::PublishedButNotRepaired),
+    #[error("{summary}")]
+    Operation {
+        stage: ProjectToolFailureStage,
+        code: &'static str,
+        summary: &'static str,
+    },
 }
 
 impl ToolError {
-    fn diagnostic(&self) -> String {
-        if let Self::Check(error) = self
-            && let Some(issue) = error.startup_scene_issue()
-        {
-            let profile_option = issue
-                .profile()
-                .map_or_else(String::new, |profile| format!(" --profile {profile}"));
-            return format!(
-                "startup Scene `{}` is missing under the project Scene root `{}`.\nrepair: nara repair startup-scene <project-directory>{profile_option} --replacement <scenes-root-relative-scene>",
-                issue.selected_scene(),
-                issue.scenes_path(),
-            );
+    fn operation(
+        stage: ProjectToolFailureStage,
+        code: &'static str,
+        summary: &'static str,
+    ) -> Self {
+        Self::Operation {
+            stage,
+            code,
+            summary,
         }
-        let mut diagnostic = self.to_string();
-        let mut source = self.source();
-        while let Some(error) = source {
-            diagnostic.push_str(": ");
-            diagnostic.push_str(&error.to_string());
-            if diagnostic.len() > protocol::MAX_DIAGNOSTIC_BYTES {
-                break;
-            }
-            source = error.source();
-        }
-        diagnostic
     }
+
+    fn failure(&self, operation: &str) -> ProjectToolFailure {
+        use ProjectToolFailureStage as Stage;
+        let (stage, code, summary) = match self {
+            Self::Protocol(summary) => (Stage::Request, "project.tool.invalid-request", *summary),
+            Self::Recipe => (
+                Stage::Recipe,
+                "project.tool.recipe-failed",
+                "Project recipe construction failed",
+            ),
+            Self::Directory(_) => (
+                Stage::ProjectAccess,
+                "project.tool.directory-unavailable",
+                "The selected project directory is unavailable",
+            ),
+            Self::Schema(error) => return ProjectToolFailure::from_schema(operation, *error),
+            Self::Check(error) | Self::Export(export::ExportCommandError::ProjectCheck(error)) => {
+                return ProjectToolFailure::from_check(operation, error);
+            }
+            Self::Repair(error) => return ProjectToolFailure::from_repair(operation, error),
+            Self::RepairPublished(outcome) => {
+                return ProjectToolFailure::from_repair_postcheck(operation, outcome.error());
+            }
+            Self::Export(_) => (
+                Stage::ExportPreparation,
+                "project.tool.export-preparation-failed",
+                "Export preparation failed before publication",
+            ),
+            Self::Operation {
+                stage,
+                code,
+                summary,
+            } => (*stage, *code, *summary),
+        };
+        ProjectToolFailure::classified(operation, stage, code, summary)
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_schema_failure_protocol_roundtrip(
+    error: crate::project_host::schema::SchemaRefreshError,
+) -> ProjectToolFailure {
+    let response =
+        protocol::encode_response("schema-write", Err(ToolError::Schema(error))).unwrap();
+    let mut bytes = serde_json::to_vec(&response).unwrap();
+    bytes.push(b'\n');
+    protocol::decode_response(&bytes, "schema-write")
+        .unwrap()
+        .unwrap_err()
 }
 
 fn execute(
@@ -214,8 +263,13 @@ fn execute(
                     receipt,
                     acceptance,
                 } => {
-                    export::record_acceptance_observation(&receipt, &acceptance)
-                        .map_err(|error| ToolError::Operation(error.to_string()))?;
+                    export::record_acceptance_observation(&receipt, &acceptance).map_err(|_| {
+                        ToolError::operation(
+                            ProjectToolFailureStage::Acceptance,
+                            "project.tool.export-observation-failed",
+                            "The candidate was published but its acceptance observation failed",
+                        )
+                    })?;
                     Ok(ProjectToolSummary::Exported {
                         content_members: receipt
                             .plan()
@@ -228,21 +282,29 @@ fn execute(
                         product_observations: acceptance.products().len(),
                     })
                 }
-                export::ExportCommandOutcome::Rejected(error) => {
-                    Err(ToolError::Operation(error.to_string()))
-                }
-                export::ExportCommandOutcome::Orphaned(error) => {
-                    Err(ToolError::Operation(error.to_string()))
-                }
-                export::ExportCommandOutcome::Unresolved(error) => {
-                    Err(ToolError::Operation(error.to_string()))
-                }
-                export::ExportCommandOutcome::PublishedButUnaccepted { receipt, error } => {
-                    Err(ToolError::Operation(format!(
-                        "candidate with {} export members was published but acceptance failed: {error}",
-                        receipt.plan().members().len(),
-                    )))
-                }
+                export::ExportCommandOutcome::Rejected(_rejection) => Err(ToolError::operation(
+                    ProjectToolFailureStage::Publication,
+                    "project.tool.export-rejected",
+                    "Export publication was rejected",
+                )),
+                export::ExportCommandOutcome::Orphaned(_orphan) => Err(ToolError::operation(
+                    ProjectToolFailureStage::Publication,
+                    "project.tool.export-orphaned",
+                    "Export left an orphaned candidate requiring cleanup",
+                )),
+                export::ExportCommandOutcome::Unresolved(_unresolved) => Err(ToolError::operation(
+                    ProjectToolFailureStage::Publication,
+                    "project.tool.export-unresolved",
+                    "Export publication has an unresolved outcome",
+                )),
+                export::ExportCommandOutcome::PublishedButUnaccepted {
+                    receipt: _receipt,
+                    error: _error,
+                } => Err(ToolError::operation(
+                    ProjectToolFailureStage::Acceptance,
+                    "project.tool.export-published-unaccepted",
+                    "The export candidate was published but acceptance failed",
+                )),
             }
         }
         ProjectToolRequest::RepairStartupScene {
@@ -269,8 +331,10 @@ fn repair_startup_scene(
     }
     let error = match check_project(request) {
         Ok(_) => {
-            return Err(ToolError::Operation(
-                "the project does not require startup Scene repair".to_owned(),
+            return Err(ToolError::operation(
+                ProjectToolFailureStage::Repair,
+                "project.tool.repair-not-needed",
+                "The project does not require startup Scene repair",
             ));
         }
         Err(error) => error,
@@ -281,8 +345,13 @@ fn repair_startup_scene(
     let issue = error
         .into_startup_scene_issue()
         .expect("the repairable issue was observed");
-    let replacement = crate::project::ProjectPath::new(replacement)
-        .map_err(|error| ToolError::Operation(error.to_string()))?;
+    let replacement = crate::project::ProjectPath::new(replacement).map_err(|_| {
+        ToolError::operation(
+            ProjectToolFailureStage::Repair,
+            "project.tool.repair-invalid-replacement",
+            "The replacement is not a valid Scene path",
+        )
+    })?;
     match crate::project_workflow::repair_startup_scene(ProjectStartupSceneRepairRequest::new(
         issue,
         replacement,
@@ -293,10 +362,7 @@ fn repair_startup_scene(
             })
         }
         Ok(ProjectStartupSceneRepairOutcome::PublishedButNotRepaired(outcome)) => {
-            Err(ToolError::Operation(format!(
-                "the manifest was published but the project did not pass its fresh check: {}",
-                outcome.error()
-            )))
+            Err(ToolError::RepairPublished(outcome))
         }
         Err(error) => Err(finish_repair_failure(error)),
     }
@@ -305,15 +371,12 @@ fn repair_startup_scene(
 fn finish_repair_failure(
     mut error: crate::project_workflow::ProjectStartupSceneRepairError,
 ) -> ToolError {
-    let mut diagnostic = error.to_string();
     if let crate::project_workflow::ProjectStartupSceneRepairError::TemporaryFile(failure) =
         &mut error
-        && !failure.retry_cleanup()
     {
-        let cleanup = failure.cleanup().expect("failed cleanup retains its owner");
-        diagnostic.push_str(&format!("; cleanup pending: temporary manifest {:?}, identity {:?}; remove it before retrying repair", cleanup.name().to_str(), cleanup.identity()));
+        let _ = failure.retry_cleanup();
     }
-    ToolError::Operation(diagnostic)
+    ToolError::Repair(error)
 }
 
 #[cfg(all(test, windows))]

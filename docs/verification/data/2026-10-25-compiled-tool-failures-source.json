@@ -1,0 +1,50 @@
+[
+  {
+    "path": "reference-game/tests/editor_supervised_play.rs",
+    "sha256": "cada4eeff36e1569eb552ab079150530670b33ac7a72b4ef21e0ad6be1016b14"
+  },
+  {
+    "path": "src/project_host/schema.rs",
+    "sha256": "a18401ee6f0f4b66bb877c7a1b6cd918f6e3462203fb1feb68d856539e95da04"
+  },
+  {
+    "path": "src/project_tooling/bootstrap.rs",
+    "sha256": "6b172cc0a43599fb9bd72226c5212af6ac5bfc1d679dbd04e87a92fe1a63de66"
+  },
+  {
+    "path": "src/project_tooling/export/trajectory.rs",
+    "sha256": "e8f0ec68e066181b9545a604ddaf236f5d37939f1a9d16fdfe46bdc68d704939"
+  },
+  {
+    "path": "src/project_tooling/mod.rs",
+    "sha256": "42de05592c239846a9b28b82a77eff531c953dbaee649831f85e451098f0d135"
+  },
+  {
+    "path": "src/project_tooling/protocol.rs",
+    "sha256": "67a31dc55190fee1c5e0d77b2aff7d02c7c46cf3a4e06df69e8a7e144a7a51af"
+  },
+  {
+    "path": "src/project_tooling/protocol/failure.rs",
+    "sha256": "43295b9bb591b35494704ef9c7aed2f664beb8a72010715a80a8ce6be49de5ce"
+  },
+  {
+    "path": "src/project_tooling/schema.rs",
+    "sha256": "efca97609d0119567f7f0bb7008f679c2eba4ad4809c1c4b8c9bdafcafb79dec"
+  },
+  {
+    "path": "src/project_workflow/cargo_facts/metadata.rs",
+    "sha256": "17230b5d2c66aca12fb64b27287cb86594348bc8b632519e4713705987059b93"
+  },
+  {
+    "path": "src/project_workflow/cargo_facts/tests.rs",
+    "sha256": "72909600635da96877a32e62650a65e552aa181fdf6e0e257a193aeb890ca646"
+  },
+  {
+    "path": "src/project_workflow/starter/product_contract.rs",
+    "sha256": "2ea5b7111fd0facb1d9d1b4deb4b3222fdff61eda337538d20b8eef108806fef"
+  },
+  {
+    "path": "tests/project_workflow_cli.rs",
+    "sha256": "b02c2881e1ebb1fab9c91aeb4c98ca3c01e73aae7a99d4b46bf4c015b8621bdd"
+  }
+]

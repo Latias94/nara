@@ -55,7 +55,7 @@ rust-version = "1.95"
 publish = false
 
 [package.metadata.nara]
-project-tool-protocol = 2
+project-tool-protocol = 1
 
 [workspace]
 resolver = "3"
@@ -313,7 +313,7 @@ fn validate_cargo_manifest(
             .and_then(|value| value.get("nara"))
             .and_then(|value| value.get("project-tool-protocol"))
             .and_then(Value::as_integer)
-            != Some(2)
+            != Some(1)
     {
         return Err("generated Cargo package contract disagrees with the starter");
     }

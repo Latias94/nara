@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "02bf62e8e274566511fc162ab4afb9023ff2ce30228829637e6aebdb048c7082"
+source_fingerprint: "b0e46c2c939de3030b9d68d6772b8252c05ddadaf204f7e55108cea047ec8c7c"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "02bf62e8e274566511fc162ab4afb9023ff2ce30228829637e6aebdb048
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `02bf62e8e274566511fc162ab4afb9023ff2ce30228829637e6aebdb048c7082`
-- Immutable records: 912
+- Source fingerprint: `b0e46c2c939de3030b9d68d6772b8252c05ddadaf204f7e55108cea047ec8c7c`
+- Immutable records: 914
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Compiled domain failure projection and truthful publication observations](verification/2026-10/2026-10-25T100841Z-compiled-domain-failure-projection-and-truthful-publication-observations-8b995496a82b411184e95f6f462b48f8.md) - Records R1/F3's real compiled-domain code-loss regression, bounded replacement, complete review and physical-outcome corrections; full R1 and the foundation remain open.
+- **Work Progress**: [Persistence attempts committed and compiled domain diagnostic projection checkpoint](progress/2026-10/2026-10-25T091355Z-persistence-attempts-committed-and-compiled-domain-diagnostic-projection-checkpoint-1ee496d678dc41b4953eb4665f625ca7.md) - Commits qualified R1/F2, records the real F3 code-loss regression and bounded implementation, and separates active compiled qualification from the unintegrated Snap artifact.
 - **Verification Evidence**: [Exact persistence attempts and terminal observation qualification](verification/2026-10/2026-10-25T081443Z-exact-persistence-attempts-and-terminal-observation-qualification-332f36f3c0f94f93ae1eb2721e981359.md) - Records owner-issued attempt correlation, exact observation acknowledgment, unchanged physical custody, public workflow evidence and scoped review corrections; complete R1 remains open.
 - **Work Progress**: [First writes committed and exact persistence redesign started](progress/2026-10/2026-10-25T063656Z-first-writes-committed-and-exact-persistence-redesign-started-1c12dd152e894de3a109c0d072338cf3.md) - Commits the qualified Source first-write correction and records the next R1 persistence observation owner design without claiming its implementation.
 - **Verification Evidence**: [Source owned first property writes and bounded selector error qualification](verification/2026-10/2026-10-25T060130Z-source-owned-first-property-writes-and-bounded-selector-error-qualification-0dfaa18252de473b90ff57ef150e64b0.md) - Qualifies selected default-root initialization, exact authored absence Undo, bounded rejected IDs and real non-active panel persistence while retaining complete template and storage contracts.
@@ -79,8 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Prepared panel implementation and scoped public qualification checkpoint](progress/2026-10/2026-10-25T011645Z-prepared-panel-implementation-and-scoped-public-qualification-checkpoint-2b1d6218ef0042ae8c83303e6aabfbf1.md) - Read queries are committed; real registered panels now prepare and consume source candidates with serial owner, public, native and static evidence; full review remains open.
 - **Verification Evidence**: [Bounded authoring query complete review and aggregate budget qualification](verification/2026-10/2026-10-25T002933Z-bounded-authoring-query-complete-review-and-aggregate-budget-qualification-893b5a3ffa104ec8bc7c7413c12e0c5d.md) - Nine-lens review completed; the confirmed multi-row budget proof gap is closed by focused tests and independent follow-up.
 - **Work Progress**: [Bounded authoring query public workflow and simplification checkpoint](progress/2026-10/2026-10-24T234726Z-bounded-authoring-query-public-workflow-and-simplification-checkpoint-032e0546f45246c1b04dcc4eb2fc64a5.md) - Paged actual inventory and bounded root reads reach existing public actions and computed edits; final qualification and complete review remain separate.
-- **Work Progress**: [Retained construction committed and source read projection checkpoint](progress/2026-10/2026-10-24T231507Z-retained-construction-committed-and-source-read-projection-checkpoint-843e9e4a886c4d7fa8e9f89ea8433591.md) - Construction is locally committed; bounded read design and borrowed source prototype advance R2 while public query transport remains open.
-- **Verification Evidence**: [Retained source construction pinned public and native qualification](verification/2026-10/2026-10-24T224939Z-retained-source-construction-pinned-public-and-native-qualification-e1813acad6f04a93898a1e342989fa44.md) - Rust 1.95.0 qualifies retained construction through owner/public/Session lifecycle paths, final static checks and selected Windows native regressions; full R2 remains open.
 
 # Integration Notes
 

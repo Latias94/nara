@@ -53,52 +53,85 @@ static NEXT_TRAJECTORY: AtomicU64 = AtomicU64::new(1);
 
 #[test]
 fn missing_startup_scene_diagnostic_preserves_the_selected_profile() {
-    let root = TrajectoryRoot::new();
-    for directory in ["assets", "scenes", "prefabs", "schema"] {
-        fs::create_dir(root.path().join(directory)).unwrap();
+    for profile in [None, Some("tools".to_owned()), Some("a".repeat(128))] {
+        let root = TrajectoryRoot::new();
+        for directory in ["assets", "scenes", "prefabs", "schema"] {
+            fs::create_dir(root.path().join(directory)).unwrap();
+        }
+        let manifest = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/runtime-runner/renamed-root/project/nara.toml"
+        ))
+        .replace("startup.scene.json", "missing.scene.json");
+        let manifest = match &profile {
+            Some(profile) => format!(
+                "{manifest}\n[profiles.{profile}.startup]\ndefault_scene = \"missing.scene.json\"\n"
+            ),
+            None => manifest,
+        };
+        fs::write(root.path().join("nara.toml"), manifest).unwrap();
+        let capability = host_fs::readable_directory(root.path()).unwrap();
+        let manifest = capability
+            .open_file(&crate::fs::RelativePath::new("nara.toml").unwrap())
+            .unwrap();
+        let candidate =
+            crate::project_host::ingest_project_manifest(&manifest, profile.as_deref()).unwrap();
+        let plan =
+            crate::project_host::resolve_product_recipe(&candidate, crate::ProductRecipe::new())
+                .unwrap();
+        fs::write(
+            root.path().join("schema/authoring.bundle.json"),
+            plan.schema_validation()
+                .authoring_schema_bundle()
+                .to_json_string()
+                .unwrap(),
+        )
+        .unwrap();
+        let error = crate::project_tooling::execute(
+            crate::project_tooling::ProjectToolRequest::Check {
+                project: root.path().to_owned(),
+                profile: profile.clone(),
+            },
+            crate::ProductRecipe::new(),
+        )
+        .unwrap_err();
+        let response =
+            crate::project_tooling::protocol::encode_response("check", Err(error)).unwrap();
+        let bytes = serde_json::to_vec(&response).unwrap();
+        let failure = crate::project_tooling::protocol::decode_response(&bytes, "check")
+            .unwrap()
+            .unwrap_err();
+        let hint = failure
+            .repair_hint()
+            .expect("missing startup retains admitted repair context");
+        assert_eq!(hint.scene(), Some("missing.scene.json"));
+        assert_eq!(hint.scenes_root(), Some("scenes"));
+        assert_eq!(hint.profile_selected(), profile.is_some());
+        let display = failure.to_string();
+        assert!(
+            display.contains("startup Scene `missing.scene.json` is missing"),
+            "{display}"
+        );
+        match profile.as_deref() {
+            Some("tools") => {
+                assert_eq!(hint.profile(), Some("tools"));
+                assert_eq!(failure.loss().withheld_repair_fields, 0);
+                assert!(display.contains("--profile tools"));
+            }
+            Some(withheld) => {
+                assert_eq!(hint.profile(), None);
+                assert_eq!(failure.loss().withheld_repair_fields, 1);
+                assert!(display.contains("--profile <name>"));
+                assert!(!display.contains(withheld));
+                assert!(!String::from_utf8_lossy(&bytes).contains(withheld));
+            }
+            None => {
+                assert_eq!(hint.profile(), None);
+                assert_eq!(failure.loss().withheld_repair_fields, 0);
+                assert!(!display.contains("--profile"));
+            }
+        }
     }
-    let manifest = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/runtime-runner/renamed-root/project/nara.toml"
-    ));
-    fs::write(
-        root.path().join("nara.toml"),
-        format!("{manifest}\n[profiles.tools.startup]\ndefault_scene = \"missing.scene.json\"\n"),
-    )
-    .unwrap();
-    let capability = host_fs::readable_directory(root.path()).unwrap();
-    let manifest = capability
-        .open_file(&crate::fs::RelativePath::new("nara.toml").unwrap())
-        .unwrap();
-    let candidate = crate::project_host::ingest_project_manifest(&manifest, Some("tools")).unwrap();
-    let plan = crate::project_host::resolve_product_recipe(&candidate, crate::ProductRecipe::new())
-        .unwrap();
-    fs::write(
-        root.path().join("schema/authoring.bundle.json"),
-        plan.schema_validation()
-            .authoring_schema_bundle()
-            .to_json_string()
-            .unwrap(),
-    )
-    .unwrap();
-    let error = crate::project_tooling::execute(
-        crate::project_tooling::ProjectToolRequest::Check {
-            project: root.path().to_owned(),
-            profile: Some("tools".to_owned()),
-        },
-        crate::ProductRecipe::new(),
-    )
-    .unwrap_err();
-    let diagnostic = crate::project_tooling::protocol::encode_response("check", Err(error));
-    let diagnostic = diagnostic["diagnostic"].as_str().unwrap();
-    assert!(
-        diagnostic.contains("startup Scene `missing.scene.json` is missing"),
-        "{diagnostic}"
-    );
-    assert!(
-        diagnostic.contains("--profile tools"),
-        "repair must preserve the selected profile: {diagnostic}"
-    );
 }
 
 #[test]

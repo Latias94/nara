@@ -132,6 +132,108 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
         !text_marker.exists(),
         "Check must not execute domain consumers"
     );
+    let text_source = project.join("assets/captions/greeting.txt");
+    let original_text = fs::read(&text_source).unwrap();
+    let private_text = "NARA_PRIVATE_DOMAIN_SOURCE_CANARY_".repeat(4);
+    fs::write(&text_source, format!("captions/suffix.txt\n{private_text}")).unwrap();
+    let rejected = Command::new(env!("CARGO_BIN_EXE_nara"))
+        .arg("check")
+        .arg(&project)
+        .env("CARGO_TARGET_DIR", checkout.join("target"))
+        .env("CARGO_BUILD_JOBS", "1")
+        .env("NARA_TEST_PULSE_MARKER", &marker)
+        .env("NARA_TEST_TEXT_MARKER", &text_marker)
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    let failure = String::from_utf8_lossy(&rejected.stderr);
+    assert!(
+        failure.contains("consumer.text.too-long"),
+        "the compiled project's domain code must reach the CLI: {failure}"
+    );
+    assert!(failure.contains("Text exceeds max_characters"));
+    assert!(!failure.contains("NARA_PRIVATE_DOMAIN_SOURCE_CANARY_"));
+    assert!(!marker.exists());
+    assert!(!text_marker.exists());
+    let error = nara::project_tooling::invoke_project_tool(
+        nara::project_tooling::ProjectToolRequest::Check {
+            project: project.clone(),
+            profile: None,
+        },
+    )
+    .unwrap_err();
+    let nara::project_tooling::ProjectToolInvocationError::Project(failure) = error else {
+        panic!("the public caller must retain the compiled domain failure");
+    };
+    assert_eq!(failure.operation(), "check");
+    assert_eq!(
+        failure.stage(),
+        nara::project_tooling::ProjectToolFailureStage::ContentAdmission
+    );
+    assert_eq!(failure.diagnostics().len(), 1);
+    assert_eq!(failure.diagnostics()[0].code(), "consumer.text.too-long");
+    assert_eq!(
+        failure.diagnostics()[0].severity(),
+        nara::diagnostic::DiagnosticSeverity::Error
+    );
+    assert!(
+        !failure
+            .to_string()
+            .contains("NARA_PRIVATE_DOMAIN_SOURCE_CANARY_")
+    );
+    fs::write(&text_source, original_text).unwrap();
+
+    let metadata_path = project.join("assets/captions/greeting.txt.meta");
+    let original_metadata = fs::read(&metadata_path).unwrap();
+    let mut invalid_settings: serde_json::Value =
+        serde_json::from_slice(&original_metadata).unwrap();
+    invalid_settings["payload"]["settings"]["max_characters"] = serde_json::json!(0);
+    fs::write(
+        &metadata_path,
+        serde_json::to_vec(&invalid_settings).unwrap(),
+    )
+    .unwrap();
+    let rejected = Command::new(env!("CARGO_BIN_EXE_nara"))
+        .arg("check")
+        .arg(&project)
+        .env("CARGO_TARGET_DIR", checkout.join("target"))
+        .env("CARGO_BUILD_JOBS", "1")
+        .env("NARA_TEST_PULSE_MARKER", &marker)
+        .env("NARA_TEST_TEXT_MARKER", &text_marker)
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    let failure = String::from_utf8_lossy(&rejected.stderr);
+    assert!(
+        failure.contains("consumer.text.settings-invalid"),
+        "{failure}"
+    );
+    assert!(failure.contains("Set max_characters between 1 and 4096"));
+    assert!(!marker.exists());
+    assert!(!text_marker.exists());
+    let error = nara::project_tooling::invoke_project_tool(
+        nara::project_tooling::ProjectToolRequest::Export {
+            project: project.clone(),
+            parent: parent.path().to_owned(),
+            destination: "invalid-domain-candidate".into(),
+        },
+    )
+    .unwrap_err();
+    let nara::project_tooling::ProjectToolInvocationError::Project(failure) = error else {
+        panic!("Export's preliminary Check must retain the same domain failure");
+    };
+    assert_eq!(failure.operation(), "export");
+    assert_eq!(
+        failure.stage(),
+        nara::project_tooling::ProjectToolFailureStage::ContentAdmission
+    );
+    assert_eq!(failure.diagnostics().len(), 1);
+    assert_eq!(
+        failure.diagnostics()[0].code(),
+        "consumer.text.settings-invalid"
+    );
+    assert!(!parent.path().join("invalid-domain-candidate").exists());
+    fs::write(metadata_path, &original_metadata).unwrap();
     let renamed = fs::read_to_string(&library)
         .unwrap()
         .replace("RenamedPulse", "AnotherNativePulseName");
@@ -159,6 +261,94 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
     fs::rename(
         project.join("scenes/startup.scene.json"),
         project.join("scenes/recovered.scene.json"),
+    )
+    .unwrap();
+    let old_metadata = project.join("scenes/startup.scene.json.meta");
+    let identity = nara::asset::AssetMetaIdentityCandidate::decode_json_bytes(
+        &fs::read(&old_metadata).unwrap(),
+    )
+    .unwrap();
+    let moved_metadata = nara::asset::AssetMeta::new(
+        nara::asset::AssetMetaIdentity::new(
+            identity.identity().stable_id(),
+            nara::asset::AssetPath::new("recovered.scene.json").unwrap(),
+            nara::asset::AssetSourceKind::Scene,
+        ),
+        (),
+    );
+    fs::write(
+        project.join("scenes/recovered.scene.json.meta"),
+        moved_metadata.to_json_string().unwrap(),
+    )
+    .unwrap();
+    fs::remove_file(old_metadata).unwrap();
+    let manifest_path = project.join("nara.toml");
+    let original_manifest = fs::read(&manifest_path).unwrap();
+    for profile in [None, Some("tools".to_owned()), Some("a".repeat(128))] {
+        if let Some(profile) = &profile {
+            let mut manifest = String::from_utf8(original_manifest.clone()).unwrap();
+            manifest.push_str(&format!(
+                "\n[profiles.{profile}.startup]\ndefault_scene = \"startup.scene.json\"\n"
+            ));
+            fs::write(&manifest_path, manifest).unwrap();
+        }
+        let error = nara::project_tooling::invoke_project_tool(
+            nara::project_tooling::ProjectToolRequest::Check {
+                project: project.clone(),
+                profile: profile.clone(),
+            },
+        )
+        .unwrap_err();
+        let nara::project_tooling::ProjectToolInvocationError::Project(failure) = error else {
+            panic!("missing startup must retain its structured repair hint");
+        };
+        let hint = failure.repair_hint().unwrap();
+        assert_eq!(hint.scene(), Some("startup.scene.json"));
+        assert_eq!(hint.scenes_root(), Some("scenes"));
+        assert_eq!(hint.profile_selected(), profile.is_some());
+        if profile.as_ref().is_some_and(|profile| profile.len() > 96) {
+            assert_eq!(hint.profile(), None);
+            assert_eq!(failure.loss().withheld_repair_fields, 1);
+            assert!(failure.to_string().contains("--profile <name>"));
+            assert!(!format!("{failure:?}").contains(profile.as_ref().unwrap()));
+        } else {
+            assert_eq!(hint.profile(), profile.as_deref());
+            assert_eq!(failure.loss().withheld_repair_fields, 0);
+        }
+        fs::write(&manifest_path, &original_manifest).unwrap();
+    }
+    let mut invalid_settings: serde_json::Value =
+        serde_json::from_slice(&original_metadata).unwrap();
+    invalid_settings["payload"]["settings"]["max_characters"] = serde_json::json!(0);
+    fs::write(
+        project.join("assets/captions/greeting.txt.meta"),
+        serde_json::to_vec(&invalid_settings).unwrap(),
+    )
+    .unwrap();
+    let error = nara::project_tooling::invoke_project_tool(
+        nara::project_tooling::ProjectToolRequest::RepairStartupScene {
+            project: project.clone(),
+            profile: None,
+            replacement: "recovered.scene.json".to_owned(),
+        },
+    )
+    .unwrap_err();
+    let nara::project_tooling::ProjectToolInvocationError::Project(failure) = error else {
+        panic!("replacement admission must retain the domain failure");
+    };
+    assert_eq!(
+        failure.stage(),
+        nara::project_tooling::ProjectToolFailureStage::Repair
+    );
+    assert_eq!(failure.code(), "project.tool.repair-failed");
+    assert_eq!(
+        failure.diagnostics()[0].code(),
+        "consumer.text.settings-invalid"
+    );
+    assert_eq!(fs::read(&manifest_path).unwrap(), original_manifest);
+    fs::write(
+        project.join("assets/captions/greeting.txt.meta"),
+        original_metadata,
     )
     .unwrap();
     let repaired = Command::new(env!("CARGO_BIN_EXE_nara"))
@@ -453,6 +643,34 @@ fn install_declared_second_scene(project: &Path) -> nara::scene::SceneDocument {
         scene.to_json_string().unwrap(),
     )
     .unwrap();
+    for (root, path, kind, id) in [
+        (
+            "scenes",
+            "second.scene.json",
+            nara::asset::AssetSourceKind::Scene,
+            "46199fbe-f0c4-4116-b6ae-d85b407f6cba",
+        ),
+        (
+            "prefabs",
+            "second.prefab.json",
+            nara::asset::AssetSourceKind::Prefab,
+            "d2634ab6-7f43-4bbb-b466-9b837404f3dd",
+        ),
+    ] {
+        let metadata = nara::asset::AssetMeta::new(
+            nara::asset::AssetMetaIdentity::new(
+                nara::asset::StableAssetId::parse_str(id).unwrap(),
+                nara::asset::AssetPath::new(path).unwrap(),
+                kind,
+            ),
+            (),
+        );
+        fs::write(
+            project.join(root).join(format!("{path}.meta")),
+            metadata.to_json_string().unwrap(),
+        )
+        .unwrap();
+    }
     fs::write(project.join("scenes/undeclared.scene.json"), b"not a Scene").unwrap();
     let manifest_path = project.join("nara.toml");
     let manifest = fs::read_to_string(&manifest_path).unwrap();
@@ -528,7 +746,7 @@ fn legacy_tool_entry_and_failed_bootstrap_never_launch_or_publish() {
             .output()
             .unwrap()
     };
-    for protocol in [None, Some(1), Some(999)] {
+    for protocol in [None, Some(2), Some(999)] {
         let metadata = protocol.map_or(String::new(), |version| {
             format!("\n[package.metadata.nara]\nproject-tool-protocol = {version}\n")
         });
@@ -548,7 +766,7 @@ fn legacy_tool_entry_and_failed_bootstrap_never_launch_or_publish() {
     }
     fs::write(
         root.path().join("Cargo.toml"),
-        format!("{manifest}\n[package.metadata.nara]\nproject-tool-protocol = 2\n"),
+        format!("{manifest}\n[package.metadata.nara]\nproject-tool-protocol = 1\n"),
     )
     .unwrap();
     fs::write(

@@ -58,7 +58,7 @@ fn external_supervised_play_rejects_in_process_controls_without_starting_a_proce
         ),
         std::time::Duration::ZERO,
     );
-    assert!(update.actions_observed());
+    assert!(update.update().actions_observed());
 
     let frame = application
         .current_frame()
@@ -103,7 +103,7 @@ fn external_supervised_stop_then_editor_exit_retires_the_owner() {
         ),
         Duration::ZERO,
     );
-    assert!(accepted.actions_observed());
+    assert!(accepted.update().actions_observed());
 
     drive_until_external_state(
         &mut application,
@@ -125,7 +125,7 @@ fn external_supervised_stop_then_editor_exit_retires_the_owner() {
         ),
         Duration::ZERO,
     );
-    assert!(restarted.actions_observed());
+    assert!(restarted.update().actions_observed());
     drive_until_external_state(
         &mut application,
         EditorExternalPlayState::Running,
@@ -147,7 +147,7 @@ fn external_supervised_stop_then_editor_exit_retires_the_owner() {
         ),
         Duration::ZERO,
     );
-    assert!(stopping.actions_observed());
+    assert!(stopping.update().actions_observed());
     drive_until_external_state(
         &mut application,
         EditorExternalPlayState::Idle,
@@ -267,7 +267,7 @@ fn drive_until_exit_ready(application: &mut EditorApplication, timeout: Duration
         let result = frame.workspace_intent().result();
         let update = application
             .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
-        if update.exit_ready() {
+        if update.update().exit_ready() {
             return;
         }
         assert!(

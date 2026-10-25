@@ -47,6 +47,13 @@ products and their destructors effect-free, and do not panic. Return a bounded `
 `ProjectContentError::asset_domain` for actionable format/settings failures. Host-reported parser
 panics omit the panic payload from the diagnostic report.
 
+The compiled-project tool preserves retained domain code/severity/safe-summary records through
+`ProjectToolInvocationError::Project`; it does not infer them from `Error::to_string()`.
+Inspect the bounded diagnostics and loss facts described in the
+[tool failure guide](rust-product-recipes.md#inspect-compiled-tool-failures). General diagnostic
+fields are deliberately not transported. This does not change the domain's preparation contract
+or execute runtime plugin hooks during Check.
+
 ## Runtime Access
 
 Borrow the installed resource from an ordinary system:

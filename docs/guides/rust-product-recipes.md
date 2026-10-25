@@ -247,7 +247,7 @@ the project's Cargo manifest, and dispatch it before normal argument parsing or 
 
 ```toml
 [package.metadata.nara]
-project-tool-protocol = 2
+project-tool-protocol = 1
 ```
 
 ```rust
@@ -275,10 +275,37 @@ that process. The parent CLI receives bounded display summaries, never reconstru
 
 Default tools require no window, graphics backend, or editor toolkit. Explicitly checking the
 `desktop` profile builds the matching Cargo feature. Missing or unsupported tool metadata rejects
-an old headless entry, including protocol version 1, before launch, since old entries may ignore
-arguments and start gameplay.
+an unsupported headless entry before launch, since an entry without tool mode may ignore arguments
+and start gameplay. Both endpoints use canonical protocol 1 with the current response shape;
+superseded startup-only counts and string-only failures are not supported.
 The declaration is a compatibility contract for trusted Rust and Cargo code, not a sandbox or proof
 that arbitrary project code obeys the entry contract. The generated starter includes this wiring.
+
+### Inspect compiled-tool failures
+
+`invoke_project_tool` returns `ProjectToolInvocationError::Project(ProjectToolFailure)` when the
+compiled project reports a failure with a matching unsuccessful exit. Inspect `operation()`,
+`stage()`, `code()`, `summary()` and `diagnostics()` directly; do not parse Display text. For example,
+an independent source domain can retain `consumer.text.too-long` separately from
+`consumer.text.settings-invalid` through Check and Export's preliminary Check. The CLI formats the
+same observation only at its terminal sink.
+
+`loss()` distinguishes upstream incompleteness from transfer omissions and UTF-8 summary
+truncation. The projection keeps at most eight code/severity/summary records, with 96-byte codes
+and 256-byte summaries, within a 16 KiB failure response. General diagnostic fields are omitted
+and counted. Missing-startup repair hints use separately admitted project-relative paths and a
+public profile identifier; a withheld selected profile becomes a placeholder, not a default-profile
+command. Inspect the same admitted values with `repair_hint()` and its read-only Scene/root/profile
+accessors; `profile_selected()` distinguishes no selected profile from a withheld one.
+None of these values is a file receipt or repair capability. The tool acquires its own
+current authority when the command runs.
+
+Other failures receive static owner classifications rather than arbitrary Error/source strings.
+Schema publication uncertainty and pending cleanup remain distinct observations. A published but
+unaccepted repair does not necessarily mean its ordinary Check failed; the typed classification
+retains changed prepared facts and incomplete publication evidence separately.
+The compiled project remains trusted native code: this boundary does not sanitize compiler or
+child stderr and does not prevent a custom executable from printing arbitrary values itself.
 
 ## Use the same recipe in each path
 

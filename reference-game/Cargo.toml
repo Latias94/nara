@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [package.metadata.nara]
-project-tool-protocol = 2
+project-tool-protocol = 1
 
 [features]
 default = []

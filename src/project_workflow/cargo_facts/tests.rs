@@ -11,7 +11,7 @@ fn headless_metadata_requires_its_declared_tool_entry_without_desktop_capabiliti
     let manifest = root.join("Cargo.toml");
     let mut value = metadata_value(&root);
     value["packages"][0]["features"] = json!({});
-    value["packages"][0]["metadata"] = json!({"nara":{"project-tool-protocol":2}});
+    value["packages"][0]["metadata"] = json!({"nara":{"project-tool-protocol":1}});
     value["packages"][0]["targets"][0]["name"] = json!("headless");
     value["packages"][0]["targets"][0]["src_path"] = json!(root.join("src/bin/headless.rs"));
     value["packages"][0]["targets"][0]["required-features"] = json!([]);
@@ -21,7 +21,7 @@ fn headless_metadata_requires_its_declared_tool_entry_without_desktop_capabiliti
     assert_eq!(facts.source_path(), root.join("src/bin/headless.rs"));
     for metadata in [
         Value::Null,
-        json!({"nara":{"project-tool-protocol":1}}),
+        json!({"nara":{"project-tool-protocol":2}}),
         json!({"nara":{"project-tool-protocol":999}}),
     ] {
         value["packages"][0]["metadata"] = metadata;

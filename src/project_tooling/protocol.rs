@@ -1,13 +1,20 @@
 use std::{ffi::OsString, path::PathBuf};
 
+use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{ProjectToolRequest, ProjectToolSummary, ToolError};
 
 pub(super) const TOOL_ARGUMENT: &str = "--nara-project-tool";
-pub(super) const PROTOCOL_VERSION: &str = "2";
+mod failure;
+
+pub use failure::{
+    ProjectToolDiagnostic, ProjectToolDiagnosticLoss, ProjectToolFailure, ProjectToolFailureStage,
+    ProjectToolRepairHint,
+};
+
+pub(super) const PROTOCOL_VERSION: &str = "1";
 pub(super) const MAX_RESPONSE_BYTES: u64 = 64 * 1024;
-pub(super) const MAX_DIAGNOSTIC_BYTES: usize = 16 * 1024;
 const MAX_ARGUMENT_BYTES: usize = 128 * 1024;
 
 pub(super) fn parse_request(
@@ -99,94 +106,140 @@ fn parse_selected(
 pub(super) fn encode_response(
     operation: &str,
     result: Result<ProjectToolSummary, ToolError>,
-) -> Value {
-    match result {
+) -> Result<Value, &'static str> {
+    let failed = result.is_err();
+    let value = match result {
         Ok(ProjectToolSummary::Checked { content_members }) => {
-            json!({"version":2,"operation":operation,"success":true,"content_members":content_members})
+            json!({"version":1,"operation":operation,"success":true,"content_members":content_members})
         }
         Ok(ProjectToolSummary::Schema { written }) => {
-            json!({"version":2,"operation":operation,"success":true,"written":written})
+            json!({"version":1,"operation":operation,"success":true,"written":written})
         }
         Ok(ProjectToolSummary::Exported {
             content_members,
             product_observations,
         }) => {
-            json!({"version":2,"operation":operation,"success":true,"content_members":content_members,"product_observations":product_observations})
+            json!({"version":1,"operation":operation,"success":true,"content_members":content_members,"product_observations":product_observations})
         }
         Ok(ProjectToolSummary::Repaired { replacement }) => {
-            json!({"version":2,"operation":operation,"success":true,"replacement":replacement})
+            json!({"version":1,"operation":operation,"success":true,"replacement":replacement})
         }
         Err(error) => {
-            let mut diagnostic = error.diagnostic();
-            if diagnostic.len() > MAX_DIAGNOSTIC_BYTES {
-                let mut end = MAX_DIAGNOSTIC_BYTES;
-                while !diagnostic.is_char_boundary(end) {
-                    end -= 1;
-                }
-                diagnostic.truncate(end);
-            }
-            json!({"version":2,"operation":operation,"success":false,"diagnostic":diagnostic})
+            let failure = error.failure(operation);
+            let mut value =
+                json!({"version":1,"operation":operation,"success":false,"failure":null});
+            value["failure"] = failure.to_value();
+            value
         }
+    };
+    let encoded = serde_json::to_vec(&value).map_err(|_| "cannot encode project tool response")?;
+    let limit = if failed {
+        failure::MAX_FAILURE_BYTES
+    } else {
+        MAX_RESPONSE_BYTES as usize
+    };
+    if encoded.len() >= limit {
+        return Err("encoded project tool response exceeds its bounded size");
     }
+    Ok(value)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawResponse {
+    version: u64,
+    operation: String,
+    success: bool,
+    content_members: Option<u64>,
+    product_observations: Option<u64>,
+    written: Option<bool>,
+    replacement: Option<String>,
+    failure: Option<failure::RawFailure>,
 }
 
 pub(super) fn decode_response(
     bytes: &[u8],
     operation: &str,
-) -> Result<Result<ProjectToolSummary, String>, &'static str> {
+) -> Result<Result<ProjectToolSummary, ProjectToolFailure>, &'static str> {
     if bytes.len() as u64 > MAX_RESPONSE_BYTES {
         return Err("project tool response exceeds its bounded size");
     }
-    let value: Value = serde_json::from_slice(bytes).map_err(|_| "project headless executable did not return a project tool response; update its tool-mode entry")?;
-    if value["version"].as_u64() != Some(2) || value["operation"].as_str() != Some(operation) {
+    let value: RawResponse = serde_json::from_slice(bytes).map_err(|_| "project headless executable did not return a project tool response; update its tool-mode entry")?;
+    if value.version != 1 || value.operation != operation {
         return Err("project tool response version or operation does not match the request");
     }
-    match value["success"].as_bool() {
-        Some(false) => {
-            let diagnostic = value["diagnostic"]
-                .as_str()
-                .filter(|value| value.len() <= MAX_DIAGNOSTIC_BYTES)
-                .ok_or("invalid project tool diagnostic")?;
-            Ok(Err(diagnostic.to_owned()))
+    if !value.success {
+        if bytes.len() > failure::MAX_FAILURE_BYTES
+            || value.content_members.is_some()
+            || value.product_observations.is_some()
+            || value.written.is_some()
+            || value.replacement.is_some()
+        {
+            return Err("invalid project tool failure response");
         }
-        Some(true) => {
-            let count = || {
-                value["content_members"]
-                    .as_u64()
-                    .and_then(|value| usize::try_from(value).ok())
-                    .ok_or("invalid project tool member count")
-            };
-            let summary = match operation {
-                "check" => ProjectToolSummary::Checked {
-                    content_members: count()?,
-                },
-                "schema-check" | "schema-write" => ProjectToolSummary::Schema {
-                    written: value["written"]
-                        .as_bool()
-                        .filter(|written| operation == "schema-write" || !*written)
-                        .ok_or("invalid project tool schema publication outcome")?,
-                },
-                "export" => ProjectToolSummary::Exported {
-                    content_members: count()?,
-                    product_observations: value["product_observations"]
-                        .as_u64()
-                        .filter(|value| *value == 2)
-                        .ok_or("invalid project tool product count")?
-                        as usize,
-                },
-                "repair-startup-scene" => ProjectToolSummary::Repaired {
-                    replacement: value["replacement"]
-                        .as_str()
-                        .filter(|value| value.len() <= MAX_ARGUMENT_BYTES)
-                        .ok_or("invalid project tool replacement")?
-                        .to_owned(),
-                },
-                _ => return Err("invalid project tool response operation"),
-            };
-            Ok(Ok(summary))
-        }
-        None => Err("invalid project tool response outcome"),
+        return Ok(Err(value
+            .failure
+            .ok_or("missing project tool failure")?
+            .admit(operation)?));
     }
+    if value.failure.is_some() {
+        return Err("project tool success also reported a failure");
+    }
+    let fields_match = match operation {
+        "check" => {
+            value.product_observations.is_none()
+                && value.written.is_none()
+                && value.replacement.is_none()
+        }
+        "schema-check" | "schema-write" => {
+            value.content_members.is_none()
+                && value.product_observations.is_none()
+                && value.replacement.is_none()
+        }
+        "export" => value.written.is_none() && value.replacement.is_none(),
+        "repair-startup-scene" => {
+            value.content_members.is_none()
+                && value.product_observations.is_none()
+                && value.written.is_none()
+        }
+        _ => false,
+    };
+    if !fields_match {
+        return Err("project tool response fields do not match its operation");
+    }
+    let count = || {
+        value
+            .content_members
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or("invalid project tool member count")
+    };
+    let summary = match operation {
+        "check" => ProjectToolSummary::Checked {
+            content_members: count()?,
+        },
+        "schema-check" | "schema-write" => ProjectToolSummary::Schema {
+            written: value
+                .written
+                .filter(|written| operation == "schema-write" || !*written)
+                .ok_or("invalid project tool schema publication outcome")?,
+        },
+        "export" => ProjectToolSummary::Exported {
+            content_members: count()?,
+            product_observations: value
+                .product_observations
+                .filter(|value| *value == 2)
+                .ok_or("invalid project tool product count")?
+                as usize,
+        },
+        "repair-startup-scene" => ProjectToolSummary::Repaired {
+            replacement: value
+                .replacement
+                .filter(|value| value.len() <= MAX_ARGUMENT_BYTES)
+                .ok_or("invalid project tool replacement")?,
+        },
+        _ => return Err("invalid project tool response operation"),
+    };
+    Ok(Ok(summary))
 }
 
 #[cfg(test)]
@@ -206,7 +259,7 @@ mod tests {
                 .is_err()
         );
         assert!(
-            parse_request([OsString::from(TOOL_ARGUMENT), OsString::from("1")])
+            parse_request([OsString::from(TOOL_ARGUMENT), OsString::from("2")])
                 .unwrap()
                 .is_err()
         );
@@ -217,7 +270,7 @@ mod tests {
         let summary = ProjectToolSummary::Checked {
             content_members: 11,
         };
-        let response = encode_response("check", Ok(summary.clone()));
+        let response = encode_response("check", Ok(summary.clone())).unwrap();
         assert_eq!(response["content_members"], 11);
         assert!(response.get("startup_members").is_none());
         assert_eq!(
@@ -231,6 +284,59 @@ mod tests {
     #[test]
     fn gameplay_output_is_not_tool_agreement() {
         assert!(decode_response(b"starter_headless: ok fixed_ticks=1\n", "check").is_err());
+    }
+
+    #[test]
+    fn failure_envelope_limit_includes_the_final_newline() {
+        let value = encode_response("check", Err(ToolError::Recipe)).unwrap();
+        let mut bytes = serde_json::to_vec(&value).unwrap();
+        bytes.resize(failure::MAX_FAILURE_BYTES - 1, b' ');
+        bytes.push(b'\n');
+        assert!(decode_response(&bytes, "check").unwrap().is_err());
+        bytes.push(b' ');
+        assert_eq!(
+            decode_response(&bytes, "check"),
+            Err("invalid project tool failure response")
+        );
+        assert!((bytes.len() as u64) < MAX_RESPONSE_BYTES);
+    }
+
+    #[test]
+    fn fallback_never_traverses_raw_error_sources() {
+        let error = ToolError::Directory(super::super::host_fs::HostDirectoryError::Open(
+            std::io::Error::other("NARA_PRIVATE_SOURCE_CANARY C:\\private\\file"),
+        ));
+        let response = encode_response("check", Err(error)).unwrap();
+        let bytes = serde_json::to_vec(&response).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("NARA_PRIVATE_SOURCE_CANARY"));
+        let failure = decode_response(&bytes, "check").unwrap().unwrap_err();
+        assert_eq!(failure.code(), "project.tool.directory-unavailable");
+        assert!(failure.diagnostics().is_empty());
+        assert!(!failure.to_string().contains("NARA_PRIVATE_SOURCE_CANARY"));
+    }
+
+    #[test]
+    fn superseded_and_malformed_failure_shapes_are_not_tool_agreement() {
+        for bytes in [
+            br#"{"version":1,"operation":"check","success":false,"diagnostic":"NARA_PRIVATE_SOURCE_CANARY"}"#.as_slice(),
+            br#"{"version":1,"version":1,"operation":"check","success":true,"content_members":1}"#.as_slice(),
+            br#"{"version":2,"operation":"check","success":true,"content_members":1}"#.as_slice(),
+        ] {
+            let error = decode_response(bytes, "check").unwrap_err();
+            assert!(!error.contains("NARA_PRIVATE_SOURCE_CANARY"));
+        }
+        let mut response = encode_response("check", Err(ToolError::Recipe)).unwrap();
+        assert!(decode_response(&serde_json::to_vec(&response).unwrap(), "export").is_err());
+        response["failure"].as_object_mut().unwrap().remove("loss");
+        assert!(decode_response(&serde_json::to_vec(&response).unwrap(), "check").is_err());
+        let mut response = encode_response("check", Err(ToolError::Recipe)).unwrap();
+        response["failure"]["diagnostics"] = json!(vec![
+            json!({
+                "code":"consumer.text.too-long","severity":"error","summary":"Text exceeds max_characters"
+            });
+            9
+        ]);
+        assert!(decode_response(&serde_json::to_vec(&response).unwrap(), "check").is_err());
     }
 
     #[test]
@@ -254,7 +360,7 @@ mod tests {
                 write: actual_write,
             } if actual == project && profile == "desktop" && actual_write == write));
             let summary = ProjectToolSummary::Schema { written: write };
-            let response = encode_response(operation, Ok(summary.clone()));
+            let response = encode_response(operation, Ok(summary.clone())).unwrap();
             assert_eq!(
                 decode_response(&serde_json::to_vec(&response).unwrap(), operation),
                 Ok(Ok(summary))
@@ -281,7 +387,8 @@ mod tests {
         let response = encode_response(
             "schema-check",
             Ok(ProjectToolSummary::Schema { written: true }),
-        );
+        )
+        .unwrap();
         assert!(decode_response(&serde_json::to_vec(&response).unwrap(), "schema-check").is_err());
     }
 }
