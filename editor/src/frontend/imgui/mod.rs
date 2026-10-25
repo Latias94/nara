@@ -871,9 +871,7 @@ impl ImguiEditorFrontend {
 }
 
 fn show_dirty_close_dialog(ui: &Ui, frame: &EditorFrameModel, actions: &mut Vec<EditorAction>) {
-    use nara::tooling::{
-        EditorPersistenceOperation, EditorPersistenceRequestKind, EditorWorkspaceIntentPhase,
-    };
+    use nara::tooling::{EditorPersistenceRequestKind, EditorWorkspaceIntentPhase};
 
     if let Some(phase) = frame.workspace_intent().phase() {
         ui.window("Unsaved changes")
@@ -907,8 +905,7 @@ fn show_dirty_close_dialog(ui: &Ui, frame: &EditorFrameModel, actions: &mut Vec<
                         .as_ref()
                         .map_or("Unsaved", |binding| binding.locator())
                 ));
-                let save_enabled = frame.persistence().operation()
-                    == EditorPersistenceOperation::Idle
+                let save_enabled = frame.persistence().operation().is_none()
                     && authoring::persistence_allows(
                         frame.persistence().result(),
                         EditorPersistenceRequestKind::Save,
@@ -1092,10 +1089,7 @@ fn paint_authoring_view(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) 
 }
 
 fn paint_game_view(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
-    use nara::tooling::{
-        EditorDocumentKind, EditorPersistenceOperation, EditorPlayOperationResult,
-        EditorRuntimeAvailability,
-    };
+    use nara::tooling::{EditorDocumentKind, EditorPlayOperationResult, EditorRuntimeAvailability};
     let frame = context.input.frame;
     let scene = frame.workspace().active_scene.as_ref();
     let state = frame.play().state();
@@ -1105,7 +1099,7 @@ fn paint_game_view(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
     );
     let can_request = !context.input.read_only
         && frame.workspace_intent().phase().is_none()
-        && frame.persistence().operation() == EditorPersistenceOperation::Idle;
+        && frame.persistence().operation().is_none();
     let content_ready = frame.project_content().is_current()
         && !frame
             .workspace()

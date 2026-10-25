@@ -66,14 +66,14 @@ pub use inspector::{
     SceneInspectorState,
 };
 pub use persistence::{
-    EditorAuthoringReadiness, EditorCloseDecision, EditorPersistenceCommand,
-    EditorPersistenceFailureStage, EditorPersistenceOperation, EditorPersistenceRejection,
-    EditorPersistenceRequestKind, EditorPersistenceRequestResult, EditorPersistenceResult,
-    EditorPersistenceView, EditorProjectContentAction, EditorProjectContentGeneration,
-    EditorProjectContentRefreshFailure, EditorProjectContentRefreshRejection,
-    EditorProjectContentRefreshRequestResult, EditorProjectContentView, EditorProjectReadinessView,
-    EditorProjectView, EditorWorkspaceIntent, EditorWorkspaceIntentPhase,
-    EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
+    EditorAuthoringReadiness, EditorCloseDecision, EditorPersistenceAttemptId,
+    EditorPersistenceCommand, EditorPersistenceFailureStage, EditorPersistenceOperation,
+    EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPersistenceRequestResult,
+    EditorPersistenceResult, EditorPersistenceView, EditorProjectContentAction,
+    EditorProjectContentGeneration, EditorProjectContentRefreshFailure,
+    EditorProjectContentRefreshRejection, EditorProjectContentRefreshRequestResult,
+    EditorProjectContentView, EditorProjectReadinessView, EditorProjectView, EditorWorkspaceIntent,
+    EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
     EditorWorkspaceIntentResult, EditorWorkspaceIntentView,
 };
 #[doc(hidden)]

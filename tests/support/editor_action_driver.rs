@@ -214,7 +214,9 @@ pub fn request_persistence(
             }
             EditorPersistenceAction::Reopen { target }
         }
-        EditorPersistenceCommand::AcknowledgeResult => EditorPersistenceAction::AcknowledgeResult,
+        EditorPersistenceCommand::AcknowledgeResult { attempt } => {
+            EditorPersistenceAction::AcknowledgeResult { attempt }
+        }
     };
     match dispatch_one(editor, EditorAction::Persistence(action)) {
         EditorActionOutcome::Persistence(result) => result,

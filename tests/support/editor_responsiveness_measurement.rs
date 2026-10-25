@@ -194,7 +194,10 @@ fn measure_editor_owner_thread_work() {
                 },
             );
             let request = started.elapsed();
-            assert_eq!(accepted, EditorPersistenceRequestResult::Accepted);
+            assert!(matches!(
+                accepted,
+                EditorPersistenceRequestResult::Accepted { .. }
+            ));
             let started = Instant::now();
             let mut frame = editor.drive_editor_frame(Duration::ZERO);
             let first_drive = started.elapsed();
@@ -255,13 +258,18 @@ fn measure_editor_owner_thread_work() {
                     completion,
                 );
             }
-            assert_eq!(
+            let attempt = editor
+                .current_frame()
+                .persistence()
+                .attempt()
+                .expect("the test observed a terminal persistence result");
+            assert!(matches!(
                 editor_driver::request_persistence(
                     &mut editor,
-                    EditorPersistenceCommand::AcknowledgeResult
+                    EditorPersistenceCommand::AcknowledgeResult { attempt }
                 ),
-                EditorPersistenceRequestResult::Accepted,
-            );
+                EditorPersistenceRequestResult::Acknowledged { .. }
+            ));
             editor.drive_editor_frame(Duration::ZERO);
             // Reopen must actually replace dirty state with the saved revision.
             assert!(apply_scene_patch(
@@ -278,7 +286,10 @@ fn measure_editor_owner_thread_work() {
                 },
             );
             let request = started.elapsed();
-            assert_eq!(accepted, EditorPersistenceRequestResult::Accepted);
+            assert!(matches!(
+                accepted,
+                EditorPersistenceRequestResult::Accepted { .. }
+            ));
             let started = Instant::now();
             let mut frame = editor.drive_editor_frame(Duration::ZERO);
             let first_drive = started.elapsed();

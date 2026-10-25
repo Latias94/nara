@@ -87,7 +87,26 @@ wrong-owner/stale actions do not change the document. No `Any` payload can invok
 ## Save, Reopen And Close
 
 Use existing `EditorPersistenceAction::Save` and `Reopen` with frame/document revision facts.
-Drive while persistence is pending; inspect and acknowledge `frame.persistence().result()`.
+An accepted request returns an `EditorPersistenceAttemptId`; its Pending and Terminal projections
+carry that same identity. A published immediate rejection also returns its attempt. A `Refused`
+outcome publishes nothing and has no new attempt; a Busy reason alone does not distinguish these
+cases. Drive while Pending, then inspect the observed Terminal:
+
+```rust,ignore
+if let EditorPersistenceView::Terminal { attempt, result } = frame.persistence() {
+    show_persistence_result(result);
+    // Capture this observation's identity, including when dispatch is deferred.
+    let dismiss = EditorAction::Persistence(
+        EditorPersistenceAction::AcknowledgeResult { attempt },
+    );
+}
+```
+
+Acknowledgment returns `Acknowledged { attempt }` only for that still-current terminal. An old,
+foreign or duplicate identity cannot clear another result. A redraw does not invalidate an
+observation of the same terminal. Do not sample the latest attempt later to substitute for the
+one actually displayed. Explicit retries have new identities; acknowledging uncertainty clears
+its observation, not the file owner's reconcile requirement or physical cleanup responsibility.
 
 Save captures exact content/identity before background publication. Only the existing verified
 atomic receipt advances the saved checkpoint. Edits accepted after capture stay dirty; Undo back

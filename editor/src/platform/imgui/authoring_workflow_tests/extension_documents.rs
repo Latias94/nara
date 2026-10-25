@@ -720,7 +720,12 @@ impl AuthoringWorkflow<'_> {
             EditorActionBatch::new(
                 frame.revision(),
                 [EditorAction::Persistence(
-                    EditorPersistenceAction::AcknowledgeResult,
+                    EditorPersistenceAction::AcknowledgeResult {
+                        attempt: frame
+                            .persistence()
+                            .attempt()
+                            .expect("the observed persistence result is terminal"),
+                    },
                 )],
             ),
             Duration::ZERO,

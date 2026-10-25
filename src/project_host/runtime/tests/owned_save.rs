@@ -51,12 +51,12 @@ fn assert_structural_save_snapshot(uncertain: bool) {
         editor.test_reject_next_valid_persistence_receipt(document);
     }
     let control = editor.hold_next_save(editor::SaveTestPhase::BeforePublication);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document)
         }),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+        nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     assert!(control.wait_until_started());
 
@@ -102,16 +102,21 @@ fn assert_structural_save_snapshot(uncertain: bool) {
     );
 
     // Exact admitted source bytes can restore the captured state despite later unsaved topology.
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
-    assert_eq!(
+    assert!(matches!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+            attempt: editor
+                .persistence_view()
+                .attempt()
+                .expect("the test observed a terminal persistence result")
+        }),
+        nara_tooling::EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Reopen {
             document: Some(document)
         }),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+        nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+    ));
     let reopened_result = drive_persistence_to_terminal(&mut editor)
         .persistence()
         .result();
@@ -154,12 +159,12 @@ fn pending_save_keeps_edits_available_and_close_retains_the_unpublished_owner() 
     make_authoring_name_dirty(&mut editor, document, "captured-value");
     let captured_revision = editor.workspace().scene(document).unwrap().revision();
     let control = editor.hold_next_save(editor::SaveTestPhase::BeforePublication);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document)
         }),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+        nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     assert!(control.wait_until_started());
 
@@ -168,10 +173,10 @@ fn pending_save_keeps_edits_available_and_close_retains_the_unpublished_owner() 
         let frame = editor.drive_editor_frame(Duration::ZERO);
         assert_eq!(
             frame.persistence().operation(),
-            nara_tooling::EditorPersistenceOperation::Saving {
+            Some(nara_tooling::EditorPersistenceOperation::Saving {
                 document,
                 captured_revision
-            }
+            })
         );
         assert!(frame.persistence().result().is_none());
         assert!(frame.workspace().scene(document).unwrap().dirty);
@@ -225,12 +230,12 @@ fn published_save_requires_worker_return_before_acknowledgement_and_session_clos
     make_authoring_name_dirty(&mut editor, document, "published-value");
     let captured_revision = editor.workspace().scene(document).unwrap().revision();
     let control = editor.hold_next_save(editor::SaveTestPhase::AfterPublication);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document)
         }),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+        nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     assert!(control.wait_until_started());
     let published = fs::read(&source_path).unwrap();
@@ -239,10 +244,10 @@ fn published_save_requires_worker_return_before_acknowledgement_and_session_clos
         let frame = editor.drive_editor_frame(Duration::ZERO);
         assert_eq!(
             frame.persistence().operation(),
-            nara_tooling::EditorPersistenceOperation::Saving {
+            Some(nara_tooling::EditorPersistenceOperation::Saving {
                 document,
                 captured_revision
-            }
+            })
         );
         assert!(frame.persistence().result().is_none());
         let slot = editor.workspace().scene(document).unwrap();
@@ -307,12 +312,12 @@ fn pending_scene_save_preserves_preview_and_projects_later_edits() {
     let initial = editor.take_editor_preview_candidate().unwrap();
     assert_eq!(initial.hits().len(), 1);
     let control = editor.hold_next_save(editor::SaveTestPhase::BeforePublication);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document)
         }),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+        nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     assert!(control.wait_until_started());
     let pending = editor
@@ -389,12 +394,12 @@ fn legacy_prefab_source_navigation_is_busy_until_scene_save_returns_its_host() {
     let document = editor.workspace().active_document().unwrap();
     make_authoring_name_dirty(&mut editor, document, "captured-value");
     let control = editor.hold_next_save(editor::SaveTestPhase::BeforePublication);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document)
         }),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+        nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     assert!(control.wait_until_started());
 
@@ -501,12 +506,12 @@ fn content_refresh_retry_waits_for_the_held_save_to_return_its_host() {
         }]),
     });
     assert!(edited_prefab.applied, "{:?}", edited_prefab.diagnostics);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(prefab_document)
         }),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+        nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+    ));
     let saved_prefab = drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
         saved_prefab.persistence().result(),
@@ -528,10 +533,15 @@ fn content_refresh_retry_waits_for_the_held_save_to_return_its_host() {
         }
     ));
     fs::write(&source_path, &scene_bytes).unwrap();
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+    assert!(matches!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+            attempt: editor
+                .persistence_view()
+                .attempt()
+                .expect("the test observed a terminal persistence result")
+        }),
+        nara_tooling::EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
     let frame = editor.current_frame();
     let retry = editor
         .dispatch_editor_actions(EditorActionBatch::new(
@@ -562,12 +572,12 @@ fn content_refresh_retry_waits_for_the_held_save_to_return_its_host() {
     assert!(edited_scene.applied, "{:?}", edited_scene.diagnostics);
     let captured_revision = editor.workspace().scene(scene_document).unwrap().revision();
     let control = editor.hold_next_save(editor::SaveTestPhase::BeforePublication);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(scene_document)
         }),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+        nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     assert!(control.wait_until_started());
     for _ in 0..3 {
@@ -619,12 +629,12 @@ fn dropped_editor_retains_published_save_custody_until_the_worker_returns() {
     let document = editor.workspace().active_document().unwrap();
     make_authoring_name_dirty(&mut editor, document, "published-value");
     let control = editor.hold_next_save(editor::SaveTestPhase::AfterPublication);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document)
         }),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+        nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     assert!(control.wait_until_started());
     let published = fs::read(&source_path).unwrap();

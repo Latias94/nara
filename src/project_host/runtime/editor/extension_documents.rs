@@ -127,7 +127,7 @@ impl EditorProjectSession {
     ) -> Result<EditorDocumentId, EditorExtensionDocumentHostError> {
         if !self.accepts_new_work()
             || self.pending_workspace_intent.is_some()
-            || self.pending_persistence.is_some()
+            || self.persistence.has_pending_work()
             || self.pending_document_open.is_some()
         {
             return Err(EditorExtensionDocumentHostError::Busy);

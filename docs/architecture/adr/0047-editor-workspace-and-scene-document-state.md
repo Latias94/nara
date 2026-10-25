@@ -134,6 +134,21 @@ Rules:
   Task cancellation or terminality does not prove that filesystem calls returned: retained runtime
   custody keeps the original Host and temporary cleanup alive through close or caller abandonment.
   Save exposes no public Cancel action. Reopen retains its separate exact-base-revision policy.
+- Persistence observation has one concrete Idle/Pending/Terminal owner and one non-reused,
+  session-provenanced attempt identity. Dispatch, pending work and terminal publication carry
+  that same identity, including immediately published rejection. A nonpublishing refusal creates
+  no attempt and preserves existing state; the reason code alone does not determine publication.
+  Acknowledgment names the observed terminal attempt, never whichever result happens to be current.
+  Old/foreign/duplicate acknowledgments cannot clear a successor; unrelated frame publication
+  does not revoke an observation of the still-current exact result. Explicit retry policy may
+  supersede a prior terminal with a new attempt. Read-only target normalization precedes that
+  policy, but publishing a missing-target rejection cannot bypass retained-result admission.
+- Terminal observation is not physical Host retirement. Preserve physical-return-aware worker
+  polling, actual Save publication after cancellation, Completed-only Reopen publication and
+  independent Host/task cleanup. Close/Exit retain the exact Save attempt they await: matching
+  Close success retains its terminal, matching Exit success consumes only that attempt before
+  advancing, and failure/uncertainty retains the result while refreshing the decision. Consuming
+  an uncertain observation does not clear the file owner's uncertain-write state.
 - Each Scene/Prefab document retains its own concrete file lane keyed by `EditorDocumentId`.
   Storage cardinality does not select active navigation, Scene preview or executable startup.
   Save admission captures the matching concrete Host together with its checkpoint and readmission

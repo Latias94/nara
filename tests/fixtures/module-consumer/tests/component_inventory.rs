@@ -356,7 +356,7 @@ fn public_data_only_editor_creates_edits_rejects_saves_reopens_and_passes_compil
                 base_revision: revision,
             })
         ),
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
     ));
     let deadline = Instant::now() + Duration::from_secs(5);
     while editor.current_frame().persistence().result().is_none() {
@@ -377,12 +377,17 @@ fn public_data_only_editor_creates_edits_rejects_saves_reopens_and_passes_compil
         fs::read(project.root.join("scenes/startup.scene.json")).unwrap(),
         saved
     );
+    let attempt = editor
+        .current_frame()
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
     assert!(matches!(
         dispatch(
             &mut editor,
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult)
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt })
         ),
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Acknowledged { .. })
     ));
     assert!(edit_seconds(&mut editor, 7.0).applied);
     let target = editor.current_frame().reopen_target();
@@ -391,7 +396,7 @@ fn public_data_only_editor_creates_edits_rejects_saves_reopens_and_passes_compil
             &mut editor,
             EditorAction::Persistence(EditorPersistenceAction::Reopen { target })
         ),
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
     ));
     let deadline = Instant::now() + Duration::from_secs(5);
     while editor.current_frame().persistence().result().is_none() {

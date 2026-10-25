@@ -241,7 +241,7 @@ fn source_local_reference_edit_save_reopen_and_strict_check_share_the_public_wor
                 base_revision: revision
             })
         ),
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
     ));
     settle(&mut editor);
     assert!(matches!(
@@ -249,9 +249,14 @@ fn source_local_reference_edit_save_reopen_and_strict_check_share_the_public_wor
         Some(EditorPersistenceResult::Saved { .. })
     ));
     check_project(ProjectCheckRequest::new(project.capability(), recipe())).unwrap();
+    let attempt = editor
+        .current_frame()
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
     dispatch(
         &mut editor,
-        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
     );
     assert!(edit(&mut editor, "target"));
     let target = editor.current_frame().reopen_target();
@@ -260,7 +265,7 @@ fn source_local_reference_edit_save_reopen_and_strict_check_share_the_public_wor
             &mut editor,
             EditorAction::Persistence(EditorPersistenceAction::Reopen { target })
         ),
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
     ));
     settle(&mut editor);
     select_source(&mut editor);
@@ -611,7 +616,7 @@ fn save_and_reopen(editor: &mut EditorProjectSession) {
     });
     assert!(matches!(
         dispatch(editor, save),
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
     ));
     settle(editor);
     assert!(matches!(
@@ -622,9 +627,14 @@ fn save_and_reopen(editor: &mut EditorProjectSession) {
         editor.active_authoring_unavailable_record_manifest(),
         Some(&manifest)
     );
+    let attempt = editor
+        .current_frame()
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
     dispatch(
         editor,
-        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
     );
     let target = editor.current_frame().reopen_target();
     assert!(matches!(
@@ -632,16 +642,21 @@ fn save_and_reopen(editor: &mut EditorProjectSession) {
             editor,
             EditorAction::Persistence(EditorPersistenceAction::Reopen { target })
         ),
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
     ));
     settle(editor);
     assert!(matches!(
         editor.current_frame().persistence().result(),
         Some(EditorPersistenceResult::Opened { .. })
     ));
+    let attempt = editor
+        .current_frame()
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
     dispatch(
         editor,
-        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
     );
     select_source(editor);
     let frame = editor.current_frame();

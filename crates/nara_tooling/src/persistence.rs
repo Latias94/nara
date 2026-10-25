@@ -5,7 +5,7 @@ use nara_scene::SceneAuthoringRevision;
 use crate::{
     EditorApplyChangesResult, EditorPlayView, EditorRuntimeAvailability, EditorRuntimeEditResult,
 };
-use crate::{EditorClosePromptToken, EditorDocumentDigest, EditorDocumentId};
+use crate::{EditorClosePromptToken, EditorDocumentDigest, EditorDocumentId, EditorFrameRevision};
 
 /// Authoring completeness of the exact project snapshot installed in an Editor session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,16 +161,35 @@ pub enum EditorProjectContentRefreshRequestResult {
     Rejected(EditorProjectContentRefreshRejection),
 }
 
+/// Process-local correlation for one persistence attempt; not a document or file capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EditorPersistenceAttemptId {
+    source: EditorFrameRevision,
+    sequence: u64,
+}
+
+impl EditorPersistenceAttemptId {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn new(source: EditorFrameRevision, sequence: u64) -> Self {
+        Self { source, sequence }
+    }
+
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.sequence
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorPersistenceCommand {
     Save { document: Option<EditorDocumentId> },
     Reopen { document: Option<EditorDocumentId> },
-    AcknowledgeResult,
+    AcknowledgeResult { attempt: EditorPersistenceAttemptId },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorPersistenceOperation {
-    Idle,
     Saving {
         document: EditorDocumentId,
         captured_revision: SceneAuthoringRevision,
@@ -190,6 +209,8 @@ pub enum EditorPersistenceRequestKind {
 pub enum EditorPersistenceRejection {
     Busy,
     ResultPending,
+    ResultMismatch,
+    AttemptIdExhausted,
     NoActiveDocument,
     MissingDocument,
     DocumentKindMismatch,
@@ -248,42 +269,62 @@ pub enum EditorPersistenceResult {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EditorPersistenceView {
-    operation: EditorPersistenceOperation,
-    result: Option<EditorPersistenceResult>,
+/// One immutable observation. A terminal is not proof of complete physical Host retirement.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EditorPersistenceView {
+    #[default]
+    Idle,
+    Pending {
+        attempt: EditorPersistenceAttemptId,
+        operation: EditorPersistenceOperation,
+    },
+    Terminal {
+        attempt: EditorPersistenceAttemptId,
+        result: EditorPersistenceResult,
+    },
 }
 
 impl EditorPersistenceView {
     #[must_use]
-    pub const fn new(
-        operation: EditorPersistenceOperation,
-        result: Option<EditorPersistenceResult>,
-    ) -> Self {
-        Self { operation, result }
+    pub const fn attempt(self) -> Option<EditorPersistenceAttemptId> {
+        match self {
+            Self::Idle => None,
+            Self::Pending { attempt, .. } | Self::Terminal { attempt, .. } => Some(attempt),
+        }
     }
 
     #[must_use]
-    pub const fn operation(self) -> EditorPersistenceOperation {
-        self.operation
+    pub const fn operation(self) -> Option<EditorPersistenceOperation> {
+        match self {
+            Self::Pending { operation, .. } => Some(operation),
+            Self::Idle | Self::Terminal { .. } => None,
+        }
     }
 
     #[must_use]
     pub const fn result(self) -> Option<EditorPersistenceResult> {
-        self.result
-    }
-}
-
-impl Default for EditorPersistenceView {
-    fn default() -> Self {
-        Self::new(EditorPersistenceOperation::Idle, None)
+        match self {
+            Self::Terminal { result, .. } => Some(result),
+            Self::Idle | Self::Pending { .. } => None,
+        }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorPersistenceRequestResult {
-    Accepted,
-    Rejected(EditorPersistenceRejection),
+    Accepted {
+        attempt: EditorPersistenceAttemptId,
+    },
+    /// This rejection was published as the terminal of a new attempt.
+    Rejected {
+        attempt: EditorPersistenceAttemptId,
+        reason: EditorPersistenceRejection,
+    },
+    /// Admission refused without allocating an attempt or changing retained state.
+    Refused(EditorPersistenceRejection),
+    Acknowledged {
+        attempt: EditorPersistenceAttemptId,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

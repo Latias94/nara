@@ -329,15 +329,15 @@ fn public_edit_history_save_reopen_and_close_keep_one_preview_producer_and_fresh
             super::add_entity_patch("extra")
         ));
         present(&mut editor, &mut toolkit);
-        assert_eq!(
+        assert!(matches!(
             editor_driver::request_persistence(
                 &mut editor,
                 EditorPersistenceCommand::Save {
                     document: Some(document)
                 }
             ),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         assert!(
             matches!(editor_driver::drive_persistence_until_result(&mut editor).persistence().result(), Some(EditorPersistenceResult::Saved { document: saved, .. }) if saved == document)
         );
@@ -346,22 +346,27 @@ fn public_edit_history_save_reopen_and_close_keep_one_preview_producer_and_fresh
                 .unwrap()
                 .contains("\"extra\"")
         );
-        assert_eq!(
+        let attempt = editor
+            .current_frame()
+            .persistence()
+            .attempt()
+            .expect("the test observed a terminal persistence result");
+        assert!(matches!(
             editor_driver::request_persistence(
                 &mut editor,
-                EditorPersistenceCommand::AcknowledgeResult
+                EditorPersistenceCommand::AcknowledgeResult { attempt }
             ),
-            EditorPersistenceRequestResult::Accepted
-        );
-        assert_eq!(
+            EditorPersistenceRequestResult::Acknowledged { .. }
+        ));
+        assert!(matches!(
             editor_driver::request_persistence(
                 &mut editor,
                 EditorPersistenceCommand::Reopen {
                     document: Some(document)
                 }
             ),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         assert!(
             matches!(editor_driver::drive_persistence_until_result(&mut editor).persistence().result(), Some(EditorPersistenceResult::Opened { document: opened, .. }) if opened == document)
         );
@@ -374,13 +379,18 @@ fn public_edit_history_save_reopen_and_close_keep_one_preview_producer_and_fresh
                 .unwrap()
                 .dirty
         );
-        assert_eq!(
+        let attempt = editor
+            .current_frame()
+            .persistence()
+            .attempt()
+            .expect("the test observed a terminal persistence result");
+        assert!(matches!(
             editor_driver::request_persistence(
                 &mut editor,
-                EditorPersistenceCommand::AcknowledgeResult
+                EditorPersistenceCommand::AcknowledgeResult { attempt }
             ),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Acknowledged { .. }
+        ));
         assert_eq!(
             editor_driver::request_workspace_intent(
                 &mut editor,

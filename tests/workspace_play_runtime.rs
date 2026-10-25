@@ -614,8 +614,8 @@ fn document_transactions_reject_stale_bases_and_accept_fresh_bases_without_redra
         });
     let acknowledgement = editor.dispatch_editor_actions(EditorActionBatch::new(
         frame.revision(),
-        [EditorAction::Persistence(
-            EditorPersistenceAction::AcknowledgeResult,
+        [EditorAction::WorkspaceIntent(
+            nara::tooling::EditorWorkspaceIntentAction::AcknowledgeResult,
         )],
     ));
     let fresh = committed_revision.map(|base_revision| {
@@ -813,7 +813,9 @@ fn save_completion_becomes_visible_only_after_an_editor_frame_publishes_it() {
         .unwrap();
     assert!(matches!(
         &save.outcomes()[0],
-        EditorActionOutcome::Persistence(nara::tooling::EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(
+            nara::tooling::EditorPersistenceRequestResult::Accepted { .. }
+        )
     ));
     assert!(
         editor

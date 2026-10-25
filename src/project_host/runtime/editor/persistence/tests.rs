@@ -14,6 +14,7 @@ use nara_scene::{
 
 use super::*;
 
+mod attempts;
 mod content_refresh;
 #[cfg(feature = "presentation-2d")]
 mod preview_epoch;
@@ -345,7 +346,7 @@ fn settle(editor: &mut EditorProjectSession) -> EditorPersistenceResult {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         editor.advance_persistence();
-        if let Some(result) = editor.persistence_result {
+        if let Some(result) = editor.persistence_view().result() {
             return result;
         }
         assert!(
@@ -357,10 +358,15 @@ fn settle(editor: &mut EditorProjectSession) -> EditorPersistenceResult {
 }
 
 fn acknowledge(editor: &mut EditorProjectSession) {
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-        EditorPersistenceRequestResult::Accepted
-    );
+    assert!(matches!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+            attempt: editor
+                .persistence_view()
+                .attempt()
+                .expect("the test observed a terminal persistence result")
+        }),
+        EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
 }
 
 fn close(editor: &mut EditorProjectSession) {
@@ -515,12 +521,12 @@ fn stable_editor_open_and_reopen_reject_missing_mismatched_duplicate_and_changed
     assert_eq!(editor.workspace.len(), 2);
     let revision = editor.workspace.document_revision(document).unwrap();
     let gate = editor.hold_next_reopen(ReopenTestPhase::AfterPreparation);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Reopen {
             document: Some(document)
         }),
-        EditorPersistenceRequestResult::Accepted,
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     editor.advance_persistence();
     assert!(gate.wait_until_started());
     metadata(
@@ -849,12 +855,12 @@ fn reopen_rejects_same_key_metadata_byte_and_file_replacements_after_preparation
                 _ => unreachable!(),
             };
             let gate = editor.hold_next_reopen(ReopenTestPhase::AfterPreparation);
-            assert_eq!(
+            assert!(matches!(
                 editor.request_persistence(EditorPersistenceCommand::Reopen {
                     document: Some(document)
                 }),
-                EditorPersistenceRequestResult::Accepted
-            );
+                EditorPersistenceRequestResult::Accepted { .. }
+            ));
             editor.advance_persistence();
             assert!(gate.wait_until_started());
             if replace_object {
@@ -910,10 +916,10 @@ fn non_active_scene_and_prefab_persistence_keeps_each_captured_owner() {
         edit(&mut editor, b, "captured-b");
         let captured_revision = editor.workspace.document_revision(b).unwrap();
         let gate = editor.hold_next_save(SaveTestPhase::BeforePublication);
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(EditorPersistenceCommand::Save { document: Some(b) }),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         editor.advance_persistence();
         assert!(gate.wait_until_started());
         edit(&mut editor, a, "later-a");
@@ -940,10 +946,10 @@ fn non_active_scene_and_prefab_persistence_keeps_each_captured_owner() {
         let a_revision = editor.workspace.document_revision(a);
         acknowledge(&mut editor);
         let gate = editor.hold_next_reopen(ReopenTestPhase::AfterPreparation);
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(EditorPersistenceCommand::Reopen { document: Some(b) }),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         editor.advance_persistence();
         assert!(gate.wait_until_started());
         edit(&mut editor, a, "reopen-unrelated-a");
@@ -960,10 +966,10 @@ fn non_active_scene_and_prefab_persistence_keeps_each_captured_owner() {
         assert_eq!(editor.scene_preview_document, preview);
         acknowledge(&mut editor);
         edit(&mut editor, b, "after-reopen-b");
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(EditorPersistenceCommand::Save { document: Some(b) }),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         assert!(
             matches!(settle(&mut editor), EditorPersistenceResult::Saved { document, .. } if document == b)
         );
@@ -981,12 +987,12 @@ fn prepared_reopen_rejects_rebound_or_retired_exact_host() {
             edit(&mut editor, document, "working");
             let revision = editor.workspace.document_revision(document);
             let gate = editor.hold_next_reopen(ReopenTestPhase::AfterPreparation);
-            assert_eq!(
+            assert!(matches!(
                 editor.request_persistence(EditorPersistenceCommand::Reopen {
                     document: Some(document)
                 }),
-                EditorPersistenceRequestResult::Accepted
-            );
+                EditorPersistenceRequestResult::Accepted { .. }
+            ));
             editor.advance_persistence();
             assert!(gate.wait_until_started());
             if retired {
@@ -1021,25 +1027,31 @@ fn queued_save_cannot_acquire_a_replacement_host_after_admission() {
         let mut editor = fixture.editor();
         let document = fixture.add(&mut editor, kind, "queued.json");
         edit(&mut editor, document, "must-not-publish");
-        assert_eq!(
+        let EditorPersistenceRequestResult::Accepted { attempt } =
             editor.request_persistence(EditorPersistenceCommand::Save {
-                document: Some(document)
-            }),
-            EditorPersistenceRequestResult::Accepted
-        );
+                document: Some(document),
+            })
+        else {
+            panic!("queued Save must admit its own attempt")
+        };
         match editor.capture_persistence_lane(document).unwrap() {
             PersistenceLane::Scene(lane) => assert!(lane.host.retire()),
             PersistenceLane::Prefab(lane) => assert!(lane.host.retire()),
             PersistenceLane::Extension(_) => unreachable!(),
         }
         fixture.rebind(&mut editor, document);
+        let result = settle(&mut editor);
         assert_eq!(
-            settle(&mut editor),
+            result,
             EditorPersistenceResult::Rejected {
                 request: EditorPersistenceRequestKind::Save,
                 document: Some(document),
                 reason: EditorPersistenceRejection::Busy,
             }
+        );
+        assert_eq!(
+            editor.persistence_view(),
+            EditorPersistenceView::Terminal { attempt, result }
         );
         let directory = if kind == EditorDocumentKind::Scene {
             "scenes"
@@ -1082,12 +1094,12 @@ fn rejected_acknowledgement_marks_only_the_original_published_host_uncertain() {
         edit(&mut editor, document, "published");
         let original = editor.capture_persistence_lane(document).unwrap();
         let gate = editor.hold_next_save(SaveTestPhase::AfterPublication);
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(EditorPersistenceCommand::Save {
                 document: Some(document)
             }),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         editor.advance_persistence();
         assert!(gate.wait_until_started());
         fixture.rebind(&mut editor, document);
@@ -1154,10 +1166,10 @@ fn close_releases_only_the_exact_document_lane_and_preserves_preview_binding() {
         assert_eq!(editor.workspace.active_document(), Some(a));
         assert_eq!(editor.scene_preview_document, preview);
         edit(&mut editor, a, "still-usable");
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(EditorPersistenceCommand::Save { document: Some(a) }),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         assert!(
             matches!(settle(&mut editor), EditorPersistenceResult::Saved { document, .. } if document == a)
         );
@@ -1190,10 +1202,10 @@ fn held_cleanup_keeps_only_its_document_open_while_another_owner_can_save() {
             EditorDocumentKind::Prefab => editor.test_fail_next_prefab_save_after_write(b),
             EditorDocumentKind::Extension(_) => unreachable!(),
         });
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(EditorPersistenceCommand::Save { document: Some(b) }),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         assert!(
             matches!(settle(&mut editor), EditorPersistenceResult::Failed { document: Some(document), .. } if document == b)
         );
@@ -1225,10 +1237,10 @@ fn held_cleanup_keeps_only_its_document_open_while_another_owner_can_save() {
         assert_eq!(editor.workspace.document_kind(b), Some(kind));
         assert!(editor.capture_persistence_lane(b).is_ok());
         edit(&mut editor, a, "saved-a");
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(EditorPersistenceCommand::Save { document: Some(a) }),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         assert!(
             matches!(settle(&mut editor), EditorPersistenceResult::Saved { document, .. } if document == a)
         );
@@ -1475,12 +1487,12 @@ fn source_exclusion_observes_atomic_replacement_and_retained_parent_rename() {
         let source = fixture.root.join(directory).join("saved.json");
         fs::hard_link(&source, fixture.root.join("old.json")).unwrap();
         edit(&mut editor, document, "new-source");
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(EditorPersistenceCommand::Save {
                 document: Some(document)
             }),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         assert!(matches!(
             settle(&mut editor),
             EditorPersistenceResult::Saved { .. }
@@ -1666,10 +1678,10 @@ fn later_prefab_refresh_cannot_erase_a_failed_closed_source_obligation() {
         let (mut editor, [p, q]) = fixture.two_prefabs();
         let original_content = editor.trusted_compiled().unwrap().snapshot.revision();
         edit(&mut editor, p, "saved-p");
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(EditorPersistenceCommand::Save { document: Some(p) }),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         assert!(matches!(
             settle(&mut editor),
             EditorPersistenceResult::Saved { .. }
@@ -1698,10 +1710,10 @@ fn later_prefab_refresh_cannot_erase_a_failed_closed_source_obligation() {
             edit(&mut editor, q, "saved-q");
             EditorPersistenceCommand::Save { document: Some(q) }
         };
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(command),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         assert!(matches!(
             settle(&mut editor),
             EditorPersistenceResult::Saved { .. } | EditorPersistenceResult::Opened { .. }
@@ -1712,10 +1724,10 @@ fn later_prefab_refresh_cannot_erase_a_failed_closed_source_obligation() {
         let retained_content = editor.trusted_compiled().unwrap().snapshot.revision();
 
         fs::write(fixture.root.join("prefabs/p.json"), saved_p).unwrap();
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(EditorPersistenceCommand::Reopen { document: Some(q) }),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         assert!(matches!(
             settle(&mut editor),
             EditorPersistenceResult::Opened { .. }
@@ -1750,12 +1762,12 @@ fn refresh_checks_later_sources_and_supersedes_only_the_same_source_obligation()
     let original_content = editor.trusted_compiled().unwrap().snapshot.revision();
     for (document, entity) in [(p, "p-first"), (q, "q-saved"), (p, "p-later")] {
         edit(&mut editor, document, entity);
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(EditorPersistenceCommand::Save {
                 document: Some(document)
             }),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         assert!(matches!(
             settle(&mut editor),
             EditorPersistenceResult::Saved { .. }
@@ -1784,10 +1796,10 @@ fn refresh_checks_later_sources_and_supersedes_only_the_same_source_obligation()
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Reopen { document: Some(p) }),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     assert!(matches!(
         settle(&mut editor),
         EditorPersistenceResult::Opened { .. }
@@ -1800,10 +1812,10 @@ fn refresh_checks_later_sources_and_supersedes_only_the_same_source_obligation()
         diagnostic.code().as_str() == "project.content.saved-prefab-outside-closure"
     });
     fs::write(scene, startup).unwrap();
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Reopen { document: Some(p) }),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     assert!(matches!(
         settle(&mut editor),
         EditorPersistenceResult::Opened { .. }

@@ -32,12 +32,12 @@ fn held_save_keeps_its_captured_source_through_preview_epochs_and_reopen() {
         let captured_revision = editor.workspace.document_revision(document).unwrap();
         let mut previous = preview_publication(&mut editor);
         let gate = editor.hold_next_save(SaveTestPhase::BeforePublication);
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(EditorPersistenceCommand::Save {
                 document: Some(document)
             }),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         editor.advance_persistence();
         assert!(gate.wait_until_started());
 
@@ -46,8 +46,11 @@ fn held_save_keeps_its_captured_source_through_preview_epochs_and_reopen() {
             let next = preview_publication(&mut editor);
             assert_eq!(next.0, previous.0);
             assert_ne!(next.1, previous.1);
-            assert!(editor.pending_persistence.is_some());
-            assert!(editor.persistence_result.is_none());
+            assert!(matches!(
+                editor.persistence_view(),
+                EditorPersistenceView::Pending { .. }
+            ));
+            assert!(editor.persistence_view().result().is_none());
             assert!(
                 !fs::read_to_string(fixture.root.join("scenes/startup.scene.json"))
                     .unwrap()
@@ -73,12 +76,12 @@ fn held_save_keeps_its_captured_source_through_preview_epochs_and_reopen() {
         );
 
         acknowledge(&mut editor);
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(EditorPersistenceCommand::Reopen {
                 document: Some(document)
             }),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         assert!(
             matches!(settle(&mut editor), EditorPersistenceResult::Opened { document: opened, .. } if opened == document)
         );

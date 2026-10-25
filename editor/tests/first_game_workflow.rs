@@ -219,7 +219,12 @@ fn independent_game_edits_reopens_plays_and_recovers_from_compile_failure() {
     );
     let acknowledged = dispatch(
         &mut application,
-        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+            attempt: saved
+                .persistence()
+                .attempt()
+                .expect("the observed persistence result is terminal"),
+        }),
     );
     assert!(acknowledged.persistence().result().is_none());
     close_application(&mut application);
@@ -664,7 +669,12 @@ fn prove_external_creation_composition(root: &Path, baseline_player_x: f64) {
         };
         dispatch(
             &mut application,
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+                attempt: saved
+                    .persistence()
+                    .attempt()
+                    .expect("the observed persistence result is terminal"),
+            }),
         );
         let reopened = dispatch(
             &mut application,
@@ -695,7 +705,12 @@ fn prove_external_creation_composition(root: &Path, baseline_player_x: f64) {
         );
         let acknowledged = dispatch(
             &mut application,
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+                attempt: reopened
+                    .persistence()
+                    .attempt()
+                    .expect("the observed persistence result is terminal"),
+            }),
         );
         assert!(acknowledged.persistence().result().is_none());
     }
@@ -808,7 +823,12 @@ fn edit_saved_player_prefab(
         };
         dispatch(
             application,
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+                attempt: saved
+                    .persistence()
+                    .attempt()
+                    .expect("the observed persistence result is terminal"),
+            }),
         );
         let reopened = dispatch(
             application,
@@ -851,7 +871,12 @@ fn edit_saved_player_prefab(
         }
         dispatch(
             application,
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+                attempt: reopened
+                    .persistence()
+                    .attempt()
+                    .expect("the observed persistence result is terminal"),
+            }),
         );
     }
     let restored_prefab: Value = serde_json::from_slice(&fs::read(&prefab_path).unwrap()).unwrap();
@@ -1282,8 +1307,10 @@ fn dispatch(application: &mut EditorApplication, action: EditorAction) -> Arc<Ed
     );
     assert!(update.update().actions_observed());
     let deadline = Instant::now() + Duration::from_secs(10);
-    while current_frame(application).persistence().operation()
-        != nara::tooling::EditorPersistenceOperation::Idle
+    while current_frame(application)
+        .persistence()
+        .operation()
+        .is_some()
     {
         assert!(Instant::now() < deadline, "persistence did not settle");
         let frame = current_frame(application);

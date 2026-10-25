@@ -12,7 +12,7 @@ use nara::{
     project_host::{EditorUiAuthoringFrame, TrustedCompiledEditorProjectIntent},
     reflect::ComponentValue,
     render::DisplayRect,
-    tooling::{EditorPersistenceOperation, EditorPersistenceResult},
+    tooling::EditorPersistenceResult,
     ui::__private::{
         UiAuthoringCanvasProjection, UiAuthoringDimensionKind, UiAuthoringFieldValue,
         UiAuthoringHierarchyKind,
@@ -548,9 +548,11 @@ impl CanvasWorkflow<'_> {
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
             self.paint(|_| {})?;
-            if self.application.current_frame().is_some_and(|frame| {
-                frame.persistence().operation() == EditorPersistenceOperation::Idle
-            }) {
+            if self
+                .application
+                .current_frame()
+                .is_some_and(|frame| frame.persistence().operation().is_none())
+            {
                 return Ok(());
             }
             if Instant::now() >= deadline {

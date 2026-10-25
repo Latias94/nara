@@ -1,7 +1,8 @@
 # Exact Editor Persistence Attempts
 
-Status: implementation recommendation for foundation R1/F2, not an Accepted contract or
-implementation qualification. Reconcile ADRs 0047/0118 before changing the owning interface.
+Status: implemented foundation R1/F2 contract under ADRs 0047/0118, with
+[scoped owner, independent-consumer and selected Windows/DX12 qualification](../knowledge/engineering/verification/2026-10/2026-10-25T081443Z-exact-persistence-attempts-and-terminal-observation-qualification-332f36f3c0f94f93ae1eb2721e981359.md).
+This does not complete R1 or the foundation rebaseline; the design alone is not execution evidence.
 Baseline: `1c7956908831742542261617354030cce9021c2e`, 2026-10-25.
 
 ## Problem And First Principles
@@ -12,13 +13,13 @@ the same revision. Neither content equality nor the current frame identifies whi
 observer has actually seen. Acknowledgment consumes an observation; it is not a new Save and must
 name the observation it consumes.
 
-Current `EditorPersistenceAction::AcknowledgeResult` and `EditorPersistenceCommand::AcknowledgeResult`
+At the baseline, `EditorPersistenceAction::AcknowledgeResult` and `EditorPersistenceCommand::AcknowledgeResult`
 carry no identity. The concrete owner calls `persistence_result.take()` when no worker is pending.
 An observer holding result A can therefore clear later result B, including an identical-looking
 failure. This is terminal-observation/interface loss, not evidence that saved bytes are lost.
 R1a's owned direct dispatch observations already solve a different problem and remain unchanged.
 
-The private owner separately stores `pending_persistence`, `persistence_operation` and
+The baseline private owner separately stores `pending_persistence`, `persistence_operation` and
 `persistence_result`. They describe one attempt lifecycle. Introducing an ID field alongside all
 three would leave association dependent on keeping several independently writable slots aligned.
 Prefer one concrete lifecycle state rather than a general request registry or result bus.
@@ -67,7 +68,7 @@ Source evidence:
 
 ## Selected Shape
 
-Names are provisional until implementation; the semantic states are the recommendation.
+The concrete interface implements the following states; qualification remains separate.
 
 - `EditorPersistenceAttemptId` is an opaque Copy/Eq value containing existing session provenance
   and a checked, monotonic local sequence. The existing frame source gives Host provenance;
@@ -80,9 +81,9 @@ Names are provisional until implementation; the semantic states are the recommen
 - Public projection mirrors Idle/Pending/Terminal as an immutable value. Pending operation metadata
   has only Saving/Opening, not an Idle variant nested inside Pending. Terminal payloads remain
   existing domain-specific Saved/Opened/Rejected/Failed/PersistenceUncertain facts.
-- Dispatch distinguishes an accepted attempt, an immediate rejection with its published attempt,
-  and a nonpublishing refusal. An exact acknowledgment has its own outcome and does not allocate
-  an attempt. Prefer explicit sum variants over a boolean plus unrelated optional identity fields.
+- Dispatch uses `Accepted { attempt }`, published `Rejected { attempt, reason }`, nonpublishing
+  `Refused(reason)` and exact `Acknowledged { attempt }`. Acknowledgment allocates no attempt.
+  These sum variants replace a boolean plus unrelated optional identity fields.
 - Both public action and concrete command require the attempt in `AcknowledgeResult`. Do not keep
   the old payload-free variant, convenience wrapper or alias. Renderer and tool callers use the
   identity from the observed terminal, not a freshly sampled current result at click/dispatch time.

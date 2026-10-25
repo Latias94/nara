@@ -414,7 +414,12 @@ fn ordinary_generic_open_preserves_degraded_source_through_reopen_and_recovery()
 
     let _ = dispatch(
         &mut application,
-        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+            attempt: saved
+                .persistence()
+                .attempt()
+                .expect("the observed persistence result is terminal"),
+        }),
     );
     let closed = dispatch(
         &mut application,
@@ -536,8 +541,10 @@ fn dispatch(
     );
     assert!(update.update().actions_observed());
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while current_frame(application).persistence().operation()
-        != nara::tooling::EditorPersistenceOperation::Idle
+    while current_frame(application)
+        .persistence()
+        .operation()
+        .is_some()
     {
         assert!(
             std::time::Instant::now() < deadline,

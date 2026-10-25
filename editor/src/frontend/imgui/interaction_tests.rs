@@ -343,16 +343,11 @@ impl Interaction {
 
     fn settle_persistence(&mut self) {
         let deadline = Instant::now() + Duration::from_secs(10);
-        while self.frame().persistence().operation() != EditorPersistenceOperation::Idle
-            && Instant::now() < deadline
-        {
+        while self.frame().persistence().operation().is_some() && Instant::now() < deadline {
             self.render();
             std::thread::sleep(Duration::from_millis(1));
         }
-        assert_eq!(
-            self.frame().persistence().operation(),
-            EditorPersistenceOperation::Idle
-        );
+        assert_eq!(self.frame().persistence().operation(), None);
         self.render();
     }
 
@@ -657,13 +652,13 @@ fn dirty_close_does_not_offer_a_decision_after_save_has_started() {
             frame.project_readiness(),
             frame.project_browser().clone(),
             frame.play().clone(),
-            nara::tooling::EditorPersistenceView::new(
-                EditorPersistenceOperation::Saving {
+            nara::tooling::EditorPersistenceView::Pending {
+                attempt: nara::tooling::EditorPersistenceAttemptId::new(frame.revision(), 1),
+                operation: EditorPersistenceOperation::Saving {
                     document,
                     captured_revision: frame.workspace().document(document).unwrap().revision,
                 },
-                None,
-            ),
+            },
             frame.project_content(),
             nara::tooling::EditorWorkspaceIntentView::new(
                 Some(EditorWorkspaceIntent::CloseDocument { document }),

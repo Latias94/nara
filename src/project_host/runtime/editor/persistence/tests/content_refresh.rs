@@ -6,12 +6,12 @@ use nara_tooling::{
 
 fn save_entity(editor: &mut EditorProjectSession, document: EditorDocumentId, entity: &str) {
     edit(editor, document, entity);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document)
         }),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     assert!(matches!(
         settle(editor),
         EditorPersistenceResult::Saved { .. }

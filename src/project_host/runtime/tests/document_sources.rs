@@ -53,10 +53,10 @@ fn browser_prefab_save_and_reopen_keep_the_anchor_source_observation_after_close
                 document: Some(prefab),
             }
         };
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(command),
-            nara_tooling::EditorPersistenceRequestResult::Accepted
-        );
+            nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+        ));
         drive_persistence_to_terminal(&mut editor);
         let result = editor.persistence_view().result();
         assert!(
@@ -67,10 +67,15 @@ fn browser_prefab_save_and_reopen_keep_the_anchor_source_observation_after_close
             },
             "{result:?}"
         );
-        assert_eq!(
-            editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-            nara_tooling::EditorPersistenceRequestResult::Accepted
-        );
+        assert!(matches!(
+            editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+                attempt: editor
+                    .persistence_view()
+                    .attempt()
+                    .expect("the test observed a terminal persistence result")
+            }),
+            nara_tooling::EditorPersistenceRequestResult::Acknowledged { .. }
+        ));
         assert_eq!(
             editor.request_workspace_intent(EditorWorkspaceIntent::CloseDocument {
                 document: prefab
@@ -488,12 +493,12 @@ fn trusted_anchored_prefabs_keep_independent_dirty_sources_and_exact_save_receip
         let other_bytes = fs::read(&other_path).unwrap();
         let other_before = editor.workspace_model().document(other).unwrap().clone();
         let revision = editor.workspace().document_revision(document).unwrap();
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(EditorPersistenceCommand::Save {
                 document: Some(document)
             }),
-            nara_tooling::EditorPersistenceRequestResult::Accepted
-        );
+            nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+        ));
         let saved = drive_persistence_to_terminal(&mut editor);
         let bytes = fs::read(project.root.join(format!("prefabs/{name}.prefab.json"))).unwrap();
         let digest = crate::project_host::persistence::editor_digest(
@@ -526,10 +531,15 @@ fn trusted_anchored_prefabs_keep_independent_dirty_sources_and_exact_save_receip
                 document: observed, revision: observed_revision, saved_digest, ..
             } if observed == document && observed_revision == revision && saved_digest == digest
         ));
-        assert_eq!(
-            editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-            nara_tooling::EditorPersistenceRequestResult::Accepted
-        );
+        assert!(matches!(
+            editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+                attempt: editor
+                    .persistence_view()
+                    .attempt()
+                    .expect("the test observed a terminal persistence result")
+            }),
+            nara_tooling::EditorPersistenceRequestResult::Acknowledged { .. }
+        ));
         let deadline = Instant::now() + Duration::from_secs(5);
         while !editor.current_frame().project_content().is_current() {
             assert!(

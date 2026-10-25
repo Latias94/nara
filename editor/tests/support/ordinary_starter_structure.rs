@@ -5,9 +5,8 @@ use nara::{
     reflect::ComponentTypeId,
     scene::{SceneEntityId, ScenePlacement, ScenePlacementOwner},
     tooling::{
-        EditorDocumentMutation, EditorPersistenceAction, EditorPersistenceOperation,
-        EditorPersistenceResult, EditorReopenTarget, SceneCompositionCommand,
-        SceneCompositionEntityKind,
+        EditorDocumentMutation, EditorPersistenceAction, EditorPersistenceResult,
+        EditorReopenTarget, SceneCompositionCommand, SceneCompositionEntityKind,
     },
 };
 
@@ -85,9 +84,13 @@ pub(super) fn arrange_save_reopen_and_check(
     );
     let saved = std::fs::read(&source).unwrap();
     assert_ne!(saved, initial_bytes);
+    let attempt = current_frame(application)
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
     dispatch(
         application,
-        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
     );
     dispatch(
         application,
@@ -115,9 +118,13 @@ pub(super) fn arrange_save_reopen_and_check(
             .total_count(),
         0
     );
+    let attempt = current_frame(application)
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
     dispatch(
         application,
-        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
     );
     check_project(
         ProjectCheckRequest::new(project.capability(), ProductRecipe::new())
@@ -239,7 +246,10 @@ fn dispatch(application: &mut EditorApplication, action: EditorAction) {
 fn settle(application: &mut EditorApplication) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        if current_frame(application).persistence().operation() == EditorPersistenceOperation::Idle
+        if current_frame(application)
+            .persistence()
+            .operation()
+            .is_none()
         {
             return;
         }

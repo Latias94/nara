@@ -10,9 +10,7 @@ use std::{
 use dear_imgui_rs::{ConfigFlags, Context, Key, MouseButton};
 use nara::{
     reflect::ComponentValue,
-    tooling::{
-        EditorDocumentKind, EditorFrameModel, EditorPersistenceOperation, EditorPersistenceResult,
-    },
+    tooling::{EditorDocumentKind, EditorFrameModel, EditorPersistenceResult},
 };
 use winit::{
     application::ApplicationHandler,
@@ -336,7 +334,7 @@ impl AuthoringWorkflow<'_> {
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
             self.paint(|_| {})?;
-            if self.frame()?.persistence().operation() == EditorPersistenceOperation::Idle {
+            if self.frame()?.persistence().operation().is_none() {
                 return Ok(());
             }
             if Instant::now() >= deadline {

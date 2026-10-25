@@ -781,12 +781,12 @@ fn editor_no_play_workflow_keeps_one_plan_owned_schema_snapshot() {
     assert!(report.applied);
     assert!(expected.ptr_eq(&editor.test_schema_snapshot()));
 
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Reopen {
             document: Some(document),
         }),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+        nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+    ));
     drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
         editor.persistence_view().result(),
@@ -1063,7 +1063,9 @@ logical_height = 540
         .unwrap();
     assert!(matches!(
         save_report.outcomes()[0],
-        EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(
+            nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+        )
     ));
     let saved_frame = drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
@@ -1131,7 +1133,12 @@ logical_height = 540
         .dispatch_editor_actions(EditorActionBatch::new(
             stale_frame.revision(),
             [
-                EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+                EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+                    attempt: stale_frame
+                        .persistence()
+                        .attempt()
+                        .expect("the observed persistence result is terminal"),
+                }),
                 EditorAction::Persistence(EditorPersistenceAction::Reopen {
                     target: stale_frame.reopen_target(),
                 }),
@@ -1140,11 +1147,15 @@ logical_height = 540
         .unwrap();
     assert!(matches!(
         reconcile.outcomes()[0],
-        EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(
+            nara_tooling::EditorPersistenceRequestResult::Acknowledged { .. }
+        )
     ));
     assert!(matches!(
         reconcile.outcomes()[1],
-        EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(
+            nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+        )
     ));
     let reconciled_frame = drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
@@ -1155,13 +1166,20 @@ logical_height = 540
         .dispatch_editor_actions(EditorActionBatch::new(
             reconciled_frame.revision(),
             [EditorAction::Persistence(
-                EditorPersistenceAction::AcknowledgeResult,
+                EditorPersistenceAction::AcknowledgeResult {
+                    attempt: reconciled_frame
+                        .persistence()
+                        .attempt()
+                        .expect("the observed persistence result is terminal"),
+                },
             )],
         ))
         .unwrap();
     assert!(matches!(
         acknowledged.outcomes()[0],
-        EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(
+            nara_tooling::EditorPersistenceRequestResult::Acknowledged { .. }
+        )
     ));
     let refreshed_frame = editor.drive_editor_frame(Duration::ZERO);
     assert!(matches!(
@@ -1209,7 +1227,9 @@ logical_height = 540
         .unwrap();
     assert!(matches!(
         reopen_report.outcomes()[0],
-        EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(
+            nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+        )
     ));
     let reopened_frame = drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
@@ -1271,7 +1291,12 @@ logical_height = 540
         .dispatch_editor_actions(EditorActionBatch::new(
             exit_frame.revision(),
             [
-                EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+                EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+                    attempt: exit_frame
+                        .persistence()
+                        .attempt()
+                        .expect("the observed persistence result is terminal"),
+                }),
                 EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::AcknowledgeResult),
                 EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Request(
                     EditorWorkspaceIntent::Exit,
@@ -2558,12 +2583,12 @@ fn scene_save_cleanup_blocks_session_close_until_retry() {
             .applied
     );
     editor.test_fail_next_save_after_write(document);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document),
         }),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+        nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+    ));
     drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
         editor.persistence_view().result(),
@@ -3275,12 +3300,12 @@ fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successo
         )
     );
 
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document),
         }),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+        nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+    ));
     let saved = drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
         editor.persistence_view().result(),
@@ -4200,10 +4225,15 @@ fn additive_scene_open_preserves_dirty_documents_and_close_targets_cancel_discar
             .contains("saved-before-close")
     );
     assert!(editor.acknowledge_workspace_intent_result());
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+    assert!(matches!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+            attempt: editor
+                .persistence_view()
+                .attempt()
+                .expect("the test observed a terminal persistence result")
+        }),
+        nara_tooling::EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
 
     let refreshed = refresh_project_source_index(&mut editor);
     let reopened = opened_document(editor.open_indexed_authoring_document(
@@ -4533,7 +4563,9 @@ fn authoring_prefab_source_survives_failed_publication_close_and_reopen() {
         .unwrap();
     assert!(matches!(
         save.outcomes()[0],
-        EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(
+            nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+        )
     ));
     drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
@@ -5663,12 +5695,12 @@ fn failed_and_uncertain_saves_do_not_advance_workspace_persistence_state() {
         document,
         nara_tooling::EditorPersistenceFailureStage::Encode,
     );
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document),
         }),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+        nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+    ));
     drive_persistence_to_terminal(&mut editor);
     assert!(matches!(
         editor.persistence_view().result(),
@@ -5683,17 +5715,22 @@ fn failed_and_uncertain_saves_do_not_advance_workspace_persistence_state() {
     assert_eq!(slot.saved_digest(), saved_digest);
     assert!(slot.is_dirty());
 
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+    assert!(matches!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+            attempt: editor
+                .persistence_view()
+                .attempt()
+                .expect("the test observed a terminal persistence result")
+        }),
+        nara_tooling::EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
     editor.test_reject_next_valid_persistence_receipt(document);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document),
         }),
-        nara_tooling::EditorPersistenceRequestResult::Accepted
-    );
+        nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+    ));
     drive_persistence_to_terminal(&mut editor);
     let uncertain_result = editor.persistence_view().result();
     assert!(

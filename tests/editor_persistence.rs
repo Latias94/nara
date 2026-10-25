@@ -216,13 +216,13 @@ fn save_advances_only_the_captured_revision_then_close_releases_the_lane() {
             }),
         ],
     );
-    assert_eq!(
+    assert!(matches!(
         outcomes[0],
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
-    );
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
+    ));
     assert_eq!(
         outcomes[1],
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Rejected(
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Refused(
             EditorPersistenceRejection::Busy,
         ))
     );
@@ -302,20 +302,22 @@ fn save_advances_only_the_captured_revision_then_close_releases_the_lane() {
     let outcomes = editor_driver::dispatch(
         &mut editor,
         [
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+                attempt: first.attempt().expect("the observed Save is terminal"),
+            }),
             EditorAction::Persistence(EditorPersistenceAction::Save {
                 document,
                 base_revision: save_revision,
             }),
         ],
     );
-    assert_eq!(
-        outcomes,
+    assert!(matches!(
+        outcomes.as_slice(),
         [
-            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted),
-            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted),
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Acknowledged { .. }),
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. }),
         ]
-    );
+    ));
     assert!(matches!(
         editor_driver::drive_persistence_until_result(&mut editor)
             .persistence()
@@ -330,13 +332,18 @@ fn save_advances_only_the_captured_revision_then_close_releases_the_lane() {
             .unwrap()
             .dirty
     );
-    assert_eq!(
+    let attempt = editor
+        .current_frame()
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
+    assert!(matches!(
         editor_driver::request_persistence(
             &mut editor,
-            EditorPersistenceCommand::AcknowledgeResult,
+            EditorPersistenceCommand::AcknowledgeResult { attempt },
         ),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
 
     assert_eq!(
@@ -395,15 +402,15 @@ fn external_write_rejects_save_and_preserves_dirty_document() {
     )
     .unwrap();
 
-    assert_eq!(
+    assert!(matches!(
         editor_driver::request_persistence(
             &mut editor,
             EditorPersistenceCommand::Save {
                 document: Some(document),
             },
         ),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     assert_eq!(
         editor_driver::drive_persistence_until_result(&mut editor)
             .persistence()
@@ -421,15 +428,15 @@ fn external_write_rejects_save_and_preserves_dirty_document() {
     assert!(disk.contains("external"));
     assert!(!disk.contains("local"));
 
-    assert_eq!(
+    assert!(matches!(
         editor_driver::request_persistence(
             &mut editor,
             EditorPersistenceCommand::Save {
                 document: Some(document),
             },
         ),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     assert!(matches!(
         editor_driver::drive_persistence_until_result(&mut editor)
             .persistence()
@@ -465,15 +472,15 @@ fn explicit_reopen_reconciles_a_dirty_document_from_persisted_bytes() {
             .dirty
     );
 
-    assert_eq!(
+    assert!(matches!(
         editor_driver::request_persistence(
             &mut editor,
             EditorPersistenceCommand::Reopen {
                 document: Some(document),
             },
         ),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     let reopened = editor_driver::drive_persistence_until_result(&mut editor).persistence();
     assert!(matches!(
         reopened.result(),
@@ -522,15 +529,15 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
     };
 
     fs::write(project.scene_path(), b"{ malformed").unwrap();
-    assert_eq!(
+    assert!(matches!(
         editor_driver::request_persistence(
             &mut editor,
             EditorPersistenceCommand::Reopen {
                 document: Some(document),
             },
         ),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     assert_eq!(
         editor_driver::drive_persistence_until_result(&mut editor)
             .persistence()
@@ -543,13 +550,18 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
     );
     assert_preserved(&editor);
 
-    assert_eq!(
+    let attempt = editor
+        .current_frame()
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
+    assert!(matches!(
         editor_driver::request_persistence(
             &mut editor,
-            EditorPersistenceCommand::AcknowledgeResult,
+            EditorPersistenceCommand::AcknowledgeResult { attempt },
         ),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     let duplicate = scene_id("duplicate");
     fs::write(
@@ -562,15 +574,15 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
         .unwrap(),
     )
     .unwrap();
-    assert_eq!(
+    assert!(matches!(
         editor_driver::request_persistence(
             &mut editor,
             EditorPersistenceCommand::Reopen {
                 document: Some(document),
             },
         ),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     assert_eq!(
         editor_driver::drive_persistence_until_result(&mut editor)
             .persistence()
@@ -583,24 +595,29 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
     );
     assert_preserved(&editor);
 
-    assert_eq!(
+    let attempt = editor
+        .current_frame()
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
+    assert!(matches!(
         editor_driver::request_persistence(
             &mut editor,
-            EditorPersistenceCommand::AcknowledgeResult,
+            EditorPersistenceCommand::AcknowledgeResult { attempt },
         ),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     fs::remove_file(project.scene_path()).unwrap();
-    assert_eq!(
+    assert!(matches!(
         editor_driver::request_persistence(
             &mut editor,
             EditorPersistenceCommand::Reopen {
                 document: Some(document),
             },
         ),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     assert_eq!(
         editor_driver::drive_persistence_until_result(&mut editor)
             .persistence()
@@ -613,24 +630,29 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
     );
     assert_preserved(&editor);
 
-    assert_eq!(
+    let attempt = editor
+        .current_frame()
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
+    assert!(matches!(
         editor_driver::request_persistence(
             &mut editor,
-            EditorPersistenceCommand::AcknowledgeResult,
+            EditorPersistenceCommand::AcknowledgeResult { attempt },
         ),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     fs::create_dir(project.scene_path()).unwrap();
-    assert_eq!(
+    assert!(matches!(
         editor_driver::request_persistence(
             &mut editor,
             EditorPersistenceCommand::Reopen {
                 document: Some(document),
             },
         ),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     assert!(matches!(
         editor_driver::drive_persistence_until_result(&mut editor)
             .persistence()
@@ -644,25 +666,30 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
     ));
     assert_preserved(&editor);
 
-    assert_eq!(
+    let attempt = editor
+        .current_frame()
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
+    assert!(matches!(
         editor_driver::request_persistence(
             &mut editor,
-            EditorPersistenceCommand::AcknowledgeResult,
+            EditorPersistenceCommand::AcknowledgeResult { attempt },
         ),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     fs::remove_dir(project.scene_path()).unwrap();
     fs::write(project.scene_path(), original_bytes).unwrap();
-    assert_eq!(
+    assert!(matches!(
         editor_driver::request_persistence(
             &mut editor,
             EditorPersistenceCommand::Reopen {
                 document: Some(document),
             },
         ),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     assert!(matches!(
         editor_driver::drive_persistence_until_result(&mut editor)
             .persistence()
@@ -883,13 +910,16 @@ fn reopen_rejects_while_a_runtime_owner_is_live() {
     );
     drive_play_until(&mut editor, EditorPlayState::Running);
 
-    assert_eq!(
+    assert!(matches!(
         editor_driver::request_persistence(
             &mut editor,
             EditorPersistenceCommand::Reopen { document: None },
         ),
-        EditorPersistenceRequestResult::Rejected(EditorPersistenceRejection::RuntimeActive)
-    );
+        EditorPersistenceRequestResult::Rejected {
+            reason: EditorPersistenceRejection::RuntimeActive,
+            ..
+        }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(
         editor.current_frame().persistence().result(),
@@ -899,13 +929,18 @@ fn reopen_rejects_while_a_runtime_owner_is_live() {
             reason: EditorPersistenceRejection::RuntimeActive,
         })
     );
-    assert_eq!(
+    let attempt = editor
+        .current_frame()
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
+    assert!(matches!(
         editor_driver::request_persistence(
             &mut editor,
-            EditorPersistenceCommand::AcknowledgeResult,
+            EditorPersistenceCommand::AcknowledgeResult { attempt },
         ),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(
         editor_driver::request_play(&mut editor, EditorPlayCommand::Stop),

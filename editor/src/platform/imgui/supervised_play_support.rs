@@ -322,7 +322,12 @@ impl SupervisedPlayTestFixture {
                 self.first_saved_revision = Some(revision);
                 self.transition(SupervisedPlayTestStage::AwaitingFirstSaveAcknowledgement);
                 Ok(SupervisedPlayTestAdvance::action(
-                    EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+                    EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+                        attempt: frame
+                            .persistence()
+                            .attempt()
+                            .expect("the observed Save is terminal"),
+                    }),
                 ))
             }
             SupervisedPlayTestStage::AwaitingFirstSaveAcknowledgement => {
@@ -541,7 +546,12 @@ impl SupervisedPlayTestFixture {
                 self.successor_saved_revision = Some(revision);
                 self.transition(SupervisedPlayTestStage::AwaitingSuccessorSaveAcknowledgement);
                 Ok(SupervisedPlayTestAdvance::action(
-                    EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+                    EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+                        attempt: frame
+                            .persistence()
+                            .attempt()
+                            .expect("the observed Save is terminal"),
+                    }),
                 ))
             }
             SupervisedPlayTestStage::AwaitingSuccessorSaveAcknowledgement => {

@@ -23,11 +23,10 @@ use nara::{
     scene::UnavailableRecordManifest,
     tooling::{
         EditorAction, EditorActionBatch, EditorActionBatchReport, EditorActionOutcome,
-        EditorActionRejection, EditorFrameModel, EditorPersistenceOperation,
-        EditorPersistenceResult, EditorPlayAction, EditorProjectBrowserLocalAction,
-        EditorWorkspaceIntent, EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase,
-        EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
-        EditorWorkspaceIntentResult,
+        EditorActionRejection, EditorFrameModel, EditorPersistenceResult, EditorPlayAction,
+        EditorProjectBrowserLocalAction, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
+        EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection,
+        EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult,
     },
 };
 use thiserror::Error;
@@ -1565,7 +1564,7 @@ impl EditorApplication {
                 }
             }
             _ if frame.workspace_intent().intent().is_none()
-                && frame.persistence().operation() == EditorPersistenceOperation::Idle =>
+                && frame.persistence().operation().is_none() =>
             {
                 // Persistence may have kept the initial Exit request Busy. Retain the user's
                 // retirement intent and admit it only after that operation has settled.
@@ -1678,12 +1677,15 @@ impl EditorApplication {
                 // Finish admitted persistence before preparing a replacement, so its source
                 // and the retained workspace cannot straddle two publication attempts.
                 if matches!(&opening.step, OpeningProjectStep::ProjectRoot)
-                    && retained.session.persistence_view().operation()
-                        != EditorPersistenceOperation::Idle
+                    && retained.session.persistence_view().operation().is_some()
                 {
                     let observed = drive_project_frame(&mut retained, Duration::ZERO, false);
-                    if retained.session.current_frame().persistence().operation()
-                        != EditorPersistenceOperation::Idle
+                    if retained
+                        .session
+                        .current_frame()
+                        .persistence()
+                        .operation()
+                        .is_some()
                     {
                         return (
                             EditorProductState::OpeningReplacement(
@@ -2402,7 +2404,7 @@ mod tests {
                 ),
                 Default::default(),
                 EditorPlayView::new(EditorPlayState::Empty, None, None, None, false, None),
-                EditorPersistenceView::new(EditorPersistenceOperation::Idle, None),
+                EditorPersistenceView::Idle,
                 EditorProjectContentView::NotInstalled,
                 EditorWorkspaceIntentView::new(None, None, None, None, None),
             ),

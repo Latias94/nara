@@ -560,7 +560,9 @@ pub enum EditorPersistenceAction {
     Reopen {
         target: EditorReopenTarget,
     },
-    AcknowledgeResult,
+    AcknowledgeResult {
+        attempt: crate::EditorPersistenceAttemptId,
+    },
 }
 
 /// Dirty-close and exit arbitration actions.

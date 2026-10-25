@@ -1056,7 +1056,9 @@ fn generic_editor_saves_an_imported_asset_ref_and_hydrates_the_same_recipe_on_re
         .unwrap();
     assert!(matches!(
         save.outcomes()[0],
-        EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(
+            nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+        )
     ));
     drive_persistence_to_terminal(&mut editor);
     assert!(matches!(

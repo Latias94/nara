@@ -78,6 +78,13 @@ participant before the session reports Complete. A failed document Close/Save pr
 document and its file custody for another explicit decision. Physical Host custody survives task
 completion and panel retirement through the existing close participant.
 
+Persistence adapters use ADR 0047's exact attempt correlation. The observed terminal supplies the
+identity for acknowledgment; a deferred button/tool action must not sample the latest result to
+replace that identity. Admission, immediate published rejection, nonpublishing refusal and exact
+acknowledgment have distinct outcomes. A stale frame may acknowledge its still-current exact
+terminal, but cannot dismiss a successor. No result bus, observer registry or payload-free
+acknowledgment substitutes for the concrete owner. Source/file receipts remain separate proofs.
+
 Scene and Prefab file custody is also keyed by the exact open document, using their concrete
 lane types rather than an erased document store. An operation retains its captured Host instead
 of resolving another same-kind lane at completion. Document storage, active navigation, Scene

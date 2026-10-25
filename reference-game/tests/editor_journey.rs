@@ -179,7 +179,7 @@ fn unsaved_editor_source_survives_retry_then_save_close_and_reopen() {
                 base_revision: edited_revision,
             }),
         ),
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
     ));
     let saved_frame = editor_persistence_driver::drive_until_result(&mut editor);
     assert!(matches!(
@@ -194,9 +194,11 @@ fn unsaved_editor_source_survives_retry_then_save_close_and_reopen() {
         dispatch_editor_action(
             &mut editor,
             &saved_frame,
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+                attempt: saved_frame.persistence().attempt().unwrap(),
+            }),
         ),
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Acknowledged { .. })
     ));
     assert_ne!(project.scene_bytes(), source_bytes);
 

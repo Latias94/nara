@@ -9,8 +9,7 @@ use std::{
 use dear_imgui_rs::{ConfigFlags, MouseButton};
 use nara::tooling::{
     EditorAction, EditorActionBatch, EditorActionOutcome, EditorCloseDecision, EditorDocumentKind,
-    EditorPersistenceOperation, EditorPlayAction, EditorPlayOperation, EditorPlayOperationResult,
-    EditorWorkspaceIntentPhase,
+    EditorPlayAction, EditorPlayOperation, EditorPlayOperationResult, EditorWorkspaceIntentPhase,
 };
 use winit::{
     application::ApplicationHandler,
@@ -236,7 +235,7 @@ impl PlayButtonClick {
         let read_only = application.ordinary_input_locked();
         let can_request = !read_only
             && frame.workspace_intent().phase().is_none()
-            && frame.persistence().operation() == EditorPersistenceOperation::Idle;
+            && frame.persistence().operation().is_none();
         let content_ready = frame.project_content().is_current()
             && !frame
                 .workspace()

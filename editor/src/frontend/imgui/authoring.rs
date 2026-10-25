@@ -6,11 +6,11 @@ use nara::{
         EditorAction, EditorDocumentId, EditorDocumentKind, EditorDocumentMutation,
         EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
         EditorPersistenceOperation, EditorPersistenceRejection, EditorPersistenceRequestKind,
-        EditorPersistenceResult, EditorPlayState, EditorReopenTarget, EditorRuntimeAvailability,
-        EditorSceneModel, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
-        PrefabCompositionCommand, PrefabCompositionEntityDraft, SceneCompositionCommand,
-        SceneCompositionEntityKind, SceneInspectorComponentView, SceneInspectorEntityRow,
-        SceneInspectorFieldView,
+        EditorPersistenceResult, EditorPersistenceView, EditorPlayState, EditorReopenTarget,
+        EditorRuntimeAvailability, EditorSceneModel, EditorWorkspaceIntent,
+        EditorWorkspaceIntentAction, PrefabCompositionCommand, PrefabCompositionEntityDraft,
+        SceneCompositionCommand, SceneCompositionEntityKind, SceneInspectorComponentView,
+        SceneInspectorEntityRow, SceneInspectorFieldView,
     },
 };
 
@@ -124,7 +124,7 @@ impl ImguiAuthoringPanels {
             let persistence = frame.persistence();
             let idle = !self.read_only
                 && frame.workspace_intent().intent().is_none()
-                && persistence.operation() == EditorPersistenceOperation::Idle
+                && persistence.operation().is_none()
                 && (document.kind != EditorDocumentKind::Scene
                     || frame.play().state() == EditorPlayState::Empty
                     || matches!(
@@ -171,7 +171,7 @@ impl ImguiAuthoringPanels {
         } else {
             ui.text_disabled("No active document");
         }
-        if let Some(result) = frame.persistence().result() {
+        if let EditorPersistenceView::Terminal { attempt, result } = frame.persistence() {
             match result {
                 EditorPersistenceResult::Saved { .. } => ui.text("Saved"),
                 EditorPersistenceResult::Opened { .. } => ui.text("Reopened"),
@@ -193,11 +193,11 @@ impl ImguiAuthoringPanels {
             }
             if enabled_button(
                 ui,
-                frame.persistence().operation() == EditorPersistenceOperation::Idle,
+                frame.persistence().operation().is_none(),
                 "Dismiss persistence result",
             ) {
                 actions.push(EditorAction::Persistence(
-                    EditorPersistenceAction::AcknowledgeResult,
+                    EditorPersistenceAction::AcknowledgeResult { attempt },
                 ));
             }
         }
@@ -619,7 +619,7 @@ pub(super) fn editing_enabled(frame: &EditorFrameModel) -> bool {
     )) && frame.workspace_intent().intent().is_none()
         && matches!(
             frame.persistence().operation(),
-            EditorPersistenceOperation::Idle | EditorPersistenceOperation::Saving { .. }
+            None | Some(EditorPersistenceOperation::Saving { .. })
         )
 }
 
@@ -839,7 +839,7 @@ mod tests {
                 ),
                 Default::default(),
                 EditorPlayView::new(EditorPlayState::Empty, None, None, None, false, None),
-                EditorPersistenceView::new(EditorPersistenceOperation::Idle, None),
+                EditorPersistenceView::Idle,
                 EditorProjectContentView::NotInstalled,
                 EditorWorkspaceIntentView::new(None, None, None, None, None),
             ),
@@ -1080,18 +1080,43 @@ mod tests {
             .unwrap();
         let document = report.opened_document.unwrap();
         let revision = workspace.scene(document).unwrap().revision();
+        let mut clock = EditorFrameClock::new();
+        let source = clock.publish(
+            workspace.model(&ComponentRegistry::default(), None),
+            EditorProjectView::new(
+                EditorProjectReadinessView::new(
+                    EditorAuthoringReadiness::Complete,
+                    EditorRuntimeAvailability::TrustedInProcess,
+                ),
+                Default::default(),
+                EditorPlayView::new(EditorPlayState::Empty, None, None, None, false, None),
+                EditorPersistenceView::Idle,
+                EditorProjectContentView::NotInstalled,
+                EditorWorkspaceIntentView::new(None, None, None, None, None),
+            ),
+            Default::default(),
+            EditorReopenTarget::OpenDocument {
+                document,
+                base_revision: revision,
+            },
+            None,
+        );
+        let attempt = nara::tooling::EditorPersistenceAttemptId::new(source.revision(), 1);
         for (operation, editable) in [
-            (EditorPersistenceOperation::Idle, true),
+            (None, true),
             (
-                EditorPersistenceOperation::Saving {
+                Some(EditorPersistenceOperation::Saving {
                     document,
                     captured_revision: revision,
-                },
+                }),
                 true,
             ),
-            (EditorPersistenceOperation::Opening { document }, false),
+            (
+                Some(EditorPersistenceOperation::Opening { document }),
+                false,
+            ),
         ] {
-            let frame = EditorFrameClock::new().publish(
+            let frame = clock.publish(
                 workspace.model(&ComponentRegistry::default(), None),
                 EditorProjectView::new(
                     EditorProjectReadinessView::new(
@@ -1100,7 +1125,10 @@ mod tests {
                     ),
                     Default::default(),
                     EditorPlayView::new(EditorPlayState::Empty, None, None, None, false, None),
-                    EditorPersistenceView::new(operation, None),
+                    match operation {
+                        Some(operation) => EditorPersistenceView::Pending { attempt, operation },
+                        None => EditorPersistenceView::Idle,
+                    },
                     EditorProjectContentView::NotInstalled,
                     EditorWorkspaceIntentView::new(None, None, None, None, None),
                 ),

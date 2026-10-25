@@ -180,10 +180,15 @@ fn settle(editor: &mut EditorProjectSession) -> EditorPersistenceResult {
 }
 
 fn acknowledge(editor: &mut EditorProjectSession) {
+    let attempt = editor
+        .current_frame()
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
     dispatch(
         editor,
         [EditorAction::Persistence(
-            EditorPersistenceAction::AcknowledgeResult,
+            EditorPersistenceAction::AcknowledgeResult { attempt },
         )],
     );
 }
@@ -825,7 +830,7 @@ fn dialogue_uses_host_history_save_reopen_and_rejects_stale_completion() {
     );
     assert!(matches!(
         outcomes[0],
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
     ));
     assert!(
         matches!(settle(&mut editor), EditorPersistenceResult::Saved { revision: saved, .. } if saved == revision)
@@ -987,7 +992,6 @@ fn dialogue_uses_host_history_save_reopen_and_rejects_stale_completion() {
             .redo_depth,
         0
     );
-    acknowledge(&mut editor);
     let before = editor.current_frame();
     fs::write(project.root.join(SOURCE), b"not dialogue JSON").unwrap();
     let target = before.reopen_target();

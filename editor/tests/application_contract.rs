@@ -284,23 +284,23 @@ fn direct_submission_keeps_request_admission_distinct_from_failed_save_completio
         ),
         Duration::ZERO,
     );
-    assert_eq!(
+    assert!(matches!(
         submission.actions(),
         &[EditorApplicationActionDispatch::Dispatched(
-            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
         )]
-    );
+    ));
     settle_persistence(&mut application);
     assert!(matches!(
         current_frame(&application).persistence().result(),
         Some(EditorPersistenceResult::Rejected { .. } | EditorPersistenceResult::Failed { .. })
     ));
-    assert_eq!(
+    assert!(matches!(
         submission.actions(),
         &[EditorApplicationActionDispatch::Dispatched(
-            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
         )]
-    );
+    ));
     assert!(
         current_frame(&application)
             .workspace()
@@ -1418,8 +1418,10 @@ fn current_frame(application: &EditorApplication) -> Arc<nara::tooling::EditorFr
 
 fn settle_persistence(application: &mut EditorApplication) {
     let deadline = Instant::now() + Duration::from_secs(10);
-    while current_frame(application).persistence().operation()
-        != nara::tooling::EditorPersistenceOperation::Idle
+    while current_frame(application)
+        .persistence()
+        .operation()
+        .is_some()
     {
         assert!(Instant::now() < deadline, "persistence did not settle");
         let frame = current_frame(application);

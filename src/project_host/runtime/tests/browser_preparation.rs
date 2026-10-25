@@ -753,12 +753,12 @@ fn explicit_close_retries_synchronous_save_refusal_without_reviving_cancelled_op
     let mut editor = open_generic_editor_with_ready_index(&project);
     let document = editor.workspace().active_document().unwrap();
     make_authoring_name_dirty(&mut editor, document, "saved-checkpoint");
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document)
         }),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     let saved = drive_persistence_to_terminal(&mut editor);
     assert!(
         matches!(saved.persistence().result(), Some(EditorPersistenceResult::Saved { document: saved_document, .. }) if saved_document == document)
@@ -825,10 +825,15 @@ fn explicit_close_retries_synchronous_save_refusal_without_reviving_cancelled_op
         editor.workspace_intent_view().decision_prompt(),
         Some(retry)
     );
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-        EditorPersistenceRequestResult::Accepted
-    );
+    assert!(matches!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+            attempt: editor
+                .persistence_view()
+                .attempt()
+                .expect("the test observed a terminal persistence result")
+        }),
+        EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
     assert_eq!(
         workspace_action(&mut editor, retry.resolve(EditorCloseDecision::Save)),
         EditorWorkspaceIntentRequestResult::Accepted
@@ -862,10 +867,15 @@ fn explicit_close_retries_synchronous_save_refusal_without_reviving_cancelled_op
     assert!(returned.workspace().documents.is_empty());
     acknowledge_open(&mut editor, request);
     assert!(editor.acknowledge_workspace_intent_result());
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-        EditorPersistenceRequestResult::Accepted
-    );
+    assert!(matches!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+            attempt: editor
+                .persistence_view()
+                .attempt()
+                .expect("the test observed a terminal persistence result")
+        }),
+        EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
     close(&mut editor);
 }
 

@@ -506,7 +506,7 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
                 base_revision: saved_revision,
             }),
         ),
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
     ));
     let saved = editor_persistence_driver::drive_until_result(&mut editor);
     let saved_digest = match saved.persistence().result() {
@@ -531,9 +531,11 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
         dispatch(
             &mut editor,
             &saved,
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+                attempt: saved.persistence().attempt().unwrap(),
+            }),
         ),
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Acknowledged { .. })
     ));
     let refreshed = editor.drive_editor_frame(Duration::ZERO);
     assert!(matches!(
@@ -564,7 +566,7 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
                 target: refreshed.reopen_target(),
             }),
         ),
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
     ));
     let reopened = editor_persistence_driver::drive_until_result(&mut editor);
     assert!(matches!(
@@ -620,9 +622,11 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
         dispatch(
             &mut editor,
             &reopened,
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+                attempt: reopened.persistence().attempt().unwrap(),
+            }),
         ),
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Acknowledged { .. })
     ));
     let restart_frame = editor.drive_editor_frame(Duration::ZERO);
     assert!(matches!(

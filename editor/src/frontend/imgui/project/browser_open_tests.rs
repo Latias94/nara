@@ -4,10 +4,10 @@ use dear_imgui_rs::{Condition, Context, MouseButton};
 use nara::tooling::{
     EditorAction, EditorAuthoringReadiness, EditorDocumentId, EditorDocumentOpenId,
     EditorDocumentOpenPhase, EditorDocumentOpenResult, EditorDocumentOpenView, EditorFrameClock,
-    EditorFrameModel, EditorPersistenceOperation, EditorPersistenceView, EditorPlayState,
-    EditorPlayView, EditorProjectBrowserAction, EditorProjectContentView,
-    EditorProjectReadinessView, EditorProjectView, EditorReopenTarget, EditorRuntimeAvailability,
-    EditorWorkspace, EditorWorkspaceIntentView,
+    EditorFrameModel, EditorPersistenceView, EditorPlayState, EditorPlayView,
+    EditorProjectBrowserAction, EditorProjectContentView, EditorProjectReadinessView,
+    EditorProjectView, EditorReopenTarget, EditorRuntimeAvailability, EditorWorkspace,
+    EditorWorkspaceIntentView,
 };
 
 use super::show_document_open;
@@ -79,7 +79,7 @@ fn empty_frame() -> EditorFrameModel {
             ),
             Default::default(),
             EditorPlayView::new(EditorPlayState::Empty, None, None, None, false, None),
-            EditorPersistenceView::new(EditorPersistenceOperation::Idle, None),
+            EditorPersistenceView::Idle,
             EditorProjectContentView::NotInstalled,
             EditorWorkspaceIntentView::new(None, None, None, None, None),
         ),

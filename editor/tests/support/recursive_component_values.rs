@@ -261,10 +261,14 @@ fn recursive_root_transactions_keep_shape_revision_and_reference_authority_in_do
             frame(&app).persistence().result(),
             Some(nara::tooling::EditorPersistenceResult::Saved { .. })
         ));
+        let attempt = frame(&app)
+            .persistence()
+            .attempt()
+            .expect("the test observed a terminal persistence result");
         dispatch(
             &mut app,
             Some(EditorAction::Persistence(
-                EditorPersistenceAction::AcknowledgeResult,
+                EditorPersistenceAction::AcknowledgeResult { attempt },
             )),
         );
         let base_revision = frame(&app)
@@ -297,10 +301,14 @@ fn recursive_root_transactions_keep_shape_revision_and_reference_authority_in_do
             app.active_authoring_unavailable_record_manifest(),
             Some(manifest)
         );
+        let attempt = frame(&app)
+            .persistence()
+            .attempt()
+            .expect("the test observed a terminal persistence result");
         dispatch(
             &mut app,
             Some(EditorAction::Persistence(
-                EditorPersistenceAction::AcknowledgeResult,
+                EditorPersistenceAction::AcknowledgeResult { attempt },
             )),
         );
     }

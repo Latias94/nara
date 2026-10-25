@@ -306,7 +306,12 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
     dispatch(
         &mut application,
         [EditorAction::Persistence(
-            EditorPersistenceAction::AcknowledgeResult,
+            EditorPersistenceAction::AcknowledgeResult {
+                attempt: saved
+                    .persistence()
+                    .attempt()
+                    .expect("the observed persistence result is terminal"),
+            },
         )],
     );
     let closed = dispatch(
@@ -503,7 +508,12 @@ fn starter_semantic_edit_crosses_editor_check_generated_product_and_export() {
     let acknowledged_save = dispatch(
         &mut application,
         [EditorAction::Persistence(
-            EditorPersistenceAction::AcknowledgeResult,
+            EditorPersistenceAction::AcknowledgeResult {
+                attempt: saved
+                    .persistence()
+                    .attempt()
+                    .expect("the observed persistence result is terminal"),
+            },
         )],
     );
     assert!(acknowledged_save.persistence().result().is_none());
@@ -558,12 +568,6 @@ fn starter_semantic_edit_crosses_editor_check_generated_product_and_export() {
         .expect("reopen reconstructs the composed entity in the canonical tree");
     assert!(created_row.parent.is_none());
 
-    dispatch(
-        &mut application,
-        [EditorAction::Persistence(
-            EditorPersistenceAction::AcknowledgeResult,
-        )],
-    );
     let finally_closed = dispatch(
         &mut application,
         [EditorAction::WorkspaceIntent(
@@ -753,8 +757,10 @@ fn dispatch(
         Duration::ZERO,
     );
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while current_frame(application).persistence().operation()
-        != nara::tooling::EditorPersistenceOperation::Idle
+    while current_frame(application)
+        .persistence()
+        .operation()
+        .is_some()
     {
         assert!(
             std::time::Instant::now() < deadline,

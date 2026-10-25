@@ -27,6 +27,39 @@ use crate::project_host::persistence::{
     PrefabSaveCandidate,
 };
 
+#[derive(Default)]
+pub(super) enum PersistenceState {
+    #[default]
+    Idle,
+    Pending {
+        attempt: EditorPersistenceAttemptId,
+        operation: EditorPersistenceOperation,
+        work: PendingPersistence,
+    },
+    Terminal {
+        attempt: EditorPersistenceAttemptId,
+        result: EditorPersistenceResult,
+    },
+}
+
+impl PersistenceState {
+    pub(super) const fn has_pending_work(&self) -> bool {
+        matches!(self, Self::Pending { .. })
+    }
+
+    pub(super) const fn view(&self) -> EditorPersistenceView {
+        match *self {
+            Self::Idle => EditorPersistenceView::Idle,
+            Self::Pending {
+                attempt, operation, ..
+            } => EditorPersistenceView::Pending { attempt, operation },
+            Self::Terminal { attempt, result } => {
+                EditorPersistenceView::Terminal { attempt, result }
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) enum PersistenceLane {
     Scene(EditorScenePersistenceLane),
@@ -67,28 +100,43 @@ impl EditorProjectSession {
     }
 
     pub(super) fn advance_persistence(&mut self) {
-        let Some(pending) = self.pending_persistence.take() else {
+        let state = std::mem::take(&mut self.persistence);
+        let PersistenceState::Pending {
+            attempt,
+            operation,
+            work,
+        } = state
+        else {
+            self.persistence = state;
             return;
         };
-        let result = match pending {
+        let result = match work {
             PendingPersistence::Save {
                 lane,
                 candidate,
                 authoring,
             } => {
-                self.pending_persistence = Some(PendingPersistence::Saving(BackgroundSave::start(
-                    lane,
-                    candidate,
-                    authoring,
-                    self.authoring_runtime.persistence_tasks(),
-                    #[cfg(test)]
-                    self.next_save_gate.take(),
-                )));
+                self.persistence = PersistenceState::Pending {
+                    attempt,
+                    operation,
+                    work: PendingPersistence::Saving(BackgroundSave::start(
+                        lane,
+                        candidate,
+                        authoring,
+                        self.authoring_runtime.persistence_tasks(),
+                        #[cfg(test)]
+                        self.next_save_gate.take(),
+                    )),
+                };
                 return;
             }
             PendingPersistence::Saving(mut worker) => {
                 let Some((lane, outcome)) = worker.poll() else {
-                    self.pending_persistence = Some(PendingPersistence::Saving(worker));
+                    self.persistence = PersistenceState::Pending {
+                        attempt,
+                        operation,
+                        work: PendingPersistence::Saving(worker),
+                    };
                     return;
                 };
                 let refresh = match &lane {
@@ -101,25 +149,31 @@ impl EditorProjectSession {
                 self.acknowledge_save(lane, refresh, outcome)
             }
             PendingPersistence::Reopen(pending) => {
-                self.pending_persistence =
-                    Some(PendingPersistence::Reopening(BackgroundReopen::start(
+                self.persistence = PersistenceState::Pending {
+                    attempt,
+                    operation,
+                    work: PendingPersistence::Reopening(BackgroundReopen::start(
                         pending,
                         self.authoring_runtime.persistence_tasks(),
                         #[cfg(test)]
                         self.next_reopen_gate.take(),
-                    )));
+                    )),
+                };
                 return;
             }
             PendingPersistence::Reopening(mut worker) => {
                 let Some(completion) = worker.poll() else {
-                    self.pending_persistence = Some(PendingPersistence::Reopening(worker));
+                    self.persistence = PersistenceState::Pending {
+                        attempt,
+                        operation,
+                        work: PendingPersistence::Reopening(worker),
+                    };
                     return;
                 };
                 self.publish_reopen_completion(worker.admission(), completion)
             }
         };
-        self.persistence_result = Some(result);
-        self.persistence_operation = EditorPersistenceOperation::Idle;
+        self.persistence = PersistenceState::Terminal { attempt, result };
     }
 
     fn capture_persistence_lane(
@@ -168,7 +222,7 @@ impl EditorProjectSession {
         entity: &SceneEntityId,
     ) -> EditorWorkspaceCommandReport {
         if !self.accepts_new_work()
-            || self.pending_persistence.is_some()
+            || self.persistence.has_pending_work()
             || self.pending_workspace_intent.is_some()
             || self.pending_document_open.is_some()
         {
@@ -693,7 +747,7 @@ impl EditorProjectSession {
     #[doc(hidden)]
     /// Immediate read-only Host state, including an admitted operation before frame publication.
     pub const fn persistence_view(&self) -> EditorPersistenceView {
-        EditorPersistenceView::new(self.persistence_operation, self.persistence_result)
+        self.persistence.view()
     }
 
     #[cfg(test)]
@@ -706,10 +760,10 @@ impl EditorProjectSession {
         &mut self,
         command: EditorPersistenceCommand,
     ) -> EditorPersistenceRequestResult {
-        if command != EditorPersistenceCommand::AcknowledgeResult
+        if !matches!(command, EditorPersistenceCommand::AcknowledgeResult { .. })
             && (self.pending_workspace_intent.is_some() || self.pending_document_open.is_some())
         {
-            return EditorPersistenceRequestResult::Rejected(EditorPersistenceRejection::Busy);
+            return EditorPersistenceRequestResult::Refused(EditorPersistenceRejection::Busy);
         }
         self.request_persistence_after_workspace_arbitration(command)
     }
@@ -725,66 +779,56 @@ impl EditorProjectSession {
         &mut self,
         command: EditorPersistenceCommand,
     ) -> EditorPersistenceRequestResult {
-        if command == EditorPersistenceCommand::AcknowledgeResult {
-            return if self.pending_persistence.is_some() {
-                EditorPersistenceRequestResult::Rejected(EditorPersistenceRejection::Busy)
-            } else if self.persistence_result.take().is_some() {
-                EditorPersistenceRequestResult::Accepted
-            } else {
-                EditorPersistenceRequestResult::Rejected(EditorPersistenceRejection::ResultPending)
-            };
+        if let EditorPersistenceCommand::AcknowledgeResult { attempt } = command {
+            return self.acknowledge_persistence_attempt(attempt);
         }
-        if !self.accepts_new_work() || self.pending_persistence.is_some() {
-            return EditorPersistenceRequestResult::Rejected(EditorPersistenceRejection::Busy);
+        if !self.accepts_new_work() || self.persistence.has_pending_work() {
+            return EditorPersistenceRequestResult::Refused(EditorPersistenceRejection::Busy);
         }
         let (request, requested_document) = match command {
-            EditorPersistenceCommand::Save { document } => {
-                let Some(document) = document.or(self.workspace.active_document()) else {
-                    self.persistence_result = Some(EditorPersistenceResult::Rejected {
-                        request: EditorPersistenceRequestKind::Save,
-                        document: None,
-                        reason: EditorPersistenceRejection::NoActiveDocument,
-                    });
-                    return EditorPersistenceRequestResult::Rejected(
-                        EditorPersistenceRejection::NoActiveDocument,
-                    );
-                };
-                (EditorPersistenceRequestKind::Save, document)
-            }
-            EditorPersistenceCommand::Reopen { document } => {
-                let Some(document) = document.or(self.workspace.active_document()) else {
-                    self.persistence_result = Some(EditorPersistenceResult::Rejected {
-                        request: EditorPersistenceRequestKind::Reopen,
-                        document: None,
-                        reason: EditorPersistenceRejection::NoActiveDocument,
-                    });
-                    return EditorPersistenceRequestResult::Rejected(
-                        EditorPersistenceRejection::NoActiveDocument,
-                    );
-                };
-                (EditorPersistenceRequestKind::Reopen, document)
-            }
-            EditorPersistenceCommand::AcknowledgeResult => unreachable!(),
+            EditorPersistenceCommand::Save { document } => (
+                EditorPersistenceRequestKind::Save,
+                document.or(self.workspace.active_document()),
+            ),
+            EditorPersistenceCommand::Reopen { document } => (
+                EditorPersistenceRequestKind::Reopen,
+                document.or(self.workspace.active_document()),
+            ),
+            EditorPersistenceCommand::AcknowledgeResult { .. } => unreachable!(),
         };
-        if self.persistence_result.is_some_and(|result| {
+        if self.persistence_view().result().is_some_and(|result| {
             !persistence_result_allows_retry(result, request, requested_document)
         }) {
-            return EditorPersistenceRequestResult::Rejected(
+            return EditorPersistenceRequestResult::Refused(
                 EditorPersistenceRejection::ResultPending,
             );
         }
+
+        let Some(sequence) = self.next_persistence_attempt.checked_add(1) else {
+            return EditorPersistenceRequestResult::Refused(
+                EditorPersistenceRejection::AttemptIdExhausted,
+            );
+        };
+        let attempt = EditorPersistenceAttemptId::new(self.current_frame().revision(), sequence);
+        self.next_persistence_attempt = sequence;
+        let Some(requested_document) = requested_document else {
+            return self.reject_persistence_attempt(
+                attempt,
+                request,
+                None,
+                EditorPersistenceRejection::NoActiveDocument,
+            );
+        };
 
         let runtime_blocks_reopen = self.scene_runtime_blocks_reopen();
         if matches!(command, EditorPersistenceCommand::Reopen { .. })
             && self.workspace.document_kind(requested_document) == Some(EditorDocumentKind::Scene)
             && runtime_blocks_reopen
         {
-            self.persistence_result = Some(EditorPersistenceResult::Rejected {
-                request: EditorPersistenceRequestKind::Reopen,
-                document: Some(requested_document),
-                reason: EditorPersistenceRejection::RuntimeActive,
-            });
-            return EditorPersistenceRequestResult::Rejected(
+            return self.reject_persistence_attempt(
+                attempt,
+                request,
+                Some(requested_document),
                 EditorPersistenceRejection::RuntimeActive,
             );
         }
@@ -792,12 +836,10 @@ impl EditorProjectSession {
         match command {
             EditorPersistenceCommand::Save { .. } => {
                 let Some(kind) = self.workspace.document_kind(requested_document) else {
-                    self.persistence_result = Some(EditorPersistenceResult::Rejected {
-                        request: EditorPersistenceRequestKind::Save,
-                        document: Some(requested_document),
-                        reason: EditorPersistenceRejection::MissingDocument,
-                    });
-                    return EditorPersistenceRequestResult::Rejected(
+                    return self.reject_persistence_attempt(
+                        attempt,
+                        request,
+                        Some(requested_document),
                         EditorPersistenceRejection::MissingDocument,
                     );
                 };
@@ -806,36 +848,32 @@ impl EditorProjectSession {
                     .document_is_dirty(requested_document)
                     .unwrap_or(false)
                 {
-                    self.persistence_result = Some(EditorPersistenceResult::Rejected {
-                        request: EditorPersistenceRequestKind::Save,
-                        document: Some(requested_document),
-                        reason: EditorPersistenceRejection::NotDirty,
-                    });
-                    return EditorPersistenceRequestResult::Rejected(
+                    return self.reject_persistence_attempt(
+                        attempt,
+                        request,
+                        Some(requested_document),
                         EditorPersistenceRejection::NotDirty,
                     );
                 }
                 let lane = match self.capture_persistence_lane(requested_document) {
                     Ok(lane) => lane,
                     Err(reason) => {
-                        self.persistence_result = Some(EditorPersistenceResult::Rejected {
-                            request: EditorPersistenceRequestKind::Save,
-                            document: Some(requested_document),
+                        return self.reject_persistence_attempt(
+                            attempt,
+                            request,
+                            Some(requested_document),
                             reason,
-                        });
-                        return EditorPersistenceRequestResult::Rejected(reason);
+                        );
                     }
                 };
                 let Some(checkpoint) = self
                     .persistence_authority
                     .capture(&self.workspace, requested_document)
                 else {
-                    self.persistence_result = Some(EditorPersistenceResult::Rejected {
-                        request: EditorPersistenceRequestKind::Save,
-                        document: Some(requested_document),
-                        reason: EditorPersistenceRejection::StaleRevision,
-                    });
-                    return EditorPersistenceRequestResult::Rejected(
+                    return self.reject_persistence_attempt(
+                        attempt,
+                        request,
+                        Some(requested_document),
                         EditorPersistenceRejection::StaleRevision,
                     );
                 };
@@ -857,7 +895,7 @@ impl EditorProjectSession {
                         .and_then(|slot| slot.session().authoring_readmission()),
                     EditorDocumentKind::Extension(_) => None,
                 };
-                self.pending_persistence = Some(PendingPersistence::Save {
+                let work = PendingPersistence::Save {
                     lane,
                     candidate: match kind {
                         EditorDocumentKind::Scene => {
@@ -869,59 +907,107 @@ impl EditorProjectSession {
                         EditorDocumentKind::Extension(_) => PendingSave::Extension(checkpoint),
                     },
                     authoring,
-                });
-                self.persistence_operation = EditorPersistenceOperation::Saving {
+                };
+                let operation = EditorPersistenceOperation::Saving {
                     document: requested_document,
                     captured_revision: revision,
+                };
+                self.persistence = PersistenceState::Pending {
+                    attempt,
+                    operation,
+                    work,
                 };
             }
             EditorPersistenceCommand::Reopen { .. } => {
                 let pending = match self.capture_reopen(requested_document) {
                     Ok(pending) => pending,
                     Err(reason) => {
-                        self.persistence_result = Some(EditorPersistenceResult::Rejected {
-                            request: EditorPersistenceRequestKind::Reopen,
-                            document: Some(requested_document),
+                        return self.reject_persistence_attempt(
+                            attempt,
+                            request,
+                            Some(requested_document),
                             reason,
-                        });
-                        return EditorPersistenceRequestResult::Rejected(reason);
+                        );
                     }
                 };
-                self.pending_persistence = Some(PendingPersistence::Reopen(pending));
-                self.persistence_operation = EditorPersistenceOperation::Opening {
+                let operation = EditorPersistenceOperation::Opening {
                     document: requested_document,
                 };
+                self.persistence = PersistenceState::Pending {
+                    attempt,
+                    operation,
+                    work: PendingPersistence::Reopen(pending),
+                };
             }
-            EditorPersistenceCommand::AcknowledgeResult => unreachable!(),
+            EditorPersistenceCommand::AcknowledgeResult { .. } => unreachable!(),
         }
-        // A retry has its own eventual result. The previous terminal must not drive
-        // a Workspace close decision while this operation is still pending.
-        self.persistence_result = None;
-        EditorPersistenceRequestResult::Accepted
+        EditorPersistenceRequestResult::Accepted { attempt }
+    }
+
+    fn reject_persistence_attempt(
+        &mut self,
+        attempt: EditorPersistenceAttemptId,
+        request: EditorPersistenceRequestKind,
+        document: Option<EditorDocumentId>,
+        reason: EditorPersistenceRejection,
+    ) -> EditorPersistenceRequestResult {
+        self.persistence = PersistenceState::Terminal {
+            attempt,
+            result: EditorPersistenceResult::Rejected {
+                request,
+                document,
+                reason,
+            },
+        };
+        EditorPersistenceRequestResult::Rejected { attempt, reason }
+    }
+
+    fn acknowledge_persistence_attempt(
+        &mut self,
+        expected: EditorPersistenceAttemptId,
+    ) -> EditorPersistenceRequestResult {
+        match self.persistence_view() {
+            EditorPersistenceView::Terminal { attempt, .. } if attempt == expected => {
+                self.persistence = PersistenceState::Idle;
+                EditorPersistenceRequestResult::Acknowledged { attempt }
+            }
+            EditorPersistenceView::Pending { .. } => {
+                EditorPersistenceRequestResult::Refused(EditorPersistenceRejection::Busy)
+            }
+            _ => {
+                EditorPersistenceRequestResult::Refused(EditorPersistenceRejection::ResultMismatch)
+            }
+        }
     }
 
     pub(super) fn advance_workspace_persistence(&mut self) {
         let Some(mut pending) = self.pending_workspace_intent.take() else {
             return;
         };
-        if pending.phase() != EditorWorkspaceIntentPhase::Saving {
+        let Some(expected_attempt) = pending.save_attempt() else {
             self.pending_workspace_intent = Some(pending);
             return;
-        }
+        };
         let Some(pending_document) = pending.decision_document() else {
             self.pending_workspace_intent = Some(pending);
             return;
         };
-        match self.persistence_result {
+        let result = match self.persistence_view() {
+            EditorPersistenceView::Terminal { attempt, result } if attempt == expected_attempt => {
+                Some(result)
+            }
+            _ => None,
+        };
+        match result {
             Some(EditorPersistenceResult::Saved { document, .. })
                 if document == pending_document =>
             {
                 match &mut pending {
                     PendingWorkspaceIntent::CloseDocument(close) => {
-                        close.phase = EditorWorkspaceIntentPhase::RetiringRuntime;
+                        close.phase = WorkspaceIntentProgress::RetiringRuntime;
                     }
                     PendingWorkspaceIntent::Exit(exit) => {
-                        self.persistence_result = None;
+                        let _ = self.acknowledge_persistence_attempt(expected_attempt);
                         exit.cursor = exit.cursor.saturating_add(1);
                         self.prepare_current_exit_document(exit);
                     }
@@ -932,11 +1018,11 @@ impl EditorProjectSession {
                 | EditorPersistenceResult::Failed { .. }
                 | EditorPersistenceResult::PersistenceUncertain { .. },
             ) => {
-                pending.set_phase(EditorWorkspaceIntentPhase::AwaitingDecision);
+                pending.set_progress(WorkspaceIntentProgress::AwaitingDecision);
             }
             Some(EditorPersistenceResult::Opened { .. })
             | Some(EditorPersistenceResult::Saved { .. }) => {
-                pending.set_phase(EditorWorkspaceIntentPhase::AwaitingDecision);
+                pending.set_progress(WorkspaceIntentProgress::AwaitingDecision);
             }
             None => {}
         }
@@ -1218,14 +1304,14 @@ fn prefab_open_failure_code(stage: EditorPersistenceFailureStage) -> &'static st
 fn persistence_result_allows_retry(
     result: EditorPersistenceResult,
     request: EditorPersistenceRequestKind,
-    document: EditorDocumentId,
+    document: Option<EditorDocumentId>,
 ) -> bool {
     match result {
         EditorPersistenceResult::Rejected {
             document: target,
             reason: EditorPersistenceRejection::RequiresReconcile,
             ..
-        } => request == EditorPersistenceRequestKind::Reopen && target == Some(document),
+        } => request == EditorPersistenceRequestKind::Reopen && target == document,
         EditorPersistenceResult::Rejected {
             request: failed_request,
             document: failed_document,
@@ -1237,12 +1323,14 @@ fn persistence_result_allows_retry(
             ..
         } => {
             failed_request == request
-                && failed_document.is_none_or(|failed_document| failed_document == document)
+                && failed_document.is_none_or(|failed_document| Some(failed_document) == document)
         }
         EditorPersistenceResult::PersistenceUncertain {
             document: uncertain_document,
             ..
-        } => request == EditorPersistenceRequestKind::Reopen && uncertain_document == document,
+        } => {
+            request == EditorPersistenceRequestKind::Reopen && Some(uncertain_document) == document
+        }
         EditorPersistenceResult::Saved { .. } | EditorPersistenceResult::Opened { .. } => false,
     }
 }

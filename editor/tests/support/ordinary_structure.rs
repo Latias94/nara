@@ -125,10 +125,14 @@ fn save_and_reopen(app: &mut EditorApplication) {
     }) if actual == document && saved == revision)
     );
     assert!(!frame(app).workspace().document(document).unwrap().dirty);
+    let attempt = frame(app)
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
     dispatch(
         app,
         Some(EditorAction::Persistence(
-            EditorPersistenceAction::AcknowledgeResult,
+            EditorPersistenceAction::AcknowledgeResult { attempt },
         )),
     );
     dispatch(

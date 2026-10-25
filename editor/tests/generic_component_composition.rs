@@ -563,12 +563,16 @@ fn ordinary_scene_and_prefab_create_custom_components_without_project_execution(
             Some(original_manifest.clone())
         );
 
-        dispatch(
-            &mut app,
-            Some(EditorAction::Persistence(
-                EditorPersistenceAction::AcknowledgeResult,
-            )),
-        );
+        if let nara::tooling::EditorPersistenceView::Terminal { attempt, .. } =
+            frame(&app).persistence()
+        {
+            dispatch(
+                &mut app,
+                Some(EditorAction::Persistence(
+                    EditorPersistenceAction::AcknowledgeResult { attempt },
+                )),
+            );
+        }
         dispatch(
             &mut app,
             Some(EditorAction::Persistence(EditorPersistenceAction::Save {
@@ -590,10 +594,14 @@ fn ordinary_scene_and_prefab_create_custom_components_without_project_execution(
             document,
             base_revision: frame(&app).workspace().document(document).unwrap().revision,
         };
+        let attempt = frame(&app)
+            .persistence()
+            .attempt()
+            .expect("the test observed a terminal persistence result");
         dispatch(
             &mut app,
             Some(EditorAction::Persistence(
-                EditorPersistenceAction::AcknowledgeResult,
+                EditorPersistenceAction::AcknowledgeResult { attempt },
             )),
         );
         dispatch(
@@ -639,7 +647,7 @@ fn ordinary_scene_and_prefab_create_custom_components_without_project_execution(
 fn settle_persistence(app: &mut EditorApplication) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
-        if frame(app).persistence().operation() == nara::tooling::EditorPersistenceOperation::Idle {
+        if frame(app).persistence().operation().is_none() {
             return;
         }
         dispatch(app, None);

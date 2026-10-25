@@ -1,0 +1,234 @@
+[
+  {
+    "path": "crates/nara_tooling/src/frame.rs",
+    "sha256": "fe7765773c8204e769b8786a53c5138cbda81c4e716a832ce668b35bbd622777"
+  },
+  {
+    "path": "crates/nara_tooling/src/lib.rs",
+    "sha256": "0c69c33bcad8c17630e0805d8891e31b80265a911c4185160a8f3d2593142caa"
+  },
+  {
+    "path": "crates/nara_tooling/src/persistence.rs",
+    "sha256": "f4aad6bc7cf5c3fb8de872b6f537bda70ff40c77204cbfa508301426b8805a85"
+  },
+  {
+    "path": "editor/src/app.rs",
+    "sha256": "5c38a4c9bd59c929a4c4158fdb2a1a75e89e7a41757ccbe077fa5360eecdfa64"
+  },
+  {
+    "path": "editor/src/app/persistence_tests.rs",
+    "sha256": "38bdcf5c10157955a27ccf45fb8b813692a57febcc97ef53c6a2cc41f0a9b383"
+  },
+  {
+    "path": "editor/src/frontend/imgui/authoring.rs",
+    "sha256": "ce0b8f4215f7a5856b5fd91e8da88cd1a8637997c5798047d4dbdbba991c91af"
+  },
+  {
+    "path": "editor/src/frontend/imgui/interaction_tests.rs",
+    "sha256": "e134ccd85b402b62e10e99d269944a529664d4a43a855665d8a9c782af3c6e1e"
+  },
+  {
+    "path": "editor/src/frontend/imgui/mod.rs",
+    "sha256": "97ed3930f4a48d073266c9f44fb14405d3a68b9271c9dc865603de4f28075d4d"
+  },
+  {
+    "path": "editor/src/frontend/imgui/project/browser_open_tests.rs",
+    "sha256": "ba999daae25d0471d0b140453e6772ae3629e41534751c63e3d2288e899887cc"
+  },
+  {
+    "path": "editor/src/frontend/imgui/ui_interaction_tests.rs",
+    "sha256": "087993581233f19e57d437676e826361bb9eef675606bd61a387ea3e95eb1f61"
+  },
+  {
+    "path": "editor/src/frontend/imgui/ui_structure_tests.rs",
+    "sha256": "8bffc292bd42eb0ee7cefa8d8619631543cd0639571b2fe7bf75122c6acbc822"
+  },
+  {
+    "path": "editor/src/platform.rs",
+    "sha256": "116d917a9c50039bb8141b1f0888d42f657e5ddc30efc92ccb7502e3d20c6cc9"
+  },
+  {
+    "path": "editor/src/platform/imgui/authoring_workflow_tests.rs",
+    "sha256": "03cdfa3cce8b9660866b8b3a98b8a77b694146e93354469291a8e01b28b748f5"
+  },
+  {
+    "path": "editor/src/platform/imgui/authoring_workflow_tests/extension_documents.rs",
+    "sha256": "13a5eeed2b8db36aa5c8a2d2036cd25d6433309397fef13b1bc7c831291592c3"
+  },
+  {
+    "path": "editor/src/platform/imgui/canvas_workflow_tests.rs",
+    "sha256": "e05ff0064a534567dfa3914fed91edc19faa200bc2bb6d63d04dfc7ad1dd9e73"
+  },
+  {
+    "path": "editor/src/platform/imgui/supervised_play_support.rs",
+    "sha256": "2365a772fba74f07a7b9ab4468114dabffde119b3fc9f451f70b916882e43e20"
+  },
+  {
+    "path": "editor/src/platform/imgui/supervised_play_tests.rs",
+    "sha256": "97b9427ab8de24a52b3ccbcbd14a4450e7b59db072d33964b845cd6d6c4298ef"
+  },
+  {
+    "path": "editor/tests/application_contract.rs",
+    "sha256": "4b0c7fd7a7f634c360cbb912ca087de961ba71191e69ff53aa55ee0b78b94cf7"
+  },
+  {
+    "path": "editor/tests/authoring_loop.rs",
+    "sha256": "4a93bfcf7a353c5ef20f4ed0bc8c8ab21a6705aa9417fcfe49be7c327a301ce3"
+  },
+  {
+    "path": "editor/tests/first_game_workflow.rs",
+    "sha256": "fcd34febfae9d885cc7aeb9161c47d97b6796c570daa92ec5c340188d0b836e1"
+  },
+  {
+    "path": "editor/tests/generic_component_composition.rs",
+    "sha256": "65fdd475df23db165f8406a286f12c8b43efc8ef3cac3eac8e5f0c07e106fd31"
+  },
+  {
+    "path": "editor/tests/generic_open_recovery.rs",
+    "sha256": "5e45f025be831a1095448dc102820af71217da897a5ebe0ffb4e9f4210e778b5"
+  },
+  {
+    "path": "editor/tests/support/ordinary_starter_structure.rs",
+    "sha256": "83206d560162a9689a9a2a45646b43ec3aa032f055578ce6f48cc422af28ece5"
+  },
+  {
+    "path": "editor/tests/support/ordinary_structure.rs",
+    "sha256": "f298d8909bf63c48ba20d4164383f8194cfbf45463fbbbaa7000ad114ae5ff7a"
+  },
+  {
+    "path": "editor/tests/support/recursive_component_values.rs",
+    "sha256": "c3cf6d6ed1b8d5c4230fe1c4d97d5faac47227c80a2a99da4448f5a9ea93c86b"
+  },
+  {
+    "path": "reference-game/tests/editor_journey.rs",
+    "sha256": "01105e203a077338ff89df402737c3f2aac3253f71d227298fb3e780ed200b2a"
+  },
+  {
+    "path": "reference-game/tests/editor_ui_refresh.rs",
+    "sha256": "b1d7a0b1167dbf25ea7a2596223c5168972c5f6b4f682b802624864a8706f32c"
+  },
+  {
+    "path": "src/project_host/runtime/editor.rs",
+    "sha256": "8f82d9bb52f698208f58291b83a1d16085628d4bc06dbb7053b172efca060ab5"
+  },
+  {
+    "path": "src/project_host/runtime/editor/actions.rs",
+    "sha256": "864e59c4c10fb432fa40533abeb30baf41049e76d515cd6b7bba0889b75dddb8"
+  },
+  {
+    "path": "src/project_host/runtime/editor/content_refresh.rs",
+    "sha256": "87ea0a30dc57a3b3500c54d4cafbfcceba6e18ad5c0eb087c6e3192bfa56e742"
+  },
+  {
+    "path": "src/project_host/runtime/editor/document_open.rs",
+    "sha256": "06e6e8c161d1e86ca8e8790da2c049de15b153bb3d1f25b48f7735fe5d490dc0"
+  },
+  {
+    "path": "src/project_host/runtime/editor/extension_documents.rs",
+    "sha256": "cb164cd071bd1a581e65b7a53caee79263a3946b62c243b0c96bf4398009d79c"
+  },
+  {
+    "path": "src/project_host/runtime/editor/persistence.rs",
+    "sha256": "13503f94a79d153a37223c165f3c2612b748044981b16ef26e4607725a1d30e7"
+  },
+  {
+    "path": "src/project_host/runtime/editor/persistence/background/tests.rs",
+    "sha256": "34725f874a9769b3955f35aeb9d06e7fd93f6ab524f29f72235ceea951f87341"
+  },
+  {
+    "path": "src/project_host/runtime/editor/persistence/reopen.rs",
+    "sha256": "44b3a510d96e1ed99aa2af9f4838572af6cf750c66fa83870fad5daadb102105"
+  },
+  {
+    "path": "src/project_host/runtime/editor/persistence/tests.rs",
+    "sha256": "63b0122e3fce29e931912227902f9c1ca104e0106d422409380cbd5bfe4f2897"
+  },
+  {
+    "path": "src/project_host/runtime/editor/persistence/tests/attempts.rs",
+    "sha256": "2d27273d689289ad4b3be3203388b37e3053f9f41542c7e7623e99a82238c5d6"
+  },
+  {
+    "path": "src/project_host/runtime/editor/persistence/tests/content_refresh.rs",
+    "sha256": "d96c72138c176386b7b3f9d62819fec5ed74a4211c160edaa2ea637fb9382d54"
+  },
+  {
+    "path": "src/project_host/runtime/editor/persistence/tests/preview_epoch.rs",
+    "sha256": "e7e00898b1eaaec4e116ac2511bb2fe6abbe3fdc2d66452f177b5a4a2af3baaa"
+  },
+  {
+    "path": "src/project_host/runtime/tests.rs",
+    "sha256": "a7d2ab9d5ad8158260d9abcdb3c5f03636875d4326975868c277d9ae1d6e64db"
+  },
+  {
+    "path": "src/project_host/runtime/tests/authoring_images.rs",
+    "sha256": "c78fa15adb12d1dfb56457da01c647c487d48aea1453fa7792a087a3f1e53bd7"
+  },
+  {
+    "path": "src/project_host/runtime/tests/browser_preparation.rs",
+    "sha256": "555cd062c44ef2fe2c8b5851b8cf020bc51bb7ee51a2d98be62912d18b1fef80"
+  },
+  {
+    "path": "src/project_host/runtime/tests/closing_session.rs",
+    "sha256": "16449194596e65514bf8c5437e34057b8efc79a8ebef421c165f4b3fcf06b6cc"
+  },
+  {
+    "path": "src/project_host/runtime/tests/document_sources.rs",
+    "sha256": "9a5bb3426de96637d8efe921b8334f7970e24237edb888d551517660ccffc078"
+  },
+  {
+    "path": "src/project_host/runtime/tests/host_custody.rs",
+    "sha256": "1a52abd339f01d091768209ca37d0de1eb54453fb208f07f46861727a46dee7d"
+  },
+  {
+    "path": "src/project_host/runtime/tests/owned_reopen.rs",
+    "sha256": "67c877c2ee5805c171f4c2b13e2c3e7ced29fdd59687a941ca9a6a0ffc3c0e41"
+  },
+  {
+    "path": "src/project_host/runtime/tests/owned_save.rs",
+    "sha256": "a8181280c27c40d08fecfe92e71c3a87982edba4df0b07c546817ec51268ce66"
+  },
+  {
+    "path": "tests/editor_persistence.rs",
+    "sha256": "397d5775bf08eb0895f58a7f4e3ca503f341629d4437119ac484e5f7ece632ec"
+  },
+  {
+    "path": "tests/fixtures/module-consumer/editor-panel-consumer/tests/dialogue_documents.rs",
+    "sha256": "0277d7674995df46a5e1fb9582448f8243b29dfed3941842ffb611db04f68966"
+  },
+  {
+    "path": "tests/fixtures/module-consumer/editor-panel-consumer/tests/prepared_authoring.rs",
+    "sha256": "36d8706a3212239acdade904ed81fa199c031e374122d49d6d728396ed8e02f1"
+  },
+  {
+    "path": "tests/fixtures/module-consumer/editor-panel-consumer/tests/support/property_read.rs",
+    "sha256": "3f5c86dde7bb2962d60b4400df30f7655b9329fb7617182673cbd174c658a923"
+  },
+  {
+    "path": "tests/fixtures/module-consumer/tests/component_inventory.rs",
+    "sha256": "3fe4791b0fe756e1fa14a6074fe2ffe6e7acbf3f7e7d6fe099771cd7c6bf6bcb"
+  },
+  {
+    "path": "tests/fixtures/module-consumer/tests/entity_reference_editing.rs",
+    "sha256": "d26aba639713d540e330c03db48405167b715347a8ff781a734504de0d34180b"
+  },
+  {
+    "path": "tests/fixtures/module-consumer/tests/property_authoring.rs",
+    "sha256": "69166bb0443e670b487017eeb40c38ab7ae5cb1cb6a37ad34943a511a2ab6269"
+  },
+  {
+    "path": "tests/support/editor_action_driver.rs",
+    "sha256": "74fb82e17428b7fb7638672d9db1eb4997e4c18d3e461d6a674db7245aa34442"
+  },
+  {
+    "path": "tests/support/editor_responsiveness_measurement.rs",
+    "sha256": "62f9f830bad8b7f606b435b83351af8b41b3ad324ce2aa0c22266f6617313e0c"
+  },
+  {
+    "path": "tests/support/fake_preview_toolkit.rs",
+    "sha256": "dd822f35a369ef35af32b29d96c74e3eafaad47281a87ba772aecb97e31097f6"
+  },
+  {
+    "path": "tests/workspace_play_runtime.rs",
+    "sha256": "57e2142e04327708e16cacd7cb19c41f00a287f5d637338ee17bc2bc2b8ca783"
+  }
+]

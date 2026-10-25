@@ -616,7 +616,7 @@ fn assert_closing_session_rejects_mutation(kind: EditorDocumentKind, mutation: C
     assert_eq!(
         save.outcomes(),
         &[EditorActionOutcome::Persistence(
-            EditorPersistenceRequestResult::Rejected(EditorPersistenceRejection::Busy)
+            EditorPersistenceRequestResult::Refused(EditorPersistenceRejection::Busy)
         )]
     );
     assert_eq!(fs::read(&path).unwrap(), persisted);

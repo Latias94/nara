@@ -169,6 +169,12 @@ The returned observations stay associated with that call across later drives and
 panel callbacks. Save/Play request admission still needs its owning asynchronous completion
 observation; an Accepted request can later fail. Ordered actions are not an atomic transaction.
 
+For Save/Reopen, retain the admitted `EditorPersistenceAttemptId` and match the later Pending or
+Terminal observation to that attempt. Dismiss a terminal with the identity actually displayed,
+not a newly sampled latest result. `Refused` admission publishes nothing; an immediate published
+`Rejected` has its own attempt. See [persistence observation](editor-documents.md#save-reopen-and-close)
+for the exact acknowledgment and retry rules shared with window-free consumers.
+
 Panel state survives docking, movement, relocation and native GPU reconstruction. Closing or
 hiding a panel retires that instance's drafts without closing its document. Reopening starts
 fresh state. Changing the panel target or its resolved document also retires drafts, including a

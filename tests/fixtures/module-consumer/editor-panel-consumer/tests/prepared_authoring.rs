@@ -35,7 +35,7 @@ use nara_tooling::{
     EditorCloseDecision, EditorDocumentId, EditorDocumentKind, EditorDocumentMutation,
     EditorDocumentOpenResult, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
     EditorEntityPage, EditorEntityQuery, EditorEntityQueryLimits, EditorEntityQueryPosition,
-    EditorFrameModel, EditorNavigationAction, EditorPersistenceAction, EditorPersistenceOperation,
+    EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
     EditorPersistenceRequestResult, EditorPersistenceResult, EditorProjectBrowserAction,
     EditorProjectBrowserActionOutcome, EditorPropertyObservation, EditorPropertyRead,
     EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue, EditorReopenTarget,
@@ -137,9 +137,7 @@ fn wait(app: &mut EditorApplication, ready: impl Fn(&EditorFrameModel) -> bool) 
     }
 }
 fn settle_persistence(app: &mut EditorApplication) {
-    wait(app, |frame| {
-        frame.persistence().operation() == EditorPersistenceOperation::Idle
-    });
+    wait(app, |frame| frame.persistence().operation().is_none());
 }
 
 fn bundle() -> AuthoringSchemaBundle {
@@ -582,10 +580,13 @@ fn exercise_discovered_computed_edit(
             EditorPropertyValue::Present(ComponentValue::U64(value))
         );
     }
-    submit(
-        app,
-        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
-    );
+    if let nara_tooling::EditorPersistenceView::Terminal { attempt, .. } = frame(app).persistence()
+    {
+        submit(
+            app,
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
+        );
+    }
     let saving_basis = basis(app, document);
     assert!(matches!(
         submit(
@@ -597,7 +598,7 @@ fn exercise_discovered_computed_edit(
         )
         .actions(),
         [EditorApplicationActionDispatch::Dispatched(
-            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
         )]
     ));
     settle_persistence(app);
@@ -605,9 +606,13 @@ fn exercise_discovered_computed_edit(
         matches!(frame(app).persistence().result(), Some(EditorPersistenceResult::Saved { document: saved, revision, .. }) if saved == document && revision == saving_basis.revision)
     );
     assert!(!frame(app).workspace().document(document).unwrap().dirty);
+    let attempt = frame(app)
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
     submit(
         app,
-        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
     );
     assert!(matches!(
         submit(
@@ -621,7 +626,7 @@ fn exercise_discovered_computed_edit(
         )
         .actions(),
         [EditorApplicationActionDispatch::Dispatched(
-            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
         )]
     ));
     settle_persistence(app);
@@ -921,10 +926,13 @@ fn exercise_panel_construction(
             [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Workspace(report))] if report.applied)
         );
     }
-    submit(
-        app,
-        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
-    );
+    if let nara_tooling::EditorPersistenceView::Terminal { attempt, .. } = frame(app).persistence()
+    {
+        submit(
+            app,
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
+        );
+    }
     let saving = basis(app, document);
     submit(
         app,
@@ -957,9 +965,13 @@ fn exercise_panel_construction(
             .unwrap()
         );
     }
+    let attempt = frame(app)
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
     submit(
         app,
-        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
     );
     submit(
         app,
@@ -1406,7 +1418,7 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
         assert!(matches!(
             saving.actions(),
             [EditorApplicationActionDispatch::Dispatched(
-                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
             )]
         ));
         settle_persistence(&mut app);
@@ -1459,9 +1471,13 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
                 }]),
             )
             .unwrap();
+        let attempt = frame(&app)
+            .persistence()
+            .attempt()
+            .expect("the test observed a terminal persistence result");
         submit(
             &mut app,
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
         );
         let reopening = submit(
             &mut app,
@@ -1475,7 +1491,7 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
         assert!(matches!(
             reopening.actions(),
             [EditorApplicationActionDispatch::Dispatched(
-                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
             )]
         ));
         settle_persistence(&mut app);
@@ -1516,9 +1532,13 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
         exercise_discovered_computed_edit(&mut app, document, entities[1].clone());
         assert!(!frame(&app).workspace().document(document).unwrap().dirty);
         assert_untargeted(&app);
+        let attempt = frame(&app)
+            .persistence()
+            .attempt()
+            .expect("the test observed a terminal persistence result");
         submit(
             &mut app,
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
         );
     }
     for document in [*second_scene, *second_prefab] {
@@ -1616,7 +1636,7 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
         assert!(matches!(
             saving.actions(),
             [EditorApplicationActionDispatch::Dispatched(
-                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
             )]
         ));
         settle_persistence(&mut app);
@@ -1660,9 +1680,13 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
         for (path, bytes) in other_files {
             assert_eq!(fs::read(project.root.join(path)).unwrap(), bytes);
         }
+        let attempt = frame(&app)
+            .persistence()
+            .attempt()
+            .expect("the test observed a terminal persistence result");
         submit(
             &mut app,
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
         );
     }
     assert!(
@@ -1951,9 +1975,13 @@ fn retained_construction_publishes_exact_ids_through_non_active_public_documents
         let old = app
             .prepare_authoring_construction(document, &obsolete)
             .unwrap();
+        let attempt = frame(&app)
+            .persistence()
+            .attempt()
+            .expect("the test observed a terminal persistence result");
         submit(
             &mut app,
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
         );
         submit(
             &mut app,
@@ -2372,7 +2400,7 @@ fn browser_prefab_persistence_round_trips_through_a_fresh_anchored_document() {
                 persistence.actions(),
                 [EditorApplicationActionDispatch::Dispatched(
                     EditorActionOutcome::Persistence(
-                        nara_tooling::EditorPersistenceRequestResult::Accepted
+                        nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
                     )
                 )]
             ));
@@ -2386,9 +2414,13 @@ fn browser_prefab_persistence_round_trips_through_a_fresh_anchored_document() {
                 },
                 "{result:?}"
             );
+            let attempt = frame(&app)
+                .persistence()
+                .attempt()
+                .expect("the test observed a terminal persistence result");
             submit(
                 &mut app,
-                EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+                EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
             );
             let closed = submit(
                 &mut app,

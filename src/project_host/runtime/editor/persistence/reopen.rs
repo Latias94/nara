@@ -408,8 +408,8 @@ impl EditorProjectSession {
 
     pub(in crate::project_host::runtime::editor) fn reopen_pending(&self) -> bool {
         matches!(
-            self.persistence_operation,
-            EditorPersistenceOperation::Opening { .. }
+            self.persistence_view().operation(),
+            Some(EditorPersistenceOperation::Opening { .. })
         )
     }
 }

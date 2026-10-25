@@ -342,7 +342,7 @@ fn ordinary_creation_retains_generated_identity_and_unavailable_records_through_
                     base_revision: saved_revision
                 })
             ),
-            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
         ));
         wait(&mut editor, |editor| {
             editor.current_frame().persistence().result().is_some()
@@ -365,9 +365,14 @@ fn ordinary_creation_retains_generated_identity_and_unavailable_records_through_
             fs::read(project.root.join(source)).unwrap(),
             expected.as_bytes()
         );
+        let attempt = editor
+            .current_frame()
+            .persistence()
+            .attempt()
+            .expect("the test observed a terminal persistence result");
         dispatch(
             &mut editor,
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
         );
         let target = editor.current_frame().reopen_target();
         assert!(matches!(
@@ -375,7 +380,7 @@ fn ordinary_creation_retains_generated_identity_and_unavailable_records_through_
                 &mut editor,
                 EditorAction::Persistence(EditorPersistenceAction::Reopen { target })
             ),
-            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
         ));
         wait(&mut editor, |editor| {
             editor.current_frame().persistence().result().is_some()
@@ -384,9 +389,14 @@ fn ordinary_creation_retains_generated_identity_and_unavailable_records_through_
             editor.current_frame().persistence().result(),
             Some(EditorPersistenceResult::Opened { .. })
         ));
+        let attempt = editor
+            .current_frame()
+            .persistence()
+            .attempt()
+            .expect("the test observed a terminal persistence result");
         dispatch(
             &mut editor,
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
         );
         select(&mut editor, document, created.as_str());
         let reopened = editor.current_frame();
@@ -1025,7 +1035,7 @@ fn save_and_reopen(
     );
     assert!(matches!(
         save,
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
     ));
     wait(editor, |editor| {
         editor.current_frame().persistence().result().is_some()
@@ -1056,9 +1066,14 @@ fn save_and_reopen(
         editor.active_authoring_unavailable_record_manifest(),
         Some(manifest)
     );
+    let attempt = editor
+        .current_frame()
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
     dispatch(
         editor,
-        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
     );
     let target = editor.current_frame().reopen_target();
     let reopen = dispatch(
@@ -1067,7 +1082,7 @@ fn save_and_reopen(
     );
     assert!(matches!(
         reopen,
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
     ));
     wait(editor, |editor| {
         editor.current_frame().persistence().result().is_some()
@@ -1076,9 +1091,14 @@ fn save_and_reopen(
         editor.current_frame().persistence().result(),
         Some(EditorPersistenceResult::Opened { .. })
     ));
+    let attempt = editor
+        .current_frame()
+        .persistence()
+        .attempt()
+        .expect("the test observed a terminal persistence result");
     dispatch(
         editor,
-        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
     );
     select(editor, document, "actor");
     assert_eq!(&root(editor), expected);

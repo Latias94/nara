@@ -688,14 +688,21 @@ impl EditorProjectSession {
                 let outcome = self.request_persistence(EditorPersistenceCommand::Reopen {
                     document: Some(document),
                 });
-                if outcome == nara_tooling::EditorPersistenceRequestResult::Accepted {
+                if matches!(
+                    outcome,
+                    nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+                ) {
                     let _ = self.cancel_editor_gesture(EditorGestureCancelReason::Reopen);
                 }
                 EditorActionOutcome::Persistence(outcome)
             }
-            EditorPersistenceAction::AcknowledgeResult => EditorActionOutcome::Persistence(
-                self.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-            ),
+            EditorPersistenceAction::AcknowledgeResult { attempt } => {
+                EditorActionOutcome::Persistence(
+                    self.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+                        attempt,
+                    }),
+                )
+            }
         }
     }
 

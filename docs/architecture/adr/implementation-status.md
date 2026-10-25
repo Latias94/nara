@@ -67,6 +67,19 @@ dispatch versus eventual Save completion remain explicit. The five-owner target 
 and seven workflow waves are an execution direction, not completion of R1, prepared editing,
 dynamic tools, Behavior or render composition. Their unimplemented scope remains unqualified.
 
+The [R1/F2 persistence-attempt qualification](../../knowledge/engineering/verification/2026-10/2026-10-25T081443Z-exact-persistence-attempts-and-terminal-observation-qualification-332f36f3c0f94f93ae1eb2721e981359.md)
+implements one concrete Idle/Pending/Terminal owner under ADRs 0047/0118, with the exact admitted
+attempt carried through dispatch, physical-return-aware publication and observed-ID acknowledgment.
+Published rejection, nonpublishing refusal and retry supersession remain distinct; Close retains
+its matching success while Exit consumes its exact Save before advancing. Old, foreign and duplicate
+observations cannot clear successors, including a real two-document Exit handoff. Final-source
+root/Editor/tooling 667, independent panel 7, independent source 11 and Reference Game 2 tests pass,
+as do four selected actual Windows/DX12 trajectories and all 12 final serial qualification groups.
+Complete nine-lens review has no actionable finding; both advisory proof gaps have a separately
+reviewed correction and final-source rerun. This is observation ownership, not file reconciliation,
+physical shutdown completion, full R1 or foundation qualification. Useful semantic tooling,
+structured compiled-tool diagnostics and local install lifecycle remain open.
+
 The [R2 source-owner qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T140847Z-prepared-source-editing-and-non-active-entity-query-qualification-d08c0cb5ab2c4f798dd7cd98c2a2e6c5.md)
 adds owned Scene/Prefab prepare/commit, mixed construction and bounded non-active direct-entity
 queries under ADRs 0026/0047/0118. Final serial evidence passes 826 library cases, 10 prepared

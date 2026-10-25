@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "caa761aa649bbd3544577cbc62ac16df0baeda5c05ab12eeb9a3e325717f4d65"
+source_fingerprint: "02bf62e8e274566511fc162ab4afb9023ff2ce30228829637e6aebdb048c7082"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "caa761aa649bbd3544577cbc62ac16df0baeda5c05ab12eeb9a3e325717
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `caa761aa649bbd3544577cbc62ac16df0baeda5c05ab12eeb9a3e325717f4d65`
-- Immutable records: 911
+- Source fingerprint: `02bf62e8e274566511fc162ab4afb9023ff2ce30228829637e6aebdb048c7082`
+- Immutable records: 912
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Exact persistence attempts and terminal observation qualification](verification/2026-10/2026-10-25T081443Z-exact-persistence-attempts-and-terminal-observation-qualification-332f36f3c0f94f93ae1eb2721e981359.md) - Records owner-issued attempt correlation, exact observation acknowledgment, unchanged physical custody, public workflow evidence and scoped review corrections; complete R1 remains open.
 - **Work Progress**: [First writes committed and exact persistence redesign started](progress/2026-10/2026-10-25T063656Z-first-writes-committed-and-exact-persistence-redesign-started-1c12dd152e894de3a109c0d072338cf3.md) - Commits the qualified Source first-write correction and records the next R1 persistence observation owner design without claiming its implementation.
 - **Verification Evidence**: [Source owned first property writes and bounded selector error qualification](verification/2026-10/2026-10-25T060130Z-source-owned-first-property-writes-and-bounded-selector-error-qualification-0dfaa18252de473b90ff57ef150e64b0.md) - Qualifies selected default-root initialization, exact authored absence Undo, bounded rejected IDs and real non-active panel persistence while retaining complete template and storage contracts.
 - **Verification Evidence**: [Selector directed property reads and indexed root retirement qualification](verification/2026-10/2026-10-25T051125Z-selector-directed-property-reads-and-indexed-root-retirement-qualification-bd267ec01e4d44d3ad5f2a2d4543514d.md) - Qualifies borrowed nested source observations, independent scan and copy budgets, real computed panel editing and the reviewed root-tombstone correction; full R2 remains open.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Bounded authoring query public workflow and simplification checkpoint](progress/2026-10/2026-10-24T234726Z-bounded-authoring-query-public-workflow-and-simplification-checkpoint-032e0546f45246c1b04dcc4eb2fc64a5.md) - Paged actual inventory and bounded root reads reach existing public actions and computed edits; final qualification and complete review remain separate.
 - **Work Progress**: [Retained construction committed and source read projection checkpoint](progress/2026-10/2026-10-24T231507Z-retained-construction-committed-and-source-read-projection-checkpoint-843e9e4a886c4d7fa8e9f89ea8433591.md) - Construction is locally committed; bounded read design and borrowed source prototype advance R2 while public query transport remains open.
 - **Verification Evidence**: [Retained source construction pinned public and native qualification](verification/2026-10/2026-10-24T224939Z-retained-source-construction-pinned-public-and-native-qualification-e1813acad6f04a93898a1e342989fa44.md) - Rust 1.95.0 qualifies retained construction through owner/public/Session lifecycle paths, final static checks and selected Windows native regressions; full R2 remains open.
-- **Work Progress**: [Retained construction complete review and pinned qualification correction](progress/2026-10/2026-10-24T224111Z-retained-construction-complete-review-and-pinned-qualification-correction-5fc5eada19d14468877fc065bb2ff7ff.md) - Actual eight-lens CE receipt completed with one direct Session test gap; simplification applied and explicit Rust 1.95.0 qualification supersedes unsupported historical toolchain labels.
 
 # Integration Notes
 

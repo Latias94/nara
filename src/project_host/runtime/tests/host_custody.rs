@@ -128,22 +128,27 @@ fn failed_and_stale_reopen_preserve_failed_save_cleanup_through_session_drop() {
             make_authoring_name_dirty(&mut editor, document, "dirty-before-reopen");
             guard = CleanupGuard::new(arm_failed_cleanup(&mut editor, document, kind));
             fail_save(&mut editor, document);
-            assert_eq!(
-                editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-                EditorPersistenceRequestResult::Accepted
-            );
+            assert!(matches!(
+                editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+                    attempt: editor
+                        .persistence_view()
+                        .attempt()
+                        .expect("the test observed a terminal persistence result")
+                }),
+                EditorPersistenceRequestResult::Acknowledged { .. }
+            ));
             let control = if stale {
                 Some(editor.hold_next_reopen(editor::ReopenTestPhase::AfterPreparation))
             } else {
                 fs::write(&path, b"{ malformed").unwrap();
                 None
             };
-            assert_eq!(
+            assert!(matches!(
                 editor.request_persistence(EditorPersistenceCommand::Reopen {
                     document: Some(document)
                 }),
-                EditorPersistenceRequestResult::Accepted
-            );
+                EditorPersistenceRequestResult::Accepted { .. }
+            ));
             editor.drive_editor_frame(Duration::ZERO);
             if let Some(control) = control {
                 assert!(control.wait_until_started());
@@ -196,10 +201,15 @@ fn additive_open_preserves_failed_cleanup_until_explicit_close_retires_only_its_
         make_authoring_name_dirty(&mut editor, document, "retained-dirty");
         guard = CleanupGuard::new(arm_failed_cleanup(&mut editor, document, kind));
         fail_save(&mut editor, document);
-        assert_eq!(
-            editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-            EditorPersistenceRequestResult::Accepted
-        );
+        assert!(matches!(
+            editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+                attempt: editor
+                    .persistence_view()
+                    .attempt()
+                    .expect("the test observed a terminal persistence result")
+            }),
+            EditorPersistenceRequestResult::Acknowledged { .. }
+        ));
         let retained = editor.workspace_model().document(document).unwrap().clone();
         let index = editor.project_source_index_snapshot().unwrap();
         let (source, source_kind) = successor(kind);
@@ -217,12 +227,12 @@ fn additive_open_preserves_failed_cleanup_until_explicit_close_retires_only_its_
         assert_eq!(after_open, retained);
         make_authoring_name_dirty(&mut editor, opened, "saved-successor");
         let saved_revision = editor.workspace().document_revision(opened).unwrap();
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(EditorPersistenceCommand::Save {
                 document: Some(opened)
             }),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         assert!(matches!(
             drive_persistence_to_terminal(&mut editor).persistence().result(),
             Some(EditorPersistenceResult::Saved { document: saved, revision, .. })
@@ -233,10 +243,15 @@ fn additive_open_preserves_failed_cleanup_until_explicit_close_retires_only_its_
                 .unwrap()
                 .contains("saved-successor")
         );
-        assert_eq!(
-            editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-            EditorPersistenceRequestResult::Accepted
-        );
+        assert!(matches!(
+            editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+                attempt: editor
+                    .persistence_view()
+                    .attempt()
+                    .expect("the test observed a terminal persistence result")
+            }),
+            EditorPersistenceRequestResult::Acknowledged { .. }
+        ));
         assert_eq!(
             editor.request_workspace_intent(EditorWorkspaceIntent::CloseDocument { document }),
             nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
@@ -302,12 +317,12 @@ fn additive_open_preserves_failed_cleanup_until_explicit_close_retires_only_its_
         assert_eq!(fs::read(&path).unwrap(), target);
         assert!(editor.acknowledge_workspace_intent_result());
         make_authoring_name_dirty(&mut editor, opened, "saved-after-other-close");
-        assert_eq!(
+        assert!(matches!(
             editor.request_persistence(EditorPersistenceCommand::Save {
                 document: Some(opened)
             }),
-            EditorPersistenceRequestResult::Accepted
-        );
+            EditorPersistenceRequestResult::Accepted { .. }
+        ));
         assert!(matches!(
             drive_persistence_to_terminal(&mut editor).persistence().result(),
             Some(EditorPersistenceResult::Saved { document: saved, .. }) if saved == opened
@@ -334,12 +349,12 @@ fn session_close_rejects_new_file_and_play_admission_before_and_after_physical_r
     let index = editor.project_source_index_snapshot().unwrap();
     let before = editor.drive_editor_frame(Duration::ZERO);
     let control = editor.hold_next_reopen(editor::ReopenTestPhase::BeforeRead);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Reopen {
             document: Some(document)
         }),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     assert!(control.wait_until_started());
     assert!(matches!(
@@ -423,19 +438,24 @@ fn content_runtime_replacement_transfers_failed_cleanup_and_keeps_original_hosts
     edit_native_name(&mut editor, scene_document, "unsaved-scene");
     guard = CleanupGuard::new(editor.test_fail_next_save_after_write(scene_document));
     fail_save(&mut editor, scene_document);
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-        EditorPersistenceRequestResult::Accepted
-    );
+    assert!(matches!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+            attempt: editor
+                .persistence_view()
+                .attempt()
+                .expect("the test observed a terminal persistence result")
+        }),
+        EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
     assert_eq!(directory_entries(&source_path), scene_entries + 1);
     let old_content = editor.test_project_content_revision();
     edit_native_name(&mut editor, prefab_document, "saved-prefab");
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(prefab_document)
         }),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     let saved = drive_persistence_to_terminal(&mut editor);
     assert!(
         matches!(saved.persistence().result(), Some(EditorPersistenceResult::Saved { document, .. })
@@ -462,16 +482,21 @@ fn content_runtime_replacement_transfers_failed_cleanup_and_keeps_original_hosts
             .unwrap()
             .contains("saved-prefab")
     );
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-        EditorPersistenceRequestResult::Accepted
-    );
-    assert_eq!(
+    assert!(matches!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+            attempt: editor
+                .persistence_view()
+                .attempt()
+                .expect("the test observed a terminal persistence result")
+        }),
+        EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Reopen {
             document: Some(scene_document)
         }),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     assert!(
         matches!(drive_persistence_to_terminal(&mut editor).persistence().result(),
         Some(EditorPersistenceResult::Opened { document, .. }) if document == scene_document)
@@ -536,7 +561,7 @@ fn assert_closed_admission(
     ] {
         assert_eq!(
             editor.request_persistence(command),
-            EditorPersistenceRequestResult::Rejected(EditorPersistenceRejection::Busy)
+            EditorPersistenceRequestResult::Refused(EditorPersistenceRejection::Busy)
         );
     }
     for command in [
@@ -659,12 +684,12 @@ fn arm_failed_cleanup(
 
 #[cfg(windows)]
 fn fail_save(editor: &mut editor::EditorProjectSession, document: EditorDocumentId) {
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document)
         }),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     assert_eq!(
         drive_persistence_to_terminal(editor).persistence().result(),
         Some(EditorPersistenceResult::Failed {

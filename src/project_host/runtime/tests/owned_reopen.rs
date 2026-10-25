@@ -29,12 +29,12 @@ fn prepared_reopen_rejects_a_later_edit_without_changing_its_source_or_saved_che
     )
     .unwrap();
     let control = editor.hold_next_reopen(editor::ReopenTestPhase::AfterPreparation);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Reopen {
             document: Some(document)
         }),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     assert!(control.wait_until_started());
 
@@ -48,7 +48,7 @@ fn prepared_reopen_rejects_a_later_edit_without_changing_its_source_or_saved_che
     let revision = before_slot.revision();
     assert_eq!(
         before.persistence().operation(),
-        EditorPersistenceOperation::Opening { document }
+        Some(EditorPersistenceOperation::Opening { document })
     );
     assert!(before.persistence().result().is_none());
 
@@ -74,16 +74,21 @@ fn prepared_reopen_rejects_a_later_edit_without_changing_its_source_or_saved_che
     assert_eq!(slot.session().history_status(), history);
     assert_eq!(scene_name_value(&editor, document), "later-edit");
     assert_eq!(fs::read(&source_path).unwrap(), original);
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-        EditorPersistenceRequestResult::Accepted
-    );
-    assert_eq!(
+    assert!(matches!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+            attempt: editor
+                .persistence_view()
+                .attempt()
+                .expect("the test observed a terminal persistence result")
+        }),
+        EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document)
         }),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     assert!(matches!(
         drive_persistence_to_terminal(&mut editor)
             .persistence()
@@ -125,12 +130,12 @@ fn prepared_reopen_publishes_captured_bytes_but_a_later_disk_write_conflicts_wit
         .unwrap();
     fs::write(&source_path, &captured).unwrap();
     let control = editor.hold_next_reopen(editor::ReopenTestPhase::AfterPreparation);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Reopen {
             document: Some(document)
         }),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     assert!(control.wait_until_started());
     let replacement = editable_authoring_scene("external-b")
@@ -153,17 +158,22 @@ fn prepared_reopen_publishes_captured_bytes_but_a_later_disk_write_conflicts_wit
         ))
     );
     assert_eq!(fs::read_to_string(&source_path).unwrap(), replacement);
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-        EditorPersistenceRequestResult::Accepted
-    );
+    assert!(matches!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult {
+            attempt: editor
+                .persistence_view()
+                .attempt()
+                .expect("the test observed a terminal persistence result")
+        }),
+        EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
     make_authoring_name_dirty(&mut editor, document, "local-successor");
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Save {
             document: Some(document)
         }),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     assert_eq!(
         drive_persistence_to_terminal(&mut editor)
             .persistence()
@@ -193,12 +203,12 @@ fn pending_reopen_blocks_trusted_play_admission_and_close_waits_for_the_read_own
     .unwrap();
     let document = editor.workspace().active_document().unwrap();
     let control = editor.hold_next_reopen(editor::ReopenTestPhase::BeforeRead);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Reopen {
             document: Some(document)
         }),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     assert!(control.wait_until_started());
     for command in [
@@ -270,12 +280,12 @@ fn pending_reopen_blocks_external_play_admission_before_build_receipt_preparatio
     );
     let document = editor.workspace().active_document().unwrap();
     let control = editor.hold_next_reopen(editor::ReopenTestPhase::BeforeRead);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Reopen {
             document: Some(document)
         }),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     assert!(control.wait_until_started());
     for command in [
@@ -320,12 +330,12 @@ fn dropped_editor_retains_prepared_reopen_until_its_worker_physically_returns() 
     let mut editor = open_generic_editor_with_ready_index(&project);
     let document = editor.workspace().active_document().unwrap();
     let control = editor.hold_next_reopen(editor::ReopenTestPhase::AfterPreparation);
-    assert_eq!(
+    assert!(matches!(
         editor.request_persistence(EditorPersistenceCommand::Reopen {
             document: Some(document)
         }),
-        EditorPersistenceRequestResult::Accepted
-    );
+        EditorPersistenceRequestResult::Accepted { .. }
+    ));
     editor.drive_editor_frame(Duration::ZERO);
     assert!(control.wait_until_started());
     assert!(editor.persistence_view().result().is_none());

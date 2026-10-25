@@ -186,7 +186,7 @@ impl EditorProjectSession {
     pub(super) fn advance_project_content_refresh(&mut self) {
         // Transfer the lifetime Host owner only when no operation still borrows its runtime.
         if !self.accepts_new_work()
-            || self.pending_persistence.is_some()
+            || self.persistence.has_pending_work()
             || !matches!(
                 self.project_content,
                 EditorProjectContentView::RefreshPending { .. }

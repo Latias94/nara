@@ -162,12 +162,13 @@ This does not close full R2 or installable-tool workflows; the
 [pinned editing/format study](../research/2026-10-25-editing-versus-format-admission.md) keeps
 equivalent locality and a deliberate editing/Save contract redesign as separate alternatives.
 
-The [exact persistence-attempt recommendation](editor-persistence-attempt-design.md) develops
+The [exact persistence-attempt design](editor-persistence-attempt-design.md) develops
 R1/F2's missing observation correlation: one owner-issued attempt through dispatch, pending and
-terminal state, with exact acknowledgment and explicit retry supersession. It proposes replacing
-parallel private lifecycle slots, not adding a result bus or observer registry. The design does
-not qualify implementation, change file/worker custody or complete R1; ADRs 0047/0118 must be
-reconciled before the corresponding production replacement.
+terminal state, with exact acknowledgment and explicit retry supersession. ADRs 0047/0118 adopt
+the replacement of parallel private lifecycle slots, not a result bus or observer registry.
+Its [scoped qualification](../knowledge/engineering/verification/2026-10/2026-10-25T081443Z-exact-persistence-attempts-and-terminal-observation-qualification-332f36f3c0f94f93ae1eb2721e981359.md)
+records exact owner/public correlation, unchanged independent file/worker custody and four selected
+actual Windows/DX12 workflows. This does not complete R1 or qualify installable tools.
 
 The [source-context and logical-occurrence proposal](scene-source-and-occurrence-identity-design.md)
 addresses the separately reproduced same-World/two-Scene UI key collision. It compares a required

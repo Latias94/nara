@@ -267,17 +267,17 @@ fn worker_panic_recovers_the_poisoned_host_and_blocks_blind_retry() {
     assert!(!super::super::persistence_result_allows_retry(
         rejection,
         EditorPersistenceRequestKind::Save,
-        fixture.document,
+        Some(fixture.document),
     ));
     assert!(super::super::persistence_result_allows_retry(
         rejection,
         EditorPersistenceRequestKind::Reopen,
-        fixture.document,
+        Some(fixture.document),
     ));
     assert!(!super::super::persistence_result_allows_retry(
         rejection,
         EditorPersistenceRequestKind::Reopen,
-        EditorDocumentId::from_raw(fixture.document.raw() + 1),
+        Some(EditorDocumentId::from_raw(fixture.document.raw() + 1)),
     ));
     let PersistenceLane::Scene(lane) = lane else {
         panic!("the fixture owns a Scene Host")

@@ -720,7 +720,7 @@ fn a_panel_reads_a_keyed_scalar_then_commits_it_without_copying_or_activating_it
             )
             .actions(),
             [EditorApplicationActionDispatch::Dispatched(
-                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
             )]
         ));
         settle_persistence(&mut app);
@@ -740,9 +740,13 @@ fn a_panel_reads_a_keyed_scalar_then_commits_it_without_copying_or_activating_it
             "only the selected score changes; the other row, large subtree and unknown record survive"
         );
         assert_navigation(&app, document, &initial);
+        let attempt = frame(&app)
+            .persistence()
+            .attempt()
+            .expect("the test observed a terminal persistence result");
         submit(
             &mut app,
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
         );
         assert!(matches!(
             submit(
@@ -756,7 +760,7 @@ fn a_panel_reads_a_keyed_scalar_then_commits_it_without_copying_or_activating_it
             )
             .actions(),
             [EditorApplicationActionDispatch::Dispatched(
-                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
             )]
         ));
         settle_persistence(&mut app);
@@ -821,32 +825,41 @@ fn save_property_source(
             base_revision: saving.revision,
         }),
     );
-    if dirty {
-        assert!(matches!(
-            submitted.actions(),
-            [EditorApplicationActionDispatch::Dispatched(
-                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
-            )]
-        ));
+    let attempt = if dirty {
+        let [
+            EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Persistence(
+                EditorPersistenceRequestResult::Accepted { attempt },
+            )),
+        ] = submitted.actions()
+        else {
+            panic!("dirty Save must admit an identified attempt")
+        };
         settle_persistence(app);
-        assert!(matches!(
-        frame(app).persistence().result(),
-        Some(EditorPersistenceResult::Saved { document, revision, .. })
-            if document == saving.document && revision == saving.revision
-        ));
+        assert!(
+            matches!(frame(app).persistence(), nara_tooling::EditorPersistenceView::Terminal {
+            attempt: actual, result: EditorPersistenceResult::Saved { document, revision, .. }
+        } if actual == *attempt && document == saving.document && revision == saving.revision)
+        );
+        *attempt
     } else {
-        assert!(matches!(
-            submitted.actions(),
-            [EditorApplicationActionDispatch::Dispatched(
-                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Rejected(
-                    nara_tooling::EditorPersistenceRejection::NotDirty
-                ))
-            )]
-        ));
-        assert!(matches!(frame(app).persistence().result(),
-            Some(EditorPersistenceResult::Rejected { document: Some(document), reason: nara_tooling::EditorPersistenceRejection::NotDirty, .. })
-                if document == saving.document));
-    }
+        let [
+            EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::Persistence(
+                EditorPersistenceRequestResult::Rejected {
+                    attempt,
+                    reason: nara_tooling::EditorPersistenceRejection::NotDirty,
+                },
+            )),
+        ] = submitted.actions()
+        else {
+            panic!("clean Save must publish its own NotDirty attempt")
+        };
+        assert!(
+            matches!(frame(app).persistence(), nara_tooling::EditorPersistenceView::Terminal {
+            attempt: actual, result: EditorPersistenceResult::Rejected { document: Some(document), reason: nara_tooling::EditorPersistenceRejection::NotDirty, .. }
+        } if actual == *attempt && document == saving.document)
+        );
+        *attempt
+    };
     assert!(
         !frame(app)
             .workspace()
@@ -860,11 +873,141 @@ fn save_property_source(
         expected,
         "only wire_defaults may change; settings, the large subtree and unknown component survive"
     );
-    submit(
+    let acknowledged = submit(
         app,
-        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
+    );
+    assert!(
+        matches!(acknowledged.actions(), [EditorApplicationActionDispatch::Dispatched(
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Acknowledged { attempt: actual })
+    )] if *actual == attempt)
     );
     saved
+}
+
+#[test]
+fn two_public_observers_cannot_dismiss_each_others_successor_persistence_attempt() {
+    use nara_tooling::{EditorPersistenceRejection, EditorPersistenceView};
+
+    for (kind, source) in [
+        (
+            EditorDocumentKind::Scene,
+            "scenes/attempt-observers.scene.json",
+        ),
+        (
+            EditorDocumentKind::Prefab,
+            "prefabs/attempt-observers.prefab.json",
+        ),
+    ] {
+        let PropertyFixture {
+            project,
+            mut app,
+            startup,
+            contents,
+            active,
+            document,
+        } = property_fixture(kind, source);
+        let revision = basis(&app, document).revision;
+        let first = submit(
+            &mut app,
+            EditorAction::Persistence(EditorPersistenceAction::Save {
+                document,
+                base_revision: revision,
+            }),
+        );
+        let first_observation = frame(&app).persistence();
+        let EditorPersistenceView::Terminal {
+            attempt: first_id,
+            result: first_result,
+        } = first_observation
+        else {
+            panic!("clean Save must publish an observed terminal")
+        };
+        assert!(
+            matches!(first.actions(), [EditorApplicationActionDispatch::Dispatched(
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Rejected { attempt, reason: EditorPersistenceRejection::NotDirty })
+        )] if *attempt == first_id)
+        );
+        let second_observer_ack = submit(
+            &mut app,
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+                attempt: first_id,
+            }),
+        );
+        assert!(
+            matches!(second_observer_ack.actions(), [EditorApplicationActionDispatch::Dispatched(
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Acknowledged { attempt })
+        )] if *attempt == first_id)
+        );
+        let second = submit(
+            &mut app,
+            EditorAction::Persistence(EditorPersistenceAction::Save {
+                document,
+                base_revision: revision,
+            }),
+        );
+        let successor = frame(&app).persistence();
+        let EditorPersistenceView::Terminal {
+            attempt: second_id,
+            result: second_result,
+        } = successor
+        else {
+            panic!("the second request must have its own terminal")
+        };
+        assert!(
+            matches!(second.actions(), [EditorApplicationActionDispatch::Dispatched(
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Rejected { attempt, reason: EditorPersistenceRejection::NotDirty })
+        )] if *attempt == second_id)
+        );
+        assert_ne!(first_id, second_id);
+        assert_eq!(first_result, second_result);
+        let late = submit(
+            &mut app,
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+                attempt: first_id,
+            }),
+        );
+        assert!(matches!(
+            late.actions(),
+            [EditorApplicationActionDispatch::Dispatched(
+                EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Refused(
+                    EditorPersistenceRejection::ResultMismatch
+                ))
+            )]
+        ));
+        assert_eq!(frame(&app).persistence(), successor);
+        let exact = submit(
+            &mut app,
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult {
+                attempt: second_id,
+            }),
+        );
+        assert!(
+            matches!(exact.actions(), [EditorApplicationActionDispatch::Dispatched(
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Acknowledged { attempt })
+        )] if *attempt == second_id)
+        );
+        assert_eq!(frame(&app).persistence(), EditorPersistenceView::Idle);
+        assert!(
+            matches!(first.actions(), [EditorApplicationActionDispatch::Dispatched(
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Rejected { attempt, reason: EditorPersistenceRejection::NotDirty })
+        )] if *attempt == first_id)
+        );
+        assert_eq!(frame(&app).workspace().active_document, Some(active));
+        assert_eq!(
+            frame(&app).workspace().document(document).unwrap().revision,
+            revision
+        );
+        assert!(!frame(&app).workspace().document(document).unwrap().dirty);
+        assert_eq!(
+            fs::read_to_string(project.root.join(source)).unwrap(),
+            contents
+        );
+        assert_eq!(
+            fs::read_to_string(project.root.join("scenes/startup.scene.json")).unwrap(),
+            startup
+        );
+    }
 }
 
 #[test]
@@ -1166,7 +1309,9 @@ fn a_panel_first_writes_a_defaulted_leaf_and_undo_restores_absent_source_storage
                     )
                     .actions(),
                     [EditorApplicationActionDispatch::Dispatched(
-                        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+                        EditorActionOutcome::Persistence(
+                            EditorPersistenceRequestResult::Accepted { .. }
+                        )
                     )]
                 ));
                 settle_persistence(&mut app);

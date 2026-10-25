@@ -12,7 +12,7 @@ use nara::{
     scene::{SceneEntityId, ScenePlacementAnchor},
     tooling::{
         EditorAction, EditorActionBatch, EditorCloseDecision, EditorFrameModel,
-        EditorPersistenceOperation, EditorPersistenceResult,
+        EditorPersistenceResult,
     },
 };
 use serde_json::{Value, json};
@@ -201,16 +201,11 @@ impl StructureInteraction {
 
     fn settle_persistence(&mut self) {
         let deadline = Instant::now() + Duration::from_secs(10);
-        while self.frame().persistence().operation() != EditorPersistenceOperation::Idle
-            && Instant::now() < deadline
-        {
+        while self.frame().persistence().operation().is_some() && Instant::now() < deadline {
             self.render();
             std::thread::sleep(Duration::from_millis(1));
         }
-        assert_eq!(
-            self.frame().persistence().operation(),
-            EditorPersistenceOperation::Idle
-        );
+        assert_eq!(self.frame().persistence().operation(), None);
         self.render();
     }
 }

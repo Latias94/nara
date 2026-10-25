@@ -110,9 +110,9 @@ fn image_import_poll_deadline(now: Instant, pending: bool) -> Option<Instant> {
 
 fn persistence_poll_deadline(
     now: Instant,
-    operation: EditorPersistenceOperation,
+    operation: Option<EditorPersistenceOperation>,
 ) -> Option<Instant> {
-    (operation != EditorPersistenceOperation::Idle).then_some(now + PERSISTENCE_POLL_DELAY)
+    operation.is_some().then_some(now + PERSISTENCE_POLL_DELAY)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -245,14 +245,11 @@ mod tests {
             EditorPersistenceOperation::Opening { document },
         ] {
             assert_eq!(
-                persistence_poll_deadline(now, operation),
+                persistence_poll_deadline(now, Some(operation)),
                 Some(now + Duration::from_millis(16))
             );
         }
-        assert_eq!(
-            persistence_poll_deadline(now, EditorPersistenceOperation::Idle),
-            None
-        );
+        assert_eq!(persistence_poll_deadline(now, None), None);
     }
 
     #[test]

@@ -179,7 +179,7 @@ fn reopen_completion_is_observed_without_repainting_unchanged_polls() {
         let update = application.drive_editor_frame(Duration::ZERO, false, false);
         let after = application.current_frame().unwrap().persistence();
         assert_eq!(update.actions_observed(), before != after);
-        if after.operation() == EditorPersistenceOperation::Idle {
+        if after.operation().is_none() {
             assert!(matches!(
                 after.result(),
                 Some(EditorPersistenceResult::Opened { .. })
@@ -258,7 +258,7 @@ fn persistence_completion_is_observed_without_repainting_unchanged_polls() {
                 != after.source_asset_import_work_pending()
             || before.image_import_work_pending() != after.image_import_work_pending();
         assert_eq!(update.actions_observed(), changed);
-        if after.persistence().operation() == EditorPersistenceOperation::Idle {
+        if after.persistence().operation().is_none() {
             assert!(matches!(
                 after.persistence().result(),
                 Some(EditorPersistenceResult::Saved { .. })
@@ -316,7 +316,7 @@ fn queue_save(application: &mut EditorApplication) {
     assert!(matches!(
         dispatch.feedback().unwrap().unwrap().outcomes(),
         [EditorActionOutcome::Persistence(
-            EditorPersistenceRequestResult::Accepted
+            EditorPersistenceRequestResult::Accepted { .. }
         )]
     ));
 }
@@ -354,19 +354,19 @@ fn queue_reopen(application: &mut EditorApplication) {
     assert!(matches!(
         dispatch.feedback().unwrap().unwrap().outcomes(),
         [EditorActionOutcome::Persistence(
-            EditorPersistenceRequestResult::Accepted
+            EditorPersistenceRequestResult::Accepted { .. }
         )]
     ));
     let project = application.state.workspace().unwrap();
     assert_eq!(
         project.session.persistence_view().operation(),
-        EditorPersistenceOperation::Opening {
+        Some(EditorPersistenceOperation::Opening {
             document: scene.document
-        }
+        })
     );
     assert_eq!(
         frame.persistence().operation(),
-        EditorPersistenceOperation::Idle,
+        None,
         "admission must precede publication of the Opening frame"
     );
 }
