@@ -132,6 +132,11 @@ records actual read/computed-edit workflows, affected native/static evidence, so
 complete review and its multi-row budget proof correction. Prepared panel submission, broader
 index-maintenance costs and full R2 remain separate from this bounded workflow and the
 [timing baseline](../benchmarks/2026-10-25-authoring-root-read.md).
+The [selector-directed successor](../knowledge/engineering/verification/2026-10/2026-10-25T051125Z-selector-directed-property-reads-and-indexed-root-retirement-qualification-bd267ec01e4d44d3ad5f2a2d4543514d.md)
+replaces root-only read operations with the existing property selector and separate lookup/copy
+budgets. Actual nested observations drive non-active Scene/Prefab panel edits; indexed root
+retirement, provenance and failure distinctions have scoped owner/public evidence. It does not
+materialize a defaulted root for mutation or qualify nested discovery/full R2.
 
 The [prepared-panel design](editor-prepared-panel-design.md) selects finite read-only preparation
 and consuming commands through existing panel submission, rather than mutable paint access or

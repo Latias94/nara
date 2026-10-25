@@ -69,8 +69,9 @@ pub use plugin::{
     validate_component_registry_authority,
 };
 pub use property::{
-    ComponentPropertyError, ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep,
-    ResolvedComponentProperty, replace_component_property, resolve_component_property,
+    ComponentPropertyError, ComponentPropertyKey, ComponentPropertyPath,
+    ComponentPropertyReadBudget, ComponentPropertyStep, ResolvedComponentProperty,
+    replace_component_property, resolve_component_property, resolve_component_property_in_root,
 };
 pub use provider::{
     ComponentSchemaContributionReceipt, ComponentSchemaOwnerContributionReceipt,
@@ -162,15 +163,16 @@ pub mod prelude {
         ComponentMemberPath, ComponentMemberPathError, ComponentMemberPathSegment,
         ComponentMigrationError, ComponentNumericBound, ComponentNumericDomain,
         ComponentNumericInterval, ComponentPropertyError, ComponentPropertyKey,
-        ComponentPropertyPath, ComponentPropertyStep, ComponentRegistry, ComponentRegistryError,
-        ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
-        ComponentShapeError, ComponentShapeErrorKind, ComponentShapeMember, ComponentTypeId,
-        ComponentValue, ComponentValueError, ComponentValueKind, ComponentValueShape,
-        DeclaredAssetReference, DeclaredAssetReferenceError, EntityReference,
-        EntityReferenceTraversalLimits, MigratedComponentValue, PersistentComponent,
-        PersistentComponentProvider, PreparedComponent, PreparedComponentCandidate,
-        ResolvedComponentProperty, collect_declared_asset_references,
-        remap_declared_entity_references, replace_component_property, resolve_component_property,
+        ComponentPropertyPath, ComponentPropertyReadBudget, ComponentPropertyStep,
+        ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot, ComponentSchema,
+        ComponentSchemaCatalog, ComponentSchemaVersion, ComponentShapeError,
+        ComponentShapeErrorKind, ComponentShapeMember, ComponentTypeId, ComponentValue,
+        ComponentValueError, ComponentValueKind, ComponentValueShape, DeclaredAssetReference,
+        DeclaredAssetReferenceError, EntityReference, EntityReferenceTraversalLimits,
+        MigratedComponentValue, PersistentComponent, PersistentComponentProvider,
+        PreparedComponent, PreparedComponentCandidate, ResolvedComponentProperty,
+        collect_declared_asset_references, remap_declared_entity_references,
+        replace_component_property, resolve_component_property, resolve_component_property_in_root,
         rewrite_declared_entity_references, validate_component_value,
     };
     pub use bevy_reflect::prelude::*;

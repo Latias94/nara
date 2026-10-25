@@ -37,10 +37,10 @@ use nara_tooling::{
     EditorEntityPage, EditorEntityQuery, EditorEntityQueryLimits, EditorEntityQueryPosition,
     EditorFrameModel, EditorNavigationAction, EditorPersistenceAction, EditorPersistenceOperation,
     EditorPersistenceRequestResult, EditorPersistenceResult, EditorProjectBrowserAction,
-    EditorProjectBrowserActionOutcome, EditorReopenTarget, EditorRootObservation, EditorRootRead,
-    EditorRootReadLimits, EditorRootTarget, EditorRootValue, EditorWorkspaceIntent,
-    EditorWorkspaceIntentAction, EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult,
-    PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
+    EditorProjectBrowserActionOutcome, EditorPropertyObservation, EditorPropertyRead,
+    EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue, EditorReopenTarget,
+    EditorWorkspaceIntent, EditorWorkspaceIntentAction, EditorWorkspaceIntentRequestResult,
+    EditorWorkspaceIntentResult, PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
 };
 
 #[path = "support/text_project.rs"]
@@ -49,6 +49,9 @@ mod text_project;
 
 #[path = "support/prepared_panel_cost.rs"]
 mod prepared_panel_cost;
+
+#[path = "support/property_read.rs"]
+mod property_read;
 
 const OWNER: &str = "consumer.prepared";
 
@@ -281,10 +284,10 @@ fn page(
 
 fn root_read(
     app: &mut EditorApplication,
-    request: EditorRootRead,
-) -> Result<EditorRootObservation, EditorDocumentQueryRejection> {
-    let result = submit(app, EditorAction::ReadDocumentRoot(request));
-    let [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::DocumentRoot(value))] =
+    request: EditorPropertyRead,
+) -> Result<EditorPropertyObservation, EditorDocumentQueryRejection> {
+    let result = submit(app, EditorAction::ReadDocumentProperty(request));
+    let [EditorApplicationActionDispatch::Dispatched(EditorActionOutcome::DocumentProperty(value))] =
         result.actions()
     else {
         panic!("{result:?}")
@@ -294,7 +297,7 @@ fn root_read(
 
 #[derive(Default)]
 struct ComputedPanelEvidence {
-    observation: Option<EditorRootObservation>,
+    observation: Option<EditorPropertyObservation>,
     held_frames: usize,
     results: Vec<PanelActionDispatch>,
 }
@@ -304,7 +307,7 @@ struct ComputedEditPanel {
     entity: SceneEntityId,
     action: Option<EditorAction>,
     component_version: Option<ComponentSchemaVersion>,
-    observation: Option<EditorRootObservation>,
+    observation: Option<EditorPropertyObservation>,
     prepared: Option<PreparedEditorDocumentEdit>,
     stale: Option<PreparedEditorDocumentEdit>,
     evidence: Rc<RefCell<ComputedPanelEvidence>>,
@@ -330,14 +333,14 @@ impl ImguiEditorPanel for ComputedEditPanel {
             return;
         }
         if let Some(observed) = self.observation.take() {
-            let EditorRootValue::Present(ComponentValue::U64(original)) = observed.value else {
+            let EditorPropertyValue::Present(ComponentValue::U64(original)) = observed.value else {
                 panic!("the discovered integer must be present")
             };
             let edits = [AuthoringPropertyEdit {
                 entity: observed.target.entity.clone(),
                 component: observed.target.component.clone(),
                 component_version: self.component_version.unwrap(),
-                property: ComponentPropertyPath::new(observed.target.field.clone()),
+                property: observed.target.property.clone(),
                 value: ComponentValue::U64(original.checked_add(2).unwrap()),
             }];
             let mut wrong_schema = observed.target.basis.clone();
@@ -423,14 +426,14 @@ impl ImguiEditorPanel for ComputedEditPanel {
                             _ => None,
                         });
                         if let Some(field) = field {
-                            EditorAction::ReadDocumentRoot(EditorRootRead {
-                                target: EditorRootTarget {
+                            EditorAction::ReadDocumentProperty(EditorPropertyRead {
+                                target: EditorPropertyTarget {
                                     basis: page.target.basis.clone(),
                                     entity: page.target.entity.clone(),
                                     component: component.clone(),
-                                    field,
+                                    property: ComponentPropertyPath::new(field),
                                 },
-                                limits: EditorRootReadLimits::new(1024, 1, 8).unwrap(),
+                                limits: EditorPropertyReadLimits::new(1024, 1, 8).unwrap(),
                             })
                         } else {
                             EditorAction::QueryDocumentAuthoring(EditorAuthoringQuery {
@@ -443,7 +446,9 @@ impl ImguiEditorPanel for ComputedEditPanel {
                     }
                 });
             }
-            PanelActionDispatch::Dispatched(EditorActionOutcome::DocumentRoot(Ok(observed))) => {
+            PanelActionDispatch::Dispatched(EditorActionOutcome::DocumentProperty(Ok(
+                observed,
+            ))) => {
                 self.observation = Some(observed);
             }
             result @ PanelActionDispatch::Dispatched(EditorActionOutcome::Workspace(_)) => {
@@ -529,16 +534,16 @@ fn exercise_discovered_computed_edit(
         PanelActionDispatch::Dispatched(EditorActionOutcome::Workspace(stale)),
     ] if accepted.applied && !stale.applied));
     let observed = retained.observation.as_ref().unwrap();
-    let EditorRootValue::Present(ComponentValue::U64(original)) = observed.value else {
+    let EditorPropertyValue::Present(ComponentValue::U64(original)) = observed.value else {
         panic!("expected the discovered integer")
     };
     let expected = original.checked_add(2).unwrap();
     let request = |basis| {
         let mut target = observed.target.clone();
         target.basis = basis;
-        EditorRootRead {
+        EditorPropertyRead {
             target,
-            limits: EditorRootReadLimits::new(1024, 1, 8).unwrap(),
+            limits: EditorPropertyReadLimits::new(1024, 1, 8).unwrap(),
         }
     };
     let old_request = request(observed.target.basis.clone());
@@ -574,7 +579,7 @@ fn exercise_discovered_computed_edit(
         let current_basis = basis(app, document);
         assert_eq!(
             root_read(app, request(current_basis)).unwrap().value,
-            EditorRootValue::Present(ComponentValue::U64(value))
+            EditorPropertyValue::Present(ComponentValue::U64(value))
         );
     }
     submit(
@@ -630,7 +635,7 @@ fn exercise_discovered_computed_edit(
     );
     assert_eq!(
         root_read(app, request(reopened)).unwrap().value,
-        EditorRootValue::Present(ComponentValue::U64(expected))
+        EditorPropertyValue::Present(ComponentValue::U64(expected))
     );
     assert_eq!(
         root_read(app, old_request),
@@ -981,22 +986,22 @@ fn exercise_panel_construction(
             ),
             ("amount", ComponentValue::U64(amount), 8),
         ] {
-            let target = EditorRootTarget {
+            let target = EditorPropertyTarget {
                 basis: reopened.clone(),
                 entity: entity.clone(),
                 component: ComponentTypeId::new("consumer.Link"),
-                field: ComponentFieldId::new(field),
+                property: ComponentPropertyPath::new(ComponentFieldId::new(field)),
             };
             let observed = root_read(
                 app,
-                EditorRootRead {
+                EditorPropertyRead {
                     target: target.clone(),
-                    limits: EditorRootReadLimits::new(1024, 1, logical_bytes).unwrap(),
+                    limits: EditorPropertyReadLimits::new(1024, 1, logical_bytes).unwrap(),
                 },
             )
             .unwrap();
             assert_eq!(observed.target, target);
-            assert_eq!(observed.value, EditorRootValue::Present(expected));
+            assert_eq!(observed.value, EditorPropertyValue::Present(expected));
             assert_eq!(observed.value_nodes, 1);
             assert_eq!(observed.value_logical_bytes, logical_bytes);
         }
@@ -1267,14 +1272,16 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
                             ),
                             limits: EditorAuthoringQueryLimits::new(1, 1, 1024).unwrap(),
                         }),
-                        EditorAction::ReadDocumentRoot(EditorRootRead {
-                            target: EditorRootTarget {
+                        EditorAction::ReadDocumentProperty(EditorPropertyRead {
+                            target: EditorPropertyTarget {
                                 basis: captured.clone(),
                                 entity: id("anchor"),
                                 component: ComponentTypeId::new("consumer.Unknown"),
-                                field: ComponentFieldId::new("must-not-interpret"),
+                                property: ComponentPropertyPath::new(ComponentFieldId::new(
+                                    "must-not-interpret",
+                                )),
                             },
-                            limits: EditorRootReadLimits::new(1024, 1, 8).unwrap(),
+                            limits: EditorPropertyReadLimits::new(1024, 1, 8).unwrap(),
                         }),
                     ],
                     result: Rc::clone(&shared),
@@ -1305,7 +1312,7 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
         assert!(matches!(evidence.borrow().as_slice(), [
                 PanelActionDispatch::Dispatched(EditorActionOutcome::DocumentEntities(Ok(result))),
                 PanelActionDispatch::Dispatched(EditorActionOutcome::DocumentAuthoring(Ok(actual))),
-                PanelActionDispatch::Dispatched(EditorActionOutcome::DocumentRoot(Err(EditorDocumentQueryRejection::Source(nara::scene::AuthoringReadError::UnavailableComponent { readiness: nara::scene::AuthoringRecordReadiness::UnknownSchema })))),
+                PanelActionDispatch::Dispatched(EditorActionOutcome::DocumentProperty(Err(EditorDocumentQueryRejection::Source(nara::scene::AuthoringReadError::UnavailableComponent { readiness: nara::scene::AuthoringRecordReadiness::UnknownSchema })))),
             ] if result.entities == [id("anchor")] && matches!(actual.rows.as_slice(), [EditorAuthoringRow::Component { component, readiness: nara::scene::AuthoringRecordReadiness::UnknownSchema, .. }] if component.as_str() == "consumer.Unknown")));
         drop(context);
         drop(frontend);

@@ -129,20 +129,20 @@ fn assert_amount(app: &mut EditorApplication, document: EditorDocumentId, expect
     let captured = basis(app, document);
     let observed = root_read(
         app,
-        EditorRootRead {
-            target: EditorRootTarget {
+        EditorPropertyRead {
+            target: EditorPropertyTarget {
                 basis: captured,
                 entity: id("anchor"),
                 component: ComponentTypeId::new("consumer.Link"),
-                field: ComponentFieldId::new("amount"),
+                property: ComponentPropertyPath::new(ComponentFieldId::new("amount")),
             },
-            limits: EditorRootReadLimits::new(1024, 1, 8).unwrap(),
+            limits: EditorPropertyReadLimits::new(1024, 1, 8).unwrap(),
         },
     )
     .unwrap();
     assert_eq!(
         observed.value,
-        EditorRootValue::Present(ComponentValue::U64(expected))
+        EditorPropertyValue::Present(ComponentValue::U64(expected))
     );
 }
 

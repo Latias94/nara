@@ -95,9 +95,9 @@ impl EditorProjectSession {
             EditorAction::QueryDocumentAuthoring(query) => EditorActionOutcome::DocumentAuthoring(
                 self.workspace.query_document_authoring(query),
             ),
-            EditorAction::ReadDocumentRoot(request) => {
-                EditorActionOutcome::DocumentRoot(self.workspace.read_document_root(request))
-            }
+            EditorAction::ReadDocumentProperty(request) => EditorActionOutcome::DocumentProperty(
+                self.workspace.read_document_property(request),
+            ),
             EditorAction::CommitAuthoringEdit(prepared) => self.commit_authoring_edit(prepared),
             EditorAction::CommitAuthoringConstruction(prepared) => {
                 match self.commit_authoring_construction(prepared) {
@@ -362,7 +362,7 @@ impl EditorProjectSession {
             }
             EditorActionOutcome::DocumentEntities(_)
             | EditorActionOutcome::DocumentAuthoring(_)
-            | EditorActionOutcome::DocumentRoot(_)
+            | EditorActionOutcome::DocumentProperty(_)
             | EditorActionOutcome::AuthoringConstruction(_)
             | EditorActionOutcome::Persistence(_)
             | EditorActionOutcome::ProjectBrowser(_)

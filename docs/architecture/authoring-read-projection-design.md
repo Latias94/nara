@@ -1,7 +1,7 @@
 ---
 title: Selection-Independent Authoring Read Projections
 date: 2026-10-25
-status: Bounded owner and public workflow qualified; full R2 remains open
+status: Bounded selector-directed owner and public workflow qualified; full R2 remains open
 ---
 
 # Selection-Independent Authoring Read Projections
@@ -26,6 +26,9 @@ nor the selected Inspector is an alternative authoring authority.
 
 ## Alternatives And Selection
 
+These alternatives record the original root-read baseline. The selector-directed successor below
+keeps its inventory/borrowed-value split rather than adding another authority or a query language.
+
 | Interface | Benefit | Cost or failure mode |
 | --- | --- | --- |
 | Build the Inspector and truncate | Reuses a working presentation model | Already performs unbounded unwanted work and copies unrelated values; rejected |
@@ -41,6 +44,49 @@ its tree, or preventing metadata discovery from progressing. This is not arbitra
 pagination or a general query DSL.
 
 ## Source-Owned Borrowed Views
+
+### Selector-Directed Successor
+
+Replace the root-only read operation with one property read carrying the existing
+`ComponentPropertyPath`. Empty steps read the root; Member, keyed ListItem and MapEntry steps
+select an existing descendant. Root discovery remains a separate metadata operation. Do not
+retain unreleased root-only aliases or introduce a string query language.
+
+Scene/Prefab first require their current Available record and admitted Schema. They borrow the
+explicit root or its declared default, then ask Reflect's shared selector walker to resolve only
+that root. Defaulted provenance propagates to the selected descendant. A missing declared root
+without a default is Missing only for an empty selector; descending from that absence is a typed
+unavailable-value error. OptionalAbsent, unknown/retired members, wrong key types and missing map
+or list keys remain resolution failures, not Missing. Explicit Null remains explicit data.
+
+The bounded root walker is an operation over an already admitted field/root, not arbitrary input
+validation, native decoding or mutation authority. Share its member-lineage and keyed-item rules
+with the existing complete component resolver. Do not call complete effective-value materialization
+or validate/copy every component sibling just to read one descendant.
+
+Separate finite scan entries/logical bytes from copied metadata and output nodes/logical bytes.
+Charge examined declaration members, tombstone paths, optional unwrapping and keyed-list items,
+including compared key bytes, before the corresponding work. Normal root/storage lookups retain
+their admitted bounded-path/index responsibilities. A small scalar output is not an O(depth),
+elapsed-time or allocator bound; keyed lookup can scan its list and must refuse exhausted work.
+The full selector contributes to metadata accounting before any owned observation is constructed.
+
+Direct Workspace, Session and Application action/result routes carry the same observation.
+Source-built panels may use a synchronous read-only Session borrow during paint, then retain or
+submit the ordinary source-owned candidate. No mutable document access, extra query session,
+candidate registry or second history is introduced. Read failure publishes nothing and cannot
+change navigation. Fencing remains exact document/source incarnation/revision/Schema admission.
+
+The concrete proof is a non-active Scene/Prefab keyed-row score: whole-root copying exceeds a
+one-node/eight-byte output budget, selected scalar reading fits, and the observed value drives a
+real prepared edit through cancellation, stale refusal, history and Save/Reopen. Test scan and
+copy budgets separately, together with default/null/absence/retired-selector behavior. This is
+qualified by the [scoped successor evidence](../knowledge/engineering/verification/2026-10/2026-10-25T051125Z-selector-directed-property-reads-and-indexed-root-retirement-qualification-bd267ec01e4d44d3ad5f2a2d4543514d.md),
+not qualification of nested discovery, value pagination or full R2. Root field/tombstone lookups
+reuse the admitted catalog's sorted slices; they do not hide full retired-root scans. Storage-path
+lookup still has its admitted bound and may build diagnostic prefixes; this is not allocation-free.
+Readable defaulted descendants do not make an omitted root editable: first-write default
+materialization remains a separate source-mutation obligation.
 
 Add a borrowed semantic view of one admitted direct source entity. The owning session retains
 its document and classification together. Reuse the canonical sorted entity sequence for binary
@@ -101,7 +147,8 @@ do not call a chosen cap measured memory or latency evidence.
 Direct Workspace, project Session and Application paths must carry the same observation. Existing
 action/outcome transport supplies registered consumers; no active-tab switch or inferred result is
 needed. Read-only observation during retained close does not reopen mutation admission. Prepared
-panel submission itself remains the next separate R2 obligation.
+panel submission has its own scoped qualification; installable-tool placement/lifecycle remains
+separate.
 
 ## Acceptance And Experiment Stops
 
@@ -116,11 +163,12 @@ panel submission itself remains the next separate R2 obligation.
   Scene and Prefab documents, then one Undo/Redo and Save/Reopen. Retained receipts remain historical.
 - Compare author concepts and engine-private changes with current explicit-value editing. Record
   index/storage cost and lookup/read timing; investigate any linear full-source-scan point-read
-  slope or copying of an unrequested component. Logarithmic indexed lookup is expected. Do not
+  slope or copying of an unrequested component. Entity/component/root lookup remains indexed;
+  keyed-item scans have their explicit separate budget, not a logarithmic lookup promise. Do not
   freeze thresholds from fabricated timings.
 - Reconcile ADRs 0047/0118 before shipping changed public contracts. Update the implementation
-  ledger only after actual owner/public evidence. Root reads do not close durable Prefab overlay,
-  arbitrary nested traversal, unopened source queries, full R2 or the foundation Goal.
+  ledger only after actual owner/public evidence. Selector-directed reads do not close durable
+  Prefab overlay, nested discovery, value pagination, unopened source queries, full R2 or the Goal.
 
 If the borrowed view requires reimplementing recursive default materialization, a second
 classification service or a generic query planner, stop and deepen the existing source/Reflect seam instead. If inventory

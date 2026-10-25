@@ -19,10 +19,11 @@ mod workspace;
 pub use authoring_query::{
     EditorAuthoringCursor, EditorAuthoringPage, EditorAuthoringProjection, EditorAuthoringQuery,
     EditorAuthoringQueryLimits, EditorAuthoringQueryPosition, EditorAuthoringQueryTarget,
-    EditorAuthoringRow, EditorRootObservation, EditorRootRead, EditorRootReadLimits,
-    EditorRootTarget, EditorRootValue, MAX_EDITOR_AUTHORING_QUERY_ENTRIES,
-    MAX_EDITOR_AUTHORING_QUERY_METADATA_BYTES, MAX_EDITOR_ROOT_READ_LOGICAL_BYTES,
-    MAX_EDITOR_ROOT_READ_VALUE_NODES,
+    EditorAuthoringRow, EditorPropertyObservation, EditorPropertyRead, EditorPropertyReadLimits,
+    EditorPropertyTarget, EditorPropertyValue, MAX_EDITOR_AUTHORING_QUERY_ENTRIES,
+    MAX_EDITOR_AUTHORING_QUERY_METADATA_BYTES, MAX_EDITOR_PROPERTY_READ_LOGICAL_BYTES,
+    MAX_EDITOR_PROPERTY_READ_SCAN_BYTES, MAX_EDITOR_PROPERTY_READ_SCAN_ENTRIES,
+    MAX_EDITOR_PROPERTY_READ_VALUE_NODES,
 };
 pub use composition::{
     PrefabCompositionCommand, PrefabCompositionDraftError, PrefabCompositionEntityDraft,

@@ -376,7 +376,7 @@ The independent consumer keeps two Scenes and two Prefabs and queries, edits, sa
 explicitly closes non-active documents without retargeting the active source. This does not
 introduce cross-document transactions, concurrent Save, or one preview Runtime per document.
 
-## Discover Components And Read A Selected Root
+## Discover Components And Read A Selected Property
 
 The bounded authoring-read experiment uses the same `EditorDocumentQueryBasis`, direct submission
 and action/outcome routing. Discover actual components with
@@ -403,39 +403,63 @@ reports a declaration; ordinary source candidate admission still decides whether
 Continuation fixes the complete entity/component/projection and exact basis, not only its page
 offset. A copied page remains historical after that basis changes.
 
-Read only the root selected by the tool:
+Read the selected root or an existing descendant using the same stable selector as property
+editing. Empty steps select the root; Member, keyed ListItem and literal MapEntry steps select
+descendants. Root discovery does not enumerate recursive member IDs; a semantic tool uses its
+declared Schema-relative selector rather than inferring identity from a display label or list index.
 
 ```rust,ignore
-let read = EditorRootRead {
-    target: EditorRootTarget {
+let read = EditorPropertyRead {
+    target: EditorPropertyTarget {
         basis: document_basis,
         entity,
         component,
-        field,
+        property: ComponentPropertyPath::new(field),
     },
-    limits: EditorRootReadLimits::new(4096, 256, 16 * 1024)?,
+    limits: EditorPropertyReadLimits::new(4096, 256, 16 * 1024)?
+        .with_scan_limits(512, 64 * 1024)?,
 };
-let action = EditorAction::ReadDocumentRoot(read);
-// DocumentRoot returns the exact target and Present / Defaulted / Missing observation.
+let action = EditorAction::ReadDocumentProperty(read);
+// DocumentProperty returns the exact target and Present / Defaulted / Missing observation.
 ```
 
 Explicit Null is `Present(ComponentValue::Null)`; a supplied Null default is `Defaulted`, not
-Missing. Missing describes only an omitted declared root with no default. A missing entity or
+Missing. Default origin propagates to a descendant without materializing the complete effective
+component. Missing describes only an omitted declared root with no default and empty selector
+steps. Descending from that absence, OptionalAbsent, missing keyed/map items and retired members
+are typed source/selector errors, not Missing. A missing entity or
 component, an unknown field, an unavailable record and a stale basis return distinct rejections.
-An oversized selected root returns `ValueBudgetExceeded` without partial data. Metadata discovery
+An oversized selected value returns `ValueBudgetExceeded` without partial data. Metadata discovery
 still advances independently of that value's size; it never copies the whole component first.
 
 Discovery independently caps scans, rows and aggregate UTF-8 metadata, including duplicated page/
-cursor/anchor IDs. Root reads independently cap UTF-8 target metadata and complete-value nodes/
-logical bytes before cloning. Fixed-size metadata is bounded by the row/type shape; these limits
+cursor/anchor IDs. Property reads independently cap UTF-8 target/selector metadata, selector scan
+entries/logical bytes, and selected-value nodes/logical bytes before cloning. An exhausted scan
+returns `Source(AuthoringReadError::Property(ComponentPropertyError::ReadBudgetExceeded))`; it does
+not truncate or substitute a default. Fixed-size metadata is bounded by the row/type shape; these limits
 are not wire size, RSS, allocator isolation, total batch work or the subsequent frame-drive budget.
-The experiment caps discovery at 256 entries / 64 KiB metadata and selected roots at 4,096 nodes /
-256 KiB logical payload. Callers choose smaller positive limits. Borrowed Scene/Prefab views supply
+The experiment caps discovery at 256 entries / 64 KiB metadata and selected values at 4,096 nodes /
+256 KiB logical payload. Selector scans default to at most 65,536 logical probes / 4 MiB compared
+logical bytes; callers choose smaller positive limits independently. These are finite ceilings,
+not measured memory/latency guarantees. Borrowed Scene/Prefab views supply
 source interpretation; they are not a second document or a promise of allocation-free path lookup.
+
+Source-built panels can avoid a multi-frame action/result exchange for a small read:
+
+```rust,ignore
+let observed = context.read_document_property(request)?;
+// Compute from observed.value, then prepare against observed.target.basis.
+// Preparation remains read-only; commit still consumes the candidate after paint.
+```
+
+An observation is historical, not an edit capability. In particular a Defaulted descendant of an
+omitted root is readable, but existing property replacement still requires a stored root; reading
+does not silently materialize it. Use an explicit legal root edit when source creation is intended.
 
 The independent consumer discovers an editable integer in non-active Scene and Prefab documents,
 reads its current value and computes the replacement before preparing one ordinary source edit,
 Undo/Redo and Save/Reopen. Full query qualification is tracked separately from this guide; the
-experiment does not implement arbitrary nested reads or unopened-source querying. Prepared panel
+selector-directed consumer also computes a keyed/map scalar edit without copying the unrelated
+root subtree. The experiment does not implement nested discovery, value pagination or unopened-source querying. Prepared panel
 submission has its own contract and qualification scope rather than following from read-only
 query outcomes.

@@ -1,5 +1,6 @@
 use nara_reflect::{
-    ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentFieldId, ComponentPropertyPath, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind,
 };
 use nara_scene::{AuthoringRecordReadiness, SceneEntityId};
 
@@ -8,8 +9,10 @@ use crate::{EditorDocumentKind, EditorDocumentQueryBasis, EditorDocumentQueryRej
 
 pub const MAX_EDITOR_AUTHORING_QUERY_ENTRIES: usize = 256;
 pub const MAX_EDITOR_AUTHORING_QUERY_METADATA_BYTES: usize = 64 * 1024;
-pub const MAX_EDITOR_ROOT_READ_VALUE_NODES: usize = 4_096;
-pub const MAX_EDITOR_ROOT_READ_LOGICAL_BYTES: usize = 256 * 1024;
+pub const MAX_EDITOR_PROPERTY_READ_VALUE_NODES: usize = 4_096;
+pub const MAX_EDITOR_PROPERTY_READ_LOGICAL_BYTES: usize = 256 * 1024;
+pub const MAX_EDITOR_PROPERTY_READ_SCAN_ENTRIES: usize = 65_536;
+pub const MAX_EDITOR_PROPERTY_READ_SCAN_BYTES: usize = 4 * 1024 * 1024;
 
 /// Operation-local discovery limits. Metadata counts all returned/cursor UTF-8 ID bytes.
 /// Fixed-size fields are bounded independently by row count; this is not an allocator bound.
@@ -140,30 +143,34 @@ pub struct EditorAuthoringPage {
     pub next: Option<EditorAuthoringCursor>,
 }
 
-/// Separately capped metadata, complete-value nodes and complete-value logical bytes for one root.
+/// Separately capped metadata, selected-value copies and selector lookup work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EditorRootReadLimits {
+pub struct EditorPropertyReadLimits {
     max_metadata_bytes: usize,
     max_value_nodes: usize,
     max_logical_bytes: usize,
+    max_scan_entries: usize,
+    max_scan_logical_bytes: usize,
 }
 
-impl EditorRootReadLimits {
+impl EditorPropertyReadLimits {
     pub fn new(
         max_metadata_bytes: usize,
         max_value_nodes: usize,
         max_logical_bytes: usize,
     ) -> Result<Self, EditorDocumentQueryRejection> {
         if !(1..=MAX_EDITOR_AUTHORING_QUERY_METADATA_BYTES).contains(&max_metadata_bytes)
-            || !(1..=MAX_EDITOR_ROOT_READ_VALUE_NODES).contains(&max_value_nodes)
-            || !(1..=MAX_EDITOR_ROOT_READ_LOGICAL_BYTES).contains(&max_logical_bytes)
+            || !(1..=MAX_EDITOR_PROPERTY_READ_VALUE_NODES).contains(&max_value_nodes)
+            || !(1..=MAX_EDITOR_PROPERTY_READ_LOGICAL_BYTES).contains(&max_logical_bytes)
         {
-            return Err(EditorDocumentQueryRejection::InvalidRootReadLimits);
+            return Err(EditorDocumentQueryRejection::InvalidPropertyReadLimits);
         }
         Ok(Self {
             max_metadata_bytes,
             max_value_nodes,
             max_logical_bytes,
+            max_scan_entries: MAX_EDITOR_PROPERTY_READ_SCAN_ENTRIES,
+            max_scan_logical_bytes: MAX_EDITOR_PROPERTY_READ_SCAN_BYTES,
         })
     }
     #[must_use]
@@ -178,45 +185,88 @@ impl EditorRootReadLimits {
     pub const fn max_logical_bytes(self) -> usize {
         self.max_logical_bytes
     }
-}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EditorRootTarget {
-    pub basis: EditorDocumentQueryBasis,
-    pub entity: SceneEntityId,
-    pub component: ComponentTypeId,
-    pub field: ComponentFieldId,
-}
+    pub fn with_scan_limits(
+        mut self,
+        entries: usize,
+        logical_bytes: usize,
+    ) -> Result<Self, EditorDocumentQueryRejection> {
+        if !(1..=MAX_EDITOR_PROPERTY_READ_SCAN_ENTRIES).contains(&entries)
+            || !(1..=MAX_EDITOR_PROPERTY_READ_SCAN_BYTES).contains(&logical_bytes)
+        {
+            return Err(EditorDocumentQueryRejection::InvalidPropertyReadLimits);
+        }
+        self.max_scan_entries = entries;
+        self.max_scan_logical_bytes = logical_bytes;
+        Ok(self)
+    }
 
-impl EditorRootTarget {
-    pub(crate) fn metadata_bytes(&self) -> usize {
-        self.entity
-            .as_str()
-            .len()
-            .saturating_add(self.component.as_str().len())
-            .saturating_add(self.field.as_str().len())
+    #[must_use]
+    pub const fn max_scan_entries(self) -> usize {
+        self.max_scan_entries
+    }
+
+    #[must_use]
+    pub const fn max_scan_logical_bytes(self) -> usize {
+        self.max_scan_logical_bytes
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EditorRootRead {
-    pub target: EditorRootTarget,
-    pub limits: EditorRootReadLimits,
+pub struct EditorPropertyTarget {
+    pub basis: EditorDocumentQueryBasis,
+    pub entity: SceneEntityId,
+    pub component: ComponentTypeId,
+    pub property: ComponentPropertyPath,
+}
+
+impl EditorPropertyTarget {
+    pub(crate) fn metadata_bytes(&self) -> usize {
+        // Length-only preflight precedes selector validation, whose errors may own invalid IDs.
+        let mut bytes = self
+            .entity
+            .as_str()
+            .len()
+            .saturating_add(self.component.as_str().len())
+            .saturating_add(self.property.root.as_str().len());
+        for step in &self.property.steps {
+            use nara_reflect::{ComponentPropertyKey, ComponentPropertyStep};
+            bytes = bytes.saturating_add(match step {
+                ComponentPropertyStep::Member(id) => id.as_str().len(),
+                ComponentPropertyStep::ListItem { by, key } => {
+                    by.as_str().len().saturating_add(match key {
+                        ComponentPropertyKey::String(value) => value.len(),
+                        _ => 8,
+                    })
+                }
+                ComponentPropertyStep::MapEntry(key) => key.len(),
+            });
+        }
+        bytes
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorPropertyRead {
+    pub target: EditorPropertyTarget,
+    pub limits: EditorPropertyReadLimits,
 }
 
 /// Explicit Null is Present; a defaulted Null is Defaulted. Missing never means an unknown field.
 #[derive(Debug, Clone, PartialEq)]
-pub enum EditorRootValue {
+pub enum EditorPropertyValue {
     Present(ComponentValue),
     Defaulted(ComponentValue),
     Missing,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct EditorRootObservation {
-    pub target: EditorRootTarget,
-    pub value: EditorRootValue,
+pub struct EditorPropertyObservation {
+    pub target: EditorPropertyTarget,
+    pub value: EditorPropertyValue,
     pub metadata_bytes: usize,
     pub value_nodes: usize,
     pub value_logical_bytes: usize,
+    pub scanned_entries: usize,
+    pub scanned_logical_bytes: usize,
 }

@@ -5,7 +5,7 @@ mod read;
 mod structure;
 
 pub use read::{
-    AuthoringComponentView, AuthoringEntityView, AuthoringReadError, AuthoringRootValue,
+    AuthoringComponentView, AuthoringEntityView, AuthoringPropertyValue, AuthoringReadError,
 };
 use structure::{authoring_structure_rejection, prepare_scene_authoring_structure};
 

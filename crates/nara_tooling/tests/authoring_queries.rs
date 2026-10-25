@@ -15,8 +15,8 @@ use nara_tooling::{
     EditorAuthoringPage, EditorAuthoringProjection, EditorAuthoringQuery,
     EditorAuthoringQueryLimits, EditorAuthoringQueryPosition, EditorAuthoringQueryTarget,
     EditorAuthoringRow, EditorDocumentId, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
-    EditorDocumentSourceBinding, EditorRootRead, EditorRootReadLimits, EditorRootTarget,
-    EditorRootValue, EditorWorkspace, EditorWorkspaceCommand,
+    EditorDocumentSourceBinding, EditorPropertyRead, EditorPropertyReadLimits,
+    EditorPropertyTarget, EditorPropertyValue, EditorWorkspace, EditorWorkspaceCommand,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -257,15 +257,15 @@ fn read(
     document: EditorDocumentId,
     field: &str,
     bytes: usize,
-) -> EditorRootRead {
-    EditorRootRead {
-        target: EditorRootTarget {
+) -> EditorPropertyRead {
+    EditorPropertyRead {
+        target: EditorPropertyTarget {
             basis: basis(workspace, document),
             entity: id("item"),
             component: ComponentTypeId::new("game.Data"),
-            field: ComponentFieldId::new(field),
+            property: nara_reflect::ComponentPropertyPath::new(ComponentFieldId::new(field)),
         },
-        limits: EditorRootReadLimits::new(1024, 32, bytes).unwrap(),
+        limits: EditorPropertyReadLimits::new(1024, 32, bytes).unwrap(),
     }
 }
 fn next(workspace: &EditorWorkspace, page: EditorAuthoringPage) -> EditorAuthoringPage {
@@ -275,6 +275,43 @@ fn next(workspace: &EditorWorkspace, page: EditorAuthoringPage) -> EditorAuthori
             limits: EditorAuthoringQueryLimits::new(1, 1, 1024).unwrap(),
         })
         .unwrap()
+}
+
+#[test]
+fn property_read_preflights_raw_selector_metadata_before_owned_validation_errors() {
+    use nara_reflect::{ComponentPropertyError, ComponentPropertyPath, ComponentPropertyStep};
+    for prefab in [false, true] {
+        let (workspace, document) = fixture(prefab);
+        for nested in [false, true] {
+            let mut request = read(&workspace, document, "amount", 8);
+            let huge = ComponentFieldId::new("x".repeat(70_000));
+            if nested {
+                request
+                    .target
+                    .property
+                    .steps
+                    .push(ComponentPropertyStep::Member(huge));
+            } else {
+                request.target.property.root = huge;
+            }
+            assert_eq!(
+                workspace.read_document_property(request),
+                Err(EditorDocumentQueryRejection::MetadataBudgetExceeded)
+            );
+        }
+        let mut request = read(&workspace, document, "amount", 8);
+        request.target.property.steps =
+            vec![
+                ComponentPropertyStep::Member(ComponentFieldId::new("x"));
+                ComponentPropertyPath::MAX_STEPS + 1
+            ];
+        assert_eq!(
+            workspace.read_document_property(request),
+            Err(EditorDocumentQueryRejection::Source(
+                AuthoringReadError::Property(ComponentPropertyError::PathDepthLimit,)
+            ))
+        );
+    }
 }
 
 #[test]
@@ -375,78 +412,81 @@ fn selected_root_reads_preserve_origin_and_enforce_exact_payload_and_metadata_bu
         let (workspace, document) = fixture(prefab);
         let before = workspace.authoring_model();
         let amount = workspace
-            .read_document_root(read(&workspace, document, "amount", 8))
+            .read_document_property(read(&workspace, document, "amount", 8))
             .unwrap();
         assert_eq!(
             amount.value,
-            EditorRootValue::Present(ComponentValue::U64(7))
+            EditorPropertyValue::Present(ComponentValue::U64(7))
         );
         assert_eq!((amount.value_nodes, amount.value_logical_bytes), (1, 8));
         assert_eq!(amount.metadata_bytes, 19, "item + game.Data + amount");
         assert_eq!(
-            workspace.read_document_root(read(&workspace, document, "amount", 7)),
+            workspace.read_document_property(read(&workspace, document, "amount", 7)),
             Err(EditorDocumentQueryRejection::ValueBudgetExceeded)
         );
         assert_eq!(
-            workspace.read_document_root(read(&workspace, document, "blob", 1024)),
+            workspace.read_document_property(read(&workspace, document, "blob", 1024)),
             Err(EditorDocumentQueryRejection::ValueBudgetExceeded)
         );
         assert_eq!(
             workspace
-                .read_document_root(read(&workspace, document, "defaulted", 8))
+                .read_document_property(read(&workspace, document, "defaulted", 8))
                 .unwrap()
                 .value,
-            EditorRootValue::Defaulted(ComponentValue::U64(11))
+            EditorPropertyValue::Defaulted(ComponentValue::U64(11))
         );
         assert_eq!(
             workspace
-                .read_document_root(read(&workspace, document, "missing", 8))
+                .read_document_property(read(&workspace, document, "missing", 8))
                 .unwrap()
                 .value,
-            EditorRootValue::Missing
+            EditorPropertyValue::Missing
         );
         assert_eq!(
             workspace
-                .read_document_root(read(&workspace, document, "nullable", 8))
+                .read_document_property(read(&workspace, document, "nullable", 8))
                 .unwrap()
                 .value,
-            EditorRootValue::Present(ComponentValue::Null)
+            EditorPropertyValue::Present(ComponentValue::Null)
         );
         assert_eq!(
             workspace
-                .read_document_root(read(&workspace, document, "null_default", 8))
+                .read_document_property(read(&workspace, document, "null_default", 8))
                 .unwrap()
                 .value,
-            EditorRootValue::Defaulted(ComponentValue::Null)
+            EditorPropertyValue::Defaulted(ComponentValue::Null)
         );
         let mut tree = read(&workspace, document, "tree", 16);
-        tree.limits = EditorRootReadLimits::new(1024, 2, 16).unwrap();
+        tree.limits = EditorPropertyReadLimits::new(1024, 2, 16).unwrap();
         assert_eq!(
-            workspace.read_document_root(tree.clone()),
+            workspace.read_document_property(tree.clone()),
             Err(EditorDocumentQueryRejection::ValueBudgetExceeded)
         );
-        tree.limits = EditorRootReadLimits::new(1024, 3, 16).unwrap();
-        let tree = workspace.read_document_root(tree).unwrap();
+        tree.limits = EditorPropertyReadLimits::new(1024, 3, 16).unwrap();
+        let tree = workspace.read_document_property(tree).unwrap();
         assert_eq!((tree.value_nodes, tree.value_logical_bytes), (3, 16));
         assert_eq!(
             tree.value,
-            EditorRootValue::Present(ComponentValue::List(vec![
+            EditorPropertyValue::Present(ComponentValue::List(vec![
                 ComponentValue::U64(1),
                 ComponentValue::U64(2)
             ]))
         );
         let mut exact = read(&workspace, document, "amount", 8);
-        exact.limits = EditorRootReadLimits::new(19, 1, 8).unwrap();
-        assert_eq!(workspace.read_document_root(exact.clone()).unwrap(), amount);
-        exact.limits = EditorRootReadLimits::new(18, 1, 8).unwrap();
+        exact.limits = EditorPropertyReadLimits::new(19, 1, 8).unwrap();
         assert_eq!(
-            workspace.read_document_root(exact),
+            workspace.read_document_property(exact.clone()).unwrap(),
+            amount
+        );
+        exact.limits = EditorPropertyReadLimits::new(18, 1, 8).unwrap();
+        assert_eq!(
+            workspace.read_document_property(exact),
             Err(EditorDocumentQueryRejection::MetadataBudgetExceeded)
         );
         let mut unavailable = read(&workspace, document, "amount", 8);
         unavailable.target.component = ComponentTypeId::new("game.Unknown");
         assert_eq!(
-            workspace.read_document_root(unavailable),
+            workspace.read_document_property(unavailable),
             Err(EditorDocumentQueryRejection::Source(
                 AuthoringReadError::UnavailableComponent {
                     readiness: AuthoringRecordReadiness::UnknownSchema
@@ -510,7 +550,7 @@ fn continuations_bind_workspace_target_and_basis_and_charge_the_complete_observa
             Err(EditorDocumentQueryRejection::StaleRevision)
         );
         assert_eq!(
-            workspace.read_document_root(old_read.clone()),
+            workspace.read_document_property(old_read.clone()),
             Err(EditorDocumentQueryRejection::StaleRevision)
         );
         let revision = workspace.document_revision(document).unwrap();
@@ -527,7 +567,7 @@ fn continuations_bind_workspace_target_and_basis_and_charge_the_complete_observa
             Err(EditorDocumentQueryRejection::StaleRevision)
         );
         assert_eq!(
-            workspace.read_document_root(old_read),
+            workspace.read_document_property(old_read),
             Err(EditorDocumentQueryRejection::StaleRevision)
         );
     }
@@ -653,11 +693,11 @@ fn independent_limits_accept_exact_caps_and_reject_zero_or_over_cap_values() {
         (1, 1, 262_145),
     ] {
         assert_eq!(
-            EditorRootReadLimits::new(metadata, nodes, bytes),
-            Err(EditorDocumentQueryRejection::InvalidRootReadLimits)
+            EditorPropertyReadLimits::new(metadata, nodes, bytes),
+            Err(EditorDocumentQueryRejection::InvalidPropertyReadLimits)
         );
     }
-    assert!(EditorRootReadLimits::new(65_536, 4_096, 262_144).is_ok());
+    assert!(EditorPropertyReadLimits::new(65_536, 4_096, 262_144).is_ok());
 }
 
 #[test]
@@ -670,18 +710,18 @@ fn measure_selected_root_read_with_large_unrequested_sibling_and_entity_growth()
             let (workspace, document) = fixture_size(prefab, extra);
             let request = read(&workspace, document, "amount", 8);
             for _ in 0..8 {
-                black_box(workspace.read_document_root(request.clone()).unwrap());
+                black_box(workspace.read_document_property(request.clone()).unwrap());
             }
             let mut samples = Vec::with_capacity(64);
             for _ in 0..64 {
                 let started = Instant::now();
                 let result = workspace
-                    .read_document_root(black_box(request.clone()))
+                    .read_document_property(black_box(request.clone()))
                     .unwrap();
                 samples.push(started.elapsed().as_nanos());
                 assert_eq!(
                     result.value,
-                    EditorRootValue::Present(ComponentValue::U64(7))
+                    EditorPropertyValue::Present(ComponentValue::U64(7))
                 );
                 black_box(result);
             }

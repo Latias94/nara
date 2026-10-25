@@ -56,6 +56,19 @@ pub struct ImguiEditorPanelContext<'scope, 'frame> {
 }
 
 impl ImguiEditorPanelContext<'_, '_> {
+    /// Reads one bounded source property synchronously, without mutable Session access.
+    pub fn read_document_property(
+        &self,
+        request: nara::tooling::EditorPropertyRead,
+    ) -> Result<nara::tooling::EditorPropertyObservation, nara::tooling::EditorDocumentQueryRejection>
+    {
+        let session = self
+            .preparation
+            .as_ref()
+            .map_err(|_| nara::tooling::EditorDocumentQueryRejection::WorkspaceUnavailable)?;
+        session.read_document_property(request)
+    }
+
     #[must_use]
     pub fn model(&self) -> EditorPanelModel<'_> {
         self.model

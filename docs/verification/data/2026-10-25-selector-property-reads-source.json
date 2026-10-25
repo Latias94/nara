@@ -1,0 +1,82 @@
+[
+  {
+    "path": "crates/nara_reflect/src/lib.rs",
+    "sha256": "0dc91d5fe79ddb4a8fa4a18b2da946085a2491cdab4a3f50c8887fd2c14c0ae6"
+  },
+  {
+    "path": "crates/nara_reflect/src/property.rs",
+    "sha256": "307b7f87d5a93617c54511552b3805b50b18a07b50280df92412b911b9a03f1c"
+  },
+  {
+    "path": "crates/nara_reflect/tests/property_addressing.rs",
+    "sha256": "e6bec64387f077331832e9ca306316f8976c438c20639967b6e07c43a3972acd"
+  },
+  {
+    "path": "crates/nara_scene/src/authoring/property.rs",
+    "sha256": "fbd9ff6c097b7181f435ad203c969d3e2e07965257def0c4abc97ce83d2d0c85"
+  },
+  {
+    "path": "crates/nara_scene/src/authoring_decode.rs",
+    "sha256": "84091b2b0d0c8341c643b5096169a58e38a9907d18b48c96ff0a06c9814715e2"
+  },
+  {
+    "path": "crates/nara_scene/src/authoring_decode/read.rs",
+    "sha256": "5efd5dd62a8e270c7fb40c48d33aab598d4209b668930d20b594a761bb06dc57"
+  },
+  {
+    "path": "crates/nara_scene/src/lib.rs",
+    "sha256": "8bbf4d142b6ba2caacd247f2a5638e2f037418ef48fca3ab42a9a9dee91b61dc"
+  },
+  {
+    "path": "crates/nara_scene/tests/authoring_reads.rs",
+    "sha256": "02438e88ec77629cf5a9f27e765507a644fb0184f18b19c7fd3eb6d908d87034"
+  },
+  {
+    "path": "crates/nara_tooling/src/authoring_query.rs",
+    "sha256": "03ecab293a9fa90beec2ddb698c634a8fec5885a407da58cc7b6d457a9a2a4a7"
+  },
+  {
+    "path": "crates/nara_tooling/src/document_query.rs",
+    "sha256": "6fee2d6273f29f290b500309a85e1d14ec2687ef5d2176c91479791404f8fef8"
+  },
+  {
+    "path": "crates/nara_tooling/src/frame.rs",
+    "sha256": "223a3650b864e9683060006da257fcaa2c1c7bf8835c8d98187b514d89aa7c43"
+  },
+  {
+    "path": "crates/nara_tooling/src/lib.rs",
+    "sha256": "221ce72171b2d054f5e30c2737c8f875798340ca1a109fba5b7791dabac1445e"
+  },
+  {
+    "path": "crates/nara_tooling/src/workspace/authoring_query.rs",
+    "sha256": "de2450d36194a8d52d57bdda5db8f32bf8c90f7ee89a425075ffbd3e872f9388"
+  },
+  {
+    "path": "crates/nara_tooling/tests/authoring_queries.rs",
+    "sha256": "8e5fa7edcee7d709652a8199e8b0cf5083d699c78df4f712c3471d6a2dea1d8c"
+  },
+  {
+    "path": "editor/src/frontend/imgui/workspace.rs",
+    "sha256": "244845eb7cbfafe9d1cb2cfedeaea7b480c79a683a66a53e63fd067aaf9c9a18"
+  },
+  {
+    "path": "src/project_host/runtime/editor/actions.rs",
+    "sha256": "4fe78f4593e18d74bef11d087983ff036c0855878c907ccf43cf24356904ccc5"
+  },
+  {
+    "path": "src/project_host/runtime/editor/prepared_edit.rs",
+    "sha256": "a6ecf52ce3528b8dd1b1bce89cbbe69278f2e931234f613b5e57ae962436d4b0"
+  },
+  {
+    "path": "tests/fixtures/module-consumer/editor-panel-consumer/tests/prepared_authoring.rs",
+    "sha256": "511b21f57e3e04e6691f47aeb53ca55ad322af173f9a5dbbc3ad5b6c6acc5868"
+  },
+  {
+    "path": "tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prepared_panel_cost.rs",
+    "sha256": "4ca9563d675c2e9c97c9ca7ebbab9af582ed63086c091a1b9064a2bc2d6017b7"
+  },
+  {
+    "path": "tests/fixtures/module-consumer/editor-panel-consumer/tests/support/property_read.rs",
+    "sha256": "a03c8e9078eaf1f16f8de382dd716226076f3242b61e175b0797873060c86d34"
+  }
+]

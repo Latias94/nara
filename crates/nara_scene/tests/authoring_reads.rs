@@ -3,13 +3,13 @@
 use nara_asset::AssetRef;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
-    ComponentFieldPath, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    PersistentComponentSchemaOwnerId,
+    ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath, ComponentPropertyReadBudget,
+    ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringEntityView,
-    AuthoringReadError, AuthoringRecordReadiness, AuthoringRootValue, PrefabAuthoringSession,
+    AuthoringPropertyValue, AuthoringReadError, AuthoringRecordReadiness, PrefabAuthoringSession,
     PrefabDocument, PrefabDocumentCandidate, SceneAuthoringSession, SceneComponentRecord,
     SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
     ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
@@ -205,8 +205,12 @@ fn assert_actual_inventory(view: AuthoringEntityView<'_>, original: &SceneEntity
     );
     let data = view.component(&ComponentTypeId::new("game.Data")).unwrap();
     assert_eq!(data.root_fields().unwrap().len(), 6);
-    let AuthoringRootValue::Present(amount) =
-        data.root_value(&ComponentFieldId::new("amount")).unwrap()
+    let AuthoringPropertyValue::Present(amount) = data
+        .property_value(
+            &ComponentPropertyPath::new(ComponentFieldId::new("amount")),
+            &mut read_budget(),
+        )
+        .unwrap()
     else {
         panic!("expected explicit amount")
     };
@@ -221,26 +225,43 @@ fn assert_actual_inventory(view: AuthoringEntityView<'_>, original: &SceneEntity
             .unwrap()
     ));
     assert_eq!(
-        data.root_value(&ComponentFieldId::new("defaulted"))
-            .unwrap(),
-        AuthoringRootValue::Defaulted(&ComponentValue::U64(19))
+        data.property_value(
+            &ComponentPropertyPath::new(ComponentFieldId::new("defaulted")),
+            &mut read_budget()
+        )
+        .unwrap(),
+        AuthoringPropertyValue::Defaulted(&ComponentValue::U64(19))
     );
     assert_eq!(
-        data.root_value(&ComponentFieldId::new("missing")).unwrap(),
-        AuthoringRootValue::Missing
+        data.property_value(
+            &ComponentPropertyPath::new(ComponentFieldId::new("missing")),
+            &mut read_budget()
+        )
+        .unwrap(),
+        AuthoringPropertyValue::Missing
     );
     assert_eq!(
-        data.root_value(&ComponentFieldId::new("nullable")).unwrap(),
-        AuthoringRootValue::Present(&ComponentValue::Null)
+        data.property_value(
+            &ComponentPropertyPath::new(ComponentFieldId::new("nullable")),
+            &mut read_budget()
+        )
+        .unwrap(),
+        AuthoringPropertyValue::Present(&ComponentValue::Null)
     );
     assert_eq!(
-        data.root_value(&ComponentFieldId::new("null_default"))
-            .unwrap(),
-        AuthoringRootValue::Defaulted(&ComponentValue::Null)
+        data.property_value(
+            &ComponentPropertyPath::new(ComponentFieldId::new("null_default")),
+            &mut read_budget()
+        )
+        .unwrap(),
+        AuthoringPropertyValue::Defaulted(&ComponentValue::Null)
     );
     assert_eq!(
-        data.root_value(&ComponentFieldId::new("unknown"))
-            .unwrap_err(),
+        data.property_value(
+            &ComponentPropertyPath::new(ComponentFieldId::new("unknown")),
+            &mut read_budget()
+        )
+        .unwrap_err(),
         AuthoringReadError::FieldNotFound
     );
     for (name, readiness) in headers.into_iter().skip(1) {
@@ -251,7 +272,10 @@ fn assert_actual_inventory(view: AuthoringEntityView<'_>, original: &SceneEntity
         );
         assert_eq!(
             component
-                .root_value(&ComponentFieldId::new("amount"))
+                .property_value(
+                    &ComponentPropertyPath::new(ComponentFieldId::new("amount")),
+                    &mut read_budget()
+                )
                 .unwrap_err(),
             AuthoringReadError::UnavailableComponent { readiness }
         );
@@ -475,9 +499,12 @@ fn field_reads_follow_published_values_and_default_origin_through_history() {
                     .unwrap()
                     .component(&component)
                     .unwrap()
-                    .root_value(&read("amount"))
+                    .property_value(
+                        &ComponentPropertyPath::new(read("amount")),
+                        &mut read_budget()
+                    )
                     .unwrap(),
-                AuthoringRootValue::Present(&ComponentValue::U64(7))
+                AuthoringPropertyValue::Present(&ComponentValue::U64(7))
             );
             assert!($session.commit_authoring_edit(prepared).applied);
             let view = $session
@@ -486,12 +513,20 @@ fn field_reads_follow_published_values_and_default_origin_through_history() {
                 .component(&component)
                 .unwrap();
             assert_eq!(
-                view.root_value(&read("amount")).unwrap(),
-                AuthoringRootValue::Present(&ComponentValue::U64(31))
+                view.property_value(
+                    &ComponentPropertyPath::new(read("amount")),
+                    &mut read_budget()
+                )
+                .unwrap(),
+                AuthoringPropertyValue::Present(&ComponentValue::U64(31))
             );
             assert_eq!(
-                view.root_value(&read("defaulted")).unwrap(),
-                AuthoringRootValue::Present(&ComponentValue::U64(24))
+                view.property_value(
+                    &ComponentPropertyPath::new(read("defaulted")),
+                    &mut read_budget()
+                )
+                .unwrap(),
+                AuthoringPropertyValue::Present(&ComponentValue::U64(24))
             );
             assert!($session.undo_authoring().applied);
             let view = $session
@@ -500,12 +535,20 @@ fn field_reads_follow_published_values_and_default_origin_through_history() {
                 .component(&component)
                 .unwrap();
             assert_eq!(
-                view.root_value(&read("amount")).unwrap(),
-                AuthoringRootValue::Present(&ComponentValue::U64(7))
+                view.property_value(
+                    &ComponentPropertyPath::new(read("amount")),
+                    &mut read_budget()
+                )
+                .unwrap(),
+                AuthoringPropertyValue::Present(&ComponentValue::U64(7))
             );
             assert_eq!(
-                view.root_value(&read("defaulted")).unwrap(),
-                AuthoringRootValue::Defaulted(&ComponentValue::U64(19))
+                view.property_value(
+                    &ComponentPropertyPath::new(read("defaulted")),
+                    &mut read_budget()
+                )
+                .unwrap(),
+                AuthoringPropertyValue::Defaulted(&ComponentValue::U64(19))
             );
             assert!($session.redo_authoring().applied);
             assert!($session.apply_authoring_patch(&reset).applied);
@@ -515,9 +558,12 @@ fn field_reads_follow_published_values_and_default_origin_through_history() {
                     .unwrap()
                     .component(&component)
                     .unwrap()
-                    .root_value(&read("defaulted"))
+                    .property_value(
+                        &ComponentPropertyPath::new(read("defaulted")),
+                        &mut read_budget()
+                    )
                     .unwrap(),
-                AuthoringRootValue::Defaulted(&ComponentValue::U64(19))
+                AuthoringPropertyValue::Defaulted(&ComponentValue::U64(19))
             );
             assert!($session.undo_authoring().applied);
             assert_eq!(
@@ -526,9 +572,12 @@ fn field_reads_follow_published_values_and_default_origin_through_history() {
                     .unwrap()
                     .component(&component)
                     .unwrap()
-                    .root_value(&read("defaulted"))
+                    .property_value(
+                        &ComponentPropertyPath::new(read("defaulted")),
+                        &mut read_budget()
+                    )
                     .unwrap(),
-                AuthoringRootValue::Present(&ComponentValue::U64(24))
+                AuthoringPropertyValue::Present(&ComponentValue::U64(24))
             );
             assert!($session.redo_authoring().applied);
             assert_eq!(
@@ -537,10 +586,193 @@ fn field_reads_follow_published_values_and_default_origin_through_history() {
                     .unwrap()
                     .component(&component)
                     .unwrap()
-                    .root_value(&read("defaulted"))
+                    .property_value(
+                        &ComponentPropertyPath::new(read("defaulted")),
+                        &mut read_budget()
+                    )
                     .unwrap(),
-                AuthoringRootValue::Defaulted(&ComponentValue::U64(19))
+                AuthoringPropertyValue::Defaulted(&ComponentValue::U64(19))
             );
+        }};
+    }
+    check!(scene);
+    check!(prefab);
+}
+
+fn read_budget() -> ComponentPropertyReadBudget {
+    ComponentPropertyReadBudget::new(
+        nara_core::ItemLimit::new(4096).unwrap(),
+        nara_core::ByteLimit::new(65536).unwrap(),
+    )
+}
+
+#[test]
+fn selected_descendants_keep_default_origin_and_distinguish_unavailable_targets() {
+    use nara_reflect::{
+        ComponentPropertyError, ComponentPropertyStep, ComponentShapeMember, ComponentValueShape,
+    };
+    let component = ComponentTypeId::new("game.Nested");
+    let shape = ComponentValueShape::record_members([ComponentShapeMember::new(
+        "wire_score",
+        ComponentValueKind::U64,
+    )
+    .with_id(ComponentFieldId::new("score"))]);
+    let field = |name: &str| ComponentFieldId::new(name);
+    let schema = ComponentSchema::new(component.clone(), "Nested", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([
+            ComponentFieldSchema::optional_with_default(
+                field("root"),
+                "Root",
+                ComponentFieldPath::from_fields(["root"]),
+                shape.clone(),
+                ComponentValue::map([("wire_score", ComponentValue::U64(11))]),
+            ),
+            ComponentFieldSchema::optional(
+                field("absent"),
+                "Absent",
+                ComponentFieldPath::from_fields(["absent"]),
+                shape.clone(),
+            ),
+            ComponentFieldSchema::required(
+                field("maybe"),
+                "Maybe",
+                ComponentFieldPath::from_fields(["maybe"]),
+                ComponentValueShape::optional(shape),
+            ),
+        ])
+        .with_field_tombstones([
+            field("zeta"),
+            field("retired"),
+            field("alpha"),
+            field("middle"),
+        ]);
+    let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+        PersistentComponentSchemaOwnerId::try_new("game.nested").unwrap(),
+        ComponentSchemaCatalog {
+            components: vec![schema],
+            ..Default::default()
+        },
+        None,
+    )])
+    .unwrap();
+    let adapters =
+        [
+            AuthoringAdapterReceipt::from_schema_owner(&bundle.owners()[0], &Default::default())
+                .unwrap(),
+        ];
+    let document = SceneDocument::from_ordered_roots([
+        SceneEntityRecord::new(id("defaults")).with_component(
+            component.clone(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([("maybe", ComponentValue::Null)]),
+            ),
+        ),
+        SceneEntityRecord::new(id("explicit")).with_component(
+            component.clone(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([
+                    ("maybe", ComponentValue::Null),
+                    (
+                        "root",
+                        ComponentValue::map([("wire_score", ComponentValue::U64(7))]),
+                    ),
+                ]),
+            ),
+        ),
+    ]);
+    let source = AuthoringDocumentSource::new(AssetRef::path("scenes/nested.scene.json").unwrap());
+    let scene = SceneAuthoringSession::from_published_authoring_document(
+        SceneDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
+            .unwrap()
+            .admit_authoring(source.clone(), &bundle, &adapters)
+            .unwrap()
+            .publish(),
+    );
+    let prefab = PrefabDocument::from_ordered_roots(document.entities);
+    let prefab = PrefabAuthoringSession::from_published_authoring_document(
+        PrefabDocumentCandidate::decode_json_bytes(prefab.to_json_string().unwrap().as_bytes())
+            .unwrap()
+            .admit_authoring(source, &bundle, &adapters)
+            .unwrap()
+            .publish(),
+    );
+    let selected = |root: &str| {
+        ComponentPropertyPath::new(field(root))
+            .with_steps([ComponentPropertyStep::Member(field("score"))])
+    };
+    macro_rules! check {
+        ($session:expr) => {{
+            for (entity, expected) in [
+                (
+                    "defaults",
+                    AuthoringPropertyValue::Defaulted(&ComponentValue::U64(11)),
+                ),
+                (
+                    "explicit",
+                    AuthoringPropertyValue::Present(&ComponentValue::U64(7)),
+                ),
+            ] {
+                let view = $session
+                    .authoring_entity_view(&id(entity))
+                    .unwrap()
+                    .component(&component)
+                    .unwrap();
+                assert_eq!(
+                    view.property_value(&selected("root"), &mut read_budget())
+                        .unwrap(),
+                    expected
+                );
+                assert!(matches!(
+                    view.property_value(&selected("maybe"), &mut read_budget()),
+                    Err(AuthoringReadError::Property(
+                        ComponentPropertyError::OptionalAbsent { step: 0 }
+                    ))
+                ));
+                assert_eq!(
+                    view.property_value(
+                        &ComponentPropertyPath::new(field("absent")),
+                        &mut read_budget()
+                    )
+                    .unwrap(),
+                    AuthoringPropertyValue::Missing
+                );
+                assert!(matches!(
+                    view.property_value(&selected("absent"), &mut read_budget()),
+                    Err(AuthoringReadError::Property(
+                        ComponentPropertyError::ValueUnavailable(_)
+                    ))
+                ));
+                for retired in ["alpha", "middle", "retired", "zeta"] {
+                    assert_eq!(
+                        view.property_value(
+                            &ComponentPropertyPath::new(field(retired)),
+                            &mut read_budget()
+                        ),
+                        Err(AuthoringReadError::Property(
+                            ComponentPropertyError::RetiredField(field(retired))
+                        ))
+                    );
+                }
+                assert_eq!(
+                    view.property_value(
+                        &ComponentPropertyPath::new(field("unknown")),
+                        &mut read_budget()
+                    ),
+                    Err(AuthoringReadError::FieldNotFound)
+                );
+                let mut minimum = ComponentPropertyReadBudget::new(
+                    nara_core::ItemLimit::ONE,
+                    nara_core::ByteLimit::ONE,
+                );
+                assert!(
+                    view.property_value(&ComponentPropertyPath::new(field("root")), &mut minimum)
+                        .is_ok()
+                );
+                assert_eq!(minimum.scanned_entries(), 0);
+            }
         }};
     }
     check!(scene);

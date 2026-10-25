@@ -1,11 +1,13 @@
+use nara_core::{ByteLimit, ItemLimit};
 use nara_ecs::Component;
 use nara_reflect::{
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentMemberPath,
     ComponentMemberPathError, ComponentMemberPathSegment, ComponentPropertyError,
-    ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep, ComponentRegistry,
-    ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentShapeErrorKind,
-    ComponentShapeMember, ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape,
-    replace_component_property, resolve_component_property, validate_component_value,
+    ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyReadBudget,
+    ComponentPropertyStep, ComponentRegistry, ComponentSchema, ComponentSchemaCatalog,
+    ComponentSchemaVersion, ComponentShapeErrorKind, ComponentShapeMember, ComponentTypeId,
+    ComponentValue, ComponentValueKind, ComponentValueShape, replace_component_property,
+    resolve_component_property, resolve_component_property_in_root, validate_component_value,
 };
 
 fn id(value: &str) -> ComponentFieldId {
@@ -84,6 +86,135 @@ fn hp_path(identity: &str) -> ComponentPropertyPath {
         ComponentPropertyStep::Member(id("stats")),
         ComponentPropertyStep::Member(id("hp")),
     ])
+}
+
+#[test]
+fn admitted_root_property_read_borrows_the_selected_scalar() {
+    let schema = schema(keyed_shape());
+    let value = ComponentValue::List(vec![row("first", "other", 1), row("second", "target", 7)]);
+    let mut budget = ComponentPropertyReadBudget::new(
+        ItemLimit::new(128).unwrap(),
+        ByteLimit::new(4096).unwrap(),
+    );
+    let result = resolve_component_property_in_root(
+        &schema.fields()[0],
+        &value,
+        &hp_path("second"),
+        &mut budget,
+    )
+    .unwrap();
+    assert_eq!(result.value, &ComponentValue::U64(7));
+    let ComponentValue::List(items) = &value else {
+        panic!("list")
+    };
+    let expected = items[1].get("wire_stats").unwrap().get("health").unwrap();
+    assert!(std::ptr::eq(result.value, expected));
+}
+
+#[test]
+fn admitted_root_property_read_refuses_exhausted_lookup_work() {
+    let schema = schema(keyed_shape());
+    let value = ComponentValue::List(vec![row("first", "other", 1), row("second", "target", 7)]);
+    let mut budget =
+        ComponentPropertyReadBudget::new(ItemLimit::ONE, ByteLimit::new(4096).unwrap());
+    assert!(matches!(
+        resolve_component_property_in_root(
+            &schema.fields()[0],
+            &value,
+            &hp_path("second"),
+            &mut budget,
+        ),
+        Err(ComponentPropertyError::ReadBudgetExceeded)
+    ));
+}
+
+#[test]
+fn admitted_root_property_read_has_independent_exact_scan_entry_and_byte_limits() {
+    let schema = schema(keyed_shape());
+    let value = ComponentValue::List(vec![row("first", "other", 1), row("second", "target", 7)]);
+    // Three identity declarations, two probes per item, three stats declarations and one hp.
+    // Declaration names/IDs cost 37 + 37 + 8 bytes; item lookups/keys cost 12 + 13.
+    for (entries, bytes, accepted) in [(11, 107, true), (10, 107, false), (11, 106, false)] {
+        let mut budget = ComponentPropertyReadBudget::new(
+            ItemLimit::new(entries).unwrap(),
+            ByteLimit::new(bytes).unwrap(),
+        );
+        let result = resolve_component_property_in_root(
+            &schema.fields()[0],
+            &value,
+            &hp_path("second"),
+            &mut budget,
+        );
+        if accepted {
+            assert_eq!(result.unwrap().value, &ComponentValue::U64(7));
+            assert_eq!(budget.scanned_entries(), 11);
+            assert_eq!(budget.scanned_logical_bytes(), 107);
+        } else {
+            assert!(matches!(
+                result,
+                Err(ComponentPropertyError::ReadBudgetExceeded)
+            ));
+        }
+    }
+}
+
+#[test]
+fn admitted_root_property_read_charges_optional_unwrap_and_literal_map_lookup() {
+    let schema = schema(ComponentValueShape::optional(ComponentValueShape::map(
+        ComponentValueKind::U64.into(),
+    )));
+    let value = ComponentValue::map([("a.b", ComponentValue::U64(9))]);
+    let path = path([ComponentPropertyStep::MapEntry("a.b".into())]);
+    for (entries, bytes, accepted) in [(2, 3, true), (1, 3, false), (2, 2, false)] {
+        let mut budget = ComponentPropertyReadBudget::new(
+            ItemLimit::new(entries).unwrap(),
+            ByteLimit::new(bytes).unwrap(),
+        );
+        let result =
+            resolve_component_property_in_root(&schema.fields()[0], &value, &path, &mut budget);
+        if accepted {
+            assert_eq!(result.unwrap().value, &ComponentValue::U64(9));
+            assert_eq!(budget.scanned_entries(), 2);
+            assert_eq!(budget.scanned_logical_bytes(), 3);
+        } else {
+            assert!(matches!(
+                result,
+                Err(ComponentPropertyError::ReadBudgetExceeded)
+            ));
+        }
+    }
+}
+
+#[test]
+fn admitted_root_property_read_charges_retired_member_prefix_checks() {
+    let mut schema = schema(ComponentValueShape::record_members([member(
+        "v",
+        "live",
+        ComponentValueKind::U64,
+    )]));
+    schema.fields[0].member_tombstones = vec![declaration([ComponentMemberPathSegment::Member(
+        id("retired"),
+    )])];
+    let value = ComponentValue::map([("v", ComponentValue::U64(9))]);
+    let path = path([ComponentPropertyStep::Member(id("live"))]);
+    for (entries, bytes, accepted) in [(2, 12, true), (1, 12, false), (2, 11, false)] {
+        let mut budget = ComponentPropertyReadBudget::new(
+            ItemLimit::new(entries).unwrap(),
+            ByteLimit::new(bytes).unwrap(),
+        );
+        let result =
+            resolve_component_property_in_root(&schema.fields()[0], &value, &path, &mut budget);
+        if accepted {
+            assert_eq!(result.unwrap().value, &ComponentValue::U64(9));
+            assert_eq!(budget.scanned_entries(), 2);
+            assert_eq!(budget.scanned_logical_bytes(), 12);
+        } else {
+            assert!(matches!(
+                result,
+                Err(ComponentPropertyError::ReadBudgetExceeded)
+            ));
+        }
+    }
 }
 
 #[test]

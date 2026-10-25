@@ -605,8 +605,8 @@ pub enum EditorAction {
     QueryDocumentEntities(crate::EditorEntityQuery),
     /// Discovers actual component/root metadata at an explicit source basis.
     QueryDocumentAuthoring(crate::EditorAuthoringQuery),
-    /// Copies one selected complete root after source and logical-cost admission.
-    ReadDocumentRoot(crate::EditorRootRead),
+    /// Copies one selected property after source, scan and logical-copy admission.
+    ReadDocumentProperty(crate::EditorPropertyRead),
     /// Consumes the source owner's unpublished edit without preparing it again.
     CommitAuthoringEdit(crate::PreparedEditorDocumentEdit),
     /// Consumes the source owner's construction and retains its exact successful mapping.
@@ -655,7 +655,7 @@ impl EditorAction {
             Self::Mutate(_)
             | Self::QueryDocumentEntities(_)
             | Self::QueryDocumentAuthoring(_)
-            | Self::ReadDocumentRoot(_)
+            | Self::ReadDocumentProperty(_)
             | Self::CommitAuthoringEdit(_)
             | Self::CommitAuthoringConstruction(_)
             | Self::Extension(_)
@@ -825,7 +825,7 @@ pub enum EditorActionOutcome {
     /// Owned read-only page or exact query rejection; not a document mutation result.
     DocumentEntities(Result<crate::EditorEntityPage, crate::EditorDocumentQueryRejection>),
     DocumentAuthoring(Result<crate::EditorAuthoringPage, crate::EditorDocumentQueryRejection>),
-    DocumentRoot(Result<crate::EditorRootObservation, crate::EditorDocumentQueryRejection>),
+    DocumentProperty(Result<crate::EditorPropertyObservation, crate::EditorDocumentQueryRejection>),
     Persistence(EditorPersistenceRequestResult),
     ProjectBrowser(EditorProjectBrowserActionOutcome),
     ImageImport(EditorImageImportActionOutcome),
@@ -872,14 +872,16 @@ mod entity_query_tests {
                 ),
                 limits: crate::EditorAuthoringQueryLimits::new(1, 1, 1024).unwrap(),
             }),
-            EditorAction::ReadDocumentRoot(crate::EditorRootRead {
-                target: crate::EditorRootTarget {
+            EditorAction::ReadDocumentProperty(crate::EditorPropertyRead {
+                target: crate::EditorPropertyTarget {
                     basis,
                     entity: SceneEntityId::new("item").unwrap(),
                     component: ComponentTypeId::new("game.Data"),
-                    field: ComponentFieldId::new("amount"),
+                    property: nara_reflect::ComponentPropertyPath::new(ComponentFieldId::new(
+                        "amount",
+                    )),
                 },
-                limits: crate::EditorRootReadLimits::new(1024, 1, 8).unwrap(),
+                limits: crate::EditorPropertyReadLimits::new(1024, 1, 8).unwrap(),
             }),
         ];
         for query in queries {

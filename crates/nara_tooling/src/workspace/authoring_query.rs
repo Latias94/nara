@@ -1,12 +1,15 @@
-use nara_reflect::{ComponentCapability, ComponentFieldSchema, ComponentTypeId};
-use nara_scene::{AuthoringEntityView, AuthoringRecordFact, AuthoringRootValue, SceneEntityId};
+use nara_core::{ByteLimit, ItemLimit};
+use nara_reflect::{
+    ComponentCapability, ComponentFieldSchema, ComponentPropertyReadBudget, ComponentTypeId,
+};
+use nara_scene::{AuthoringEntityView, AuthoringPropertyValue, AuthoringRecordFact, SceneEntityId};
 
 use super::{EditorDocumentSlot, EditorWorkspace};
 use crate::{
     EditorAuthoringCursor, EditorAuthoringPage, EditorAuthoringProjection, EditorAuthoringQuery,
     EditorAuthoringQueryPosition, EditorAuthoringRow, EditorDocumentKind, EditorDocumentQueryBasis,
-    EditorDocumentQueryRejection, EditorRootObservation, EditorRootRead, EditorRootValue,
-    authoring_query::AuthoringPagePosition,
+    EditorDocumentQueryRejection, EditorPropertyObservation, EditorPropertyRead,
+    EditorPropertyValue, authoring_query::AuthoringPagePosition,
 };
 
 impl EditorWorkspace {
@@ -158,22 +161,32 @@ impl EditorWorkspace {
         })
     }
 
-    /// Copies only one requested complete root after exact-basis and aggregate cost admission.
+    /// Copies only the selected property after exact-basis, scan and aggregate copy admission.
     /// Missing/default interpretation remains with Scene/Prefab, not an Inspector or Runtime.
-    pub fn read_document_root(
+    pub fn read_document_property(
         &self,
-        request: EditorRootRead,
-    ) -> Result<EditorRootObservation, EditorDocumentQueryRejection> {
+        request: EditorPropertyRead,
+    ) -> Result<EditorPropertyObservation, EditorDocumentQueryRejection> {
         let slot = self.resolve_document_query_slot(&request.target.basis, None)?;
+        if request.target.property.steps.len() > nara_reflect::ComponentPropertyPath::MAX_STEPS {
+            return Err(nara_scene::AuthoringReadError::Property(
+                nara_reflect::ComponentPropertyError::PathDepthLimit,
+            )
+            .into());
+        }
         let metadata_bytes = request.target.metadata_bytes();
         if metadata_bytes > request.limits.max_metadata_bytes() {
             return Err(EditorDocumentQueryRejection::MetadataBudgetExceeded);
         }
+        let mut budget = ComponentPropertyReadBudget::new(
+            ItemLimit::new(request.limits.max_scan_entries()).expect("validated scan limit"),
+            ByteLimit::new(request.limits.max_scan_logical_bytes()).expect("validated scan limit"),
+        );
         let root = entity_view(slot, &request.target.entity)?
             .component(&request.target.component)?
-            .root_value(&request.target.field)?;
+            .property_value(&request.target.property, &mut budget)?;
         let (value_nodes, value_logical_bytes) = match root {
-            AuthoringRootValue::Present(value) | AuthoringRootValue::Defaulted(value) => {
+            AuthoringPropertyValue::Present(value) | AuthoringPropertyValue::Defaulted(value) => {
                 let cost = value
                     .cost_up_to(
                         request.limits.max_value_nodes(),
@@ -182,19 +195,23 @@ impl EditorWorkspace {
                     .ok_or(EditorDocumentQueryRejection::ValueBudgetExceeded)?;
                 (cost.nodes(), cost.logical_bytes())
             }
-            AuthoringRootValue::Missing => (0, 0),
+            AuthoringPropertyValue::Missing => (0, 0),
         };
         let value = match root {
-            AuthoringRootValue::Present(value) => EditorRootValue::Present(value.clone()),
-            AuthoringRootValue::Defaulted(value) => EditorRootValue::Defaulted(value.clone()),
-            AuthoringRootValue::Missing => EditorRootValue::Missing,
+            AuthoringPropertyValue::Present(value) => EditorPropertyValue::Present(value.clone()),
+            AuthoringPropertyValue::Defaulted(value) => {
+                EditorPropertyValue::Defaulted(value.clone())
+            }
+            AuthoringPropertyValue::Missing => EditorPropertyValue::Missing,
         };
-        Ok(EditorRootObservation {
+        Ok(EditorPropertyObservation {
             target: request.target,
             value,
             metadata_bytes,
             value_nodes,
             value_logical_bytes,
+            scanned_entries: budget.scanned_entries(),
+            scanned_logical_bytes: budget.scanned_logical_bytes(),
         })
     }
 }

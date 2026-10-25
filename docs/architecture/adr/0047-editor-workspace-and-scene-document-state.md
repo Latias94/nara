@@ -76,6 +76,12 @@ Rules:
   retain presence/readiness without gaining editable payload access. Root reads distinguish an
   explicit value (including Null), a supplied default and an omitted declared value. A missing
   component, unknown root or incompatible path is not an omitted value.
+- Selected value reads use the existing Schema-relative property selector; empty steps select
+  the root. Default provenance propagates to a selected descendant without materializing a whole
+  effective component. Missing is an omitted declared root with no default, not an invalid nested
+  target. Optional absence, missing keys and retired selectors remain typed resolution failures.
+  Finite selector scan work and copied output cost are independent limits; neither a scalar result
+  nor an admitted source makes a keyed-list scan free.
 - Copied query observations admit aggregate metadata and requested value costs before cloning.
   Source-owned indexes may retain positions into the jointly published document/classification,
   not another document or history. Discovery must not read every value, and a selected root read

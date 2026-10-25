@@ -5,11 +5,13 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
+use nara_core::{ByteLimit, ItemLimit};
+
 use crate::{
     ComponentCodecError, ComponentFieldId, ComponentFieldPath, ComponentFieldPathError,
-    ComponentFieldPathSegment, ComponentMemberPath, ComponentMemberPathSegment, ComponentSchema,
-    ComponentSchemaVersion, ComponentShapeError, ComponentValue, ComponentValueKind,
-    ComponentValueShape,
+    ComponentFieldPathSegment, ComponentFieldSchema, ComponentMemberPath,
+    ComponentMemberPathSegment, ComponentSchema, ComponentSchemaVersion, ComponentShapeError,
+    ComponentValue, ComponentValueKind, ComponentValueShape,
     schema::{
         MAX_SHAPE_BYTES, MAX_SHAPE_DEPTH, keyed_list_member, validate_component_shape_budget,
         validate_component_value_budget,
@@ -99,6 +101,8 @@ pub struct ComponentPropertyPath {
 }
 
 impl ComponentPropertyPath {
+    pub const MAX_STEPS: usize = MAX_SHAPE_DEPTH;
+
     #[must_use]
     pub fn new(root: ComponentFieldId) -> Self {
         Self {
@@ -120,7 +124,7 @@ impl ComponentPropertyPath {
     /// Validates the selector and returns its logical size for an owner's aggregate work budget.
     /// This counts identity strings and scalar key bytes, not serialized transport overhead.
     pub fn logical_bytes(&self) -> Result<usize, ComponentPropertyError> {
-        if self.steps.len() > MAX_SHAPE_DEPTH {
+        if self.steps.len() > Self::MAX_STEPS {
             return Err(ComponentPropertyError::PathDepthLimit);
         }
         let mut bytes = self.root.as_str().len();
@@ -160,8 +164,57 @@ pub struct ResolvedComponentProperty<'schema, 'value> {
     pub value: &'value ComponentValue,
 }
 
+/// Finite selector lookup work, independent of the selected value's copying budget.
+/// Counts examined declarations, optional wrappers, tombstones, list keys and map lookups,
+/// not allocator usage, elapsed time or internal BTreeMap comparisons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComponentPropertyReadBudget {
+    max_entries: usize,
+    max_logical_bytes: usize,
+    scanned_entries: usize,
+    scanned_logical_bytes: usize,
+}
+
+impl ComponentPropertyReadBudget {
+    #[must_use]
+    pub const fn new(entries: ItemLimit, logical_bytes: ByteLimit) -> Self {
+        Self {
+            max_entries: entries.get(),
+            max_logical_bytes: logical_bytes.get(),
+            scanned_entries: 0,
+            scanned_logical_bytes: 0,
+        }
+    }
+
+    #[must_use]
+    pub const fn scanned_entries(self) -> usize {
+        self.scanned_entries
+    }
+
+    #[must_use]
+    pub const fn scanned_logical_bytes(self) -> usize {
+        self.scanned_logical_bytes
+    }
+
+    fn observe(&mut self, bytes: usize) -> Result<(), ComponentPropertyError> {
+        let entries = self.scanned_entries.checked_add(1);
+        let bytes = self.scanned_logical_bytes.checked_add(bytes);
+        match (entries, bytes) {
+            (Some(entries), Some(bytes))
+                if entries <= self.max_entries && bytes <= self.max_logical_bytes =>
+            {
+                self.scanned_entries = entries;
+                self.scanned_logical_bytes = bytes;
+                Ok(())
+            }
+            _ => Err(ComponentPropertyError::ReadBudgetExceeded),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComponentPropertyError {
+    ReadBudgetExceeded,
     PathDepthLimit,
     PathByteLimit,
     InvalidFieldId(ComponentFieldId),
@@ -263,6 +316,22 @@ pub fn resolve_component_property<'schema, 'value>(
     Ok(resolved)
 }
 
+/// Borrows a descendant of an already admitted root, without validating/materializing siblings.
+/// The caller owns current Schema/version admission and explicit/default source interpretation.
+/// This is neither arbitrary input validation nor permission to edit the observed value.
+pub fn resolve_component_property_in_root<'schema, 'value>(
+    field: &'schema ComponentFieldSchema,
+    value: &'value ComponentValue,
+    path: &ComponentPropertyPath,
+    budget: &mut ComponentPropertyReadBudget,
+) -> Result<ResolvedComponentProperty<'schema, 'value>, ComponentPropertyError> {
+    path.validate()?;
+    if field.id != path.root {
+        return Err(ComponentPropertyError::UnknownRoot(path.root.clone()));
+    }
+    resolve_root_location(field, value, path, Some(budget), None).map(|(resolved, _)| resolved)
+}
+
 /// Replaces exactly one existing target, returning its previous value.
 ///
 /// All resolution, shape and complete candidate validation precede publication. Failure leaves
@@ -330,14 +399,40 @@ fn resolve_location<'schema, 'value>(
         .iter()
         .find(|field| field.id == path.root)
         .ok_or_else(|| ComponentPropertyError::UnknownRoot(path.root.clone()))?;
-    let mut current = value
+    let current = value
         .get_path(&root.path)
         .map_err(ComponentPropertyError::ValueUnavailable)?;
+    let (resolved, storage) = resolve_root_location(
+        root,
+        current,
+        path,
+        None,
+        Some(root.path.segments().to_vec()),
+    )?;
+    Ok((
+        resolved,
+        storage.expect("complete resolution records its storage path"),
+    ))
+}
+
+fn resolve_root_location<'schema, 'value>(
+    root: &'schema ComponentFieldSchema,
+    mut current: &'value ComponentValue,
+    path: &ComponentPropertyPath,
+    mut budget: Option<&mut ComponentPropertyReadBudget>,
+    mut storage: Option<Vec<ComponentFieldPathSegment>>,
+) -> Result<
+    (
+        ResolvedComponentProperty<'schema, 'value>,
+        Option<ComponentFieldPath>,
+    ),
+    ComponentPropertyError,
+> {
     let mut shape = &root.shape;
-    let mut storage = root.path.segments().to_vec();
     let mut declaration = Vec::new();
     for (step, selector) in path.steps.iter().enumerate() {
         while let ComponentValueShape::Optional { value } = shape {
+            observe_read(&mut budget, 0)?;
             if matches!(current, ComponentValue::Null) {
                 return Err(ComponentPropertyError::OptionalAbsent { step });
             }
@@ -346,29 +441,49 @@ fn resolve_location<'schema, 'value>(
         match selector {
             ComponentPropertyStep::Member(id) => {
                 declaration.push(ComponentMemberPathSegment::Member(id.clone()));
-                if root
-                    .member_tombstones
-                    .iter()
-                    .any(|tombstone| declaration.starts_with(tombstone.segments()))
-                {
-                    return Err(ComponentPropertyError::RetiredMember(
-                        ComponentMemberPath::new(declaration),
-                    ));
+                for tombstone in &root.member_tombstones {
+                    if budget.is_some() {
+                        for segment in tombstone.segments() {
+                            let bytes = match segment {
+                                ComponentMemberPathSegment::Member(id) => id.as_str().len(),
+                                _ => 0,
+                            };
+                            observe_read(&mut budget, bytes)?;
+                        }
+                    }
+                    if declaration.starts_with(tombstone.segments()) {
+                        return Err(ComponentPropertyError::RetiredMember(
+                            ComponentMemberPath::new(declaration),
+                        ));
+                    }
                 }
                 let ComponentValueShape::Record { members } = shape else {
                     return Err(ComponentPropertyError::ExpectedRecord { step });
                 };
-                let member = members
-                    .iter()
-                    .find(|member| member.id.as_ref() == Some(id))
-                    .ok_or_else(|| ComponentPropertyError::MemberNotFound {
-                        step,
-                        id: id.clone(),
-                    })?;
+                let mut selected = None;
+                for member in members {
+                    observe_read(
+                        &mut budget,
+                        member
+                            .name
+                            .len()
+                            .saturating_add(member.id.as_ref().map_or(0, |id| id.as_str().len())),
+                    )?;
+                    if member.id.as_ref() == Some(id) {
+                        selected = Some(member);
+                        break;
+                    }
+                }
+                let member = selected.ok_or_else(|| ComponentPropertyError::MemberNotFound {
+                    step,
+                    id: id.clone(),
+                })?;
                 current = current
                     .field(&member.name)
                     .map_err(ComponentPropertyError::InvalidValue)?;
-                storage.push(ComponentFieldPathSegment::field(&member.name));
+                if let Some(storage) = &mut storage {
+                    storage.push(ComponentFieldPathSegment::field(&member.name));
+                }
                 shape = &member.shape;
             }
             ComponentPropertyStep::ListItem { by, key } => {
@@ -389,9 +504,24 @@ fn resolve_location<'schema, 'value>(
                         actual: by.clone(),
                     });
                 }
+                // Admit the helper's finite declaration scan before it visits the members.
+                if budget.is_some()
+                    && let ComponentValueShape::Record { members } = item.as_ref()
+                {
+                    for member in members {
+                        observe_read(
+                            &mut budget,
+                            member.name.len().saturating_add(
+                                member.id.as_ref().map_or(0, |id| id.as_str().len()),
+                            ),
+                        )?;
+                    }
+                }
                 let member = keyed_list_member(item, identity).map_err(|kind| {
                     ComponentPropertyError::InvalidSchema(ComponentShapeError {
-                        path: ComponentFieldPath::new(storage.iter().cloned()),
+                        path: ComponentFieldPath::new(
+                            storage.as_deref().unwrap_or_default().iter().cloned(),
+                        ),
                         kind,
                     })
                 })?;
@@ -410,10 +540,16 @@ fn resolve_location<'schema, 'value>(
                 };
                 let mut found = None;
                 for (index, value) in items.iter().enumerate() {
+                    observe_read(&mut budget, member.name.len())?;
                     let identity = value
                         .get(&member.name)
                         .filter(|value| value.kind() == expected)
                         .ok_or(ComponentPropertyError::InvalidListItemKey { step, index })?;
+                    let bytes = match identity {
+                        ComponentValue::String(value) => value.len(),
+                        _ => 8,
+                    };
+                    observe_read(&mut budget, bytes)?;
                     if key.matches(identity) && found.replace(index).is_some() {
                         return Err(ComponentPropertyError::AmbiguousListItem {
                             step,
@@ -426,10 +562,12 @@ fn resolve_location<'schema, 'value>(
                     key: key.clone(),
                 })?;
                 current = &items[index];
-                storage.push(ComponentFieldPathSegment::index(
-                    u32::try_from(index)
-                        .map_err(|_| ComponentPropertyError::StorageIndexOverflow)?,
-                ));
+                if let Some(storage) = &mut storage {
+                    storage.push(ComponentFieldPathSegment::index(
+                        u32::try_from(index)
+                            .map_err(|_| ComponentPropertyError::StorageIndexOverflow)?,
+                    ));
+                }
                 shape = item;
                 declaration.push(ComponentMemberPathSegment::ListItem);
             }
@@ -437,6 +575,7 @@ fn resolve_location<'schema, 'value>(
                 let ComponentValueShape::Map { value: entry } = shape else {
                     return Err(ComponentPropertyError::ExpectedMap { step });
                 };
+                observe_read(&mut budget, key.len())?;
                 current =
                     current
                         .get(key)
@@ -444,7 +583,9 @@ fn resolve_location<'schema, 'value>(
                             step,
                             key: key.clone(),
                         })?;
-                storage.push(ComponentFieldPathSegment::field(key));
+                if let Some(storage) = &mut storage {
+                    storage.push(ComponentFieldPathSegment::field(key));
+                }
                 shape = entry;
                 declaration.push(ComponentMemberPathSegment::MapEntry);
             }
@@ -455,8 +596,18 @@ fn resolve_location<'schema, 'value>(
             shape,
             value: current,
         },
-        ComponentFieldPath::new(storage),
+        storage.map(ComponentFieldPath::new),
     ))
+}
+
+fn observe_read(
+    budget: &mut Option<&mut ComponentPropertyReadBudget>,
+    bytes: usize,
+) -> Result<(), ComponentPropertyError> {
+    match budget {
+        Some(budget) => budget.observe(bytes),
+        None => Ok(()),
+    }
 }
 
 fn refuse_retired(

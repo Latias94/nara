@@ -207,7 +207,11 @@ The [bounded read design](../authoring-read-projection-design.md) is an implemen
 not a claim that root-query actions or prepared panel submission are already qualified.
 
 Source-built panels may borrow finite, read-only preparation access during paint. The existing
-Session and document owners validate the exact captured document-query basis and return an owned,
+Session may also return a bounded selector-directed property observation through that read-only
+borrow, without action/result multi-frame choreography just to read a scalar. Empty selector steps
+use the same operation for roots. Read failures retain exact basis/scan/copy refusals, publish
+nothing and grant no mutation authority. Session and document owners validate the exact captured
+document-query basis and return an owned,
 unpublished candidate; panels do not acquire mutable Session, document or persistence access.
 Preparation and inspecting the candidate's patch/inverse publish nothing. Dropping a retained
 candidate cancels before submission. Commit consumes that same candidate through the existing

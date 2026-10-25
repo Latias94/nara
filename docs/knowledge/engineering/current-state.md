@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "481fa9fb7d6855d23c9eaaf7eb73b7b942f90656f8f0c15c3ea7d30399f2c9d6"
+source_fingerprint: "78679c7d831d724664fc64aabf96d30f18e6f8001787c3ec5247a35e214ae9ad"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "481fa9fb7d6855d23c9eaaf7eb73b7b942f90656f8f0c15c3ea7d30399f
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `481fa9fb7d6855d23c9eaaf7eb73b7b942f90656f8f0c15c3ea7d30399f2c9d6`
-- Immutable records: 908
+- Source fingerprint: `78679c7d831d724664fc64aabf96d30f18e6f8001787c3ec5247a35e214ae9ad`
+- Immutable records: 909
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Selector directed property reads and indexed root retirement qualification](verification/2026-10/2026-10-25T051125Z-selector-directed-property-reads-and-indexed-root-retirement-qualification-bd267ec01e4d44d3ad5f2a2d4543514d.md) - Qualifies borrowed nested source observations, independent scan and copy budgets, real computed panel editing and the reviewed root-tombstone correction; full R2 remains open.
 - **Verification Evidence**: [Finite reference shape certificate and clean-source public native qualification](verification/2026-10/2026-10-25T041346Z-finite-reference-shape-certificate-and-clean-source-public-native-qualification-d2673296c2bb413c9fd2b05bdf78a0c4.md) - Qualifies finite typed-reference certification, direct zero-preflight observations, restored-source comparisons and affected serial coverage; full R2 remains open.
 - **Verification Evidence**: [Reference-bearing preparation phase attribution and clean-source controls](verification/2026-10/2026-10-25T031736Z-reference-bearing-preparation-phase-attribution-and-clean-source-controls-aec33a24b30247b786582270db721766.md) - Five executions locate populated instrumented preparation wall time in format admission; explicit disturbance limits, corrected analyzer and exact source cleanup retain full R2 as open.
 - **Verification Evidence**: [Prepared panel complete review and scoped workflow qualification](verification/2026-10/2026-10-25T024527Z-prepared-panel-complete-review-and-scoped-workflow-qualification-49e27d9779054a5b8fda1142add06519.md) - Qualified finite panel preparation and consuming source candidates after complete review, nine added regressions and independent recheck; shared-owner locality and full foundation remain open.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Retained construction complete review and pinned qualification correction](progress/2026-10/2026-10-24T224111Z-retained-construction-complete-review-and-pinned-qualification-correction-5fc5eada19d14468877fc065bb2ff7ff.md) - Actual eight-lens CE receipt completed with one direct Session test gap; simplification applied and explicit Rust 1.95.0 qualification supersedes unsupported historical toolchain labels.
 - **Verification Evidence**: [Retained construction owner public and lifecycle regression checkpoint](verification/2026-10/2026-10-24T215522Z-retained-construction-owner-public-and-lifecycle-regression-checkpoint-82b171c17ee24213934e375e976c3e0c.md) - Source-owned retained construction passes owner, independent Application, lifecycle and root/Editor regressions; final static review and selected native qualification remain open.
 - **Subagent Finding**: [R2 selection independent field reading seam](subagents/2026-10/2026-10-24T215152Z-r2-selection-independent-field-reading-seam-389b97a2cf8f4275abbae7eeaa84bc6d.md) - Read-only investigation identifies the missing component/root-value observation workflow and bounded source-owner seams without selecting a general query language.
-- **Work Progress**: [Retained construction owner and public adapter checkpoint](progress/2026-10/2026-10-24T214058Z-retained-construction-owner-and-public-adapter-checkpoint-a65bea496a9442b18628572e20667490.md) - Owner prototype and direct Application construction are implemented; independent workflows pass while strengthened boundary, cost and final qualification remain in flight.
 
 # Integration Notes
 

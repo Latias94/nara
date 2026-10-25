@@ -27,6 +27,15 @@ pub enum EditorEditPreparationError {
 }
 
 impl EditorProjectSession {
+    /// Reads a named source property through the same owner and basis as action-based queries.
+    /// This does not mutate navigation, reserve a revision or grant preparation authority.
+    pub fn read_document_property(
+        &self,
+        request: nara_tooling::EditorPropertyRead,
+    ) -> Result<nara_tooling::EditorPropertyObservation, EditorDocumentQueryRejection> {
+        self.workspace.read_document_property(request)
+    }
+
     /// Validates a retained observation before source-owned preparation, without refreshing it.
     /// Commit still revalidates the actual candidate and the current lifecycle independently.
     pub fn validate_authoring_query_basis(

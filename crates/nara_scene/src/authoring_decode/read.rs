@@ -1,8 +1,9 @@
 use std::{collections::BTreeMap, error::Error, fmt, ops::Bound};
 
 use nara_reflect::{
-    ComponentFieldId, ComponentFieldPathError, ComponentFieldSchema, ComponentTypeId,
-    ComponentValue,
+    ComponentFieldPathError, ComponentFieldSchema, ComponentPropertyError, ComponentPropertyPath,
+    ComponentPropertyReadBudget, ComponentTypeId, ComponentValue,
+    resolve_component_property_in_root,
 };
 
 use super::{
@@ -11,7 +12,7 @@ use super::{
 use crate::{SceneEntityId, SceneEntityRecord};
 
 /// Refusal of a borrowed authoring projection, distinct from a missing optional value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthoringReadError {
     /// The session has no registry-free authoring admission.
     NotAdmitted,
@@ -25,6 +26,8 @@ pub enum AuthoringReadError {
     FieldNotFound,
     /// A non-missing source path is incompatible with the admitted Schema.
     InvalidFieldPath,
+    /// Exact selector/lookup-work refusal from the shared Schema owner.
+    Property(ComponentPropertyError),
 }
 
 impl fmt::Display for AuthoringReadError {
@@ -38,15 +41,29 @@ impl fmt::Display for AuthoringReadError {
             }
             Self::FieldNotFound => "declared root field was not found",
             Self::InvalidFieldPath => "source value is incompatible with its admitted field path",
+            Self::Property(error) => return error.fmt(formatter),
         })
     }
 }
 
-impl Error for AuthoringReadError {}
+impl Error for AuthoringReadError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Property(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
-/// A borrowed root observation. Explicit Null is Present, not Missing or Defaulted.
+impl From<ComponentPropertyError> for AuthoringReadError {
+    fn from(error: ComponentPropertyError) -> Self {
+        Self::Property(error)
+    }
+}
+
+/// A borrowed selected property. Explicit Null is Present, not Missing or Defaulted.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum AuthoringRootValue<'a> {
+pub enum AuthoringPropertyValue<'a> {
     Present(&'a ComponentValue),
     Defaulted(&'a ComponentValue),
     Missing,
@@ -140,16 +157,27 @@ impl<'a> AuthoringComponentView<'a> {
         Ok(self.schema()?.schema.fields())
     }
 
-    /// Looks up one root by admitted ID and borrows only its source subtree or declared default.
-    /// No sibling value is copied or traversed; shape/native validation already belongs to admission.
-    pub fn root_value(
+    /// Borrows one admitted root or descendant, preserving explicit/default origin.
+    /// Scan limits apply to selector traversal, not root/storage index lookups, allocation or time.
+    /// Complete shape/native validation belongs to admission; no effective component is copied.
+    pub fn property_value(
         &self,
-        field: &ComponentFieldId,
-    ) -> Result<AuthoringRootValue<'a>, AuthoringReadError> {
+        property: &ComponentPropertyPath,
+        budget: &mut ComponentPropertyReadBudget,
+    ) -> Result<AuthoringPropertyValue<'a>, AuthoringReadError> {
         let entry = self.schema()?;
+        property.validate()?;
+        if entry
+            .schema
+            .field_tombstones()
+            .binary_search(&property.root)
+            .is_ok()
+        {
+            return Err(ComponentPropertyError::RetiredField(property.root.clone()).into());
+        }
         let fields = entry.schema.fields();
         let index = fields
-            .binary_search_by(|candidate| candidate.id().cmp(field))
+            .binary_search_by(|candidate| candidate.id().cmp(&property.root))
             .map_err(|_| AuthoringReadError::FieldNotFound)?;
         let field = &fields[index];
         let record = self
@@ -157,16 +185,24 @@ impl<'a> AuthoringComponentView<'a> {
             .components
             .get(self.fact.component())
             .expect("indexed component belongs to its source record");
-        match record.value.get_path(field.path()) {
-            Ok(value) => Ok(AuthoringRootValue::Present(value)),
+        let (value, defaulted) = match record.value.get_path(field.path()) {
+            Ok(value) => (value, false),
             Err(
-                ComponentFieldPathError::MissingField { .. }
-                | ComponentFieldPathError::IndexOutOfBounds { .. },
-            ) => Ok(field
-                .default_value()
-                .map_or(AuthoringRootValue::Missing, AuthoringRootValue::Defaulted)),
-            Err(_) => Err(AuthoringReadError::InvalidFieldPath),
-        }
+                error @ (ComponentFieldPathError::MissingField { .. }
+                | ComponentFieldPathError::IndexOutOfBounds { .. }),
+            ) => match field.default_value() {
+                Some(value) => (value, true),
+                None if property.steps.is_empty() => return Ok(AuthoringPropertyValue::Missing),
+                None => return Err(ComponentPropertyError::ValueUnavailable(error).into()),
+            },
+            Err(_) => return Err(AuthoringReadError::InvalidFieldPath),
+        };
+        let selected = resolve_component_property_in_root(field, value, property, budget)?.value;
+        Ok(if defaulted {
+            AuthoringPropertyValue::Defaulted(selected)
+        } else {
+            AuthoringPropertyValue::Present(selected)
+        })
     }
 
     fn schema(&self) -> Result<&'a AuthoringSchemaEntry, AuthoringReadError> {

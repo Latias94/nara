@@ -216,6 +216,7 @@ fn property_rejection(
     operation_index: usize,
 ) -> ScenePatchReport {
     let (kind, step) = match error {
+        ComponentPropertyError::ReadBudgetExceeded => ("read-budget", None),
         ComponentPropertyError::PathDepthLimit => ("path-depth-limit", None),
         ComponentPropertyError::PathByteLimit => ("path-byte-limit", None),
         ComponentPropertyError::InvalidFieldId(_) => ("invalid-field-id", None),

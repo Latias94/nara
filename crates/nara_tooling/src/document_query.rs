@@ -18,6 +18,8 @@ pub struct EditorDocumentQueryBasis {
 /// Exact rejection of a query without changing document or presentation state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditorDocumentQueryRejection {
+    /// No readable project workspace is available through the current adapter.
+    WorkspaceUnavailable,
     /// The continuation belongs to another workspace, including a replaced project workspace.
     WrongWorkspace,
     /// The explicitly named document is no longer open, or was never open here.
@@ -44,11 +46,11 @@ pub enum EditorDocumentQueryRejection {
     InvalidContinuation,
     /// A discovery scan, row or metadata limit is zero or above its public cap.
     InvalidAuthoringLimits,
-    /// A selected-root metadata, node or logical-byte limit is zero or above its public cap.
-    InvalidRootReadLimits,
+    /// A selected-property scan, metadata or value limit is zero or above its public cap.
+    InvalidPropertyReadLimits,
     /// The aggregate owned observation's UTF-8 metadata exceeds the operation's limit.
     MetadataBudgetExceeded,
-    /// The requested complete root exceeds its node or logical-byte limit; nothing is truncated.
+    /// The selected value exceeds its node or logical-byte limit; nothing is truncated.
     ValueBudgetExceeded,
     /// Actual presence/readability/default interpretation is rejected by the source owner.
     Source(AuthoringReadError),
@@ -57,6 +59,9 @@ pub enum EditorDocumentQueryRejection {
 impl fmt::Display for EditorDocumentQueryRejection {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::WorkspaceUnavailable => {
+                formatter.write_str("no readable document workspace is available")
+            }
             Self::WrongWorkspace => {
                 formatter.write_str("document query belongs to another workspace")
             }
@@ -83,11 +88,13 @@ impl fmt::Display for EditorDocumentQueryRejection {
             Self::InvalidAuthoringLimits => {
                 formatter.write_str("authoring discovery limits are out of range")
             }
-            Self::InvalidRootReadLimits => formatter.write_str("root read limits are out of range"),
+            Self::InvalidPropertyReadLimits => {
+                formatter.write_str("property read limits are out of range")
+            }
             Self::MetadataBudgetExceeded => {
                 formatter.write_str("document query metadata budget exceeded")
             }
-            Self::ValueBudgetExceeded => formatter.write_str("root read value budget exceeded"),
+            Self::ValueBudgetExceeded => formatter.write_str("property read value budget exceeded"),
             Self::Source(error) => error.fmt(formatter),
         }
     }
