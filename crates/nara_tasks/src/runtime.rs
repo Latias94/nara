@@ -1979,6 +1979,44 @@ impl Default for TaskShutdownReport {
 }
 
 impl TaskShutdownReport {
+    /// Combines observations of disjoint physical owners, preserving completion and failures.
+    ///
+    /// Count each owner once; successive polls of the same owner are not disjoint reports.
+    /// Empty input describes no physical obligations and is complete. This is observation
+    /// aggregation, not ownership transfer or proof that the caller supplied disjoint owners.
+    #[must_use]
+    pub fn aggregate<'a>(reports: impl IntoIterator<Item = &'a Self>) -> Self {
+        let mut result = Self {
+            complete: true,
+            ..Self::default()
+        };
+        for report in reports {
+            result.complete &= report.complete;
+            for kind in TaskPoolKind::ALL {
+                let next = report.for_kind(kind);
+                let current = result
+                    .per_kind
+                    .get_mut(&kind)
+                    .expect("report contains every worker kind");
+                current.cancelled_pending = current
+                    .cancelled_pending
+                    .saturating_add(next.cancelled_pending);
+                current.cancellation_requests = current
+                    .cancellation_requests
+                    .saturating_add(next.cancellation_requests);
+                current.joined_workers = current.joined_workers.saturating_add(next.joined_workers);
+                current.panicked_workers = current
+                    .panicked_workers
+                    .saturating_add(next.panicked_workers);
+                current.cleanup_failed |= next.cleanup_failed;
+                current.drain_timed_out |= next.drain_timed_out;
+                current.cancel_timed_out |= next.cancel_timed_out;
+                current.join_timed_out |= next.join_timed_out;
+            }
+        }
+        result
+    }
+
     /// Returns whether all workers joined and all admitted executor-owned disposal returned.
     /// Cleanup failure is independent of physical completion.
     #[must_use]

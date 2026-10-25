@@ -117,6 +117,7 @@ impl EditorFrameClock {
             source_asset_import_work_pending: false,
             document_open: Default::default(),
             scene_preview_document: None,
+            authoring_retirement_pending: false,
         }
     }
 }
@@ -283,9 +284,24 @@ pub struct EditorFrameModel {
     source_asset_import_work_pending: bool,
     document_open: crate::EditorDocumentOpenView,
     scene_preview_document: Option<EditorDocumentId>,
+    authoring_retirement_pending: bool,
 }
 
 impl EditorFrameModel {
+    /// A replaced or rejected authoring Runtime still owns physical retirement work.
+    /// Unchanged pending polls require maintenance, not repeated presentation.
+    #[must_use]
+    pub const fn authoring_retirement_pending(&self) -> bool {
+        self.authoring_retirement_pending
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_authoring_retirement_pending(mut self, pending: bool) -> Self {
+        self.authoring_retirement_pending = pending;
+        self
+    }
+
     /// Returns the explicitly bound Scene source, independently of the active Inspector document.
     /// Its revision belongs to this frame's Workspace Scene tab; this is not picking authority.
     #[must_use]

@@ -29,9 +29,11 @@ use nara_tasks::{
 };
 use nara_tilemap::TileSetAssetPlugin;
 
+mod retirement;
 mod tilesets;
 #[cfg(feature = "presentation-2d")]
 use nara_tooling::{EditorDocumentId, WorldIdentitySnapshot};
+pub(super) use retirement::EditorAuthoringRetirements;
 pub(super) use tilesets::EditorTileSetSourceUpdate;
 
 #[cfg(test)]
@@ -513,6 +515,10 @@ impl EditorAuthoringRuntime {
 
     pub(super) fn persistence_tasks(&self) -> &TaskPools {
         self.runtime.world().resource::<TaskPools>()
+    }
+
+    pub(super) fn has_close_failure(&self) -> bool {
+        self.runtime.close_evidence().has_terminal_failure()
     }
 
     pub(super) fn host_custody(&self) -> &super::persistence::HostCustody {

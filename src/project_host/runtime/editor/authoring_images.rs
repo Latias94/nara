@@ -176,11 +176,20 @@ impl EditorAuthoringImageHost {
         &mut self,
         successor: EditorAuthoringImageCatalogSuccessor,
     ) -> Result<Arc<EditorAuthoringImageCatalogReceipt>, EditorAuthoringImageCatalogError> {
-        if successor.predecessor != self.current.generation() {
-            return Err(EditorAuthoringImageCatalogError::StaleSuccessor);
-        }
+        self.validate_successor(&successor)?;
         self.current = successor.receipt;
         Ok(Arc::clone(&self.current))
+    }
+
+    pub(super) fn validate_successor(
+        &self,
+        successor: &EditorAuthoringImageCatalogSuccessor,
+    ) -> Result<(), EditorAuthoringImageCatalogError> {
+        if successor.predecessor != self.current.generation() {
+            Err(EditorAuthoringImageCatalogError::StaleSuccessor)
+        } else {
+            Ok(())
+        }
     }
 }
 

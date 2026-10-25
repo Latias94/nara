@@ -139,6 +139,7 @@ impl EditorProjectSession {
                     self.source_asset_import.has_pending_work(),
                 )
                 .with_document_open(self.document_open_view())
+                .with_authoring_retirement_pending(self.authoring_retirements.is_pending())
                 .with_scene_preview_document(self.scene_preview_document),
         );
         #[cfg(feature = "runtime-ui")]

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "e69a81ccef0d7a5453e0bf38492f39a8af5efa866db6f17dcbd073bb11c62d9a"
+source_fingerprint: "5552d5c201f6c04d5b4ed111e9b684eebdf0bb48c2e112ae09c92d3b6d54f847"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "e69a81ccef0d7a5453e0bf38492f39a8af5efa866db6f17dcbd073bb11c
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `e69a81ccef0d7a5453e0bf38492f39a8af5efa866db6f17dcbd073bb11c62d9a`
-- Immutable records: 925
+- Source fingerprint: `5552d5c201f6c04d5b4ed111e9b684eebdf0bb48c2e112ae09c92d3b6d54f847`
+- Immutable records: 926
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Retained authoring replacement and physical retirement qualification](verification/2026-10/2026-10-25T172648Z-retained-authoring-replacement-and-physical-retirement-qualification-f93efd28e9324ff4accf45fc3d38311c.md) - Bounded predecessor and rejected candidate custody, exact file Host transfer, sticky disjoint completion and affected Editor maintenance evidence.
 - **Session Handoff**: [Demand activation merged with measured task isolation direction](sessions/2026-10/2026-10-25T164658Z-demand-activation-merged-with-measured-task-isolation-direction-b4f47bf5eb9346d092120ce798f90f90.md) - Pins the qualified lazy/shared comparison and local source commit, records the next concrete Editor deployment and retirement obligations, and preserves the full foundation Goal.
 - **Verification Evidence**: [Demand activation custody and matched lazy shared Image comparison](verification/2026-10/2026-10-25T164306Z-demand-activation-custody-and-matched-lazy-shared-image-comparison-c5d3a638a3884807b489a85f0b7b0b1a.md) - Qualifies lazy per-kind workers, concurrent physical retirement, actual joined retention and a matched release Image comparison that challenges unconditional physical sharing.
 - **Session Handoff**: [R4b task activity custody merged and ready for lazy facility comparison](sessions/2026-10/2026-10-25T160206Z-r4b-task-activity-custody-merged-and-ready-for-lazy-facility-comparison-48eac0b948164958bb8efff8a892bcab.md) - Pins the qualified optional custody substrate to local main while preserving the full foundation Goal and remaining workload/product selection.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Finite child Snap proposal and physical custody qualification](verification/2026-10/2026-10-25T122634Z-finite-child-snap-proposal-and-physical-custody-qualification-ce23b00e49cc4a758017b5a2eba63913.md) - Qualifies the opt-in real child proposal through the existing source owner after error-fact regressions, complete review and controlled Reopen proof correction; broader R1 and R1b remain open.
 - **Verification Evidence**: [Source local Snap public consumer and installer qualification](verification/2026-10/2026-10-25T112059Z-source-local-snap-public-consumer-and-installer-qualification-f89f21479f7d4c06a81ab5bc63b5ff87.md) - Qualifies the source-built R1 Snap planner, exact panel candidate and independent inactive Session workflow after complete review and direct installer proof correction; child tools and full R1 remain open.
 - **Session Handoff**: [Compiled failure projection committed and real Snap consumer initially passing](sessions/2026-10/2026-10-25T103839Z-compiled-failure-projection-committed-and-real-snap-consumer-initially-passing-b98096de3c6149249a0389e9faacb5d5.md) - R1/F2 and F3 are locally committed with scoped qualification; three uncommitted Snap consumer files pass five focused workflows and still need review, broader checks and a precise commit.
-- **Verification Evidence**: [Compiled domain failure projection and truthful publication observations](verification/2026-10/2026-10-25T100841Z-compiled-domain-failure-projection-and-truthful-publication-observations-8b995496a82b411184e95f6f462b48f8.md) - Records R1/F3's real compiled-domain code-loss regression, bounded replacement, complete review and physical-outcome corrections; full R1 and the foundation remain open.
 
 # Integration Notes
 

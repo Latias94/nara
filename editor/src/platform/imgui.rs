@@ -1926,18 +1926,31 @@ fn imgui_next_deadline(
         deadline = earliest_deadline(deadline, Some(now + Duration::from_millis(16)));
     }
     if let Some(frame) = application.current_frame() {
-        if frame.project_browser().has_pending_work() || frame.document_open().has_pending_work() {
-            deadline = earliest_deadline(deadline, Some(now + Duration::from_millis(16)));
-        }
-        let state = frame.play().state();
-        deadline = earliest_deadline(deadline, play_lifecycle_poll_deadline(now, state));
-        deadline = earliest_deadline(
-            deadline,
-            persistence_poll_deadline(now, frame.persistence().operation()),
-        );
+        deadline = earliest_deadline(deadline, imgui_frame_maintenance_deadline(&frame, now));
     }
     deadline = earliest_deadline(deadline, application.session_close_retry_deadline());
     deadline
+}
+
+fn imgui_frame_maintenance_deadline(
+    frame: &nara::tooling::EditorFrameModel,
+    now: Instant,
+) -> Option<Instant> {
+    let deadline = (frame.project_browser().has_pending_work()
+        || frame.document_open().has_pending_work()
+        || frame.authoring_retirement_pending()
+        || matches!(
+            frame.project_content(),
+            nara::tooling::EditorProjectContentView::RefreshPending { .. }
+        ))
+    .then_some(now + Duration::from_millis(16));
+    earliest_deadline(
+        earliest_deadline(
+            deadline,
+            play_lifecycle_poll_deadline(now, frame.play().state()),
+        ),
+        persistence_poll_deadline(now, frame.persistence().operation()),
+    )
 }
 
 fn imgui_next_presentation_deadline(
@@ -1947,16 +1960,7 @@ fn imgui_next_presentation_deadline(
 ) -> Option<Instant> {
     let mut deadline = None;
     if let Some(frame) = application.current_frame() {
-        if imgui_play_cadence(frame.play().state(), frame.runtime_availability()).running {
-            deadline = Some(now + Duration::from_millis(16));
-        }
-        deadline = earliest_deadline(
-            deadline,
-            image_import_poll_deadline(
-                now,
-                frame.image_import_work_pending() || frame.source_asset_import_work_pending(),
-            ),
-        );
+        deadline = imgui_frame_presentation_deadline(&frame, now);
     }
     if application.game_step_requires_runtime_drive() {
         deadline = earliest_deadline(deadline, Some(now + Duration::from_millis(16)));
@@ -1976,6 +1980,20 @@ fn imgui_next_presentation_deadline(
         );
     }
     deadline
+}
+
+fn imgui_frame_presentation_deadline(
+    frame: &nara::tooling::EditorFrameModel,
+    now: Instant,
+) -> Option<Instant> {
+    let running = imgui_play_cadence(frame.play().state(), frame.runtime_availability()).running;
+    earliest_deadline(
+        running.then_some(now + Duration::from_millis(16)),
+        image_import_poll_deadline(
+            now,
+            frame.image_import_work_pending() || frame.source_asset_import_work_pending(),
+        ),
+    )
 }
 
 #[derive(Default)]
@@ -2177,6 +2195,18 @@ mod opening_tests {
                 .has_pending_work()
         );
         let settled_deadline = imgui_next_deadline(&application, None, now);
+        let retiring_frame = application
+            .current_frame()
+            .unwrap()
+            .as_ref()
+            .clone()
+            .with_image_import(None, false)
+            .with_source_asset_import(None, false)
+            .with_authoring_retirement_pending(true);
+        let retirement_deadline = imgui_frame_maintenance_deadline(&retiring_frame, now);
+        let retirement_presentation = imgui_frame_presentation_deadline(&retiring_frame, now);
+        let retired_frame = retiring_frame.with_authoring_retirement_pending(false);
+        let retired_deadline = imgui_frame_maintenance_deadline(&retired_frame, now);
         let other_work = application
             .current_frame()
             .unwrap()
@@ -2205,6 +2235,9 @@ mod opening_tests {
             "the browser must release its wake after settling"
         );
         assert!(closed);
+        assert_eq!(retirement_deadline, Some(now + Duration::from_millis(16)));
+        assert_eq!(retirement_presentation, None);
+        assert_eq!(retired_deadline, None);
     }
 }
 

@@ -829,6 +829,10 @@ pub struct EditorProjectSession {
     gestures: EditorGestureController,
     last_gesture_cancellation: Option<EditorGestureCancelReason>,
     authoring_runtime: authoring_runtime::EditorAuthoringRuntime,
+    authoring_retirements: authoring_runtime::EditorAuthoringRetirements,
+    #[cfg(test)]
+    next_authoring_refresh_hook:
+        Option<Box<dyn FnOnce(&authoring_runtime::EditorAuthoringRuntime)>>,
     #[cfg(feature = "runtime-ui")]
     authoring_images: authoring_images::EditorAuthoringImageHost,
     #[cfg(feature = "presentation-ui")]
@@ -843,17 +847,27 @@ pub struct EditorProjectSession {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EditorProjectCloseReceipt {
     task_shutdown: TaskShutdownReport,
+    authoring_cleanup_failed: bool,
 }
 
 impl EditorProjectCloseReceipt {
-    fn new(task_shutdown: TaskShutdownReport) -> Self {
+    fn new(task_shutdown: TaskShutdownReport, authoring_cleanup_failed: bool) -> Self {
         debug_assert!(task_shutdown.is_complete());
-        Self { task_shutdown }
+        Self {
+            task_shutdown,
+            authoring_cleanup_failed,
+        }
     }
 
     #[must_use]
     pub const fn task_shutdown(&self) -> &TaskShutdownReport {
         &self.task_shutdown
+    }
+
+    /// Cleanup failure is independent of physical completion, including replaced authoring owners.
+    #[must_use]
+    pub const fn has_authoring_cleanup_failure(&self) -> bool {
+        self.authoring_cleanup_failed
     }
 }
 
@@ -911,6 +925,7 @@ impl EditorProjectSession {
     #[doc(hidden)]
     pub fn advance_close(&mut self) -> EditorProjectCloseProgress {
         self.closing = true;
+        self.advance_authoring_retirement();
         self.cancel_pending_document_open();
         if let Some(project) = self.authoring_project_mut() {
             project.cancel_source_index();
@@ -919,7 +934,9 @@ impl EditorProjectSession {
         self.advance_persistence();
         if self.persistence.has_pending_work() {
             return EditorProjectCloseProgress::Incomplete {
-                task_shutdown: TaskShutdownReport::default(),
+                task_shutdown: self
+                    .authoring_retirements
+                    .report_with(&TaskShutdownReport::default()),
                 file_cleanup_pending: true,
             };
         }
@@ -930,14 +947,17 @@ impl EditorProjectSession {
         match self.authoring_runtime.shutdown_tasks() {
             authoring_runtime::EditorAuthoringRuntimeCloseProgress::Incomplete(task_shutdown) => {
                 EditorProjectCloseProgress::Incomplete {
-                    task_shutdown,
+                    task_shutdown: self.authoring_retirements.report_with(&task_shutdown),
                     file_cleanup_pending: !files_closed,
                 }
             }
             authoring_runtime::EditorAuthoringRuntimeCloseProgress::Complete(task_shutdown) => {
-                if files_closed {
+                let task_shutdown = self.authoring_retirements.report_with(&task_shutdown);
+                if files_closed && !self.authoring_retirements.is_pending() {
                     EditorProjectCloseProgress::Complete(EditorProjectCloseReceipt::new(
                         task_shutdown,
+                        self.authoring_retirements.failed()
+                            || self.authoring_runtime.has_close_failure(),
                     ))
                 } else {
                     EditorProjectCloseProgress::Incomplete {
@@ -1442,6 +1462,9 @@ impl EditorProjectSession {
             gestures: EditorGestureController::default(),
             last_gesture_cancellation: None,
             authoring_runtime,
+            authoring_retirements: Default::default(),
+            #[cfg(test)]
+            next_authoring_refresh_hook: None,
             #[cfg(feature = "runtime-ui")]
             authoring_images,
             #[cfg(feature = "presentation-ui")]
@@ -1683,6 +1706,9 @@ impl EditorProjectSession {
             gestures: EditorGestureController::default(),
             last_gesture_cancellation: None,
             authoring_runtime,
+            authoring_retirements: Default::default(),
+            #[cfg(test)]
+            next_authoring_refresh_hook: None,
             #[cfg(feature = "runtime-ui")]
             authoring_images,
             #[cfg(feature = "presentation-ui")]

@@ -2262,9 +2262,11 @@ fn drive_project_frame(
         .session
         .drive_editor_frame_with_runtime(real_delta, drive_runtime);
     before.persistence() != after.persistence()
+        || before.project_content() != after.project_content()
         || before.source_asset_import() != after.source_asset_import()
         || before.source_asset_import_work_pending() != after.source_asset_import_work_pending()
         || before.image_import_work_pending() != after.image_import_work_pending()
+        || before.authoring_retirement_pending() != after.authoring_retirement_pending()
 }
 
 fn request_exit_on_project(project: &mut PublishedEditorProject) -> EditorApplicationUpdate {

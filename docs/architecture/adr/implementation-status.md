@@ -52,6 +52,17 @@ two closures block. ADRs 0008/0052 adopt explicit activation costs/failure and d
 from progress isolation; no product default changes. Actual Editor failure/refresh/close owners
 and deployment qualification remain open, not replaced by the bounded Image evidence.
 
+The [retained authoring replacement qualification](../../knowledge/engineering/verification/2026-10/2026-10-25T172648Z-retained-authoring-replacement-and-physical-retirement-qualification-f93efd28e9324ff4accf45fc3d38311c.md)
+adds a bounded Session-owned predecessor or rejected post-start Runtime, independent retirement
+maintenance and exact file-Host transfer before successor publication. A held predecessor permits
+successor Save/Reopen but gates another refresh; Session close observes late-result disposal and
+aggregates disjoint physical reports once, with sticky cleanup failure. The four real Prefab
+owner tests and final 420-case root/198-case ordinary Editor cohorts pass, together with eleven
+selected Windows/DX12 trajectories including the critical group and refreshed Canvas source.
+ADRs 0052/0118 adopt this boundary. Initial App/Open construction failure custody, trusted Play's
+complete Session close and lazy-private product deployment are separate open work, as are R4c
+and the full plan.
+
 The [R5c disposable projection qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md) binds `207bbcc` to complete-domain Scene epoch ownership, unchanged shared authoring facilities, a stable preview renderer producer and fresh presentation authority after identical-content recovery. Held Image/Save work, the joined public edit/history/Save/Reopen/picking/Close consumer, independent Prefab consumers and six actual Windows/DX12 trajectories pass. This closes the selected preview lifetime mismatch, not incremental projection, durable property addressing or the full foundation rebaseline.
 
 The [canonical native-source admission checkpoint](../../knowledge/engineering/verification/2026-10/2026-10-24T-project-content-source-admission-and-prefab-binding-qualification.md)

@@ -46,6 +46,7 @@ struct CanvasWorkflowObservation {
     saved: [f64; 4],
     unrelated_source_unchanged: bool,
     presents: u64,
+    content_generations: [u64; 2],
 }
 
 #[test]
@@ -78,6 +79,7 @@ fn native_canvas_widgets_pick_move_resize_and_save_reopen_real_source() {
     assert_eq!(observed.history, [0, 1, 2, 1, 2]);
     assert!(observed.unrelated_source_unchanged);
     assert!(observed.presents > 0);
+    assert!(observed.content_generations[1] > observed.content_generations[0]);
 }
 
 struct CanvasWorkflowApplication {
@@ -622,6 +624,11 @@ impl CanvasWorkflow<'_> {
         }) {
             return Err("the widget edits did not leave the UI Prefab dirty".to_owned());
         }
+        let before_content = self
+            .application
+            .current_frame()
+            .and_then(|frame| frame.project_content().current_generation())
+            .ok_or("trusted Canvas has no project-content generation")?;
         self.click("Save")?;
         self.settle_persistence()?;
         if !self.application.current_frame().is_some_and(|frame| {
@@ -635,6 +642,28 @@ impl CanvasWorkflow<'_> {
         }) {
             return Err("the real Save widget did not save the UI Prefab".to_owned());
         }
+        let refresh_deadline = Instant::now() + Duration::from_secs(5);
+        let after_content = loop {
+            let frame = self
+                .application
+                .current_frame()
+                .ok_or("the Canvas frame disappeared")?;
+            if frame.project_content().is_current()
+                && !frame.authoring_retirement_pending()
+                && let Some(generation) = frame.project_content().current_generation()
+                && generation > before_content
+            {
+                break generation;
+            }
+            if Instant::now() >= refresh_deadline {
+                return Err(
+                    "Save did not publish refreshed content and retire the authoring predecessor"
+                        .to_owned(),
+                );
+            }
+            self.paint(|_| {})?;
+            std::thread::sleep(Duration::from_millis(1));
+        };
         let stored: serde_json::Value =
             serde_json::from_slice(&fs::read(&source).map_err(|error| error.to_string())?)
                 .map_err(|error| error.to_string())?;
@@ -694,6 +723,7 @@ impl CanvasWorkflow<'_> {
             saved,
             unrelated_source_unchanged: true,
             presents: self.presents,
+            content_generations: [before_content.get(), after_content.get()],
         })
     }
 }

@@ -23,6 +23,23 @@ pub(super) struct PrefabContentRefreshObligation {
 }
 
 impl EditorProjectSession {
+    pub(super) fn advance_authoring_retirement(&mut self) {
+        if self.authoring_retirements.poll_for_new_cleanup_failure() {
+            let _ = self.diagnostics.extend(single_error(
+                "project.editor.authoring-retirement-failed",
+                "An authoring Runtime returned with a terminal cleanup failure",
+            ));
+        }
+    }
+
+    fn retain_authoring_runtime(
+        &mut self,
+        runtime: super::authoring_runtime::EditorAuthoringRuntime,
+    ) {
+        self.authoring_retirements.retain(runtime);
+        self.advance_authoring_retirement();
+    }
+
     pub(super) fn schedule_prefab_content_refresh(&mut self, evidence: EditorPersistenceReceipt) {
         let document = evidence.document();
         let path = self
@@ -184,8 +201,10 @@ impl EditorProjectSession {
     }
 
     pub(super) fn advance_project_content_refresh(&mut self) {
+        self.advance_authoring_retirement();
         // Transfer the lifetime Host owner only when no operation still borrows its runtime.
         if !self.accepts_new_work()
+            || self.authoring_retirements.is_pending()
             || self.persistence.has_pending_work()
             || !matches!(
                 self.project_content,
@@ -270,6 +289,10 @@ impl EditorProjectSession {
                 return;
             }
         };
+        #[cfg(test)]
+        if let Some(hook) = self.next_authoring_refresh_hook.take() {
+            hook(&replacement_authoring_runtime);
+        }
         #[cfg(feature = "runtime-ui")]
         let replacement_authoring_images = match self
             .authoring_images
@@ -277,6 +300,7 @@ impl EditorProjectSession {
         {
             Ok(successor) => successor,
             Err(_) => {
+                self.retain_authoring_runtime(replacement_authoring_runtime);
                 self.reject_project_content_refresh(
                     request,
                     EditorProjectContentRefreshFailure::PreviewRejected,
@@ -292,6 +316,7 @@ impl EditorProjectSession {
         let replacement_ui_preview = match super::ui_preview::EditorUiPreviewSession::new() {
             Ok(preview) => preview,
             Err(_) => {
+                self.retain_authoring_runtime(replacement_authoring_runtime);
                 self.reject_project_content_refresh(
                     request,
                     EditorProjectContentRefreshFailure::PreviewRejected,
@@ -306,6 +331,7 @@ impl EditorProjectSession {
 
         let generation = EditorProjectContentGeneration::new(self.next_project_content_generation);
         let Some(next_generation) = self.next_project_content_generation.checked_add(1) else {
+            self.retain_authoring_runtime(replacement_authoring_runtime);
             self.reject_project_content_refresh(
                 request,
                 EditorProjectContentRefreshFailure::CapacityExceeded,
@@ -319,26 +345,38 @@ impl EditorProjectSession {
         #[cfg(feature = "runtime-ui")]
         if self
             .authoring_images
-            .publish_successor(replacement_authoring_images)
+            .validate_successor(&replacement_authoring_images)
             .is_err()
         {
+            self.retain_authoring_runtime(replacement_authoring_runtime);
             self.reject_project_content_refresh(
                 request,
                 EditorProjectContentRefreshFailure::PreviewRejected,
             );
             return;
         }
-        // All fallible preparation has completed. Move the one retirement registration
-        // before dropping the old runtime; cloning it would let the old owner close live Hosts.
-        assert!(
-            self.authoring_runtime
-                .host_custody()
-                .transfer_to(replacement_authoring_runtime.host_custody())
-        );
+        if !self
+            .authoring_runtime
+            .host_custody()
+            .transfer_to(replacement_authoring_runtime.host_custody())
+        {
+            self.retain_authoring_runtime(replacement_authoring_runtime);
+            self.reject_project_content_refresh(
+                request,
+                EditorProjectContentRefreshFailure::PreviewRejected,
+            );
+            return;
+        }
+        #[cfg(feature = "runtime-ui")]
+        self.authoring_images
+            .publish_successor(replacement_authoring_images)
+            .expect("exclusive refresh publication retains the validated image predecessor");
         self.trusted_compiled_mut()
             .expect("content refresh begins from the trusted compiled lane")
             .snapshot = successor;
-        self.authoring_runtime = replacement_authoring_runtime;
+        let predecessor =
+            std::mem::replace(&mut self.authoring_runtime, replacement_authoring_runtime);
+        self.retain_authoring_runtime(predecessor);
         #[cfg(feature = "presentation-ui")]
         {
             self.ui_preview = replacement_ui_preview;

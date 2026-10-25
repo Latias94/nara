@@ -153,6 +153,110 @@ abstractions. Qualify the actual A-to-B-to-A Scene consumer with held Play work,
 Save/Image progress, Stop/Restart/failed start, config refusal, refresh predecessor retirement and
 final Session physical completion before selecting a shared product deployment.
 
+### Retained Authoring Replacement Unit
+
+The first product-owner correction keeps at most one unpublished or predecessor authoring
+Runtime in Session-owned retirement. Successful refresh publishes its prepared content/preview
+successor and transfers file-Host registrations exactly once; the complete previous Runtime then
+retires separately. Any rejection after a replacement Runtime exists transfers that Runtime to
+the same slot without changing the live owner. Another refresh cannot construct a Runtime while
+the slot is occupied. Logical task cancellation is not release evidence.
+
+```mermaid
+flowchart LR
+    Prepare[Prepare complete successor] --> Admit{Final source/catalog/custody admission}
+    Admit -->|refuse| Failed[Retain candidate for retirement]
+    Admit -->|accept| Publish[Publish successor and move file custody]
+    Publish --> Old[Retain complete predecessor]
+    Old --> Poll[Owner-thread retirement polls]
+    Failed --> Poll
+    Poll -->|Pending| Gate[Keep next refresh gated]
+    Poll -->|Complete| Summary[Bounded sticky completion/error summary]
+```
+
+Choose this bounded retained owner over either a growing list of old Runtimes or best-effort
+Drop/quarantine. A Stop-first alternative would require suppressing the still-useful authoring
+owner and restoring last-good on rejected successor; there is no such product requirement here.
+Do not mutate the existing asset World in place merely to avoid retirement: old task captures,
+content snapshots and preview bindings have exact generation/authority contracts.
+
+Acceptance requires a held predecessor surviving actual Prefab Save/refresh, successor Save/Reopen
+remaining usable, a second refresh remaining gated, rejected post-start candidate retention,
+off-thread physical disposal and Session close waiting for every retained authoring owner.
+Physical reports aggregate disjoint completed owners once, without retaining an unbounded history;
+cleanup failure remains sticky independently of completion. A public frame pending fact drives
+non-redraw native maintenance after content publication. This unit does not by itself qualify
+failed App/initial-Open construction or select lazy product placement.
+
+### Initial Construction And Open Failure Follow-up
+
+The replacement slot exists only after an Editor Session has been published. It cannot own an
+App that failed configuration, a failed Startup, or a successful authoring Runtime whose enclosing
+Session publication subsequently rejects. Those stages need their own concrete Host custody;
+do not expand the refresh slot into a universal failure registry.
+
+The current source has three explicit boundaries to replace:
+
+- `build_authoring_app` creates a local App and installs Tasks before other fallible configuration.
+  A later error returns only diagnostics. The Tasks plugin already registers successful and
+  partial worker construction in the App ledger; this is loss of the enclosing retry owner, not
+  proof that Tasks forgot its threads.
+- `EditorAuthoringRuntime::new` and `new_authoring` project `RuntimeStartFailure` to diagnostics.
+  That failure already carries retained retirement. Earlier preview/asset preparation errors also
+  exit after resource acquisition.
+- Ordinary and trusted `EditorProjectSession` Open create their authoring Runtime before later
+  image/UI, source-file and Workspace publication checks. `EditorProjectOpenError`, the public
+  Open failure and Shell Recovery currently carry diagnostics without that candidate owner.
+  Retry, return to the manager and failed project replacement therefore cannot poll its exact
+  ordinary cleanup responsibility.
+
+`RuntimeOwner::drop` attempts finite close and retains incomplete custody through quarantine.
+That safety fallback is not evidence of immediate unsafe World destruction, a reproduced leak,
+or responsive successful Open cleanup. The intended replacement is explicit owner-thread polling
+from first resource acquisition through publication or physical retirement. Candidate refusal and
+cleanup completion remain separate facts.
+
+Use an actual public rejection as the next consumer: advance `EditorProjectOpenHost` to pending
+`SessionPublication`, change the prepared startup Scene bytes or native-source metadata, then
+advance again. Binding/revalidation rejects after authoring construction while preserving the
+incumbent project. Pair this real failure with private held-work instrumentation to prove retained
+Pending, disposal return and final close; source reachability alone does not prove a long-lived
+unfinished owner or quarantine abort in the ordinary built-in path.
+
+Compare a narrow retained raw-App admission/abort boundary with converting the concrete authoring
+builder to the existing `PluginPlan` candidate path. Reuse `RuntimePreparationRetirement`,
+`RuntimeCandidate`, `RuntimeStartFailure` and the existing ledger rather than adding a second close
+machine. Configuration must borrow an already accountable owner; do not start an invalid App merely
+to obtain a retirement handle. Keep any post-start unpublished Runtime in the same failed-attempt
+custody. Public Open failure should retain its owner and expose bounded cleanup observation, while
+Application holds one failed-Open slot independently of replaceable Recovery presentation state.
+Gate another construction while it is Pending, keep an incumbent project usable, and make Exit
+wait. Preserve the independent startup-preparation attempt's transportability rather than moving
+thread-bound Runtime ownership into it. Select the actual interface with the consumer, not by
+introducing another general service registry or arbitrary App callback.
+
+Lazy private facilities reduce unused worker acquisition and shift OS-spawn refusal to typed first
+use; they do not make preview, source validation or Session publication infallible. Directly
+preinserting `TaskPools` skips the plugin's physical-owner registration, and `TaskPlugin::shared`
+registers activity close rather than the authoring owner's physical report. Neither is a valid
+shortcut to lazy product deployment. Qualify initial construction/Open custody first, then choose
+the concrete private-lazy placement and its first-use failure behavior separately.
+
+Pinned comparison limits: Bevy `85503941e488152711a4695bbe248e9ed9f453fc` separates `App::empty`
+from default task-plugin installation; its task plugin initializes global facilities during build,
+not at each first job, and explicit task-pool Drop joins synchronously. Godot
+`81ab961f91066a63bcbf3ec340962bb1a1ada558` explicitly owns singleton initialization, lazily creates
+named pools and finishes them on destruction. These inform placement and physical ownership;
+neither supplies Nara's cross-frame retained Open-failure protocol. Relevant read-only source is
+`repo-ref/bevy/crates/bevy_app/src/{app,task_pool_plugin}.rs`,
+`repo-ref/bevy/crates/bevy_tasks/src/task_pool.rs`, `repo-ref/godot/main/main.cpp` and
+`repo-ref/godot/core/object/worker_thread_pool.cpp`.
+
+Acceptance for this separate unit covers configuration failure after acquisition, Startup failure
+with held disposal, actual public source-drift rejection, Retry/manager/Exit and project replacement
+while cleanup is Pending, then successful Open/edit/Save/Reopen/Close after physical completion.
+No new release migration guide, global executor, generic erasure or lazy-default claim follows.
+
 ### Demand-Activation Comparison Candidate
 
 The demand-activation candidate creates bounded queues and a physical close owner without workers. The

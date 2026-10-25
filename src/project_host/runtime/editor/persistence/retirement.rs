@@ -252,9 +252,9 @@ impl HostCustody {
         complete
     }
 
-    /// Transfers live registrations at the final, infallible runtime replacement boundary.
+    /// Attempts to transfer live registrations before publishing a Runtime successor.
     ///
-    /// The old participant becomes closed and empty; only the successor may retire the Hosts.
+    /// On success the old participant becomes closed and empty; only the successor may retire the Hosts.
     pub(in crate::project_host::runtime::editor) fn transfer_to(&self, next: &Self) -> bool {
         if Arc::ptr_eq(&self.registry, &next.registry) {
             return false;

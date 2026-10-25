@@ -1,4 +1,5 @@
 use super::*;
+mod retirement;
 use nara_tooling::{
     EditorProjectContentAction, EditorProjectContentRefreshFailure,
     EditorProjectContentRefreshRequestResult,
@@ -56,6 +57,15 @@ fn retry_and_runtime_retirement_revalidate_all_sources_after_the_representative_
                 save_entity(&mut editor, p, "first-generation-p");
                 editor.advance_project_content_refresh();
                 assert!(editor.project_content.is_current());
+                let retirement_deadline = Instant::now() + Duration::from_secs(5);
+                while editor.authoring_retirements.is_pending() {
+                    assert!(
+                        Instant::now() < retirement_deadline,
+                        "authoring predecessor did not retire"
+                    );
+                    editor.advance_authoring_retirement();
+                    std::thread::sleep(Duration::from_millis(1));
+                }
             }
             let last_good = editor.trusted_compiled().unwrap().snapshot.revision();
             save_entity(&mut editor, p, "pending-p");
@@ -111,6 +121,15 @@ fn retry_and_runtime_retirement_revalidate_all_sources_after_the_representative_
             editor.advance_project_content_refresh();
             let result = editor.project_content;
             let actual_content = editor.trusted_compiled().unwrap().snapshot.revision();
+            let retirement_deadline = Instant::now() + Duration::from_secs(5);
+            while editor.authoring_retirements.is_pending() {
+                assert!(
+                    Instant::now() < retirement_deadline,
+                    "authoring predecessor did not retire"
+                );
+                editor.advance_project_content_refresh();
+                std::thread::sleep(Duration::from_millis(1));
+            }
             let generations = editor
                 .trusted_compiled()
                 .unwrap()

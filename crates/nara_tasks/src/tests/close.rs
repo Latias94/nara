@@ -586,6 +586,27 @@ fn a_closed_pool_rejects_and_never_falls_back_to_inline_execution() {
 }
 
 #[test]
+fn disjoint_shutdown_reports_preserve_counts_failure_and_incomplete_ownership() {
+    let first = inline_pools(2);
+    let second = inline_pools(2);
+    let _first_task = accepted(first.spawn(TaskPoolKind::Io, request(1), |_| ()));
+    let capture = PanicOnDrop;
+    let _second_task = accepted(second.spawn(TaskPoolKind::Io, request(1), move |_| drop(capture)));
+    let first_report = first.shutdown_blocking().unwrap();
+    let second_report = second.shutdown_blocking().unwrap();
+    assert!(first_report.is_complete());
+    assert!(second_report.is_complete());
+    let aggregate = TaskShutdownReport::aggregate([&first_report, &second_report]);
+    assert!(aggregate.is_complete());
+    assert!(aggregate.has_cleanup_failure());
+    assert_eq!(aggregate.for_kind(TaskPoolKind::Io).cancelled_pending, 2);
+    assert!(
+        !TaskShutdownReport::aggregate([&aggregate, &TaskShutdownReport::default()]).is_complete()
+    );
+    assert!(TaskShutdownReport::aggregate([]).is_complete());
+}
+
+#[test]
 fn executor_repeated_shutdown_preserves_the_first_report() {
     let mut pools = inline_pools(1);
     let mut handle = accepted(pools.spawn(TaskPoolKind::Io, request(1), |_| 1_u32));

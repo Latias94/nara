@@ -154,6 +154,11 @@ flowchart TD
   its Host. A normal task business `Err` alone is not cleanup failure. The existing unwind boundary
   cannot distinguish a task-body panic from captured-value destruction panic, so either prevents
   proving successful cleanup; no panic text or unbounded provenance log is retained.
+- An outer owner observing disjoint physical facilities may aggregate their shutdown reports
+  once per owner. Completion requires all supplied reports complete; cleanup and historical
+  timeout flags remain sticky, with saturating counts. Successive polls of the same owner are
+  replacement observations, not additional owners. Aggregation does not itself transfer custody
+  or establish disjointness.
 - Reaching a drain, cancel, or join deadline records the historical timeout and yields an incomplete
   close while retaining the same owner and `JoinHandle` values. `RetryClose` polls only unfinished
   work; it does not repeat cancellation, increment shutdown counts, or invoke plugin shutdown

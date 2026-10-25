@@ -1181,7 +1181,7 @@ logical_height = 540
             nara_tooling::EditorPersistenceRequestResult::Acknowledged { .. }
         )
     ));
-    let refreshed_frame = editor.drive_editor_frame(Duration::ZERO);
+    let mut refreshed_frame = editor.drive_editor_frame(Duration::ZERO);
     assert!(matches!(
         refreshed_frame.project_content(),
         EditorProjectContentView::Current { generation } if generation.get() == 2
@@ -1190,6 +1190,15 @@ logical_height = 540
         editor.editor_authoring_image_catalog_facts(),
         (2, vec![(image_path.to_owned(), image_settings)])
     );
+    let retirement_deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while refreshed_frame.authoring_retirement_pending() {
+        assert!(
+            std::time::Instant::now() < retirement_deadline,
+            "the authoring predecessor did not retire"
+        );
+        refreshed_frame = editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
     let budget = editor.test_project_content_budget_snapshot();
     assert_eq!(budget.active_generations(), 1);
     assert_eq!(budget.generation_high_water(), 2);
