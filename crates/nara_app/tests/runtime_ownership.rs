@@ -38,7 +38,6 @@ fn fail_custom_schedule(mut runs: ResMut<CustomRuns>) -> Result<(), BevyError> {
 #[test]
 fn definitions_and_world_free_runtime_handles_remain_transportable() {
     fn assert_send_sync<Value: Send + Sync>() {}
-    fn assert_send<Value: Send>() {}
 
     assert_send_sync::<PluginDeclaration>();
     assert_send_sync::<PluginDefinition>();
@@ -51,7 +50,6 @@ fn definitions_and_world_free_runtime_handles_remain_transportable() {
     assert_send_sync::<RuntimeControl>();
     assert_send_sync::<RuntimeFaultReporter>();
     assert_send_sync::<RuntimeGeneration>();
-    assert_send::<RuntimeObligationLedger>();
 }
 
 struct NonSendDropProbe {

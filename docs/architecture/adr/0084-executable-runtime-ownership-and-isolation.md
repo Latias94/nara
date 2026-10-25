@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-10-24 (physical custody and source-local Editor document Close)
+**Last Revised**: 2026-10-25 (owner-local dependent close custody)
 **Owner**: `nara_app` and concrete executable hosts
 **Refined By**: [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): 2D Foundation Ownership and Authoring Contracts
 **Admission Trigger**: RGD-U2 through RGD-U6 replaced the plan/World behavior split, removed
@@ -214,13 +214,39 @@ They are neither `Send` nor `Sync`; sealing, promotion and retirement never gran
 The common World owner carries this property through temporary retirement guards and quarantine.
 Plugin shutdown, pollable close, and eventual World destruction execute on that owner thread.
 
-World-free immutable definitions, plugin plans, control values, fault reporters, admission route
-reservations, and transferable obligation descriptions retain their existing transportability.
-A host can send such a definition to another thread and construct, drive, and close a fresh App
-there. It cannot transfer an already configured World by sending its runtime wrapper. This does
-not change Bevy's World type, add a cross-thread executor, or make `RuntimeCloseParticipant`
-accept arbitrary `NonSend` SDK controllers; a concrete controller needing pollable close requires
-its own narrowly scoped owner-thread integration.
+World-free immutable definitions, plugin plans, control values, fault reporters, and admission
+route reservations retain their existing transportability. A host can send such a definition
+to another thread and construct, drive, and close a fresh App there. A populated obligation ledger
+contains concrete protocol owners, not transferable descriptions. The ledger and its registered
+participants are owner-local; `RuntimeCloseParticipant` does not require `Send`. This does not
+change Bevy's World type, add a cross-thread executor, or authorize arbitrary SDK operations.
+
+### Owner-Local Dependent Close
+
+A fixed consumer/provider aggregate uses one domain-owned typed composite close participant.
+The composite owns its unfinished consumers, providers and per-child completion/error state.
+It separates quiescence from destructive release: stop admitting new work, retain the execution
+and parent authority needed for existing work to drain, then release a provider only after its
+dependent consumers physically complete. Pending, retryable errors and terminal incomplete
+errors block that release. `CompleteWithError` permits release while preserving the error facts.
+The composite retains child error detail; the runtime ledger observes its aggregate result.
+
+This owner is constructed, driven, retried and destroyed on the runtime App's owner thread.
+Registration rejection preserves the existing custody rules. Startup failures and incomplete
+retirement retain the same local owner, and abnormal Drop/unwind uses the existing thread-local
+quarantine without moving or destroying the unfinished aggregate. The constructing thread must
+drain that quarantine before exit. The quarantine does not run an external event pump or retain
+an authority that the composite never owned; the concrete Host must keep those dependencies alive.
+
+Independent ledger entries still declare no completion dependencies. Reverse callback order
+alone grants no provider release guarantee. Do not add a universal close graph or infer one from
+plugin prerequisites. Revisit a minimal sealed completion plan when actual independently supplied
+lease owners cannot be composed without central contributor-specific knowledge. Such a plan must
+bind real custody and handle rejected/partial registration, not merely validate a graph.
+
+This contract admits local Rust close owners. Concrete SDK shutdown, event-loop affinity, graphics
+recovery and Host placement each require their own native evidence. An Editor graphics aggregate
+owned by the Editor Host is not moved into a Play runtime merely to reuse its close ledger.
 
 ### Construction And Publication Sequence
 
@@ -262,8 +288,9 @@ Failure before publication returns a typed startup and shutdown report and publi
 session. Before step 4 completes, the start attempt retires its partial App, prepared owners,
 inactive reservations, and other obligations directly through the ledger; no
 `RuntimeCandidate` exists. After step 4, the start attempt retains the candidate and retires its
-App, activated sessions, and remaining resources through the same ledger in reverse admitted
-dependency order. The final boundary is one ownership and visibility cut: it consumes the
+App, activated sessions, and remaining resources through the same ledger. Independent entries use
+reverse registration order; a dependent aggregate's typed owner gates physical release as defined
+above. The final boundary is one ownership and visibility cut: it consumes the
 candidate directly into the Host's visible `RuntimeInstance` slot, keeps the complete ledger and
 `App` under that owner, and leaves the attempt with access to neither. There is no separately
 fallible promotion or final-publication phase. Publication atomicity does not claim that arbitrary

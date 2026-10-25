@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-07-15
+**Last Revised**: 2026-10-25
 **Refines**: ADR 0008, ADR 0016, ADR 0019, ADR 0021, ADR 0028, ADR 0030, ADR 0031
 **Refined By**: ADR 0048: Runtime Diagnostics and Observability Bus; ADR 0052: Task
 Backpressure, Cancellation, and Long-Running Diagnostics; ADR 0056: Headless Runtime and Dedicated
@@ -53,6 +53,12 @@ Rules:
 - A plugin or service that actually has native handles, worker threads, external runtime state, or
   queues owns them and proves their finite truthful terminal state. A synchronous ECS plugin does
   not manufacture a service session or close participant.
+- A fixed dependent native aggregate uses a domain-owned typed close composite. Quiescence stops
+  new admission while preserving execution needed to drain existing work. Destructive provider
+  release requires dependent physical completion; Pending and incomplete errors retain the owner,
+  while completed errors remain observable without retaining an already retired resource. ADR 0084
+  owns runtime-local owner-thread custody. The concrete Host retains any outer authority and event
+  pumping required for progress; registration cannot transfer an unowned external event loop.
 - When ownership crosses adapters, the stable boundary is a narrow lifecycle authority rather than
   an untyped service locator. The window adapter owns providers/native targets, the render backend
   owns surfaces, and one unique typed lease orders their teardown. First-party surface owners retain

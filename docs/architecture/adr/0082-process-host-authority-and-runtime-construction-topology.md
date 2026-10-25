@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-29
+**Last Revised**: 2026-10-25
 **Owner**: Product composition and executable hosts
 **Admission Trigger**: RGD-U7 accepted ADR 0084 and independently confirmed this Host topology and
 the compatible pair at `5ebc45e`, preserving the already-compiled, Host-trusted scope without
@@ -256,9 +256,12 @@ stop runtime admission
 
 - ADR 0084 owns the order and terminal semantics inside the executable runtime, including `App`,
   runtime work, and runtime-scoped service sessions. This ADR owns only the outer parent-scope rule.
-- A host must keep the runtime owner and its parent authorities alive while runtime close is pending
-  or failed. It cannot release a parent authority or publish a conflicting replacement around live
-  child leases.
+- A host must keep the runtime owner and required parent authorities alive while child leases or
+  physical close responsibilities remain unfinished, including after incomplete errors. Completed
+  teardown errors remain evidence but do not by themselves keep a retired lease alive. Moving a
+  runtime owner to its owner-thread quarantine does not transfer external Host authorities or pump
+  their event loops: the Host must keep those dependencies available until physical completion.
+  It cannot release a parent authority or publish a conflicting replacement around live child leases.
 - Product code does not use destructor completion as evidence that either runtime or outer-scope
   shutdown succeeded.
 - Surface, acquired frame, and render-target state retire before the provider/window lease they

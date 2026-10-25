@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-20
+**Last Revised**: 2026-10-25
 **Refines**: ADR 0003
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0046:
 Plugin Metadata and Default Plugin Groups
@@ -151,6 +151,11 @@ error and never stop later shutdown hooks.
   not inferred as runtime-owned obligations from their Rust type.
 - Shutdown is reverse-order, best-effort, panic-isolated, and once-only. A hook is marked attempted
   before invocation, so a shutdown panic cannot cause a second call during `Drop`.
+- Reverse hook or participant invocation order does not prove a dependent consumer has physically
+  completed. A hook must not destroy a provider still needed by a registered pollable close owner.
+  Fixed dependent aggregates transfer their related owners together to one typed composite under
+  ADR 0084; that composite gates destructive release on physical completion and retains errors.
+  Plugin prerequisites are construction constraints, not inferred close dependencies.
 - A managed runtime treats a completed shutdown pass with hook failures as terminal plugin evidence,
   not as unfinished waitable ownership. It records the failure, never invokes the hook again, and
   may reach the `Stopped` ownership state only after every separately registered close obligation
@@ -160,8 +165,11 @@ error and never stop later shutdown hooks.
   rejected. No intentional committed-hook nesting remains.
 - `App::set_runner` is likewise rejected as a sticky violation from plugin hooks. Top-level
   code-first callers or concrete Host/driver Adapters own runner selection; product plugins do not.
-- `Drop` performs best-effort shutdown without unwinding, including when another panic is already
-  unwinding. Callers that need shutdown evidence use `App::shutdown_plugins` or `App::run`.
+- Ordinary `Drop` attempts finite close and retains an unfinished owner in its owner-thread
+  quarantine. During an existing unwind it transfers custody there without invoking shutdown or
+  close callbacks. Neither path proves clean shutdown. Callers needing evidence use managed
+  `RuntimeInstance::finish` or explicit retirement, and explicitly drive retained quarantine before
+  the owner thread exits.
 - `App::seal` consumes the configurable App and returns a `SealedApp` after finish hooks and
   obligation validation succeed. The former public `finish_plugins` and `cleanup_plugins` aliases
   are removed rather than retained as competing lifecycle entry points.

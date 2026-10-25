@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "7ab482cbb5c40035bb6cb6900ba7e520f290a7c582bf40e4277c23625887cb93"
+source_fingerprint: "46267aa2cab43d1a8b3cf70bba01d68a0460dbdfd1f1476b17fd428991690053"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "7ab482cbb5c40035bb6cb6900ba7e520f290a7c582bf40e4277c2362588
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `7ab482cbb5c40035bb6cb6900ba7e520f290a7c582bf40e4277c23625887cb93`
-- Immutable records: 918
+- Source fingerprint: `46267aa2cab43d1a8b3cf70bba01d68a0460dbdfd1f1476b17fd428991690053`
+- Immutable records: 919
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Owner-local close custody and bounded completion dependency comparison](verification/2026-10/2026-10-25T135422Z-owner-local-close-custody-and-bounded-completion-dependency-comparison-3a6ad83ba4f649ec973982d9de3a0ec9.md) - Qualifies local Rust close owners, exact registration custody and typed dependent release through public Runtime consumers; actual native graphics integration remains open.
 - **Session Handoff**: [Finite child Snap committed and native close dependency proof prepared](sessions/2026-10/2026-10-25T123619Z-finite-child-snap-committed-and-native-close-dependency-proof-prepared-620c8f2fd359440abdf7733d70a33816.md) - Commits the qualified real child proposal unit; records R4a source pressure and an uncompiled public probe as the next lower-level comparison, with full foundation scope active.
 - **Verification Evidence**: [Finite child Snap proposal and physical custody qualification](verification/2026-10/2026-10-25T122634Z-finite-child-snap-proposal-and-physical-custody-qualification-ce23b00e49cc4a758017b5a2eba63913.md) - Qualifies the opt-in real child proposal through the existing source owner after error-fact regressions, complete review and controlled Reopen proof correction; broader R1 and R1b remain open.
 - **Verification Evidence**: [Source local Snap public consumer and installer qualification](verification/2026-10/2026-10-25T112059Z-source-local-snap-public-consumer-and-installer-qualification-f89f21479f7d4c06a81ab5bc63b5ff87.md) - Qualifies the source-built R1 Snap planner, exact panel candidate and independent inactive Session workflow after complete review and direct installer proof correction; child tools and full R1 remain open.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Source owned first property writes and bounded selector error qualification](verification/2026-10/2026-10-25T060130Z-source-owned-first-property-writes-and-bounded-selector-error-qualification-0dfaa18252de473b90ff57ef150e64b0.md) - Qualifies selected default-root initialization, exact authored absence Undo, bounded rejected IDs and real non-active panel persistence while retaining complete template and storage contracts.
 - **Verification Evidence**: [Selector directed property reads and indexed root retirement qualification](verification/2026-10/2026-10-25T051125Z-selector-directed-property-reads-and-indexed-root-retirement-qualification-bd267ec01e4d44d3ad5f2a2d4543514d.md) - Qualifies borrowed nested source observations, independent scan and copy budgets, real computed panel editing and the reviewed root-tombstone correction; full R2 remains open.
 - **Verification Evidence**: [Finite reference shape certificate and clean-source public native qualification](verification/2026-10/2026-10-25T041346Z-finite-reference-shape-certificate-and-clean-source-public-native-qualification-d2673296c2bb413c9fd2b05bdf78a0c4.md) - Qualifies finite typed-reference certification, direct zero-preflight observations, restored-source comparisons and affected serial coverage; full R2 remains open.
-- **Verification Evidence**: [Reference-bearing preparation phase attribution and clean-source controls](verification/2026-10/2026-10-25T031736Z-reference-bearing-preparation-phase-attribution-and-clean-source-controls-aec33a24b30247b786582270db721766.md) - Five executions locate populated instrumented preparation wall time in format admission; explicit disturbance limits, corrected analyzer and exact source cleanup retain full R2 as open.
 
 # Integration Notes
 

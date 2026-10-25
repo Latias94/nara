@@ -81,11 +81,14 @@ Dependency names alone do not establish duplicate execution, and this observatio
 CPU, memory, build size or frame P99.
 
 The [native-close dependency study](../research/2026-10-25-native-close-dependency-ordering.md)
-grounds R4a in the current close ledger and concrete native graphics teardown. It separates the
-already implemented error/physical-completion distinction from missing dependency release gating,
-quiesce/release phases and owner-local controller admission. Typed composite versus sealed-plan
-selection awaits the same public failure consumer; no new close contract or runtime qualification
-follows from this source research.
+grounds R4a in the incumbent close ledger and concrete native graphics teardown. It separates the
+implemented error/physical-completion distinction from the source-time gaps in dependency release
+gating, quiesce/release phases and local controller admission. The
+[owner-local close design](native-close-ownership-design.md) selects a typed composite for fixed
+dependent aggregates and admits local Rust participants through the existing managed owner.
+The source study itself remains historical research. The local Rust custody boundary and bounded
+candidate comparison have separate evidence; actual Editor graphics migration and full R4a remain
+open.
 
 ## Background Designs
 

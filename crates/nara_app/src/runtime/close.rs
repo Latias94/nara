@@ -69,6 +69,16 @@ impl RuntimeClosePendingParticipant {
     }
 }
 
+/// Owns concrete close participants on the thread where the runtime App is constructed.
+///
+/// Construct transportable definitions on another thread, then bind their concrete participants
+/// here. The ledger itself cannot be sent to a different thread, even when its entries own only
+/// Send worker handles.
+///
+/// ```compile_fail
+/// fn require_send<T: Send>() {}
+/// require_send::<nara_app::RuntimeObligationLedger>();
+/// ```
 pub struct RuntimeObligationLedger {
     ids: BTreeSet<RuntimeCloseParticipantId>,
     entries: Vec<RuntimeCloseEntry>,
@@ -99,6 +109,10 @@ impl RuntimeObligationLedger {
         }
     }
 
+    /// Transfers a participant into this local ledger, or returns it unchanged on duplicate ID.
+    ///
+    /// Registration invokes no callbacks. Entries are driven in reverse registration order;
+    /// dependency completion must be enforced by a typed owner holding the dependent aggregate.
     pub fn register<P>(
         &mut self,
         id: RuntimeCloseParticipantId,

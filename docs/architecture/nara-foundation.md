@@ -366,8 +366,8 @@ second real adapter or stronger isolation pressure.
   successful startup consumes it infallibly into `RuntimeInstance`. The instance delegates all
   schedule/time/tracker work to the App, exposes only short-lived driver mutation, scopes control
   tickets and fault reporters to a non-reused generation, and never imports project/content,
-  tooling, or backend policy. Raw App Drop performs one best-effort participant pass; retryable
-  close requires the retained managed owner.
+  tooling, or backend policy. Ordinary Drop attempts finite close and retains an unfinished owner;
+  retryable close requires explicitly driving that retained custody.
   Candidate and driver mutation scopes bind the canonical fallback reporter and verify both its
   reporter and handler authority around healthy operations. An unhandled fallible system or
   observer that reaches that fallback records the first sticky fault and makes the scope return
@@ -377,9 +377,14 @@ second real adapter or stronger isolation pressure.
   fault identity without arbitrary error or scheduler-context text. Candidate mutation rejects an
   existing fault, while a published faulted runtime keeps its driver scope available for retirement
   work until it reaches `Stopped`.
-  Abnormal Drop of an admission failure, startup failure, or published runtime begins one bounded
-  close pass and retains an unfinished `App`, `World`, and obligation ledger in an observable,
-  owner-thread-affine quarantine. The quarantine has per-thread and process ceilings, exposes
+  Drop of an admission failure, startup failure, or published runtime retains an unfinished `App`,
+  `World`, and obligation ledger in an observable owner-thread-affine quarantine. During an
+  existing unwind it transfers custody without invoking close callbacks. Concrete close
+  participants may contain local `!Send` controllers; bound ledgers remain on their construction
+  thread. Fixed dependent aggregates use one typed owner to quiesce admission and gate provider
+  release on dependent physical completion; independent reverse callbacks alone are no barrier.
+  The [local-close design](native-close-ownership-design.md) keeps actual Editor graphics/SDK
+  migration separate from that public Rust contract. The quarantine has per-thread and process ceilings, exposes
   aggregate retained/reaped counts, and is explicitly driven from an owner-thread safe point; it is
   never `Stopped` evidence.
   This is module-specific advanced U5 trial evidence, not the ordinary project or Editor entry.

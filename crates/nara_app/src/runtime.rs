@@ -948,8 +948,15 @@ impl RuntimeCloseContext<'_> {
 
 /// Owns waitable cleanup driven on the thread that constructs the runtime's App.
 ///
-/// The participant may own Send worker state; its callbacks remain on the runtime owner thread.
-pub trait RuntimeCloseParticipant: Send + 'static {
+/// Participants may own local controllers as well as Send worker state. Registration, retirement,
+/// quarantine and destruction retain the owner thread; callbacks do not gain an executor or an
+/// external event pump. The Host must keep any required parent authority available until close ends.
+///
+/// Register a fixed dependent aggregate as one typed owner. Its `begin_close` quiesces admission
+/// while retaining the means to drain existing work; its `poll_close` gates destructive provider
+/// release on dependent physical completion. Independent ledger entries declare no dependencies:
+/// reverse invocation order alone is not a completion barrier.
+pub trait RuntimeCloseParticipant: 'static {
     fn begin_close(
         &mut self,
         context: &mut RuntimeCloseContext<'_>,

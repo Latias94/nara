@@ -13,6 +13,15 @@ The [documentation verification](../../knowledge/engineering/verification/2026-1
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.
 
+The [R4a local-close qualification](../../knowledge/engineering/verification/2026-10/2026-10-25T135422Z-owner-local-close-custody-and-bounded-completion-dependency-comparison-3a6ad83ba4f649ec973982d9de3a0ec9.md)
+removes the concrete obligation ledger's former `Send` promise and admits local Rust controllers
+through the existing owner-thread retirement/quarantine path. Exact rejected registration,
+startup failure, finite retry, normal Drop and unwind have public evidence. The same safe
+two-node consumer compares typed composite and sealed completion dependencies; fixed aggregates
+select the composite, with a separate renamed-root consumer. ADRs 0003/0010/0042/0082/0084 adopt
+the scoped ownership contract. Actual Editor graphics/SDK migration, arbitrary dependency graphs,
+R4b/R4c and full R4a remain open; this is not native cleanup qualification.
+
 The [R5c disposable projection qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T225800Z-disposable-scene-projection-epochs-and-stable-native-preview-qualification-2478d897135549daacbc8d1fbc90b9d9.md) binds `207bbcc` to complete-domain Scene epoch ownership, unchanged shared authoring facilities, a stable preview renderer producer and fresh presentation authority after identical-content recovery. Held Image/Save work, the joined public edit/history/Save/Reopen/picking/Close consumer, independent Prefab consumers and six actual Windows/DX12 trajectories pass. This closes the selected preview lifetime mismatch, not incremental projection, durable property addressing or the full foundation rebaseline.
 
 The [canonical native-source admission checkpoint](../../knowledge/engineering/verification/2026-10/2026-10-24T-project-content-source-admission-and-prefab-binding-qualification.md)

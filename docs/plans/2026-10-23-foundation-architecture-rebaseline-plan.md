@@ -248,7 +248,9 @@ Delete false universal TypeId/binding assumptions; preserve exact native candida
 
 ## R4: Domain Execution Rights, Activity Scopes And Native Close
 
-**Design:** D07, D08. **State:** not started. **Owners:** App/Tasks, executable Host and domains.
+**Design:** D07, D08. **State:** R4a local custody and candidate comparison in progress under the
+[owner-local close design](../architecture/native-close-ownership-design.md); native integration,
+R4b and R4c remain open. **Owners:** App/Tasks, executable Host and domains.
 
 Three independently verifiable sub-units:
 
