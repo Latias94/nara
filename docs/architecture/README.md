@@ -80,6 +80,13 @@ Editor owner multiplicity and real work before selecting worker-policy or featur
 Dependency names alone do not establish duplicate execution, and this observation does not measure
 CPU, memory, build size or frame P99.
 
+The [native-close dependency study](../research/2026-10-25-native-close-dependency-ordering.md)
+grounds R4a in the current close ledger and concrete native graphics teardown. It separates the
+already implemented error/physical-completion distinction from missing dependency release gating,
+quiesce/release phases and owner-local controller admission. Typed composite versus sealed-plan
+selection awaits the same public failure consumer; no new close contract or runtime qualification
+follows from this source research.
+
 ## Background Designs
 
 The [complete conversation reassessment](foundation-architecture-reassessment.md) revisits 36
