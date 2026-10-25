@@ -127,8 +127,14 @@ two instrumented and three control runs with all temporary source changes remove
 instrumented format boundary occupies about 97% of public preparation wall time; every observed
 call uses local classification and declines reference-shape certification. Absolute disturbance
 remains unisolated; no latency improvement, permanent profiling API or new admission proof is
-qualified. The finite format-owner comparison remains open. The earlier read-query
-receipt remains separate; this qualification does not complete R2 or the foundation rebaseline.
+qualified by that diagnosis. The subsequent
+[finite reference certificate](../../benchmarks/2026-10-25-reference-shape-certificate.md) extends
+the private shape proof to both typed reference forms while retaining full fallback and exact
+encoder byte checks. Direct counters observe zero parser-preflight calls in 576 owner calls;
+two clean-source candidate runs meet the selected populated-case comparison target, with control
+drift and no fixed causal speedup claim. Complete document traversal and both encodings remain.
+The earlier read-query receipt remains separate; these bounded units do not complete R2 or the
+foundation rebaseline.
 
 The [R5c custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md)
 implements typed per-document Scene/Prefab file custody under ADRs 0047/0118. Save retains its

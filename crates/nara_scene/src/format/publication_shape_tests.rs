@@ -2,7 +2,9 @@ use super::*;
 use crate::{ScenePlacement, ScenePlacementOwner};
 use nara_asset::AssetRef;
 use nara_core::SerdeShapeError;
-use nara_identity::EntityReference;
+use nara_identity::{
+    EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
+};
 use nara_reflect::{
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, PersistentComponentSchemaOwnerId,
 };
@@ -124,6 +126,50 @@ fn publication_shape_certificate_preserves_each_shape_and_exact_encoding_boundar
         true,
     );
     let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
+    shape_boundaries(&scene);
+    shape_boundaries(&prefab);
+}
+
+#[test]
+fn publication_shape_certificate_proves_reference_forms_against_the_complete_oracle() {
+    let local = ComponentValue::EntityReference(EntityReference::SceneLocal {
+        entity: id("child"),
+    });
+    let persistent = |namespace: &str| {
+        ComponentValue::EntityReference(EntityReference::Persistent {
+            entity: PersistentRuntimeReference::new(
+                PersistentRuntimeNamespaceId::new(namespace).unwrap(),
+                PersistentRuntimeId::parse_str("0123456789ABCDEF0123456789ABCDEF").unwrap(),
+            ),
+        })
+    };
+    for value in [
+        local.clone(),
+        persistent("game.rooms"),
+        persistent(&"n".repeat(256)),
+        ComponentValue::map([
+            (
+                "nested",
+                ComponentValue::List(vec![
+                    local,
+                    ComponentValue::map([("reference", persistent("game.other"))]),
+                ]),
+            ),
+            ("preserved", ComponentValue::String("quoted\"\\ 雪".into())),
+        ]),
+    ] {
+        for declared_owner in [false, true] {
+            let scene = document(value.clone(), declared_owner);
+            let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
+            assert!(certified(&scene, SceneFileLimits::default()), "{value:?}");
+            assert!(certified(&prefab, SceneFileLimits::default()), "{value:?}");
+            shape_boundaries(&scene);
+            shape_boundaries(&prefab);
+        }
+    }
+}
+
+fn shape_boundaries<T: SceneFilePayload>(payload: &T) {
     let base = SceneFileLimits::default();
     let shape = base.shape();
     for maximum in 1..=80 {
@@ -134,10 +180,9 @@ fn publication_shape_certificate_preserves_each_shape_and_exact_encoding_boundar
             shape.string_bytes(),
             shape.total_string_bytes(),
         ));
-        equivalent(&scene, limits);
-        equivalent(&prefab, limits);
+        equivalent(payload, limits);
     }
-    for maximum in 1..=192 {
+    for maximum in 1..=256 {
         let limits = base.with_shape(SerdeShapeLimits::new(
             shape.depth(),
             ItemLimit::new(maximum).unwrap(),
@@ -145,8 +190,7 @@ fn publication_shape_certificate_preserves_each_shape_and_exact_encoding_boundar
             shape.string_bytes(),
             shape.total_string_bytes(),
         ));
-        equivalent(&scene, limits);
-        equivalent(&prefab, limits);
+        equivalent(payload, limits);
     }
     for maximum in 1..=8 {
         let limits = base.with_shape(SerdeShapeLimits::new(
@@ -156,10 +200,9 @@ fn publication_shape_certificate_preserves_each_shape_and_exact_encoding_boundar
             shape.string_bytes(),
             shape.total_string_bytes(),
         ));
-        equivalent(&scene, limits);
-        equivalent(&prefab, limits);
+        equivalent(payload, limits);
     }
-    for maximum in 1..=32 {
+    for maximum in (1..=40).chain([255, 256, 257]) {
         let limits = base.with_shape(SerdeShapeLimits::new(
             shape.depth(),
             shape.nodes(),
@@ -167,10 +210,9 @@ fn publication_shape_certificate_preserves_each_shape_and_exact_encoding_boundar
             ByteLimit::new(maximum).unwrap(),
             shape.total_string_bytes(),
         ));
-        equivalent(&scene, limits);
-        equivalent(&prefab, limits);
+        equivalent(payload, limits);
     }
-    for maximum in 1..=384 {
+    for maximum in 1..=768 {
         let limits = base.with_shape(SerdeShapeLimits::new(
             shape.depth(),
             shape.nodes(),
@@ -178,21 +220,13 @@ fn publication_shape_certificate_preserves_each_shape_and_exact_encoding_boundar
             shape.string_bytes(),
             ByteLimit::new(maximum).unwrap(),
         ));
-        equivalent(&scene, limits);
-        equivalent(&prefab, limits);
+        equivalent(payload, limits);
     }
-    encoded_boundaries(&scene);
-    encoded_boundaries(&prefab);
+    encoded_boundaries(payload);
 }
 
 #[test]
 fn publication_shape_certificate_falls_back_without_rejecting_valid_unsupported_values() {
-    let referenced = document(
-        ComponentValue::EntityReference(EntityReference::SceneLocal {
-            entity: id("child"),
-        }),
-        true,
-    );
     let mut embedded = document(ComponentValue::Null, false);
     embedded.entities[0].prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
@@ -204,17 +238,15 @@ fn publication_shape_certificate_falls_back_without_rejecting_valid_unsupported_
             value: ComponentValue::String("override".into()),
         }]),
     });
-    for scene in [referenced, embedded] {
-        let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
-        assert!(!certified(&scene, SceneFileLimits::default()));
-        assert!(!certified(&prefab, SceneFileLimits::default()));
-        assert!(reference(&scene, SceneFileLimits::default()).is_ok());
-        assert!(reference(&prefab, SceneFileLimits::default()).is_ok());
-        equivalent(&scene, SceneFileLimits::default());
-        equivalent(&prefab, SceneFileLimits::default());
-        encoded_boundaries(&scene);
-        encoded_boundaries(&prefab);
-    }
+    let prefab = PrefabDocument::new(embedded.roots.clone(), embedded.entities.clone());
+    assert!(!certified(&embedded, SceneFileLimits::default()));
+    assert!(!certified(&prefab, SceneFileLimits::default()));
+    assert!(reference(&embedded, SceneFileLimits::default()).is_ok());
+    assert!(reference(&prefab, SceneFileLimits::default()).is_ok());
+    equivalent(&embedded, SceneFileLimits::default());
+    equivalent(&prefab, SceneFileLimits::default());
+    encoded_boundaries(&embedded);
+    encoded_boundaries(&prefab);
     let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
         entity: SceneEntityRecord::new(id("new")),
         placement: ScenePlacement::last(ScenePlacementOwner::Root),
@@ -226,35 +258,53 @@ fn publication_shape_certificate_falls_back_without_rejecting_valid_unsupported_
 
 #[test]
 fn publication_shape_certificate_depth_cutoff_is_fallback_not_a_new_limit() {
-    let mut value = ComponentValue::Null;
-    for _ in 0..13 {
-        value = ComponentValue::List(vec![value]);
+    let persistent = ComponentValue::EntityReference(EntityReference::Persistent {
+        entity: PersistentRuntimeReference::new(
+            PersistentRuntimeNamespaceId::new("game.rooms").unwrap(),
+            PersistentRuntimeId::parse_str("01234567-89ab-cdef-0123-456789abcdef").unwrap(),
+        ),
+    });
+    for (mut value, layers, expected_certificate) in [
+        (ComponentValue::Null, 13, false),
+        (
+            ComponentValue::EntityReference(EntityReference::SceneLocal {
+                entity: id("child"),
+            }),
+            12,
+            false,
+        ),
+        (persistent.clone(), 11, true),
+        (persistent, 12, false),
+    ] {
+        for _ in 0..layers {
+            value = ComponentValue::List(vec![value]);
+        }
+        let scene = document(value, false);
+        let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
+        let base = SceneFileLimits::default();
+        let shape = base.shape();
+        let limits = base.with_shape(SerdeShapeLimits::new(
+            DepthLimit::new(100).unwrap(),
+            shape.nodes(),
+            shape.container_items(),
+            shape.string_bytes(),
+            shape.total_string_bytes(),
+        ));
+        assert_eq!(certified(&scene, limits), expected_certificate);
+        assert_eq!(certified(&prefab, limits), expected_certificate);
+        assert!(
+            reference(&scene, limits).is_ok(),
+            "{:?}",
+            reference(&scene, limits)
+        );
+        assert!(
+            reference(&prefab, limits).is_ok(),
+            "{:?}",
+            reference(&prefab, limits)
+        );
+        equivalent(&scene, limits);
+        equivalent(&prefab, limits);
     }
-    let scene = document(value, false);
-    let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
-    let base = SceneFileLimits::default();
-    let shape = base.shape();
-    let limits = base.with_shape(SerdeShapeLimits::new(
-        DepthLimit::new(100).unwrap(),
-        shape.nodes(),
-        shape.container_items(),
-        shape.string_bytes(),
-        shape.total_string_bytes(),
-    ));
-    assert!(!certified(&scene, limits));
-    assert!(!certified(&prefab, limits));
-    assert!(
-        reference(&scene, limits).is_ok(),
-        "{:?}",
-        reference(&scene, limits)
-    );
-    assert!(
-        reference(&prefab, limits).is_ok(),
-        "{:?}",
-        reference(&prefab, limits)
-    );
-    equivalent(&scene, limits);
-    equivalent(&prefab, limits);
 }
 
 fn encoded_boundaries<T: SceneFilePayload>(payload: &T) {

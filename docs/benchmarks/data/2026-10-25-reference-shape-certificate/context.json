@@ -1,0 +1,288 @@
+{
+  "base": "0a05c6c97b301c7b71e6e555333ac99f65a09d3b",
+  "scope": "Finite private reference-shape certificate; not full R2 or Goal completion",
+  "toolchain": "Rust 1.95.0 Windows x86_64-pc-windows-msvc, debug/test, locked, jobs1",
+  "benchmark_consumer": "tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prepared_panel_cost.rs",
+  "command": "cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/module-consumer/Cargo.toml --target-dir target -p nara-editor-panel-module-consumer --test prepared_authoring --test-threads=1 --run-ignored all --success-output final",
+  "final_source": [
+    {
+      "path": "crates/nara_scene/src/format/publication_shape.rs",
+      "sha256": "a1ab0272619903504bc88e02e0259ab9c59bf8422047fe0b26cb11dc45f1f725"
+    },
+    {
+      "path": "crates/nara_scene/src/format/publication_shape_tests.rs",
+      "sha256": "a88f55ee83a9dab7f455a23fbcf15f1978b329f09e5ccf605cd21c3fcaa64abc"
+    }
+  ],
+  "candidate_source_unchanged_after_instrumentation": true,
+  "restored_originals": [
+    {
+      "path": "crates/nara_scene/src/lib.rs",
+      "sha256": "3291777991f332cbdc0ad235c704f451aff1f89df148df783308a0bc8ba872d9"
+    },
+    {
+      "path": "crates/nara_scene/src/authoring/property.rs",
+      "sha256": "8e41e24d0cdb2b449ada3e39f58ef85fd68a8c0b2e953f33be3b668fd1176dd9"
+    },
+    {
+      "path": "crates/nara_scene/src/authoring/prepared.rs",
+      "sha256": "5013ab3e0c1f9ca9f9201f34f7f2edf9b4c63db9b36979378a524c4df6a666e5"
+    },
+    {
+      "path": "crates/nara_scene/src/authoring_decode.rs",
+      "sha256": "9b84fb3ce1f3907a0801ea7a84e9fc87a0207f358b4569cda487665f264d5957"
+    },
+    {
+      "path": "crates/nara_scene/src/authoring_decode/field_candidate.rs",
+      "sha256": "20d377e6b50bc969e4ad5d4dcacb2cd36f1a86714d178e7fdd883fd6cfaea42a"
+    },
+    {
+      "path": "crates/nara_scene/src/format.rs",
+      "sha256": "eb8263c5d806c69167235380bbc9d6da43737964c536b9da440753193ba429b2"
+    },
+    {
+      "path": "tests/fixtures/module-consumer/editor-panel-consumer/tests/support/prepared_panel_cost.rs",
+      "sha256": "3a5399090618dc7835429f93fb0ee26b2ff7a35ad7e6d4ccb23fb204aadb4619"
+    }
+  ],
+  "temporary_module_removed": true,
+  "measurements": [
+    {
+      "name": "control",
+      "run_id": "6b94b95e-fa2a-4e25-960e-737f66ae5890",
+      "cases": [
+        {
+          "kind": "Scene",
+          "entities": 1,
+          "mode": "Direct",
+          "p50_ns": 258200,
+          "p95_ns": 348500
+        },
+        {
+          "kind": "Scene",
+          "entities": 1,
+          "mode": "Panel",
+          "p50_ns": 282600,
+          "p95_ns": 336700
+        },
+        {
+          "kind": "Scene",
+          "entities": 257,
+          "mode": "Direct",
+          "p50_ns": 30207600,
+          "p95_ns": 30969400
+        },
+        {
+          "kind": "Scene",
+          "entities": 257,
+          "mode": "Panel",
+          "p50_ns": 72062400,
+          "p95_ns": 78151000
+        },
+        {
+          "kind": "Prefab",
+          "entities": 1,
+          "mode": "Direct",
+          "p50_ns": 485700,
+          "p95_ns": 863600
+        },
+        {
+          "kind": "Prefab",
+          "entities": 1,
+          "mode": "Panel",
+          "p50_ns": 553200,
+          "p95_ns": 817300
+        },
+        {
+          "kind": "Prefab",
+          "entities": 257,
+          "mode": "Direct",
+          "p50_ns": 72943800,
+          "p95_ns": 79599100
+        },
+        {
+          "kind": "Prefab",
+          "entities": 257,
+          "mode": "Panel",
+          "p50_ns": 72455400,
+          "p95_ns": 79304400
+        }
+      ]
+    },
+    {
+      "name": "candidate-1",
+      "run_id": "00f956cc-2996-4613-add5-d62fcd62c321",
+      "cases": [
+        {
+          "kind": "Scene",
+          "entities": 1,
+          "mode": "Direct",
+          "p50_ns": 117800,
+          "p95_ns": 151800
+        },
+        {
+          "kind": "Scene",
+          "entities": 1,
+          "mode": "Panel",
+          "p50_ns": 151500,
+          "p95_ns": 174600
+        },
+        {
+          "kind": "Scene",
+          "entities": 257,
+          "mode": "Direct",
+          "p50_ns": 7445100,
+          "p95_ns": 7913200
+        },
+        {
+          "kind": "Scene",
+          "entities": 257,
+          "mode": "Panel",
+          "p50_ns": 7586700,
+          "p95_ns": 8096100
+        },
+        {
+          "kind": "Prefab",
+          "entities": 1,
+          "mode": "Direct",
+          "p50_ns": 114600,
+          "p95_ns": 124300
+        },
+        {
+          "kind": "Prefab",
+          "entities": 1,
+          "mode": "Panel",
+          "p50_ns": 151000,
+          "p95_ns": 167900
+        },
+        {
+          "kind": "Prefab",
+          "entities": 257,
+          "mode": "Direct",
+          "p50_ns": 7500900,
+          "p95_ns": 8345000
+        },
+        {
+          "kind": "Prefab",
+          "entities": 257,
+          "mode": "Panel",
+          "p50_ns": 7440900,
+          "p95_ns": 8118100
+        }
+      ]
+    },
+    {
+      "name": "candidate-2-restored",
+      "run_id": "33ed1ffd-861b-4343-82ca-8a76e6d8a30a",
+      "cases": [
+        {
+          "kind": "Scene",
+          "entities": 1,
+          "mode": "Direct",
+          "p50_ns": 127300,
+          "p95_ns": 176400
+        },
+        {
+          "kind": "Scene",
+          "entities": 1,
+          "mode": "Panel",
+          "p50_ns": 150500,
+          "p95_ns": 172100
+        },
+        {
+          "kind": "Scene",
+          "entities": 257,
+          "mode": "Direct",
+          "p50_ns": 7540300,
+          "p95_ns": 8151800
+        },
+        {
+          "kind": "Scene",
+          "entities": 257,
+          "mode": "Panel",
+          "p50_ns": 7645500,
+          "p95_ns": 8119800
+        },
+        {
+          "kind": "Prefab",
+          "entities": 1,
+          "mode": "Direct",
+          "p50_ns": 111800,
+          "p95_ns": 129600
+        },
+        {
+          "kind": "Prefab",
+          "entities": 1,
+          "mode": "Panel",
+          "p50_ns": 148300,
+          "p95_ns": 170600
+        },
+        {
+          "kind": "Prefab",
+          "entities": 257,
+          "mode": "Direct",
+          "p50_ns": 7285700,
+          "p95_ns": 7764900
+        },
+        {
+          "kind": "Prefab",
+          "entities": 257,
+          "mode": "Panel",
+          "p50_ns": 7790000,
+          "p95_ns": 12148600
+        }
+      ]
+    }
+  ],
+  "direct_count_run_id": "6337e42d-6bfa-4e3f-a9c8-16df0d1a6321",
+  "direct_count_assertion": "576 rows: all certified/local true; both encoders once; both preflights zero",
+  "artifacts": [
+    {
+      "path": "control.log.gz",
+      "uncompressed_sha256": "f9754e42cc8ba4454ecb0ad2733b080392088b7007d5facd84e518bf6e76fa5d"
+    },
+    {
+      "path": "candidate-1.log.gz",
+      "uncompressed_sha256": "ee3d03671589091f6e3fb284b2e0a360eff76d53c9e5535bf930f47a3209244a"
+    },
+    {
+      "path": "candidate-2.log.gz",
+      "uncompressed_sha256": "88b14bf9154d9c0148fd92e6bf1a01d70e7606e1bec1f5fc12a6b52f098a8ea5"
+    },
+    {
+      "path": "initial-phase.log.gz",
+      "uncompressed_sha256": "cc40dd85d31624084cfff41f4813107732bdcb031196bb6c80bdbcc03fe7ae48"
+    },
+    {
+      "path": "counts-phase.log.gz",
+      "uncompressed_sha256": "b6cb164f933c0e67d69102b268322f4f64085e84ae64fbd08c8a79775916a168"
+    },
+    {
+      "path": "initial-phase.json.gz",
+      "uncompressed_sha256": "2b16c5d0f8a4a06da7ef7c64967ccb1b0cabe43dbd5d56bf6b3910d56391edb1"
+    },
+    {
+      "path": "counts-phase.json.gz",
+      "uncompressed_sha256": "26abaa046d4884b088f533d7801353f10d1f504fa21a06cbb5b2920fe348e86e"
+    },
+    {
+      "path": "instrumentation-v2.patch.gz",
+      "uncompressed_sha256": "5bc8c75bd0eb9b95929f8df601531a8e4d92019f58ccd5357fe125158b3aab30"
+    },
+    {
+      "path": "probe-with-call-counts.rs.gz",
+      "uncompressed_sha256": "c673a19fcdae2f5e65690167115469220efc831318baa260cb64c03e9c02a203"
+    },
+    {
+      "path": "phase-analyze.py.gz",
+      "uncompressed_sha256": "ea86d99d43f8c541c560c1566ba716778814f90840984a377e345ce9f7b050ae"
+    }
+  ],
+  "limits": [
+    "Fixed case/run order, no randomized control",
+    "Background other-project builds and scheduling not isolated",
+    "No allocation/CPU profile or release/native latency qualification",
+    "Canonical byte encoders unchanged; oracle tests are not independent byte snapshots"
+  ],
+  "public_samples_location": "Corresponding archived control/candidate-1/candidate-2.log.gz; 64 sorted preparation samples per case"
+}

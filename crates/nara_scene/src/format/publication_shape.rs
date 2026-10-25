@@ -2,9 +2,10 @@
 //!
 //! This is not an input validator. Failure to prove a bound selects the original JSON/RON
 //! preflight, including its acceptance and error order. Actual encoders still enforce exact
-//! byte limits. Embedded Prefabs, patches and entity references deliberately use that fallback.
+//! byte limits. Embedded Prefabs and patches deliberately use that fallback.
 
 use nara_core::{PersistentFileEnvelope, SerdeShapeLimits};
+use nara_identity::EntityReference;
 use nara_reflect::ComponentValue;
 
 use crate::{SceneComponentRecord, SceneEntityId, SceneEntityRecord};
@@ -152,7 +153,7 @@ impl Certificate {
             ComponentValue::String(_) => "string",
             ComponentValue::List(_) => "list",
             ComponentValue::Map(_) => "map",
-            ComponentValue::EntityReference(_) => return None,
+            ComponentValue::EntityReference(_) => "entity_ref",
         };
         let fields: &[&str] = if matches!(value, ComponentValue::Null) {
             &["type"]
@@ -183,7 +184,28 @@ impl Certificate {
                 }
                 Some(())
             }
-            ComponentValue::EntityReference(_) => None,
+            ComponentValue::EntityReference(reference) => {
+                self.entity_reference(depth + 1, reference)
+            }
+        }
+    }
+
+    fn entity_reference(&mut self, depth: usize, reference: &EntityReference) -> Option<()> {
+        self.structure(depth, &["kind", "entity"])?;
+        // Unlike the outer ComponentValue tag, this internal tag is a string in both formats.
+        let kind = match reference {
+            EntityReference::SceneLocal { .. } => "scene_local",
+            EntityReference::Persistent { .. } => "persistent",
+        };
+        self.string(depth + 1, kind)?;
+        match reference {
+            EntityReference::SceneLocal { entity } => self.string(depth + 1, entity.as_str()),
+            EntityReference::Persistent { entity } => {
+                self.structure(depth + 1, &["namespace", "entity"])?;
+                self.string(depth + 2, entity.namespace.as_str())?;
+                // The ID serializer uses this same Display representation, not its UUID bytes.
+                self.string(depth + 2, &entity.entity.to_string())
+            }
         }
     }
 }

@@ -126,6 +126,11 @@ digest was not captured, so the evidence is not independent binary-identity auth
 
 ## Causal Boundary And Next Comparison
 
+Historical scope: this section records the original certificate and the next comparison selected
+at `0a05c6c`. The subsequent [finite reference certificate](2026-10-25-reference-shape-certificate.md)
+implements that bounded comparison; it does not change the original observations or disturbance
+limits below, remove full encoding or complete R2.
+
 The actual path lowers a declared property, prepares a field candidate and invokes
 `format::validate_publication_shape`. That function constructs the canonical envelope, tries the
 accept-only certificate, then performs complete JSON and RON encoding and fallback parser

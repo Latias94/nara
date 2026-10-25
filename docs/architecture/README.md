@@ -143,8 +143,11 @@ affected-existing-native/static evidence. The
 preparation/enqueue/dispatch measurements. The subsequent
 [owner phase attribution](../benchmarks/2026-10-25-reference-preparation-phases.md) records actual
 reference-certificate fallback and local classification, locating populated instrumented wall time
-in complete format admission. Disturbance and uninstrumented latency remain unqualified; no
-optimized certificate or permanent profiling API is introduced by that diagnosis.
+in complete format admission. That diagnosis introduces no optimization or permanent profiling API.
+The subsequent [finite reference certificate](../benchmarks/2026-10-25-reference-shape-certificate.md)
+extends the existing private proof without changing admission, observes zero parser-preflight
+calls and records two uninstrumented candidate comparisons. Control drift prevents a fixed causal
+speedup claim; complete envelope traversal and both actual encodings remain.
 This does not close full R2 or installable-tool workflows; the
 [pinned editing/format study](../research/2026-10-25-editing-versus-format-admission.md) keeps
 equivalent locality and a deliberate editing/Save contract redesign as separate alternatives.
