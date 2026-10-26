@@ -6,11 +6,12 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use nara_asset::AssetRef;
 use nara_engine::{
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode},
     project_host::{
-        EditorProjectCloseProgress, EditorProjectOpenHost, EditorProjectOpenProgress,
-        EditorProjectSession,
+        EditorEditPreparationError, EditorProjectCloseProgress, EditorProjectOpenHost,
+        EditorProjectOpenProgress, EditorProjectSession,
     },
 };
 use nara_reflect::{
@@ -22,11 +23,11 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId, replace_component_property, resolve_component_property,
 };
 use nara_scene::{
-    AuthoringDocumentReadiness, AuthoringPropertyEdit, AuthoringRecordReadiness, PrefabDocument,
-    PrefabDocumentCandidate, SceneAuthoringRevision, SceneComponentRecord, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementOwner, UnavailableRecordManifest,
-    UnavailableRecordManifestEntry,
+    AuthoringDocumentReadiness, AuthoringPropertyEdit, AuthoringRecordLocation,
+    AuthoringRecordReadiness, PrefabDocument, PrefabDocumentCandidate, PrefabInstance,
+    SceneAuthoringRevision, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+    SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
+    ScenePlacementOwner, UnavailableRecordManifest, UnavailableRecordManifestEntry,
 };
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentId, EditorDocumentKind,
@@ -222,6 +223,14 @@ fn patch(root: ComponentValue) -> ScenePatchDocument {
         component_version: ComponentSchemaVersion::ONE,
         field: ComponentFieldId::new("settings"),
         value: root,
+    }])
+}
+
+fn instance_patch(expected: Option<PrefabInstance>, value: Option<PrefabInstance>) -> ScenePatchDocument {
+    ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
+        entity: id("actor"),
+        expected,
+        value,
     }])
 }
 
@@ -662,7 +671,13 @@ fn nested_writes_coalesce_and_keep_exact_basis_history_and_saved_records() {
             assert_eq!(tab.history.redo_depth, usize::from(!redo));
             assert_eq!(tab.dirty, redo);
         }
-        save_and_reopen(&mut editor, &project, source, &expected, &manifest);
+        save_and_reopen(
+            &mut editor,
+            &project,
+            source,
+            &SceneDocument::from_ordered_roots(records(expected)),
+            &manifest,
+        );
         close_editor(&mut editor);
     }
 }
@@ -776,7 +791,13 @@ fn key_changes_resolve_in_order_and_a_final_failure_publishes_nothing() {
             fs::read(project.root.join(source)).unwrap(),
             project.original(source)
         );
-        save_and_reopen(&mut editor, &project, source, &expected, &manifest);
+        save_and_reopen(
+            &mut editor,
+            &project,
+            source,
+            &SceneDocument::from_ordered_roots(records(expected)),
+            &manifest,
+        );
         close_editor(&mut editor);
     }
 }
@@ -854,6 +875,290 @@ fn explicitly_targeted_inactive_scene_and_prefab_keep_tabs_and_selections() {
         manifest(&editor);
         select(&mut editor, document, "observer");
     }
+    close_editor(&mut editor);
+}
+
+#[test]
+fn inactive_source_instance_attach_replace_and_detach_preserve_local_records_and_history() {
+    for source in [SCENE, PREFAB] {
+        let project = Project::new();
+        let mut local = records(initial());
+        local[0].children.push(id("observer"));
+        let mut expected = SceneDocument::new([id("actor")], local);
+        fs::write(project.root.join(source), source_bytes(source, &expected)).unwrap();
+        let mut editor = open_project(&project);
+        let scene = editor.current_frame().workspace().active_document.unwrap();
+        select(&mut editor, scene, "observer");
+        let prefab = open_source(&mut editor, PREFAB);
+        select(&mut editor, prefab, "observer");
+        let (document, active) = if source == SCENE {
+            (scene, prefab)
+        } else {
+            (prefab, scene)
+        };
+
+        // No base file exists: this exercises source intent, not nested preview or expansion.
+        let first = PrefabInstance {
+            source: AssetRef::path("prefabs/not-installed.prefab.json").unwrap(),
+            overrides: patch(settings(70, 80, "a", 1, "base override")),
+        };
+        let replacement = PrefabInstance {
+            overrides: patch(settings(71, 80, "a", 1, "replacement override")),
+            ..first.clone()
+        };
+        let mut previous = None;
+        for value in [Some(first), Some(replacement), None] {
+            assert_applied(dispatch(
+                &mut editor,
+                EditorAction::Navigate(EditorNavigationAction::SetActiveDocument { document }),
+            ));
+            select(&mut editor, document, "observer");
+            let manifest = manifest(&editor);
+            assert_applied(dispatch(
+                &mut editor,
+                EditorAction::Navigate(EditorNavigationAction::SetActiveDocument {
+                    document: active,
+                }),
+            ));
+            let before = editor.current_frame();
+            let basis = revision(&editor, document);
+            let change = instance_patch(previous.clone(), value.clone());
+            let inverse = instance_patch(value.clone(), previous.clone());
+            let cancelled = editor
+                .prepare_authoring_edit(document, basis, &change)
+                .unwrap();
+            assert_eq!(cancelled.patch(), &change);
+            assert_eq!(cancelled.inverse(), &inverse);
+            drop(cancelled);
+            editor.drive_editor_frame(Duration::ZERO);
+            assert_eq!(editor.current_frame().workspace(), before.workspace());
+
+            let prepared = editor
+                .prepare_authoring_edit(document, basis, &change)
+                .unwrap();
+            assert_eq!(prepared.document(), document);
+            assert_eq!(
+                prepared.document_kind(),
+                if source == SCENE {
+                    EditorDocumentKind::Scene
+                } else {
+                    EditorDocumentKind::Prefab
+                }
+            );
+            assert_eq!(prepared.base_revision(), basis);
+            assert_eq!(prepared.patch(), &change);
+            assert_eq!(prepared.inverse(), &inverse);
+            assert_applied(editor.commit_authoring_edit(prepared));
+            editor.drive_editor_frame(Duration::ZERO);
+            let committed = editor.current_frame();
+            assert_eq!(committed.workspace().active_document, Some(active));
+            assert_eq!(
+                committed.workspace().active_scene,
+                before.workspace().active_scene
+            );
+            assert_eq!(
+                committed.workspace().document(active),
+                before.workspace().document(active)
+            );
+            assert_eq!(
+                committed.workspace().document(document).unwrap().history.undo_depth,
+                1
+            );
+            for redo in [false, true] {
+                let base_revision = revision(&editor, document);
+                let mutation = if redo {
+                    EditorDocumentMutation::Redo {
+                        document,
+                        base_revision,
+                    }
+                } else {
+                    EditorDocumentMutation::Undo {
+                        document,
+                        base_revision,
+                    }
+                };
+                assert_applied(dispatch(&mut editor, EditorAction::Mutate(mutation)));
+                // Observe the exact declaration restored by history without publishing a probe.
+                let probe = if redo { &inverse } else { &change };
+                drop(
+                    editor
+                        .prepare_authoring_edit(document, revision(&editor, document), probe)
+                        .unwrap(),
+                );
+                let frame = editor.current_frame();
+                assert_eq!(frame.workspace().active_document, Some(active));
+                assert_eq!(
+                    frame.workspace().active_scene,
+                    before.workspace().active_scene
+                );
+                assert_eq!(
+                    frame.workspace().document(active),
+                    before.workspace().document(active)
+                );
+                assert_eq!(
+                    frame.workspace().documents.iter().map(|tab| tab.document).collect::<Vec<_>>(),
+                    before.workspace().documents.iter().map(|tab| tab.document).collect::<Vec<_>>()
+                );
+                let target = frame.workspace().document(document).unwrap();
+                assert_eq!(target.history.undo_depth, usize::from(redo));
+                assert_eq!(target.history.redo_depth, usize::from(!redo));
+                assert_eq!(target.dirty, redo);
+            }
+            assert_eq!(
+                fs::read(project.root.join(source)).unwrap(),
+                source_bytes(source, &expected)
+            );
+            expected
+                .entities
+                .iter_mut()
+                .find(|row| row.id == id("actor"))
+                .unwrap()
+                .prefab = value.clone();
+            assert_applied(dispatch(
+                &mut editor,
+                EditorAction::Navigate(EditorNavigationAction::SetActiveDocument { document }),
+            ));
+            assert_eq!(
+                editor
+                    .current_frame()
+                    .workspace()
+                    .active_scene
+                    .as_ref()
+                    .unwrap()
+                    .selection
+                    .top_entity(),
+                Some(&id("observer"))
+            );
+            // Compare complete source data: detachment must not synthesize converted records.
+            save_and_reopen(&mut editor, &project, source, &expected, &manifest);
+            drop(
+                editor
+                    .prepare_authoring_edit(document, revision(&editor, document), &inverse)
+                    .unwrap(),
+            );
+            previous = value;
+        }
+        close_editor(&mut editor);
+    }
+}
+
+#[test]
+fn exact_instance_mismatch_is_atomic_and_unknown_override_records_cannot_be_detached() {
+    let project = Project::new();
+    let mut local = records(initial());
+    let declaration = PrefabInstance {
+        source: AssetRef::path("prefabs/not-installed.prefab.json").unwrap(),
+        overrides: ScenePatchDocument::new([ScenePatchOperation::AddComponent {
+            entity: id("base-node"),
+            component: ComponentTypeId::new(UNKNOWN),
+            value: local[0].components[&ComponentTypeId::new(UNKNOWN)].clone(),
+        }]),
+    };
+    local[0].prefab = Some(declaration.clone());
+    let mut expected = SceneDocument::from_ordered_roots(local);
+    let original = source_bytes(PREFAB, &expected);
+    fs::write(project.root.join(PREFAB), &original).unwrap();
+    let mut editor = open_project(&project);
+    let scene = editor.current_frame().workspace().active_document.unwrap();
+    select(&mut editor, scene, "observer");
+    let prefab = open_source(&mut editor, PREFAB);
+    select(&mut editor, prefab, "observer");
+    let manifest = editor
+        .active_authoring_unavailable_record_manifest()
+        .unwrap()
+        .clone();
+    assert_eq!(manifest.total_count(), 3);
+    assert!(manifest.entries().iter().any(|entry| matches!(
+        entry,
+        UnavailableRecordManifestEntry::Record(record)
+            if record.component().as_str() == UNKNOWN
+                && matches!(record.location(), AuthoringRecordLocation::PatchComponent { anchor, .. } if anchor == &id("actor"))
+    )));
+    assert_applied(dispatch(
+        &mut editor,
+        EditorAction::Navigate(EditorNavigationAction::SetActiveDocument { document: scene }),
+    ));
+    let before = editor.current_frame();
+    let basis = revision(&editor, prefab);
+    let changed = settings(42, 20, "a", 1, "before");
+    let prefix = patch(changed.clone());
+    drop(
+        editor
+            .prepare_authoring_edit(prefab, basis, &prefix)
+            .unwrap(),
+    );
+    let wrong = PrefabInstance {
+        overrides: ScenePatchDocument::default(),
+        ..declaration.clone()
+    };
+    assert_eq!(wrong.source, declaration.source);
+    assert_ne!(wrong.overrides, declaration.overrides);
+    let mut failing = prefix.clone();
+    failing.operations.extend(
+        instance_patch(Some(wrong.clone()), Some(declaration.clone())).operations,
+    );
+    let rejection = editor
+        .prepare_authoring_edit(prefab, basis, &failing)
+        .unwrap_err();
+    let EditorEditPreparationError::Document(report) = rejection else {
+        panic!("{rejection:?}")
+    };
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.patch-prefab-instance-context-mismatch"
+    }));
+    for value in [None, Some(wrong)] {
+        let rejection = editor
+            .prepare_authoring_edit(
+                prefab,
+                basis,
+                &instance_patch(Some(declaration.clone()), value),
+            )
+            .unwrap_err();
+        let EditorEditPreparationError::Document(report) = rejection else {
+            panic!("{rejection:?}")
+        };
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.authoring-structure-unavailable"
+        }));
+    }
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(editor.current_frame().workspace(), before.workspace());
+    assert_eq!(fs::read(project.root.join(PREFAB)).unwrap(), original);
+
+    let prepared = editor
+        .prepare_authoring_edit(prefab, basis, &prefix)
+        .unwrap();
+    assert_eq!(prepared.inverse(), &patch(initial()));
+    assert_applied(editor.commit_authoring_edit(prepared));
+    editor.drive_editor_frame(Duration::ZERO);
+    let committed = editor.current_frame();
+    assert_eq!(committed.workspace().active_document, Some(scene));
+    assert_eq!(
+        committed.workspace().active_scene,
+        before.workspace().active_scene
+    );
+    assert_eq!(
+        committed.workspace().document(scene),
+        before.workspace().document(scene)
+    );
+    assert_eq!(
+        committed.workspace().document(prefab).unwrap().history.undo_depth,
+        1
+    );
+    assert_applied(dispatch(
+        &mut editor,
+        EditorAction::Navigate(EditorNavigationAction::SetActiveDocument { document: prefab }),
+    ));
+    expected
+        .entities
+        .iter_mut()
+        .find(|row| row.id == id("actor"))
+        .unwrap()
+        .components
+        .get_mut(&ComponentTypeId::new(COMPONENT))
+        .unwrap()
+        .value = ComponentValue::map([("payload", changed)]);
+    save_and_reopen(&mut editor, &project, PREFAB, &expected, &manifest);
     close_editor(&mut editor);
 }
 
@@ -1021,7 +1326,7 @@ fn save_and_reopen(
     editor: &mut EditorProjectSession,
     project: &Project,
     source: &str,
-    expected: &ComponentValue,
+    expected: &SceneDocument,
     manifest: &UnavailableRecordManifest,
 ) {
     let document = editor.current_frame().workspace().active_document.unwrap();
@@ -1060,7 +1365,7 @@ fn save_and_reopen(
             .to_json_string()
             .unwrap()
     };
-    assert_eq!(actual.as_bytes(), project.encoded(source, expected.clone()));
+    assert_eq!(actual.as_bytes(), source_bytes(source, expected));
     assert_ne!(bytes, project.original(source));
     assert_eq!(
         editor.active_authoring_unavailable_record_manifest(),
@@ -1101,7 +1406,12 @@ fn save_and_reopen(
         EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
     );
     select(editor, document, "actor");
-    assert_eq!(&root(editor), expected);
+    let actor = expected.entities.iter().find(|row| row.id == id("actor")).unwrap();
+    let expected_root = actor.components[&ComponentTypeId::new(COMPONENT)]
+        .value
+        .get_path(&ComponentFieldPath::from_fields(["payload"]))
+        .unwrap();
+    assert_eq!(&root(editor), expected_root);
     assert_eq!(
         editor.active_authoring_unavailable_record_manifest(),
         Some(manifest)
@@ -1112,6 +1422,17 @@ fn save_and_reopen(
     assert_eq!(tab.history.undo_depth, 0);
     assert_eq!(tab.history.redo_depth, 0);
     assert_ne!(tab.revision, base_revision);
+}
+
+fn source_bytes(source: &str, document: &SceneDocument) -> Vec<u8> {
+    if source == SCENE {
+        document.to_json_string().unwrap().into_bytes()
+    } else {
+        PrefabDocument::new(document.roots.clone(), document.entities.clone())
+            .to_json_string()
+            .unwrap()
+            .into_bytes()
+    }
 }
 
 fn close_editor(editor: &mut EditorProjectSession) {
@@ -1168,17 +1489,7 @@ impl Project {
     }
 
     fn encoded(&self, source: &str, root: ComponentValue) -> Vec<u8> {
-        if source == SCENE {
-            SceneDocument::from_ordered_roots(records(root))
-                .to_json_string()
-                .unwrap()
-                .into_bytes()
-        } else {
-            PrefabDocument::from_ordered_roots(records(root))
-                .to_json_string()
-                .unwrap()
-                .into_bytes()
-        }
+        source_bytes(source, &SceneDocument::from_ordered_roots(records(root)))
     }
 
     fn original(&self, source: &str) -> Vec<u8> {

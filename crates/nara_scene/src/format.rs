@@ -1530,16 +1530,24 @@ impl SceneFileCounts {
             self.observe_component_value(component.value.cost(), limits)?;
         }
         if let Some(prefab) = &entity.prefab {
-            increase(
-                &mut self.prefab_instances,
-                1,
-                limits.prefab_instances(),
-                SceneFileBudgetKind::PrefabInstances,
-            )?;
-            self.observe_diagnostic_source(limits)?;
-            self.observe_patch(&prefab.overrides, limits)?;
+            self.observe_prefab_instance(prefab, limits)?;
         }
         Ok(())
+    }
+
+    fn observe_prefab_instance(
+        &mut self,
+        prefab: &PrefabInstance,
+        limits: SceneFileLimits,
+    ) -> Result<(), SceneFileBudgetError> {
+        increase(
+            &mut self.prefab_instances,
+            1,
+            limits.prefab_instances(),
+            SceneFileBudgetKind::PrefabInstances,
+        )?;
+        self.observe_diagnostic_source(limits)?;
+        self.observe_patch(&prefab.overrides, limits)
     }
 
     fn observe_patch(
@@ -1584,6 +1592,15 @@ impl SceneFileCounts {
                 }
                 ScenePatchOperation::SetField { value, .. } => {
                     self.observe_component_value(value.cost(), limits)?;
+                }
+                ScenePatchOperation::SetPrefabInstance {
+                    expected, value, ..
+                } => {
+                    // Both exact snapshots are retained input, including the precondition side.
+                    // Count their complete trees without inventing an entity or placement.
+                    for prefab in expected.iter().chain(value.iter()) {
+                        self.observe_prefab_instance(prefab, limits)?;
+                    }
                 }
                 ScenePatchOperation::RemoveEntity { .. } => {
                     self.observe_placements(1, limits)?;

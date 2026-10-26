@@ -20,6 +20,7 @@ use nara_fs::{
 use nara_identity::SceneEntityId;
 use nara_scene::{
     PrefabDocument, PrefabInstance, SceneDocument, SceneEntityRecord, ScenePatchDocument,
+    ScenePatchOperation,
 };
 
 use crate::{
@@ -364,6 +365,78 @@ fn catalogue_capture_and_scene_copy_reject_budget_pressure_without_retaining_wor
     drop(pressure);
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
     assert_eq!(loader.budget_snapshot().active_generations(), 0);
+}
+
+#[test]
+fn exact_instance_snapshots_discover_both_sides_and_charge_repeated_edges() {
+    let project = CatalogueProject::new(2, 4);
+    let root = project.capability();
+    let manifest = root
+        .open_file(&RelativePath::new("nara.toml").unwrap())
+        .unwrap();
+    let candidate = ingest_project_manifest(&manifest, None).unwrap();
+    let plan = resolve_product_recipe(&candidate, ProductRecipe::new()).unwrap();
+    let loader = ProjectContentLoader::new(root.share()).unwrap();
+    let mut context = super::super::LoadContext::new(
+        &loader,
+        plan.schema_validation(),
+        &plan.asset_domains,
+        None,
+        Default::default(),
+        candidate.manifest_digest(),
+        None,
+        None,
+        false,
+    )
+    .unwrap();
+    context.catalogue_roots = Some([
+        candidate.settings().paths.assets.clone(),
+        candidate.settings().paths.prefabs.clone(),
+    ]);
+    let instance = |index, overrides| PrefabInstance {
+        source: AssetRef::StableId(stable_id(index)),
+        overrides,
+    };
+    let patch = ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
+        entity: SceneEntityId::new("nested").unwrap(),
+        expected: Some(instance(0, ScenePatchDocument::default())),
+        value: Some(instance(
+            1,
+            ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
+                entity: SceneEntityId::new("deep").unwrap(),
+                expected: Some(instance(2, ScenePatchDocument::default())),
+                value: Some(instance(
+                    3,
+                    ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
+                        entity: SceneEntityId::new("repeated").unwrap(),
+                        expected: Some(instance(0, ScenePatchDocument::default())),
+                        value: None,
+                    }]),
+                )),
+            }]),
+        )),
+    }]);
+    let mut queue = std::collections::VecDeque::new();
+    let mut discovered = std::collections::BTreeSet::new();
+    let (result, counts, _) =
+        measure(|| context.enqueue_patch_prefabs(&patch, 3, &mut queue, &mut discovered));
+    result.unwrap();
+    assert_eq!(counts.catalogue_builds, 1);
+    assert_eq!(
+        queue.into_iter().collect::<Vec<_>>(),
+        (0..4)
+            .map(|index| { (AssetPath::new(prefab_path(index)).unwrap(), 3) })
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(discovered.len(), 4);
+    assert_eq!(
+        loader
+            .budget_snapshot()
+            .active(ProjectContentBudgetKind::DependencyEdges),
+        5
+    );
+    drop(context);
+    assert_eq!(loader.budget_snapshot().active_reservations(), 0);
 }
 
 #[test]

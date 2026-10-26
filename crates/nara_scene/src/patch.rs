@@ -13,7 +13,8 @@ use nara_reflect::{
 };
 
 use crate::{
-    PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
+    PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityId,
+    SceneEntityRecord,
     diagnostics::{
         error as diagnostic_error, with_capability, with_component_field_path,
         with_component_field_path_error, with_public_locator, with_public_u64,
@@ -255,6 +256,7 @@ impl ScenePatchDocument {
                 diagnostics,
             });
         }
+        self.admit_input_cost(limits)?;
         let source_validation = validate(document, registry, None);
         if source_validation.has_errors() {
             return Err(ScenePatchReport {
@@ -570,6 +572,7 @@ impl ScenePatchDocument {
             }));
         }
 
+        self.admit_input_cost(limits).map_err(Box::new)?;
         let source_validation = validate(document, registry, None);
         if source_validation.has_errors() {
             return Err(Box::new(ScenePatchReport {
@@ -580,6 +583,22 @@ impl ScenePatchDocument {
         }
 
         Ok(source_work)
+    }
+
+    fn admit_input_cost(&self, limits: ScenePatchApplyLimits) -> Result<(), ScenePatchReport> {
+        if bounded_scene_patch_cost(self, limits).is_some() {
+            return Ok(());
+        }
+        let mut diagnostics = DiagnosticReport::default();
+        diagnostics.push(diagnostic_error(
+            "scene.patch-validation-work-budget-exceeded",
+            "Patch input exceeds the replay data or depth budget",
+        ));
+        Err(ScenePatchReport {
+            applied: false,
+            inverse: None,
+            diagnostics,
+        })
     }
 }
 
@@ -655,6 +674,13 @@ pub enum ScenePatchOperation {
         component_version: ComponentSchemaVersion,
         field: ComponentFieldId,
         asset_ref: AssetRef,
+    },
+    /// Replaces source-owned instance intent after comparing its complete prior declaration.
+    /// This does not resolve the Prefab or convert its generated projection into source data.
+    SetPrefabInstance {
+        entity: SceneEntityId,
+        expected: Option<PrefabInstance>,
+        value: Option<PrefabInstance>,
     },
 }
 
@@ -751,6 +777,7 @@ impl ScenePlacement {
 
 enum PatchTreeNode<'a> {
     Entity(&'a SceneEntityRecord),
+    Instance(&'a PrefabInstance),
     Patch(&'a ScenePatchDocument),
 }
 
@@ -789,8 +816,11 @@ fn unsupported_patch_tree_format_version(patch: &ScenePatchDocument) -> Option<u
         match node {
             PatchTreeNode::Entity(entity) => {
                 if let Some(prefab) = &entity.prefab {
-                    pending.push(PatchTreeNode::Patch(&prefab.overrides));
+                    pending.push(PatchTreeNode::Instance(prefab));
                 }
+            }
+            PatchTreeNode::Instance(instance) => {
+                pending.push(PatchTreeNode::Patch(&instance.overrides));
             }
             PatchTreeNode::Patch(patch) => {
                 if patch.format_version != ScenePatchDocument::CURRENT_FORMAT_VERSION {
@@ -809,6 +839,12 @@ fn unsupported_patch_tree_format_version(patch: &ScenePatchDocument) -> Option<u
                             pending.push(PatchTreeNode::Entity(entity));
                             pending.extend(descendants.iter().map(PatchTreeNode::Entity));
                         }
+                        ScenePatchOperation::SetPrefabInstance {
+                            expected, value, ..
+                        } => {
+                            pending
+                                .extend(expected.iter().chain(value).map(PatchTreeNode::Instance));
+                        }
                         _ => {}
                     }
                 }
@@ -819,11 +855,12 @@ fn unsupported_patch_tree_format_version(patch: &ScenePatchDocument) -> Option<u
 }
 
 enum ValueCostNode<'a> {
-    Entity(&'a SceneEntityRecord),
-    Entities(std::slice::Iter<'a, SceneEntityRecord>),
-    Patch(&'a ScenePatchDocument),
-    Operations(std::slice::Iter<'a, ScenePatchOperation>),
-    Value(&'a ComponentValue),
+    Entity(&'a SceneEntityRecord, usize),
+    Instance(&'a PrefabInstance, usize),
+    Entities(std::slice::Iter<'a, SceneEntityRecord>, usize),
+    Patch(&'a ScenePatchDocument, usize),
+    Operations(std::slice::Iter<'a, ScenePatchOperation>, usize),
+    Value(&'a ComponentValue, usize),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -861,7 +898,7 @@ pub(crate) fn scene_entity_component_value_cost(entity: &SceneEntityRecord) -> C
 pub(crate) fn scene_entities_source_value_cost(
     entities: &[SceneEntityRecord],
 ) -> ComponentValueCost {
-    tree_cost(vec![ValueCostNode::Entities(entities.iter())], None)
+    tree_cost(vec![ValueCostNode::Entities(entities.iter(), 1)], None)
         .expect("unbounded cost traversal always completes")
         .value_cost()
 }
@@ -871,16 +908,15 @@ pub(crate) fn scene_patch_value_cost(patch: &ScenePatchDocument) -> ComponentVal
 }
 
 pub(crate) fn scene_patch_cost(patch: &ScenePatchDocument) -> ScenePatchCost {
-    tree_cost(vec![ValueCostNode::Patch(patch)], None)
+    tree_cost(vec![ValueCostNode::Patch(patch, 1)], None)
         .expect("unbounded cost traversal always completes")
 }
 
-#[cfg(feature = "serde")]
 pub(crate) fn bounded_scene_patch_cost(
     patch: &ScenePatchDocument,
     limits: ScenePatchApplyLimits,
 ) -> Option<ScenePatchCost> {
-    tree_cost(vec![ValueCostNode::Patch(patch)], Some(limits))
+    tree_cost(vec![ValueCostNode::Patch(patch, 1)], Some(limits))
 }
 
 fn tree_cost(
@@ -890,7 +926,8 @@ fn tree_cost(
     let mut cost = ScenePatchCost::default();
     while let Some(node) = pending.pop() {
         match node {
-            ValueCostNode::Entity(entity) => {
+            ValueCostNode::Entity(entity, depth) => {
+                admit_data_depth(depth, limits)?;
                 cost.operation_count = cost
                     .operation_count
                     .saturating_add(1)
@@ -911,38 +948,51 @@ fn tree_cost(
                         bytes.saturating_add(component.as_str().len())
                     }));
                 for component in entity.components.values() {
-                    add_patch_value_cost(&mut cost, &component.value, limits)?;
-                }
-                if let Some(prefab) = &entity.prefab {
-                    cost.operation_count = cost.operation_count.saturating_add(1);
                     cost.structural_logical_bytes = cost
                         .structural_logical_bytes
-                        .saturating_add(asset_ref_value(&prefab.source).cost().logical_bytes());
-                    pending.push(ValueCostNode::Patch(&prefab.overrides));
+                        .saturating_add(component.owner().map_or(0, |owner| owner.as_str().len()));
+                    add_patch_value_cost(&mut cost, &component.value, depth + 1, limits)?;
+                }
+                if let Some(prefab) = &entity.prefab {
+                    pending.push(ValueCostNode::Instance(prefab, depth + 1));
                 }
             }
-            ValueCostNode::Entities(mut entities) => {
+            ValueCostNode::Instance(instance, depth) => {
+                admit_data_depth(depth, limits)?;
+                cost.operation_count = cost.operation_count.saturating_add(1);
+                if limits
+                    .is_some_and(|limits| cost.operation_count > limits.validation_work().get())
+                {
+                    return None;
+                }
+                cost.structural_logical_bytes = cost
+                    .structural_logical_bytes
+                    .saturating_add(asset_ref_logical_bytes(&instance.source));
+                pending.push(ValueCostNode::Patch(&instance.overrides, depth + 1));
+            }
+            ValueCostNode::Entities(mut entities, depth) => {
                 if let Some(entity) = entities.next() {
-                    pending.push(ValueCostNode::Entities(entities));
-                    pending.push(ValueCostNode::Entity(entity));
+                    pending.push(ValueCostNode::Entities(entities, depth));
+                    pending.push(ValueCostNode::Entity(entity, depth));
                 }
             }
-            ValueCostNode::Patch(patch) => {
+            ValueCostNode::Patch(patch, depth) => {
+                admit_data_depth(depth, limits)?;
                 cost.operation_count = cost.operation_count.saturating_add(patch.operations.len());
                 if limits
                     .is_some_and(|limits| cost.operation_count > limits.validation_work().get())
                 {
                     return None;
                 }
-                pending.push(ValueCostNode::Operations(patch.operations.iter()));
+                pending.push(ValueCostNode::Operations(patch.operations.iter(), depth));
             }
-            ValueCostNode::Operations(mut operations) => {
+            ValueCostNode::Operations(mut operations, depth) => {
                 if let Some(operation) = operations.next() {
-                    pending.push(ValueCostNode::Operations(operations));
+                    pending.push(ValueCostNode::Operations(operations, depth));
                     match operation {
                         ScenePatchOperation::AddEntity { entity, placement } => {
                             add_placement_cost(&mut cost, placement);
-                            pending.push(ValueCostNode::Entity(entity));
+                            pending.push(ValueCostNode::Entity(entity, depth + 1));
                         }
                         ScenePatchOperation::RestoreEntity {
                             entity,
@@ -950,8 +1000,8 @@ fn tree_cost(
                             placement,
                         } => {
                             add_placement_cost(&mut cost, placement);
-                            pending.push(ValueCostNode::Entity(entity));
-                            pending.push(ValueCostNode::Entities(descendants.iter()));
+                            pending.push(ValueCostNode::Entity(entity, depth + 1));
+                            pending.push(ValueCostNode::Entities(descendants.iter(), depth + 1));
                         }
                         ScenePatchOperation::RemoveEntity { entity, from } => {
                             add_scene_entity_id_cost(&mut cost, entity);
@@ -969,7 +1019,11 @@ fn tree_cost(
                         } => {
                             add_scene_entity_id_cost(&mut cost, entity);
                             add_component_type_id_cost(&mut cost, component);
-                            pending.push(ValueCostNode::Value(&value.value));
+                            cost.structural_logical_bytes =
+                                cost.structural_logical_bytes.saturating_add(
+                                    value.owner().map_or(0, |owner| owner.as_str().len()),
+                                );
+                            pending.push(ValueCostNode::Value(&value.value, depth + 1));
                         }
                         ScenePatchOperation::RemoveComponent { entity, component } => {
                             add_scene_entity_id_cost(&mut cost, entity);
@@ -985,7 +1039,7 @@ fn tree_cost(
                             add_scene_entity_id_cost(&mut cost, entity);
                             add_component_type_id_cost(&mut cost, component);
                             add_component_field_id_cost(&mut cost, field);
-                            pending.push(ValueCostNode::Value(value));
+                            pending.push(ValueCostNode::Value(value, depth + 1));
                         }
                         ScenePatchOperation::RemoveField {
                             entity,
@@ -1012,13 +1066,31 @@ fn tree_cost(
                             add_scene_entity_id_cost(&mut cost, entity);
                             add_component_type_id_cost(&mut cost, component);
                             add_component_field_id_cost(&mut cost, field);
-                            add_patch_value_cost(&mut cost, &asset_ref_value(asset_ref), limits)?;
+                            add_patch_value_cost(
+                                &mut cost,
+                                &asset_ref_value(asset_ref),
+                                depth + 1,
+                                limits,
+                            )?;
+                        }
+                        ScenePatchOperation::SetPrefabInstance {
+                            entity,
+                            expected,
+                            value,
+                        } => {
+                            add_scene_entity_id_cost(&mut cost, entity);
+                            pending.extend(
+                                expected
+                                    .iter()
+                                    .chain(value)
+                                    .map(|instance| ValueCostNode::Instance(instance, depth + 1)),
+                            );
                         }
                     }
                 }
             }
-            ValueCostNode::Value(value) => {
-                add_patch_value_cost(&mut cost, value, limits)?;
+            ValueCostNode::Value(value, depth) => {
+                add_patch_value_cost(&mut cost, value, depth, limits)?;
             }
         }
     }
@@ -1028,6 +1100,7 @@ fn tree_cost(
 fn add_patch_value_cost(
     cost: &mut ScenePatchCost,
     value: &ComponentValue,
+    depth: usize,
     limits: Option<ScenePatchApplyLimits>,
 ) -> Option<()> {
     let value_cost = match limits {
@@ -1043,13 +1116,265 @@ fn add_patch_value_cost(
         )?,
         None => value.cost(),
     };
+    if limits.is_some() {
+        admit_value_depth(value, depth)?;
+    }
     cost.value_cost = cost.value_cost.saturating_add(value_cost);
+    Some(())
+}
+
+// This semantic depth is no stricter than the serialized grammar's depth. It bounds
+// programmatically supplied data before derived equality, Clone, or serialization recurse.
+fn admit_data_depth(depth: usize, limits: Option<ScenePatchApplyLimits>) -> Option<()> {
+    if limits.is_some() && depth > ComponentValueMaterializationLimits::default().depth().get() {
+        return None;
+    }
+    Some(())
+}
+
+fn admit_value_depth(value: &ComponentValue, depth: usize) -> Option<()> {
+    if depth > ComponentValueMaterializationLimits::default().depth().get() {
+        return None;
+    }
+    match value {
+        ComponentValue::List(values) => {
+            for value in values {
+                admit_value_depth(value, depth + 1)?;
+            }
+        }
+        ComponentValue::Map(values) => {
+            for value in values.values() {
+                admit_value_depth(value, depth + 1)?;
+            }
+        }
+        _ => {}
+    }
     Some(())
 }
 
 #[cfg(all(test, feature = "serde"))]
 mod bounded_cost_tests {
     use super::*;
+
+    fn deep_declaration(depth: usize, through_entities: bool) -> PrefabInstance {
+        let mut declaration = PrefabInstance {
+            source: AssetRef::path("p").unwrap(),
+            overrides: ScenePatchDocument::default(),
+        };
+        for _ in 0..depth {
+            let operation = if through_entities {
+                let mut entity = SceneEntityRecord::new(SceneEntityId::new("e").unwrap());
+                entity.prefab = Some(declaration);
+                ScenePatchOperation::AddEntity {
+                    entity,
+                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                }
+            } else {
+                ScenePatchOperation::SetPrefabInstance {
+                    entity: SceneEntityId::new("e").unwrap(),
+                    expected: None,
+                    value: Some(declaration),
+                }
+            };
+            declaration = PrefabInstance {
+                source: AssetRef::path("p").unwrap(),
+                overrides: ScenePatchDocument::new([operation]),
+            };
+        }
+        declaration
+    }
+
+    fn set_instance(declaration: PrefabInstance, expected_side: bool) -> ScenePatchDocument {
+        let (expected, value) = if expected_side {
+            (Some(declaration), None)
+        } else {
+            (None, Some(declaration))
+        };
+        ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
+            entity: SceneEntityId::new("a").unwrap(),
+            expected,
+            value,
+        }])
+    }
+
+    #[test]
+    fn borrowed_cost_rejects_deep_snapshots_on_both_sides_and_entity_paths() {
+        for expected_side in [false, true] {
+            for through_entities in [false, true] {
+                let patch = set_instance(deep_declaration(128, through_entities), expected_side);
+                // This input fits every count/byte ceiling; semantic depth alone rejects it.
+                let cost = scene_patch_cost(&patch);
+                assert!(cost.operation_count() < 1024);
+                assert!(cost.logical_bytes() < 64 * 1024);
+                assert!(
+                    bounded_scene_patch_cost(&patch, ScenePatchApplyLimits::default()).is_none()
+                );
+            }
+            let mut value = ComponentValue::Null;
+            for _ in 0..128 {
+                value = ComponentValue::List(vec![ComponentValue::map([("v", value)])]);
+            }
+            let declaration = PrefabInstance {
+                source: AssetRef::path("p").unwrap(),
+                overrides: ScenePatchDocument::new([ScenePatchOperation::RestoreEntity {
+                    entity: SceneEntityRecord::new(SceneEntityId::new("e").unwrap()),
+                    descendants: vec![
+                        SceneEntityRecord::new(SceneEntityId::new("child").unwrap())
+                            .with_component(
+                                ComponentTypeId::new("c"),
+                                SceneComponentRecord::new(ComponentSchemaVersion::ONE, value),
+                            ),
+                    ],
+                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                }]),
+            };
+            assert!(
+                bounded_scene_patch_cost(
+                    &set_instance(declaration, expected_side),
+                    ScenePatchApplyLimits::default(),
+                )
+                .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn borrowed_value_depth_has_an_inclusive_default_boundary() {
+        let patch = |depth: usize, maps: bool| {
+            let mut value = ComponentValue::Null;
+            for _ in 1..depth {
+                value = if maps {
+                    ComponentValue::map([("v", value)])
+                } else {
+                    ComponentValue::List(vec![value])
+                };
+            }
+            ScenePatchDocument::new([ScenePatchOperation::AddComponent {
+                entity: SceneEntityId::new("a").unwrap(),
+                component: ComponentTypeId::new("c"),
+                value: SceneComponentRecord::new(ComponentSchemaVersion::ONE, value),
+            }])
+        };
+        let maximum = ComponentValueMaterializationLimits::default().depth().get();
+        for maps in [false, true] {
+            // Patch is depth one; its component payload begins at depth two.
+            let admitted = patch(maximum - 1, maps);
+            assert_eq!(
+                bounded_scene_patch_cost(&admitted, ScenePatchApplyLimits::default()),
+                Some(scene_patch_cost(&admitted)),
+            );
+            assert!(
+                bounded_scene_patch_cost(&patch(maximum, maps), ScenePatchApplyLimits::default())
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn native_and_owned_paths_reject_deep_input_before_validation_or_mutation() {
+        let mut registry = ComponentRegistry::new();
+        registry.freeze().unwrap();
+        for expected_side in [false, true] {
+            let patch = set_instance(deep_declaration(128, false), expected_side);
+            let original = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+                SceneEntityId::new("a").unwrap(),
+            )]);
+            let mut document = original.clone();
+            let report = patch.apply_to_scene(&mut document, &registry);
+            assert!(!report.applied);
+            assert!(report.inverse.is_none());
+            assert_eq!(document, original);
+            assert!(report.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code().as_str() == "scene.patch-validation-work-budget-exceeded"
+            }));
+            let prefab = PrefabDocument::new(original.roots.clone(), original.entities.clone());
+            let rejected = patch.prepare_to_prefab_with_validator(&prefab, &registry, |_, _, _| {
+                panic!("input must be admitted before source validation")
+            });
+            assert!(rejected.is_err());
+            let report = patch.apply_owned_to_unpublished_scene(&mut document, &registry);
+            assert!(!report.applied);
+            assert!(report.inverse.is_none());
+            assert_eq!(document, original);
+        }
+    }
+
+    #[test]
+    fn authoring_depth_rejection_keeps_document_revision_and_history() {
+        use crate::{AuthoringDocumentSource, SceneAuthoringSession, SceneDocumentCandidate};
+        use nara_reflect::AuthoringSchemaBundle;
+
+        let original = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            SceneEntityId::new("a").unwrap(),
+        )]);
+        let bundle = AuthoringSchemaBundle::new([]).unwrap();
+        let published = SceneDocumentCandidate::decode_json_bytes(
+            original.to_json_string().unwrap().as_bytes(),
+        )
+        .unwrap()
+        .admit_authoring(
+            AuthoringDocumentSource::new(AssetRef::path("s").unwrap()),
+            &bundle,
+            &[],
+        )
+        .unwrap()
+        .publish();
+        let session = SceneAuthoringSession::from_published_authoring_document(published);
+        let revision = session.revision();
+        let content = session.content_state();
+        let history = session.history_status();
+        let patch = set_instance(deep_declaration(128, false), false);
+        let report = session
+            .prepare_authoring_edit(revision, &patch)
+            .unwrap_err();
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.authoring-history-entry-limit-exceeded"
+        }));
+        assert_eq!(session.document(), &original);
+        assert_eq!(session.revision(), revision);
+        assert_eq!(session.content_state(), content);
+        assert_eq!(session.history_status(), history);
+    }
+
+    #[test]
+    fn exact_instance_snapshot_history_cost_counts_each_retained_record_owner() {
+        let owner = nara_reflect::PersistentComponentSchemaOwnerId::try_new("test.owner").unwrap();
+        let id = SceneEntityId::new("e").unwrap();
+        let component = ComponentTypeId::new("c");
+        let value = SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null);
+        for whole_entity in [false, true] {
+            let snapshot = |value: SceneComponentRecord| PrefabInstance {
+                source: AssetRef::path("p").unwrap(),
+                overrides: ScenePatchDocument::new([if whole_entity {
+                    ScenePatchOperation::AddEntity {
+                        entity: SceneEntityRecord::new(id.clone())
+                            .with_component(component.clone(), value),
+                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    }
+                } else {
+                    ScenePatchOperation::AddComponent {
+                        entity: id.clone(),
+                        component: component.clone(),
+                        value,
+                    }
+                }]),
+            };
+            let patch = |value: SceneComponentRecord| {
+                let declaration = snapshot(value);
+                ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
+                    entity: SceneEntityId::new("a").unwrap(),
+                    expected: Some(declaration.clone()),
+                    value: Some(declaration),
+                }])
+            };
+            let unclaimed = scene_patch_cost(&patch(value.clone()));
+            let claimed = scene_patch_cost(&patch(value.clone().with_owner(owner.clone())));
+            assert_eq!(claimed.logical_bytes() - unclaimed.logical_bytes(), 20);
+            assert_eq!(claimed.logical_bytes(), 53);
+            assert_eq!(claimed.value_cost().nodes(), 2);
+            assert_eq!(claimed.operation_count(), if whole_entity { 9 } else { 5 });
+        }
+    }
 
     #[test]
     fn structural_replay_cost_has_exact_independent_inclusive_ceilings() {
@@ -1558,6 +1883,11 @@ pub(crate) fn apply_authoring_structure_operation(
         ScenePatchOperation::RemoveComponent { entity, component } => {
             remove_component_record(document, entity, component, operation_index)
         }
+        ScenePatchOperation::SetPrefabInstance {
+            entity,
+            expected,
+            value,
+        } => set_prefab_instance(document, entity, expected, value, operation_index),
         _ => unreachable!("the authoring owner admits only its finite structure vocabulary"),
     }
 }
@@ -1688,6 +2018,11 @@ fn apply_non_component_operation<D: EntityDocument>(
             ),
             asset_ref,
         ),
+        ScenePatchOperation::SetPrefabInstance {
+            entity,
+            expected,
+            value,
+        } => set_prefab_instance(document, entity, expected, value, operation_index),
     }
 }
 
@@ -1812,7 +2147,58 @@ fn apply_owned_operation(
             ),
             asset_ref,
         ),
+        ScenePatchOperation::SetPrefabInstance {
+            entity,
+            expected,
+            value,
+        } => set_prefab_instance_value(document, &entity, &expected, value, operation_index),
     }
+}
+
+fn set_prefab_instance<D: EntityDocument + ?Sized>(
+    document: &mut D,
+    entity: &SceneEntityId,
+    expected: &Option<PrefabInstance>,
+    value: &Option<PrefabInstance>,
+    operation_index: usize,
+) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
+    prefab_instance_record(document, entity, expected, operation_index)?.prefab = value.clone();
+    Ok(vec![ScenePatchOperation::SetPrefabInstance {
+        entity: entity.clone(),
+        expected: value.clone(),
+        value: expected.clone(),
+    }])
+}
+
+fn set_prefab_instance_value<D: EntityDocument + ?Sized>(
+    document: &mut D,
+    entity: &SceneEntityId,
+    expected: &Option<PrefabInstance>,
+    value: Option<PrefabInstance>,
+    operation_index: usize,
+) -> Result<(), Diagnostic> {
+    prefab_instance_record(document, entity, expected, operation_index)?.prefab = value;
+    Ok(())
+}
+
+fn prefab_instance_record<'document, D: EntityDocument + ?Sized>(
+    document: &'document mut D,
+    entity: &SceneEntityId,
+    expected: &Option<PrefabInstance>,
+    operation_index: usize,
+) -> Result<&'document mut SceneEntityRecord, Diagnostic> {
+    let record = entity_mut(document, entity, operation_index)?;
+    if &record.prefab != expected {
+        return Err(patch_diagnostic(
+            operation_index,
+            "scene.patch-prefab-instance-context-mismatch",
+            "Instance mutation requires its exact prior source declaration",
+            Some(entity),
+            None,
+            None,
+        ));
+    }
+    Ok(record)
 }
 
 fn add_owned_entity(
@@ -3169,6 +3555,20 @@ pub(crate) fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
             ("value", ComponentValue::String(id.to_string())),
         ]),
     }
+}
+
+// The same logical wire-value cost as `asset_ref_value`, without copying a caller's path
+// during borrowed replay/history admission.
+fn asset_ref_logical_bytes(asset_ref: &AssetRef) -> usize {
+    let (kind, value_bytes) = match asset_ref {
+        AssetRef::Path(path) => ("path", path.as_str().len()),
+        AssetRef::StableId(id) => ("stable_id", id.to_string().len()),
+    };
+    "kind"
+        .len()
+        .saturating_add("value".len())
+        .saturating_add(kind.len())
+        .saturating_add(value_bytes)
 }
 
 fn with_component_field_id(diagnostic: Diagnostic, field: &ComponentFieldId) -> Diagnostic {

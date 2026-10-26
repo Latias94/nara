@@ -38,10 +38,10 @@ use nara_reflect::{
     collect_declared_asset_references, collect_declared_field_asset_references,
 };
 use nara_scene::{
-    ExpandedSceneCandidate, PrefabDocument, PrefabDocumentCandidate, PrefabSourceResolver,
-    ResolvedPrefabSource, SceneDocument, SceneDocumentCandidate, SceneEntityProvenanceMap,
-    SceneEntityRecord, SceneFormatError, ScenePatchDocument, ScenePatchOperation,
-    SourceDocumentKey, SourceDocumentKind,
+    ExpandedSceneCandidate, PrefabDocument, PrefabDocumentCandidate, PrefabInstance,
+    PrefabSourceResolver, ResolvedPrefabSource, SceneDocument, SceneDocumentCandidate,
+    SceneEntityProvenanceMap, SceneEntityRecord, SceneFormatError, ScenePatchDocument,
+    ScenePatchOperation, SourceDocumentKey, SourceDocumentKind,
 };
 use nara_tilemap::{
     TileSetSource, TileSetSourceFileLimits, TilemapMembershipError,
@@ -1862,10 +1862,20 @@ impl<'a> LoadContext<'a> {
         discovered: &mut BTreeSet<AssetPath>,
     ) -> Result<(), ProjectContentError> {
         if let Some(prefab) = &entity.prefab {
-            self.enqueue_prefab_ref(&prefab.source, depth, queue, discovered)?;
-            self.enqueue_patch_prefabs(&prefab.overrides, depth, queue, discovered)?;
+            self.enqueue_prefab_instance(prefab, depth, queue, discovered)?;
         }
         Ok(())
+    }
+
+    fn enqueue_prefab_instance(
+        &mut self,
+        prefab: &PrefabInstance,
+        depth: usize,
+        queue: &mut VecDeque<(AssetPath, usize)>,
+        discovered: &mut BTreeSet<AssetPath>,
+    ) -> Result<(), ProjectContentError> {
+        self.enqueue_prefab_ref(&prefab.source, depth, queue, discovered)?;
+        self.enqueue_patch_prefabs(&prefab.overrides, depth, queue, discovered)
     }
 
     fn enqueue_patch_prefabs(
@@ -1877,6 +1887,13 @@ impl<'a> LoadContext<'a> {
     ) -> Result<(), ProjectContentError> {
         for operation in &patch.operations {
             match operation {
+                ScenePatchOperation::SetPrefabInstance {
+                    expected, value, ..
+                } => {
+                    for prefab in expected.iter().chain(value.iter()) {
+                        self.enqueue_prefab_instance(prefab, depth, queue, discovered)?;
+                    }
+                }
                 ScenePatchOperation::AddEntity { entity, .. } => {
                     self.prepare_component_asset_references(std::slice::from_ref(entity))?;
                     self.enqueue_prefab_references(entity, depth, queue, discovered)?;

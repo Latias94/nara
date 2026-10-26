@@ -368,6 +368,48 @@ impl AuthoringHistory {
         Ok((report, cost))
     }
 
+    #[cfg(feature = "serde")]
+    fn admit_forward_input(&self, patch: &ScenePatchDocument) -> Result<(), ScenePatchReport> {
+        // Let the source preparer report cheap envelope/arity errors before value work.
+        if patch.format_version != ScenePatchDocument::CURRENT_FORMAT_VERSION
+            || patch.is_empty()
+            || patch.operations.len() > crate::authoring_decode::MAX_AUTHORING_EDIT_OPERATIONS
+            || patch
+                .operations
+                .iter()
+                .filter(|operation| {
+                    crate::authoring_decode::is_authoring_field_operation(operation)
+                })
+                .take(crate::authoring_decode::MAX_AUTHORING_FIELD_WRITES + 1)
+                .count()
+                > crate::authoring_decode::MAX_AUTHORING_FIELD_WRITES
+        {
+            return Ok(());
+        }
+        let limits = crate::ScenePatchApplyLimits::default()
+            .with_validation_work(
+                nara_core::ItemLimit::new(self.limits.max_entry_operations)
+                    .expect("nonzero history limit"),
+            )
+            .with_validation_value_nodes(
+                nara_core::ItemLimit::new(self.limits.max_entry_value_nodes)
+                    .expect("nonzero history limit"),
+            )
+            .with_validation_value_bytes(
+                nara_core::ByteLimit::new(self.limits.max_entry_logical_bytes)
+                    .expect("nonzero history limit"),
+            );
+        let admitted = crate::patch::bounded_scene_patch_cost(patch, limits)
+            .is_some_and(|cost| cost.logical_bytes() <= self.limits.max_entry_logical_bytes);
+        if !admitted {
+            return Err(history_error_report(
+                "scene.authoring-history-entry-limit-exceeded",
+                "authoring patch exceeds the per-entry history limit",
+            ));
+        }
+        Ok(())
+    }
+
     fn apply_history<D>(
         &mut self,
         document: &mut D,

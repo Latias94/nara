@@ -305,6 +305,16 @@ value is insufficient if its inverse cannot be replayed under the same field lim
 existing field-value limits remain separate. This is not cross-document atomicity or atomic
 multi-file Save.
 
+Use `ScenePatchOperation::SetPrefabInstance { entity, expected, value }` to attach, replace or
+detach a direct source entity's instance declaration through this same preparation path. Capture
+the complete optional previous declaration in `expected`; an equal lookup with different overrides
+does not match. `value: None` detaches only the declaration and keeps local components, children
+and placement. It does not convert expanded objects to local records. The owner creates the exact
+inverse and charges both snapshots to replay/history limits. Unavailable override records remain
+protected by the ordinary preservation check. Preparing a declaration does not resolve its source,
+qualify nested preview or activate Runtime data. Native snapshot loading requires current Schema
+semantics without silently migrating either comparison side.
+
 Raw mixed patches use explicit persistent `SceneEntityId` values and declared component templates;
 use [retained construction](#construct-with-transaction-local-references) for source-owned
 transaction-local allocation and references. Schema-relative nested replacements have their separate

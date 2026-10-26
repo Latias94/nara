@@ -63,6 +63,7 @@ impl SceneAuthoringSession {
             .authority
             .published()
             .ok_or_else(authoring_field_edit_session_rejection)?;
+        self.history.admit_forward_input(patch)?;
         let mut candidate = prepare_scene_authoring_patch(&self.document, state, patch, false)?;
         let (report, history_cost) = self
             .history
@@ -153,6 +154,7 @@ impl PrefabAuthoringSession {
             .authority
             .published()
             .ok_or_else(authoring_field_edit_session_rejection)?;
+        self.history.admit_forward_input(patch)?;
         let mut candidate = prepare_prefab_authoring_patch(&self.document, state, patch, false)?;
         let (report, history_cost) = self
             .history

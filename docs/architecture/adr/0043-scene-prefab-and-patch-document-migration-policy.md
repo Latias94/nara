@@ -3,6 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Amended**: 2026-07-10 for the unreleased canonical-version reset policy
+**Amended**: 2026-10-26 for exact instance-declaration snapshot semantics
 **Implemented Slice**: RGF-U1 on 2026-07-12
 **Refines**: ADR 0006, ADR 0011, ADR 0026, ADR 0038
 **Refined By**: ADR 0047: Editor Workspace and Scene Document State; ADR 0049: Untrusted Project
@@ -76,6 +77,11 @@ Rules:
   best-effort guess unknown document shapes.
 - Patch documents migrate before validation/apply. Undo/redo stacks should store current-version
   inverse patches once they are produced by the active editor session.
+- Complete expected/replacement snapshots in `SetPrefabInstance` are exact transaction data,
+  not values to migrate independently of their captured source basis. Native admission rejects
+  snapshots requiring reinterpretation rather than silently rewriting their comparison or inverse.
+  Schema-only source preservation may retain understood unavailable data under ADR 0090; that
+  does not grant native activation or destructive replacement of unavailable records.
 - Migrations must preserve authoring identity and provenance. They may rewrite IDs only through an
   explicit documented migration that also updates references and overrides.
 - AI/editor tooling emits canonical version 1. Loading another version is supported only when the

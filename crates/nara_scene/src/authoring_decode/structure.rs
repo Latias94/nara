@@ -218,6 +218,7 @@ fn validate_structure_operation(
     match operation {
         ScenePatchOperation::AddEntity { .. } => {}
         ScenePatchOperation::MoveEntity { .. } => {}
+        ScenePatchOperation::SetPrefabInstance { .. } => {}
         ScenePatchOperation::RemoveEntity { entity, .. } => {
             let empty_history_inverse = history
                 && document.entities.iter().any(|record| {

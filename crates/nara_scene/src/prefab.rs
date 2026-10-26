@@ -1567,6 +1567,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
                 | ScenePatchOperation::SetField { .. }
                 | ScenePatchOperation::RemoveField { .. }
                 | ScenePatchOperation::MoveEntity { .. }
+                | ScenePatchOperation::SetPrefabInstance { .. }
                 | ScenePatchOperation::SetAssetRefField { .. } => {}
             }
         }

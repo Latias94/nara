@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "11e4f8852e09b37e6892490210f0d04383eb9c76cba3d1ab411d58b966badd59"
+source_fingerprint: "4d1d36a73b9f10b49402b7245eb87109aa98d1d88b413ed87f63d5a2f5b51cdb"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "11e4f8852e09b37e6892490210f0d04383eb9c76cba3d1ab411d58b966b
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `11e4f8852e09b37e6892490210f0d04383eb9c76cba3d1ab411d58b966badd59`
-- Immutable records: 946
+- Source fingerprint: `4d1d36a73b9f10b49402b7245eb87109aa98d1d88b413ed87f63d5a2f5b51cdb`
+- Immutable records: 947
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Exact source-owned Prefab instance transactions and complete snapshot custody](verification/2026-10/2026-10-26T083507Z-exact-source-owned-prefab-instance-transactions-and-complete-snapshot-custody-85b9ca4381b94cad9c61fb829f479247.md) - Source instance declaration replacement through existing preparation/history and real Host consumers; durable declarative overlay storage remains separate.
 - **Verification Evidence**: [Complete mixed-origin overlay targets and payload-relative property claims](verification/2026-10/2026-10-26T074532Z-complete-mixed-origin-overlay-targets-and-payload-relative-property-claims-0949791c549242739236d36eb00d4fa2.md) - Complete private mixed-origin target indexing and bounded property claims with shared Reflect payload reference traversal; production overlay storage remains unchanged.
 - **Work Progress**: [Complete nested overlay target grammar and next production replacement gates](progress/2026-10/2026-10-26T065759Z-complete-nested-overlay-target-grammar-and-next-production-replacement-gates-630e9676fa7f496b9000e4aa4ef27f45.md) - Read-only owner analysis exposes mixed-origin target omissions and bounds the next durable grammar, source codec and source-history replacement without adopting a public format.
 - **Verification Evidence**: [One bounded Application no-action pass through Open and physical retirement](verification/2026-10/2026-10-26T063246Z-one-bounded-application-no-action-pass-through-open-and-physical-retirement-f8c6241efa2b48f8af54f1603482cd39.md) - Replace public frame/no-frame maintenance choreography with one bounded Application pass while preserving action evidence, quiet wakes and physical Exit completion.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Private Prefab property intent comparison and next owner replacement](verification/2026-10/2026-10-26T025005Z-private-prefab-property-intent-comparison-and-next-owner-replacement-70ca642be09045ab909751b87ed5164d.md) - Compared real root-patch lowering with retained scalar leaf intent, reviewed the proposed full overlay replacement, and recorded structural/reference freeze blockers without changing production format.
 - **Verification Evidence**: [Pre-budget query ownership and independent direct-member panel workflow](verification/2026-10/2026-10-26T024129Z-pre-budget-query-ownership-and-independent-direct-member-panel-workflow-1acbda3fb8cc47218dd9b54bcd59f367.md) - Removed caller-ID cloning before query budget admission and qualified a separately compiled non-active Scene direct-member panel through retained edits, history and divergent-memory Save/Reopen.
 - **Verification Evidence**: [Public Exit drivers retain maintenance after Workspace retirement](verification/2026-10/2026-10-26T022556Z-public-exit-drivers-retain-maintenance-after-workspace-retirement-2c1f097eeed04d499d81adc33d3232dd.md) - Corrected public and independent Exit callers, a deterministic held-worker regression, and successor clarification of earlier lifecycle and panel evidence.
-- **Verification Evidence**: [Bounded direct-member discovery and non-active panel query workflow](verification/2026-10/2026-10-26T004155Z-bounded-direct-member-discovery-and-panel-query-workflow-7003450c49204d8eba92ba90db765dc0.md) - Qualified one-level durable Record-member discovery, selection-independent Session/panel query forwarding, and an independently compiled non-active panel discover/read/prepare/retain/commit workflow.
 
 # Integration Notes
 

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-25
+**Last Revised**: 2026-10-26
 **Amended**: 2026-08-15 to require exact mutation preconditions and independently bounded,
 branch-aware authoring history
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
@@ -100,6 +100,16 @@ Rules:
   append, before later lowering can clone them. Length admission does not certify that an ID
   names an admitted component, provider or template; preparation retains those semantic checks.
 - Patches should be serializable so AI tools, editor UI, and tests can share the same mutation format.
+- An instance declaration is source data owned by its containing Scene or Prefab session.
+  `SetPrefabInstance` compares the complete expected optional declaration before replacing it,
+  including lookup and retained override intent. Its inverse exchanges expected and replacement;
+  ordinary revision/Schema, complete forward/reverse replay and history admission still apply.
+  It can attach, replace or detach that declaration while preserving the entity's local components,
+  children and placement. Detaching does not convert generated projection records to local data.
+  Preparation does not resolve or activate a Prefab, and unavailable-record preservation remains
+  a barrier to destructive replacement; this operation does not grant implicit repair authority.
+  Borrowed programmatic input must satisfy bounded declaration/value depth before recursive
+  equality, cloning or serialization; post-copy file validation is not allocation admission.
 
 ```mermaid
 flowchart TD
@@ -132,6 +142,7 @@ ScenePatchOperation
   RemoveField { entity, component, component_version, field }
   MoveEntity { entity, from, to }
   SetAssetRefField { entity, component, component_version, field, asset_ref }
+  SetPrefabInstance { entity, expected: Option<PrefabInstance>, value: Option<PrefabInstance> }
 
 ScenePlacement
   owner: Root | Parent { parent }

@@ -933,7 +933,7 @@ mod tests {
     };
     use nara_scene::{
         PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityId,
-        SceneEntityRecord, ScenePatchDocument,
+        SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
     };
 
     use super::*;
@@ -1445,6 +1445,144 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn exact_instance_snapshots_capture_both_prefab_and_declared_asset_closures() {
+        let owner = PersistentComponentSchemaOwnerId::try_new("nara.test.snapshot-owner").unwrap();
+        let component = ComponentTypeId::new("nara.test.SnapshotImageLink");
+        let project = TestAuthoringProject::new(
+            "instance-snapshot-closure",
+            asset_schema_bundle(owner.clone(), component.clone()),
+        );
+        project.write_startup_manifest();
+        for directory in ["scenes", "prefabs", "assets"] {
+            fs::create_dir_all(project.root.join(directory)).unwrap();
+        }
+        let asset_operation = |name: &str| ScenePatchOperation::AddComponent {
+            entity: SceneEntityId::new("same-target").unwrap(),
+            component: component.clone(),
+            value: SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([(
+                    "image",
+                    ComponentValue::map([
+                        ("kind", ComponentValue::String("path".to_owned())),
+                        ("value", ComponentValue::String(format!("{name}.png"))),
+                    ]),
+                )]),
+            )
+            .with_owner(owner.clone()),
+        };
+        let declaration = |name: &str, overrides| PrefabInstance {
+            source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
+            overrides,
+        };
+        let replacement = ScenePatchOperation::SetPrefabInstance {
+            entity: SceneEntityId::new("same-target").unwrap(),
+            expected: Some(declaration(
+                "prior",
+                ScenePatchDocument::new([asset_operation("prior")]),
+            )),
+            value: Some(declaration(
+                "next",
+                ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
+                    entity: SceneEntityId::new("same-target").unwrap(),
+                    expected: Some(declaration(
+                        "nested-prior",
+                        ScenePatchDocument::new([asset_operation("nested-prior")]),
+                    )),
+                    value: Some(declaration(
+                        "nested-next",
+                        ScenePatchDocument::new([asset_operation("nested-next")]),
+                    )),
+                }]),
+            )),
+        };
+        let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
+        anchor.prefab = Some(declaration("outer", ScenePatchDocument::new([replacement])));
+        let scene = SceneDocument::from_ordered_roots([anchor]);
+        fs::write(
+            project.root.join("scenes/startup.scene.json"),
+            scene.to_json_string().unwrap(),
+        )
+        .unwrap();
+        for name in ["outer", "prior", "next", "nested-prior", "nested-next"] {
+            fs::write(
+                project.root.join(format!("prefabs/{name}.prefab.json")),
+                PrefabDocument::default().to_json_string().unwrap(),
+            )
+            .unwrap();
+        }
+        for (index, name) in ["prior", "nested-prior", "nested-next"].iter().enumerate() {
+            fs::write(
+                project.root.join(format!("assets/{name}.png")),
+                name.as_bytes(),
+            )
+            .unwrap();
+            fs::write(
+                project.root.join(format!("assets/{name}.png.meta")),
+                AssetMeta::new(
+                    AssetMetaIdentity::new(
+                        StableAssetId::parse_str(&format!("2f0d71c7-14fc-4ed4-b48b-{index:012x}"))
+                            .unwrap(),
+                        AssetPath::new(format!("{name}.png")).unwrap(),
+                        AssetSourceKind::Image,
+                    ),
+                    (),
+                )
+                .to_json_string()
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        let mut host = AuthoringProjectAdmissionHost::default();
+        let schema = host
+            .prepare(project.capability(), None)
+            .unwrap()
+            .admit_bundle()
+            .unwrap()
+            .publish();
+        let receipt = PreparedAuthoringProject::new(schema, Box::new([]))
+            .admit_startup_closure()
+            .unwrap()
+            .publish();
+        let snapshot = receipt.snapshot();
+        assert_eq!(snapshot.startup_scene().document(), &scene);
+        assert_eq!(snapshot.prefabs().len(), 5);
+        assert_eq!(snapshot.assets().len(), 3);
+        assert!(snapshot.unresolved_dependencies().is_empty());
+        let facts = snapshot.startup_scene().record_facts();
+        let paths = facts
+            .iter()
+            .map(|fact| {
+                let nara_scene::AuthoringRecordLocation::PatchComponent { operation_path, .. } =
+                    fact.location()
+                else {
+                    panic!("snapshot records must keep their embedded patch location");
+                };
+                (
+                    operation_path.clone(),
+                    fact.schema_declared_asset_references()[0]
+                        .asset_ref()
+                        .clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            paths,
+            vec![
+                (vec![0, 0, 0], AssetRef::path("prior.png").unwrap()),
+                (
+                    vec![0, 1, 0, 0, 0],
+                    AssetRef::path("nested-prior.png").unwrap()
+                ),
+                (
+                    vec![0, 1, 0, 1, 0],
+                    AssetRef::path("nested-next.png").unwrap()
+                ),
+            ]
+        );
     }
 
     #[test]

@@ -117,6 +117,9 @@ fn entity_dynamic_bytes(entity: &SceneEntityRecord) -> Result<usize, SceneRetent
                 size_of_val(record),
                 BTREE_ENTRY_OVERHEAD,
                 string_retained_bytes(id.as_str())?,
+                record
+                    .owner()
+                    .map_or(Ok(0), |owner| string_retained_bytes(owner.as_str()))?,
                 component_value_retained_bytes(&record.value)?,
             ])?,
         )?;
@@ -188,6 +191,14 @@ pub(crate) fn patch_retained_bytes(
     )?;
     for operation in &patch.operations {
         let dynamic = match operation {
+            ScenePatchOperation::SetPrefabInstance {
+                entity,
+                expected,
+                value,
+            } => expected.iter().chain(value.iter()).try_fold(
+                string_retained_bytes(entity.as_str())?,
+                |total, instance| checked_sum([total, prefab_instance_retained_bytes(instance)?]),
+            )?,
             ScenePatchOperation::AddEntity { entity, placement } => checked_sum([
                 entity_dynamic_bytes(entity)?,
                 placement_retained_bytes(placement)?,
@@ -219,6 +230,9 @@ pub(crate) fn patch_retained_bytes(
             } => checked_sum([
                 string_retained_bytes(entity.as_str())?,
                 string_retained_bytes(component.as_str())?,
+                value
+                    .owner()
+                    .map_or(Ok(0), |owner| string_retained_bytes(owner.as_str()))?,
                 component_value_retained_bytes(&value.value)?,
             ])?,
             ScenePatchOperation::SetField {
@@ -599,6 +613,44 @@ mod tests {
                 ],
             );
         }
+    }
+
+    #[test]
+    fn exact_instance_snapshots_retain_both_payloads_even_when_they_are_equal() {
+        let snapshot = PrefabInstance {
+            source: AssetRef::path("deep/base.prefab.json").unwrap(),
+            overrides: ScenePatchDocument::new([ScenePatchOperation::SetField {
+                entity: scene_id("nested-entity"),
+                component: nara_reflect::ComponentTypeId::new("test.Snapshot"),
+                component_version: nara_reflect::ComponentSchemaVersion::ONE,
+                field: nara_reflect::ComponentFieldId::new("payload"),
+                value: nara_reflect::ComponentValue::map([(
+                    "items",
+                    nara_reflect::ComponentValue::String("retained payload".repeat(32)),
+                )]),
+            }]),
+        };
+        let target = scene_id("anchor");
+        let patch = |expected, value| {
+            ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
+                entity: target.clone(),
+                expected,
+                value,
+            }])
+        };
+        let empty = patch(None, None);
+        let old = patch(Some(snapshot.clone()), None);
+        let new = patch(None, Some(snapshot.clone()));
+        let both = patch(Some(snapshot.clone()), Some(snapshot));
+        let base = patch_retained_bytes(&empty).unwrap();
+        let old_bytes = patch_retained_bytes(&old).unwrap() - base;
+        let new_bytes = patch_retained_bytes(&new).unwrap() - base;
+        assert!(old_bytes > "retained payload".len() * 32);
+        assert_eq!(old_bytes, new_bytes);
+        assert_eq!(
+            patch_retained_bytes(&both).unwrap() - base,
+            old_bytes + new_bytes
+        );
     }
 
     #[test]

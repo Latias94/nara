@@ -437,10 +437,11 @@ owners. A compiler-only or wire-only switch cannot establish that workflow:
   recursive declaration/value counting. `migration` and `authoring_decode` must replace embedded
   patch-version/operation-path locations with actual overlay declaration locations. Preserve
   unavailable payloads, owner/version, selectors and bindings without guessing a migration.
-- Exact Scene patches remain source transactions. Their current operation enum cannot mutate an
-  existing `entity.prefab`; add a dedicated owner-created instance/overlay operation and inverse
-  through existing prepare/commit, revision, readmission and history budgets. Unresolved intent
-  remains savable even when activation rejects. Source repair must not require an active projection.
+- Exact Scene patches remain source transactions. `SetPrefabInstance` replaces an existing
+  `entity.prefab` after complete optional-declaration equality, with an owner-created inverse through
+  existing prepare/commit, revision, readmission and history budgets. This prerequisite operates on
+  current storage and does not qualify the selected declarative overlay. Unresolved intent remains
+  savable even when activation rejects; unavailable-record preservation is not implicit repair.
 - The Scene-owned compiler takes actual resolved bases and produces the existing admitted expanded
   document without source history. Production additions carry complete records, including nested
   instances. Bound aggregate values, defaults, targets, bindings and provenance before copying;
@@ -460,6 +461,15 @@ Current `project_authoring_preview` still reports nested Prefabs as unsupported.
 does not qualify the ordinary Inspector/preview path until its real captured closure and compiler
 are connected. Existing Play Apply Changes remains limited to ordinary Scene entities; extending
 cross-document Apply is a separate workflow and is not required to preserve that supported scope.
+
+The exact declaration transaction counts both snapshots and retains their unmodified comparison
+semantics. Native canonicalization rejects a snapshot requiring component migration; an equality
+precondition cannot be silently migrated independently of its source basis. Attaching, replacing
+and detaching declarations preserve local components/children. Detachment is not conversion.
+Authoring dependency capture still has a separate pre-existing gap for assets introduced by
+embedded field writes: complete record facts carry declared assets, but partial field payloads do
+not yet publish equivalent source-owned dependency facts. Recursive snapshot scanning alone does
+not close that gap; production overlay activation must account for all declared payload assets.
 
 ## Experiment Gates And Risks
 

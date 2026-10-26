@@ -228,6 +228,9 @@ pub enum AuthoringRecordLocation {
     },
     PatchComponent {
         anchor: SceneEntityId,
+        /// Nested operation indices. A `SetPrefabInstance` operation inserts a side
+        /// segment (0 for expected, 1 for value) before its nested operation index.
+        /// The outer source anchor remains the owner of both snapshot branches.
         operation_path: Vec<usize>,
         slot: AuthoringPatchRecordSlot,
         entity: SceneEntityId,
@@ -650,7 +653,7 @@ impl UnavailableRecord {
 }
 
 /// Canonical preservation barrier for an unavailable component-targeting patch operation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UnavailablePatchTarget {
     source: AuthoringDocumentSource,
     document_kind: AuthoringDocumentKind,
@@ -662,6 +665,9 @@ pub struct UnavailablePatchTarget {
     component: ComponentTypeId,
     version: Option<ComponentSchemaVersion>,
     field: Option<ComponentFieldId>,
+    // Exact replacement data; asset references use their existing canonical value grammar.
+    // None is a payload-free removal, distinct from an explicit SetField(Null).
+    value: Option<ComponentValue>,
     readiness: AuthoringRecordReadiness,
 }
 
@@ -713,6 +719,11 @@ impl UnavailablePatchTarget {
     #[must_use]
     pub const fn field(&self) -> Option<&ComponentFieldId> {
         self.field.as_ref()
+    }
+
+    #[must_use]
+    pub const fn value(&self) -> Option<&ComponentValue> {
+        self.value.as_ref()
     }
 
     #[must_use]
@@ -2007,82 +2018,78 @@ fn classify_patch(
                 value,
                 context,
             )?,
-            ScenePatchOperation::RemoveComponent { entity, component } => {
-                classify_patch_target(
-                    anchor,
-                    operation_path,
-                    AuthoringPatchTargetKind::RemoveComponent,
-                    entity,
-                    component,
-                    None,
-                    None,
-                    context,
-                )?;
+            ScenePatchOperation::RemoveComponent { .. }
+            | ScenePatchOperation::SetField { .. }
+            | ScenePatchOperation::RemoveField { .. }
+            | ScenePatchOperation::SetAssetRefField { .. } => {
+                classify_patch_target(anchor, operation_path, operation, context)?;
             }
-            ScenePatchOperation::SetField {
-                entity,
-                component,
-                component_version,
-                field,
-                ..
-            } => classify_patch_target(
-                anchor,
-                operation_path,
-                AuthoringPatchTargetKind::SetField,
-                entity,
-                component,
-                Some(*component_version),
-                Some(field),
-                context,
-            )?,
-            ScenePatchOperation::RemoveField {
-                entity,
-                component,
-                component_version,
-                field,
-            } => classify_patch_target(
-                anchor,
-                operation_path,
-                AuthoringPatchTargetKind::RemoveField,
-                entity,
-                component,
-                Some(*component_version),
-                Some(field),
-                context,
-            )?,
-            ScenePatchOperation::SetAssetRefField {
-                entity,
-                component,
-                component_version,
-                field,
-                ..
-            } => classify_patch_target(
-                anchor,
-                operation_path,
-                AuthoringPatchTargetKind::SetAssetRefField,
-                entity,
-                component,
-                Some(*component_version),
-                Some(field),
-                context,
-            )?,
+            ScenePatchOperation::SetPrefabInstance {
+                expected, value, ..
+            } => {
+                // A snapshot is not a source entity record. Retain the containing anchor,
+                // and distinguish both branches before descending into their operations.
+                // Host record scanners use this same operation/side/operation grammar.
+                for (side, instance) in [(0, expected.as_ref()), (1, value.as_ref())] {
+                    if let Some(instance) = instance {
+                        let mut branch_path = operation_path.clone();
+                        branch_path.push(side);
+                        classify_patch(&instance.overrides, anchor, &branch_path, context)?;
+                    }
+                }
+            }
             ScenePatchOperation::RemoveEntity { .. } | ScenePatchOperation::MoveEntity { .. } => {}
         }
     }
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn classify_patch_target(
     anchor: &SceneEntityId,
     operation_path: Vec<usize>,
-    target_kind: AuthoringPatchTargetKind,
-    entity: &SceneEntityId,
-    component: &ComponentTypeId,
-    version: Option<ComponentSchemaVersion>,
-    field: Option<&ComponentFieldId>,
+    operation: &ScenePatchOperation,
     context: &mut ClassificationContext<'_>,
 ) -> Result<(), AuthoringDocumentPublicationError> {
+    let (target_kind, entity, component, version, field) = match operation {
+        ScenePatchOperation::RemoveComponent { entity, component } => (
+            AuthoringPatchTargetKind::RemoveComponent,
+            entity,
+            component,
+            None,
+            None,
+        ),
+        ScenePatchOperation::SetField {
+            entity,
+            component,
+            component_version,
+            field,
+            ..
+        }
+        | ScenePatchOperation::RemoveField {
+            entity,
+            component,
+            component_version,
+            field,
+        }
+        | ScenePatchOperation::SetAssetRefField {
+            entity,
+            component,
+            component_version,
+            field,
+            ..
+        } => (
+            match operation {
+                ScenePatchOperation::SetField { .. } => AuthoringPatchTargetKind::SetField,
+                ScenePatchOperation::RemoveField { .. } => AuthoringPatchTargetKind::RemoveField,
+                _ => AuthoringPatchTargetKind::SetAssetRefField,
+            },
+            entity,
+            component,
+            Some(*component_version),
+            Some(field),
+        ),
+        _ => unreachable!("only finite component-target operations use target classification"),
+    };
     let classified = context.basis.classify_target(component, version)?;
     if classified.readiness.is_available() {
         if let Some(field) = field {
@@ -2127,6 +2134,13 @@ fn classify_patch_target(
                 component: component.clone(),
                 version,
                 field: field.cloned(),
+                value: match operation {
+                    ScenePatchOperation::SetField { value, .. } => Some(value.clone()),
+                    ScenePatchOperation::SetAssetRefField { asset_ref, .. } => {
+                        Some(crate::patch::asset_ref_value(asset_ref))
+                    }
+                    _ => None,
+                },
                 readiness: classified.readiness,
             },
         ));
@@ -2303,7 +2317,7 @@ struct AuthoringFieldChange {
     value: Option<ComponentValue>,
 }
 
-fn is_authoring_field_operation(operation: &ScenePatchOperation) -> bool {
+pub(crate) fn is_authoring_field_operation(operation: &ScenePatchOperation) -> bool {
     matches!(
         operation,
         ScenePatchOperation::SetField { .. }

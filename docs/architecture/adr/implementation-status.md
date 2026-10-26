@@ -360,6 +360,13 @@ Reflect reuses its declared-reference traversal; the resolved-base trace and com
 test-private. Production patch storage, bounded source/conflict decoding, source history/repair
 and captured-closure activation remain separate work, without an Accepted ADR format change.
 
+The [exact instance transaction successor](../../knowledge/engineering/verification/2026-10/2026-10-26T083507Z-exact-source-owned-prefab-instance-transactions-and-complete-snapshot-custody-85b9ca4381b94cad9c61fb829f479247.md)
+adds containing-source declaration replacement through existing prepared Scene/Prefab edits,
+exact inverse/history and actual Host scanners. ADRs 0026/0038/0043/0090 adopt comparison,
+snapshot migration and unavailable-preservation rules. Both sides remain complete retained input;
+source preparation does not imply resolution, activation, nested preview or conversion. Production
+durable overrides remain patches, with partial-field asset dependency capture still a separate gap.
+
 The [R5c custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md)
 implements typed per-document Scene/Prefab file custody under ADRs 0047/0118. Save retains its
 admission-time Host through acknowledgement/uncertainty; Reopen validates exact retained Host

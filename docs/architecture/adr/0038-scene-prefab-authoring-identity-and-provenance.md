@@ -7,6 +7,7 @@ and Scene-owned logical occurrence
 **Amended**: 2026-10-25 by owned unbound ordinary Scene preparation
 and complete Runtime/Canvas logical-key lowering
 **Amended**: 2026-10-26 by explicit instance-addition origin throughout projection ancestry
+and exact containing-source instance-declaration transactions
 **Refines**: ADR 0006: Scene and Prefab Data Model
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References;
@@ -61,6 +62,11 @@ Scene/prefab authoring identity is document-relative and provenance-aware.
   containing instance's override, or convert the selected projection into local data. Each path
   needs its own qualified source transaction. Writing a whole expanded entity back as if it were
   a containing-source local record is invalid.
+- Attaching, replacing or detaching an instance declaration uses the containing source's exact
+  `SetPrefabInstance` transaction under ADR 0026. Expected declaration equality is separate from
+  lookup resolution and activation. Source preparation may retain unresolved lookup/override
+  intent without claiming an executable candidate. Local children and components are unchanged;
+  detachment is not convert-to-local, and preservation of unavailable data remains mandatory.
 - Cross-document references should use `AssetRef` plus document-relative `SceneEntityId` when they
   become necessary. They must not rely on runtime entity IDs or backend handles.
 

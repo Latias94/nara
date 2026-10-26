@@ -157,6 +157,10 @@ The [mixed-origin/property successor](../knowledge/engineering/verification/2026
 combines complete source/addition target chains, per-hop base predicates and bounded property
 claims in the private compiler, using Reflect's payload-relative declared-reference traversal.
 It does not qualify a production wire codec, conflict persistence or source history/repair.
+The [exact instance transaction](../knowledge/engineering/verification/2026-10/2026-10-26T083507Z-exact-source-owned-prefab-instance-transactions-and-complete-snapshot-custody-85b9ca4381b94cad9c61fb829f479247.md)
+adds production source declaration replacement through the existing prepared-edit and history
+owner while retaining current override storage. It is a prerequisite to the complete replacement,
+with actual validation evidence and remaining dependency/preview obligations scoped separately.
 
 The [source-owned creation and construction design](authoring-construction-design.md) removes
 Workspace ordinal allocation and ID-reservation choreography from ordinary Scene/Prefab creation.

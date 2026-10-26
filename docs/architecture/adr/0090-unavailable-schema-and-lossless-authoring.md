@@ -114,6 +114,18 @@ file envelope, document shape, and generic `ComponentValue` grammar are understo
 migration, or required native/Adapter runtime binding is unavailable. Runtime admission remains
 strict and fail-closed.
 
+Exact `SetPrefabInstance` source transactions under ADR 0026 do not bypass preservation.
+Both expected and replacement declarations are bounded input, including nested record and target
+facts. Their embedded operation paths distinguish expected/replacement branches explicitly.
+The candidate must reproduce the complete unavailable manifest; removing or rewriting unavailable
+override records requires a separately admitted repair workflow. An unresolved lookup alone does
+not prevent storing a syntactically understood declaration, and preparation does not resolve or
+execute it. Source equality and activation readiness remain distinct.
+
+Unavailable component-targeting field writes retain their complete replacement payload, including
+canonical asset-reference values. Preserving only the target/field identity does not preserve the
+operation. Payload-free removal and an explicit Null replacement remain different declarations.
+
 ```mermaid
 flowchart TD
     Bytes[Bounded source bytes]

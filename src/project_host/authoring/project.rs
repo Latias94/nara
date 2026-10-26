@@ -23,9 +23,9 @@ use nara_scene::__private::{
 };
 use nara_scene::{
     AuthoringDocumentPublicationError, AuthoringDocumentReadiness, AuthoringRecordFact,
-    PrefabDocument, PublishedAuthoringPrefabDocument, PublishedAuthoringSceneDocument,
-    SceneDocument, SceneEntityRecord, SceneFileLimits, SceneFormatError, ScenePatchDocument,
-    ScenePatchOperation, UnavailableRecordManifestEntry,
+    PrefabDocument, PrefabInstance, PublishedAuthoringPrefabDocument,
+    PublishedAuthoringSceneDocument, SceneDocument, SceneEntityRecord, SceneFileLimits,
+    SceneFormatError, ScenePatchDocument, ScenePatchOperation, UnavailableRecordManifestEntry,
 };
 
 use super::{
@@ -36,6 +36,8 @@ use super::{
 };
 
 mod catalogue;
+#[cfg(test)]
+mod tests;
 use super::native_source::{AdmittedNativeDocumentSource, NativeDocumentSourcePolicy};
 use catalogue::{ReferenceCatalogue, charge_database_record, insert_asset_record};
 
@@ -1717,10 +1719,18 @@ fn entity_retained_bytes(
         )?;
     }
     if let Some(prefab) = &entity.prefab {
-        checked_add_to(&mut total, asset_ref_retained_bytes(&prefab.source)?)?;
-        checked_add_to(&mut total, patch_retained_bytes(&prefab.overrides)?)?;
+        checked_add_to(&mut total, prefab_instance_retained_bytes(prefab)?)?;
     }
     Ok(total)
+}
+
+fn prefab_instance_retained_bytes(
+    prefab: &PrefabInstance,
+) -> Result<usize, AuthoringProjectSourceAdmissionError> {
+    checked_sum([
+        asset_ref_retained_bytes(&prefab.source)?,
+        patch_retained_bytes(&prefab.overrides)?,
+    ])
 }
 
 fn patch_retained_bytes(
@@ -1729,6 +1739,16 @@ fn patch_retained_bytes(
     let mut total = checked_product(patch.operations.len(), size_of::<ScenePatchOperation>())?;
     for operation in &patch.operations {
         let dynamic = match operation {
+            ScenePatchOperation::SetPrefabInstance {
+                entity,
+                expected,
+                value,
+            } => expected
+                .iter()
+                .chain(value.iter())
+                .try_fold(entity.as_str().len(), |total, prefab| {
+                    checked_sum([total, prefab_instance_retained_bytes(prefab)?])
+                })?,
             ScenePatchOperation::AddEntity { entity, .. } => entity_retained_bytes(entity)?,
             ScenePatchOperation::RestoreEntity {
                 entity,
@@ -1755,6 +1775,7 @@ fn patch_retained_bytes(
                 checked_sum([
                     entity.as_str().len(),
                     component.as_str().len(),
+                    value.owner().map_or(0, |owner| owner.as_str().len()),
                     cost.logical_bytes(),
                     checked_product(cost.nodes(), VALUE_NODE_RETAINED_BYTES)?,
                 ])?
@@ -1883,6 +1904,28 @@ fn enqueue_entity_prefabs(
     let Some(prefab) = &entity.prefab else {
         return Ok(());
     };
+    enqueue_prefab_instance(
+        prefab,
+        dependency_depth,
+        pending,
+        queued_depths,
+        loaded_paths,
+        unresolved_dependencies,
+        catalogue,
+        budget,
+    )
+}
+
+fn enqueue_prefab_instance(
+    prefab: &PrefabInstance,
+    dependency_depth: usize,
+    pending: &mut BTreeSet<(usize, AssetPath)>,
+    queued_depths: &mut BTreeMap<AssetPath, usize>,
+    loaded_paths: &BTreeSet<AssetPath>,
+    unresolved_dependencies: &mut Vec<AuthoringUnresolvedDependency>,
+    catalogue: &mut ReferenceCatalogue,
+    budget: &mut AuthoringProjectAdmissionBudget,
+) -> Result<(), AuthoringProjectSourceAdmissionError> {
     enqueue_prefab_reference(
         &prefab.source,
         dependency_depth,
@@ -1917,6 +1960,22 @@ fn enqueue_patch_prefabs(
 ) -> Result<(), AuthoringProjectSourceAdmissionError> {
     for operation in &patch.operations {
         match operation {
+            ScenePatchOperation::SetPrefabInstance {
+                expected, value, ..
+            } => {
+                for prefab in expected.iter().chain(value.iter()) {
+                    enqueue_prefab_instance(
+                        prefab,
+                        dependency_depth,
+                        pending,
+                        queued_depths,
+                        loaded_paths,
+                        unresolved_dependencies,
+                        catalogue,
+                        budget,
+                    )?;
+                }
+            }
             ScenePatchOperation::AddEntity { entity, .. } => enqueue_entity_prefabs(
                 entity,
                 dependency_depth,

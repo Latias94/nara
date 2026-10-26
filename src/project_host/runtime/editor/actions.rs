@@ -982,6 +982,13 @@ pub(super) fn prefab_patch_uses_ui_domain(patch: &nara_scene::ScenePatchDocument
     let mut pending = patch.operations.iter().collect::<Vec<_>>();
     while let Some(operation) = pending.pop() {
         match operation {
+            ScenePatchOperation::SetPrefabInstance {
+                expected, value, ..
+            } => {
+                for prefab in expected.iter().chain(value.iter()) {
+                    pending.extend(prefab.overrides.operations.iter());
+                }
+            }
             ScenePatchOperation::AddEntity { entity, .. } => {
                 if entity.components.keys().any(component_uses_ui_domain) {
                     return true;
@@ -1006,7 +1013,10 @@ pub(super) fn prefab_patch_uses_ui_domain(patch: &nara_scene::ScenePatchDocument
             }
             ScenePatchOperation::AddComponent { component, .. }
             | ScenePatchOperation::RemoveComponent { component, .. }
-            | ScenePatchOperation::ReplaceComponent { component, .. } => {
+            | ScenePatchOperation::ReplaceComponent { component, .. }
+            | ScenePatchOperation::SetField { component, .. }
+            | ScenePatchOperation::RemoveField { component, .. }
+            | ScenePatchOperation::SetAssetRefField { component, .. } => {
                 if component_uses_ui_domain(component) {
                     return true;
                 }
@@ -1136,4 +1146,52 @@ fn with_public_u64(diagnostic: Diagnostic, key: &'static str, value: u64) -> Dia
             value,
         ))
         .expect("Editor action diagnostics use unique fields within the hard limit")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prefab_patch_uses_ui_domain;
+    use nara_asset::AssetRef;
+    use nara_reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue};
+    use nara_scene::{PrefabInstance, SceneEntityId, ScenePatchDocument, ScenePatchOperation};
+
+    #[test]
+    fn ui_domain_guard_checks_nested_expected_and_value_snapshots() {
+        let id = SceneEntityId::new("nested").unwrap();
+        let instance = |overrides| PrefabInstance {
+            source: AssetRef::path("base.prefab.json").unwrap(),
+            overrides,
+        };
+        let field = ScenePatchDocument::new([ScenePatchOperation::SetField {
+            entity: id.clone(),
+            component: ComponentTypeId::new("nara.ui.UiText"),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("text"),
+            value: ComponentValue::String("authored text".to_owned()),
+        }]);
+        for outer_expected in [false, true] {
+            for inner_expected in [false, true] {
+                let ui = Some(instance(field.clone()));
+                let inner = ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
+                    entity: id.clone(),
+                    expected: if inner_expected { ui.clone() } else { None },
+                    value: if inner_expected { None } else { ui },
+                }]);
+                let nested = Some(instance(inner));
+                let outer = ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
+                    entity: id.clone(),
+                    expected: if outer_expected { nested.clone() } else { None },
+                    value: if outer_expected { None } else { nested },
+                }]);
+                assert!(prefab_patch_uses_ui_domain(&outer));
+            }
+        }
+        assert!(!prefab_patch_uses_ui_domain(&ScenePatchDocument::new([
+            ScenePatchOperation::SetPrefabInstance {
+                entity: id,
+                expected: Some(instance(ScenePatchDocument::default())),
+                value: None,
+            },
+        ])));
+    }
 }
