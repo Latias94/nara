@@ -149,6 +149,10 @@ corrects current production addition ancestry through Scene, Runtime, retention 
 it does not qualify the Proposed overlay compiler. The [Unity/Godot editor study](../research/2026-10-26-unity-godot-prefab-editor-ownership.md)
 grounds editing contexts, explicit Apply/Revert, unused overrides and Inspector/history routing
 without adopting either engine's object model or claiming native UI support.
+The [full-value comparison successor](../knowledge/engineering/verification/2026-10/2026-10-26T061353Z-complete-value-projection-comparison-without-source-history-or-templates-047bc67b5dec41c2a940091b39ceedba.md)
+shares source classification's value validator with a private history-free compiler. It fixes
+the lawful absent/empty-container counterexample without introducing a public candidate family
+or changing production overlay storage.
 
 The [source-owned creation and construction design](authoring-construction-design.md) removes
 Workspace ordinal allocation and ID-reservation choreography from ordinary Scene/Prefab creation.

@@ -69,6 +69,9 @@ valid projection are separate admissions; a conflict must not make the source un
 - A direct inherited target names a source entity. A nested target adds ordered steps of source-
   local instance anchor plus the next canonical source identity, ending with a source entity.
   The same source at two anchors is two placements, not one target.
+- That source-only shorthand is insufficient for inherited additions or an added instance
+  anchor. The replacement address must tag source versus addition origin at every anchor and
+  terminal entity; the later grammar sketch below records this unresolved production shape.
 - Lookup spelling is useful evidence and write-back input, not canonical equality. Do not use
   whole `PrefabProjectionStep` equality: it deliberately includes the authored lookup request.
 - Properties retain `ComponentTypeId` and the original `ComponentPropertyPath` before root
@@ -97,6 +100,66 @@ and repeated nested sources. The first scalar comparison intentionally exercises
 the source owner before production format replacement; do not serialize Debug text, invent a new
 asset resolver, or derive canonical identity from a lookup path after resolution. Named,
 project-location and admitted stable-asset origins retain their existing continuity semantics.
+
+### Complete Nested Target Grammar
+
+The next data comparison should replace the private `Inherited(Vec<SourceEntity>)/Added(id)`
+split, which currently drops a target whenever any production provenance step is an addition.
+Real expansion already admits `Source(P,n) -> Added(x)`, `Added(a) -> Source(Q,y)` and
+`Added(a) -> Added(x)`. Each is a distinct authored placement, including repeated outer instances.
+Treating `Added(id)` as root-only or tagging only the terminal entity cannot express them.
+
+One proposed semantic shape, not an adopted public API or wire schema, is:
+
+```text
+EntityOrigin = SourceEntity(local_id) | InstanceAddition(local_id)
+InstanceHop = { anchor: EntityOrigin, expected_base: SourceDocumentKey }
+EntityTarget = { through: [InstanceHop], entity: EntityOrigin }
+Overlay = { base: SourceDocumentKey, additions, components, placements, suppressions }
+```
+
+Interpret a target relative to the containing overlay's instance. Each hop identifies the next
+anchor in that layer's source/addition namespace, then enters its Prefab only if its admitted
+base matches `expected_base`. The terminal origin uses the reached layer. The root overlay's
+`base` also binds intent when only additions survive. These are rebase predicates, not addition
+owners or extra Runtime/UI identity axes. Alias requests may preserve a canonical key; actual
+root or nested base replacement conflicts until explicit rebind/remap. Do not put Workspace IDs,
+Runtime occurrences, preview epochs or lookup requests into canonical target equality.
+
+Retain `PrefabInstance.source` as lookup, and reuse `ComponentPropertyPath`, `ComponentValue`,
+`SceneComponentRecord` and payload-coordinate `ComponentFieldPath` rather than creating parallel
+value/selector trees. Complete records and property values carry exact local-reference bindings
+relative to that payload; a scalar-reference payload can have an empty slot. Default-before-bind,
+exact single consumption and final survivor-namespace validation remain mandatory. Version-bound
+payload coordinates are not durable selectors and neither follows a full-record migration
+implicitly.
+
+The production normalization candidate is deliberately stricter than the comparison's upsert:
+
+- One `(target, component)` has Add, Replace, Suppress or a property-claim set, not overlapping
+  modes. Add requires absence and Replace presence. New-entity component changes fold into its
+  complete added record; placement alone owns sibling/child order.
+- Duplicate and ancestor/descendant property claims conflict against one base. Preserve explicit
+  equal-value pins. Key-member writes, including replacement of an enclosing item with another
+  key, require complete keyed-container replacement and exclude descendant claims.
+- Initially Absent covers only a declared root that existing RemoveField can remove: optional
+  or default-bearing, ending in a map member. It removes authored storage; a Schema default can
+  still apply. It is neither Set(Null) nor Revert (removing the claim). Do not generalize nested
+  Optional to absent record members when the existing shape validator requires them.
+
+Scene's format owner should use private wire structs for the existing source-key kind and
+Named/ProjectLocation/StableAsset origins, rebuilding semantic keys through their constructors.
+The UI's existing canonical key encoder is useful precedent, not the persistence owner; never
+persist its occurrence-bearing context. A decoded expected key does not itself admit a real file:
+the actual Host still validates metadata/location and captures the immutable resolved closure.
+
+Before a production switch, compare the three mixed-origin paths through repeated outer instances;
+alias versus root/nested base replacement including additions-only; leaf/whole-container and
+Absent/Null/Revert distinctions; same-spelled cross-origin references/defaults/empty payload slot;
+and final invalid intent with unchanged source/history. Then qualify actual source editing,
+Undo/Redo, conflict Save/Reopen and conversion through the real decoder/Host. Reconcile ADRs
+0006/0038/0026/0090/0043 and remove embedded operation-path/patch-version dependence together.
+No new legacy reader is justified for the unreleased canonical-v1 replacement.
 
 ## Intent, Versions And Rebase
 
