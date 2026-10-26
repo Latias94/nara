@@ -28,15 +28,17 @@ fn path(name: &str) -> AssetRef {
 }
 
 fn inherited(steps: &[(&str, &str)]) -> Target {
-    Target::Inherited(
-        steps
-            .iter()
-            .map(|(source, entity)| SourceEntity {
-                source: SourceIdentity::of(&key(source)),
-                entity: id(entity),
+    let (_, terminal) = steps.last().unwrap();
+    Target {
+        through: steps
+            .windows(2)
+            .map(|pair| InstanceHop {
+                anchor: EntityOrigin::Source(id(pair[0].1)),
+                expected_base: SourceIdentity::of(&key(pair[1].0)),
             })
             .collect(),
-    )
+        entity: EntityOrigin::Source(id(terminal)),
+    }
 }
 
 fn direct(entity: &str) -> Target {
@@ -46,7 +48,7 @@ fn nested(anchor: &str, entity: &str) -> Target {
     inherited(&[("outer", anchor), ("leaf", entity)])
 }
 fn added(entity: &str) -> Target {
-    Target::Added(id(entity))
+    Target::added(id(entity))
 }
 
 fn instance(name: &str, source: AssetRef) -> SceneEntityRecord {
@@ -106,12 +108,240 @@ fn projection(outer: PrefabDocument, alias: bool) -> Projection {
         SceneEntityRecord::new(id("unrelated")),
         SceneEntityRecord::new(id("socket")),
     ]);
-    let report = scene.expand_prefabs(&registry(), &resolver(outer));
-    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
-    Projection {
-        anchor: id("host_a"),
-        source: SourceIdentity::of(&key("outer")),
-        expanded: report.candidate.unwrap(),
+    Projection::expand(id("host_a"), &scene, &registry(), &resolver(outer))
+}
+
+fn mixed_origin_projection() -> Projection {
+    let mut inherited_anchor = instance("nested", path("leaf"));
+    inherited_anchor.prefab.as_mut().unwrap().overrides =
+        ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(id("added_leaf")),
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+        }]);
+    let source = PrefabDocument::from_ordered_roots([
+        inherited_anchor,
+        SceneEntityRecord::new(id("added_leaf")),
+    ]);
+    let resolver = resolver(source);
+    let scene = SceneDocument::from_ordered_roots(["host_a", "host_b"].map(|name| {
+        let mut added_anchor = instance("added_anchor", path("leaf"));
+        added_anchor.prefab.as_mut().unwrap().overrides =
+            ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                entity: SceneEntityRecord::new(id("added_leaf")),
+                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            }]);
+        let mut anchor = instance(name, path("outer"));
+        anchor.prefab.as_mut().unwrap().overrides =
+            ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                entity: added_anchor,
+                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            }]);
+        anchor
+    }));
+    Projection::expand(id("host_a"), &scene, &registry(), &resolver)
+}
+
+#[test]
+fn target_index_keeps_all_mixed_origin_paths_in_one_repeated_placement() {
+    let projection = mixed_origin_projection();
+    let expected = projection
+        .expanded
+        .provenance()
+        .values()
+        .filter(|origin| {
+            origin
+                .projection_path()
+                .is_some_and(|path| path.root_anchor() == &id("host_a"))
+        })
+        .count();
+    assert_eq!(projection.targets().unwrap().len(), expected);
+}
+
+fn inside(anchor: EntityOrigin, base: &str, entity: EntityOrigin) -> Target {
+    Target {
+        through: vec![InstanceHop {
+            anchor,
+            expected_base: SourceIdentity::of(&key(base)),
+        }],
+        entity,
+    }
+}
+
+#[test]
+fn mixed_origin_targets_bind_references_without_editing_the_repeated_occurrence() {
+    let projection = mixed_origin_projection();
+    let inherited_addition = inside(
+        EntityOrigin::Source(id("nested")),
+        "leaf",
+        EntityOrigin::Addition(id("added_leaf")),
+    );
+    let added_inherited = inside(
+        EntityOrigin::Addition(id("added_anchor")),
+        "leaf",
+        EntityOrigin::Source(id("socket")),
+    );
+    let added_addition = inside(
+        EntityOrigin::Addition(id("added_anchor")),
+        "leaf",
+        EntityOrigin::Addition(id("added_leaf")),
+    );
+    let mut intent = overlay();
+    intent.components = vec![
+        link(
+            inherited_addition.clone(),
+            Some(added_inherited.clone()),
+            "inherited addition",
+        ),
+        link(
+            added_inherited.clone(),
+            Some(added_addition.clone()),
+            "added anchor source",
+        ),
+        link(
+            added_addition.clone(),
+            Some(direct("added_leaf")),
+            "added anchor addition",
+        ),
+    ];
+    let roundtrip: Overlay = serde_json::from_slice(&serde_json::to_vec(&intent).unwrap()).unwrap();
+    let base = open(projection.expanded.document());
+    let before = base.revision();
+    let (candidate, targets) = prepare(&projection, &base, &roundtrip).unwrap();
+    let candidate = candidate.unwrap();
+    for (from, to, note) in [
+        (&inherited_addition, &added_inherited, "inherited addition"),
+        (&added_inherited, &added_addition, "added anchor source"),
+        (
+            &added_addition,
+            &direct("added_leaf"),
+            "added anchor addition",
+        ),
+    ] {
+        assert_link(candidate.document(), &targets[from], &targets[to], note);
+    }
+    assert_eq!(candidate.provenance(), projection.expanded.provenance());
+    for (entity, origin) in projection.expanded.provenance() {
+        if origin
+            .projection_path()
+            .is_some_and(|path| path.root_anchor() == &id("host_b"))
+        {
+            assert_eq!(
+                candidate
+                    .document()
+                    .entities
+                    .iter()
+                    .find(|record| &record.id == entity),
+                projection
+                    .expanded
+                    .document()
+                    .entities
+                    .iter()
+                    .find(|record| &record.id == entity)
+            );
+        }
+    }
+    assert_eq!(base.document(), projection.expanded.document());
+    assert_eq!(base.revision(), before);
+    assert_eq!(base.history_status().undo_depth, 0);
+}
+
+fn addition_only_projection(
+    root_base: &str,
+    nested_base: &str,
+    alias: bool,
+    nested: bool,
+) -> Projection {
+    let addition = ScenePatchOperation::AddEntity {
+        entity: SceneEntityRecord::new(id("only_addition")),
+        placement: ScenePlacement::last(ScenePlacementOwner::Root),
+    };
+    let mut nested_anchor = instance(
+        "nested",
+        if alias {
+            path("nested_alias")
+        } else {
+            path("inner")
+        },
+    );
+    nested_anchor.prefab.as_mut().unwrap().overrides = ScenePatchDocument::new([addition.clone()]);
+    let root = if nested {
+        PrefabDocument::from_ordered_roots([nested_anchor])
+    } else {
+        PrefabDocument::default()
+    };
+    let resolver = InMemoryPrefabSourceResolver::new()
+        .with_prefab(path("outer"), key(root_base), root.clone())
+        .with_prefab(path("alias"), key(root_base), root)
+        .with_prefab(path("inner"), key(nested_base), PrefabDocument::default())
+        .with_prefab(
+            path("nested_alias"),
+            key(nested_base),
+            PrefabDocument::default(),
+        );
+    let mut anchor = instance("host_a", if alias { path("alias") } else { path("outer") });
+    if !nested {
+        anchor.prefab.as_mut().unwrap().overrides = ScenePatchDocument::new([addition]);
+    }
+    Projection::expand(
+        id("host_a"),
+        &SceneDocument::from_ordered_roots([anchor]),
+        &registry(),
+        &resolver,
+    )
+}
+
+#[test]
+fn addition_only_targets_still_bind_root_and_nested_bases_while_aliases_keep_meaning() {
+    for nested in [false, true] {
+        let original = addition_only_projection("outer", "inner", false, nested);
+        let target = if nested {
+            inside(
+                EntityOrigin::Source(id("nested")),
+                "inner",
+                EntityOrigin::Addition(id("only_addition")),
+            )
+        } else {
+            added("only_addition")
+        };
+        let mut intent = overlay();
+        intent
+            .components
+            .push(link(target.clone(), None, "bound addition"));
+        let aliased = addition_only_projection("outer", "inner", true, nested);
+        let (effective, targets) = prepare_document(&aliased, &intent);
+        assert!(
+            effective
+                .entities
+                .iter()
+                .any(|record| record.id == targets[&target])
+        );
+        let changed_root = addition_only_projection("replacement_root", "inner", false, nested);
+        assert_eq!(
+            assert_conflict(&changed_root, &intent),
+            Conflict::SourceChanged
+        );
+        if nested {
+            let changed_inner = addition_only_projection("outer", "replacement_inner", false, true);
+            assert_eq!(
+                assert_conflict(&changed_inner, &intent),
+                Conflict::MissingTarget(target.clone())
+            );
+            let ComponentIntent::Set { target, .. } = &mut intent.components[0] else {
+                unreachable!()
+            };
+            target.through[0].expected_base = SourceIdentity::of(&key("replacement_inner"));
+            assert!(
+                prepare_document(&changed_inner, &intent)
+                    .0
+                    .entities
+                    .iter()
+                    .any(|record| !record.components.is_empty())
+            );
+        }
+        assert_eq!(
+            original.targets().unwrap().len(),
+            if nested { 2 } else { 1 }
+        );
     }
 }
 
@@ -385,7 +615,7 @@ fn suppression_is_instance_relative_and_can_preserve_an_explicitly_reparented_ch
         effective
             .entities
             .iter()
-            .all(|record| record.id != projection.targets()[&direct("nest_a")])
+            .all(|record| record.id != projection.targets().unwrap()[&direct("nest_a")])
     );
 }
 
@@ -504,13 +734,12 @@ fn projection_with_containing_children() -> Projection {
             SceneEntityRecord::new(id("local_descendant")),
         ],
     );
-    let report = scene.expand_prefabs(&registry(), &resolver(outer(&["socket", "tail"])));
-    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
-    Projection {
-        anchor: id("host_a"),
-        source: SourceIdentity::of(&key("outer")),
-        expanded: report.candidate.unwrap(),
-    }
+    Projection::expand(
+        id("host_a"),
+        &scene,
+        &registry(),
+        &resolver(outer(&["socket", "tail"])),
+    )
 }
 
 #[test]
@@ -579,6 +808,7 @@ fn projected_reordering_and_additions_preserve_containing_owner_records_and_orde
 
 fn link(target: Target, referent: Option<Target>, note: &str) -> ComponentIntent {
     ComponentIntent::Set {
+        mode: ComponentSetMode::Add,
         target,
         component: ComponentTypeId::new("game.Link"),
         version: ComponentSchemaVersion::ONE,
@@ -627,6 +857,322 @@ fn assert_link(
             ("note", ComponentValue::String(note.into())),
         ])
     );
+}
+
+fn link_source(note: &str, target: ComponentValue) -> PrefabDocument {
+    let mut source = outer(&["socket", "nest_a", "nest_b", "tail"]);
+    source
+        .entities
+        .iter_mut()
+        .find(|record| record.id == id("socket"))
+        .unwrap()
+        .components
+        .insert(
+            ComponentTypeId::new("game.Link"),
+            crate::SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([
+                    ("target", target),
+                    ("note", ComponentValue::String(note.into())),
+                ]),
+            ),
+        );
+    source
+}
+
+fn property_intent(
+    path: &str,
+    intent: PropertyIntent,
+    bindings: Vec<ReferenceBinding>,
+) -> ComponentIntent {
+    ComponentIntent::Properties {
+        target: direct("socket"),
+        component: ComponentTypeId::new("game.Link"),
+        version: ComponentSchemaVersion::ONE,
+        claims: vec![BoundPropertyClaim {
+            claim: PropertyClaim {
+                path: nara_reflect::ComponentPropertyPath::new(ComponentFieldId::new(path)),
+                intent,
+            },
+            bindings,
+        }],
+    }
+}
+
+#[test]
+fn property_claims_rebase_leaf_pins_without_freezing_uncovered_reference_siblings() {
+    let new_base = projection(
+        link_source(
+            "new base",
+            ComponentValue::EntityReference(nara_identity::EntityReference::SceneLocal {
+                entity: id("tail"),
+            }),
+        ),
+        true,
+    );
+    let mut intent = overlay();
+    intent.components.push(property_intent(
+        "note",
+        PropertyIntent::Set(ComponentValue::String("old base".into())),
+        vec![],
+    ));
+    let (effective, targets) = prepare_document(&new_base, &intent);
+    assert_link(
+        &effective,
+        &targets[&direct("socket")],
+        &targets[&direct("tail")],
+        "old base",
+    );
+    let mut reverted = intent.clone();
+    reverted.components.clear();
+    let (inherited, targets) = prepare_document(&new_base, &reverted);
+    assert_link(
+        &inherited,
+        &targets[&direct("socket")],
+        &targets[&direct("tail")],
+        "new base",
+    );
+    assert_eq!(intent.components.len(), 1);
+}
+
+#[test]
+fn scalar_property_payloads_use_empty_slots_and_default_absence_cannot_borrow_scene_names() {
+    let projection = projection(link_source("kept", ComponentValue::Null), false);
+    let referent = nested("nest_b", "socket");
+    let binding = ReferenceBinding {
+        slot: ComponentFieldPath::empty(),
+        expected: id("socket"),
+        target: referent.clone(),
+    };
+    let mut intent = overlay();
+    intent.components.push(property_intent(
+        "target",
+        PropertyIntent::Set(ComponentValue::EntityReference(
+            nara_identity::EntityReference::SceneLocal {
+                entity: id("socket"),
+            },
+        )),
+        vec![binding.clone()],
+    ));
+    let (effective, targets) = prepare_document(&projection, &intent);
+    assert_link(
+        &effective,
+        &targets[&direct("socket")],
+        &targets[&referent],
+        "kept",
+    );
+    intent.suppressions.push(referent.clone());
+    assert_eq!(
+        assert_conflict(&projection, &intent),
+        Conflict::OwnerAdmission
+    );
+    intent.suppressions.clear();
+    let mut catalog = schemas().owners()[0].current().clone();
+    let field = catalog.components[0]
+        .fields
+        .iter_mut()
+        .find(|field| field.id() == &ComponentFieldId::new("target"))
+        .unwrap();
+    field.required = false;
+    field.default_value = Some(ComponentValue::EntityReference(
+        nara_identity::EntityReference::SceneLocal {
+            entity: id("socket"),
+        },
+    ));
+    let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+        PersistentComponentSchemaOwnerId::try_new("game.overlay-comparison").unwrap(),
+        catalog,
+        None,
+    )])
+    .unwrap();
+    let base = open_with_bundle(projection.expanded.document(), &bundle);
+    intent.components = vec![property_intent("target", PropertyIntent::Absent, vec![])];
+    assert_eq!(
+        prepare(&projection, &base, &intent).unwrap_err(),
+        Conflict::Reference
+    );
+    let ComponentIntent::Properties { claims, .. } = &mut intent.components[0] else {
+        unreachable!()
+    };
+    claims[0].bindings.push(binding);
+    let (candidate, targets) = prepare(&projection, &base, &intent).unwrap();
+    assert_link(
+        candidate.unwrap().document(),
+        &targets[&direct("socket")],
+        &targets[&referent],
+        "kept",
+    );
+    assert_ne!(targets[&referent], id("socket"));
+    assert_eq!(base.history_status().undo_depth, 0);
+    intent.suppressions.push(referent);
+    assert_eq!(
+        prepare(&projection, &base, &intent).unwrap_err(),
+        Conflict::OwnerAdmission
+    );
+    assert_eq!(base.document(), projection.expanded.document());
+    assert_eq!(base.history_status().undo_depth, 0);
+}
+
+#[test]
+fn component_modes_and_property_claims_cannot_silently_upsert_or_overlap() {
+    let projection = projection(link_source("base", ComponentValue::Null), false);
+    let mut intent = overlay();
+    intent.components = vec![link(direct("socket"), None, "add")];
+    assert_eq!(assert_conflict(&projection, &intent), Conflict::Component);
+    let ComponentIntent::Set { mode, target, .. } = &mut intent.components[0] else {
+        unreachable!()
+    };
+    *mode = ComponentSetMode::Replace;
+    *target = direct("tail");
+    assert_eq!(assert_conflict(&projection, &intent), Conflict::Component);
+    intent.components = vec![property_intent(
+        "note",
+        PropertyIntent::Set(ComponentValue::String("pin".into())),
+        vec![],
+    )];
+    intent.components.push(property_intent(
+        "target",
+        PropertyIntent::Set(ComponentValue::Null),
+        vec![],
+    ));
+    assert_eq!(
+        assert_conflict(&projection, &intent),
+        Conflict::DuplicateIntent
+    );
+}
+
+#[test]
+fn absent_defaults_materialize_missing_ancestors_in_the_derived_candidate_only() {
+    let component = ComponentTypeId::new("game.NestedDefault");
+    for local_reference in [false, true] {
+        let default = if local_reference {
+            ComponentValue::EntityReference(nara_identity::EntityReference::SceneLocal {
+                entity: id("socket"),
+            })
+        } else {
+            ComponentValue::U64(7)
+        };
+        let field = ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("value"),
+            "Value",
+            ComponentFieldPath::from_fields(["settings", "wire_value"]),
+            if local_reference {
+                ComponentValueShape::EntityRef
+            } else {
+                ComponentValueKind::U64.into()
+            },
+            default,
+        )
+        .with_capabilities(
+            ComponentCapability::SCENE_AUTHORING
+                .into_iter()
+                .chain(local_reference.then_some(ComponentCapability::EntityRef)),
+        );
+        let schema = ComponentSchema::new(
+            component.clone(),
+            "Nested default",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([field]);
+        let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+            PersistentComponentSchemaOwnerId::try_new("game.overlay-comparison").unwrap(),
+            ComponentSchemaCatalog {
+                components: vec![schema],
+                ..Default::default()
+            },
+            None,
+        )])
+        .unwrap();
+        for original in [
+            ComponentValue::map([] as [(&str, ComponentValue); 0]),
+            ComponentValue::map([(
+                "settings",
+                ComponentValue::map([] as [(&str, ComponentValue); 0]),
+            )]),
+        ] {
+            let mut entity = SceneEntityRecord::new(id("item"));
+            entity.components.insert(
+                component.clone(),
+                crate::SceneComponentRecord::new(ComponentSchemaVersion::ONE, original),
+            );
+            let document = SceneDocument::from_ordered_roots([
+                entity,
+                SceneEntityRecord::new(id("socket")),
+                SceneEntityRecord::new(id("projected_socket")),
+            ]);
+            let base = open_with_bundle(&document, &bundle);
+            let revision = base.revision();
+            let history = base.history_status();
+            let targets = TargetMap::from([
+                (direct("item"), id("item")),
+                (direct("socket"), id("projected_socket")),
+            ]);
+            let mut intents = [ComponentIntent::Properties {
+                target: direct("item"),
+                component: component.clone(),
+                version: ComponentSchemaVersion::ONE,
+                claims: vec![BoundPropertyClaim {
+                    claim: PropertyClaim {
+                        path: nara_reflect::ComponentPropertyPath::new(ComponentFieldId::new(
+                            "value",
+                        )),
+                        intent: PropertyIntent::Absent,
+                    },
+                    bindings: vec![],
+                }],
+            }];
+            if local_reference {
+                let mut rejected = document.clone();
+                assert_eq!(
+                    compile_components(&base, &mut rejected, &targets, &intents),
+                    Err(Conflict::Reference)
+                );
+                assert_eq!(rejected, document);
+                let ComponentIntent::Properties { claims, .. } = &mut intents[0] else {
+                    unreachable!()
+                };
+                claims[0].bindings.push(ReferenceBinding {
+                    slot: ComponentFieldPath::empty(),
+                    expected: id("socket"),
+                    target: direct("socket"),
+                });
+            }
+            let mut working = document.clone();
+            compile_components(&base, &mut working, &targets, &intents).unwrap();
+            assert_eq!(
+                working
+                    .entities
+                    .iter()
+                    .find(|entity| entity.id == id("item"))
+                    .unwrap()
+                    .components[&component]
+                    .value,
+                ComponentValue::map([(
+                    "settings",
+                    ComponentValue::map([(
+                        "wire_value",
+                        if local_reference {
+                            ComponentValue::EntityReference(
+                                nara_identity::EntityReference::SceneLocal {
+                                    entity: id("projected_socket"),
+                                },
+                            )
+                        } else {
+                            ComponentValue::U64(7)
+                        },
+                    )]),
+                )])
+            );
+            assert!(
+                matches!(&intents[0], ComponentIntent::Properties { claims, .. }
+                if matches!(claims[0].claim.intent, PropertyIntent::Absent))
+            );
+            assert_eq!(base.document(), &document);
+            assert_eq!(base.revision(), revision);
+            assert_eq!(base.history_status(), history);
+        }
+    }
 }
 
 #[test]
@@ -712,6 +1258,10 @@ fn component_replacement_and_suppression_reuse_the_existing_owner_validation() {
     intent
         .components
         .push(link(direct("socket"), Some(direct("tail")), "replacement"));
+    let ComponentIntent::Set { mode, .. } = &mut intent.components[0] else {
+        unreachable!()
+    };
+    *mode = ComponentSetMode::Replace;
     let (effective, targets) = prepare_document(&projection, &intent);
     assert_link(
         &effective,
@@ -800,6 +1350,7 @@ fn default_introduced_references_cannot_bind_to_an_unrelated_containing_scene_en
     let base = open_with_bundle(projection.expanded.document(), &bundle);
     let mut intent = overlay();
     intent.components = vec![ComponentIntent::Set {
+        mode: ComponentSetMode::Add,
         target: direct("tail"),
         component: ComponentTypeId::new("game.Link"),
         version: ComponentSchemaVersion::ONE,
@@ -859,6 +1410,7 @@ fn whole_component_intent_preserves_distinct_lawful_optional_container_values() 
     let base = open_with_bundle(projection.expanded.document(), &bundle);
     let mut intent = overlay();
     intent.components = vec![ComponentIntent::Set {
+        mode: ComponentSetMode::Add,
         target: direct("socket"),
         component: component.clone(),
         version: ComponentSchemaVersion::ONE,

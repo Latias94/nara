@@ -3,14 +3,17 @@
 use std::collections::BTreeMap;
 
 use nara_identity::EntityReference;
-use nara_reflect::__private::plan_declared_entity_references;
+use nara_reflect::__private::{
+    DeclaredEntityReferencePlan, plan_declared_entity_references,
+    plan_declared_value_entity_references,
+};
 use nara_reflect::{
-    ComponentFieldPath, ComponentFieldPathSegment, ComponentSchema, ComponentValue,
-    EntityReferenceTraversalLimits,
+    ComponentFieldPath, ComponentFieldPathSegment, ComponentFieldSchema, ComponentSchema,
+    ComponentValue, ComponentValueShape, EntityReferenceTraversalLimits,
 };
 use serde::{Deserialize, Serialize};
 
-use super::{Conflict, SceneEntityId, SourceIdentity, Target, TargetMap};
+use super::{Conflict, SceneEntityId, Target, TargetMap};
 
 const MAX_REFERENCE_BINDINGS: usize = 64;
 
@@ -30,11 +33,34 @@ pub(super) fn bind_references(
     targets: &TargetMap,
 ) -> Result<ComponentValue, Conflict> {
     let limits = EntityReferenceTraversalLimits::default();
+    let plan = plan_declared_entity_references::<Conflict>(schema, value, limits)
+        .map_err(|_| Conflict::Reference)?;
+    bind_plan(plan, value, bindings, targets, limits)
+}
+
+pub(super) fn bind_property_references(
+    field: &ComponentFieldSchema,
+    shape: &ComponentValueShape,
+    payload: &ComponentValue,
+    bindings: &[ReferenceBinding],
+    targets: &TargetMap,
+) -> Result<ComponentValue, Conflict> {
+    let limits = EntityReferenceTraversalLimits::default();
+    let plan = plan_declared_value_entity_references::<Conflict>(field, shape, payload, limits)
+        .map_err(|_| Conflict::Reference)?;
+    bind_plan(plan, payload, bindings, targets, limits)
+}
+
+fn bind_plan(
+    plan: DeclaredEntityReferencePlan,
+    value: &ComponentValue,
+    bindings: &[ReferenceBinding],
+    targets: &TargetMap,
+    limits: EntityReferenceTraversalLimits,
+) -> Result<ComponentValue, Conflict> {
     if bindings.len() > MAX_REFERENCE_BINDINGS {
         return Err(Conflict::Reference);
     }
-    let plan = plan_declared_entity_references::<Conflict>(schema, value, limits)
-        .map_err(|_| Conflict::Reference)?;
     let mut pending = BTreeMap::new();
     let mut binding_bytes = 0usize;
     for binding in bindings {
@@ -48,28 +74,12 @@ pub(super) fn bind_references(
                 ComponentFieldPathSegment::Index(_) => std::mem::size_of::<u32>(),
             });
         }
-        match &binding.target {
-            Target::Added(entity) => {
-                binding_bytes = binding_bytes.saturating_add(entity.as_str().len());
-            }
-            Target::Inherited(chain) => {
-                if chain.len() > limits.depth().get() {
-                    return Err(Conflict::Reference);
-                }
-                for step in chain {
-                    let source_bytes = match &step.source {
-                        SourceIdentity::Named { name, .. } => 16usize.saturating_add(name.len()),
-                        SourceIdentity::ProjectLocation { path, .. } => {
-                            16usize.saturating_add(path.as_str().len())
-                        }
-                        SourceIdentity::StableAsset { .. } => 16,
-                    };
-                    binding_bytes = binding_bytes
-                        .saturating_add(source_bytes)
-                        .saturating_add(step.entity.as_str().len());
-                }
-            }
-        }
+        binding_bytes = binding_bytes.saturating_add(
+            binding
+                .target
+                .logical_bytes()
+                .map_err(|_| Conflict::Reference)?,
+        );
         if binding_bytes > limits.bytes().get() || pending.insert(&binding.slot, binding).is_some()
         {
             return Err(Conflict::Reference);
@@ -134,7 +144,7 @@ mod tests {
         collect_declared_asset_references_from_schema,
     };
 
-    use super::super::SourceEntity;
+    use super::super::{EntityOrigin, InstanceHop, SourceIdentity};
     use super::*;
 
     fn id(value: &str) -> SceneEntityId {
@@ -153,16 +163,13 @@ mod tests {
     }
 
     fn inherited(anchor: &str) -> Target {
-        Target::Inherited(vec![
-            SourceEntity {
-                source: source("outer"),
-                entity: id(anchor),
-            },
-            SourceEntity {
-                source: source("inner"),
-                entity: id("socket"),
-            },
-        ])
+        Target {
+            through: vec![InstanceHop {
+                anchor: EntityOrigin::Source(id(anchor)),
+                expected_base: source("inner"),
+            }],
+            entity: EntityOrigin::Source(id("socket")),
+        }
     }
 
     fn schema(shape: ComponentValueShape) -> ComponentSchema {
@@ -211,11 +218,11 @@ mod tests {
         let value = list_value();
         let targets = TargetMap::from([
             (inherited("left"), id("inherited-output")),
-            (Target::Added(id("socket")), id("added-output")),
+            (Target::added(id("socket")), id("added-output")),
         ]);
         let bindings = vec![
             binding(slot(0), inherited("left")),
-            binding(slot(1), Target::Added(id("socket"))),
+            binding(slot(1), Target::added(id("socket"))),
         ];
         let wire = serde_json::to_vec(&bindings).unwrap();
         let reopened: Vec<ReferenceBinding> = serde_json::from_slice(&wire).unwrap();
@@ -248,12 +255,10 @@ mod tests {
         assert_eq!(bound.get_path(&slot(0)).unwrap(), &local("left-output"));
         assert_eq!(bound.get_path(&slot(1)).unwrap(), &local("right-output"));
         let mut rebound = targets.clone();
-        let Target::Inherited(mut changed) = inherited("right") else {
-            unreachable!();
-        };
-        changed[1].source = source("replacement-inner");
+        let mut changed = inherited("right");
+        changed.through[0].expected_base = source("replacement-inner");
         rebound.remove(&inherited("right"));
-        rebound.insert(Target::Inherited(changed), id("right-output"));
+        rebound.insert(changed, id("right-output"));
         assert_eq!(
             bind_references(&schema, &list_value(), &bindings, &rebound),
             Err(Conflict::Reference),
@@ -264,9 +269,9 @@ mod tests {
     fn incomplete_duplicate_stray_stale_and_unresolved_bindings_are_atomic_conflicts() {
         let schema = schema(ComponentValueShape::list(ComponentValueShape::EntityRef));
         let value = list_value();
-        let targets = TargetMap::from([(Target::Added(id("socket")), id("output"))]);
-        let first = binding(slot(0), Target::Added(id("socket")));
-        let second = binding(slot(1), Target::Added(id("socket")));
+        let targets = TargetMap::from([(Target::added(id("socket")), id("output"))]);
+        let first = binding(slot(0), Target::added(id("socket")));
+        let second = binding(slot(1), Target::added(id("socket")));
         let mut stale = second.clone();
         stale.expected = id("previous-local");
         let cases = [
@@ -276,10 +281,10 @@ mod tests {
             vec![
                 first.clone(),
                 second.clone(),
-                binding(slot(2), Target::Added(id("socket"))),
+                binding(slot(2), Target::added(id("socket"))),
             ],
             vec![first.clone(), stale],
-            vec![first, binding(slot(1), Target::Added(id("missing")))],
+            vec![first, binding(slot(1), Target::added(id("missing")))],
         ];
         for bindings in cases {
             let original = bindings.clone();
@@ -291,7 +296,7 @@ mod tests {
                 serde_json::from_slice(&serde_json::to_vec(&bindings).unwrap()).unwrap();
             assert_eq!(reopened, original);
             assert_eq!(value, list_value());
-            assert_eq!(targets[&Target::Added(id("socket"))], id("output"));
+            assert_eq!(targets[&Target::added(id("socket"))], id("output"));
         }
     }
 
@@ -358,10 +363,10 @@ mod tests {
             );
             ComponentFieldPath::new(segments)
         };
-        let targets = TargetMap::from([(Target::Added(id("socket")), id("output"))]);
+        let targets = TargetMap::from([(Target::added(id("socket")), id("output"))]);
         let valid = binding(
             nested_slot(0, &["others", "name.with.dot"]),
-            Target::Added(id("socket")),
+            Target::added(id("socket")),
         );
         let bound =
             bind_references(&schema, &value, std::slice::from_ref(&valid), &targets).unwrap();
@@ -404,7 +409,7 @@ mod tests {
                     &value,
                     &[
                         valid.clone(),
-                        binding(forbidden, Target::Added(id("socket")))
+                        binding(forbidden, Target::added(id("socket")))
                     ],
                     &targets,
                 ),
@@ -422,7 +427,7 @@ mod tests {
             &replacement,
             &[binding(
                 nested_slot(1, &["others", "name.with.dot"]),
-                Target::Added(id("socket")),
+                Target::added(id("socket")),
             )],
             &targets,
         )
@@ -457,12 +462,12 @@ mod tests {
             );
         }
         let list = schema(ComponentValueShape::list(ComponentValueShape::EntityRef));
-        let targets = TargetMap::from([(Target::Added(id("socket")), id("output"))]);
+        let targets = TargetMap::from([(Target::added(id("socket")), id("output"))]);
         let excessive = (0..=MAX_REFERENCE_BINDINGS)
             .map(|index| {
                 binding(
                     slot(u32::try_from(index).unwrap()),
-                    Target::Added(id("socket")),
+                    Target::added(id("socket")),
                 )
             })
             .collect::<Vec<_>>();
@@ -487,12 +492,12 @@ mod tests {
             Err(Conflict::Reference),
         );
         let targets = TargetMap::from([(
-            Target::Added(id("socket")),
+            Target::added(id("socket")),
             id(&"x".repeat(EntityReferenceTraversalLimits::default().bytes().get() + 1)),
         )]);
         let bindings = [
-            binding(slot(0), Target::Added(id("socket"))),
-            binding(slot(1), Target::Added(id("socket"))),
+            binding(slot(0), Target::added(id("socket"))),
+            binding(slot(1), Target::added(id("socket"))),
         ];
         assert_eq!(
             bind_references(&list, &list_value(), &bindings, &targets),

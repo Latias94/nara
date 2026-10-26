@@ -649,6 +649,10 @@ struct PrefabExpansionContext<'a, R: PrefabSourceResolver + ?Sized> {
     provenance: BTreeMap<SceneEntityId, SceneEntityProvenance>,
     reserved_entity_ids: BTreeSet<SceneEntityId>,
     next_projected_entity: usize,
+    // Private comparison evidence from actual resolution, including addition-only instances.
+    // This is not retained production provenance or a Host dependency/publication inventory.
+    #[cfg(test)]
+    resolved_instance_bases: BTreeMap<SceneEntityId, SourceDocumentKey>,
 }
 
 #[derive(Debug)]
@@ -693,6 +697,8 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             provenance: BTreeMap::new(),
             reserved_entity_ids: BTreeSet::new(),
             next_projected_entity: 0,
+            #[cfg(test)]
+            resolved_instance_bases: BTreeMap::new(),
         }
     }
 
@@ -931,6 +937,9 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         let Some(additions) = self.override_additions(&overrides, anchor_id, &source) else {
             return Vec::new();
         };
+        #[cfg(test)]
+        self.resolved_instance_bases
+            .insert(anchor_id.clone(), canonical_key.clone());
         let mut source_document = prefab.instantiate();
         let structure = validate_scene_structure(&source_document);
         if structure.has_errors() {

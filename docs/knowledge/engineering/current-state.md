@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "25b52b0c94fb88e70c2e2f286d02a8d3e673e3165beb94bd0b02865f7d426124"
+source_fingerprint: "11e4f8852e09b37e6892490210f0d04383eb9c76cba3d1ab411d58b966badd59"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "25b52b0c94fb88e70c2e2f286d02a8d3e673e3165beb94bd0b02865f7d4
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `25b52b0c94fb88e70c2e2f286d02a8d3e673e3165beb94bd0b02865f7d426124`
-- Immutable records: 945
+- Source fingerprint: `11e4f8852e09b37e6892490210f0d04383eb9c76cba3d1ab411d58b966badd59`
+- Immutable records: 946
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Complete mixed-origin overlay targets and payload-relative property claims](verification/2026-10/2026-10-26T074532Z-complete-mixed-origin-overlay-targets-and-payload-relative-property-claims-0949791c549242739236d36eb00d4fa2.md) - Complete private mixed-origin target indexing and bounded property claims with shared Reflect payload reference traversal; production overlay storage remains unchanged.
 - **Work Progress**: [Complete nested overlay target grammar and next production replacement gates](progress/2026-10/2026-10-26T065759Z-complete-nested-overlay-target-grammar-and-next-production-replacement-gates-630e9676fa7f496b9000e4aa4ef27f45.md) - Read-only owner analysis exposes mixed-origin target omissions and bounds the next durable grammar, source codec and source-history replacement without adopting a public format.
 - **Verification Evidence**: [One bounded Application no-action pass through Open and physical retirement](verification/2026-10/2026-10-26T063246Z-one-bounded-application-no-action-pass-through-open-and-physical-retirement-f8c6241efa2b48f8af54f1603482cd39.md) - Replace public frame/no-frame maintenance choreography with one bounded Application pass while preserving action evidence, quiet wakes and physical Exit completion.
 - **Verification Evidence**: [Complete-value projection comparison without source history or templates](verification/2026-10/2026-10-26T061353Z-complete-value-projection-comparison-without-source-history-or-templates-047bc67b5dec41c2a940091b39ceedba.md) - Share production full-value validation with a private history-free projection compiler; preserve lawful containers without selecting a durable format or public activation API.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Pre-budget query ownership and independent direct-member panel workflow](verification/2026-10/2026-10-26T024129Z-pre-budget-query-ownership-and-independent-direct-member-panel-workflow-1acbda3fb8cc47218dd9b54bcd59f367.md) - Removed caller-ID cloning before query budget admission and qualified a separately compiled non-active Scene direct-member panel through retained edits, history and divergent-memory Save/Reopen.
 - **Verification Evidence**: [Public Exit drivers retain maintenance after Workspace retirement](verification/2026-10/2026-10-26T022556Z-public-exit-drivers-retain-maintenance-after-workspace-retirement-2c1f097eeed04d499d81adc33d3232dd.md) - Corrected public and independent Exit callers, a deterministic held-worker regression, and successor clarification of earlier lifecycle and panel evidence.
 - **Verification Evidence**: [Bounded direct-member discovery and non-active panel query workflow](verification/2026-10/2026-10-26T004155Z-bounded-direct-member-discovery-and-panel-query-workflow-7003450c49204d8eba92ba90db765dc0.md) - Qualified one-level durable Record-member discovery, selection-independent Session/panel query forwarding, and an independently compiled non-active panel discover/read/prepare/retain/commit workflow.
-- **Verification Evidence**: [Startup preparation owner retry and final Application shutdown](verification/2026-10/2026-10-25T232708Z-startup-preparation-owner-retry-and-final-application-shutdown-4281deb3281042fc9095f7cf2e247c4b.md) - Bounded R4b standalone startup facility ownership, exact failure evidence, independent review and serial qualification.
 
 # Integration Notes
 

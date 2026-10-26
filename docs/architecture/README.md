@@ -153,6 +153,10 @@ The [full-value comparison successor](../knowledge/engineering/verification/2026
 shares source classification's value validator with a private history-free compiler. It fixes
 the lawful absent/empty-container counterexample without introducing a public candidate family
 or changing production overlay storage.
+The [mixed-origin/property successor](../knowledge/engineering/verification/2026-10/2026-10-26T074532Z-complete-mixed-origin-overlay-targets-and-payload-relative-property-claims-0949791c549242739236d36eb00d4fa2.md)
+combines complete source/addition target chains, per-hop base predicates and bounded property
+claims in the private compiler, using Reflect's payload-relative declared-reference traversal.
+It does not qualify a production wire codec, conflict persistence or source history/repair.
 
 The [source-owned creation and construction design](authoring-construction-design.md) removes
 Workspace ordinal allocation and ID-reservation choreography from ordinary Scene/Prefab creation.

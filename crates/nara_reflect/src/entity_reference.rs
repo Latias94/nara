@@ -213,6 +213,45 @@ pub fn plan_declared_entity_references<E>(
     Ok(DeclaredEntityReferencePlan { references })
 }
 
+/// Plans references relative to one complete replacement payload for a resolved value shape.
+///
+/// The caller supplies the admitted owning root field and its selected shape (for example from
+/// property resolution). Capabilities still come from that field. Paths start at this payload,
+/// so a scalar reference occupies the empty path. This neither resolves a property nor admits
+/// a source edit, native value or default; those remain the caller's existing owner boundaries.
+pub fn plan_declared_value_entity_references<E>(
+    field: &ComponentFieldSchema,
+    shape: &ComponentValueShape,
+    value: &ComponentValue,
+    limits: EntityReferenceTraversalLimits,
+) -> Result<DeclaredEntityReferencePlan, ComponentEntityReferenceRewriteError<E>> {
+    let root = ComponentFieldPath::empty();
+    let _ = find_undeclared_reference_path(value, limits, &BTreeSet::new(), 0, 0, &root)?;
+    let mut traversal = PresentReferenceTraversal::new(limits, ComponentValueKind::EntityRef);
+    traversal.visit_field_shape(field, shape, value, &root)?;
+    if let Some(path) = find_undeclared_reference_path(
+        value,
+        limits,
+        &traversal.entity_paths,
+        traversal.result_nodes,
+        traversal.result_bytes,
+        &root,
+    )? {
+        return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path });
+    }
+    Ok(DeclaredEntityReferencePlan {
+        references: traversal
+            .references
+            .into_iter()
+            .map(|reference| PlannedEntityReference {
+                field_id: reference.field.id().clone(),
+                path: reference.path,
+                required: reference.required,
+            })
+            .collect(),
+    })
+}
+
 /// Rewrites structurally declared entity-reference leaves without changing the input value.
 ///
 /// This validates the `EntityRef` structural marker. Callers remain responsible for checking the
@@ -422,7 +461,17 @@ impl<'schema> PresentReferenceTraversal<'schema> {
         field: &'schema ComponentFieldSchema,
         value: &ComponentValue,
     ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
-        field.shape.validate().map_err(|_| {
+        self.visit_field_shape(field, &field.shape, value, field.path())
+    }
+
+    fn visit_field_shape<E>(
+        &mut self,
+        field: &'schema ComponentFieldSchema,
+        shape: &ComponentValueShape,
+        value: &ComponentValue,
+        root: &ComponentFieldPath,
+    ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
+        shape.validate().map_err(|_| {
             ComponentEntityReferenceRewriteError::InvalidReferenceValue {
                 path: field.path.clone(),
                 actual: value.kind(),
@@ -435,7 +484,7 @@ impl<'schema> PresentReferenceTraversal<'schema> {
             ),
             (ComponentValueKind::AssetRef, ComponentCapability::AssetRef),
         ] {
-            if field.shape.contains_kind(kind) && !field.has_capability(capability) {
+            if shape.contains_kind(kind) && !field.has_capability(capability) {
                 return Err(match capability {
                     ComponentCapability::EntityRef => {
                         ComponentEntityReferenceRewriteError::MissingEntityRefCapability {
@@ -448,14 +497,8 @@ impl<'schema> PresentReferenceTraversal<'schema> {
                 });
             }
         }
-        let mut path = field.path.segments().to_vec();
-        self.visit(
-            field,
-            &field.shape,
-            value,
-            &mut path,
-            path_depth(field.path()),
-        )
+        let mut path = root.segments().to_vec();
+        self.visit(field, shape, value, &mut path, path_depth(root))
     }
 
     fn visit<E>(

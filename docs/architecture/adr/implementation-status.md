@@ -352,6 +352,14 @@ Adapter. Its strict whole-document entry remains test-only; aggregate effective-
 include defaults but do not prove full pre-copy admission. This closes the private lowering
 counterexample, not durable overlay storage, source repair/history or Host publication.
 
+The [mixed-origin/property successor](../../knowledge/engineering/verification/2026-10/2026-10-26T074532Z-complete-mixed-origin-overlay-targets-and-payload-relative-property-claims-0949791c549242739236d36eb00d4fa2.md)
+combines complete nested source/addition targets with per-hop canonical-base predicates and
+bounded Schema-relative property claims in the private compiler. Explicit Add/Replace modes,
+overlap/key rules, Absent/default binding and empty reference slots have executable coverage.
+Reflect reuses its declared-reference traversal; the resolved-base trace and compiler remain
+test-private. Production patch storage, bounded source/conflict decoding, source history/repair
+and captured-closure activation remain separate work, without an Accepted ADR format change.
+
 The [R5c custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md)
 implements typed per-document Scene/Prefab file custody under ADRs 0047/0118. Save retains its
 admission-time Host through acknowledgement/uncertainty; Reopen validates exact retained Host

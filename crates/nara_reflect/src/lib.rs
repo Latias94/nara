@@ -113,6 +113,7 @@ pub mod __macro_support {
 pub mod __private {
     pub use crate::entity_reference::{
         DeclaredEntityReferencePlan, plan_declared_entity_references,
+        plan_declared_value_entity_references,
     };
     pub use crate::persistent_apply::{
         PreparedComponentApplyBatch, UnboundComponentApplyBatch, declare_persistent_apply_targets,

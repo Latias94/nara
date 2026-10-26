@@ -14,6 +14,9 @@ editing-context, Apply/Revert and Inspector evidence, separately from runtime qu
 The [typed-origin production checkpoint](../knowledge/engineering/verification/2026-10/2026-10-26T041116Z-typed-prefab-instance-addition-provenance-and-complete-consumer-propagation-331ec66de92c4315971800928d8f2dc7.md)
 replaces flattened addition provenance in the current patch-based expansion under ADRs
 0038/0058/0102. It does not adopt this Proposed durable overlay format.
+The [mixed-origin and property successor](../knowledge/engineering/verification/2026-10/2026-10-26T074532Z-complete-mixed-origin-overlay-targets-and-payload-relative-property-claims-0949791c549242739236d36eb00d4fa2.md)
+combines nested source/addition targets and Schema-relative property claims in that private
+compiler. Its resolved-base trace is test-only; production storage and Host admission remain unchanged.
 
 ## Problem And Scope
 
@@ -103,13 +106,14 @@ project-location and admitted stable-asset origins retain their existing continu
 
 ### Complete Nested Target Grammar
 
-The next data comparison should replace the private `Inherited(Vec<SourceEntity>)/Added(id)`
-split, which currently drops a target whenever any production provenance step is an addition.
+The private comparison now replaces its former `Inherited(Vec<SourceEntity>)/Added(id)`
+split, which dropped a target whenever any production provenance step was an addition.
 Real expansion already admits `Source(P,n) -> Added(x)`, `Added(a) -> Source(Q,y)` and
 `Added(a) -> Added(x)`. Each is a distinct authored placement, including repeated outer instances.
 Treating `Added(id)` as root-only or tagging only the terminal entity cannot express them.
 
-One proposed semantic shape, not an adopted public API or wire schema, is:
+The executable private shape models the following semantics; this is not an adopted public API
+or production wire schema:
 
 ```text
 EntityOrigin = SourceEntity(local_id) | InstanceAddition(local_id)
@@ -134,7 +138,7 @@ exact single consumption and final survivor-namespace validation remain mandator
 payload coordinates are not durable selectors and neither follows a full-record migration
 implicitly.
 
-The production normalization candidate is deliberately stricter than the comparison's upsert:
+The private compiler also replaces its component upsert with explicit normalization:
 
 - One `(target, component)` has Add, Replace, Suppress or a property-claim set, not overlapping
   modes. Add requires absence and Replace presence. New-entity component changes fold into its
@@ -147,16 +151,27 @@ The production normalization candidate is deliberately stricter than the compari
   still apply. It is neither Set(Null) nor Revert (removing the claim). Do not generalize nested
   Optional to absent record members when the existing shape validator requires them.
 
+Property claims resolve against the same immutable effective base before replacement. Raw claims
+are bounded before payload cloning or binding. A small Reflect helper reuses the existing declared
+reference traversal with the selected value shape and payload-relative paths, including an empty
+scalar slot. The owning root field still supplies capabilities. Existing inherited references are
+retained; a replacement payload or an Absent-exposed default must bind its local references
+explicitly. Bound defaults appear only in the derived effective candidate; the retained declaration
+remains Absent. Duplicate claims, ancestor/descendant overlap and keyed-item identity changes
+reject; whole keyed-container replacement is explicit. These are executable comparison rules,
+not production source editing or persistence qualification.
+
 Scene's format owner should use private wire structs for the existing source-key kind and
 Named/ProjectLocation/StableAsset origins, rebuilding semantic keys through their constructors.
 The UI's existing canonical key encoder is useful precedent, not the persistence owner; never
 persist its occurrence-bearing context. A decoded expected key does not itself admit a real file:
 the actual Host still validates metadata/location and captures the immutable resolved closure.
 
-Before a production switch, compare the three mixed-origin paths through repeated outer instances;
+The private comparison covers the three mixed-origin paths through repeated outer instances;
 alias versus root/nested base replacement including additions-only; leaf/whole-container and
-Absent/Null/Revert distinctions; same-spelled cross-origin references/defaults/empty payload slot;
-and final invalid intent with unchanged source/history. Then qualify actual source editing,
+Absent/Null/Revert distinctions; mixed-origin references, defaults and empty payload slots;
+and final invalid intent with unchanged source/history. Before a production switch, qualify these
+through bounded production decoding and actual source editing,
 Undo/Redo, conflict Save/Reopen and conversion through the real decoder/Host. Reconcile ADRs
 0006/0038/0026/0090/0043 and remove embedded operation-path/patch-version dependence together.
 No new legacy reader is justified for the unreleased canonical-v1 replacement.
@@ -226,6 +241,10 @@ construction preparation. Intermediate structure uses existing exact Scene place
 on an unpublished copy; there is no new ID allocator or Undo authority.
 It compares a real old-basis `MoveEntity` override against desired placement on a reordered base.
 Repeated source occurrences, nested targets and lookup aliases are separate executable cases.
+The mixed-origin successor indexes all nine targets in a real repeated/nested fixture where the
+old source-only index retained four. Each instance hop reads its canonical base from actual
+production resolution in a test-only trace, including instances with no surviving source entities.
+It does not infer dependencies from surviving entity provenance or add a production inventory.
 
 The chosen placement rules for this experiment are:
 
@@ -323,10 +342,16 @@ overlay storage, a captured base closure, native materialization or Host publica
   source edit/history/repair or full reference grammar. Existing occurrence/epoch custody stays.
 - Activation must retain and revalidate the actual admitted immutable nested base closure and
   Schema. Full document equality in a private fixture is not a filesystem publication protocol.
-- The production compiler still needs complete property grammar (including explicit absence,
-  whole keyed-container replacement and overlap rules), full component admission, persistent
-  bounded conflict/source encoding, and complete source edit/history/repair and conversion paths.
-  These obligations have not been qualified by combining two separate private comparisons.
+- The private compiler now combines explicit absence, whole keyed-container replacement, overlap
+  rules, component-mode admission and mixed-origin reference binding with complete-value
+  validation. The production replacement still needs bounded canonical source/conflict encoding,
+  aggregate admission before copying, complete source edit/history/repair and conversion paths.
+  Combining the private comparisons does not qualify those production obligations.
+- The private overlay's new additions are still IDs plus separate component declarations. It
+  can address an existing added instance anchor from real production expansion, but cannot yet
+  declare a complete new record carrying its own `PrefabInstance`. Production additions must
+  preserve complete records and recursively capture their sources; mixed-origin target coverage
+  does not establish that declaration capability.
 
 The production provenance change is a typed origin axis within the existing placement model,
 not a replacement identity service. Conceptually, an entity address combines its owning-source
@@ -402,6 +427,39 @@ the owning contracts and complete replacement are reconciled.
 5. **Qualify public workflow:** non-active prepare/retain/commit, exact outcomes, one Undo/Redo,
    conflict Save/Reopen, explicit remap, convert-to-local and last-failure atomicity. Include
    independent consumption and the affected native Editor path before claiming its support.
+
+### Concrete Production Replacement Boundaries
+
+The next production unit is one containing-source instance workflow across the following existing
+owners. A compiler-only or wire-only switch cannot establish that workflow:
+
+- `nara_scene::prefab` and `format` own instance storage, private wire, bounded decoding and
+  recursive declaration/value counting. `migration` and `authoring_decode` must replace embedded
+  patch-version/operation-path locations with actual overlay declaration locations. Preserve
+  unavailable payloads, owner/version, selectors and bindings without guessing a migration.
+- Exact Scene patches remain source transactions. Their current operation enum cannot mutate an
+  existing `entity.prefab`; add a dedicated owner-created instance/overlay operation and inverse
+  through existing prepare/commit, revision, readmission and history budgets. Unresolved intent
+  remains savable even when activation rejects. Source repair must not require an active projection.
+- The Scene-owned compiler takes actual resolved bases and produces the existing admitted expanded
+  document without source history. Production additions carry complete records, including nested
+  instances. Bound aggregate values, defaults, targets, bindings and provenance before copying;
+  the private equality oracle, limits and test-only resolved-base trace cannot supply this policy.
+- Both `project_host/authoring/project.rs` and `project_content.rs` capture dependencies from the
+  new declarations, including nested additions and Schema-declared asset references. Update
+  `scene_retention` and the Editor UI-domain scanner with them. Retain actual immutable closure
+  receipts, exact Schema and containing-source revision through prepared activation; metadata
+  revalidation alone does not prove unchanged Prefab content.
+- Persistence and Workspace route edits through the same source sessions and actual decoder.
+  Whole-instance conversion needs dedicated source-owned preparation with durable local IDs,
+  complete hierarchy/reference remap and one inverse; generated expanded locators cannot simply
+  be saved as source IDs. Existing generic authoring intentionally disallows arbitrary whole-record
+  replacement and Prefab-anchor deletion, so conversion must not bypass those boundaries.
+
+Current `project_authoring_preview` still reports nested Prefabs as unsupported. A format switch
+does not qualify the ordinary Inspector/preview path until its real captured closure and compiler
+are connected. Existing Play Apply Changes remains limited to ordinary Scene entities; extending
+cross-document Apply is a separate workflow and is not required to preserve that supported scope.
 
 ## Experiment Gates And Risks
 
