@@ -1,4 +1,4 @@
-//! Bounded R4b evidence, not a product benchmark or P99 estimate. Both candidates have two
+//! Bounded activity-scope evidence, not a product benchmark or P99 estimate. Both candidates have two
 //! aggregate IO workers and identical activity custody; total-saturation fairness is not promised.
 
 use super::*;
@@ -363,7 +363,7 @@ fn trial(shared: bool, trial: usize) {
 }
 
 #[test]
-#[ignore = "bounded R4b measurements; caller owns serial execution and interpretation"]
+#[ignore = "bounded task-facility measurements; caller owns serial execution and interpretation"]
 fn measure_lazy_runtime_vs_shared_image_facilities() {
     println!(
         "{}",

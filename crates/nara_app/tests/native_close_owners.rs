@@ -1,4 +1,4 @@
-//! Bounded R4a comparison: one independently supplied consumer and its local provider.
+//! Bounded close-owner comparison: one independently supplied consumer and its local provider.
 //! These are safe resource models, not qualification of a native SDK or a public graph API.
 
 use std::{
