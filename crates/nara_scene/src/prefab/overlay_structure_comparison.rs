@@ -205,12 +205,12 @@ fn resolve(targets: &TargetMap, target: &Target) -> Result<SceneEntityId, Confli
 
 fn emit(
     working: &mut SceneDocument,
-    operations: &mut Vec<ScenePatchOperation>,
+    operation_count: &mut usize,
     operation: ScenePatchOperation,
 ) -> Result<(), Conflict> {
-    crate::patch::apply_authoring_structure_operation(working, &operation, operations.len())
+    crate::patch::apply_authoring_structure_operation(working, &operation, *operation_count)
         .map_err(|_| Conflict::OwnerAdmission)?;
-    operations.push(operation);
+    *operation_count += 1;
     Ok(())
 }
 
@@ -238,7 +238,7 @@ fn prepare(
         .map_err(|_| Conflict::WorkLimit)?;
     let mut targets = projection.targets();
     let mut working = base.document().clone();
-    let mut operations = Vec::new();
+    let mut operation_count = 0;
     let mut provenance = projection.expanded.provenance().clone();
     let mut seen = BTreeSet::new();
     for added in &overlay.additions {
@@ -251,7 +251,7 @@ fn prepare(
         .map_err(|_| Conflict::OwnerAdmission)?;
         emit(
             &mut working,
-            &mut operations,
+            &mut operation_count,
             ScenePatchOperation::AddEntity {
                 entity: SceneEntityRecord::new(entity.clone()),
                 placement: ScenePlacement::last(ScenePlacementOwner::Parent {
@@ -318,7 +318,7 @@ fn prepare(
                 let from = ScenePlacement::current(&working, &entity).ok_or(Conflict::Placement)?;
                 emit(
                     &mut working,
-                    &mut operations,
+                    &mut operation_count,
                     ScenePatchOperation::MoveEntity {
                         entity: entity.clone(),
                         from,
@@ -366,7 +366,7 @@ fn prepare(
             .ok_or_else(|| Conflict::MissingTarget(target.clone()))?;
         emit(
             &mut working,
-            &mut operations,
+            &mut operation_count,
             ScenePatchOperation::RemoveEntity { entity, from },
         )?;
     }
