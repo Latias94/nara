@@ -2063,7 +2063,8 @@ fn merge_owner_candidate(aggregate: &mut RegistryData, candidate: RegistryData) 
     aggregate.type_tombstone_index.extend(type_tombstone_index);
 }
 
-fn validate_schema_capabilities(
+#[doc(hidden)]
+pub fn validate_schema_capabilities(
     schema: &ComponentSchema,
     capabilities: impl IntoIterator<Item = ComponentCapability>,
 ) -> Result<(), ComponentProjectionError> {

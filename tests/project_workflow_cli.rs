@@ -590,7 +590,6 @@ fn install_declared_second_scene(project: &Path) -> nara::scene::SceneDocument {
         reflect::{ComponentSchemaVersion, ComponentTypeId},
         scene::{
             PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityRecord,
-            ScenePatchDocument,
         },
     };
 
@@ -635,7 +634,7 @@ fn install_declared_second_scene(project: &Path) -> nara::scene::SceneDocument {
     );
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("second.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     let scene = SceneDocument::from_ordered_roots([anchor]);
     fs::write(

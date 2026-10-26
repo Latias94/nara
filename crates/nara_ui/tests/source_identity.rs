@@ -5,9 +5,10 @@ use nara_asset::AssetRef;
 use nara_input::{InputPointerId, InputSeatId, InputWindowId};
 use nara_reflect::{ComponentRegistry, ComponentRegistryPlugin, component_registry};
 use nara_scene::{
-    ExpandedSceneCandidate, InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance,
-    PrefabProjectionStep, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
-    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    ExpandedSceneCandidate, InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument,
+    PrefabEntityTarget, PrefabInstance, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
+    PrefabPlacementSlot, PrefabProjectionStep, PrefabSourceResolver, SceneDocument, SceneEntityId,
+    SceneEntityRecord, SceneEntitySource, SourceDocumentKey,
 };
 use nara_ui::{
     UiAdapterDiagnostics, UiNode, UiPlugin, UiRoot, UiStyle, UiSurfaceEndpoint, UiSurfaceSlot,
@@ -129,7 +130,7 @@ fn canonical_prefab_alias_rebuild_preserves_keys_but_a_containing_source_switch_
         let mut anchor = SceneEntityRecord::new(local(name));
         anchor.prefab = Some(PrefabInstance {
             source: request,
-            overrides: ScenePatchDocument::default(),
+            overrides: None,
         });
         anchor
     };
@@ -158,7 +159,7 @@ fn canonical_prefab_alias_rebuild_preserves_keys_but_a_containing_source_switch_
         let mut anchor = SceneEntityRecord::new(local("anchor"));
         anchor.prefab = Some(PrefabInstance {
             source: request,
-            overrides: ScenePatchDocument::default(),
+            overrides: None,
         });
         let expanded =
             SceneDocument::from_ordered_roots([anchor]).expand_prefabs(&registry, &resolver);
@@ -279,14 +280,22 @@ fn direct_overlay_additions_do_not_alias_inherited_ui_keys_or_inherit_the_base_s
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(source.clone(), prefab_source_key("base"), prefab.clone())
         .with_prefab(other_source.clone(), prefab_source_key("other"), prefab);
-    let additions = replace_roots_with_additions([SceneEntityRecord::new(local_id("shared"))]);
+    let additions = |request: &AssetRef| {
+        replace_roots_with_additions(
+            resolver.resolve_prefab(request).unwrap().key().clone(),
+            [SceneEntityRecord::new(local_id("shared"))],
+        )
+    };
     let observations = observe_shared_ui_roots(vec![
+        expand_ui_scene(repeated_placements(source.clone(), None), &resolver),
         expand_ui_scene(
-            repeated_placements(source.clone(), ScenePatchDocument::default()),
+            repeated_placements(source.clone(), Some(additions(&source))),
             &resolver,
         ),
-        expand_ui_scene(repeated_placements(source, additions.clone()), &resolver),
-        expand_ui_scene(repeated_placements(other_source, additions), &resolver),
+        expand_ui_scene(
+            repeated_placements(other_source.clone(), Some(additions(&other_source))),
+            &resolver,
+        ),
     ]);
 
     assert_eq!(observations[0].keys.len(), 2);
@@ -316,31 +325,30 @@ fn direct_overlay_additions_do_not_alias_inherited_ui_keys_or_inherit_the_base_s
 fn nested_overlay_additions_do_not_alias_inherited_ui_keys_across_repeated_placements() {
     let outer_source = AssetRef::path("prefabs/outer.ron").unwrap();
     let leaf_source = AssetRef::path("prefabs/leaf.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        leaf_source.clone(),
+        prefab_source_key("leaf"),
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(local_id("shared"))]),
+    );
     let candidates = [
-        ScenePatchDocument::default(),
-        replace_roots_with_additions([SceneEntityRecord::new(local_id("shared"))]),
+        None,
+        Some(replace_roots_with_additions(
+            resolver.resolve_prefab(&leaf_source).unwrap().key().clone(),
+            [SceneEntityRecord::new(local_id("shared"))],
+        )),
     ]
     .into_iter()
     .map(|overrides| {
-        let resolver = InMemoryPrefabSourceResolver::new()
-            .with_prefab(
+        let resolver = resolver.clone().with_prefab(
+            outer_source.clone(),
+            prefab_source_key("outer"),
+            PrefabDocument::from_ordered_roots([prefab_anchor(
+                "inner",
                 leaf_source.clone(),
-                prefab_source_key("leaf"),
-                PrefabDocument::from_ordered_roots([SceneEntityRecord::new(local_id("shared"))]),
-            )
-            .with_prefab(
-                outer_source.clone(),
-                prefab_source_key("outer"),
-                PrefabDocument::from_ordered_roots([prefab_anchor(
-                    "inner",
-                    leaf_source.clone(),
-                    overrides,
-                )]),
-            );
-        expand_ui_scene(
-            repeated_placements(outer_source.clone(), ScenePatchDocument::default()),
-            &resolver,
-        )
+                overrides,
+            )]),
+        );
+        expand_ui_scene(repeated_placements(outer_source.clone(), None), &resolver)
     })
     .collect();
     let observations = observe_shared_ui_roots(candidates);
@@ -384,8 +392,7 @@ fn nested_overlay_additions_do_not_alias_inherited_ui_keys_across_repeated_place
 fn added_prefab_instances_retain_addition_ancestry_in_descendant_ui_keys() {
     let outer_source = AssetRef::path("prefabs/outer.ron").unwrap();
     let leaf_source = AssetRef::path("prefabs/leaf.ron").unwrap();
-    let anchors = ["first", "second"]
-        .map(|name| prefab_anchor(name, leaf_source.clone(), ScenePatchDocument::default()));
+    let anchors = ["first", "second"].map(|name| prefab_anchor(name, leaf_source.clone(), None));
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             leaf_source,
@@ -398,12 +405,19 @@ fn added_prefab_instances_retain_addition_ancestry_in_descendant_ui_keys() {
             PrefabDocument::from_ordered_roots(anchors.clone()),
         );
     let observations = observe_shared_ui_roots(vec![
+        expand_ui_scene(repeated_placements(outer_source.clone(), None), &resolver),
         expand_ui_scene(
-            repeated_placements(outer_source.clone(), ScenePatchDocument::default()),
-            &resolver,
-        ),
-        expand_ui_scene(
-            repeated_placements(outer_source, replace_roots_with_additions(anchors)),
+            repeated_placements(
+                outer_source.clone(),
+                Some(replace_roots_with_additions(
+                    resolver
+                        .resolve_prefab(&outer_source)
+                        .unwrap()
+                        .key()
+                        .clone(),
+                    anchors,
+                )),
+            ),
             &resolver,
         ),
     ]);
@@ -583,39 +597,48 @@ fn prefab_source_key(name: &str) -> nara_scene::SourceDocumentKey {
     .unwrap()
 }
 
-fn prefab_anchor(id: &str, source: AssetRef, overrides: ScenePatchDocument) -> SceneEntityRecord {
+fn prefab_anchor(
+    id: &str,
+    source: AssetRef,
+    overrides: Option<PrefabOverlay>,
+) -> SceneEntityRecord {
     let mut anchor = SceneEntityRecord::new(local_id(id));
     anchor.prefab = Some(PrefabInstance { source, overrides });
     anchor
 }
 
-fn repeated_placements(source: AssetRef, overrides: ScenePatchDocument) -> SceneDocument {
+fn repeated_placements(source: AssetRef, overrides: Option<PrefabOverlay>) -> SceneDocument {
     SceneDocument::from_ordered_roots(
         ["left", "right"].map(|name| prefab_anchor(name, source.clone(), overrides.clone())),
     )
 }
 
 fn replace_roots_with_additions(
+    base: SourceDocumentKey,
     entities: impl IntoIterator<Item = SceneEntityRecord>,
-) -> ScenePatchDocument {
-    let entities = entities.into_iter().collect::<Vec<_>>();
-    // Remove fixture roots in source order so each removal has an exact first-root precondition.
-    let mut operations = entities
-        .iter()
-        .map(|entity| ScenePatchOperation::RemoveEntity {
-            entity: entity.id.clone(),
-            from: ScenePlacement::first(ScenePlacementOwner::Root),
-        })
-        .collect::<Vec<_>>();
-    operations.extend(
-        entities
-            .into_iter()
-            .map(|entity| ScenePatchOperation::AddEntity {
-                entity,
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
-            }),
-    );
-    ScenePatchDocument::new(operations)
+) -> PrefabOverlay {
+    let mut overlay = PrefabOverlay::new(base);
+    for entity in entities {
+        assert!(
+            entity.children.is_empty(),
+            "fixture additions are flat roots"
+        );
+        overlay
+            .suppressions
+            .push(PrefabEntityTarget::source(entity.id.clone()));
+        overlay.placements.push(PrefabPlacement {
+            target: PrefabEntityTarget::addition(entity.id.clone()),
+            parent: PrefabPlacementParent::Root,
+            slot: PrefabPlacementSlot::Last,
+        });
+        overlay.additions.push(PrefabAddition {
+            id: entity.id,
+            components: entity.components,
+            prefab: entity.prefab,
+            bindings: Default::default(),
+        });
+    }
+    overlay
 }
 
 fn expand_ui_scene(

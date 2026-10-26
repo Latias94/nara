@@ -4,9 +4,9 @@ use nara_reflect::{
 };
 
 use crate::{
-    PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
-    SceneFileLimits, SceneFilePublicationError, SceneFormatError, ScenePatchDocument,
-    ScenePatchOperation,
+    PrefabComponentIntent, PrefabDocument, PrefabInstance, PrefabPropertyIntent,
+    SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SceneFileLimits,
+    SceneFilePublicationError, SceneFormatError, ScenePatchDocument, ScenePatchOperation,
     diagnostics::{
         error as diagnostic_error, usize_to_u64, with_migration_error, with_public_identifier,
         with_public_locator, with_public_u64,
@@ -77,7 +77,7 @@ fn canonicalize_entities(
 ) -> Result<bool, SceneFilePublicationError> {
     let mut changed = false;
     for entity in entities {
-        changed |= canonicalize_entity(entity, registry, budget, PatchValuePolicy::Migrate)?;
+        changed |= canonicalize_entity(entity, registry, budget)?;
     }
     Ok(changed)
 }
@@ -86,22 +86,14 @@ fn canonicalize_entity(
     entity: &mut SceneEntityRecord,
     registry: &ComponentRegistry,
     budget: &mut PublicationValueBudget,
-    policy: PatchValuePolicy,
 ) -> Result<bool, SceneFilePublicationError> {
     let mut changed = false;
     for (component_id, component) in &mut entity.components {
-        changed |= migrate_component_record(
-            &entity.id,
-            component_id,
-            component,
-            registry,
-            budget,
-            policy,
-        )?;
+        changed |= migrate_component_record(&entity.id, component_id, component, registry, budget)?;
     }
-    if let Some(prefab) = &mut entity.prefab {
-        changed |= canonicalize_patch_values(&mut prefab.overrides, registry, budget, policy)?;
-    }
+    // Overlay claims are source declarations. Their Schema/selector/base predicates belong
+    // to the surviving selection, so a replaced obsolete declaration must not reject here.
+    // Raw admission already charged the complete tree, including inactive declarations.
     Ok(changed)
 }
 
@@ -110,35 +102,20 @@ fn canonicalize_patch(
     registry: &ComponentRegistry,
     budget: &mut PublicationValueBudget,
 ) -> Result<bool, SceneFilePublicationError> {
-    canonicalize_patch_values(patch, registry, budget, PatchValuePolicy::Migrate)
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum PatchValuePolicy {
-    Migrate,
-    ExactSnapshot,
-}
-
-fn canonicalize_patch_values(
-    patch: &mut ScenePatchDocument,
-    registry: &ComponentRegistry,
-    budget: &mut PublicationValueBudget,
-    policy: PatchValuePolicy,
-) -> Result<bool, SceneFilePublicationError> {
     let mut changed = false;
     for operation in &mut patch.operations {
         match operation {
             ScenePatchOperation::AddEntity { entity, .. } => {
-                changed |= canonicalize_entity(entity, registry, budget, policy)?;
+                changed |= canonicalize_entity(entity, registry, budget)?;
             }
             ScenePatchOperation::RestoreEntity {
                 entity,
                 descendants,
                 ..
             } => {
-                changed |= canonicalize_entity(entity, registry, budget, policy)?;
+                changed |= canonicalize_entity(entity, registry, budget)?;
                 for descendant in descendants {
-                    changed |= canonicalize_entity(descendant, registry, budget, policy)?;
+                    changed |= canonicalize_entity(descendant, registry, budget)?;
                 }
             }
             ScenePatchOperation::AddComponent {
@@ -151,8 +128,7 @@ fn canonicalize_patch_values(
                 component,
                 value,
             } => {
-                changed |=
-                    migrate_component_record(entity, component, value, registry, budget, policy)?;
+                changed |= migrate_component_record(entity, component, value, registry, budget)?;
             }
             ScenePatchOperation::SetField {
                 entity,
@@ -167,39 +143,9 @@ fn canonicalize_patch_values(
                     component_version,
                     field.as_str(),
                     registry,
-                    if policy == PatchValuePolicy::ExactSnapshot {
-                        FieldVersionPolicy::ExactSnapshot
-                    } else {
-                        FieldVersionPolicy::RequireCurrentValueSemantics
-                    },
+                    FieldVersionPolicy::RequireCurrentValueSemantics,
                 )?;
                 budget.observe(value)?;
-                if policy == PatchValuePolicy::ExactSnapshot {
-                    let schema = registry
-                        .schema(component)
-                        .expect("validated component schema");
-                    let field_schema = registry
-                        .resolve_field(component, field)
-                        .expect("validated component field");
-                    field_schema.shape().validate_value(value).map_err(|_| {
-                        publication_error(with_public_locator(
-                            with_public_locator(
-                                with_public_locator(
-                                    diagnostic_error(
-                                        "scene.file-exact-snapshot-value-invalid",
-                                        "Exact Prefab snapshot field value does not match its current schema",
-                                    ),
-                                    "entity-id",
-                                    entity.as_str(),
-                                ),
-                                "component-id",
-                                schema.id().as_str(),
-                            ),
-                            "field-id",
-                            field.as_str(),
-                        ))
-                    })?;
-                }
             }
             ScenePatchOperation::RemoveField {
                 entity,
@@ -213,11 +159,7 @@ fn canonicalize_patch_values(
                     component_version,
                     field.as_str(),
                     registry,
-                    if policy == PatchValuePolicy::ExactSnapshot {
-                        FieldVersionPolicy::ExactSnapshot
-                    } else {
-                        FieldVersionPolicy::StableIdentityOnly
-                    },
+                    FieldVersionPolicy::StableIdentityOnly,
                 )?;
             }
             ScenePatchOperation::SetAssetRefField {
@@ -233,26 +175,16 @@ fn canonicalize_patch_values(
                     component_version,
                     field.as_str(),
                     registry,
-                    if policy == PatchValuePolicy::ExactSnapshot {
-                        FieldVersionPolicy::ExactSnapshot
-                    } else {
-                        FieldVersionPolicy::RequireCurrentValueSemantics
-                    },
+                    FieldVersionPolicy::RequireCurrentValueSemantics,
                 )?;
             }
             ScenePatchOperation::SetPrefabInstance {
                 expected, value, ..
             } => {
-                // Neither side may be migrated: expected is an equality precondition and
-                // value becomes the next exact snapshot (and the inverse precondition).
-                // Validate recursively against current schemas without rewriting either tree.
-                for instance in expected.iter_mut().chain(value.iter_mut()) {
-                    canonicalize_patch_values(
-                        &mut instance.overrides,
-                        registry,
-                        budget,
-                        PatchValuePolicy::ExactSnapshot,
-                    )?;
+                // Both sides are equality evidence. Check exact record versions without
+                // rewriting claims or resolving activation-only targets and selectors.
+                for instance in expected.iter().chain(value.iter()) {
+                    validate_exact_instance_snapshot(instance, registry, budget)?;
                 }
             }
             ScenePatchOperation::RemoveEntity { .. }
@@ -263,16 +195,71 @@ fn canonicalize_patch_values(
     Ok(changed)
 }
 
-fn migrate_component_record(
-    entity: &SceneEntityId,
-    component_id: &ComponentTypeId,
-    record: &mut SceneComponentRecord,
+fn validate_exact_instance_snapshot(
+    instance: &PrefabInstance,
     registry: &ComponentRegistry,
     budget: &mut PublicationValueBudget,
-    policy: PatchValuePolicy,
-) -> Result<bool, SceneFilePublicationError> {
-    if registry.schema(component_id).is_none() {
-        return Err(publication_error(with_public_locator(
+) -> Result<(), SceneFilePublicationError> {
+    let Some(overlay) = &instance.overrides else {
+        return Ok(());
+    };
+    for addition in &overlay.additions {
+        for (component, record) in &addition.components {
+            validate_exact_component_record(&addition.id, component, record, registry, budget)?;
+        }
+        if let Some(instance) = &addition.prefab {
+            validate_exact_instance_snapshot(instance, registry, budget)?;
+        }
+    }
+    for claim in &overlay.instances {
+        if let Some(instance) = &claim.value {
+            validate_exact_instance_snapshot(instance, registry, budget)?;
+        }
+    }
+    for intent in &overlay.components {
+        match intent {
+            PrefabComponentIntent::Set {
+                target,
+                component,
+                record,
+                ..
+            } => {
+                validate_exact_component_record(
+                    target.entity.entity(),
+                    component,
+                    record,
+                    registry,
+                    budget,
+                )?;
+            }
+            PrefabComponentIntent::Properties {
+                target,
+                component,
+                version,
+                claims,
+            } => {
+                let entity = target.entity.entity();
+                let schema = require_component_schema(entity, component, registry)?;
+                require_exact_snapshot_version(entity, component, *version, schema.version)?;
+                for claim in claims {
+                    if let PrefabPropertyIntent::Set(value) = &claim.intent {
+                        budget.observe(value)?;
+                    }
+                }
+            }
+            PrefabComponentIntent::Suppress { .. } => {}
+        }
+    }
+    Ok(())
+}
+
+fn require_component_schema<'a>(
+    entity: &SceneEntityId,
+    component_id: &ComponentTypeId,
+    registry: &'a ComponentRegistry,
+) -> Result<&'a nara_reflect::ComponentSchema, SceneFilePublicationError> {
+    registry.schema(component_id).ok_or_else(|| {
+        publication_error(with_public_locator(
             with_public_locator(
                 diagnostic_error(
                     "scene.unknown-component",
@@ -283,39 +270,53 @@ fn migrate_component_record(
             ),
             "component-id",
             component_id.as_str(),
-        )));
-    }
-    if policy == PatchValuePolicy::ExactSnapshot {
-        let schema = registry
-            .schema(component_id)
-            .expect("known component schema");
-        require_exact_snapshot_version(entity, component_id, record.version, schema.version)?;
-        budget.observe(&record.value)?;
-        validate_component_value_with_limits(
-            schema,
-            &record.value,
-            budget.limits.component_materialization_limits(),
-        )
-        .map_err(|error| {
-            publication_error(crate::diagnostics::with_codec_error(
+        ))
+    })
+}
+
+fn validate_exact_component_record(
+    entity: &SceneEntityId,
+    component_id: &ComponentTypeId,
+    record: &SceneComponentRecord,
+    registry: &ComponentRegistry,
+    budget: &mut PublicationValueBudget,
+) -> Result<(), SceneFilePublicationError> {
+    let schema = require_component_schema(entity, component_id, registry)?;
+    require_exact_snapshot_version(entity, component_id, record.version, schema.version)?;
+    budget.observe(&record.value)?;
+    validate_component_value_with_limits(
+        schema,
+        &record.value,
+        budget.limits.component_materialization_limits(),
+    )
+    .map_err(|error| {
+        publication_error(crate::diagnostics::with_codec_error(
+            with_public_locator(
                 with_public_locator(
-                    with_public_locator(
-                        diagnostic_error(
-                            "scene.file-exact-snapshot-value-invalid",
-                            "Exact Prefab snapshot component value does not match its current schema",
-                        ),
-                        "entity-id",
-                        entity.as_str(),
+                    diagnostic_error(
+                        "scene.file-exact-snapshot-value-invalid",
+                        "Exact Prefab snapshot component value does not match its current schema",
                     ),
-                    "component-id",
-                    component_id.as_str(),
+                    "entity-id",
+                    entity.as_str(),
                 ),
-                &error,
-                Some(schema),
-            ))
-        })?;
-        return Ok(false);
-    }
+                "component-id",
+                component_id.as_str(),
+            ),
+            &error,
+            Some(schema),
+        ))
+    })
+}
+
+fn migrate_component_record(
+    entity: &SceneEntityId,
+    component_id: &ComponentTypeId,
+    record: &mut SceneComponentRecord,
+    registry: &ComponentRegistry,
+    budget: &mut PublicationValueBudget,
+) -> Result<bool, SceneFilePublicationError> {
+    require_component_schema(entity, component_id, registry)?;
     let migrated = registry
         .migrate_component_value(component_id, record.version, &record.value)
         .map_err(|error| {
@@ -366,9 +367,6 @@ fn canonicalize_field_target(
             component_id.as_str(),
         )));
     };
-    if version_policy == FieldVersionPolicy::ExactSnapshot {
-        require_exact_snapshot_version(entity, component_id, *component_version, schema.version)?;
-    }
     if *component_version > schema.version {
         return Err(publication_error(with_public_u64(
             with_public_u64(
@@ -449,7 +447,6 @@ fn canonicalize_field_target(
 enum FieldVersionPolicy {
     StableIdentityOnly,
     RequireCurrentValueSemantics,
-    ExactSnapshot,
 }
 
 fn require_exact_snapshot_version(
@@ -658,7 +655,7 @@ fn post_migration_format_error(error: SceneFormatError) -> SceneFilePublicationE
         SceneFormatError::Shape { .. } => "shape",
         SceneFormatError::Header { .. } => "header",
         SceneFormatError::Contract(_) => "contract",
-        SceneFormatError::EmbeddedPatchFormatVersion { .. } => "embedded-patch-version",
+        SceneFormatError::PatchFormatVersion { .. } => "patch-version",
         SceneFormatError::LegacyPlacementShape { .. } => "legacy-placement-shape",
         SceneFormatError::Payload { .. } => "payload",
         SceneFormatError::Budget(_) => "domain-budget",
@@ -673,4 +670,242 @@ fn post_migration_format_error(error: SceneFormatError) -> SceneFilePublicationE
         "format-error-kind",
         kind,
     ))
+}
+
+#[cfg(test)]
+mod overlay_snapshot_tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    use nara_asset::{AssetPath, AssetRef};
+    use nara_ecs::Component;
+    use nara_reflect::{
+        ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
+        ComponentPropertyPath, ComponentSchema, ComponentValueKind,
+    };
+
+    use super::*;
+    use crate::{
+        PrefabAddition, PrefabComponentSetMode, PrefabEntityTarget, PrefabInstanceClaim,
+        PrefabOverlay, PrefabPropertyClaim, SourceDocumentKey, SourceDocumentKind,
+    };
+
+    fn component() -> ComponentTypeId {
+        ComponentTypeId::new("test.snapshot")
+    }
+
+    #[derive(Component)]
+    struct SnapshotComponent {
+        number: u64,
+    }
+
+    fn registry(calls: Arc<AtomicUsize>) -> ComponentRegistry {
+        let mut registry = ComponentRegistry::new();
+        registry
+            .register_persistent_component_with_codec::<SnapshotComponent, _, _>(
+                ComponentSchema::new(component(), "Snapshot", ComponentSchemaVersion(2))
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                    .with_fields([ComponentFieldSchema::required(
+                        ComponentFieldId::new("number"),
+                        "Number",
+                        ComponentFieldPath::from_fields(["number"]),
+                        ComponentValueKind::U64,
+                    )
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING)]),
+                |value| {
+                    Ok(SnapshotComponent {
+                        number: value.field_u64("number")?,
+                    })
+                },
+                |value| {
+                    Ok(ComponentValue::map([(
+                        "number",
+                        ComponentValue::U64(value.number),
+                    )]))
+                },
+            )
+            .unwrap();
+        registry
+            .register_component_migration(
+                &component(),
+                ComponentSchemaVersion::ONE,
+                ComponentSchemaVersion(2),
+                move |value| {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(value)
+                },
+            )
+            .unwrap();
+        registry.freeze().unwrap();
+        registry
+    }
+
+    fn overlay() -> PrefabOverlay {
+        PrefabOverlay::new(
+            SourceDocumentKey::named(
+                "72011426-37e2-48ba-bc06-78841468889a".parse().unwrap(),
+                "base",
+                SourceDocumentKind::Prefab,
+            )
+            .unwrap(),
+        )
+    }
+
+    fn instance(overlay: PrefabOverlay) -> PrefabInstance {
+        PrefabInstance {
+            source: AssetRef::Path(AssetPath::new("p.prefab.json").unwrap()),
+            overrides: Some(overlay),
+        }
+    }
+
+    fn old_record() -> SceneComponentRecord {
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::map([("number", ComponentValue::U64(7))]),
+        )
+    }
+
+    #[test]
+    fn direct_records_migrate_while_overlay_records_remain_original_source_data() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let registry = registry(Arc::clone(&calls));
+        let mut declaration = overlay();
+        let mut addition = PrefabAddition::new(SceneEntityId::new("added").unwrap());
+        addition.components.insert(component(), old_record());
+        declaration.additions.push(addition);
+        let declaration = instance(declaration);
+        let mut entity = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
+        entity.components.insert(component(), old_record());
+        entity.prefab = Some(declaration.clone());
+        let document = SceneDocument::from_ordered_roots([entity]);
+        let (canonical, changed) =
+            canonicalize_scene_document(document, &registry, SceneFileLimits::default()).unwrap();
+        assert!(changed);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            canonical.entities[0].components[&component()].version,
+            ComponentSchemaVersion(2)
+        );
+        assert_eq!(canonical.entities[0].prefab.as_ref(), Some(&declaration));
+    }
+
+    #[test]
+    fn exact_snapshot_sides_never_invoke_migrations_in_nested_additions_or_claims() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let registry = registry(Arc::clone(&calls));
+        let mut old = overlay();
+        old.components.push(PrefabComponentIntent::Set {
+            mode: PrefabComponentSetMode::Replace,
+            target: PrefabEntityTarget::source(SceneEntityId::new("target").unwrap()),
+            component: component(),
+            record: old_record(),
+            bindings: Vec::new(),
+        });
+        let mut through_addition = overlay();
+        let mut addition = PrefabAddition::new(SceneEntityId::new("added").unwrap());
+        addition.prefab = Some(instance(old.clone()));
+        through_addition.additions.push(addition);
+        let mut through_claim = overlay();
+        through_claim.instances.push(PrefabInstanceClaim {
+            target: PrefabEntityTarget::source(SceneEntityId::new("nested").unwrap()),
+            value: Some(instance(old)),
+        });
+        for declaration in [through_addition, through_claim] {
+            for expected_side in [true, false] {
+                let declaration = instance(declaration.clone());
+                let (expected, value) = if expected_side {
+                    (Some(declaration), None)
+                } else {
+                    (None, Some(declaration))
+                };
+                let patch = ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
+                    entity: SceneEntityId::new("anchor").unwrap(),
+                    expected,
+                    value,
+                }]);
+                let error = canonicalize_scene_patch(patch, &registry, SceneFileLimits::default())
+                    .unwrap_err();
+                assert!(error.diagnostics().iter().any(|entry| {
+                    entry.code().as_str() == "scene.file-exact-snapshot-version-mismatch"
+                }));
+                assert_eq!(calls.load(Ordering::SeqCst), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn exact_property_snapshot_preserves_unresolved_selectors_without_rewriting() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let registry = registry(Arc::clone(&calls));
+        let mut declaration = overlay();
+        declaration
+            .components
+            .push(PrefabComponentIntent::Properties {
+                target: PrefabEntityTarget::source(SceneEntityId::new("missing").unwrap()),
+                component: component(),
+                version: ComponentSchemaVersion(2),
+                claims: vec![PrefabPropertyClaim {
+                    path: ComponentPropertyPath::new(ComponentFieldId::new("removed")),
+                    intent: PrefabPropertyIntent::Set(ComponentValue::String(
+                        "unresolved".to_owned(),
+                    )),
+                    bindings: Vec::new(),
+                }],
+            });
+        let patch = ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
+            entity: SceneEntityId::new("anchor").unwrap(),
+            expected: Some(instance(declaration)),
+            value: None,
+        }]);
+        let (canonical, changed) =
+            canonicalize_scene_patch(patch.clone(), &registry, SceneFileLimits::default()).unwrap();
+        assert!(!changed);
+        assert_eq!(canonical, patch);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn exact_property_version_and_complete_record_shape_still_require_exact_admission() {
+        let registry = registry(Arc::new(AtomicUsize::new(0)));
+        let mut old_property = overlay();
+        old_property
+            .components
+            .push(PrefabComponentIntent::Properties {
+                target: PrefabEntityTarget::source(SceneEntityId::new("missing").unwrap()),
+                component: component(),
+                version: ComponentSchemaVersion::ONE,
+                claims: Vec::new(),
+            });
+        let mut invalid_record = overlay();
+        invalid_record.components.push(PrefabComponentIntent::Set {
+            mode: PrefabComponentSetMode::Replace,
+            target: PrefabEntityTarget::source(SceneEntityId::new("missing").unwrap()),
+            component: component(),
+            record: SceneComponentRecord::new(
+                ComponentSchemaVersion(2),
+                ComponentValue::map([("number", ComponentValue::String("invalid".to_owned()))]),
+            ),
+            bindings: Vec::new(),
+        });
+        for (declaration, code) in [
+            (old_property, "scene.file-exact-snapshot-version-mismatch"),
+            (invalid_record, "scene.file-exact-snapshot-value-invalid"),
+        ] {
+            let patch = ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
+                entity: SceneEntityId::new("anchor").unwrap(),
+                expected: Some(instance(declaration)),
+                value: None,
+            }]);
+            let error =
+                canonicalize_scene_patch(patch, &registry, SceneFileLimits::default()).unwrap_err();
+            assert!(
+                error
+                    .diagnostics()
+                    .iter()
+                    .any(|entry| entry.code().as_str() == code)
+            );
+        }
+    }
 }

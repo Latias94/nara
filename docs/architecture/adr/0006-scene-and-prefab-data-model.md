@@ -96,33 +96,39 @@ Conceptually:
 
 ```text
 SceneDocument
-  format_version
   entities: Vec<SceneEntityRecord>
   roots: Vec<SceneEntityId>
-  assets: optional asset reference table
 
 SceneEntityRecord
   id: SceneEntityId
-  name: optional string
-  components: map ComponentTypeId -> ComponentData
+  children: ordered Vec<SceneEntityId>
+  components: map ComponentTypeId -> SceneComponentRecord
   prefab: optional PrefabInstance
 
+SceneComponentRecord
+  owner: optional PersistentComponentSchemaOwnerId
+  version: ComponentSchemaVersion
+  value: ComponentValue
+
 PrefabInstance
-  source: AssetRef<PrefabDocument>
-  overrides: ScenePatchDocument
+  source: AssetRef
+  overrides: optional PrefabOverlay
 ```
 
 The exact serialized syntax can evolve, but these semantic fields should remain.
 
-Implementation notes as of 2026-07-08:
+Current source representation:
 
 - `SceneEntityId` is a validated path-like stable ID.
-- `SceneComponentRecord` stores `ComponentSchemaVersion` plus `ComponentValue`.
-- `PrefabInstance.overrides` is a `ScenePatchDocument`, not a whole-component override map.
+- `SceneComponentRecord` stores declared owner, `ComponentSchemaVersion` and `ComponentValue`.
+- The file envelope owns kind/version; Scene and Prefab payloads do not repeat them. Canonical
+  source identity is supplied by the source owner separately from the lookup `AssetRef`.
+- `PrefabInstance.overrides` retains declarative intent under ADR 0038. Exact transaction patches
+  are separate from durable property/component/instance claims, additions and desired layout.
 - Nested prefab expansion uses `PrefabSourceResolver`; the first adapter is
   `InMemoryPrefabSourceResolver`.
-- A prefab instance remains as an anchor entity. Expanded source entities are namespaced as
-  `anchor/source_entity`, and source roots are parented to the anchor.
+- A prefab instance remains as an anchor entity. Materialized locators are private and non-durable;
+  typed source/addition ancestry carries identity. Effective roots precede the anchor's local children.
 
 ## Alternatives Considered
 
@@ -188,7 +194,7 @@ but process-local ECS behavior is not implicit persistent meaning.
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | Component type IDs become unstable | High | Medium | Define stable nara component type IDs through `ComponentRegistry` |
-| Prefab overrides become complex | Medium | High | Use `ScenePatchDocument` for field-level overrides and share validation with scene editing |
+| Prefab overrides become complex | Medium | High | Separate declarative inheritance intent from exact edit history; share Schema validation and explicit source ownership |
 | JSON/RON divergence | Medium | Medium | Keep one semantic model and format adapters |
 | Scene validation slows iteration | Medium | Low | Provide fast diagnostics and partial validation for tooling |
 | AI emits structurally valid but bad scenes | Medium | High | Add schema constraints, defaults, and semantic validation passes |

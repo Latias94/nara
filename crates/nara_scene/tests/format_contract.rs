@@ -9,12 +9,14 @@ use nara_diagnostic::{Diagnostic, DiagnosticReport, DiagnosticValueRef};
 use nara_ecs::Component;
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistry, ComponentSchema, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentFieldSchema, ComponentPropertyPath, ComponentRegistry, ComponentSchema,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 use nara_scene::{
-    AuthoringSessionReplacementError, InMemoryPrefabSourceResolver, PrefabDocument,
-    PrefabDocumentCandidate, PrefabInstance, PrefabSourceResolver, SceneAuthoringSession,
+    AuthoringSessionReplacementError, InMemoryPrefabSourceResolver, PrefabAddition,
+    PrefabComponentIntent, PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget,
+    PrefabInstance, PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
+    PrefabPropertyClaim, PrefabPropertyIntent, PrefabSourceResolver, SceneAuthoringSession,
     SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
     SceneFileBudgetKind, SceneFileLimits, SceneFormatError, ScenePatchDocument,
     ScenePatchDocumentCandidate, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
@@ -367,76 +369,62 @@ fn ordered_patch_round_trip_preserves_owner_and_anchor_vocabulary() {
 }
 
 #[test]
-fn canonical_v1_rejects_non_v1_embedded_patch_records() {
-    fn entity_with_future_override() -> SceneEntityRecord {
+fn canonical_v1_rejects_embedded_operation_patches_without_a_legacy_reader() {
+    let overlay = PrefabOverlay::new(prefab_source::key("format.rejected-patch"));
+    let entity_with_overlay = || {
         let mut entity = SceneEntityRecord::new(scene_id("instance"));
         entity.prefab = Some(PrefabInstance {
             source: AssetRef::path("prefabs/source.ron").unwrap(),
-            overrides: ScenePatchDocument {
-                format_version: ScenePatchDocument::CURRENT_FORMAT_VERSION + 1,
-                operations: Vec::new(),
-            },
+            overrides: Some(overlay.clone()),
         });
         entity
-    }
+    };
 
-    let scene = SceneDocument::from_ordered_roots([entity_with_future_override()]);
-    let prefab = PrefabDocument::from_ordered_roots([entity_with_future_override()]);
+    let scene = SceneDocument::from_ordered_roots([entity_with_overlay()]);
+    let prefab = PrefabDocument::from_ordered_roots([entity_with_overlay()]);
     let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: entity_with_future_override(),
+        entity: entity_with_overlay(),
         placement: root_last(),
     }]);
-    for error in [
-        scene.to_json_string().unwrap_err(),
-        scene.to_ron_string().unwrap_err(),
-        prefab.to_json_string().unwrap_err(),
-        prefab.to_ron_string().unwrap_err(),
-        patch.to_json_string().unwrap_err(),
-        patch.to_ron_string().unwrap_err(),
-    ] {
-        assert!(
-            error
-                .to_string()
-                .contains("embedded scene patch format version")
+    for format_version in [1, 2] {
+        let legacy = ScenePatchDocument {
+            format_version,
+            operations: Vec::new(),
+        };
+        let replace_json = |encoded: String| {
+            let needle = serde_json::to_string(&Some(overlay.clone())).unwrap();
+            assert!(encoded.contains(&needle));
+            encoded.replace(&needle, &serde_json::to_string(&legacy).unwrap())
+        };
+        let replace_ron = |encoded: String| {
+            let needle = ron::ser::to_string(&Some(overlay.clone())).unwrap();
+            assert!(encoded.contains(&needle));
+            encoded.replace(&needle, &ron::ser::to_string(&legacy).unwrap())
+        };
+        let scene_json =
+            replace_json(serde_json::to_string(&envelope("scene", 1, "0.1.0", &scene)).unwrap());
+        let scene_ron =
+            replace_ron(ron::ser::to_string(&envelope("scene", 1, "0.1.0", &scene)).unwrap());
+        let prefab_json =
+            replace_json(serde_json::to_string(&envelope("prefab", 1, "0.1.0", &prefab)).unwrap());
+        let prefab_ron =
+            replace_ron(ron::ser::to_string(&envelope("prefab", 1, "0.1.0", &prefab)).unwrap());
+        let patch_json = replace_json(
+            serde_json::to_string(&envelope("scene_patch", 1, "0.1.0", &patch)).unwrap(),
         );
+        let patch_ron =
+            replace_ron(ron::ser::to_string(&envelope("scene_patch", 1, "0.1.0", &patch)).unwrap());
+        for error in [
+            SceneDocumentCandidate::decode_json_bytes(scene_json.as_bytes()).unwrap_err(),
+            SceneDocumentCandidate::decode_ron_bytes(scene_ron.as_bytes()).unwrap_err(),
+            PrefabDocumentCandidate::decode_json_bytes(prefab_json.as_bytes()).unwrap_err(),
+            PrefabDocumentCandidate::decode_ron_bytes(prefab_ron.as_bytes()).unwrap_err(),
+            ScenePatchDocumentCandidate::decode_json_bytes(patch_json.as_bytes()).unwrap_err(),
+            ScenePatchDocumentCandidate::decode_ron_bytes(patch_ron.as_bytes()).unwrap_err(),
+        ] {
+            assert!(matches!(error, SceneFormatError::Payload { .. }), "{error}");
+        }
     }
-
-    let valid =
-        SceneDocument::from_ordered_roots([prefab_anchor("instance", "prefabs/source.ron")]);
-    let mut encoded =
-        serde_json::from_str::<serde_json::Value>(&valid.to_json_string().unwrap()).unwrap();
-    encoded["payload"]["entities"][0]["prefab"]["overrides"]["format_version"] =
-        serde_json::json!(ScenePatchDocument::CURRENT_FORMAT_VERSION + 1);
-    let encoded = serde_json::to_vec(&encoded).unwrap();
-
-    let error = SceneDocumentCandidate::decode_json_bytes(&encoded).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("embedded scene patch format version")
-    );
-
-    let invalid_json = serde_json::to_vec(&envelope("scene_patch", 1, "0.1.0", &patch)).unwrap();
-    let invalid_ron = ron::ser::to_string(&envelope("scene_patch", 1, "0.1.0", &patch)).unwrap();
-    for error in [
-        ScenePatchDocumentCandidate::decode_json_bytes(&invalid_json).unwrap_err(),
-        ScenePatchDocumentCandidate::decode_ron_bytes(invalid_ron.as_bytes()).unwrap_err(),
-    ] {
-        assert!(
-            error
-                .to_string()
-                .contains("embedded scene patch format version")
-        );
-    }
-
-    let mut target = SceneDocument::default();
-    let before = target.clone();
-    let report = patch.apply_to_scene(&mut target, &ComponentRegistry::new());
-    assert!(!report.applied);
-    assert_eq!(target, before);
-    assert!(report.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "scene.patch-unsupported-format-version"
-    }));
 }
 
 #[test]
@@ -867,14 +855,20 @@ fn legacy_parent_and_missing_roots_fail_without_migration_or_order_inference() {
 }
 
 #[test]
-fn nested_prefab_override_add_entity_legacy_parent_is_a_transitional_payload_error() {
+fn nested_prefab_addition_rejects_legacy_parent_payload() {
     let mut root = SceneEntityRecord::new(scene_id("root"));
+    let mut overlay = PrefabOverlay::new(prefab_source::key("format.nested"));
+    overlay
+        .additions
+        .push(PrefabAddition::new(scene_id("nested-added")));
+    overlay.placements.push(PrefabPlacement {
+        target: PrefabEntityTarget::addition(scene_id("nested-added")),
+        parent: PrefabPlacementParent::Root,
+        slot: PrefabPlacementSlot::Last,
+    });
     root.prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/nested.ron").unwrap(),
-        overrides: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-            entity: SceneEntityRecord::new(scene_id("nested-added")),
-            placement: root_last(),
-        }]),
+        overrides: Some(overlay),
     });
     let mut encoded = serde_json::from_str::<serde_json::Value>(
         &PrefabDocument::from_ordered_roots([root])
@@ -882,14 +876,14 @@ fn nested_prefab_override_add_entity_legacy_parent_is_a_transitional_payload_err
             .unwrap(),
     )
     .unwrap();
-    encoded["payload"]["entities"][0]["prefab"]["overrides"]["operations"][0]["args"]["entity"]["parent"] =
+    encoded["payload"]["entities"][0]["prefab"]["overrides"]["additions"][0]["parent"] =
         serde_json::json!("root");
     let encoded = serde_json::to_vec(&encoded).unwrap();
 
     let error = PrefabDocumentCandidate::decode_json_bytes(&encoded).unwrap_err();
     assert!(
         matches!(&error, SceneFormatError::Payload { .. }),
-        "nested patch wire remains a generic payload boundary until U7: {error}"
+        "addition hierarchy belongs to declarative placements: {error}"
     );
 }
 
@@ -1047,9 +1041,26 @@ fn migration_value_growth_respects_candidate_limits_and_is_failure_atomic() {
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
             .with_component(migrating_text_id(), legacy_text_record("x"))]);
     let encoded = incoming.to_json_string().unwrap();
+    // Complete source cost: component ID, version (4), owner flag (1), map key and string.
+    let baseline_bytes = migrating_text_id().as_str().len() + 4 + 1 + "legacy".len() + 1;
     let limits = SceneFileLimits::default()
         .with_component_value_nodes(ItemLimit::new(4).unwrap())
-        .with_component_value_bytes(ByteLimit::new(16).unwrap());
+        .with_component_value_bytes(ByteLimit::new(baseline_bytes).unwrap());
+    let SceneFormatError::Budget(error) = SceneDocumentCandidate::decode_json_bytes_with_limits(
+        encoded.as_bytes(),
+        limits.with_component_value_bytes(ByteLimit::new(baseline_bytes - 1).unwrap()),
+    )
+    .unwrap_err() else {
+        panic!("the complete source must exceed the byte ceiling by exactly one");
+    };
+    assert_eq!(
+        (error.kind, error.observed, error.maximum),
+        (
+            SceneFileBudgetKind::ComponentValueBytes,
+            baseline_bytes,
+            baseline_bytes - 1,
+        )
+    );
     let candidate =
         SceneDocumentCandidate::decode_json_bytes_with_limits(encoded.as_bytes(), limits).unwrap();
     let before = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("existing"))]);
@@ -1074,9 +1085,12 @@ fn migration_value_growth_respects_candidate_limits_and_is_failure_atomic() {
 #[test]
 fn prefab_and_patch_migration_growth_respects_limits_and_is_failure_atomic() {
     let registry = migrating_text_registry(64);
+    // Direct source records retain their component ID as well as record metadata and value.
+    let record_bytes = 4 + 1 + "legacy".len() + 1;
+    let baseline_bytes = migrating_text_id().as_str().len() + record_bytes;
     let limits = SceneFileLimits::default()
         .with_component_value_nodes(ItemLimit::new(4).unwrap())
-        .with_component_value_bytes(ByteLimit::new(16).unwrap());
+        .with_component_value_bytes(ByteLimit::new(baseline_bytes).unwrap());
     let source = AssetRef::path("prefabs/migrating.ron").unwrap();
     let key = prefab_source::key("format.migrating");
     let existing =
@@ -1085,6 +1099,21 @@ fn prefab_and_patch_migration_growth_respects_limits_and_is_failure_atomic() {
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
             .with_component(migrating_text_id(), legacy_text_record("x"))]);
     let encoded = incoming.to_json_string().unwrap();
+    let SceneFormatError::Budget(error) = PrefabDocumentCandidate::decode_json_bytes_with_limits(
+        encoded.as_bytes(),
+        limits.with_component_value_bytes(ByteLimit::new(baseline_bytes - 1).unwrap()),
+    )
+    .unwrap_err() else {
+        panic!("the complete source must exceed the byte ceiling by exactly one");
+    };
+    assert_eq!(
+        (error.kind, error.observed, error.maximum),
+        (
+            SceneFileBudgetKind::ComponentValueBytes,
+            baseline_bytes,
+            baseline_bytes - 1,
+        )
+    );
     let mut resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
         key.clone(),
@@ -1117,6 +1146,25 @@ fn prefab_and_patch_migration_growth_respects_limits_and_is_failure_atomic() {
         value: legacy_text_record("x"),
     }]);
     let encoded = patch.to_ron_string().unwrap();
+    // AddComponent counts the complete record; its operation target/ID are not value bytes.
+    let limits = limits.with_component_value_bytes(ByteLimit::new(record_bytes).unwrap());
+    let SceneFormatError::Budget(error) =
+        ScenePatchDocumentCandidate::decode_ron_bytes_with_limits(
+            encoded.as_bytes(),
+            limits.with_component_value_bytes(ByteLimit::new(record_bytes - 1).unwrap()),
+        )
+        .unwrap_err()
+    else {
+        panic!("the complete record must exceed the byte ceiling by exactly one");
+    };
+    assert_eq!(
+        (error.kind, error.observed, error.maximum),
+        (
+            SceneFileBudgetKind::ComponentValueBytes,
+            record_bytes,
+            record_bytes - 1,
+        )
+    );
     let candidate =
         ScenePatchDocumentCandidate::decode_ron_bytes_with_limits(encoded.as_bytes(), limits)
             .unwrap();
@@ -1467,17 +1515,23 @@ fn patch_candidate_rejects_legacy_remove_of_tombstoned_field() {
 }
 
 #[test]
-fn prefab_candidate_upgrades_nested_legacy_remove_field() {
+fn prefab_candidate_preserves_version_bound_absence_without_implicit_migration() {
     let registry = migrating_text_registry(0);
     let mut root = SceneEntityRecord::new(scene_id("root"));
+    let mut overlay = PrefabOverlay::new(prefab_source::key("format.nested"));
+    overlay.components.push(PrefabComponentIntent::Properties {
+        target: PrefabEntityTarget::source(scene_id("nested-target")),
+        component: migrating_text_id(),
+        version: ComponentSchemaVersion::ONE,
+        claims: vec![PrefabPropertyClaim {
+            path: ComponentPropertyPath::new(ComponentFieldId::new("note")),
+            intent: PrefabPropertyIntent::Absent,
+            bindings: Vec::new(),
+        }],
+    });
     root.prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/nested.ron").unwrap(),
-        overrides: ScenePatchDocument::new([ScenePatchOperation::RemoveField {
-            entity: scene_id("nested-target"),
-            component: migrating_text_id(),
-            component_version: ComponentSchemaVersion::ONE,
-            field: ComponentFieldId::new("note"),
-        }]),
+        overrides: Some(overlay.clone()),
     });
     let incoming = PrefabDocument::from_ordered_roots([root]);
     let encoded = incoming.to_json_string().unwrap();
@@ -1497,47 +1551,56 @@ fn prefab_candidate_upgrades_nested_legacy_remove_field() {
     let published = resolver.resolve_prefab(&published_source).unwrap();
     assert_eq!(published.key(), &key);
     let published = published.document();
-    let operations = &published.entities[0]
+    let actual = published.entities[0]
         .prefab
         .as_ref()
         .unwrap()
         .overrides
-        .operations;
-    let ScenePatchOperation::RemoveField {
-        component_version,
-        field,
-        ..
-    } = &operations[0]
+        .as_ref()
+        .unwrap();
+    assert_eq!(actual, &overlay);
+    let PrefabComponentIntent::Properties {
+        version, claims, ..
+    } = &actual.components[0]
     else {
-        panic!("nested override must remain a field removal");
+        panic!("nested intent must remain a version-bound absence");
     };
-    assert_eq!(*component_version, ComponentSchemaVersion(2));
-    assert_eq!(field.as_str(), "note");
+    assert_eq!(*version, ComponentSchemaVersion::ONE);
+    assert_eq!(claims[0].path.root.as_str(), "note");
+    assert_eq!(claims[0].intent, PrefabPropertyIntent::Absent);
 }
 
 #[test]
-fn prefab_candidate_canonicalizes_components_and_nested_override_operations() {
+fn prefab_candidate_migrates_source_components_and_preserves_nested_declarations() {
     let registry = migrating_text_registry(0);
     let nested_entity = scene_id("nested-added");
     let nested_source = AssetRef::path("prefabs/nested.ron").unwrap();
     let mut root = SceneEntityRecord::new(scene_id("root"))
         .with_component(migrating_text_id(), legacy_text_record("root-before"));
+    let mut overlay = PrefabOverlay::new(prefab_source::key("format.nested"));
+    let mut addition = PrefabAddition::new(nested_entity);
+    addition
+        .components
+        .insert(migrating_text_id(), legacy_text_record("nested-before"));
+    overlay.additions.push(addition);
+    overlay.placements.push(PrefabPlacement {
+        target: PrefabEntityTarget::addition(scene_id("nested-added")),
+        parent: PrefabPlacementParent::Root,
+        slot: PrefabPlacementSlot::Last,
+    });
+    overlay.components.push(PrefabComponentIntent::Properties {
+        target: PrefabEntityTarget::source(scene_id("nested-target")),
+        component: migrating_text_id(),
+        version: ComponentSchemaVersion(2),
+        claims: vec![PrefabPropertyClaim {
+            path: ComponentPropertyPath::new(ComponentFieldId::new("text")),
+            intent: PrefabPropertyIntent::Set(ComponentValue::String("nested-after".to_owned())),
+            bindings: Vec::new(),
+        }],
+    });
     root.prefab = Some(PrefabInstance {
         source: nested_source,
-        overrides: ScenePatchDocument::new([
-            ScenePatchOperation::AddEntity {
-                entity: SceneEntityRecord::new(nested_entity.clone())
-                    .with_component(migrating_text_id(), legacy_text_record("nested-before")),
-                placement: root_last(),
-            },
-            ScenePatchOperation::SetField {
-                entity: nested_entity,
-                component: migrating_text_id(),
-                component_version: ComponentSchemaVersion(2),
-                field: ComponentFieldId::new("text"),
-                value: ComponentValue::String("nested-after".to_owned()),
-            },
-        ]),
+        overrides: Some(overlay.clone()),
     });
     let encoded = PrefabDocument::from_ordered_roots([root])
         .to_json_string()
@@ -1562,23 +1625,14 @@ fn prefab_candidate_canonicalizes_components_and_nested_override_operations() {
     let component = root.components.get(&migrating_text_id()).unwrap();
     assert_eq!(component.version, ComponentSchemaVersion(2));
     assert_eq!(component.value.field_str("current").unwrap(), "root-before");
-    let operations = &root.prefab.as_ref().unwrap().overrides.operations;
-    let ScenePatchOperation::AddEntity { entity, .. } = &operations[0] else {
-        panic!("first override must add the nested entity");
-    };
-    let component = entity.components.get(&migrating_text_id()).unwrap();
-    assert_eq!(component.version, ComponentSchemaVersion(2));
     assert_eq!(
-        component.value.field_str("current").unwrap(),
-        "nested-before"
+        root.prefab.as_ref().unwrap().overrides.as_ref(),
+        Some(&overlay)
     );
-    let ScenePatchOperation::SetField {
-        component_version, ..
-    } = &operations[1]
-    else {
-        panic!("second override must edit the nested entity");
-    };
-    assert_eq!(*component_version, ComponentSchemaVersion(2));
+    assert_eq!(
+        overlay.additions[0].components[&migrating_text_id()],
+        legacy_text_record("nested-before")
+    );
 }
 
 #[test]
@@ -1971,7 +2025,7 @@ fn prefab_anchor(id: &str, source: &str) -> SceneEntityRecord {
     let mut entity = SceneEntityRecord::new(scene_id(id));
     entity.prefab = Some(PrefabInstance {
         source: AssetRef::path(source).unwrap(),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     entity
 }

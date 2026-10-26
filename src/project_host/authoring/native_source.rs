@@ -281,6 +281,14 @@ impl AdmittedNativeDocumentSource {
         self.source_identity
     }
 
+    /// Advances only the containing file identity after an accepted persistence observation.
+    pub(crate) fn with_source_identity(&self, identity: FileIdentity) -> Self {
+        Self {
+            source_identity: identity,
+            ..self.clone()
+        }
+    }
+
     pub(super) fn metadata_source(&self) -> Option<&Arc<AuthoringSourceFact>> {
         self.metadata.as_ref().map(|metadata| &metadata.source)
     }

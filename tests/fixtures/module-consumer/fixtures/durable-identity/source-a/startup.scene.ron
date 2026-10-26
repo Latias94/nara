@@ -12,7 +12,7 @@
                 components: {},
                 prefab: Some((
                     source: (kind: "path", value: "source-a/actor.prefab.ron"),
-                    overrides: (format_version: 1, operations: []),
+                    overrides: None,
                 )),
             ),
             (
@@ -21,7 +21,7 @@
                 components: {},
                 prefab: Some((
                     source: (kind: "path", value: "source-b/shared.prefab.ron"),
-                    overrides: (format_version: 1, operations: []),
+                    overrides: None,
                 )),
             ),
         ],

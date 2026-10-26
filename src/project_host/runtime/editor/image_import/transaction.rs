@@ -16,7 +16,8 @@ use crate::project_host::file_publication::FilePublicationReadSource;
 use crate::project_host::persistence::CleanupTestControl;
 use crate::project_host::{
     authoring::{
-        AuthoringProjectSessionSnapshot, ProjectSourceIndexGeneration, ProjectSourceIndexSnapshot,
+        AuthoringDocumentCapture, AuthoringProjectSessionSnapshot, ProjectSourceIndexGeneration,
+        ProjectSourceIndexSnapshot,
     },
     persistence::{
         FilePublicationBinding, FilePublicationFailureStage, FilePublicationHost,
@@ -346,7 +347,16 @@ impl EditorImageImportHost {
         &mut self,
         project: &AuthoringProjectSessionSnapshot,
     ) {
-        self.hydration.initialize(project);
+        self.hydration.initialize(project, &mut self.last_good);
+    }
+
+    pub(crate) fn enqueue_authoring_capture(
+        &mut self,
+        project: &AuthoringProjectSessionSnapshot,
+        capture: &AuthoringDocumentCapture,
+    ) {
+        self.hydration
+            .enqueue_authoring_capture(project, capture, &mut self.last_good);
     }
 
     #[must_use]
@@ -442,12 +452,25 @@ impl EditorImageImportHost {
         self.advance_tile_sources(project, runtime);
         self.advance_reconciliation(project);
         self.advance_import(project, runtime);
-        if self.pending.is_none() {
+        if self.runtime_revocation_failure.is_some() {
+            self.hydration.cancel_pending();
+        } else if self.pending.is_none() {
             self.hydration
                 .advance(project, runtime, &mut self.last_good);
+            if let Some(failure) = self.hydration.take_revocation_failure() {
+                self.runtime_revocation_failure = Some(failure);
+            }
         }
         if let Err(failure) = runtime.reconcile_tile_sets(Vec::new()) {
             self.runtime_revocation_failure = Some(failure);
+        }
+        if self.runtime_revocation_failure.is_some() {
+            self.hydration.cancel_pending();
+            if let Some(catalog) = &self.catalog {
+                self.last_good.retain_catalog_eligible(|path, image| {
+                    catalog.retains_imported_image(path, image.stable_id(), image.source_identity())
+                });
+            }
         }
         self.runtime_revocation_failure
             .filter(|_| previous_failure.is_none())
@@ -776,10 +799,7 @@ impl EditorImageImportHost {
         };
         match attempt.advance(project) {
             Ok(Some(snapshot)) => {
-                self.hydration
-                    .retain_catalog_eligible(|path, stable_id, source_identity| {
-                        snapshot.retains_imported_image(path, stable_id, source_identity)
-                    });
+                let snapshot = Arc::new(snapshot);
                 if self.pending.as_ref().is_some_and(|pending| {
                     !snapshot.retains_imported_image(
                         &pending.asset_path,
@@ -796,26 +816,36 @@ impl EditorImageImportHost {
                         failure: EditorImageImportFailure::MetadataInvalid,
                     });
                 }
+                let deferred = self
+                    .hydration
+                    .observe_catalog(Arc::clone(&snapshot), &self.last_good);
+                let deferred = if self.runtime_revocation_failure.is_some() {
+                    BTreeSet::new()
+                } else {
+                    deferred
+                };
                 let revoked = self.last_good.ineligible_handles(|path, image| {
-                    snapshot.retains_imported_image(
-                        path,
-                        image.stable_id(),
-                        image.source_identity(),
-                    )
+                    deferred.contains(path)
+                        || snapshot.retains_imported_image(
+                            path,
+                            image.stable_id(),
+                            image.source_identity(),
+                        )
                 });
                 if let Err(failure) = runtime.revoke_images(revoked) {
                     self.runtime_revocation_failure = Some(failure);
                 }
                 self.last_good.retain_catalog_eligible(|asset_path, image| {
-                    snapshot.retains_imported_image(
-                        asset_path,
-                        image.stable_id(),
-                        image.source_identity(),
-                    )
+                    deferred.contains(asset_path)
+                        || snapshot.retains_imported_image(
+                            asset_path,
+                            image.stable_id(),
+                            image.source_identity(),
+                        )
                 });
                 self.tile_source_refresh =
                     Some(runtime.tile_set_records().iter().cloned().collect());
-                self.catalog = Some(Arc::new(snapshot));
+                self.catalog = Some(snapshot);
                 self.catalog_attempt = None;
                 self.catalog_failure = None;
             }

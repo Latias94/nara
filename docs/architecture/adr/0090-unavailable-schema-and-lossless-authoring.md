@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-13
 **Accepted**: 2026-08-18
-**Last Revised**: 2026-10-25 (source-owned first writes and omission-preserving inverse)
+**Last Revised**: 2026-10-27 (explicit declaration repair and composition/source publication boundaries)
 **Owner**: `nara_reflect`, `nara_scene`, `nara_tooling`, and persistent document owners
 **Admission Trigger**: Scene/prefab fixtures with a missing provider, known schema without its
 required native or Adapter-specific runtime binding, missing migration, and future component schema
@@ -65,7 +65,7 @@ each final edit candidate. This adds no project-code execution or native preview
 Current Available records use the selected file policy for effective defaults and reference work.
 Direct records validate local references against their source document namespace, including when
 an unrelated Prefab anchor is present. ADR 0038 does not admit generated projection IDs as new
-persistent identities. Override records belong to their referenced Prefab's final patch namespace,
+persistent identities. Override records belong to their declaring overlay's typed target and binding namespace,
 so source classification does not interpret them against the outer document. Unknown, future and
 unbound records retain their preservation boundary rather than acquiring typed remap authority.
 
@@ -114,11 +114,31 @@ file envelope, document shape, and generic `ComponentValue` grammar are understo
 migration, or required native/Adapter runtime binding is unavailable. Runtime admission remains
 strict and fail-closed.
 
-Exact `SetPrefabInstance` source transactions under ADR 0026 do not bypass preservation.
-Both expected and replacement declarations are bounded input, including nested record and target
-facts. Their embedded operation paths distinguish expected/replacement branches explicitly.
-The candidate must reproduce the complete unavailable manifest; removing or rewriting unavailable
-override records requires a separately admitted repair workflow. An unresolved lookup alone does
+Declarative instance overlays retain complete understood claims, including obsolete selectors,
+bindings and unavailable component payloads, with their exact source owner and value. Their
+source classification is not eager activation. A superseded embedded declaration may remain
+preserved while an outer complete instance pin selects a valid successor. The Scene compiler
+validates selected surviving declarations and their actual reference/dependency closure; inactive
+source inventory does not force successful Authoring or Runtime dependency reads. All retained declarations
+still cross the file's raw shape, depth and aggregate budgets. Unknown grammar is not preservable
+by guessing, and exact transaction snapshots retain ADR 0043's independent no-reinterpretation rule.
+
+The composition loader admits bounded decoded dependencies and their complete local structure
+before effective component interpretation. It retains actual canonical source/content evidence
+and the exact authoring basis, but does not claim standalone editable publication. A source payload
+that an outer complete component replacement or suppression discards must not fail effective
+composition merely because standalone semantic publication would reject that payload. Independent
+Open still crosses the ordinary strict source classifier. Do not label raw dependency capture as
+`Available`, manufacture an Adapter, or weaken standalone validation to repair compiler ordering.
+Selected structural declarations and component-slot existence checks remain mandatory even when
+later layers discard their values or entities.
+
+An exact `SetPrefabInstance` source transaction under ADR 0026 is the explicit complete-declaration
+repair boundary for its named anchor. Both snapshots are bounded input and the complete prior
+declaration must match before replacement. The inverse retains that prior declaration, including
+unavailable payloads and bindings. Only that anchor's embedded unavailable overlay may change;
+direct unavailable records and other anchors retain their complete preservation manifest. A generic
+field edit or readmission cannot acquire this repair permission. An unresolved lookup alone does
 not prevent storing a syntactically understood declaration, and preparation does not resolve or
 execute it. Source equality and activation readiness remain distinct.
 
@@ -126,12 +146,16 @@ Unavailable component-targeting field writes retain their complete replacement p
 canonical asset-reference values. Preserving only the target/field identity does not preserve the
 operation. Payload-free removal and an explicit Null replacement remain different declarations.
 
-The source classifier publishes one borrowed declared-asset projection covering complete records
-and current-version field declarations, including recursive values and defaults exposed by
-RemoveField. Expected/replacement instance branches use that same owner. Host dependency capture
-consumes these facts instead of interpreting Schema again or inventing complete component records
-for partial writes. Current known-but-unbound Schema can describe dependencies without acquiring
-an Adapter/native binding; unknown or incompatible versions retain data without inferred assets.
+The source classifier publishes one borrowed declared-asset inventory covering complete records
+and current-version property declarations, including recursive payloads and defaults exposed by
+Absent. Exact transaction snapshots retain complete declarations; they are not active dependency
+programs. Current known-but-unbound Schema can describe source inventory without acquiring an
+Adapter/native binding; unknown or incompatible versions retain data without inferred assets.
+Authoring and Runtime dependency capture use the shared Scene compiler's actual selected sources
+and effective values/defaults. A raw inventory entry cannot trigger a read after its declaration or
+component has been superseded or suppressed. The compiler receives the actual admitted Schema
+basis, not a synthetic native registry. Data-adapted records participate in semantic compilation;
+native preview omissions and strict executable publication remain separate admissions.
 The retained reference projection has a document-wide node/logical-byte allowance using the
 selected file policy's component-value ceilings. Each traversal receives the remaining allowance
 before paths/references/defaults are copied. Payload budget and reference projection budget are

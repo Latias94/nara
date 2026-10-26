@@ -2,6 +2,7 @@
 
 mod complete_value;
 mod field_candidate;
+mod overlay;
 mod read;
 mod structure;
 
@@ -28,12 +29,12 @@ use nara_reflect::{
     ComponentFieldId, ComponentFieldPathSegment, ComponentSchema,
     ComponentSchemaContributionReceipt, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     ComponentValueShape, DeclaredAssetReference, EntityReference, PersistentComponentSchemaOwnerId,
-    collect_declared_asset_references_from_schema_with_limits,
-    collect_declared_field_asset_references_with_limits, effective_component_value,
+    collect_declared_asset_references_from_schema_with_limits, effective_component_value,
 };
 
 use crate::{
-    PrefabDocument, PrefabDocumentCandidate, SceneComponentRecord, SceneDocument,
+    PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance,
+    PrefabPropertyClaim, PrefabPropertyIntent, SceneComponentRecord, SceneDocument,
     SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SceneFileLimits, ScenePatchDocument,
     ScenePatchOperation, ScenePatchReport,
     diagnostics::{
@@ -78,11 +79,52 @@ pub enum AuthoringDocumentReadiness {
 
 /// Read-only identity of one immutable authoring schema and Adapter admission.
 ///
-/// Clones compare equal while they retain the same admission in this process. Independent
-/// admissions compare unequal even when their catalog contents match. This is neither a
-/// serialized catalog fingerprint nor authority to mutate a document.
+/// Admit one basis from the actual schema bundle and Adapters, then share it across independent
+/// Scene and Prefab sources. Clones compare equal while they retain the same admission in this
+/// process. Independent basis admissions compare unequal even when their catalog contents match.
+/// This is neither a serialized catalog fingerprint nor authority to mutate a document.
 #[derive(Clone)]
 pub struct AuthoringSchemaBasis(Arc<AuthoringClassificationBasis>);
+
+impl AuthoringSchemaBasis {
+    /// Admits the exact current schema catalogs and compatible Adapter coverage once.
+    ///
+    /// Reuses ordinary authoring admission checks without constructing a native registry or
+    /// retaining a document, source identity, mutation authority or history.
+    pub fn admit(
+        bundle: &AuthoringSchemaBundle,
+        adapters: &[AuthoringAdapterReceipt],
+    ) -> Result<Self, AuthoringDocumentPublicationError> {
+        AuthoringClassificationBasis::new(bundle, adapters).map(|basis| Self(Arc::new(basis)))
+    }
+
+    /// Borrows the current catalog declaration; record owner/version admission remains required.
+    pub(crate) fn schema(&self, component: &ComponentTypeId) -> Option<&ComponentSchema> {
+        self.0.schemas.get(component).map(|entry| &entry.schema)
+    }
+
+    pub(crate) fn component_schema_owner(
+        &self,
+        component: &ComponentTypeId,
+    ) -> Option<&PersistentComponentSchemaOwnerId> {
+        self.0.schemas.get(component).map(|entry| &entry.owner)
+    }
+
+    pub(crate) fn has_authoring_adapter(&self, component: &ComponentTypeId) -> bool {
+        self.0
+            .schemas
+            .get(component)
+            .is_some_and(|entry| entry.adapter.is_some())
+    }
+
+    pub(crate) fn has_native_preview_adapter(&self, component: &ComponentTypeId) -> bool {
+        self.0
+            .schemas
+            .get(component)
+            .and_then(|entry| entry.adapter.as_ref())
+            .is_some_and(AuthoringAdapterEvidence::supports_native_preview)
+    }
+}
 
 /// Owned admission for preparing another document against one session's exact authoring basis.
 ///
@@ -190,7 +232,8 @@ impl PartialEq for AuthoringSchemaBasis {
 
 impl Eq for AuthoringSchemaBasis {}
 
-/// ADR 0090 readiness of one persistent component record or component-targeting operation.
+/// Schema/Adapter readiness of a persistent record or declarative component/property intent.
+/// Overlay readiness does not admit a target, bindings, base or effective activation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AuthoringRecordReadiness {
     Available,
@@ -198,6 +241,9 @@ pub enum AuthoringRecordReadiness {
     UnknownSchema,
     Unmigratable,
     FutureSchema,
+    /// Understood source intent that cannot be interpreted against the current Schema.
+    /// Target/base activation is deliberately not part of source classification.
+    UnresolvedOverlay,
 }
 
 impl AuthoringRecordReadiness {
@@ -215,12 +261,38 @@ pub enum AuthoringRecordOwnerClaim {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum AuthoringPatchRecordSlot {
-    AddEntity,
-    RestoreEntity,
-    RestoreDescendant { index: usize },
-    AddComponent,
-    ReplaceComponent,
+pub enum AuthoringOverlayRecordSlot {
+    Addition {
+        index: usize,
+    },
+    Component {
+        index: usize,
+    },
+    Property {
+        component_index: usize,
+        claim_index: usize,
+    },
+}
+
+/// Actual nested instance declarations, including the exact lookup and canonical base claims.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum AuthoringOverlayPathSegment {
+    Root {
+        source: AssetRef,
+        base: crate::SourceDocumentKey,
+    },
+    Addition {
+        index: usize,
+        entity: SceneEntityId,
+        source: AssetRef,
+        base: crate::SourceDocumentKey,
+    },
+    InstanceClaim {
+        index: usize,
+        target: PrefabEntityTarget,
+        source: AssetRef,
+        base: crate::SourceDocumentKey,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -228,23 +300,19 @@ pub enum AuthoringRecordLocation {
     EntityComponent {
         entity: SceneEntityId,
     },
-    PatchComponent {
+    OverlayComponent {
         anchor: SceneEntityId,
-        /// Nested operation indices. A `SetPrefabInstance` operation inserts a side
-        /// segment (0 for expected, 1 for value) before its nested operation index.
-        /// The outer source anchor remains the owner of both snapshot branches.
-        operation_path: Vec<usize>,
-        slot: AuthoringPatchRecordSlot,
-        entity: SceneEntityId,
+        overlays: Vec<AuthoringOverlayPathSegment>,
+        slot: AuthoringOverlayRecordSlot,
+        target: PrefabEntityTarget,
     },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AuthoringPatchTargetKind {
-    RemoveComponent,
-    SetField,
-    RemoveField,
-    SetAssetRefField,
+pub enum AuthoringOverlayTargetKind {
+    SuppressComponent,
+    SetProperty,
+    AbsentProperty,
 }
 
 /// Stable process-independent identity of one authoring Adapter implementation.
@@ -363,7 +431,8 @@ impl UnavailableEntityReference {
     }
 }
 
-/// Immutable classification fact for one complete component record.
+/// Immutable Schema/Adapter classification for one complete component record.
+/// Overlay facts describe source inventory; the Prefab compiler admits their effective values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthoringRecordFact {
     location: AuthoringRecordLocation,
@@ -598,7 +667,7 @@ impl UnavailableRecord {
         self.placement.as_ref()
     }
 
-    /// Placement of the source-local entity containing a nested Prefab patch record.
+    /// Placement of the source-local entity containing an overlay declaration.
     #[must_use]
     pub const fn anchor_placement(&self) -> Option<&crate::ScenePlacement> {
         self.anchor_placement.as_ref()
@@ -654,26 +723,24 @@ impl UnavailableRecord {
     }
 }
 
-/// Canonical preservation barrier for an unavailable component-targeting patch operation.
+/// Preserved component suppression or property declaration without an available interpretation.
+///
+/// Locations and payloads refer to actual declarative overlay data. Source admission never
+/// resolves their effective targets.
 #[derive(Debug, Clone, PartialEq)]
-pub struct UnavailablePatchTarget {
+pub struct UnavailableOverlayTarget {
     source: AuthoringDocumentSource,
     document_kind: AuthoringDocumentKind,
-    anchor: SceneEntityId,
+    location: AuthoringRecordLocation,
     anchor_placement: Option<crate::ScenePlacement>,
-    operation_path: Vec<usize>,
-    target_kind: AuthoringPatchTargetKind,
-    entity: SceneEntityId,
+    target_kind: AuthoringOverlayTargetKind,
     component: ComponentTypeId,
     version: Option<ComponentSchemaVersion>,
-    field: Option<ComponentFieldId>,
-    // Exact replacement data; asset references use their existing canonical value grammar.
-    // None is a payload-free removal, distinct from an explicit SetField(Null).
-    value: Option<ComponentValue>,
+    property: Option<PrefabPropertyClaim>,
     readiness: AuthoringRecordReadiness,
 }
 
-impl UnavailablePatchTarget {
+impl UnavailableOverlayTarget {
     #[must_use]
     pub const fn anchor_placement(&self) -> Option<&crate::ScenePlacement> {
         self.anchor_placement.as_ref()
@@ -689,23 +756,38 @@ impl UnavailablePatchTarget {
     }
 
     #[must_use]
-    pub const fn anchor(&self) -> &SceneEntityId {
-        &self.anchor
+    pub fn anchor(&self) -> &SceneEntityId {
+        match &self.location {
+            AuthoringRecordLocation::OverlayComponent { anchor, .. } => anchor,
+            AuthoringRecordLocation::EntityComponent { .. } => {
+                unreachable!("overlay targets always retain their declaring anchor")
+            }
+        }
     }
 
     #[must_use]
-    pub fn operation_path(&self) -> &[usize] {
-        &self.operation_path
+    pub const fn location(&self) -> &AuthoringRecordLocation {
+        &self.location
     }
 
     #[must_use]
-    pub const fn target_kind(&self) -> AuthoringPatchTargetKind {
+    pub fn target(&self) -> &PrefabEntityTarget {
+        match &self.location {
+            AuthoringRecordLocation::OverlayComponent { target, .. } => target,
+            AuthoringRecordLocation::EntityComponent { .. } => {
+                unreachable!("overlay targets always retain their authored target")
+            }
+        }
+    }
+
+    #[must_use]
+    pub const fn target_kind(&self) -> AuthoringOverlayTargetKind {
         self.target_kind
     }
 
     #[must_use]
-    pub const fn entity(&self) -> &SceneEntityId {
-        &self.entity
+    pub fn entity(&self) -> &SceneEntityId {
+        self.target().entity.entity()
     }
 
     #[must_use]
@@ -719,13 +801,33 @@ impl UnavailablePatchTarget {
     }
 
     #[must_use]
-    pub const fn field(&self) -> Option<&ComponentFieldId> {
-        self.field.as_ref()
+    pub fn field(&self) -> Option<&ComponentFieldId> {
+        self.property.as_ref().map(|property| &property.path.root)
     }
 
     #[must_use]
-    pub const fn value(&self) -> Option<&ComponentValue> {
-        self.value.as_ref()
+    pub const fn property(&self) -> Option<&PrefabPropertyClaim> {
+        self.property.as_ref()
+    }
+
+    #[must_use]
+    pub fn property_path(&self) -> Option<&nara_reflect::ComponentPropertyPath> {
+        self.property.as_ref().map(|property| &property.path)
+    }
+
+    #[must_use]
+    pub fn bindings(&self) -> &[crate::PrefabReferenceBinding] {
+        self.property
+            .as_ref()
+            .map_or(&[], |property| property.bindings.as_slice())
+    }
+
+    #[must_use]
+    pub fn value(&self) -> Option<&ComponentValue> {
+        match &self.property.as_ref()?.intent {
+            PrefabPropertyIntent::Set(value) => Some(value),
+            PrefabPropertyIntent::Absent => None,
+        }
     }
 
     #[must_use]
@@ -737,28 +839,38 @@ impl UnavailablePatchTarget {
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnavailableRecordManifestEntry {
     Record(UnavailableRecord),
-    PatchTarget(UnavailablePatchTarget),
+    OverlayTarget(UnavailableOverlayTarget),
 }
 
-/// Complete ordered semantic manifest used by degraded mutation and Save/Reopen gates.
+/// Complete semantic preservation manifest used by source mutation and Save/Reopen gates.
+/// Unavailable entries determine readiness; complete instance declarations independently guard
+/// dormant intent, including declarations whose current Schema is understood.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct UnavailableRecordManifest {
     record_count: usize,
-    patch_target_count: usize,
+    overlay_target_count: usize,
     entries: Vec<UnavailableRecordManifestEntry>,
+    // Retain each containing instance once, including understood but unresolved declarations.
+    // This also preserves bindings, placements, empty base claims and nested detach declarations
+    // that do not themselves produce an unavailable component entry.
+    overlays: BTreeMap<SceneEntityId, PrefabInstance>,
 }
 
 impl UnavailableRecordManifest {
-    fn new(entries: Vec<UnavailableRecordManifestEntry>) -> Self {
+    fn new(
+        entries: Vec<UnavailableRecordManifestEntry>,
+        overlays: BTreeMap<SceneEntityId, PrefabInstance>,
+    ) -> Self {
         let record_count = entries
             .iter()
             .filter(|entry| matches!(entry, UnavailableRecordManifestEntry::Record(_)))
             .count();
-        let patch_target_count = entries.len().saturating_sub(record_count);
+        let overlay_target_count = entries.len().saturating_sub(record_count);
         Self {
             record_count,
-            patch_target_count,
+            overlay_target_count,
             entries,
+            overlays,
         }
     }
 
@@ -768,18 +880,24 @@ impl UnavailableRecordManifest {
     }
 
     #[must_use]
-    pub const fn patch_target_count(&self) -> usize {
-        self.patch_target_count
+    pub const fn overlay_target_count(&self) -> usize {
+        self.overlay_target_count
     }
 
     #[must_use]
     pub const fn total_count(&self) -> usize {
-        self.record_count + self.patch_target_count
+        self.record_count + self.overlay_target_count
     }
 
     #[must_use]
     pub fn entries(&self) -> &[UnavailableRecordManifestEntry] {
         &self.entries
+    }
+
+    /// Exact source declarations used by Save/Reopen and source transaction preservation guards.
+    /// These are inventory, including dormant intent, not effective activation requirements.
+    pub fn overlay_declarations(&self) -> impl Iterator<Item = (&SceneEntityId, &PrefabInstance)> {
+        self.overlays.iter()
     }
 }
 
@@ -1098,13 +1216,19 @@ impl PublishedAuthoringSceneDocument {
         self.state.readiness
     }
 
+    /// Retains the exact admission shared with other Scene or Prefab sources.
+    #[must_use]
+    pub fn schema_basis(&self) -> AuthoringSchemaBasis {
+        self.state.schema_basis()
+    }
+
     #[must_use]
     pub fn record_facts(&self) -> &[AuthoringRecordFact] {
         &self.state.record_facts
     }
 
-    /// Borrows declared asset dependencies from complete records and current field declarations.
-    /// This includes defaults exposed by field removal, not inferred assets in unavailable values.
+    /// Borrows Schema-declared asset inventory from records, property payloads and exposed defaults.
+    /// Dormant overlay declarations remain inventory; effective activation owns its actual demand.
     pub fn schema_declared_asset_references(
         &self,
     ) -> impl Iterator<Item = &DeclaredAssetReference> {
@@ -1154,12 +1278,19 @@ impl PublishedAuthoringPrefabDocument {
         self.state.readiness
     }
 
+    /// Retains the exact admission shared with other Scene or Prefab sources.
+    #[must_use]
+    pub fn schema_basis(&self) -> AuthoringSchemaBasis {
+        self.state.schema_basis()
+    }
+
     #[must_use]
     pub fn record_facts(&self) -> &[AuthoringRecordFact] {
         &self.state.record_facts
     }
 
-    /// Borrows source-classified dependencies without requiring Host-side Schema interpretation.
+    /// Borrows source-classified asset inventory without Host-side Schema interpretation.
+    /// Dormant overlay declarations do not independently establish effective activation demand.
     pub fn schema_declared_asset_references(
         &self,
     ) -> impl Iterator<Item = &DeclaredAssetReference> {
@@ -1198,7 +1329,7 @@ pub(crate) struct AuthoringDocumentState {
     kind: AuthoringDocumentKind,
     readiness: AuthoringDocumentReadiness,
     record_facts: Vec<AuthoringRecordFact>,
-    patch_asset_references: Vec<DeclaredAssetReference>,
+    overlay_asset_references: Vec<DeclaredAssetReference>,
     direct_record_facts: BTreeMap<SceneEntityId, BTreeMap<ComponentTypeId, usize>>,
     unavailable_manifest: UnavailableRecordManifest,
     diagnostics: DiagnosticReport,
@@ -1221,11 +1352,15 @@ impl AuthoringComponentTemplate<'_> {
 }
 
 impl AuthoringDocumentState {
+    pub(crate) fn source(&self) -> &AuthoringDocumentSource {
+        &self.source
+    }
+
     fn schema_declared_asset_references(&self) -> impl Iterator<Item = &DeclaredAssetReference> {
         self.record_facts
             .iter()
             .flat_map(|record| record.schema_declared_asset_references())
-            .chain(&self.patch_asset_references)
+            .chain(&self.overlay_asset_references)
     }
     pub(crate) fn schema_basis(&self) -> AuthoringSchemaBasis {
         AuthoringSchemaBasis(Arc::clone(&self.basis))
@@ -1337,19 +1472,31 @@ struct AuthoringSchemaEntry {
 }
 
 impl SceneDocumentCandidate {
+    /// Admits a Scene against a newly constructed schema and Adapter basis.
     pub fn admit_authoring(
         self,
         source: AuthoringDocumentSource,
         bundle: &AuthoringSchemaBundle,
         adapters: &[AuthoringAdapterReceipt],
     ) -> Result<SceneAuthoringDocumentCandidate, AuthoringDocumentPublicationError> {
+        let basis = AuthoringSchemaBasis::admit(bundle, adapters)?;
+        self.admit_authoring_with_basis(source, &basis)
+    }
+
+    /// Admits an independent Scene source while retaining the supplied basis identity.
+    ///
+    /// Candidate decoding limits and complete document classification remain source-local.
+    pub fn admit_authoring_with_basis(
+        self,
+        source: AuthoringDocumentSource,
+        basis: &AuthoringSchemaBasis,
+    ) -> Result<SceneAuthoringDocumentCandidate, AuthoringDocumentPublicationError> {
         let (document, limits) = self.into_authoring_parts();
-        let basis = Arc::new(AuthoringClassificationBasis::new(bundle, adapters)?);
         let state = classify_scene_document(
             &document,
             source,
             AuthoringDocumentKind::Scene,
-            basis,
+            Arc::clone(&basis.0),
             limits,
         )?;
         Ok(SceneAuthoringDocumentCandidate { document, state })
@@ -1357,19 +1504,31 @@ impl SceneDocumentCandidate {
 }
 
 impl PrefabDocumentCandidate {
+    /// Admits a Prefab against a newly constructed schema and Adapter basis.
     pub fn admit_authoring(
         self,
         source: AuthoringDocumentSource,
         bundle: &AuthoringSchemaBundle,
         adapters: &[AuthoringAdapterReceipt],
     ) -> Result<PrefabAuthoringDocumentCandidate, AuthoringDocumentPublicationError> {
+        let basis = AuthoringSchemaBasis::admit(bundle, adapters)?;
+        self.admit_authoring_with_basis(source, &basis)
+    }
+
+    /// Admits an independent Prefab source while retaining the supplied basis identity.
+    ///
+    /// Candidate decoding limits and complete document classification remain source-local.
+    pub fn admit_authoring_with_basis(
+        self,
+        source: AuthoringDocumentSource,
+        basis: &AuthoringSchemaBasis,
+    ) -> Result<PrefabAuthoringDocumentCandidate, AuthoringDocumentPublicationError> {
         let (document, limits) = self.into_authoring_parts();
-        let basis = Arc::new(AuthoringClassificationBasis::new(bundle, adapters)?);
         let state = classify_scene_document(
             &document.instantiate(),
             source,
             AuthoringDocumentKind::Prefab,
-            basis,
+            Arc::clone(&basis.0),
             limits,
         )?;
         Ok(PrefabAuthoringDocumentCandidate { document, state })
@@ -1460,53 +1619,41 @@ impl AuthoringClassificationBasis {
                 .owner()
                 .is_none_or(|declared| declared == &entry.owner)
         });
-        self.classify(component, record.version, owner, entry)
+        self.classify(component, record.version, owner, entry, true)
     }
 
-    fn classify_target(
+    fn classify_overlay_record(
+        &self,
+        component: &ComponentTypeId,
+        record: &SceneComponentRecord,
+    ) -> Result<ClassifiedRecord, AuthoringDocumentPublicationError> {
+        let owner = record
+            .owner()
+            .map_or(AuthoringRecordOwnerClaim::Unclaimed, |owner| {
+                AuthoringRecordOwnerClaim::Declared(owner.clone())
+            });
+        let entry = self
+            .schemas
+            .get(component)
+            .filter(|entry| record.owner().is_none_or(|owner| owner == &entry.owner));
+        self.classify(component, record.version, owner, entry, false)
+    }
+
+    fn classify_overlay_target(
         &self,
         component: &ComponentTypeId,
         version: Option<ComponentSchemaVersion>,
     ) -> Result<ClassifiedRecord, AuthoringDocumentPublicationError> {
-        if let Some(version) = version {
-            return self.classify(
-                component,
-                version,
-                AuthoringRecordOwnerClaim::Unclaimed,
-                self.schemas.get(component),
-            );
-        }
-        let Some(entry) = self.schemas.get(component) else {
-            return Ok(ClassifiedRecord {
-                owner: AuthoringRecordOwnerClaim::Unclaimed,
-                resolved_owner: None,
-                readiness: AuthoringRecordReadiness::UnknownSchema,
-                adapter: None,
-                schema: None,
-            });
-        };
-        if !entry.schema.has_capability(ComponentCapability::Scene) {
-            return Err(rejection(with_public_locator(
-                diagnostic_error(
-                    "scene.authoring-component-not-scene-capable",
-                    "Persistent Scene or Prefab operation targets a component without Scene capability",
-                ),
-                "component-id",
-                component.as_str(),
-            )));
-        }
-        let readiness = if entry.adapter.is_some() {
-            AuthoringRecordReadiness::Available
-        } else {
-            AuthoringRecordReadiness::KnownUnbound
-        };
-        Ok(ClassifiedRecord {
-            owner: AuthoringRecordOwnerClaim::Unclaimed,
-            resolved_owner: Some(entry.owner.clone()),
-            readiness,
-            adapter: entry.adapter.clone(),
-            schema: Some(entry.schema.clone()),
-        })
+        let entry = self.schemas.get(component);
+        self.classify(
+            component,
+            version
+                .or_else(|| entry.map(|entry| entry.schema.version()))
+                .unwrap_or(ComponentSchemaVersion::ONE),
+            AuthoringRecordOwnerClaim::Unclaimed,
+            entry,
+            false,
+        )
     }
 
     fn classify(
@@ -1515,6 +1662,7 @@ impl AuthoringClassificationBasis {
         version: ComponentSchemaVersion,
         owner: AuthoringRecordOwnerClaim,
         entry: Option<&AuthoringSchemaEntry>,
+        require_scene_capability: bool,
     ) -> Result<ClassifiedRecord, AuthoringDocumentPublicationError> {
         let Some(entry) = entry else {
             return Ok(ClassifiedRecord {
@@ -1525,7 +1673,7 @@ impl AuthoringClassificationBasis {
                 schema: None,
             });
         };
-        if !entry.schema.has_capability(ComponentCapability::Scene) {
+        if require_scene_capability && !entry.schema.has_capability(ComponentCapability::Scene) {
             return Err(rejection(with_public_locator(
                 diagnostic_error(
                     "scene.authoring-component-not-scene-capable",
@@ -1535,7 +1683,9 @@ impl AuthoringClassificationBasis {
                 component.as_str(),
             )));
         }
-        let readiness = if version > entry.schema.version() {
+        let readiness = if !entry.schema.has_capability(ComponentCapability::Scene) {
+            AuthoringRecordReadiness::UnresolvedOverlay
+        } else if version > entry.schema.version() {
             AuthoringRecordReadiness::FutureSchema
         } else if version < entry.schema.version() {
             AuthoringRecordReadiness::Unmigratable
@@ -1570,11 +1720,13 @@ struct ClassificationContext<'a> {
     kind: AuthoringDocumentKind,
     basis: &'a AuthoringClassificationBasis,
     record_facts: Vec<AuthoringRecordFact>,
-    patch_asset_references: Vec<DeclaredAssetReference>,
+    overlay_asset_references: Vec<DeclaredAssetReference>,
     manifest: Vec<UnavailableRecordManifestEntry>,
     placements: BTreeMap<SceneEntityId, crate::ScenePlacement>,
     namespace: BTreeSet<&'a SceneEntityId>,
     limits: SceneFileLimits,
+    // Selector scans share their own allowance, including unsuccessful lookups.
+    property_read_budget: nara_reflect::ComponentPropertyReadBudget,
     asset_reference_nodes: usize,
     asset_reference_bytes: usize,
 }
@@ -1652,13 +1804,13 @@ fn classify_scene_document(
         return Err(AuthoringDocumentPublicationError::new(structure));
     }
 
-    let (record_facts, patch_asset_references, manifest) = {
+    let (record_facts, overlay_asset_references, manifest) = {
         let mut context = ClassificationContext {
             source: &source,
             kind,
             basis: &basis,
             record_facts: Vec::new(),
-            patch_asset_references: Vec::new(),
+            overlay_asset_references: Vec::new(),
             manifest: Vec::new(),
             placements: crate::patch::authoring_entity_placements(
                 &document.roots,
@@ -1666,19 +1818,35 @@ fn classify_scene_document(
             ),
             namespace: document.entities.iter().map(|entity| &entity.id).collect(),
             limits,
+            property_read_budget: nara_reflect::ComponentPropertyReadBudget::new(
+                limits.component_value_nodes(),
+                limits.component_value_bytes(),
+            ),
             asset_reference_nodes: 0,
             asset_reference_bytes: 0,
         };
         for entity in &document.entities {
-            classify_entity_components(entity, AuthoringRecordOrigin::Direct, &mut context)?;
+            classify_entity_components(entity, &mut context)?;
         }
         (
             context.record_facts,
-            context.patch_asset_references,
+            context.overlay_asset_references,
             context.manifest,
         )
     };
-    let unavailable_manifest = UnavailableRecordManifest::new(manifest);
+    let unavailable_manifest = UnavailableRecordManifest::new(
+        manifest,
+        document
+            .entities
+            .iter()
+            .filter_map(|entity| {
+                entity
+                    .prefab
+                    .as_ref()
+                    .map(|instance| (entity.id.clone(), instance.clone()))
+            })
+            .collect(),
+    );
     let diagnostics = unavailable_record_diagnostics(unavailable_manifest.entries());
     let readiness = if unavailable_manifest.total_count() == 0 {
         AuthoringDocumentReadiness::Complete
@@ -1699,7 +1867,7 @@ fn classify_scene_document(
         kind,
         readiness,
         record_facts,
-        patch_asset_references,
+        overlay_asset_references,
         direct_record_facts,
         unavailable_manifest,
         diagnostics,
@@ -1718,24 +1886,17 @@ fn unavailable_record_diagnostics(entries: &[UnavailableRecordManifestEntry]) ->
                 record.readiness(),
                 record.location(),
             ),
-            UnavailableRecordManifestEntry::PatchTarget(target) => {
+            UnavailableRecordManifestEntry::OverlayTarget(target) => {
                 let diagnostic = unavailable_readiness_diagnostic(target.readiness());
                 let diagnostic = with_asset_ref(
-                    with_public_locator(
-                        with_public_locator(
-                            diagnostic,
-                            "component-id",
-                            target.component().as_str(),
-                        ),
-                        "entity-id",
-                        target.entity().as_str(),
-                    ),
+                    with_public_locator(diagnostic, "component-id", target.component().as_str()),
                     "source",
                     target.source().as_asset_ref(),
                 );
-                let diagnostic =
-                    with_public_locator(diagnostic, "anchor-id", target.anchor().as_str());
-                diagnostics.push(with_operation_path(diagnostic, target.operation_path()));
+                diagnostics.push(with_authoring_record_location(
+                    diagnostic,
+                    target.location(),
+                ));
                 continue;
             }
         };
@@ -1773,6 +1934,10 @@ fn unavailable_readiness_diagnostic(
             "scene.authoring-future-schema",
             "Persistent component uses a schema version newer than the authoring bundle",
         ),
+        AuthoringRecordReadiness::UnresolvedOverlay => diagnostic_warning(
+            "scene.authoring-unresolved-overlay",
+            "Persistent overlay intent is retained for repair against its declared Schema",
+        ),
         AuthoringRecordReadiness::Available => {
             unreachable!("available records are never retained in the unavailable-record manifest")
         }
@@ -1787,85 +1952,52 @@ fn with_authoring_record_location(
         AuthoringRecordLocation::EntityComponent { entity } => {
             with_public_locator(diagnostic, "entity-id", entity.as_str())
         }
-        AuthoringRecordLocation::PatchComponent {
+        AuthoringRecordLocation::OverlayComponent {
             anchor,
-            operation_path,
-            entity,
+            overlays,
+            slot,
+            target,
             ..
-        } => with_operation_path(
-            with_public_locator(
+        } => {
+            let diagnostic = with_public_locator(
                 with_public_locator(diagnostic, "anchor-id", anchor.as_str()),
                 "entity-id",
-                entity.as_str(),
-            ),
-            operation_path,
-        ),
-    }
-}
-
-fn with_operation_path(
-    diagnostic: nara_diagnostic::Diagnostic,
-    operation_path: &[usize],
-) -> nara_diagnostic::Diagnostic {
-    let mut encoded = String::new();
-    for (index, segment) in operation_path.iter().enumerate() {
-        if index > 0 {
-            encoded.push('.');
+                target.entity.entity().as_str(),
+            );
+            let diagnostic = crate::diagnostics::with_public_u64(
+                diagnostic,
+                "overlay-depth",
+                overlays.len() as u64,
+            );
+            let (kind, index) = match slot {
+                AuthoringOverlayRecordSlot::Addition { index } => ("addition", *index),
+                AuthoringOverlayRecordSlot::Component { index } => ("component", *index),
+                AuthoringOverlayRecordSlot::Property { claim_index, .. } => {
+                    ("property", *claim_index)
+                }
+            };
+            crate::diagnostics::with_public_u64(
+                with_public_locator(diagnostic, "overlay-declaration", kind),
+                "declaration-index",
+                index as u64,
+            )
         }
-        encoded.push_str(&segment.to_string());
     }
-    with_public_locator(diagnostic, "operation-path", &encoded)
-}
-
-#[derive(Clone)]
-enum AuthoringRecordOrigin {
-    Direct,
-    Patch {
-        anchor: SceneEntityId,
-        operation_path: Vec<usize>,
-        slot: AuthoringPatchRecordSlot,
-        placement: Option<crate::ScenePlacement>,
-    },
 }
 
 fn classify_entity_components(
     entity: &SceneEntityRecord,
-    origin: AuthoringRecordOrigin,
     context: &mut ClassificationContext<'_>,
 ) -> Result<(), AuthoringDocumentPublicationError> {
-    let placement = match &origin {
-        AuthoringRecordOrigin::Direct => context.placements.get(&entity.id).cloned(),
-        AuthoringRecordOrigin::Patch { placement, .. } => placement.clone(),
-    };
+    let placement = context.placements.get(&entity.id).cloned();
     for (component, record) in &entity.components {
-        let location = match &origin {
-            AuthoringRecordOrigin::Direct => AuthoringRecordLocation::EntityComponent {
-                entity: entity.id.clone(),
-            },
-            AuthoringRecordOrigin::Patch {
-                anchor,
-                operation_path,
-                slot,
-                ..
-            } => AuthoringRecordLocation::PatchComponent {
-                anchor: anchor.clone(),
-                operation_path: operation_path.clone(),
-                slot: slot.clone(),
-                entity: entity.id.clone(),
-            },
+        let location = AuthoringRecordLocation::EntityComponent {
+            entity: entity.id.clone(),
         };
         classify_complete_record(location, placement.clone(), component, record, context)?;
     }
     if let Some(prefab) = &entity.prefab {
-        let (anchor, operation_path) = match origin {
-            AuthoringRecordOrigin::Direct => (entity.id.clone(), Vec::new()),
-            AuthoringRecordOrigin::Patch {
-                anchor,
-                operation_path,
-                ..
-            } => (anchor, operation_path),
-        };
-        classify_patch(&prefab.overrides, &anchor, &operation_path, context)?;
+        overlay::classify_instance(prefab, &entity.id, context)?;
     }
     Ok(())
 }
@@ -1956,6 +2088,27 @@ fn classify_complete_record(
         })?
     };
     context.reserve_asset_references(&schema_declared_asset_references)?;
+    retain_complete_record(
+        location,
+        placement,
+        component,
+        record,
+        classified,
+        schema_declared_asset_references,
+        context,
+    );
+    Ok(())
+}
+
+fn retain_complete_record(
+    location: AuthoringRecordLocation,
+    placement: Option<crate::ScenePlacement>,
+    component: &ComponentTypeId,
+    record: &SceneComponentRecord,
+    classified: ClassifiedRecord,
+    schema_declared_asset_references: Vec<DeclaredAssetReference>,
+    context: &mut ClassificationContext<'_>,
+) {
     context.record_facts.push(AuthoringRecordFact {
         location: location.clone(),
         owner: classified.owner.clone(),
@@ -1976,7 +2129,7 @@ fn classify_complete_record(
                 placement,
                 anchor_placement: match &location {
                     AuthoringRecordLocation::EntityComponent { .. } => None,
-                    AuthoringRecordLocation::PatchComponent { anchor, .. } => {
+                    AuthoringRecordLocation::OverlayComponent { anchor, .. } => {
                         context.placements.get(anchor).cloned()
                     }
                 },
@@ -1990,7 +2143,6 @@ fn classify_complete_record(
                 readiness: classified.readiness,
             }));
     }
-    Ok(())
 }
 
 fn collect_entity_references(value: &ComponentValue) -> Vec<UnavailableEntityReference> {
@@ -2048,265 +2200,6 @@ fn collect_entity_references_at<'a>(
         | ComponentValue::F64(_)
         | ComponentValue::String(_) => {}
     }
-}
-
-fn classify_patch(
-    patch: &ScenePatchDocument,
-    anchor: &SceneEntityId,
-    parent_path: &[usize],
-    context: &mut ClassificationContext<'_>,
-) -> Result<(), AuthoringDocumentPublicationError> {
-    for (operation_index, operation) in patch.operations.iter().enumerate() {
-        let mut operation_path = parent_path.to_vec();
-        operation_path.push(operation_index);
-        match operation {
-            ScenePatchOperation::AddEntity { entity, placement } => classify_entity_components(
-                entity,
-                AuthoringRecordOrigin::Patch {
-                    anchor: anchor.clone(),
-                    operation_path,
-                    slot: AuthoringPatchRecordSlot::AddEntity,
-                    placement: Some(placement.clone()),
-                },
-                context,
-            )?,
-            ScenePatchOperation::RestoreEntity {
-                entity,
-                descendants,
-                placement,
-            } => {
-                classify_entity_components(
-                    entity,
-                    AuthoringRecordOrigin::Patch {
-                        anchor: anchor.clone(),
-                        operation_path: operation_path.clone(),
-                        slot: AuthoringPatchRecordSlot::RestoreEntity,
-                        placement: Some(placement.clone()),
-                    },
-                    context,
-                )?;
-                let restored_placements = crate::patch::authoring_entity_placements(
-                    std::slice::from_ref(&entity.id),
-                    std::iter::once(entity).chain(descendants.iter()),
-                );
-                for (index, descendant) in descendants.iter().enumerate() {
-                    classify_entity_components(
-                        descendant,
-                        AuthoringRecordOrigin::Patch {
-                            anchor: anchor.clone(),
-                            operation_path: operation_path.clone(),
-                            slot: AuthoringPatchRecordSlot::RestoreDescendant { index },
-                            placement: restored_placements.get(&descendant.id).cloned(),
-                        },
-                        context,
-                    )?;
-                }
-            }
-            ScenePatchOperation::AddComponent {
-                entity,
-                component,
-                value,
-            } => classify_complete_record(
-                AuthoringRecordLocation::PatchComponent {
-                    anchor: anchor.clone(),
-                    operation_path,
-                    slot: AuthoringPatchRecordSlot::AddComponent,
-                    entity: entity.clone(),
-                },
-                None,
-                component,
-                value,
-                context,
-            )?,
-            ScenePatchOperation::ReplaceComponent {
-                entity,
-                component,
-                value,
-            } => classify_complete_record(
-                AuthoringRecordLocation::PatchComponent {
-                    anchor: anchor.clone(),
-                    operation_path,
-                    slot: AuthoringPatchRecordSlot::ReplaceComponent,
-                    entity: entity.clone(),
-                },
-                None,
-                component,
-                value,
-                context,
-            )?,
-            ScenePatchOperation::RemoveComponent { .. }
-            | ScenePatchOperation::SetField { .. }
-            | ScenePatchOperation::RemoveField { .. }
-            | ScenePatchOperation::SetAssetRefField { .. } => {
-                classify_patch_target(anchor, operation_path, operation, context)?;
-            }
-            ScenePatchOperation::SetPrefabInstance {
-                expected, value, ..
-            } => {
-                // A snapshot is not a source entity record. Retain the containing anchor,
-                // and distinguish both branches before descending into their operations.
-                // Host record scanners use this same operation/side/operation grammar.
-                for (side, instance) in [(0, expected.as_ref()), (1, value.as_ref())] {
-                    if let Some(instance) = instance {
-                        let mut branch_path = operation_path.clone();
-                        branch_path.push(side);
-                        classify_patch(&instance.overrides, anchor, &branch_path, context)?;
-                    }
-                }
-            }
-            ScenePatchOperation::RemoveEntity { .. } | ScenePatchOperation::MoveEntity { .. } => {}
-        }
-    }
-    Ok(())
-}
-
-fn classify_patch_target(
-    anchor: &SceneEntityId,
-    operation_path: Vec<usize>,
-    operation: &ScenePatchOperation,
-    context: &mut ClassificationContext<'_>,
-) -> Result<(), AuthoringDocumentPublicationError> {
-    let (target_kind, entity, component, version, field) = match operation {
-        ScenePatchOperation::RemoveComponent { entity, component } => (
-            AuthoringPatchTargetKind::RemoveComponent,
-            entity,
-            component,
-            None,
-            None,
-        ),
-        ScenePatchOperation::SetField {
-            entity,
-            component,
-            component_version,
-            field,
-            ..
-        }
-        | ScenePatchOperation::RemoveField {
-            entity,
-            component,
-            component_version,
-            field,
-        }
-        | ScenePatchOperation::SetAssetRefField {
-            entity,
-            component,
-            component_version,
-            field,
-            ..
-        } => (
-            match operation {
-                ScenePatchOperation::SetField { .. } => AuthoringPatchTargetKind::SetField,
-                ScenePatchOperation::RemoveField { .. } => AuthoringPatchTargetKind::RemoveField,
-                _ => AuthoringPatchTargetKind::SetAssetRefField,
-            },
-            entity,
-            component,
-            Some(*component_version),
-            Some(field),
-        ),
-        _ => unreachable!("only finite component-target operations use target classification"),
-    };
-    let classified = context.basis.classify_target(component, version)?;
-    if let Some(schema) = classified
-        .schema
-        .as_ref()
-        .filter(|schema| version == Some(schema.version()))
-        && let Some(field) =
-            field.and_then(|id| schema.fields().iter().find(|field| field.id() == id))
-        && field
-            .shape()
-            .contains_kind(nara_reflect::ComponentValueKind::AssetRef)
-    {
-        let asset_value;
-        let payload = match operation {
-            ScenePatchOperation::SetField { value, .. } => Some(value),
-            ScenePatchOperation::SetAssetRefField { asset_ref, .. } => {
-                asset_value = crate::patch::asset_ref_value(asset_ref);
-                Some(&asset_value)
-            }
-            ScenePatchOperation::RemoveField { .. } => field.default_value(),
-            _ => None,
-        };
-        if let Some(payload) = payload {
-            let reference_limits = context.asset_reference_limits()?;
-            let references = collect_declared_field_asset_references_with_limits(
-                component,
-                field,
-                payload,
-                nara_reflect::EntityReferenceTraversalLimits::new(
-                    reference_limits.nodes(),
-                    reference_limits.bytes(),
-                    reference_limits.depth(),
-                ),
-            )
-            .map_err(|_| {
-                rejection(with_public_locator(
-                    diagnostic_error(
-                        "scene.authoring-declared-asset-reference-invalid",
-                        "Persistent authoring field has an invalid schema-declared asset reference",
-                    ),
-                    "component-id",
-                    component.as_str(),
-                ))
-            })?;
-            context.reserve_asset_references(&references)?;
-            context.patch_asset_references.extend(references);
-        }
-    }
-    if classified.readiness.is_available() {
-        if let Some(field) = field {
-            let schema = &context
-                .basis
-                .schemas
-                .get(component)
-                .expect("available component has an admitted schema")
-                .schema;
-            if !schema
-                .fields()
-                .iter()
-                .any(|candidate| candidate.id() == field)
-            {
-                return Err(rejection(with_public_locator(
-                    with_public_locator(
-                        diagnostic_error(
-                            "scene.authoring-patch-field-unknown",
-                            "Available authoring patch targets an unknown component field",
-                        ),
-                        "component-id",
-                        component.as_str(),
-                    ),
-                    "field-id",
-                    field.as_str(),
-                )));
-            }
-        }
-        return Ok(());
-    }
-    context
-        .manifest
-        .push(UnavailableRecordManifestEntry::PatchTarget(
-            UnavailablePatchTarget {
-                source: context.source.clone(),
-                document_kind: context.kind,
-                anchor: anchor.clone(),
-                anchor_placement: context.placements.get(anchor).cloned(),
-                operation_path,
-                target_kind,
-                entity: entity.clone(),
-                component: component.clone(),
-                version,
-                field: field.cloned(),
-                value: match operation {
-                    ScenePatchOperation::SetField { value, .. } => Some(value.clone()),
-                    ScenePatchOperation::SetAssetRefField { asset_ref, .. } => {
-                        Some(crate::patch::asset_ref_value(asset_ref))
-                    }
-                    _ => None,
-                },
-                readiness: classified.readiness,
-            },
-        ));
-    Ok(())
 }
 
 fn rejection(diagnostic: nara_diagnostic::Diagnostic) -> AuthoringDocumentPublicationError {

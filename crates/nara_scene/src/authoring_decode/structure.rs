@@ -147,7 +147,11 @@ pub(super) fn prepare_scene_authoring_structure(
     } else {
         state.unavailable_manifest.clone()
     };
-    if candidate_state.unavailable_manifest != expected_manifest {
+    if !preserves_unedited_declarations(
+        &expected_manifest,
+        &candidate_state.unavailable_manifest,
+        patch,
+    ) {
         return Err(authoring_structure_rejection(
             "Authoring structure changed the complete unavailable-record manifest",
         ));
@@ -296,7 +300,7 @@ fn authoring_deletion_closure_is_complete(
 }
 
 /// Rebinds only source-local placement facts. The classifier must still reproduce every exact
-/// source, record, value, reference and nested-patch location from the original manifest.
+/// source, record, value, reference and overlay location from the original manifest.
 fn manifest_after_topology(
     manifest: &UnavailableRecordManifest,
     document: &SceneDocument,
@@ -309,16 +313,60 @@ fn manifest_after_topology(
                 AuthoringRecordLocation::EntityComponent { entity } => {
                     record.placement = placements.get(entity).cloned();
                 }
-                AuthoringRecordLocation::PatchComponent { anchor, .. } => {
+                AuthoringRecordLocation::OverlayComponent { anchor, .. } => {
                     record.anchor_placement = placements.get(anchor).cloned();
                 }
             },
-            UnavailableRecordManifestEntry::PatchTarget(target) => {
-                target.anchor_placement = placements.get(&target.anchor).cloned();
+            UnavailableRecordManifestEntry::OverlayTarget(target) => {
+                target.anchor_placement = placements.get(target.anchor()).cloned();
             }
         }
     }
     expected
+}
+
+fn preserves_unedited_declarations(
+    expected: &UnavailableRecordManifest,
+    candidate: &UnavailableRecordManifest,
+    patch: &ScenePatchDocument,
+) -> bool {
+    let replaced = patch
+        .operations
+        .iter()
+        .filter_map(|operation| match operation {
+            ScenePatchOperation::SetPrefabInstance { entity, .. } => Some(entity),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    if replaced.is_empty() {
+        return expected == candidate;
+    }
+    // The patch owner compares each complete expected declaration and retains both snapshots
+    // in the exact inverse. Only those actual instance anchors may change their overlay facts.
+    // Direct unavailable records on the same entity remain protected.
+    let unedited = |entry: &&UnavailableRecordManifestEntry| {
+        let location = match entry {
+            UnavailableRecordManifestEntry::Record(record) => record.location(),
+            UnavailableRecordManifestEntry::OverlayTarget(target) => target.location(),
+        };
+        match location {
+            AuthoringRecordLocation::EntityComponent { .. } => true,
+            AuthoringRecordLocation::OverlayComponent { anchor, .. } => !replaced.contains(anchor),
+        }
+    };
+    expected
+        .entries
+        .iter()
+        .filter(unedited)
+        .eq(candidate.entries.iter().filter(unedited))
+        && expected
+            .overlays
+            .iter()
+            .filter(|(anchor, _)| !replaced.contains(anchor))
+            .eq(candidate
+                .overlays
+                .iter()
+                .filter(|(anchor, _)| !replaced.contains(anchor)))
 }
 
 pub(super) fn authoring_structure_rejection(summary: &'static str) -> ScenePatchReport {

@@ -1,17 +1,21 @@
 #![cfg(feature = "serde")]
 
+#[path = "support/prefab_source.rs"]
+mod prefab_source;
+
 use nara_asset::AssetRef;
 use nara_core::{ByteLimit, ItemLimit};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
-    ComponentFieldPath, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueShape,
-    PersistentComponentSchemaOwnerId,
+    ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath, ComponentSchema,
+    ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueShape, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    AuthoringDocumentSource, AuthoringRecordReadiness, PrefabDocument, PrefabDocumentCandidate,
-    PrefabInstance, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
-    SceneFileLimits, ScenePatchDocument, ScenePatchOperation,
+    AuthoringDocumentSource, AuthoringRecordReadiness, PrefabComponentIntent, PrefabDocument,
+    PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance, PrefabInstanceClaim,
+    PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SceneFileLimits,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -72,38 +76,56 @@ fn field(
     name: &str,
     value: ComponentValue,
     version: ComponentSchemaVersion,
-) -> ScenePatchOperation {
-    ScenePatchOperation::SetField {
-        entity: id("base"),
+) -> PrefabComponentIntent {
+    PrefabComponentIntent::Properties {
+        target: PrefabEntityTarget::source(id(name)),
         component: component(),
-        component_version: version,
-        field: ComponentFieldId::new(name),
-        value,
+        version,
+        claims: vec![PrefabPropertyClaim {
+            path: ComponentPropertyPath::new(ComponentFieldId::new(name)),
+            intent: PrefabPropertyIntent::Set(value),
+            bindings: Vec::new(),
+        }],
     }
 }
 
-fn document(operations: impl IntoIterator<Item = ScenePatchOperation>) -> SceneDocument {
+fn absent(entity: &str) -> PrefabComponentIntent {
+    PrefabComponentIntent::Properties {
+        target: PrefabEntityTarget::source(id(entity)),
+        component: component(),
+        version: ComponentSchemaVersion::ONE,
+        claims: vec![PrefabPropertyClaim {
+            path: ComponentPropertyPath::new(ComponentFieldId::new("image")),
+            intent: PrefabPropertyIntent::Absent,
+            bindings: Vec::new(),
+        }],
+    }
+}
+
+fn document(components: impl IntoIterator<Item = PrefabComponentIntent>) -> SceneDocument {
     let mut anchor = SceneEntityRecord::new(id("anchor"));
+    let mut overlay = PrefabOverlay::new(prefab_source::key("assets.base"));
+    overlay.components.extend(components);
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("base.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::new(operations),
+        overrides: Some(overlay),
     });
     SceneDocument::from_ordered_roots([anchor])
 }
 
 #[test]
-fn field_dependencies_include_nested_snapshots_and_exposed_defaults_without_fake_records() {
-    let snapshots = |name| {
-        Some(PrefabInstance {
+fn field_dependencies_include_nested_declarations_and_exposed_defaults_without_fake_records() {
+    let nested = |name| {
+        let mut overlay = PrefabOverlay::new(prefab_source::key("assets.nested"));
+        overlay
+            .components
+            .push(field("image", asset(name), ComponentSchemaVersion::ONE));
+        PrefabInstance {
             source: AssetRef::path("nested.prefab.json").unwrap(),
-            overrides: ScenePatchDocument::new([field(
-                "image",
-                asset(name),
-                ComponentSchemaVersion::ONE,
-            )]),
-        })
+            overrides: Some(overlay),
+        }
     };
-    let document = document([
+    let mut document = document([
         field(
             "images",
             ComponentValue::List(vec![ComponentValue::map([
@@ -112,30 +134,27 @@ fn field_dependencies_include_nested_snapshots_and_exposed_defaults_without_fake
             ])]),
             ComponentSchemaVersion::ONE,
         ),
-        ScenePatchOperation::SetAssetRefField {
-            entity: id("base"),
-            component: component(),
-            component_version: ComponentSchemaVersion::ONE,
-            field: ComponentFieldId::new("image"),
-            asset_ref: AssetRef::path("explicit.png").unwrap(),
-        },
-        ScenePatchOperation::RemoveField {
-            entity: id("base"),
-            component: component(),
-            component_version: ComponentSchemaVersion::ONE,
-            field: ComponentFieldId::new("image"),
-        },
+        field("image", asset("explicit.png"), ComponentSchemaVersion::ONE),
+        absent("defaulted"),
         field(
             "optional",
             ComponentValue::Null,
             ComponentSchemaVersion::ONE,
         ),
-        ScenePatchOperation::SetPrefabInstance {
-            entity: id("base"),
-            expected: snapshots("prior.png"),
-            value: snapshots("next.png"),
-        },
     ]);
+    let overlay = document.entities[0]
+        .prefab
+        .as_mut()
+        .unwrap()
+        .overrides
+        .as_mut()
+        .unwrap();
+    overlay.instances = ["prior.png", "next.png"]
+        .map(|name| PrefabInstanceClaim {
+            target: PrefabEntityTarget::source(id(name)),
+            value: Some(nested(name)),
+        })
+        .into();
     let bundle = bundle();
     let published =
         SceneDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
@@ -154,17 +173,17 @@ fn field_dependencies_include_nested_snapshots_and_exposed_defaults_without_fake
             .entries()
             .iter()
             .all(|entry| matches!(
-                entry, nara_scene::UnavailableRecordManifestEntry::PatchTarget(target)
+                entry, nara_scene::UnavailableRecordManifestEntry::OverlayTarget(target)
                     if target.readiness() == AuthoringRecordReadiness::KnownUnbound
             ))
     );
     let expected = [
+        "prior.png",
+        "next.png",
         "left.png",
         "right.png",
         "explicit.png",
         "default.png",
-        "prior.png",
-        "next.png",
     ]
     .map(|path| AssetRef::path(path).unwrap());
     assert_eq!(
@@ -213,13 +232,23 @@ fn unknown_or_version_incompatible_field_payloads_are_preserved_without_dependen
             &bundle,
             &[],
         );
-        if version == ComponentSchemaVersion::ONE {
-            assert!(result.is_err());
-        } else {
-            let published = result.unwrap().publish();
-            assert_eq!(published.schema_declared_asset_references().count(), 0);
-            assert_eq!(published.document(), &document);
-        }
+        let published = result.unwrap().publish();
+        assert_eq!(published.schema_declared_asset_references().count(), 0);
+        assert_eq!(published.document(), &document);
+        assert!(
+            published
+                .unavailable_manifest()
+                .entries()
+                .iter()
+                .any(|entry| matches!(
+                        entry, nara_scene::UnavailableRecordManifestEntry::OverlayTarget(target)
+                        if target.readiness() == if version == ComponentSchemaVersion::ONE {
+                            AuthoringRecordReadiness::UnresolvedOverlay
+                        } else {
+                            AuthoringRecordReadiness::FutureSchema
+                        }
+                ))
+        );
     }
     let document = document([field(
         "image",
@@ -242,6 +271,7 @@ fn unknown_or_version_incompatible_field_payloads_are_preserved_without_dependen
 
 #[test]
 fn repeated_default_reference_facts_share_the_remaining_traversal_allowance() {
+    let default_path = "p".repeat(512);
     let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
         PersistentComponentSchemaOwnerId::try_new("game.assets").unwrap(),
         ComponentSchemaCatalog {
@@ -253,7 +283,7 @@ fn repeated_default_reference_facts_share_the_remaining_traversal_allowance() {
                         "Image",
                         ComponentFieldPath::from_fields(["image"]),
                         ComponentValueShape::AssetRef,
-                        asset("p"),
+                        asset(&default_path),
                     )
                     .with_capabilities([
                         ComponentCapability::Scene,
@@ -265,16 +295,11 @@ fn repeated_default_reference_facts_share_the_remaining_traversal_allowance() {
         None,
     )])
     .unwrap();
-    let document = document((0..2).map(|_| ScenePatchOperation::RemoveField {
-        entity: id("base"),
-        component: component(),
-        component_version: ComponentSchemaVersion::ONE,
-        field: ComponentFieldId::new("image"),
-    }));
+    let document = document([absent("first"), absent("second")]);
     let encoded = document.to_json_string().unwrap();
-    // One default's traversal sees 3 value nodes + 1 reference and 14 payload + 11 result
-    // bytes. Its retained projection reserves 1 node/11 bytes before the second call.
-    for (nodes, bytes, accepted) in [(5, 36, true), (4, 36, false), (5, 35, false)] {
+    // One default traverses 525 payload + 522 result bytes. The first retained fact
+    // reserves 522 bytes before the second traversal. Raw declarations fit below either limit.
+    for (nodes, bytes, accepted) in [(64, 1569, true), (64, 1568, false)] {
         let limits = SceneFileLimits::default()
             .with_component_value_nodes(ItemLimit::new(nodes).unwrap())
             .with_component_value_bytes(ByteLimit::new(bytes).unwrap());

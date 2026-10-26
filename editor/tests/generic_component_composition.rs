@@ -58,7 +58,7 @@ fn trusted_project_opens_ordinary_prefab_through_source_navigation() {
     let mut record = SceneEntityRecord::new(anchor.clone());
     record.prefab = Some(nara::scene::PrefabInstance {
         source: nara::asset::AssetRef::path("ordinary.prefab.json").unwrap(),
-        overrides: nara::scene::ScenePatchDocument::default(),
+        overrides: None,
     });
     fs::write(
         project.source(EditorDocumentKind::Scene),

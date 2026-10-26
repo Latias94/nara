@@ -5,6 +5,7 @@
 **Amended**: 2026-07-10 for the unreleased canonical-version reset policy
 **Amended**: 2026-10-26 for exact instance-declaration snapshot semantics
 and source-owned canonical identity encoding
+**Amended**: 2026-10-27 for composition selection before component interpretation
 **Implemented Slice**: RGF-U1 on 2026-07-12
 **Refines**: ADR 0006, ADR 0011, ADR 0026, ADR 0038
 **Refined By**: ADR 0047: Editor Workspace and Scene Document State; ADR 0049: Untrusted Project
@@ -18,8 +19,8 @@ UI, Text, Widget, and Presented-Frame Topology
 
 Scene, prefab, and standalone patch files now share the ADR 0051 envelope. `SceneDocument` and
 `PrefabDocument` payloads intentionally carry no duplicate file version. `ScenePatchDocument`
-retains its own record version because prefab instances embed that record without embedding a
-second file envelope. Component-level migrations exist through `nara_reflect`; document-shape
+retains a revision-bound transaction record version; Prefab instances instead contain optional
+declarative overlays with no embedded patch version. Component-level migrations exist through `nara_reflect`; document-shape
 migration remains a separate, currently empty compatibility mechanism.
 
 If nara only migrates component values, it cannot safely rename document fields, change prefab
@@ -42,7 +43,7 @@ flowchart TD
     Contract --> Payload[Private wire payload decode]
     Payload --> Counts[Domain count budgets]
     Counts --> Candidate[Budget-safe file candidate]
-    Candidate -->|current v1| Validate[Frozen-registry semantic validation]
+    Candidate -->|current v1| Validate[Admitted authoring basis or frozen-registry validation]
     Candidate -->|future ADR-retained version| DocMig[Pure document migration chain]
     DocMig --> Validate
     Validate --> Publish[Authoring session, prefab source, or patch transaction]
@@ -62,6 +63,12 @@ Rules:
   not mutate the live `World`, asset server, or source file in place.
 - Component migrations run after the document shape has been migrated into a version whose component
   payload locations and patch operation payloads are known.
+- Composition dependency admission and standalone source publication are separate products.
+  Composition captures bounded decoded data with valid local structure and actual source
+  identity/content evidence. The Scene compiler selects surviving component programs before
+  migrating or interpreting their payloads; a complete replacement/suppression does not interpret
+  the discarded payload. Standalone canonicalization and editable publication retain their strict
+  semantic gates. Raw captured dependencies are not published editable documents or native values.
 - Component migration results are revalidated iteratively against the candidate's depth, node,
   container, single-string, cumulative-string, and logical component-value budgets before
   publication. A migration cannot publish a value that the same file boundary would reject.
@@ -82,14 +89,23 @@ Rules:
   not values to migrate independently of their captured source basis. Native admission rejects
   snapshots requiring reinterpretation rather than silently rewriting their comparison or inverse.
   Schema-only source preservation may retain understood unavailable data under ADR 0090; that
-  does not grant native activation or destructive replacement of unavailable records.
+  does not grant native activation or implicit destructive replacement of unavailable records.
+  An explicit complete `SetPrefabInstance` replacement may repair that anchor's overlay while
+  retaining the exact old snapshot in inverse history; unrelated unavailable data remains guarded.
 - Migrations must preserve authoring identity and provenance. They may rewrite IDs only through an
   explicit documented migration that also updates references and overrides.
 - A stored `SourceDocumentKey` uses the source owner's strict kind-and-origin representation in
   JSON or RON. It carries no independent file envelope, compatibility reader or source-admission
   receipt. Constructors validate its identity fields; the containing format and actual Host
   retain bounded file admission and immutable-source validation. This value codec alone does
-  not replace the current patch-based durable Prefab override format.
+  not itself grant activation of durable Prefab intent.
+- Retained overlay declarations use the current containing file's grammar, without an operation
+  patch reader or compatibility converter. Source preservation and activation are separate:
+  bounded declarations and identity are admitted before instance selection; selected surviving
+  payloads cross current selector/version/reference/native checks in the Scene compiler.
+  Native file loading must not activate a discarded embedded overlay before a complete outer
+  instance replacement can select its successor. Direct source component migration and exact
+  transaction snapshot semantics retain their existing checks.
 - AI/editor tooling emits canonical version 1. Loading another version is supported only when the
   compatibility matrix links to its authorizing ADR.
 - Automatic write-back of migrated files is an explicit tool/editor action. Runtime loading should
@@ -107,8 +123,10 @@ Rules:
 | `scene_patch` | 1 | embedded patch record 1 | none |
 
 Decode produces a `SceneDocumentCandidate`, `PrefabDocumentCandidate`, or
-`ScenePatchDocumentCandidate`; it does not publish authoring or runtime state. Scene candidates
-enter `SceneAuthoringSession` only after validation against a frozen registry. Prefab candidates
+`ScenePatchDocumentCandidate`; it does not publish authoring or runtime state. Scene and Prefab
+candidates enter source sessions after admission against an actual `AuthoringSchemaBasis` or a
+frozen executable registry. One authoring capture shares the exact admitted basis across its
+documents; source admission does not require fake native bindings. Prefab candidates
 enter a resolver only after the resolver owner validates them. Patch candidates are validated in
 the target document transaction and can enter authoring revision/undo history through the session
 API. The top-level document types do not implement public `Deserialize`; direct Rust construction

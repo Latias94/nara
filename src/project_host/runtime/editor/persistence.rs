@@ -22,6 +22,7 @@ use nara_asset::{AssetPath, AssetRef};
 use nara_scene::SceneEntityId;
 use nara_tooling::EditorDocumentSourceBinding;
 
+use crate::project_host::authoring::AuthoringDocumentAdmissionError;
 use crate::project_host::persistence::{
     OpenedPrefabPersistence, OpenedPrefabReopen, PersistenceSaveOutcome, PrefabReopenOutcome,
     PrefabSaveCandidate,
@@ -408,6 +409,7 @@ impl EditorProjectSession {
             EditorPrefabPersistenceLane {
                 project_path,
                 source_key,
+                authoring_source: None,
                 document,
                 host,
             },
@@ -441,6 +443,23 @@ impl EditorProjectSession {
                     "project.editor.prefab-source-outside-authoring-closure",
                 );
             };
+            let published = match snapshot.fork_prefab(&path) {
+                Ok(Some(published)) => published,
+                Ok(None) => {
+                    return editor_workspace_command_rejected(
+                        self.workspace.active_document(),
+                        "project.editor.prefab-source-outside-authoring-closure",
+                    );
+                }
+                Err(error) => {
+                    let error = AuthoringDocumentAdmissionError::Document(error);
+                    let _ = self.diagnostics.push(error.diagnostic());
+                    return editor_workspace_command_rejected(
+                        self.workspace.active_document(),
+                        error.code(),
+                    );
+                }
+            };
             (
                 snapshot.project_root(),
                 snapshot.settings().paths.prefabs.clone(),
@@ -449,9 +468,7 @@ impl EditorProjectSession {
                     prefab.source().digest(),
                 ),
                 prefab.native_source().clone(),
-                snapshot
-                    .fork_prefab(&path)
-                    .expect("the admitted Prefab source remains in the immutable snapshot"),
+                published,
             )
         };
         let observation = self
@@ -537,6 +554,26 @@ impl EditorProjectSession {
             );
         }
         let source_key = native_source.key().clone();
+        let authoring_source = {
+            let Some(project) = self.authoring_project() else {
+                unreachable!("authoring Prefab Open retains its project");
+            };
+            let captured = project
+                .prefab(&path)
+                .expect("the admitted Prefab source is retained");
+            match crate::project_host::authoring::document::AuthoringDocumentSourceFact::from_captured_source(
+                captured.source(), captured.native_source(),
+            ).and_then(|fact| fact.with_persistence_observation(
+                identity,
+                host.accepted_source_observation().and_then(|(_, parent, _)| parent),
+                content_digest,
+            )) {
+                Ok(source) => source,
+                Err(error) => return editor_workspace_command_rejected(
+                    self.workspace.active_document(), error.code(),
+                ),
+            }
+        };
         if let Err(code) = self.exclude_native_source_key(&project_path, &source_key) {
             return editor_workspace_command_rejected(self.workspace.active_document(), code);
         }
@@ -596,6 +633,7 @@ impl EditorProjectSession {
             EditorPrefabPersistenceLane {
                 project_path,
                 source_key,
+                authoring_source: Some(authoring_source),
                 document,
                 host,
             },
@@ -1115,6 +1153,29 @@ impl EditorProjectSession {
                         reason,
                     };
                 }
+                let refreshed_source = match lane
+                    .authoring_source
+                    .as_ref()
+                    .map(|source| {
+                        source
+                            .with_persistence_observation(
+                                identity,
+                                source.parent_identity(),
+                                content_digest,
+                            )
+                            .and_then(|source| source.with_native_source(native_source.clone()))
+                    })
+                    .transpose()
+                {
+                    Ok(source) => source,
+                    Err(_) => {
+                        return EditorPersistenceResult::Rejected {
+                            request: EditorPersistenceRequestKind::Reopen,
+                            document: Some(document),
+                            reason: EditorPersistenceRejection::SourceBindingMismatch,
+                        };
+                    }
+                };
                 let report = lane.host.try_with(|host| {
                     let report = self.persistence_authority.publish_reopened_session(
                         &mut self.workspace,
@@ -1148,6 +1209,9 @@ impl EditorProjectSession {
                 let revision = report
                     .revision
                     .expect("a reopened document reports its authoring revision");
+                if let Some(stored) = self.scene_lanes.get_mut(&document) {
+                    stored.authoring_source = refreshed_source;
+                }
                 EditorPersistenceResult::Opened {
                     document,
                     revision,
@@ -1197,6 +1261,29 @@ impl EditorProjectSession {
                         reason,
                     };
                 }
+                let refreshed_source = match lane
+                    .authoring_source
+                    .as_ref()
+                    .map(|source| {
+                        source
+                            .with_persistence_observation(
+                                identity,
+                                source.parent_identity(),
+                                content_digest,
+                            )
+                            .and_then(|source| source.with_native_source(native_source.clone()))
+                    })
+                    .transpose()
+                {
+                    Ok(source) => source,
+                    Err(_) => {
+                        return EditorPersistenceResult::Rejected {
+                            request: EditorPersistenceRequestKind::Reopen,
+                            document: Some(document),
+                            reason: EditorPersistenceRejection::SourceBindingMismatch,
+                        };
+                    }
+                };
                 let report = lane.host.try_with(|host| {
                     let report = self.persistence_authority.publish_reopened_prefab_session(
                         &mut self.workspace,
@@ -1231,6 +1318,9 @@ impl EditorProjectSession {
                 let revision = report
                     .revision
                     .expect("a reopened Prefab reports its authoring revision");
+                if let Some(stored) = self.prefab_lanes.get_mut(&document) {
+                    stored.authoring_source = refreshed_source;
+                }
                 if refresh_runtime_content {
                     self.schedule_reopened_prefab_content_refresh(
                         document,

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-20
-**Last Revised**: 2026-10-20 (metadata publication retirement custody)
+**Last Revised**: 2026-10-27 (captured-source evidence and ordered catalog reconciliation)
 **Owner**: `nara_asset`, `nara_image`, the project Host, UI-neutral tooling, and private Editor
 authoring adapters
 **Refines**: [ADR 0033](0033-asset-import-and-render-resource-preparation-seam.md),
@@ -155,6 +155,21 @@ attempt. If current metadata becomes invalid or conflicting, or if its identity/
 the Host retires the previous pixels from authoring choices and prepared resources. This safety
 retirement is distinct from a recoverable decode failure under the same admitted identity, which
 preserves last-good.
+
+An actual document capture may prove an Image after an older catalog scan began. Catalog absence
+or stale identity alone cannot revoke that newer proof. Reconcile the relevant source and metadata
+evidence in bounded background work before publication or retirement. A global stable-ID conflict
+requires evidence for the conflicting members; rechecking only the captured Image's unchanged
+sidecar does not prove the conflict absent. This does not permanently exempt captured Images from
+later catalog rejection.
+
+Bind revalidation to the catalog observation it discharges. A newer rejection retains a coalesced
+successor obligation even when an earlier check has already physically returned but its result has
+not been consumed. Earlier success cannot consume the later observation. Cancelled import or
+validation tasks remain owned until physical return before their replacement uses the same
+capacity. Pixel equivalence and source evidence are separate: reusing accepted pixels for a new
+capture must refresh the accepted source/metadata receipt and obsolete checks without requiring
+another decode.
 
 Retirement updates the single managed authoring runtime's typed Image value, usable state,
 prepared resources and Scene content revision before publishing subsequent projections. The Host

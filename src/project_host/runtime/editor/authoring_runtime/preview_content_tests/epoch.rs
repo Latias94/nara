@@ -22,7 +22,9 @@ use nara_scene::{
 };
 use nara_transform::Transform2d;
 
-use crate::project_host::runtime::editor::preview::EditorPreviewContentStamp;
+use crate::project_host::runtime::editor::preview::{
+    EditorPreviewContentStamp, EditorPreviewParticipant,
+};
 
 const DOCUMENT: EditorDocumentId = EditorDocumentId::from_raw(1);
 
@@ -148,11 +150,28 @@ struct Epoch {
 }
 
 fn observe(runtime: &mut EditorAuthoringRuntime, source: &SceneAuthoringSession) -> Epoch {
-    let candidate = preview(runtime, source);
+    observe_with_dependencies(runtime, source, &EditorPreviewDependencies::empty())
+}
+
+fn observe_with_dependencies(
+    runtime: &mut EditorAuthoringRuntime,
+    source: &SceneAuthoringSession,
+    dependencies: &EditorPreviewDependencies,
+) -> Epoch {
+    let candidate = preview_with_dependencies(runtime, source, dependencies);
     assert_eq!(candidate.document(), DOCUMENT);
     assert_eq!(candidate.revision(), source.revision());
     assert!(candidate.preview_omissions().is_empty());
     let content = candidate.content_stamp();
+    assert_eq!(
+        runtime.current_preview_content_stamp().as_ref(),
+        Some(&content)
+    );
+    assert!(runtime.take_preview_candidate().is_none());
+    assert_eq!(
+        runtime.current_preview_content_stamp().as_ref(),
+        Some(&content)
+    );
     let geometry = candidate.geometry_revision();
     let (_, _, _, packet, _, _) = candidate.into_parts();
     let world = runtime.runtime.world();
@@ -193,7 +212,7 @@ fn observe(runtime: &mut EditorAuthoringRuntime, source: &SceneAuthoringSession)
     assert_eq!(stats.registered_entities, population);
     assert_eq!(stats.persistent_logical_records, 0);
     assert_eq!(stats.recent_tombstones, 0);
-    assert!(!runtime.preview_requires_source_projection(DOCUMENT, source.revision()));
+    assert!(!runtime.preview_requires_source_projection(DOCUMENT, source.revision(), dependencies));
     Epoch {
         snapshot,
         producer: packet.source_generation(),
@@ -215,6 +234,26 @@ fn assert_successor(runtime: &EditorAuthoringRuntime, before: &Epoch, after: &Ep
             }
         );
     }
+}
+
+fn dependency_participant(revision: SceneAuthoringRevision) -> EditorPreviewParticipant {
+    EditorPreviewParticipant {
+        source_key: nara_scene::SourceDocumentKey::named(
+            "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+            "dependent-prefab",
+            nara_scene::SourceDocumentKind::Prefab,
+        )
+        .unwrap(),
+        document: EditorDocumentId::from_raw(2),
+        revision,
+    }
+}
+
+fn captured_dependencies(
+    generation: u64,
+    revision: SceneAuthoringRevision,
+) -> EditorPreviewDependencies {
+    EditorPreviewDependencies::captured(generation, Arc::from([dependency_participant(revision)]))
 }
 
 #[test]
@@ -354,6 +393,376 @@ fn unchanged_source_retains_generation_but_source_switches_always_publish_fresh_
 }
 
 #[test]
+fn dependency_changes_publish_fresh_epochs_without_changing_the_root_revision() {
+    let registry = registry();
+    let source = source(&registry);
+    let root_revision = source.revision();
+    let participant_revision = SceneAuthoringRevision::initial();
+    let reopened_revision = SceneAuthoringRevision::initial().next();
+    assert_eq!(
+        participant_revision.next().generation(),
+        reopened_revision.generation()
+    );
+    assert_ne!(
+        participant_revision.source_id(),
+        reopened_revision.source_id()
+    );
+    let (runtime, _, _) = authoring_runtime_with_claim_limit(Some(3));
+    let mut runtime = EpochRuntime(runtime);
+    runtime.set_preview_extent(Extent2d::new(320, 240));
+    let owners = RuntimeOwners::capture(&runtime);
+    let mut previous: Option<Epoch> = None;
+
+    for (generation, revision) in [
+        (1, participant_revision),
+        (2, participant_revision),
+        (2, participant_revision.next()),
+        (2, reopened_revision),
+    ] {
+        let dependencies = captured_dependencies(generation, revision);
+        assert!(
+            runtime.preview_requires_source_projection(DOCUMENT, root_revision, &dependencies,)
+        );
+        let published = observe_with_dependencies(&mut runtime, &source, &dependencies);
+        if let Some(before) = &previous {
+            assert_ne!(published.content, before.content);
+            assert_successor(&runtime, before, &published);
+        }
+        for _ in 0..2 {
+            let same_capture = captured_dependencies(generation, revision);
+            let unchanged = observe_with_dependencies(&mut runtime, &source, &same_capture);
+            assert_eq!(unchanged.snapshot, published.snapshot);
+            assert_eq!(unchanged.producer, published.producer);
+            assert_eq!(unchanged.content, published.content);
+            assert!(unchanged.geometry > published.geometry);
+        }
+        assert_eq!(source.revision(), root_revision);
+        assert_rotation(&runtime, 0.0);
+        previous = Some(published);
+    }
+    assert_eq!(RuntimeOwners::capture(&runtime), owners);
+}
+
+#[test]
+fn invalidating_pending_dependency_content_preserves_the_last_good_world_and_request() {
+    let registry = registry();
+    let source = source(&registry);
+    let root_revision = source.revision();
+    let participant_revision = SceneAuthoringRevision::initial();
+    let dependencies = captured_dependencies(1, participant_revision);
+    let (runtime, _, _) = authoring_runtime_with_claim_limit(Some(3));
+    let mut runtime = EpochRuntime(runtime);
+    let extent = Extent2d::new(320, 240);
+    runtime.set_preview_extent(extent);
+    assert_eq!(runtime.preview_extent(), extent);
+    assert!(runtime.current_preview_content_stamp().is_none());
+    let last_good = observe_with_dependencies(&mut runtime, &source, &dependencies);
+    let owners = RuntimeOwners::capture(&runtime);
+    assert!(
+        runtime
+            .drive_preview(Some(EditorPreviewSource {
+                document: DOCUMENT,
+                revision: root_revision,
+                dependencies: dependencies.clone(),
+                projection: None,
+            }))
+            .is_none()
+    );
+
+    runtime.invalidate_preview_content();
+    assert!(runtime.current_preview_content_stamp().is_none());
+    assert!(runtime.take_preview_candidate().is_none());
+    assert_eq!(runtime.preview_world_snapshot(), Some(&last_good.snapshot));
+    assert!(!runtime.preview_requires_source_projection(DOCUMENT, root_revision, &dependencies));
+    assert_rotation(&runtime, 0.0);
+    assert_eq!(RuntimeOwners::capture(&runtime), owners);
+
+    let restored = observe_with_dependencies(&mut runtime, &source, &dependencies);
+    assert_eq!(restored.content, last_good.content);
+    assert_eq!(restored.snapshot, last_good.snapshot);
+    runtime.set_preview_extent(extent);
+    assert_eq!(
+        runtime.current_preview_content_stamp().as_ref(),
+        Some(&restored.content)
+    );
+    runtime.set_preview_extent(Extent2d::new(640, 480));
+    assert!(runtime.current_preview_content_stamp().is_none());
+    assert!(runtime.take_preview_candidate().is_none());
+    assert_eq!(runtime.preview_world_snapshot(), Some(&last_good.snapshot));
+    let resized = observe_with_dependencies(&mut runtime, &source, &dependencies);
+    assert_ne!(resized.content, restored.content);
+    assert_eq!(resized.snapshot, restored.snapshot);
+
+    let changed = captured_dependencies(2, participant_revision.next());
+    let successor = observe_with_dependencies(&mut runtime, &source, &changed);
+    assert_ne!(successor.content, resized.content);
+    assert_eq!(source.revision(), root_revision);
+    assert!(runtime.drive_preview(None).is_none());
+    assert!(runtime.current_preview_content_stamp().is_none());
+    assert!(runtime.take_preview_candidate().is_none());
+    let _ = observe_with_dependencies(&mut runtime, &source, &changed);
+    runtime.set_preview_extent(None);
+    assert_eq!(runtime.preview_extent(), None);
+    assert!(runtime.current_preview_content_stamp().is_none());
+    assert!(runtime.take_preview_candidate().is_none());
+}
+
+#[test]
+fn captured_dependencies_compare_canonical_participants_with_exact_source_and_document_identity() {
+    let revision = SceneAuthoringRevision::initial();
+    let first = dependency_participant(revision);
+    let second = EditorPreviewParticipant {
+        source_key: preview_source_key(),
+        document: DOCUMENT,
+        revision,
+    };
+    let captured =
+        EditorPreviewDependencies::captured(1, Arc::from([first.clone(), second.clone()]));
+    assert_eq!(
+        captured,
+        EditorPreviewDependencies::captured(1, Arc::from([second.clone(), first.clone()])),
+    );
+    let changed_source = EditorPreviewParticipant {
+        source_key: preview_source_key(),
+        ..first.clone()
+    };
+    let changed_document = EditorPreviewParticipant {
+        document: EditorDocumentId::from_raw(3),
+        ..first.clone()
+    };
+    for changed in [changed_source, changed_document] {
+        assert_ne!(
+            captured,
+            EditorPreviewDependencies::captured(1, Arc::from([changed, second.clone()])),
+        );
+    }
+    assert_ne!(
+        captured,
+        EditorPreviewDependencies::captured(1, Arc::from([first])),
+    );
+}
+
+#[test]
+fn rejected_capture_keeps_last_good_until_a_successor_closure_is_published() {
+    let registry = registry();
+    let source = source(&registry);
+    let root_revision = source.revision();
+    let participant_revision = SceneAuthoringRevision::initial();
+    let accepted_dependencies = captured_dependencies(2, participant_revision);
+    let rejected_dependencies = captured_dependencies(3, participant_revision);
+    let repaired_dependencies = captured_dependencies(4, participant_revision);
+    let (runtime, _, _) = authoring_runtime_with_claim_limit(Some(3));
+    let mut runtime = EpochRuntime(runtime);
+    runtime.set_preview_extent(Extent2d::new(320, 240));
+    let owners = RuntimeOwners::capture(&runtime);
+    let mut diagnostics = single_error(
+        "project.editor.capture-base-missing",
+        "A demanded base Prefab could not be captured",
+    );
+    let _ = diagnostics.extend(single_error(
+        "project.editor.capture-receipt-changed",
+        "The admitted source receipt changed during capture",
+    ));
+
+    assert_eq!(
+        runtime.drive_preview(Some(EditorPreviewSource {
+            document: DOCUMENT,
+            revision: root_revision,
+            dependencies: captured_dependencies(1, participant_revision),
+            projection: Some(EditorPreviewProjection::rejected(diagnostics.clone())),
+        })),
+        Some(diagnostics.clone()),
+    );
+    assert!(runtime.take_preview_candidate().is_none());
+    assert!(runtime.preview_world_snapshot().is_none());
+    let last_good = observe_with_dependencies(&mut runtime, &source, &accepted_dependencies);
+    let stats = runtime
+        .runtime
+        .world()
+        .resource::<WorldIdentityDomain>()
+        .stats();
+    assert!(
+        runtime
+            .drive_preview(Some(EditorPreviewSource {
+                document: DOCUMENT,
+                revision: root_revision,
+                dependencies: accepted_dependencies,
+                projection: None,
+            }))
+            .is_none()
+    );
+    assert!(runtime.preview_requires_source_projection(
+        DOCUMENT,
+        root_revision,
+        &rejected_dependencies,
+    ));
+    let report = runtime
+        .drive_preview(Some(EditorPreviewSource {
+            document: DOCUMENT,
+            revision: root_revision,
+            dependencies: rejected_dependencies.clone(),
+            projection: Some(EditorPreviewProjection::rejected(diagnostics.clone())),
+        }))
+        .expect("a capture rejection must report its complete diagnostics");
+    assert_eq!(report, diagnostics);
+    assert!(runtime.current_preview_content_stamp().is_none());
+    for _ in 0..3 {
+        assert!(runtime.take_preview_candidate().is_none());
+        assert!(runtime.current_preview_content_stamp().is_none());
+        assert!(!runtime.preview_requires_source_projection(
+            DOCUMENT,
+            root_revision,
+            &rejected_dependencies,
+        ));
+        assert!(runtime.preview_requires_source_projection(
+            DOCUMENT,
+            root_revision,
+            &repaired_dependencies,
+        ));
+        assert_eq!(runtime.preview_world_snapshot(), Some(&last_good.snapshot));
+        assert_eq!(
+            WorldIdentitySnapshot::capture_default(runtime.runtime.world()).unwrap(),
+            last_good.snapshot,
+        );
+        assert_eq!(
+            runtime
+                .runtime
+                .world()
+                .resource::<WorldIdentityDomain>()
+                .stats(),
+            stats,
+        );
+        for locator in &last_good.snapshot.locators {
+            assert!(matches!(
+                resolve_in_world(runtime.runtime.world(), locator),
+                EntityLookup::Resolved(_)
+            ));
+        }
+        assert_rotation(&runtime, 0.0);
+        assert!(
+            runtime
+                .drive_preview(Some(EditorPreviewSource {
+                    document: DOCUMENT,
+                    revision: root_revision,
+                    dependencies: rejected_dependencies.clone(),
+                    projection: None,
+                }))
+                .is_none()
+        );
+    }
+    assert!(runtime.take_preview_candidate().is_none());
+    let recovered = observe_with_dependencies(&mut runtime, &source, &repaired_dependencies);
+    assert_ne!(recovered.content, last_good.content);
+    assert_successor(&runtime, &last_good, &recovered);
+    assert_eq!(source.revision(), root_revision);
+    assert_eq!(RuntimeOwners::capture(&runtime), owners);
+}
+
+#[test]
+fn rejected_dependencies_keep_last_good_without_authorizing_the_unchanged_root_revision() {
+    let registry = registry();
+    let source = source(&registry);
+    let root_revision = source.revision();
+    let participant_revision = SceneAuthoringRevision::initial();
+    let accepted_dependencies = captured_dependencies(1, participant_revision);
+    let (runtime, _, _) = authoring_runtime_with_claim_limit(Some(3));
+    let mut runtime = EpochRuntime(runtime);
+    runtime.set_preview_extent(Extent2d::new(320, 240));
+    let owners = RuntimeOwners::capture(&runtime);
+    let last_good = observe_with_dependencies(&mut runtime, &source, &accepted_dependencies);
+    let stats = runtime
+        .runtime
+        .world()
+        .resource::<WorldIdentityDomain>()
+        .stats();
+    let mut invalid = source.document().clone();
+    let component = ComponentTypeId::new("nara.transform.Transform2d");
+    invalid.entities.last_mut().unwrap().components.insert(
+        component.clone(),
+        SceneComponentRecord::new(
+            registry.schema(&component).unwrap().version,
+            ComponentValue::String("not-a-transform".to_owned()),
+        ),
+    );
+
+    let revised_dependencies = captured_dependencies(1, participant_revision.next());
+    for rejected_dependencies in [
+        captured_dependencies(2, participant_revision),
+        revised_dependencies.clone(),
+    ] {
+        assert!(
+            runtime
+                .drive_preview(Some(EditorPreviewSource {
+                    document: DOCUMENT,
+                    revision: root_revision,
+                    dependencies: accepted_dependencies.clone(),
+                    projection: None,
+                }))
+                .is_none()
+        );
+        assert!(runtime.preview_requires_source_projection(
+            DOCUMENT,
+            root_revision,
+            &rejected_dependencies,
+        ));
+        let database = preview_database(&runtime);
+        let report = runtime
+            .drive_preview(Some(EditorPreviewSource {
+                document: DOCUMENT,
+                revision: root_revision,
+                dependencies: rejected_dependencies.clone(),
+                projection: Some(EditorPreviewProjection::authoring(
+                    ExpandedSceneCandidate::plain(preview_source_key(), Arc::new(invalid.clone())),
+                    EditorAuthoringPreviewOmissions::empty(DOCUMENT, root_revision),
+                    database,
+                )),
+            }))
+            .expect("dependency changes must not reuse an accepted root-only stamp");
+        assert!(report.has_errors());
+        assert!(runtime.current_preview_content_stamp().is_none());
+        assert!(runtime.take_preview_candidate().is_none());
+        for _ in 0..2 {
+            assert!(!runtime.preview_requires_source_projection(
+                DOCUMENT,
+                root_revision,
+                &rejected_dependencies,
+            ));
+            assert!(
+                runtime
+                    .drive_preview(Some(EditorPreviewSource {
+                        document: DOCUMENT,
+                        revision: root_revision,
+                        dependencies: rejected_dependencies.clone(),
+                        projection: None,
+                    }))
+                    .is_none()
+            );
+            assert!(runtime.take_preview_candidate().is_none());
+            assert!(runtime.current_preview_content_stamp().is_none());
+            assert_eq!(runtime.preview_world_snapshot(), Some(&last_good.snapshot));
+            assert_eq!(
+                runtime
+                    .runtime
+                    .world()
+                    .resource::<WorldIdentityDomain>()
+                    .stats(),
+                stats,
+            );
+            assert_rotation(&runtime, 0.0);
+        }
+        let restored = observe_with_dependencies(&mut runtime, &source, &accepted_dependencies);
+        assert_eq!(restored.snapshot, last_good.snapshot);
+        assert_eq!(restored.producer, last_good.producer);
+        assert_eq!(restored.content, last_good.content);
+    }
+    let recovered = observe_with_dependencies(&mut runtime, &source, &revised_dependencies);
+    assert_ne!(recovered.content, last_good.content);
+    assert_successor(&runtime, &last_good, &recovered);
+    assert_eq!(source.revision(), root_revision);
+    assert_eq!(RuntimeOwners::capture(&runtime), owners);
+}
+
+#[test]
 fn rejected_projection_keeps_last_good_without_authorizing_the_rejected_revision() {
     let registry = registry();
     let mut source = source(&registry);
@@ -386,18 +795,24 @@ fn rejected_projection_keeps_last_good_without_authorizing_the_rejected_revision
             .drive_preview(Some(EditorPreviewSource {
                 document: DOCUMENT,
                 revision: source.revision(),
+                dependencies: EditorPreviewDependencies::empty(),
                 projection: None,
             }))
             .is_none()
     );
+    let database = preview_database(&runtime);
     let report = runtime
         .drive_preview(Some(EditorPreviewSource {
             document: DOCUMENT,
             revision: rejected.revision(),
-            projection: Some(EditorPreviewProjection::new(
-                preview_source_key(),
-                rejected.document().clone(),
+            dependencies: EditorPreviewDependencies::empty(),
+            projection: Some(EditorPreviewProjection::authoring(
+                ExpandedSceneCandidate::plain(
+                    preview_source_key(),
+                    Arc::new(rejected.document().clone()),
+                ),
                 EditorAuthoringPreviewOmissions::empty(DOCUMENT, rejected.revision()),
+                database,
             )),
         }))
         .expect("the invalid projection must be reported");
@@ -420,10 +835,15 @@ fn rejected_projection_keeps_last_good_without_authorizing_the_rejected_revision
                 EntityLookup::Resolved(_)
             ));
         }
-        assert!(!runtime.preview_requires_source_projection(DOCUMENT, rejected.revision()));
+        assert!(!runtime.preview_requires_source_projection(
+            DOCUMENT,
+            rejected.revision(),
+            &EditorPreviewDependencies::empty(),
+        ));
         let _ = runtime.drive_preview(Some(EditorPreviewSource {
             document: DOCUMENT,
             revision: rejected.revision(),
+            dependencies: EditorPreviewDependencies::empty(),
             projection: None,
         }));
     }
@@ -516,14 +936,19 @@ fn foreign_unregistered_identity_rejects_preview_epoch_without_erasing_last_good
         stats
     );
     edit_rotation(&mut source, &registry, 0.75);
+    let database = preview_database(&runtime);
     let report = runtime
         .drive_preview(Some(EditorPreviewSource {
             document: DOCUMENT,
             revision: source.revision(),
-            projection: Some(EditorPreviewProjection::new(
-                preview_source_key(),
-                source.document().clone(),
+            dependencies: EditorPreviewDependencies::empty(),
+            projection: Some(EditorPreviewProjection::authoring(
+                ExpandedSceneCandidate::plain(
+                    preview_source_key(),
+                    Arc::new(source.document().clone()),
+                ),
                 EditorAuthoringPreviewOmissions::empty(DOCUMENT, source.revision()),
+                database,
             )),
         }))
         .expect("foreign identity responsibility must reject the epoch");
@@ -533,6 +958,7 @@ fn foreign_unregistered_identity_rejects_preview_epoch_without_erasing_last_good
         let _ = runtime.drive_preview(Some(EditorPreviewSource {
             document: DOCUMENT,
             revision: source.revision(),
+            dependencies: EditorPreviewDependencies::empty(),
             projection: None,
         }));
     }
@@ -605,7 +1031,11 @@ fn source_none_clears_nonempty_and_empty_projection_epochs_without_restarting_ow
                     .pixels(),
                 &[24, 120, 220, 255]
             );
-            assert!(runtime.preview_requires_source_projection(DOCUMENT, source.revision()));
+            assert!(runtime.preview_requires_source_projection(
+                DOCUMENT,
+                source.revision(),
+                &EditorPreviewDependencies::empty(),
+            ));
             assert!(runtime.drive_preview(None).is_none());
         }
         let republished = observe(&mut runtime, source);
@@ -765,12 +1195,18 @@ fn nonempty_omissions_follow_only_the_accepted_epoch_and_preserve_unknown_source
     let second = unavailable_source("second");
     let first_bytes = first.document().to_json_string().unwrap();
     let second_bytes = second.document().to_json_string().unwrap();
-    let (first_projection, first_omissions) =
-        super::super::super::authoring_preview::project_scene(DOCUMENT, first.revision(), &first)
-            .unwrap();
-    let (second_projection, second_omissions) =
-        super::super::super::authoring_preview::project_scene(DOCUMENT, second.revision(), &second)
-            .unwrap();
+    let project_omissions = |session: &SceneAuthoringSession| {
+        let (scene, facts) =
+            nara_scene::__private::project_authoring_scene_session_preview(session)
+                .unwrap()
+                .into_parts();
+        (
+            scene,
+            EditorAuthoringPreviewOmissions::new(DOCUMENT, session.revision(), facts),
+        )
+    };
+    let (first_projection, first_omissions) = project_omissions(&first);
+    let (second_projection, second_omissions) = project_omissions(&second);
     assert_eq!(first_omissions.facts().len(), 1);
     assert_eq!(second_omissions.facts().len(), 1);
     assert_ne!(first_omissions.facts(), second_omissions.facts());
@@ -783,10 +1219,11 @@ fn nonempty_omissions_follow_only_the_accepted_epoch_and_preserve_unknown_source
             runtime.drive_preview(Some(EditorPreviewSource {
                 document: DOCUMENT,
                 revision: source.revision(),
-                projection: Some(EditorPreviewProjection::new(
-                    preview_source_key(),
-                    scene,
+                dependencies: EditorPreviewDependencies::empty(),
+                projection: Some(EditorPreviewProjection::authoring(
+                    ExpandedSceneCandidate::plain(preview_source_key(), Arc::new(scene)),
                     omissions,
+                    preview_database(&runtime),
                 )),
             }))
         };

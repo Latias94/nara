@@ -189,6 +189,7 @@ impl Fixture {
                         .insert(
                             document,
                             EditorScenePersistenceLane {
+                                authoring_source: None,
                                 project_path: Arc::from(format!("scenes/{name}")),
                                 source_key: nara_scene::SourceDocumentKey::project_location(
                                     "6d57f8c5-867c-5463-b74a-057a8cabe2bc".parse().unwrap(),
@@ -238,6 +239,7 @@ impl Fixture {
                         .insert(
                             document,
                             EditorPrefabPersistenceLane {
+                                authoring_source: None,
                                 project_path: Arc::from(format!("prefabs/{name}")),
                                 source_key: nara_scene::SourceDocumentKey::project_location(
                                     "6d57f8c5-867c-5463-b74a-057a8cabe2bc".parse().unwrap(),

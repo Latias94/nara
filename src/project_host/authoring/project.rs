@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, HashMap},
     error::Error,
     fmt::{self, Debug, Display, Formatter},
     mem::size_of,
@@ -11,31 +11,36 @@ use nara_asset::{
     AssetPath, AssetPathError, AssetRecord, AssetRef, AssetSourceKind, ProjectAssetDatabase,
 };
 use nara_core::ByteLimit;
+use nara_diagnostic::DiagnosticReport;
 use nara_fs::{
     ContentDigest, DirectoryCapability, FileCapability, FileIdentity, FsError, PathValidationError,
     RelativePath,
 };
 use nara_project::{EffectiveProjectSettings, ProjectPath, ProjectPathError};
 use nara_reflect::{AuthoringSchemaBundle, ComponentFieldPathSegment, DeclaredAssetReference};
-use nara_scene::__private::{
-    AuthoringAdapterReceipt, fork_published_authoring_prefab_document,
-    fork_published_authoring_scene_document,
-};
+use nara_scene::__private::{AuthoringAdapterReceipt, fork_published_authoring_scene_document};
 use nara_scene::{
-    AuthoringDocumentPublicationError, AuthoringDocumentReadiness, AuthoringRecordFact,
-    PrefabDocument, PrefabInstance, PublishedAuthoringPrefabDocument,
-    PublishedAuthoringSceneDocument, SceneDocument, SceneEntityRecord, SceneFileLimits,
-    SceneFormatError, ScenePatchDocument, ScenePatchOperation, UnavailableRecordManifestEntry,
+    AuthoringDocumentPublicationError, AuthoringDocumentReadiness, AuthoringDocumentSource,
+    AuthoringRecordFact, AuthoringSchemaBasis, PrefabDocument, PrefabDocumentCandidate,
+    PrefabInstance, PublishedAuthoringPrefabDocument, PublishedAuthoringSceneDocument,
+    ResolvedPrefabSource, SceneDocument, SceneEntityRecord, SceneFileLimits,
+    SceneFilePublicationError, SceneFormatError, UnavailableRecordManifest,
+    UnavailableRecordManifestEntry,
 };
 
 use super::{
     AuthoringProjectAdmissionBudget, AuthoringProjectAdmissionError,
     AuthoringProjectAdmissionUsage, AuthoringProjectAttemptGeneration, AuthoringSchemaReceipt,
-    document::{AuthoringDocumentDataError, admit_prefab_bytes, admit_scene_bytes},
+    document::{AuthoringDocumentDataError, admit_scene_bytes_with_basis},
     source_index::ProjectSourceIndexState,
 };
 
+mod capture;
 mod catalogue;
+pub(crate) use capture::{
+    AuthoringDocumentCapture, AuthoringPrefabSessionSnapshot, AuthoringSourceValidation,
+    CapturedAuthoringPreview,
+};
 #[cfg(test)]
 mod tests;
 use super::native_source::{AdmittedNativeDocumentSource, NativeDocumentSourcePolicy};
@@ -49,6 +54,8 @@ const DEGRADED_ISSUE_RETAINED_BYTES: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum AuthoringSourceKind {
+    ProjectManifest,
+    SchemaBundle,
     Scene,
     Prefab,
     AssetMetadata,
@@ -58,6 +65,8 @@ pub(crate) enum AuthoringSourceKind {
 impl Display for AuthoringSourceKind {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
+            Self::ProjectManifest => "project manifest",
+            Self::SchemaBundle => "authoring Schema bundle",
             Self::Scene => "Scene",
             Self::Prefab => "Prefab",
             Self::AssetMetadata => "asset metadata",
@@ -131,6 +140,16 @@ impl AuthoringSourceFact {
     pub(crate) const fn dependency_depth(&self) -> usize {
         self.dependency_depth
     }
+
+    /// Traversal depth describes a capture edge, not the observed file.
+    fn same_file_observation(&self, other: &Self) -> bool {
+        self.kind == other.kind
+            && self.project_path == other.project_path
+            && self.identity == other.identity
+            && self.parent_identity == other.parent_identity
+            && self.digest == other.digest
+            && self.encoded_bytes == other.encoded_bytes
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,13 +163,6 @@ impl AuthoringProjectReadiness {
         match readiness {
             AuthoringDocumentReadiness::Complete => Self::Complete,
             AuthoringDocumentReadiness::Degraded => Self::Degraded,
-        }
-    }
-
-    const fn include(self, readiness: AuthoringDocumentReadiness) -> Self {
-        match (self, readiness) {
-            (Self::Degraded, _) | (_, AuthoringDocumentReadiness::Degraded) => Self::Degraded,
-            (Self::Complete, AuthoringDocumentReadiness::Complete) => Self::Complete,
         }
     }
 }
@@ -189,7 +201,18 @@ pub(crate) struct AuthoringPrefabSource {
     path: AssetPath,
     native_source: AdmittedNativeDocumentSource,
     source: Arc<AuthoringSourceFact>,
-    document: Arc<PublishedAuthoringPrefabDocument>,
+    content: AuthoringPrefabContent,
+    basis: AuthoringSchemaBasis,
+    limits: SceneFileLimits,
+}
+
+#[derive(Clone)]
+enum AuthoringPrefabContent {
+    File(Arc<PrefabDocument>),
+    Session {
+        document: Arc<PrefabDocument>,
+        revision: nara_scene::SceneAuthoringRevision,
+    },
 }
 
 pub(crate) struct AuthoringAssetSource {
@@ -261,8 +284,56 @@ impl AuthoringPrefabSource {
     }
 
     #[must_use]
-    pub(crate) fn document(&self) -> &PublishedAuthoringPrefabDocument {
-        &self.document
+    pub(crate) fn document(&self) -> &PrefabDocument {
+        self.shared_source_document()
+    }
+
+    fn shared_source_document(&self) -> &Arc<PrefabDocument> {
+        match &self.content {
+            AuthoringPrefabContent::File(document)
+            | AuthoringPrefabContent::Session { document, .. } => document,
+        }
+    }
+
+    /// The file receipt and this revision describe separate authorities.
+    pub(crate) fn session_revision(&self) -> Option<nara_scene::SceneAuthoringRevision> {
+        match &self.content {
+            AuthoringPrefabContent::File(_) => None,
+            AuthoringPrefabContent::Session { revision, .. } => Some(*revision),
+        }
+    }
+
+    /// Retains raw declarations and their exact authority for deferred composition.
+    pub(crate) fn resolved_source(&self) -> ResolvedPrefabSource {
+        ResolvedPrefabSource::bound_authoring_source(
+            Arc::clone(self.shared_source_document()),
+            self.basis.clone(),
+            self.native_source.key().clone(),
+        )
+    }
+
+    /// Strictly classifies a cloned raw source against its exact captured Schema basis.
+    ///
+    /// Composition capture alone cannot establish standalone publishability. This may reject
+    /// a source whose discarded values are harmless in a repaired outer composition.
+    pub(crate) fn publish_document(
+        &self,
+    ) -> Result<PublishedAuthoringPrefabDocument, AuthoringDocumentDataError> {
+        if self.session_revision().is_some() {
+            return Err(AuthoringDocumentDataError::SessionSnapshot);
+        }
+        let source_path = AssetPath::new(self.source.project_path().as_str().to_owned())
+            .map_err(AuthoringDocumentDataError::Source)?;
+        let candidate =
+            PrefabDocumentCandidate::from_source_document(self.document().clone(), self.limits)
+                .map_err(AuthoringDocumentDataError::Format)?;
+        Ok(candidate
+            .admit_authoring_with_basis(
+                AuthoringDocumentSource::new(AssetRef::Path(source_path)),
+                &self.basis,
+            )
+            .map_err(AuthoringDocumentDataError::Publication)?
+            .publish())
     }
 }
 
@@ -272,16 +343,19 @@ impl Debug for AuthoringPrefabSource {
             .debug_struct("AuthoringPrefabSource")
             .field("path", &self.path)
             .field("source", &self.source)
-            .field("readiness", &self.document.readiness())
+            .field("entity_count", &self.document().entities.len())
+            .field("session_revision", &self.session_revision())
             .finish_non_exhaustive()
     }
 }
 
 struct AuthoringProjectSnapshotInner {
-    schema: AuthoringSchemaReceipt,
+    schema: Arc<AuthoringSchemaReceipt>,
     adapters: Box<[AuthoringAdapterReceipt]>,
     scene_limits: SceneFileLimits,
     readiness: AuthoringProjectReadiness,
+    startup_compilation_diagnostics: DiagnosticReport,
+    startup_preview: Option<CapturedAuthoringPreview>,
     startup_source: Arc<AuthoringSourceFact>,
     startup_native_source: AdmittedNativeDocumentSource,
     startup_scene: Arc<PublishedAuthoringSceneDocument>,
@@ -289,7 +363,7 @@ struct AuthoringProjectSnapshotInner {
     assets: Box<[AuthoringAssetSource]>,
     asset_database: Arc<ProjectAssetDatabase>,
     unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
-    source_facts: Box<[Arc<AuthoringSourceFact>]>,
+    source_facts: Arc<[Arc<AuthoringSourceFact>]>,
     usage: AuthoringProjectAdmissionUsage,
 }
 
@@ -344,9 +418,14 @@ impl AuthoringProjectSnapshot {
         self.inner.schema.bundle()
     }
 
+    /// Readiness of captured source inventory; effective activation is owned by Scene.
     #[must_use]
     pub(crate) fn readiness(&self) -> AuthoringProjectReadiness {
         self.inner.readiness
+    }
+
+    pub(crate) fn startup_compilation_diagnostics(&self) -> &DiagnosticReport {
+        &self.inner.startup_compilation_diagnostics
     }
 
     #[must_use]
@@ -359,6 +438,7 @@ impl AuthoringProjectSnapshot {
         &self.inner.startup_scene
     }
 
+    /// Immutable sources actually requested by the selected declaration compiler.
     #[must_use]
     pub(crate) fn prefabs(&self) -> &[AuthoringPrefabSource] {
         &self.inner.prefabs
@@ -463,6 +543,8 @@ impl AuthoringProjectReceipt {
                 adapters: Arc::from(inner.adapters),
                 scene_limits: inner.scene_limits,
                 readiness: inner.readiness,
+                startup_compilation_diagnostics: inner.startup_compilation_diagnostics,
+                startup_preview: inner.startup_preview,
                 startup_source: inner.startup_source,
                 startup_native_source: inner.startup_native_source,
                 startup_scene: inner.startup_scene,
@@ -511,10 +593,12 @@ pub(crate) struct AuthoringProjectSessionParts {
 }
 
 pub(crate) struct AuthoringProjectSessionSnapshot {
-    schema: AuthoringSchemaReceipt,
+    schema: Arc<AuthoringSchemaReceipt>,
     adapters: Arc<[AuthoringAdapterReceipt]>,
     scene_limits: SceneFileLimits,
     readiness: AuthoringProjectReadiness,
+    startup_compilation_diagnostics: DiagnosticReport,
+    startup_preview: Option<CapturedAuthoringPreview>,
     startup_source: Arc<AuthoringSourceFact>,
     startup_native_source: AdmittedNativeDocumentSource,
     startup_scene: Arc<PublishedAuthoringSceneDocument>,
@@ -522,12 +606,69 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
     assets: Box<[AuthoringAssetSource]>,
     asset_database: Arc<ProjectAssetDatabase>,
     unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
-    source_facts: Box<[Arc<AuthoringSourceFact>]>,
+    source_facts: Arc<[Arc<AuthoringSourceFact>]>,
     usage: AuthoringProjectAdmissionUsage,
     source_index: ProjectSourceIndexState,
 }
 
 impl AuthoringProjectSessionSnapshot {
+    pub(crate) fn take_startup_preview(&mut self) -> Option<CapturedAuthoringPreview> {
+        self.startup_preview.take()
+    }
+
+    pub(crate) fn startup_source_validation(&self) -> AuthoringSourceValidation {
+        AuthoringSourceValidation::new(
+            Arc::clone(&self.schema),
+            Arc::clone(&self.source_facts),
+            self.usage.retained_candidate_bytes(),
+        )
+    }
+
+    pub(crate) fn capture_scene_document(
+        &self,
+        source: &super::document::AuthoringDocumentSourceFact,
+        session: &nara_scene::SceneAuthoringSession,
+        open_prefabs: &[AuthoringPrefabSessionSnapshot],
+    ) -> Result<AuthoringDocumentCapture, AuthoringProjectSourceAdmissionError> {
+        self.capture_scene_request(source, session, open_prefabs.iter().cloned().collect())?
+            .prepare()
+    }
+
+    pub(crate) fn capture_scene_request(
+        &self,
+        source: &super::document::AuthoringDocumentSourceFact,
+        session: &nara_scene::SceneAuthoringSession,
+        open_prefabs: Box<[AuthoringPrefabSessionSnapshot]>,
+    ) -> Result<capture::OwnedAuthoringSceneCapture, AuthoringProjectSourceAdmissionError> {
+        let basis = session
+            .authoring_schema_basis()
+            .filter(|basis| basis == &self.startup_scene.schema_basis())
+            .ok_or(AuthoringProjectSourceAdmissionError::SchemaBasisMismatch)?;
+        if source.source_key().kind() != nara_scene::SourceDocumentKind::Scene {
+            return Err(AuthoringProjectSourceAdmissionError::NativeSource(
+                super::AuthoringDocumentAdmissionError::DocumentKindMismatch,
+            ));
+        }
+        if !capture::source_locator_matches(session.authoring_source(), source.relative_path()) {
+            return Err(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch);
+        }
+        Ok(capture::OwnedAuthoringSceneCapture {
+            schema: Arc::clone(&self.schema),
+            scene_limits: self.scene_limits,
+            source: source.clone(),
+            document: session.shared_document(),
+            revision: session.revision(),
+            basis,
+            readiness: AuthoringProjectReadiness::from_document(
+                session
+                    .authoring_readiness()
+                    .ok_or(AuthoringProjectSourceAdmissionError::SchemaBasisMismatch)?,
+            ),
+            adapter_retained: adapter_receipts_retained_bytes(&self.adapters)?,
+            open_prefabs,
+        })
+    }
+
     pub(crate) fn startup_native_source(&self) -> &AdmittedNativeDocumentSource {
         &self.startup_native_source
     }
@@ -543,7 +684,7 @@ impl AuthoringProjectSessionSnapshot {
     }
 
     #[must_use]
-    pub(crate) const fn settings(&self) -> &EffectiveProjectSettings {
+    pub(crate) fn settings(&self) -> &EffectiveProjectSettings {
         self.schema.settings()
     }
 
@@ -553,12 +694,12 @@ impl AuthoringProjectSessionSnapshot {
     }
 
     #[must_use]
-    pub(crate) const fn manifest_digest(&self) -> ContentDigest {
+    pub(crate) fn manifest_digest(&self) -> ContentDigest {
         self.schema.manifest_digest()
     }
 
     #[must_use]
-    pub(crate) const fn authoring_bundle_digest(&self) -> ContentDigest {
+    pub(crate) fn authoring_bundle_digest(&self) -> ContentDigest {
         self.schema.bundle_digest()
     }
 
@@ -575,6 +716,10 @@ impl AuthoringProjectSessionSnapshot {
     #[must_use]
     pub(crate) const fn readiness(&self) -> AuthoringProjectReadiness {
         self.readiness
+    }
+
+    pub(crate) fn startup_compilation_diagnostics(&self) -> &DiagnosticReport {
+        &self.startup_compilation_diagnostics
     }
 
     #[must_use]
@@ -596,11 +741,14 @@ impl AuthoringProjectSessionSnapshot {
         self.prefabs.iter()
     }
 
-    #[must_use]
-    pub(crate) fn fork_prefab(&self, path: &AssetPath) -> Option<PublishedAuthoringPrefabDocument> {
+    /// Independently classifies a captured source before creating an editable document.
+    pub(crate) fn fork_prefab(
+        &self,
+        path: &AssetPath,
+    ) -> Result<Option<PublishedAuthoringPrefabDocument>, AuthoringDocumentDataError> {
         self.prefab(path)
-            .map(AuthoringPrefabSource::document)
-            .map(fork_published_authoring_prefab_document)
+            .map(AuthoringPrefabSource::publish_document)
+            .transpose()
     }
 
     pub(crate) fn asset_records(&self) -> impl Iterator<Item = &AssetRecord> {
@@ -684,7 +832,7 @@ impl AuthoringProjectSessionSnapshot {
     > {
         super::document::AuthoringDocumentAdmissionBasis::new(
             &self.schema,
-            &self.adapters,
+            &self.startup_scene.schema_basis(),
             self.scene_limits,
         )
         .capture(index, relative_path, expected_kind)
@@ -713,7 +861,7 @@ impl Debug for AuthoringProjectSessionSnapshot {
 }
 
 pub(crate) struct PreparedAuthoringProject {
-    schema: AuthoringSchemaReceipt,
+    schema: Arc<AuthoringSchemaReceipt>,
     adapters: Box<[AuthoringAdapterReceipt]>,
     scene_limits: SceneFileLimits,
 }
@@ -728,24 +876,23 @@ impl PreparedAuthoringProject {
     }
 
     #[must_use]
-    pub(crate) const fn with_scene_limits(
+    pub(crate) fn with_scene_limits(
         schema: AuthoringSchemaReceipt,
         adapters: Box<[AuthoringAdapterReceipt]>,
         scene_limits: SceneFileLimits,
     ) -> Self {
         Self {
-            schema,
+            schema: Arc::new(schema),
             adapters,
             scene_limits,
         }
     }
 
     pub(crate) fn admit_startup_closure(
-        mut self,
+        self,
     ) -> Result<AuthoringProjectCandidate, AuthoringProjectSourceAdmissionError> {
+        let mut budget = self.schema.budget;
         let scene_root = self.schema.settings.paths.scenes.clone();
-        let prefab_root = self.schema.settings.paths.prefabs.clone();
-        let asset_root = self.schema.settings.paths.assets.clone();
         let bundle_encoded_bytes = self.schema.bundle_bytes().len();
         let startup_path = self
             .schema
@@ -756,19 +903,15 @@ impl PreparedAuthoringProject {
             .ok_or(AuthoringProjectSourceAdmissionError::MissingStartupScene)?;
 
         let adapter_retained = adapter_receipts_retained_bytes(&self.adapters)?;
-        self.schema
-            .budget
-            .charge_source_bytes(0, 0, 0, adapter_retained)?;
+        budget.charge_source_bytes(0, 0, 0, adapter_retained)?;
 
         let scenes = open_source_directory(
             &self.schema.project_root,
             &scene_root,
             AuthoringSourceKind::Scene,
-            &mut self.schema.budget,
+            &mut budget,
         )?;
-        self.schema
-            .budget
-            .charge_reference(startup_path.as_str().len(), 0, false)?;
+        budget.charge_reference(startup_path.as_str().len(), 0, false)?;
         let startup_project_path = join_project_path(&scene_root, startup_path.as_str())?;
         let startup_opened = open_source_file(
             &scenes,
@@ -776,7 +919,7 @@ impl PreparedAuthoringProject {
             startup_path.as_str(),
             AuthoringSourceKind::Scene,
             0,
-            &mut self.schema.budget,
+            &mut budget,
         )?;
         let mut identities = HashMap::new();
         identities.insert(self.schema.manifest_identity(), LoadedIdentity::SchemaBasis);
@@ -791,16 +934,22 @@ impl PreparedAuthoringProject {
         let startup_read = read_unique_source(
             startup_opened,
             self.scene_limits.encoded_bytes().get(),
-            &mut self.schema.budget,
+            &mut budget,
         )?;
+        let basis = AuthoringSchemaBasis::admit(self.schema.bundle.bundle(), &self.adapters)
+            .map_err(|error| {
+                map_document_data_error(
+                    &startup_read,
+                    AuthoringDocumentDataError::Publication(error),
+                    &mut budget,
+                )
+            })?;
         let startup_scene = {
-            let bundle = self.schema.bundle.bundle();
-            let budget = &mut self.schema.budget;
+            let budget = &mut budget;
             admit_scene_document(
                 &startup_read,
                 self.scene_limits,
-                bundle,
-                &self.adapters,
+                &basis,
                 bundle_encoded_bytes,
                 budget,
             )?
@@ -815,416 +964,36 @@ impl PreparedAuthoringProject {
             nara_scene::SourceDocumentKind::Scene,
             startup_source.identity(),
             0,
-            3, // Project root, manifest and schema bundle; the startup read handle is closed.
-            &mut self.schema.budget,
+            3,
+            &mut budget,
         )?;
-        let mut readiness = AuthoringProjectReadiness::from_document(startup_scene.readiness());
-        identities.insert(startup_source.identity(), LoadedIdentity::Scene);
-        let mut source_facts = BTreeMap::new();
-        source_facts.insert(
-            startup_source.project_path().as_str().to_owned(),
-            Arc::clone(&startup_source),
-        );
-        include_native_metadata_source(&startup_native_source, &mut identities, &mut source_facts)?;
-
-        let mut pending = BTreeSet::new();
-        let mut queued_depths = BTreeMap::new();
-        let mut loaded_paths = BTreeSet::new();
-        let mut pending_assets = BTreeMap::new();
-        let mut unresolved_dependencies = Vec::new();
-        let mut catalogue = ReferenceCatalogue::new(
-            self.schema.project_root.share(),
-            [asset_root.clone(), prefab_root.clone()],
-        );
-        enqueue_document_prefabs(
-            &startup_scene.document().entities,
-            0,
-            &mut pending,
-            &mut queued_depths,
-            &loaded_paths,
-            &mut unresolved_dependencies,
-            &mut catalogue,
-            &mut self.schema.budget,
+        let mut capture = capture::capture_scene(
+            &self.schema,
+            self.scene_limits,
+            startup_scene.document(),
+            &basis,
+            &startup_source,
+            &startup_native_source,
+            AuthoringProjectReadiness::from_document(startup_scene.readiness()),
+            &mut budget,
+            &[],
         )?;
-        enqueue_document_assets(
-            startup_scene.schema_declared_asset_references(),
-            0,
-            &mut pending_assets,
-            &mut unresolved_dependencies,
-            &mut catalogue,
-            &mut self.schema.budget,
-        )?;
-
-        let prefabs_directory = if pending.is_empty() {
-            None
-        } else {
-            Some(open_source_directory(
-                &self.schema.project_root,
-                &prefab_root,
-                AuthoringSourceKind::Prefab,
-                &mut self.schema.budget,
-            )?)
-        };
-        let mut prefabs = BTreeMap::new();
-        while let Some((depth, path)) = pending.pop_first() {
-            queued_depths.remove(&path);
-            if !loaded_paths.insert(path.clone()) {
-                continue;
-            }
-            let directory = prefabs_directory
-                .as_ref()
-                .ok_or(AuthoringProjectSourceAdmissionError::PrefabDirectoryAuthorityUnavailable)?;
-            let project_path = join_project_path(&prefab_root, path.as_str())?;
-            let opened = open_source_file(
-                directory,
-                project_path,
-                path.as_str(),
-                AuthoringSourceKind::Prefab,
-                depth,
-                &mut self.schema.budget,
-            )?;
-            let native_source = source_policy.admit_budgeted(
-                &self.schema.project_root,
-                opened.project_path.as_str(),
-                nara_scene::SourceDocumentKind::Prefab,
-                opened.identity,
-                depth,
-                5, // Schema handles, Prefab directory and original unread Prefab file.
-                &mut self.schema.budget,
-            )?;
-            if native_source.key().origin() == startup_native_source.key().origin()
-                || prefabs.values().any(|prefab: &AuthoringPrefabSource| {
-                    prefab.native_source.key().origin() == native_source.key().origin()
-                        && prefab.source.project_path() != &opened.project_path
-                })
-            {
-                return Err(AuthoringProjectSourceAdmissionError::NativeSource(
-                    super::AuthoringDocumentAdmissionError::NativeSourceIdentityConflict,
-                ));
-            }
-            include_native_metadata_source(&native_source, &mut identities, &mut source_facts)?;
-
-            if let Some(loaded) = identities.get(&opened.identity) {
-                let LoadedIdentity::Prefab { source, document } = loaded else {
-                    return Err(
-                        AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict {
-                            path: opened.project_path,
-                        },
-                    );
-                };
-                prefabs.insert(
-                    path.clone(),
-                    AuthoringPrefabSource {
-                        path,
-                        native_source,
-                        source: Arc::clone(source),
-                        document: Arc::clone(document),
-                    },
-                );
-                continue;
-            }
-
-            let read = read_unique_source(
-                opened,
-                self.scene_limits.encoded_bytes().get(),
-                &mut self.schema.budget,
-            )?;
-            let document = {
-                let bundle = self.schema.bundle.bundle();
-                let budget = &mut self.schema.budget;
-                admit_prefab_document(
-                    &read,
-                    self.scene_limits,
-                    bundle,
-                    &self.adapters,
-                    bundle_encoded_bytes,
-                    budget,
-                )?
-            };
-            readiness = readiness.include(document.readiness());
-            let source = Arc::clone(&read.source);
-            identities.insert(
-                source.identity(),
-                LoadedIdentity::Prefab {
-                    source: Arc::clone(&source),
-                    document: Arc::clone(&document),
-                },
-            );
-            source_facts.insert(
-                source.project_path().as_str().to_owned(),
-                Arc::clone(&source),
-            );
-            prefabs.insert(
-                path.clone(),
-                AuthoringPrefabSource {
-                    path,
-                    native_source,
-                    source,
-                    document: Arc::clone(&document),
-                },
-            );
-            enqueue_document_prefabs(
-                &document.document().entities,
-                depth,
-                &mut pending,
-                &mut queued_depths,
-                &loaded_paths,
-                &mut unresolved_dependencies,
-                &mut catalogue,
-                &mut self.schema.budget,
-            )?;
-            enqueue_document_assets(
-                document.schema_declared_asset_references(),
-                depth,
-                &mut pending_assets,
-                &mut unresolved_dependencies,
-                &mut catalogue,
-                &mut self.schema.budget,
-            )?;
-        }
-        drop(prefabs_directory);
-
-        let mut asset_database = ProjectAssetDatabase::default();
-        if catalogue.is_indexed() && !prefabs.is_empty() {
-            let directory = open_source_directory(
-                &self.schema.project_root,
-                &prefab_root,
-                AuthoringSourceKind::Prefab,
-                &mut self.schema.budget,
-            )?;
-            for (path, prefab) in &prefabs {
-                if let (Some(source), nara_scene::SourceDocumentOrigin::StableAsset { stable_id }) = (
-                    prefab.native_source.metadata_source(),
-                    prefab.native_source.key().origin(),
-                ) {
-                    // Native admission already owns this exact observation and its byte charge.
-                    // Compare the catalogue evidence without reopening or retaining another fact.
-                    catalogue.verify_metadata(path, true, source)?;
-                    let record =
-                        AssetRecord::new(*stable_id, path.clone(), AssetSourceKind::Prefab);
-                    charge_database_record(&record, &mut self.schema.budget)?;
-                    insert_asset_record(&mut asset_database, record)?;
-                    continue;
-                }
-                if let Some((record, source)) =
-                    catalogue.admit_prefab_metadata(&directory, path, &mut self.schema.budget)?
-                {
-                    if identities.contains_key(&source.identity()) {
-                        return Err(
-                            AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict {
-                                path: source.project_path().clone(),
-                            },
-                        );
-                    }
-                    insert_asset_record(&mut asset_database, record)?;
-                    identities.insert(source.identity(), LoadedIdentity::AssetMetadata);
-                    source_facts.insert(source.project_path().as_str().to_owned(), source);
-                }
-            }
-        }
-
-        let assets_directory = if pending_assets.is_empty() {
-            None
-        } else {
-            Some(open_source_directory(
-                &self.schema.project_root,
-                &asset_root,
-                AuthoringSourceKind::AssetSource,
-                &mut self.schema.budget,
-            )?)
-        };
-        let mut assets = BTreeMap::new();
-        for (path, depth) in pending_assets {
-            let directory = assets_directory
-                .as_ref()
-                .ok_or(AuthoringProjectSourceAdmissionError::AssetDirectoryAuthorityUnavailable)?;
-            let metadata_path = path.meta_path();
-            self.schema
-                .budget
-                .charge_reference(metadata_path.len(), depth, false)?;
-            let metadata_project_path = join_project_path(&asset_root, &metadata_path)?;
-            let metadata_opened = open_source_file(
-                directory,
-                metadata_project_path,
-                &metadata_path,
-                AuthoringSourceKind::AssetMetadata,
-                depth,
-                &mut self.schema.budget,
-            )?;
-            ensure_unclaimed_source_identity(&identities, &metadata_opened)?;
-            let metadata_limits = AssetMetaFileLimits::default();
-            let metadata_read = read_unique_source(
-                metadata_opened,
-                metadata_limits.encoded_bytes().get(),
-                &mut self.schema.budget,
-            )?;
-            catalogue.verify_metadata(&path, false, &metadata_read.source)?;
-            let exact_metadata_limit = ByteLimit::new(metadata_read.read_limit)
-                .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
-            let metadata_encoded_bytes = metadata_read.bytes.len();
-            let metadata_source = metadata_read.source;
-            let metadata = AssetMetaIdentityCandidate::decode_json_bytes_owned_with_limits(
-                metadata_read.bytes.into_boxed_slice(),
-                metadata_limits.with_encoded_bytes(exact_metadata_limit),
-            )
-            .map_err(|source| {
-                AuthoringProjectSourceAdmissionError::AssetMetadataFormat {
-                    path: path.clone(),
-                    source,
-                }
-            })?;
-            asset_database
-                .insert_identity(path.clone(), metadata.identity().clone())
-                .map_err(|source| match source {
-                    AssetDatabaseError::MetaPathMismatch {
-                        source_path,
-                        meta_path,
-                    } => AuthoringProjectSourceAdmissionError::AssetMetadataPathMismatch {
-                        requested: source_path,
-                        declared: meta_path,
-                    },
-                    source => AuthoringProjectSourceAdmissionError::AssetIdentity {
-                        path: path.clone(),
-                        source,
-                    },
-                })?;
-            let record = AssetRecord::from(metadata.identity().clone());
-            charge_database_record(&record, &mut self.schema.budget)?;
-            charge_asset_metadata(
-                &metadata_source,
-                metadata_encoded_bytes,
-                &metadata,
-                &record,
-                &mut self.schema.budget,
-            )?;
-            identities.insert(metadata_source.identity(), LoadedIdentity::AssetMetadata);
-            source_facts.insert(
-                metadata_source.project_path().as_str().to_owned(),
-                Arc::clone(&metadata_source),
-            );
-
-            let source_project_path = join_project_path(&asset_root, record.path().as_str())?;
-            let source_opened = open_source_file(
-                directory,
-                source_project_path,
-                record.path().as_str(),
-                AuthoringSourceKind::AssetSource,
-                depth,
-                &mut self.schema.budget,
-            )?;
-            ensure_unclaimed_source_identity(&identities, &source_opened)?;
-            let aggregate_source_limit = self.schema.budget.maximum();
-            let source_read = read_unique_source(
-                source_opened,
-                aggregate_source_limit,
-                &mut self.schema.budget,
-            )?;
-            charge_asset_source(&source_read, &mut self.schema.budget)?;
-            let source = Arc::clone(&source_read.source);
-            identities.insert(source.identity(), LoadedIdentity::AssetSource);
-            source_facts.insert(
-                source.project_path().as_str().to_owned(),
-                Arc::clone(&source),
-            );
-            let bytes = Arc::<[u8]>::from(source_read.bytes);
-            assets.insert(
-                record.path().clone(),
-                AuthoringAssetSource {
-                    record,
-                    metadata,
-                    metadata_source,
-                    source,
-                    bytes,
-                },
-            );
-        }
-        drop(assets_directory);
-
         #[cfg(feature = "presentation-2d")]
-        {
-            // The preview shares this database until the first accepted image adds an identity.
-            // Reserve its one private copy before publishing the authoring session.
-            for asset in assets.values() {
-                charge_database_record(asset.record(), &mut self.schema.budget)?;
-            }
-            for path in prefabs.keys() {
-                if let Some(record) = asset_database.record_for_path(path) {
-                    charge_database_record(record, &mut self.schema.budget)?;
-                }
-            }
-            self.schema.budget.charge_source_bytes(
-                0,
-                0,
-                0,
-                size_of::<ProjectAssetDatabase>() + 2 * size_of::<usize>(),
-            )?;
-            let growth = checked_sum([
-                checked_product(super::MAX_AUTHORING_IMAGE_IDENTITY_PATH_BYTES, 9)?,
-                checked_product(
-                    super::MAX_AUTHORING_IMAGE_IDENTITIES,
-                    size_of::<AssetRecord>() + 3 * size_of::<AssetPath>() + 192,
-                )?,
-            ])?;
-            self.schema.budget.charge_source_bytes(0, 0, 0, growth)?;
-        }
-
-        let prefab_path_bytes = prefabs.keys().try_fold(0_usize, |total, path| {
-            total
-                .checked_add(path.as_str().len())
-                .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)
-        })?;
-        startup_native_source
-            .revalidate(&self.schema.project_root)
-            .map_err(AuthoringProjectSourceAdmissionError::NativeSource)?;
-        for prefab in prefabs.values() {
-            prefab
-                .native_source
-                .revalidate(&self.schema.project_root)
-                .map_err(AuthoringProjectSourceAdmissionError::NativeSource)?;
-            if let nara_scene::SourceDocumentOrigin::StableAsset { stable_id } =
-                prefab.native_source.key().origin()
-                && asset_database
-                    .record_for_stable_id(*stable_id)
-                    .is_some_and(|record| {
-                        record.path() != prefab.path()
-                            || record.source_kind() != &AssetSourceKind::Prefab
-                    })
-            {
-                return Err(AuthoringProjectSourceAdmissionError::NativeSource(
-                    super::AuthoringDocumentAdmissionError::NativeSourceIdentityConflict,
-                ));
-            }
-        }
-        if let nara_scene::SourceDocumentOrigin::StableAsset { stable_id } =
-            startup_native_source.key().origin()
-            && asset_database.record_for_stable_id(*stable_id).is_some()
-        {
-            return Err(AuthoringProjectSourceAdmissionError::NativeSource(
-                super::AuthoringDocumentAdmissionError::NativeSourceIdentityConflict,
-            ));
-        }
-        if !unresolved_dependencies.is_empty() {
-            readiness = AuthoringProjectReadiness::Degraded;
-        }
-        let unresolved_dependency_retained =
-            unresolved_dependencies_retained_bytes(&unresolved_dependencies)?;
-        self.schema
-            .budget
-            .charge_source_bytes(0, 0, 0, unresolved_dependency_retained)?;
-        let source_facts = source_facts.into_values().collect::<Vec<_>>();
-        self.schema.budget.charge_source_bytes(
-            0,
-            0,
-            0,
-            snapshot_index_retained_bytes(
-                source_facts.len(),
-                prefabs.len(),
-                assets.len(),
-                unresolved_dependencies.len(),
-                prefab_path_bytes,
-            )?,
-        )?;
-        let usage = self.schema.budget.usage();
+        reserve_preview_identity_store(&capture, &mut budget)?;
+        capture.usage = budget.usage();
+        let capture::AuthoringDocumentCapture {
+            readiness,
+            diagnostics: startup_compilation_diagnostics,
+            prefabs,
+            assets,
+            asset_database,
+            unresolved_dependencies,
+            source_facts,
+            usage,
+            preview: startup_preview,
+            root_revision: _,
+            authority: _,
+        } = capture;
 
         Ok(AuthoringProjectCandidate {
             inner: AuthoringProjectSnapshotInner {
@@ -1232,18 +1001,50 @@ impl PreparedAuthoringProject {
                 adapters: self.adapters,
                 scene_limits: self.scene_limits,
                 readiness,
+                startup_compilation_diagnostics,
+                startup_preview,
                 startup_source,
                 startup_native_source,
                 startup_scene,
-                prefabs: prefabs.into_values().collect::<Vec<_>>().into_boxed_slice(),
-                assets: assets.into_values().collect::<Vec<_>>().into_boxed_slice(),
-                asset_database: Arc::new(asset_database),
-                unresolved_dependencies: unresolved_dependencies.into_boxed_slice(),
-                source_facts: source_facts.into_boxed_slice(),
+                prefabs,
+                assets,
+                asset_database,
+                unresolved_dependencies,
+                source_facts,
                 usage,
             },
         })
     }
+}
+
+#[cfg(feature = "presentation-2d")]
+fn reserve_preview_identity_store(
+    capture: &AuthoringDocumentCapture,
+    budget: &mut AuthoringProjectAdmissionBudget,
+) -> Result<(), AuthoringProjectSourceAdmissionError> {
+    for asset in &capture.assets {
+        charge_database_record(asset.record(), budget)?;
+    }
+    for prefab in &capture.prefabs {
+        if let Some(record) = capture.asset_database.record_for_path(prefab.path()) {
+            charge_database_record(record, budget)?;
+        }
+    }
+    budget.charge_source_bytes(
+        0,
+        0,
+        0,
+        size_of::<ProjectAssetDatabase>() + 2 * size_of::<usize>(),
+    )?;
+    let growth = checked_sum([
+        checked_product(super::MAX_AUTHORING_IMAGE_IDENTITY_PATH_BYTES, 9)?,
+        checked_product(
+            super::MAX_AUTHORING_IMAGE_IDENTITIES,
+            size_of::<AssetRecord>() + 3 * size_of::<AssetPath>() + 192,
+        )?,
+    ])?;
+    budget.charge_source_bytes(0, 0, 0, growth)?;
+    Ok(())
 }
 
 enum LoadedIdentity {
@@ -1253,7 +1054,8 @@ enum LoadedIdentity {
     AssetSource,
     Prefab {
         source: Arc<AuthoringSourceFact>,
-        document: Arc<PublishedAuthoringPrefabDocument>,
+        document: Arc<PrefabDocument>,
+        limits: SceneFileLimits,
     },
 }
 
@@ -1268,7 +1070,7 @@ fn include_native_metadata_source(
     let path = source.project_path();
     if source_facts
         .get(path.as_str())
-        .is_some_and(|existing| existing == source)
+        .is_some_and(|existing| existing.same_file_observation(source))
     {
         return Ok(());
     }
@@ -1485,8 +1287,7 @@ pub(super) fn source_fact_retained_bytes(
 fn admit_scene_document(
     source: &ReadAuthoringSource,
     scene_limits: SceneFileLimits,
-    bundle: &AuthoringSchemaBundle,
-    adapters: &[AuthoringAdapterReceipt],
+    basis: &AuthoringSchemaBasis,
     bundle_encoded_bytes: usize,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<Arc<PublishedAuthoringSceneDocument>, AuthoringProjectSourceAdmissionError> {
@@ -1494,14 +1295,8 @@ fn admit_scene_document(
         .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
     let limits = scene_limits.with_encoded_bytes(encoded_limit);
     let published = Arc::new(
-        admit_scene_bytes(
-            source.source.project_path(),
-            &source.bytes,
-            limits,
-            bundle,
-            adapters,
-        )
-        .map_err(|error| map_document_data_error(source, error, budget))?,
+        admit_scene_bytes_with_basis(source.source.project_path(), &source.bytes, limits, basis)
+            .map_err(|error| map_document_data_error(source, error, budget))?,
     );
     charge_published_document(
         PublishedDocumentCharge {
@@ -1513,6 +1308,9 @@ fn admit_scene_document(
                 published.schema_declared_asset_references(),
             )?,
             unavailable_records: published.unavailable_manifest().total_count(),
+            overlay_declarations_retained_bytes: manifest_overlay_declarations_retained_bytes(
+                published.unavailable_manifest(),
+            )?,
             diagnostics: published.diagnostics(),
             bundle_encoded_bytes,
         },
@@ -1521,43 +1319,63 @@ fn admit_scene_document(
     Ok(published)
 }
 
-fn admit_prefab_document(
+fn admit_prefab_composition_source(
     source: &ReadAuthoringSource,
     scene_limits: SceneFileLimits,
-    bundle: &AuthoringSchemaBundle,
-    adapters: &[AuthoringAdapterReceipt],
-    bundle_encoded_bytes: usize,
     budget: &mut AuthoringProjectAdmissionBudget,
-) -> Result<Arc<PublishedAuthoringPrefabDocument>, AuthoringProjectSourceAdmissionError> {
+) -> Result<(Arc<PrefabDocument>, SceneFileLimits), AuthoringProjectSourceAdmissionError> {
     let encoded_limit = ByteLimit::new(source.read_limit)
         .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
     let limits = scene_limits.with_encoded_bytes(encoded_limit);
-    let published = Arc::new(
-        admit_prefab_bytes(
-            source.source.project_path(),
-            &source.bytes,
-            limits,
-            bundle,
-            adapters,
-        )
-        .map_err(|error| map_document_data_error(source, error, budget))?,
-    );
-    charge_published_document(
-        PublishedDocumentCharge {
-            source: &source.source,
-            encoded_bytes: source.bytes.len(),
-            document: published.document(),
-            record_facts: published.record_facts(),
-            asset_references_retained_bytes: declared_asset_references_retained_bytes(
-                published.schema_declared_asset_references(),
-            )?,
-            unavailable_records: published.unavailable_manifest().total_count(),
-            diagnostics: published.diagnostics(),
-            bundle_encoded_bytes,
-        },
-        budget,
-    )?;
-    Ok(published)
+    let path = source.source.project_path().as_str();
+    let candidate = if path.ends_with(".ron") {
+        PrefabDocumentCandidate::decode_ron_bytes_with_limits(&source.bytes, limits)
+    } else if path.ends_with(".json") {
+        PrefabDocumentCandidate::decode_json_bytes_with_limits(&source.bytes, limits)
+    } else {
+        return Err(map_document_data_error(
+            source,
+            AuthoringDocumentDataError::UnsupportedEncoding,
+            budget,
+        ));
+    }
+    .map_err(|error| {
+        map_document_data_error(source, AuthoringDocumentDataError::Format(error), budget)
+    })?;
+    let document = candidate.into_composition_source().map_err(|error| {
+        if let Err(budget_error) = budget.charge_diagnostics(
+            error.diagnostics().len(),
+            error.diagnostics().retained_bytes(),
+        ) {
+            return budget_error.into();
+        }
+        AuthoringProjectSourceAdmissionError::SourceStructure {
+            kind: source.source.kind(),
+            path: source.source.project_path().clone(),
+            source: error,
+        }
+    })?;
+    charge_composition_source(&source.source, source.bytes.len(), &document, budget)?;
+    Ok((Arc::new(document), limits))
+}
+
+fn charge_composition_source(
+    source: &AuthoringSourceFact,
+    encoded_bytes: usize,
+    document: &PrefabDocument,
+    budget: &mut AuthoringProjectAdmissionBudget,
+) -> Result<(), AuthoringProjectSourceAdmissionError> {
+    let document_retained = document.retained_bytes()?;
+    let retained_bytes = checked_sum([
+        document_retained,
+        source_fact_retained_bytes(source)?,
+        size_of::<Arc<PrefabDocument>>(),
+    ])?;
+    // The startup publication owns the shared Schema basis. Raw dependencies retain no
+    // standalone classification, reference projections or duplicate unavailable manifests.
+    let decode_work = document_retained.saturating_add(encoded_bytes);
+    budget.charge_source_bytes(0, document_retained, decode_work, retained_bytes)?;
+    Ok(())
 }
 
 fn map_document_data_error(
@@ -1566,6 +1384,9 @@ fn map_document_data_error(
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> AuthoringProjectSourceAdmissionError {
     match error {
+        AuthoringDocumentDataError::SessionSnapshot => {
+            AuthoringProjectSourceAdmissionError::SessionSnapshotPublication
+        }
         AuthoringDocumentDataError::UnsupportedEncoding => {
             AuthoringProjectSourceAdmissionError::UnsupportedSourceEncoding {
                 kind: source.source.kind(),
@@ -1608,6 +1429,7 @@ struct PublishedDocumentCharge<'a, D> {
     record_facts: &'a [AuthoringRecordFact],
     asset_references_retained_bytes: usize,
     unavailable_records: usize,
+    overlay_declarations_retained_bytes: usize,
     diagnostics: &'a nara_diagnostic::DiagnosticReport,
     bundle_encoded_bytes: usize,
 }
@@ -1629,9 +1451,9 @@ fn charge_published_document<D: AuthoringDocumentMetrics>(
                 charge.unavailable_records,
                 size_of::<UnavailableRecordManifestEntry>() + DEGRADED_ISSUE_RETAINED_BYTES,
             )?,
-            // The manifest owns cloned values plus derived reference paths. Charging twice the
-            // complete document payload is deliberately conservative and bounds both copies
-            // without leaking the manifest's private representation into the Host.
+            // Unavailable entries own cloned values and derived location/reference paths.
+            // This conservative allowance is independent of the complete instance declarations
+            // charged below, which also exist without unavailable component facts.
             checked_product(document_retained, 2)?,
         ])?
     };
@@ -1647,7 +1469,7 @@ fn charge_published_document<D: AuthoringDocumentMetrics>(
     // Unavailable complete records retain another reference projection in their manifest.
     // Schema defaults can introduce those references without any authored value bytes, so the
     // document-payload allowance above cannot cover them. Conservatively reserve a second copy
-    // of all projections whenever the manifest is nonempty.
+    // of all projections whenever unavailable entries exist.
     let asset_references_retained = checked_product(
         charge.asset_references_retained_bytes,
         if charge.unavailable_records == 0 {
@@ -1661,6 +1483,7 @@ fn charge_published_document<D: AuthoringDocumentMetrics>(
         record_retained,
         asset_references_retained,
         unavailable_retained,
+        charge.overlay_declarations_retained_bytes,
         basis_retained,
         source_retained,
         size_of::<Arc<D>>(),
@@ -1749,91 +1572,36 @@ fn prefab_instance_retained_bytes(
 ) -> Result<usize, AuthoringProjectSourceAdmissionError> {
     checked_sum([
         asset_ref_retained_bytes(&prefab.source)?,
-        patch_retained_bytes(&prefab.overrides)?,
+        if matches!(&prefab.source, AssetRef::Path(_)) {
+            crate::scene_retention::STRING_ALLOCATION_OVERHEAD
+        } else {
+            0
+        },
+        prefab.overrides.as_ref().map_or(Ok(0), |overlay| {
+            crate::scene_retention::overlay_retained_bytes(overlay)
+                .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)
+        })?,
     ])
 }
 
-fn patch_retained_bytes(
-    patch: &ScenePatchDocument,
+fn manifest_overlay_declarations_retained_bytes(
+    manifest: &UnavailableRecordManifest,
 ) -> Result<usize, AuthoringProjectSourceAdmissionError> {
-    let mut total = checked_product(patch.operations.len(), size_of::<ScenePatchOperation>())?;
-    for operation in &patch.operations {
-        let dynamic = match operation {
-            ScenePatchOperation::SetPrefabInstance {
-                entity,
-                expected,
-                value,
-            } => expected
-                .iter()
-                .chain(value.iter())
-                .try_fold(entity.as_str().len(), |total, prefab| {
-                    checked_sum([total, prefab_instance_retained_bytes(prefab)?])
-                })?,
-            ScenePatchOperation::AddEntity { entity, .. } => entity_retained_bytes(entity)?,
-            ScenePatchOperation::RestoreEntity {
-                entity,
-                descendants,
-                ..
-            } => descendants
-                .iter()
-                .try_fold(entity_retained_bytes(entity)?, |total, entity| {
-                    total
-                        .checked_add(entity_retained_bytes(entity)?)
-                        .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)
-                })?,
-            ScenePatchOperation::AddComponent {
-                entity,
-                component,
-                value,
-            }
-            | ScenePatchOperation::ReplaceComponent {
-                entity,
-                component,
-                value,
-            } => {
-                let cost = value.value.cost();
-                checked_sum([
-                    entity.as_str().len(),
-                    component.as_str().len(),
-                    value.owner().map_or(0, |owner| owner.as_str().len()),
-                    cost.logical_bytes(),
-                    checked_product(cost.nodes(), VALUE_NODE_RETAINED_BYTES)?,
-                ])?
-            }
-            ScenePatchOperation::SetField {
-                entity,
-                component,
-                field,
-                value,
-                ..
-            } => {
-                let cost = value.cost();
-                checked_sum([
-                    entity.as_str().len(),
-                    component.as_str().len(),
-                    field.as_str().len(),
-                    cost.logical_bytes(),
-                    checked_product(cost.nodes(), VALUE_NODE_RETAINED_BYTES)?,
-                ])?
-            }
-            ScenePatchOperation::SetAssetRefField {
-                entity,
-                component,
-                field,
-                asset_ref,
-                ..
-            } => checked_sum([
-                entity.as_str().len(),
-                component.as_str().len(),
-                field.as_str().len(),
-                asset_ref_retained_bytes(asset_ref)?,
+    let mut total = 0;
+    // Every retained anchor owns a complete instance copy, even when all component facts are
+    // understood or the overlay contains only structural intent and nested detach claims.
+    for (anchor, instance) in manifest.overlay_declarations() {
+        checked_add_to(
+            &mut total,
+            checked_sum([
+                size_of::<nara_scene::SceneEntityId>(),
+                anchor.as_str().len(),
+                crate::scene_retention::STRING_ALLOCATION_OVERHEAD,
+                size_of::<PrefabInstance>(),
+                crate::scene_retention::BTREE_ENTRY_OVERHEAD,
+                prefab_instance_retained_bytes(instance)?,
             ])?,
-            ScenePatchOperation::RemoveEntity { entity, .. }
-            | ScenePatchOperation::RemoveComponent { entity, .. }
-            | ScenePatchOperation::RemoveField { entity, .. }
-            | ScenePatchOperation::MoveEntity { entity, .. } => entity.as_str().len(),
-        };
-        checked_add_to(&mut total, dynamic)?;
+        )?;
     }
     Ok(total)
 }
@@ -1910,192 +1678,102 @@ fn enqueue_document_assets<'a>(
     Ok(())
 }
 
-fn enqueue_document_prefabs(
-    entities: &[SceneEntityRecord],
-    current_depth: usize,
-    pending: &mut BTreeSet<(usize, AssetPath)>,
-    queued_depths: &mut BTreeMap<AssetPath, usize>,
-    loaded_paths: &BTreeSet<AssetPath>,
-    unresolved_dependencies: &mut Vec<AuthoringUnresolvedDependency>,
-    catalogue: &mut ReferenceCatalogue,
+fn remaining_compiler_work(
+    budget: &AuthoringProjectAdmissionBudget,
+    reserved: usize,
+    previous_limit: ByteLimit,
+) -> Result<ByteLimit, AuthoringProjectSourceAdmissionError> {
+    let host_retained = budget
+        .retained_candidate_bytes
+        .checked_sub(reserved)
+        .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
+    let available = budget
+        .limits
+        .retained_candidate_bytes()
+        .get()
+        .saturating_sub(host_retained);
+    ByteLimit::new(available.min(previous_limit.get())).ok_or_else(|| {
+        AuthoringProjectAdmissionError::RetainedCandidateBytesExceeded {
+            maximum: budget.limits.retained_candidate_bytes().get(),
+        }
+        .into()
+    })
+}
+
+fn resize_compiler_work(
     budget: &mut AuthoringProjectAdmissionBudget,
+    reserved: &mut usize,
+    bytes: usize,
 ) -> Result<(), AuthoringProjectSourceAdmissionError> {
-    let next_depth = current_depth.saturating_add(1);
-    for entity in entities {
-        enqueue_entity_prefabs(
-            entity,
-            next_depth,
-            pending,
-            queued_depths,
-            loaded_paths,
-            unresolved_dependencies,
-            catalogue,
-            budget,
-        )?;
+    if bytes > *reserved {
+        budget.charge_source_bytes(0, 0, 0, bytes - *reserved)?;
+    } else {
+        budget.reconcile_retained_reservation(*reserved, bytes)?;
     }
+    *reserved = bytes;
     Ok(())
 }
 
-fn enqueue_entity_prefabs(
-    entity: &SceneEntityRecord,
-    dependency_depth: usize,
-    pending: &mut BTreeSet<(usize, AssetPath)>,
-    queued_depths: &mut BTreeMap<AssetPath, usize>,
-    loaded_paths: &BTreeSet<AssetPath>,
-    unresolved_dependencies: &mut Vec<AuthoringUnresolvedDependency>,
-    catalogue: &mut ReferenceCatalogue,
-    budget: &mut AuthoringProjectAdmissionBudget,
-) -> Result<(), AuthoringProjectSourceAdmissionError> {
-    let Some(prefab) = &entity.prefab else {
-        return Ok(());
-    };
-    enqueue_prefab_instance(
-        prefab,
-        dependency_depth,
-        pending,
-        queued_depths,
-        loaded_paths,
-        unresolved_dependencies,
-        catalogue,
-        budget,
+fn is_missing_source(error: &AuthoringProjectSourceAdmissionError) -> bool {
+    matches!(error,
+        AuthoringProjectSourceAdmissionError::SourceHost { source: FsError::Io { source, .. }, .. }
+        | AuthoringProjectSourceAdmissionError::SourceDirectoryHost { source: FsError::Io { source, .. }, .. }
+        if source.kind() == std::io::ErrorKind::NotFound
     )
 }
 
-fn enqueue_prefab_instance(
-    prefab: &PrefabInstance,
-    dependency_depth: usize,
-    pending: &mut BTreeSet<(usize, AssetPath)>,
-    queued_depths: &mut BTreeMap<AssetPath, usize>,
-    loaded_paths: &BTreeSet<AssetPath>,
-    unresolved_dependencies: &mut Vec<AuthoringUnresolvedDependency>,
-    catalogue: &mut ReferenceCatalogue,
+pub(super) fn revalidate_source_fact(
+    root: &DirectoryCapability,
+    source: &AuthoringSourceFact,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(), AuthoringProjectSourceAdmissionError> {
-    enqueue_prefab_reference(
-        &prefab.source,
-        dependency_depth,
-        pending,
-        queued_depths,
-        loaded_paths,
-        unresolved_dependencies,
-        catalogue,
-        budget,
+    let changed = || AuthoringProjectSourceAdmissionError::SourceChanged {
+        kind: source.kind(),
+        path: source.project_path().clone(),
+    };
+    budget.admit_handle_peak(SOURCE_OPEN_HANDLE_PEAK)?;
+    let preflight =
+        RelativePath::preflight(source.project_path().as_str()).map_err(|_| changed())?;
+    budget.charge_source_bytes(
+        0,
+        0,
+        exact_open_work(preflight.components(), source.project_path().as_str().len()),
+        0,
     )?;
-    enqueue_patch_prefabs(
-        &prefab.overrides,
-        dependency_depth,
-        pending,
-        queued_depths,
-        loaded_paths,
-        unresolved_dependencies,
-        catalogue,
-        budget,
-    )
-}
-
-fn enqueue_patch_prefabs(
-    patch: &ScenePatchDocument,
-    dependency_depth: usize,
-    pending: &mut BTreeSet<(usize, AssetPath)>,
-    queued_depths: &mut BTreeMap<AssetPath, usize>,
-    loaded_paths: &BTreeSet<AssetPath>,
-    unresolved_dependencies: &mut Vec<AuthoringUnresolvedDependency>,
-    catalogue: &mut ReferenceCatalogue,
-    budget: &mut AuthoringProjectAdmissionBudget,
-) -> Result<(), AuthoringProjectSourceAdmissionError> {
-    for operation in &patch.operations {
-        match operation {
-            ScenePatchOperation::SetPrefabInstance {
-                expected, value, ..
-            } => {
-                for prefab in expected.iter().chain(value.iter()) {
-                    enqueue_prefab_instance(
-                        prefab,
-                        dependency_depth,
-                        pending,
-                        queued_depths,
-                        loaded_paths,
-                        unresolved_dependencies,
-                        catalogue,
-                        budget,
-                    )?;
-                }
-            }
-            ScenePatchOperation::AddEntity { entity, .. } => enqueue_entity_prefabs(
-                entity,
-                dependency_depth,
-                pending,
-                queued_depths,
-                loaded_paths,
-                unresolved_dependencies,
-                catalogue,
-                budget,
-            )?,
-            ScenePatchOperation::RestoreEntity {
-                entity,
-                descendants,
-                ..
-            } => {
-                enqueue_entity_prefabs(
-                    entity,
-                    dependency_depth,
-                    pending,
-                    queued_depths,
-                    loaded_paths,
-                    unresolved_dependencies,
-                    catalogue,
-                    budget,
-                )?;
-                for descendant in descendants {
-                    enqueue_entity_prefabs(
-                        descendant,
-                        dependency_depth,
-                        pending,
-                        queued_depths,
-                        loaded_paths,
-                        unresolved_dependencies,
-                        catalogue,
-                        budget,
-                    )?;
-                }
-            }
-            _ => {}
+    let relative = RelativePath::new(source.project_path().as_str()).map_err(|_| changed())?;
+    let file = root.open_file_exact(&relative).map_err(|error| {
+        AuthoringProjectSourceAdmissionError::SourceHost {
+            kind: source.kind(),
+            path: source.project_path().clone(),
+            source: error,
         }
+    })?;
+    if file.identity() != source.identity() || file.parent_identity() != source.parent_identity() {
+        return Err(changed());
     }
-    Ok(())
-}
-
-fn enqueue_prefab_reference(
-    reference: &AssetRef,
-    dependency_depth: usize,
-    pending: &mut BTreeSet<(usize, AssetPath)>,
-    queued_depths: &mut BTreeMap<AssetPath, usize>,
-    loaded_paths: &BTreeSet<AssetPath>,
-    unresolved_dependencies: &mut Vec<AuthoringUnresolvedDependency>,
-    catalogue: &mut ReferenceCatalogue,
-    budget: &mut AuthoringProjectAdmissionBudget,
-) -> Result<(), AuthoringProjectSourceAdmissionError> {
-    let Some(path) = catalogue.resolve(reference, true, budget)? else {
-        budget.charge_reference(16, dependency_depth, true)?;
-        unresolved_dependencies.push(AuthoringUnresolvedDependency {
-            kind: AuthoringUnresolvedDependencyKind::Prefab,
-            reference: reference.clone(),
-            dependency_depth,
-        });
-        return Ok(());
-    };
-    budget.charge_reference(path.as_str().len(), dependency_depth, true)?;
-    if loaded_paths.contains(&path) {
-        return Ok(());
+    let read_limit = source
+        .encoded_bytes()
+        .checked_add(1)
+        .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
+    budget.charge_source_bytes(0, 0, read_limit, read_limit)?;
+    let bytes = file
+        .read_to_end_bounded(
+            u64::try_from(read_limit)
+                .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
+        )
+        .map_err(|error| match error {
+            FsError::ByteLimitExceeded { .. } => changed(),
+            error => AuthoringProjectSourceAdmissionError::SourceHost {
+                kind: source.kind(),
+                path: source.project_path().clone(),
+                source: error,
+            },
+        })?;
+    if bytes.len() != source.encoded_bytes() || ContentDigest::of_bytes(&bytes) != source.digest() {
+        return Err(changed());
     }
-    if let Some(previous_depth) = queued_depths.get(&path).copied() {
-        if previous_depth <= dependency_depth {
-            return Ok(());
-        }
-        pending.remove(&(previous_depth, path.clone()));
-    }
-    queued_depths.insert(path.clone(), dependency_depth);
-    pending.insert((dependency_depth, path.clone()));
+    drop(bytes);
+    budget.reconcile_retained_reservation(read_limit, 0)?;
     Ok(())
 }
 
@@ -2216,6 +1894,13 @@ fn checked_add_to(
 pub(crate) enum AuthoringProjectSourceAdmissionError {
     NativeSource(super::AuthoringDocumentAdmissionError),
     MissingStartupScene,
+    SchemaBasisMismatch,
+    DocumentSourceMismatch,
+    AmbiguousPrefabSession {
+        path: ProjectPath,
+    },
+    SessionSnapshotPublication,
+    CompilationBudget(DiagnosticReport),
     SourceDirectoryPath {
         kind: AuthoringSourceKind,
         source: PathValidationError,
@@ -2238,6 +1923,10 @@ pub(crate) enum AuthoringProjectSourceAdmissionError {
     SourceIdentityKindConflict {
         path: ProjectPath,
     },
+    SourceChanged {
+        kind: AuthoringSourceKind,
+        path: ProjectPath,
+    },
     SourceTooLarge {
         kind: AuthoringSourceKind,
         path: ProjectPath,
@@ -2251,6 +1940,11 @@ pub(crate) enum AuthoringProjectSourceAdmissionError {
         kind: AuthoringSourceKind,
         path: ProjectPath,
         source: SceneFormatError,
+    },
+    SourceStructure {
+        kind: AuthoringSourceKind,
+        path: ProjectPath,
+        source: SceneFilePublicationError,
     },
     DocumentSourcePath {
         path: ProjectPath,
@@ -2277,7 +1971,6 @@ pub(crate) enum AuthoringProjectSourceAdmissionError {
     AssetMetadataChanged {
         path: AssetPath,
     },
-    PrefabDirectoryAuthorityUnavailable,
     AssetDirectoryAuthorityUnavailable,
     AccountingOverflow,
     Budget(AuthoringProjectAdmissionError),
@@ -2298,6 +1991,20 @@ impl Display for AuthoringProjectSourceAdmissionError {
             Self::MissingStartupScene => {
                 formatter.write_str("project manifest does not select a startup Scene")
             }
+            Self::SchemaBasisMismatch => formatter
+                .write_str("document capture requires the exact admitted authoring Schema basis"),
+            Self::DocumentSourceMismatch => {
+                formatter.write_str("document capture receipt belongs to another authoring source")
+            }
+            Self::AmbiguousPrefabSession { path } => write!(
+                formatter,
+                "multiple open Prefab sessions claim source '{path}'"
+            ),
+            Self::SessionSnapshotPublication => formatter.write_str(
+                "an unsaved session snapshot cannot establish a file-backed document publication",
+            ),
+            Self::CompilationBudget(_) => formatter
+                .write_str("selected authoring Prefab compilation exceeded its work budget"),
             Self::SourceDirectoryPath { kind, .. } => {
                 write!(formatter, "{kind} source directory path is invalid")
             }
@@ -2320,6 +2027,10 @@ impl Display for AuthoringProjectSourceAdmissionError {
                 formatter,
                 "project source '{path}' aliases another admitted source kind"
             ),
+            Self::SourceChanged { kind, path } => write!(
+                formatter,
+                "{kind} source '{path}' changed during authoring capture; retry admission",
+            ),
             Self::SourceTooLarge {
                 kind,
                 path,
@@ -2336,6 +2047,12 @@ impl Display for AuthoringProjectSourceAdmissionError {
             }
             Self::SourceFormat { kind, path, .. } => {
                 write!(formatter, "{kind} source '{path}' is invalid")
+            }
+            Self::SourceStructure { kind, path, .. } => {
+                write!(
+                    formatter,
+                    "{kind} source '{path}' has invalid local structure"
+                )
             }
             Self::DocumentSourcePath { path, .. } => write!(
                 formatter,
@@ -2367,8 +2084,6 @@ impl Display for AuthoringProjectSourceAdmissionError {
                 formatter,
                 "asset metadata for '{path}' changed after stable reference lookup; retry admission",
             ),
-            Self::PrefabDirectoryAuthorityUnavailable => formatter
-                .write_str("Prefab closure traversal lost its retained directory authority"),
             Self::AssetDirectoryAuthorityUnavailable => {
                 formatter.write_str("asset closure traversal lost its retained directory authority")
             }
@@ -2392,19 +2107,25 @@ impl Error for AuthoringProjectSourceAdmissionError {
             }
             Self::JoinedSourcePath(source) => Some(source),
             Self::SourceFormat { source, .. } => Some(source),
+            Self::SourceStructure { source, .. } => Some(source),
             Self::DocumentSourcePath { source, .. } => Some(source),
             Self::SourcePublication { source, .. } => Some(source),
             Self::AssetMetadataFormat { source, .. } => Some(source),
             Self::AssetIdentity { source, .. } => Some(source),
             Self::Budget(source) => Some(source),
             Self::MissingStartupScene
+            | Self::SchemaBasisMismatch
+            | Self::DocumentSourceMismatch
+            | Self::AmbiguousPrefabSession { .. }
+            | Self::SessionSnapshotPublication
+            | Self::CompilationBudget(_)
             | Self::SourceIdentityKindConflict { .. }
+            | Self::SourceChanged { .. }
             | Self::SourceTooLarge { .. }
             | Self::UnsupportedSourceEncoding { .. }
             | Self::AssetMetadataPathMismatch { .. }
             | Self::CatalogueNameInvalid
             | Self::AssetMetadataChanged { .. }
-            | Self::PrefabDirectoryAuthorityUnavailable
             | Self::AssetDirectoryAuthorityUnavailable
             | Self::AccountingOverflow => None,
         }

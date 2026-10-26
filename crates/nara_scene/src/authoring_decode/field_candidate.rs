@@ -133,9 +133,9 @@ impl PreparedFieldCandidate<'_> {
             kind: state.kind,
             basis: &state.basis,
             record_facts: Vec::with_capacity(targets.len()),
-            patch_asset_references: Vec::new(),
+            overlay_asset_references: Vec::new(),
             manifest: Vec::new(),
-            // Available direct records produce no preservation placement or patch facts.
+            // Available direct records produce no preservation placement or overlay facts.
             placements: BTreeMap::new(),
             namespace: self
                 .document
@@ -144,6 +144,10 @@ impl PreparedFieldCandidate<'_> {
                 .map(|entity| &entity.id)
                 .collect(),
             limits: state.limits,
+            property_read_budget: nara_reflect::ComponentPropertyReadBudget::new(
+                state.limits.component_value_nodes(),
+                state.limits.component_value_bytes(),
+            ),
             asset_reference_nodes: 0,
             asset_reference_bytes: 0,
         };

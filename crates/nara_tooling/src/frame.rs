@@ -1,6 +1,9 @@
 //! Immutable Editor frames and the UI-neutral ordered action ingress.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
 
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValueKind};
@@ -118,6 +121,9 @@ impl EditorFrameClock {
             document_open: Default::default(),
             scene_preview_document: None,
             authoring_retirement_pending: false,
+            scene_preview_work_pending: false,
+            scene_preview_recheck_after: None,
+            scene_preview_unsaved_dependencies: 0,
         }
     }
 }
@@ -285,9 +291,42 @@ pub struct EditorFrameModel {
     document_open: crate::EditorDocumentOpenView,
     scene_preview_document: Option<EditorDocumentId>,
     authoring_retirement_pending: bool,
+    scene_preview_work_pending: bool,
+    scene_preview_recheck_after: Option<Duration>,
+    scene_preview_unsaved_dependencies: usize,
 }
 
 impl EditorFrameModel {
+    /// Background capture or source validation needs maintenance without authorizing old pixels.
+    #[must_use]
+    pub const fn scene_preview_work_pending(&self) -> bool {
+        self.scene_preview_work_pending
+    }
+
+    #[must_use]
+    pub const fn scene_preview_recheck_after(&self) -> Option<Duration> {
+        self.scene_preview_recheck_after
+    }
+
+    #[must_use]
+    pub const fn scene_preview_unsaved_dependencies(&self) -> usize {
+        self.scene_preview_unsaved_dependencies
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_scene_preview_work(
+        mut self,
+        pending: bool,
+        recheck_after: Option<Duration>,
+        unsaved_dependencies: usize,
+    ) -> Self {
+        self.scene_preview_work_pending = pending;
+        self.scene_preview_recheck_after = recheck_after;
+        self.scene_preview_unsaved_dependencies = unsaved_dependencies;
+        self
+    }
+
     /// A replaced or rejected authoring Runtime still owns physical retirement work.
     /// Unchanged pending polls require maintenance, not repeated presentation.
     #[must_use]

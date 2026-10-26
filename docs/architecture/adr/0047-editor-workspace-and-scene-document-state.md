@@ -2,9 +2,11 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-26
+**Last Revised**: 2026-10-27
 **Amended**: 2026-08-15 to make selection single-owner and separate monotonic revision from
 receipt-backed content state
+**Amended**: 2026-10-27 to capture actual open Prefab working copies for authoring Scene preview
+with independent file evidence and complete content authorization
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
 **Refined By**: [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor
 Workspace Installation
@@ -61,6 +63,10 @@ Rules:
   viewport/tool context. Selection targets use authoring identities and provenance, not runtime
   `Entity` values. Inspector state consumes that selection and does not retain a second durable
   selected entity.
+- The current Scene viewport selects containing-source entities. A hit on Prefab-derived geometry
+  selects the instance's root anchor through typed provenance; the materialized entity locator
+  never becomes a Workspace entity ID. Independent inherited-entity selection and its Inspector
+  require a separate provenance-aware target contract.
 - Undo/redo is per document by default. Cross-document operations must be represented as explicit
   multi-document transactions with per-document patches and rollback diagnostics.
 - Document mutations, Undo, and Redo target a non-optional document identity and exact base
@@ -170,6 +176,32 @@ Rules:
   Failed source publication removes only its candidate and restores the document active
   immediately before publication, without routing that rollback through explicit Scene selection.
   Preview selection never chooses executable startup or a retained Play source.
+- Authoring Scene preview composes the selected Scene with open Prefab working copies only when
+  the shared Scene compiler actually demands their canonical sources. An unrelated open document
+  does not become a dependency. A selected working copy carries its exact session lineage,
+  revision, canonical source and accepted file receipt; ambiguous or unavailable source ownership
+  rejects the capture. Disk-backed dependencies retain their own immutable source evidence.
+  This is the Editor preview policy, not a change to Check, external Play or Export inputs.
+- Preview composition and source revalidation run as bounded background work. Before first
+  materialization, verify the captured source and Schema evidence; the owner also checks the
+  selected root and participating sessions before publication. A cancelled task remains owned
+  until physical return before admitting its replacement. Subsequent background validation may
+  detect external changes; its private scheduling policy is not a filesystem-watcher or latency
+  guarantee.
+- The complete preview content stamp includes actual dependency selection independently of the
+  root Scene revision. Opening or closing a demanded Prefab, editing it, Save or Reopen can revoke
+  that stamp without changing the root. Pending and terminal results must have distinct
+  authorization. Native presentation, candidate consumption and picking require the same current
+  stamp; last-good pixels may remain visible after revocation without retaining input authority.
+  Preview assets resolve against the database admitted with that capture. Successful Image
+  publication or retirement invalidates its prior captured asset evidence as well as the native
+  content stamp; prepare and validate a successor capture before authorizing its projection.
+- Previewing unsaved dependencies neither dirties nor saves the containing Scene. Saving the
+  Scene does not save those Prefabs. The frontend exposes the number of unsaved dependencies in
+  the accepted capture; source Save, instance override, Apply and preview refresh retain their
+  distinct owners. The [Unity/Godot study](../../research/2026-10-26-unity-godot-prefab-editor-ownership.md#5-follow-up-working-copies-save-and-preview-dependencies)
+  records the saved-only alternative and the tradeoff behind this policy, without claiming the
+  same working-copy behavior in either upstream.
 - Prefab Save/Reopen source observations use the configured Prefab-domain path derived from the
   retained lane's project-relative publication path, not an arbitrary Workspace locator. Browser
   and anchored sources therefore share the same observation key. Browser documents outside that

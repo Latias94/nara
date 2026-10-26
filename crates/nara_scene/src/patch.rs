@@ -20,11 +20,7 @@ use crate::{
         with_component_field_path_error, with_public_locator, with_public_u64,
     },
     validation::{
-        preflight_authoring_scene_for_prefab_operation,
-        preflight_authoring_scene_for_prefab_source,
         preflight_authoring_scene_with_context_at_operation,
-        preflight_authoring_scene_with_context_for_prefab_operation,
-        preflight_authoring_scene_with_context_for_prefab_source,
         validate_patch_intermediate_scene_with_limits,
     },
 };
@@ -82,7 +78,7 @@ impl ScenePatchDocument {
     }
 
     pub(crate) fn unsupported_format_version(&self) -> Option<u32> {
-        unsupported_patch_tree_format_version(self)
+        (self.format_version != Self::CURRENT_FORMAT_VERSION).then_some(self.format_version)
     }
 
     pub fn apply_to_scene(
@@ -332,84 +328,6 @@ impl ScenePatchDocument {
         })
     }
 
-    #[cfg(test)]
-    pub(crate) fn apply_owned_to_unpublished_scene(
-        self,
-        document: &mut SceneDocument,
-        registry: &ComponentRegistry,
-    ) -> ScenePatchReport {
-        self.apply_owned_to_unpublished_scene_with_validator(
-            document,
-            registry,
-            ScenePatchApplyLimits::default(),
-            |document, registry, operation_index| match operation_index {
-                Some(operation_index) => {
-                    document.validate_authoring_for_patch(registry, operation_index)
-                }
-                None => document.validate_authoring(registry),
-            },
-        )
-    }
-
-    pub(crate) fn apply_owned_to_unpublished_scene_for_prefab(
-        self,
-        document: &mut SceneDocument,
-        registry: &ComponentRegistry,
-    ) -> ScenePatchReport {
-        self.apply_owned_to_unpublished_scene_with_validator(
-            document,
-            registry,
-            ScenePatchApplyLimits::default(),
-            |document, registry, operation_index| match operation_index {
-                Some(operation_index) => {
-                    preflight_authoring_scene_for_prefab_operation(
-                        document,
-                        registry,
-                        operation_index,
-                    )
-                    .diagnostics
-                }
-                None => preflight_authoring_scene_for_prefab_source(document, registry).diagnostics,
-            },
-        )
-    }
-
-    pub(crate) fn apply_owned_to_unpublished_scene_for_prefab_with_asset_database(
-        self,
-        document: &mut SceneDocument,
-        registry: &ComponentRegistry,
-        database: &ProjectAssetDatabase,
-    ) -> ScenePatchReport {
-        self.apply_owned_to_unpublished_scene_with_validator(
-            document,
-            registry,
-            ScenePatchApplyLimits::default(),
-            |document, registry, operation_index| match operation_index {
-                Some(operation_index) => {
-                    let mut context =
-                        ComponentDecodeContext::new().with_project_asset_database(database);
-                    preflight_authoring_scene_with_context_for_prefab_operation(
-                        document,
-                        registry,
-                        &mut context,
-                        operation_index,
-                    )
-                    .diagnostics
-                }
-                None => {
-                    let mut context =
-                        ComponentDecodeContext::new().with_project_asset_database(database);
-                    preflight_authoring_scene_with_context_for_prefab_source(
-                        document,
-                        registry,
-                        &mut context,
-                    )
-                    .diagnostics
-                }
-            },
-        )
-    }
-
     fn apply_to_scene_with_validator(
         &self,
         document: &mut SceneDocument,
@@ -474,63 +392,6 @@ impl ScenePatchDocument {
                 diagnostics: DiagnosticReport::default(),
             },
         })
-    }
-
-    fn apply_owned_to_unpublished_scene_with_validator(
-        self,
-        document: &mut SceneDocument,
-        registry: &ComponentRegistry,
-        limits: ScenePatchApplyLimits,
-        mut validate: impl FnMut(&SceneDocument, &ComponentRegistry, Option<usize>) -> DiagnosticReport,
-    ) -> ScenePatchReport {
-        let source_work =
-            match self.validate_patch_source(document, registry, limits, &mut validate) {
-                Ok(source_work) => source_work,
-                Err(report) => return *report,
-            };
-
-        if self.operations.is_empty() {
-            document.canonicalize();
-            return ScenePatchReport {
-                applied: true,
-                inverse: None,
-                diagnostics: DiagnosticReport::default(),
-            };
-        }
-
-        let final_operation_index = self.operations.len() - 1;
-        let mut validation_work = source_work;
-        for (operation_index, operation) in self.operations.into_iter().enumerate() {
-            if let Err(diagnostic) =
-                apply_owned_operation(document, registry, operation, operation_index)
-            {
-                let mut diagnostics = DiagnosticReport::default();
-                diagnostics.push(diagnostic);
-                return ScenePatchReport {
-                    applied: false,
-                    inverse: None,
-                    diagnostics,
-                };
-            }
-            if let Err(report) = validate_applied_operation(
-                document,
-                registry,
-                operation_index,
-                &mut validation_work,
-                limits,
-                operation_index == final_operation_index,
-                &mut validate,
-            ) {
-                return *report;
-            }
-        }
-
-        document.canonicalize();
-        ScenePatchReport {
-            applied: true,
-            inverse: None,
-            diagnostics: DiagnosticReport::default(),
-        }
     }
 
     fn validate_patch_source(
@@ -775,12 +636,6 @@ impl ScenePlacement {
     }
 }
 
-enum PatchTreeNode<'a> {
-    Entity(&'a SceneEntityRecord),
-    Instance(&'a PrefabInstance),
-    Patch(&'a ScenePatchDocument),
-}
-
 #[cfg(feature = "serde")]
 pub(crate) fn authoring_entity_placements<'a>(
     roots: &[SceneEntityId],
@@ -808,50 +663,6 @@ pub(crate) fn authoring_entity_placements<'a>(
         }
     }
     placements
-}
-
-fn unsupported_patch_tree_format_version(patch: &ScenePatchDocument) -> Option<u32> {
-    let mut pending = vec![PatchTreeNode::Patch(patch)];
-    while let Some(node) = pending.pop() {
-        match node {
-            PatchTreeNode::Entity(entity) => {
-                if let Some(prefab) = &entity.prefab {
-                    pending.push(PatchTreeNode::Instance(prefab));
-                }
-            }
-            PatchTreeNode::Instance(instance) => {
-                pending.push(PatchTreeNode::Patch(&instance.overrides));
-            }
-            PatchTreeNode::Patch(patch) => {
-                if patch.format_version != ScenePatchDocument::CURRENT_FORMAT_VERSION {
-                    return Some(patch.format_version);
-                }
-                for operation in &patch.operations {
-                    match operation {
-                        ScenePatchOperation::AddEntity { entity, .. } => {
-                            pending.push(PatchTreeNode::Entity(entity));
-                        }
-                        ScenePatchOperation::RestoreEntity {
-                            entity,
-                            descendants,
-                            ..
-                        } => {
-                            pending.push(PatchTreeNode::Entity(entity));
-                            pending.extend(descendants.iter().map(PatchTreeNode::Entity));
-                        }
-                        ScenePatchOperation::SetPrefabInstance {
-                            expected, value, ..
-                        } => {
-                            pending
-                                .extend(expected.iter().chain(value).map(PatchTreeNode::Instance));
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
-    None
 }
 
 enum ValueCostNode<'a> {
@@ -886,15 +697,6 @@ impl ScenePatchCost {
     }
 }
 
-pub(crate) fn scene_entity_component_value_cost(entity: &SceneEntityRecord) -> ComponentValueCost {
-    entity
-        .components
-        .values()
-        .fold(ComponentValueCost::ZERO, |cost, component| {
-            cost.saturating_add(component.value.cost())
-        })
-}
-
 pub(crate) fn scene_entities_source_value_cost(
     entities: &[SceneEntityRecord],
 ) -> ComponentValueCost {
@@ -903,8 +705,15 @@ pub(crate) fn scene_entities_source_value_cost(
         .value_cost()
 }
 
-pub(crate) fn scene_patch_value_cost(patch: &ScenePatchDocument) -> ComponentValueCost {
-    scene_patch_cost(patch).value_cost()
+/// Admits raw source records and embedded declarations before recursive copying.
+pub(crate) fn bounded_scene_entities_source_cost(
+    entities: &[SceneEntityRecord],
+    limits: ScenePatchApplyLimits,
+) -> Option<ScenePatchCost> {
+    tree_cost(
+        vec![ValueCostNode::Entities(entities.iter(), 1)],
+        Some(limits),
+    )
 }
 
 pub(crate) fn scene_patch_cost(patch: &ScenePatchDocument) -> ScenePatchCost {
@@ -959,16 +768,33 @@ fn tree_cost(
             }
             ValueCostNode::Instance(instance, depth) => {
                 admit_data_depth(depth, limits)?;
-                cost.operation_count = cost.operation_count.saturating_add(1);
-                if limits
-                    .is_some_and(|limits| cost.operation_count > limits.validation_work().get())
-                {
-                    return None;
+                let mut allowance = crate::prefab::PrefabOverlayCostLimits::UNBOUNDED;
+                if let Some(limits) = limits {
+                    allowance.depth = ComponentValueMaterializationLimits::default()
+                        .depth()
+                        .get()
+                        .checked_sub(depth)?
+                        .checked_add(1)?;
+                    allowance.nodes = limits
+                        .validation_work()
+                        .get()
+                        .checked_sub(cost.operation_count)?;
+                    allowance.value_nodes = limits
+                        .validation_value_nodes()
+                        .get()
+                        .checked_sub(cost.value_cost.nodes())?;
+                    allowance.value_bytes = limits
+                        .validation_value_bytes()
+                        .get()
+                        .checked_sub(cost.value_cost.logical_bytes())?;
                 }
+                let instance_cost =
+                    crate::prefab::prefab_instance_cost(instance, allowance).ok()?;
+                cost.operation_count = cost.operation_count.saturating_add(instance_cost.nodes);
+                cost.value_cost = cost.value_cost.saturating_add(instance_cost.value_cost);
                 cost.structural_logical_bytes = cost
                     .structural_logical_bytes
-                    .saturating_add(asset_ref_logical_bytes(&instance.source));
-                pending.push(ValueCostNode::Patch(&instance.overrides, depth + 1));
+                    .saturating_add(instance_cost.structural_logical_bytes);
             }
             ValueCostNode::Entities(mut entities, depth) => {
                 if let Some(entity) = entities.next() {
@@ -1155,30 +981,47 @@ fn admit_value_depth(value: &ComponentValue, depth: usize) -> Option<()> {
 #[cfg(all(test, feature = "serde"))]
 mod bounded_cost_tests {
     use super::*;
+    use crate::{
+        PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityTarget,
+        PrefabInstanceClaim, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
+        PrefabPlacementSlot, SourceDocumentKey, SourceDocumentKind,
+    };
+
+    fn source_key() -> SourceDocumentKey {
+        SourceDocumentKey::named(
+            "6b691227-a68a-4b11-8d1c-a9d5d8c7e952".parse().unwrap(),
+            "p",
+            SourceDocumentKind::Prefab,
+        )
+        .unwrap()
+    }
 
     fn deep_declaration(depth: usize, through_entities: bool) -> PrefabInstance {
         let mut declaration = PrefabInstance {
             source: AssetRef::path("p").unwrap(),
-            overrides: ScenePatchDocument::default(),
+            overrides: None,
         };
         for _ in 0..depth {
-            let operation = if through_entities {
-                let mut entity = SceneEntityRecord::new(SceneEntityId::new("e").unwrap());
-                entity.prefab = Some(declaration);
-                ScenePatchOperation::AddEntity {
-                    entity,
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                }
+            let id = SceneEntityId::new("e").unwrap();
+            let mut overlay = PrefabOverlay::new(source_key());
+            if through_entities {
+                let mut addition = PrefabAddition::new(id.clone());
+                addition.prefab = Some(declaration);
+                overlay.additions.push(addition);
+                overlay.placements.push(PrefabPlacement {
+                    target: PrefabEntityTarget::addition(id),
+                    parent: PrefabPlacementParent::Root,
+                    slot: PrefabPlacementSlot::Last,
+                });
             } else {
-                ScenePatchOperation::SetPrefabInstance {
-                    entity: SceneEntityId::new("e").unwrap(),
-                    expected: None,
+                overlay.instances.push(PrefabInstanceClaim {
+                    target: PrefabEntityTarget::source(id),
                     value: Some(declaration),
-                }
-            };
+                });
+            }
             declaration = PrefabInstance {
                 source: AssetRef::path("p").unwrap(),
-                overrides: ScenePatchDocument::new([operation]),
+                overrides: Some(overlay),
             };
         }
         declaration
@@ -1214,19 +1057,30 @@ mod bounded_cost_tests {
             for _ in 0..128 {
                 value = ComponentValue::List(vec![ComponentValue::map([("v", value)])]);
             }
+            let root = SceneEntityId::new("e").unwrap();
+            let child = SceneEntityId::new("child").unwrap();
+            let mut addition = PrefabAddition::new(child.clone());
+            addition.components.insert(
+                ComponentTypeId::new("c"),
+                SceneComponentRecord::new(ComponentSchemaVersion::ONE, value),
+            );
+            let mut overlay = PrefabOverlay::new(source_key());
+            overlay.additions = vec![PrefabAddition::new(root.clone()), addition];
+            overlay.placements = vec![
+                PrefabPlacement {
+                    target: PrefabEntityTarget::addition(root.clone()),
+                    parent: PrefabPlacementParent::Root,
+                    slot: PrefabPlacementSlot::Last,
+                },
+                PrefabPlacement {
+                    target: PrefabEntityTarget::addition(child),
+                    parent: PrefabPlacementParent::Entity(PrefabEntityTarget::addition(root)),
+                    slot: PrefabPlacementSlot::Last,
+                },
+            ];
             let declaration = PrefabInstance {
                 source: AssetRef::path("p").unwrap(),
-                overrides: ScenePatchDocument::new([ScenePatchOperation::RestoreEntity {
-                    entity: SceneEntityRecord::new(SceneEntityId::new("e").unwrap()),
-                    descendants: vec![
-                        SceneEntityRecord::new(SceneEntityId::new("child").unwrap())
-                            .with_component(
-                                ComponentTypeId::new("c"),
-                                SceneComponentRecord::new(ComponentSchemaVersion::ONE, value),
-                            ),
-                    ],
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                }]),
+                overrides: Some(overlay),
             };
             assert!(
                 bounded_scene_patch_cost(
@@ -1240,7 +1094,7 @@ mod bounded_cost_tests {
 
     #[test]
     fn borrowed_value_depth_has_an_inclusive_default_boundary() {
-        let patch = |depth: usize, maps: bool| {
+        let payload = |depth: usize, maps: bool| {
             let mut value = ComponentValue::Null;
             for _ in 1..depth {
                 value = if maps {
@@ -1249,6 +1103,9 @@ mod bounded_cost_tests {
                     ComponentValue::List(vec![value])
                 };
             }
+            value
+        };
+        let patch = |value| {
             ScenePatchDocument::new([ScenePatchOperation::AddComponent {
                 entity: SceneEntityId::new("a").unwrap(),
                 component: ComponentTypeId::new("c"),
@@ -1258,20 +1115,99 @@ mod bounded_cost_tests {
         let maximum = ComponentValueMaterializationLimits::default().depth().get();
         for maps in [false, true] {
             // Patch is depth one; its component payload begins at depth two.
-            let admitted = patch(maximum - 1, maps);
+            let admitted = patch(payload(maximum - 1, maps));
             assert_eq!(
                 bounded_scene_patch_cost(&admitted, ScenePatchApplyLimits::default()),
                 Some(scene_patch_cost(&admitted)),
             );
             assert!(
-                bounded_scene_patch_cost(&patch(maximum, maps), ScenePatchApplyLimits::default())
+                bounded_scene_patch_cost(
+                    &patch(payload(maximum, maps)),
+                    ScenePatchApplyLimits::default(),
+                )
+                .is_none()
+            );
+
+            // A source entity is also depth one, without a synthetic patch wrapper.
+            let entity = |value| {
+                SceneEntityRecord::new(SceneEntityId::new("a").unwrap()).with_component(
+                    ComponentTypeId::new("c"),
+                    SceneComponentRecord::new(ComponentSchemaVersion::ONE, value),
+                )
+            };
+            let admitted = [entity(payload(maximum - 1, maps))];
+            let cost =
+                bounded_scene_entities_source_cost(&admitted, ScenePatchApplyLimits::default())
+                    .expect("source payload at the exact depth boundary is admitted");
+            assert_eq!(
+                cost.value_cost(),
+                scene_entities_source_value_cost(&admitted)
+            );
+            assert!(
+                bounded_scene_entities_source_cost(
+                    &[entity(payload(maximum, maps))],
+                    ScenePatchApplyLimits::default(),
+                )
+                .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn borrowed_source_cost_rejects_deep_embedded_overlays_before_copying() {
+        for through_entities in [false, true] {
+            let mut entity = SceneEntityRecord::new(SceneEntityId::new("a").unwrap());
+            entity.prefab = Some(deep_declaration(128, through_entities));
+            let entities = std::slice::from_ref(&entity);
+            let unbounded = tree_cost(vec![ValueCostNode::Entities(entities.iter(), 1)], None)
+                .expect("unbounded source accounting completes");
+            assert!(unbounded.operation_count() < 1024);
+            assert!(unbounded.logical_bytes() < 64 * 1024);
+            assert_eq!(unbounded.value_cost(), ComponentValueCost::ZERO);
+            assert!(
+                bounded_scene_entities_source_cost(entities, ScenePatchApplyLimits::default())
                     .is_none()
             );
         }
     }
 
     #[test]
-    fn native_and_owned_paths_reject_deep_input_before_validation_or_mutation() {
+    fn borrowed_source_cost_has_exact_independent_inclusive_ceilings() {
+        let mut entity = SceneEntityRecord::new(SceneEntityId::new("a").unwrap()).with_component(
+            ComponentTypeId::new("c"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([("v", ComponentValue::String("abc".into()))]),
+            ),
+        );
+        entity.prefab = Some(deep_declaration(1, true));
+        let entities = [entity];
+        let limits = ScenePatchApplyLimits::default()
+            .with_validation_work(ItemLimit::new(8).unwrap())
+            .with_validation_value_nodes(ItemLimit::new(2).unwrap())
+            .with_validation_value_bytes(ByteLimit::new(4).unwrap());
+        let cost = bounded_scene_entities_source_cost(&entities, limits).unwrap();
+        assert_eq!(cost.operation_count(), 8);
+        assert_eq!(cost.value_cost().nodes(), 2);
+        assert_eq!(cost.value_cost().logical_bytes(), 4);
+        // Entity/component IDs (2), payload (4), canonical base (19), addition ID (1),
+        // placement target/tags (4), and two AssetRef wire payloads (14 each).
+        assert_eq!(cost.logical_bytes(), 2 + 4 + 19 + 1 + 4 + 2 * 14);
+        assert_eq!(
+            cost.value_cost(),
+            scene_entities_source_value_cost(&entities)
+        );
+        for insufficient in [
+            limits.with_validation_work(ItemLimit::new(7).unwrap()),
+            limits.with_validation_value_nodes(ItemLimit::new(1).unwrap()),
+            limits.with_validation_value_bytes(ByteLimit::new(3).unwrap()),
+        ] {
+            assert!(bounded_scene_entities_source_cost(&entities, insufficient).is_none());
+        }
+    }
+
+    #[test]
+    fn source_transactions_reject_deep_input_before_validation_or_mutation() {
         let mut registry = ComponentRegistry::new();
         registry.freeze().unwrap();
         for expected_side in [false, true] {
@@ -1291,11 +1227,16 @@ mod bounded_cost_tests {
             let rejected = patch.prepare_to_prefab_with_validator(&prefab, &registry, |_, _, _| {
                 panic!("input must be admitted before source validation")
             });
-            assert!(rejected.is_err());
-            let report = patch.apply_owned_to_unpublished_scene(&mut document, &registry);
+            let report = match rejected {
+                Ok(_) => panic!("deep declaration must be rejected before source validation"),
+                Err(report) => report,
+            };
             assert!(!report.applied);
             assert!(report.inverse.is_none());
-            assert_eq!(document, original);
+            assert!(report.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code().as_str() == "scene.patch-validation-work-budget-exceeded"
+            }));
+            assert_eq!(prefab.instantiate(), original);
         }
     }
 
@@ -1343,36 +1284,76 @@ mod bounded_cost_tests {
         let component = ComponentTypeId::new("c");
         let value = SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null);
         for whole_entity in [false, true] {
-            let snapshot = |value: SceneComponentRecord| PrefabInstance {
-                source: AssetRef::path("p").unwrap(),
-                overrides: ScenePatchDocument::new([if whole_entity {
-                    ScenePatchOperation::AddEntity {
-                        entity: SceneEntityRecord::new(id.clone())
-                            .with_component(component.clone(), value),
-                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                    }
+            let snapshot = |value: SceneComponentRecord| {
+                let mut overlay = PrefabOverlay::new(source_key());
+                if whole_entity {
+                    let mut addition = PrefabAddition::new(id.clone());
+                    addition.components.insert(component.clone(), value);
+                    overlay.additions.push(addition);
+                    overlay.placements.push(PrefabPlacement {
+                        target: PrefabEntityTarget::addition(id.clone()),
+                        parent: PrefabPlacementParent::Root,
+                        slot: PrefabPlacementSlot::Last,
+                    });
                 } else {
-                    ScenePatchOperation::AddComponent {
-                        entity: id.clone(),
+                    overlay.components.push(PrefabComponentIntent::Set {
+                        mode: PrefabComponentSetMode::Add,
+                        target: PrefabEntityTarget::source(id.clone()),
                         component: component.clone(),
-                        value,
-                    }
-                }]),
+                        record: value,
+                        bindings: Vec::new(),
+                    });
+                }
+                PrefabInstance {
+                    source: AssetRef::path("p").unwrap(),
+                    overrides: Some(overlay),
+                }
             };
-            let patch = |value: SceneComponentRecord| {
-                let declaration = snapshot(value);
-                ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
-                    entity: SceneEntityId::new("a").unwrap(),
-                    expected: Some(declaration.clone()),
-                    value: Some(declaration),
-                }])
-            };
-            let unclaimed = scene_patch_cost(&patch(value.clone()));
-            let claimed = scene_patch_cost(&patch(value.clone().with_owner(owner.clone())));
-            assert_eq!(claimed.logical_bytes() - unclaimed.logical_bytes(), 20);
-            assert_eq!(claimed.logical_bytes(), 53);
-            assert_eq!(claimed.value_cost().nodes(), 2);
-            assert_eq!(claimed.operation_count(), if whole_entity { 9 } else { 5 });
+            for (expected_side, value_side) in [(true, false), (false, true), (true, true)] {
+                let patch = |value: SceneComponentRecord| {
+                    ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
+                        entity: SceneEntityId::new("a").unwrap(),
+                        expected: expected_side.then(|| snapshot(value.clone())),
+                        value: value_side.then(|| snapshot(value)),
+                    }])
+                };
+                let snapshots = usize::from(expected_side) + usize::from(value_side);
+                let unclaimed = scene_patch_cost(&patch(value.clone()));
+                let claimed_patch = patch(value.clone().with_owner(owner.clone()));
+                let claimed = scene_patch_cost(&claimed_patch);
+                assert_eq!(
+                    claimed.logical_bytes() - unclaimed.logical_bytes(),
+                    snapshots * owner.as_str().len(),
+                );
+                assert_eq!(
+                    claimed.logical_bytes(),
+                    // Both forms retain the 14-byte source claim and 19-byte base claim.
+                    // Added entity/placement uses one more structural byte than component Set.
+                    1 + snapshots * if whole_entity { 54 } else { 53 },
+                );
+                assert_eq!(claimed.value_cost().nodes(), snapshots);
+                assert_eq!(claimed.value_cost().logical_bytes(), 0);
+                assert_eq!(
+                    claimed.operation_count(),
+                    1 + snapshots * if whole_entity { 7 } else { 6 },
+                );
+                let limits = ScenePatchApplyLimits::default()
+                    .with_validation_work(ItemLimit::new(claimed.operation_count()).unwrap())
+                    .with_validation_value_nodes(ItemLimit::new(snapshots).unwrap());
+                assert_eq!(
+                    bounded_scene_patch_cost(&claimed_patch, limits),
+                    Some(claimed)
+                );
+                assert!(
+                    bounded_scene_patch_cost(
+                        &claimed_patch,
+                        limits.with_validation_work(
+                            ItemLimit::new(claimed.operation_count() - 1).unwrap(),
+                        ),
+                    )
+                    .is_none()
+                );
+            }
         }
     }
 
@@ -2026,135 +2007,6 @@ fn apply_non_component_operation<D: EntityDocument>(
     }
 }
 
-fn apply_owned_operation(
-    document: &mut SceneDocument,
-    registry: &ComponentRegistry,
-    operation: ScenePatchOperation,
-    operation_index: usize,
-) -> Result<(), Diagnostic> {
-    match operation {
-        ScenePatchOperation::AddEntity { entity, placement } => {
-            add_owned_entity(document, registry, entity, placement, operation_index)
-        }
-        ScenePatchOperation::RemoveEntity { entity, from } => {
-            remove_entity_without_inverse(document, registry, &entity, &from, operation_index)
-        }
-        ScenePatchOperation::RestoreEntity {
-            entity,
-            descendants,
-            placement,
-        } => restore_owned_entity(
-            document,
-            registry,
-            entity,
-            descendants,
-            placement,
-            operation_index,
-        ),
-        ScenePatchOperation::AddComponent {
-            entity,
-            component,
-            value,
-        } => add_owned_component(
-            document,
-            registry,
-            entity,
-            component,
-            value,
-            operation_index,
-        ),
-        ScenePatchOperation::RemoveComponent { entity, component } => {
-            remove_component_without_inverse(
-                document,
-                registry,
-                &entity,
-                &component,
-                operation_index,
-            )
-        }
-        ScenePatchOperation::ReplaceComponent {
-            entity,
-            component,
-            value,
-        } => replace_owned_component(
-            document,
-            registry,
-            entity,
-            component,
-            value,
-            operation_index,
-        ),
-        ScenePatchOperation::SetField {
-            entity,
-            component,
-            component_version,
-            field,
-            value,
-        } => {
-            let previous = set_field_value(
-                document,
-                FieldPatchTarget::new(
-                    registry,
-                    &entity,
-                    &component,
-                    &component_version,
-                    &field,
-                    operation_index,
-                ),
-                value,
-            )?;
-            drop(previous);
-            Ok(())
-        }
-        ScenePatchOperation::RemoveField {
-            entity,
-            component,
-            component_version,
-            field,
-        } => {
-            let previous = remove_field_value(
-                document,
-                FieldPatchTarget::new(
-                    registry,
-                    &entity,
-                    &component,
-                    &component_version,
-                    &field,
-                    operation_index,
-                ),
-            )?;
-            drop(previous);
-            Ok(())
-        }
-        ScenePatchOperation::MoveEntity { entity, from, to } => {
-            move_entity_without_inverse(document, &entity, &from, &to, operation_index)
-        }
-        ScenePatchOperation::SetAssetRefField {
-            entity,
-            component,
-            component_version,
-            field,
-            asset_ref,
-        } => set_asset_ref_field_without_inverse(
-            document,
-            FieldPatchTarget::new(
-                registry,
-                &entity,
-                &component,
-                &component_version,
-                &field,
-                operation_index,
-            ),
-            asset_ref,
-        ),
-        ScenePatchOperation::SetPrefabInstance {
-            entity,
-            expected,
-            value,
-        } => set_prefab_instance_value(document, &entity, &expected, value, operation_index),
-    }
-}
-
 fn set_prefab_instance<D: EntityDocument + ?Sized>(
     document: &mut D,
     entity: &SceneEntityId,
@@ -2168,17 +2020,6 @@ fn set_prefab_instance<D: EntityDocument + ?Sized>(
         expected: value.clone(),
         value: expected.clone(),
     }])
-}
-
-fn set_prefab_instance_value<D: EntityDocument + ?Sized>(
-    document: &mut D,
-    entity: &SceneEntityId,
-    expected: &Option<PrefabInstance>,
-    value: Option<PrefabInstance>,
-    operation_index: usize,
-) -> Result<(), Diagnostic> {
-    prefab_instance_record(document, entity, expected, operation_index)?.prefab = value;
-    Ok(())
 }
 
 fn prefab_instance_record<'document, D: EntityDocument + ?Sized>(
@@ -2199,126 +2040,6 @@ fn prefab_instance_record<'document, D: EntityDocument + ?Sized>(
         ));
     }
     Ok(record)
-}
-
-fn add_owned_entity(
-    document: &mut SceneDocument,
-    registry: &ComponentRegistry,
-    entity: SceneEntityRecord,
-    placement: ScenePlacement,
-    operation_index: usize,
-) -> Result<(), Diagnostic> {
-    prepare_entity_insertion(document, registry, &entity, &placement, operation_index)?;
-    let insertion = resolve_insertion(document, &entity.id, &placement, false, operation_index)?;
-    document.entities.push(entity.clone());
-    insert_placed_entity(document, &entity.id, insertion);
-    Ok(())
-}
-
-fn remove_entity_without_inverse(
-    document: &mut SceneDocument,
-    registry: &ComponentRegistry,
-    entity: &SceneEntityId,
-    from: &ScenePlacement,
-    operation_index: usize,
-) -> Result<(), Diagnostic> {
-    let removed = prepare_subtree_removal(document, registry, entity, from, operation_index)?;
-    remove_subtree_records(document, &removed);
-    Ok(())
-}
-
-fn restore_owned_entity(
-    document: &mut SceneDocument,
-    registry: &ComponentRegistry,
-    entity: SceneEntityRecord,
-    descendants: Vec<SceneEntityRecord>,
-    placement: ScenePlacement,
-    operation_index: usize,
-) -> Result<(), Diagnostic> {
-    prepare_entity_restoration(
-        document,
-        registry,
-        &entity,
-        &descendants,
-        &placement,
-        operation_index,
-    )?;
-    let insertion = resolve_insertion(document, &entity.id, &placement, false, operation_index)?;
-    let entity_id = entity.id.clone();
-    document.entities.push(entity);
-    document.entities.extend(descendants);
-    insert_placed_entity(document, &entity_id, insertion);
-    Ok(())
-}
-
-fn add_owned_component(
-    document: &mut SceneDocument,
-    registry: &ComponentRegistry,
-    entity: SceneEntityId,
-    component: ComponentTypeId,
-    value: SceneComponentRecord,
-    operation_index: usize,
-) -> Result<(), Diagnostic> {
-    require_whole_component_edit(registry, &entity, &component, operation_index)?;
-    let record = entity_mut(document, &entity, operation_index)?;
-    if record.components.contains_key(&component) {
-        return Err(patch_diagnostic(
-            operation_index,
-            "scene.patch-duplicate-component",
-            "patch adds a component that already exists",
-            Some(&entity),
-            Some(&component),
-            None,
-        ));
-    }
-    drop(record.components.insert(component, value));
-    Ok(())
-}
-
-fn remove_component_without_inverse(
-    document: &mut SceneDocument,
-    registry: &ComponentRegistry,
-    entity: &SceneEntityId,
-    component: &ComponentTypeId,
-    operation_index: usize,
-) -> Result<(), Diagnostic> {
-    require_whole_component_edit(registry, entity, component, operation_index)?;
-    let record = entity_mut(document, entity, operation_index)?;
-    if record.components.remove(component).is_none() {
-        return Err(patch_diagnostic(
-            operation_index,
-            "scene.patch-missing-component",
-            "patch removes a component that does not exist",
-            Some(entity),
-            Some(component),
-            None,
-        ));
-    }
-    Ok(())
-}
-
-fn replace_owned_component(
-    document: &mut SceneDocument,
-    registry: &ComponentRegistry,
-    entity: SceneEntityId,
-    component: ComponentTypeId,
-    value: SceneComponentRecord,
-    operation_index: usize,
-) -> Result<(), Diagnostic> {
-    require_whole_component_edit(registry, &entity, &component, operation_index)?;
-    let record = entity_mut(document, &entity, operation_index)?;
-    if !record.components.contains_key(&component) {
-        return Err(patch_diagnostic(
-            operation_index,
-            "scene.patch-missing-component",
-            "patch replaces a component that does not exist",
-            Some(&entity),
-            Some(&component),
-            None,
-        ));
-    }
-    drop(record.components.insert(component, value));
-    Ok(())
 }
 
 fn add_entity<D: EntityDocument>(
@@ -2718,30 +2439,6 @@ fn move_entity<D: EntityDocument>(
         from: to.clone(),
         to: from.clone(),
     }])
-}
-
-fn move_entity_without_inverse<D: EntityDocument>(
-    document: &mut D,
-    entity: &SceneEntityId,
-    from: &ScenePlacement,
-    to: &ScenePlacement,
-    operation_index: usize,
-) -> Result<(), Diagnostic> {
-    entity_mut(document, entity, operation_index)?;
-    if !placement_matches(document, entity, from) {
-        return Err(patch_diagnostic(
-            operation_index,
-            "scene.patch-placement-context-mismatch",
-            "patch source placement does not match the current entity context",
-            Some(entity),
-            None,
-            None,
-        ));
-    }
-    let insertion = resolve_insertion(document, entity, to, true, operation_index)?;
-    detach_entity(document, entity);
-    insert_placed_entity(document, entity, insertion);
-    Ok(())
 }
 
 #[derive(Clone)]
@@ -3213,65 +2910,6 @@ fn set_asset_ref_field<D: EntityDocument>(
     set_field(document, target, asset_ref_value(asset_ref))
 }
 
-fn set_asset_ref_field_without_inverse<D: EntityDocument>(
-    document: &mut D,
-    target: FieldPatchTarget<'_>,
-    asset_ref: AssetRef,
-) -> Result<(), Diagnostic> {
-    let FieldPatchTarget {
-        registry,
-        entity,
-        component,
-        component_version,
-        field,
-        operation_index,
-    } = target;
-    let field_schema = field_schema(
-        registry,
-        component,
-        component_version,
-        field,
-        operation_index,
-        entity,
-    )?;
-    let path = &field_schema.path;
-    require_field_capability(
-        field_schema,
-        ComponentCapability::Edit,
-        component,
-        field,
-        path,
-        operation_index,
-        entity,
-    )?;
-    require_field_capability(
-        field_schema,
-        ComponentCapability::AssetRef,
-        component,
-        field,
-        path,
-        operation_index,
-        entity,
-    )?;
-    if field_schema.value_kind() != ComponentValueKind::AssetRef {
-        return Err(with_component_field_id(
-            patch_diagnostic(
-                operation_index,
-                "scene.patch-invalid-field-kind",
-                "patch sets an asset reference into a field that is not registered as an asset reference",
-                Some(entity),
-                Some(component),
-                Some(path),
-            ),
-            field,
-        ));
-    }
-
-    let previous = set_field_value(document, target, asset_ref_value(&asset_ref))?;
-    drop(previous);
-    Ok(())
-}
-
 trait EntityDocument {
     fn roots(&self) -> &[SceneEntityId];
     fn roots_mut(&mut self) -> &mut Vec<SceneEntityId>;
@@ -3555,20 +3193,6 @@ pub(crate) fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
             ("value", ComponentValue::String(id.to_string())),
         ]),
     }
-}
-
-// The same logical wire-value cost as `asset_ref_value`, without copying a caller's path
-// during borrowed replay/history admission.
-fn asset_ref_logical_bytes(asset_ref: &AssetRef) -> usize {
-    let (kind, value_bytes) = match asset_ref {
-        AssetRef::Path(path) => ("path", path.as_str().len()),
-        AssetRef::StableId(id) => ("stable_id", id.to_string().len()),
-    };
-    "kind"
-        .len()
-        .saturating_add("value".len())
-        .saturating_add(kind.len())
-        .saturating_add(value_bytes)
 }
 
 fn with_component_field_id(diagnostic: Diagnostic, field: &ComponentFieldId) -> Diagnostic {

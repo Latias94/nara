@@ -15,10 +15,10 @@ use nara::{
     project_host::{
         EditorGameInputBatch, EditorGameStartActivation, EditorGameStartRequest,
         EditorGameViewBridgeFailure, EditorGameViewCandidate, EditorGameViewCompletion,
-        EditorPreviewCandidate, EditorProjectCloseProgress, EditorProjectCloseReceipt,
-        EditorProjectOpenFailure, EditorProjectOpenHost, EditorProjectOpenProgress,
-        EditorProjectOpenTasksCloseReport, EditorUiAuthoringFrame, EditorUiPreviewCandidate,
-        TrustedCompiledEditorProjectIntent,
+        EditorPreviewCandidate, EditorPreviewContentStamp, EditorProjectCloseProgress,
+        EditorProjectCloseReceipt, EditorProjectOpenFailure, EditorProjectOpenHost,
+        EditorProjectOpenProgress, EditorProjectOpenTasksCloseReport, EditorUiAuthoringFrame,
+        EditorUiPreviewCandidate, TrustedCompiledEditorProjectIntent,
     },
     render::Extent2d,
     scene::UnavailableRecordManifest,
@@ -1403,6 +1403,13 @@ impl EditorApplication {
             .and_then(|project| project.session.take_editor_preview_candidate())
     }
 
+    #[must_use]
+    pub(crate) fn current_scene_preview_content_stamp(&self) -> Option<EditorPreviewContentStamp> {
+        self.state
+            .workspace()
+            .and_then(|project| project.session.current_editor_preview_content_stamp())
+    }
+
     #[doc(hidden)]
     #[must_use]
     pub fn take_editor_ui_preview_candidate(&mut self) -> Option<EditorUiPreviewCandidate> {
@@ -2495,6 +2502,7 @@ fn drive_project_frame(
     drive_runtime: bool,
 ) -> bool {
     let before = project.session.current_frame();
+    let preview_before = project.session.current_editor_preview_content_stamp();
     let after = project
         .session
         .drive_editor_frame_with_runtime(real_delta, drive_runtime);
@@ -2504,6 +2512,8 @@ fn drive_project_frame(
         || before.source_asset_import_work_pending() != after.source_asset_import_work_pending()
         || before.image_import_work_pending() != after.image_import_work_pending()
         || before.authoring_retirement_pending() != after.authoring_retirement_pending()
+        || before.scene_preview_unsaved_dependencies() != after.scene_preview_unsaved_dependencies()
+        || preview_before != project.session.current_editor_preview_content_stamp()
 }
 
 fn request_exit_on_project(

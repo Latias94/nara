@@ -8,7 +8,9 @@ use nara_asset::{
     AssetDatabaseError, AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath, AssetRecord,
     AssetRef, AssetSourceKind, ProjectAssetDatabase, StableAssetId,
 };
-use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity, RelativePath};
+use nara_fs::{
+    ContentDigest, DirectoryCapability, FileCapability, FileIdentity, FsError, RelativePath,
+};
 use nara_image::ImageImportSettings;
 
 use crate::project_host::authoring::{
@@ -125,6 +127,8 @@ pub(super) struct EditorImageCatalogSnapshot {
     root_identity: FileIdentity,
     entries: Box<[EditorImageCatalogEntry]>,
     pub(super) metadata: Arc<EditorAssetMetadataSnapshot>,
+    assets_root: Arc<str>,
+    identity_members: BTreeMap<StableAssetId, Box<[AssetPath]>>,
 }
 
 impl EditorImageCatalogSnapshot {
@@ -193,6 +197,75 @@ impl EditorImageCatalogSnapshot {
                 )
         })
     }
+
+    /// Reuses the admitted member set, but observes competing metadata on the worker.
+    /// An old catalogue conflict is not proof that its other member still exists.
+    pub(super) fn has_current_identity_conflict(
+        &self,
+        root: &DirectoryCapability,
+        asset_path: &AssetPath,
+        stable_id: StableAssetId,
+    ) -> Result<bool, EditorImageMetadataInvalidity> {
+        let Some(members) = self.identity_members.get(&stable_id) else {
+            return Ok(false);
+        };
+        let mut remaining = MAX_METADATA_BYTES;
+        for path in members.iter().filter(|path| *path != asset_path) {
+            let relative =
+                RelativePath::new(format!("{}/{}.meta", self.assets_root, path.as_str()))
+                    .map_err(|_| EditorImageMetadataInvalidity::MetadataUnavailable)?;
+            let file = match root.open_file_exact(&relative) {
+                Ok(file) => file,
+                Err(FsError::Io { source, .. })
+                    if source.kind() == std::io::ErrorKind::NotFound =>
+                {
+                    continue;
+                }
+                Err(_) => return Err(EditorImageMetadataInvalidity::MetadataUnavailable),
+            };
+            let limits = AssetMetaFileLimits::default();
+            let limit = nara_core::ByteLimit::new(remaining.min(limits.encoded_bytes().get()))
+                .ok_or(EditorImageMetadataInvalidity::MetadataUnavailable)?;
+            let read = read_metadata_file(&file, limits.with_encoded_bytes(limit))?;
+            remaining = remaining
+                .checked_sub(read.encoded_bytes)
+                .ok_or(EditorImageMetadataInvalidity::MetadataUnavailable)?;
+            if read.candidate.is_ok_and(|candidate| {
+                candidate.identity().path() == path && candidate.identity().stable_id() == stable_id
+            }) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+}
+
+struct ReadMetadataCandidate {
+    candidate: Result<AssetMetaIdentityCandidate, EditorImageMetadataInvalidity>,
+    digest: ContentDigest,
+    encoded_bytes: usize,
+}
+
+fn read_metadata_file(
+    file: &FileCapability,
+    limits: AssetMetaFileLimits,
+) -> Result<ReadMetadataCandidate, EditorImageMetadataInvalidity> {
+    let limit = u64::try_from(limits.encoded_bytes().get()).unwrap_or(u64::MAX);
+    let bytes = file
+        .read_to_end_bounded(limit)
+        .map_err(|_| EditorImageMetadataInvalidity::MetadataUnavailable)?;
+    let encoded_bytes = bytes.len();
+    let digest = ContentDigest::of_bytes(&bytes);
+    let candidate = AssetMetaIdentityCandidate::decode_json_bytes_owned_with_limits(
+        bytes.into_boxed_slice(),
+        limits,
+    )
+    .map_err(|_| EditorImageMetadataInvalidity::MetadataFormat);
+    Ok(ReadMetadataCandidate {
+        candidate,
+        digest,
+        encoded_bytes,
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -648,20 +721,12 @@ impl EditorImageCatalogAttempt {
         if metadata.identity() != expected_identity {
             return Ok(Err(EditorImageMetadataInvalidity::MetadataIdentityDrift));
         }
-        let byte_limit =
-            u64::try_from(self.limits.metadata_file.encoded_bytes().get()).unwrap_or(u64::MAX);
-        let bytes = match metadata.read_to_end_bounded(byte_limit) {
-            Ok(bytes) => bytes,
-            Err(_) => return Ok(Err(EditorImageMetadataInvalidity::MetadataUnavailable)),
+        let read = match read_metadata_file(&metadata, self.limits.metadata_file) {
+            Ok(read) => read,
+            Err(reason) => return Ok(Err(reason)),
         };
-        self.charge_metadata_bytes(bytes.len())?;
-        let digest = ContentDigest::of_bytes(&bytes);
-        let candidate = AssetMetaIdentityCandidate::decode_json_bytes_owned_with_limits(
-            bytes.into_boxed_slice(),
-            self.limits.metadata_file,
-        )
-        .map_err(|_| EditorImageMetadataInvalidity::MetadataFormat);
-        Ok(candidate.map(|candidate| (candidate, digest)))
+        self.charge_metadata_bytes(read.encoded_bytes)?;
+        Ok(read.candidate.map(|candidate| (candidate, read.digest)))
     }
 
     fn publish(&mut self) -> Result<EditorImageCatalogSnapshot, EditorImageCatalogBuildError> {
@@ -673,6 +738,13 @@ impl EditorImageCatalogAttempt {
                 (path, identity.stable_id(), identity.source_kind())
             }))?;
         let admitted_identities = mem::take(&mut self.metadata_identities);
+        let mut identity_members = BTreeMap::<StableAssetId, Vec<AssetPath>>::new();
+        for (path, metadata) in &admitted_identities {
+            identity_members
+                .entry(metadata.candidate.identity().stable_id())
+                .or_default()
+                .push(path.clone());
+        }
         let sources = mem::take(&mut self.sources);
         let mut entries = Vec::new();
         entries
@@ -729,6 +801,11 @@ impl EditorImageCatalogAttempt {
         Ok(EditorImageCatalogSnapshot {
             root_identity: source_index.root_identity(),
             entries: entries.into_boxed_slice(),
+            assets_root: Arc::clone(&self.assets_root),
+            identity_members: identity_members
+                .into_iter()
+                .map(|(id, members)| (id, members.into_boxed_slice()))
+                .collect(),
             metadata: Arc::new(EditorAssetMetadataSnapshot::new(
                 source_index,
                 admitted_identities,

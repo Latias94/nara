@@ -236,6 +236,14 @@ const fn authoring_source_kinds(
     kind: AuthoringSourceKind,
 ) -> (EditorExternalPlaySourceKind, ProjectContentMemberKind) {
     match kind {
+        AuthoringSourceKind::ProjectManifest => (
+            EditorExternalPlaySourceKind::ProjectManifest,
+            ProjectContentMemberKind::ProjectManifest,
+        ),
+        AuthoringSourceKind::SchemaBundle => (
+            EditorExternalPlaySourceKind::AuthoringSchemaBundle,
+            ProjectContentMemberKind::AuthoringSchemaBundle,
+        ),
         AuthoringSourceKind::Scene => (
             EditorExternalPlaySourceKind::Scene,
             ProjectContentMemberKind::Scene,

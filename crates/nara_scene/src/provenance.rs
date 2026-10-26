@@ -65,6 +65,7 @@ impl PrefabProjectionStep {
         size_of::<Self>().checked_add(provenance_string_bytes(entity.as_str())?)
     }
 
+    #[cfg(feature = "serde")]
     fn allocation_bytes(&self) -> Option<usize> {
         match self {
             Self::SourceEntity {
@@ -96,6 +97,13 @@ pub struct PrefabProjectionPath {
 }
 
 impl PrefabProjectionPath {
+    pub(crate) const fn from_resolved_steps(
+        root_anchor: SceneEntityId,
+        steps: Vec<PrefabProjectionStep>,
+    ) -> Self {
+        Self { root_anchor, steps }
+    }
+
     #[cfg(test)]
     pub(crate) const fn new(root_anchor: SceneEntityId) -> Self {
         Self {
@@ -119,6 +127,7 @@ impl PrefabProjectionPath {
         self
     }
 
+    #[cfg(feature = "serde")]
     pub(crate) fn extended_allocation_bytes(
         parent: Option<&Self>,
         root_anchor: &SceneEntityId,
@@ -132,23 +141,6 @@ impl PrefabProjectionPath {
             }
         }
         bytes.checked_add(step_bytes)
-    }
-
-    // Call only after admitting extended_allocation_bytes and the containing map entry.
-    pub(crate) fn from_resolved_step(
-        parent: Option<&Self>,
-        root_anchor: &SceneEntityId,
-        step: PrefabProjectionStep,
-    ) -> Self {
-        let mut steps = Vec::with_capacity(parent.map_or(0, |path| path.steps.len()) + 1);
-        if let Some(parent) = parent {
-            steps.extend_from_slice(&parent.steps);
-        }
-        steps.push(step);
-        Self {
-            root_anchor: parent.map_or(root_anchor, Self::root_anchor).clone(),
-            steps,
-        }
     }
 
     /// Returns the authored local anchor in the containing source document.

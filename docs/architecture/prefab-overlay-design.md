@@ -1,7 +1,180 @@
 # Scene-Owned Declarative Prefab Overlays
 
-Status: Proposed R5b design and bounded comparison. This does not replace an Accepted ADR or
-change the current `PrefabInstance.overrides: ScenePatchDocument` production contract.
+Status: Production replacement in progress. ADRs 0006/0026/0038/0043/0090 adopt the source-owned
+declarative contract; implementation, complete consumer qualification and Host publication are
+not complete. Historical comparison results below retain their original scope. The current
+working replacement stores `PrefabInstance.overrides: Option<PrefabOverlay>` and deletes the
+superseded private compiler and patch-as-overlay execution path; this status is not a release claim.
+
+## Shared Authoring And Runtime Compilation
+
+The production replacement uses one Scene compiler for source selection, properties, layout and
+reference binding. A private Schema authority selects either an executable registry or an admitted
+`AuthoringSchemaBasis`; it does not create fake Rust bindings, a second selector interpreter or a
+second history owner. All documents in one authoring capture retain the exact shared basis. Current
+data-adapted records can participate without a native codec. Native preview eligibility and complete
+Runtime publication remain separate checks against their actual installed bindings.
+
+Source inventory is not the activation graph. The Host opens a Prefab only when the compiler requests
+its selected declaration, then retains the immutable source and lookup/metadata evidence. Effective
+asset discovery follows compiled values and defaults. A superseded instance, deleted branch or
+replaced component cannot require its discarded dependencies merely because the raw source still
+preserves them. Cross-instance placements and later ancestor suppressions must participate in this
+selection; a local traversal shortcut is insufficient. An unavailable component slot retains its
+existence until layer semantics determine whether an explicit replacement/suppression removes it or
+an operation needs to interpret it. Omitting the slot before that decision changes Add/Replace
+meaning and is invalid.
+
+Selected-source conflicts and native-preview omissions are distinct observations. Missing selected
+bases, incompatible canonical identities and invalid intent can reject the effective candidate while
+the containing source remains saveable. Authority, identity and budget failures retain their concrete
+errors. A derived preview retains full typed provenance; feeding expanded records through a plain
+local-source constructor would lose ownership. Publication fences bind the source lineage/revision,
+containing canonical key, exact Schema basis and actual captured closure generation, including bases
+whose entities do not survive. Metadata revalidation alone does not revalidate Prefab content.
+
+The Unity/Godot study supports explicit source/instance context, retained unresolved intent and
+source-owned history. These observations do not justify copying either engine's mutable object
+model. This section specifies the selected integration direction; shared Authoring compilation,
+actual-demand source admission and staged composition have bounded owner qualification. Reusable
+Editor capture, nested native preview and closure fencing still require complete consumer qualification.
+
+The reusable Host responsibility is a bounded capture for the selected source document, rather
+than a startup-only resolver. Startup Open, another Scene's preview and conversion must call the
+same actual-demand acquisition owner with their actual containing document, canonical key and
+exact basis. A cache of the startup closure cannot establish that a newly edited or independently
+opened Scene has no further dependencies. Unsaved participating documents require explicit session
+lineage/revision evidence; an on-disk digest cannot stand in for their current source state. The
+preview stamp must change when this captured closure changes even if its containing Scene revision
+does not. Introduce this reuse through a complete second-document workflow, not by publishing an
+unqualified resolver/provider framework.
+
+For Editor authoring preview, an actually demanded open Prefab working copy takes precedence over
+its accepted file-backed source. This is an explicit Nara policy; it is not inferred from Unity
+Auto Save or Godot scene reloading. Capture retains the immutable document and full session
+revision separately from its last accepted disk receipt, checks the selected source's exact
+Schema basis and rejects ambiguous canonical source ownership. Unrelated open sources remain
+inactive. Closing or reopening a demanded source changes selection even if no prior participant
+revision changed. External Play, Check and Export do not implicitly acquire working copies.
+
+Preview refresh changes derived state only. It neither edits the containing Scene nor saves its
+Prefab dependencies. A session-backed composition source cannot be opened as a clean file-backed
+publication. The Editor must expose when its preview includes unsaved dependencies, and reject
+stale root/participant/file/Schema evidence before publication. The
+[working-copy comparison](../research/2026-10-26-unity-godot-prefab-editor-ownership.md#5-follow-up-working-copies-save-and-preview-dependencies)
+records the saved-only alternative and the limits of the upstream evidence.
+
+### Phase-Ordering Regressions And Remaining Budget Work
+
+The integration review identified the following phase-ordering cases. The staged production owner
+now has regressions for both, and actual-file Runtime/Authoring Host tests cover complete payload
+repair while independent Open stays strict. This is bounded composition/source-admission evidence,
+not qualification of reusable Editor capture, nested native preview or conversion:
+
+- A declaration inside one nested source is moved below a different nested source, then an outer
+  layer suppresses that destination's ancestor. A depth-first traversal can request the moved
+  node's missing Prefab before it has enough destination structure to prove that the node will
+  be deleted. Availability of that discarded file must not change the effective result. Determine
+  structural demand and surviving placement before recursively interpreting the node's instance;
+  more same-prefix suppression heuristics do not establish the general rule.
+- A complete outer replacement or suppression needs no interpretation of the previous component
+  payload. Early native source canonicalization, standalone authoring classification, defaulting
+  or reference remapping can nevertheless reject that payload before the compiler reaches the
+  repairing declaration. Source-file grammar/structure admission, standalone source editing and
+  effective composition have different semantic obligations. Correcting the compiler alone does
+  not remove an earlier Host publication gate. Preserve source budgets and explicit source
+  authority when separating those phases; do not manufacture native bindings or silently relax
+  the standalone classifier to hide the conflict.
+- Effective asset discovery now supports pre-allocation admission, but subsequent whole-value
+  validation and the legacy EntityRef planner still revalidate descriptor shapes outside that
+  callback. An empty list of a wide record can repeat large Schema scans without producing any
+  asset/entity references. Reuse admitted descriptor/index evidence or route this remaining work
+  through the same owner admission. Asset collector tests alone do not prove a complete effective
+  validation work budget.
+
+The first two cases drove the staged replacement below. Their source-owned declaration contract
+remains unchanged; the compiler now separates structural existence and layer composition from
+selected value interpretation. The third case remains open: passing value/asset collector tests
+does not establish an aggregate budget for all subsequent descriptor scans.
+
+### Selected Staged Replacement
+
+Replace the interleaved recursive compiler inside the existing Scene owner. Keep one implementation
+for Native and Authoring; do not retain `SourceSelection` or `destination_suppressed` as a second
+liveness authority. The private context owns occurrences, entity shells, layer visibility and
+component programs. A shell refers to an immutable source handle and record index rather than
+copying component payloads or borrowing from a growing arena.
+
+1. Enter a selected occurrence and validate its actual source kind, canonical base predicates and
+   complete local hierarchy. Register all local source/addition shells before connecting children.
+   Store nested instance declarations as deferred slots; this stage performs no component migration,
+   defaulting, binding or ordinary recursive instance expansion.
+2. Close explicit path demands for every selected, entered overlay: instance claims, placement
+   endpoints/order anchors, suppression and component target existence. Enter only the slots needed
+   by `through`; locating an entity does not enter that entity's own instance. Newly entered
+   occurrences contribute their selected overlays. An unopened dead slot's stored overlay is not
+   activated merely because it exists in raw input.
+3. Resolve each layer against its actual input visibility, compute desired parents/order, validate
+   attachment/cycles, then propagate suppression. Execute inner layers before outer layers. Preserve
+   declared ancestry independently of survival: a rescued descendant remains addressable through
+   its actual old occurrence, while a deleted terminal or replaced/detached instance is unavailable.
+4. Enter remaining live deferred slots. Each slot already occupies its anchor's nested-root sequence,
+   so new effective roots fill that sequence before the anchor's containing-layer children. An
+   ancestor intent capable of moving an internal entity outside this slot must have demanded its
+   explicit path in step 2. Qualify that condition before relying on late grafting; a bounded local
+   fragment rebuild is preferable to an unproved incremental shortcut.
+5. Compose component presence and value demand separately. Add requires absence, Replace/Suppress
+   require presence, and same-layer duplicates remain errors. A complete Set selects a new raw
+   payload and clears preceding property batches; Suppress clears the value program. Properties
+   append a batch retaining its own declaring namespace and immutable input. A later replacement
+   cannot legalize an earlier invalid Add, but can discard a previous payload interpretation.
+   Only bindings retained by the final program introduce reference-target demand.
+6. Allocate the final surviving ID map, evaluate selected value programs, apply defaults before
+   binding, collect effective assets and validate final references/hierarchy/provenance. Emit the
+   existing immutable expanded result only after complete success.
+
+Retain ADR 0101's three sequence roles: declaring-layer roots, an anchor's nested roots, and its
+containing-layer children. Same-parent reorder preserves its sequence; crossing to another parent
+enters that parent's containing-layer children. Before/After anchors must share the final sequence.
+No stage flattens all overlays into one unlayered set of placements.
+
+For the cross-instance regression, the required sources are T, P, A and B. A and B prove that q and r
+exist and that the inner move is legal even though their entities can later be deleted. The terminal
+q's discarded instance is never required. Every requested structural source remains in the Host
+capture/fence, including a source with no surviving provenance entries.
+
+Composition source admission must consequently retain bounded decoded data, valid local structure
+and actual source receipts without requiring standalone component publication first. Independent
+Open still uses the strict authoring classifier against the exact basis. Raw captured dependencies
+must not be represented as editable published documents. The implementation may extend the existing
+private resolver backing; it does not need a public source-provider trait or a second candidate
+framework.
+
+Cycle detection compares genuinely equivalent selected programs on active ancestry: canonical
+source/capture, stable declaration position, remaining outer demand cursors and current phase.
+Neither growing occurrence paths nor allocation addresses prove a new program. Finite same-source
+additions and consumed outer routes remain legal; depth/instance/work limits bound states whose
+equivalence cannot be established. Skeleton, visibility, queue and program allocations are admitted
+before construction and appear in suspended loader work. Value/provenance costs are admitted when
+those values actually materialize.
+
+The production entry now uses the staged shell/layout and component-program owner for both Schema
+authorities; the interleaved DFS, `SourceSelection` and `destination_suppressed` mechanisms have been
+removed. Actual Host Prefab dependencies retain raw composition sources and derive strict standalone
+publication only when independently opened. Only retained source migrations contribute to the
+Runtime source-upgrade observation. Borrowed declarations are not charged as materialized payloads.
+
+Final surviving IDs are allocated before selected values are interpreted. Intermediate references
+to entities which later die use distinct unpublished locators until later property batches have
+run; only surviving final references may publish. This prevents private shell locator lengths from
+changing the materialized value allowance. Duplicate/overlapping property declarations are checked
+before a later complete replacement can discard their interpretation. Selected programmatic values
+must pass depth admission before their first recursive clone.
+
+Reusable capture, preview fencing and native Editor consumers remain in progress. Properties still
+interpret their retained base; this does not promise arbitrary leaf-level repair of an invalid
+complete value. Verification records own the exact executed scope; this document change adds no
+native, performance or full foundation completion claim.
 
 The [private comparison evidence](../knowledge/engineering/verification/2026-10/2026-10-26T025005Z-private-prefab-property-intent-comparison-and-next-owner-replacement-70ca642be09045ab909751b87ed5164d.md)
 records six executed scalar cases and independent review corrections. That evidence does not
@@ -234,11 +407,14 @@ Ordinary revision-bound source transactions retain their existing sequential key
 Any later finer-grained normalization must prove logical identity/reference preservation without
 turning the durable overlay back into an ordered operation log.
 
-## Structural Comparison And Selected Limits
+## Historical Structural Comparison And Selected Limits
 
-The private compiler in `crates/nara_scene/src/prefab/overlay_structure_comparison.rs` uses real
-Prefab expansion and canonical provenance. Its initial checkpoint used the existing construction
-owner and one final source-owner preparation. The subsequent full-value comparison instead
+The private comparison compiler has been removed. Its controlled results below explain the
+selected semantics; production helper and public expansion tests now exercise their replacement
+in `crates/nara_scene/src/prefab/overlay/`.
+
+The experiment used real Prefab expansion and canonical provenance. Its initial checkpoint used
+the existing construction owner and one final source-owner preparation. The subsequent full-value comparison instead
 reuses the underlying ID allocator and complete-record validation core without source edit or
 construction preparation. Intermediate structure uses existing exact Scene placement operations
 on an unpublished copy; there is no new ID allocator or Undo authority.
@@ -545,9 +721,10 @@ An added entity can itself carry a `PrefabInstance`, so the origin distinction m
 in instance-anchor ancestry, not just as a terminal `is_added` flag. `PrefabProjectionPath::steps`
 now carries either `SourceEntity` (canonical source plus entity and lookup evidence) or
 `InstanceAddition` (addition-local entity, owned by the preceding anchor). Earlier expansion
-flattened patched-in additions into the base's source/entity namespace. The current patch-based
-effective copy still refuses duplicate IDs; the correction does not enable same-spelled inherited
-and added records to coexist or claim a previously observed Runtime ID collision.
+flattened patched-in additions into the base's source/entity namespace. The provenance-only
+checkpoint still refused duplicate IDs. The declarative replacement keeps source-local and
+overlay-local spelling separate; the earlier checkpoint did not itself establish that capability
+or demonstrate a Runtime ID collision.
 
 The corrected typed provenance travels through existing expansion, candidate validation,
 retained-byte admission, `SceneEntitySource` publication and UI placement encoding. Runtime
@@ -638,9 +815,11 @@ owners. A compiler-only or wire-only switch cannot establish that workflow:
   be saved as source IDs. Existing generic authoring intentionally disallows arbitrary whole-record
   replacement and Prefab-anchor deletion, so conversion must not bypass those boundaries.
 
-Current `project_authoring_preview` still reports nested Prefabs as unsupported. A format switch
-does not qualify the ordinary Inspector/preview path until its real captured closure and compiler
-are connected. Existing Play Apply Changes remains limited to ordinary Scene entities; extending
+The Authoring Scene preview now connects reusable actual-demand capture to background composition,
+source revalidation and complete native content stamps. Its integration and qualification remain
+in progress; a format switch alone does not qualify the ordinary Inspector or inherited selection.
+The UI Canvas still uses the separate direct Prefab preview helper and needs the shared capture
+path. Existing Play Apply Changes remains limited to ordinary Scene entities; extending
 cross-document Apply is a separate workflow and is not required to preserve that supported scope.
 
 The exact declaration transaction counts both snapshots and retains their unmodified comparison

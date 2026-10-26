@@ -63,10 +63,7 @@
             "kind": "path",
             "value": "enemy.prefab.json"
           },
-          "overrides": {
-            "format_version": 1,
-            "operations": []
-          }
+          "overrides": null
         }
       },
       {
@@ -118,35 +115,81 @@
             "value": "enemy.prefab.json"
           },
           "overrides": {
-            "format_version": 1,
-            "operations": [
+            "base": {
+              "kind": "prefab",
+              "origin": {
+                "project_location": {
+                  "universe": "ee6d3cbc-9b11-5dc8-96fa-94299e28c369",
+                  "path": "prefabs/enemy.prefab.json"
+                }
+              }
+            },
+            "additions": [],
+            "instances": [],
+            "components": [
               {
-                "op": "set_field",
-                "args": {
-                  "entity": "enemy",
+                "kind": "properties",
+                "value": {
+                  "target": {
+                    "through": [],
+                    "entity": {
+                      "kind": "source_entity",
+                      "entity": "enemy"
+                    }
+                  },
                   "component": "nara.transform.Transform2d",
-                  "component_version": 1,
-                  "field": "translation.x",
-                  "value": {
-                    "type": "f64",
-                    "value": 9.0
-                  }
+                  "version": 1,
+                  "claims": [
+                    {
+                      "path": {
+                        "root": "translation.x",
+                        "steps": []
+                      },
+                      "intent": {
+                        "kind": "set",
+                        "value": {
+                          "type": "f64",
+                          "value": 9.0
+                        }
+                      },
+                      "bindings": []
+                    }
+                  ]
                 }
               },
               {
-                "op": "set_field",
-                "args": {
-                  "entity": "enemy",
+                "kind": "properties",
+                "value": {
+                  "target": {
+                    "through": [],
+                    "entity": {
+                      "kind": "source_entity",
+                      "entity": "enemy"
+                    }
+                  },
                   "component": "reference_game.WaveSpawn",
-                  "component_version": 1,
-                  "field": "tick",
-                  "value": {
-                    "type": "u64",
-                    "value": 5
-                  }
+                  "version": 1,
+                  "claims": [
+                    {
+                      "path": {
+                        "root": "tick",
+                        "steps": []
+                      },
+                      "intent": {
+                        "kind": "set",
+                        "value": {
+                          "type": "u64",
+                          "value": 5
+                        }
+                      },
+                      "bindings": []
+                    }
+                  ]
                 }
               }
-            ]
+            ],
+            "placements": [],
+            "suppressions": []
           }
         }
       },
@@ -199,35 +242,81 @@
             "value": "enemy.prefab.json"
           },
           "overrides": {
-            "format_version": 1,
-            "operations": [
+            "base": {
+              "kind": "prefab",
+              "origin": {
+                "project_location": {
+                  "universe": "ee6d3cbc-9b11-5dc8-96fa-94299e28c369",
+                  "path": "prefabs/enemy.prefab.json"
+                }
+              }
+            },
+            "additions": [],
+            "instances": [],
+            "components": [
               {
-                "op": "set_field",
-                "args": {
-                  "entity": "enemy",
+                "kind": "properties",
+                "value": {
+                  "target": {
+                    "through": [],
+                    "entity": {
+                      "kind": "source_entity",
+                      "entity": "enemy"
+                    }
+                  },
                   "component": "nara.transform.Transform2d",
-                  "component_version": 1,
-                  "field": "translation.x",
-                  "value": {
-                    "type": "f64",
-                    "value": 13.0
-                  }
+                  "version": 1,
+                  "claims": [
+                    {
+                      "path": {
+                        "root": "translation.x",
+                        "steps": []
+                      },
+                      "intent": {
+                        "kind": "set",
+                        "value": {
+                          "type": "f64",
+                          "value": 13.0
+                        }
+                      },
+                      "bindings": []
+                    }
+                  ]
                 }
               },
               {
-                "op": "set_field",
-                "args": {
-                  "entity": "enemy",
+                "kind": "properties",
+                "value": {
+                  "target": {
+                    "through": [],
+                    "entity": {
+                      "kind": "source_entity",
+                      "entity": "enemy"
+                    }
+                  },
                   "component": "reference_game.WaveSpawn",
-                  "component_version": 1,
-                  "field": "tick",
-                  "value": {
-                    "type": "u64",
-                    "value": 9
-                  }
+                  "version": 1,
+                  "claims": [
+                    {
+                      "path": {
+                        "root": "tick",
+                        "steps": []
+                      },
+                      "intent": {
+                        "kind": "set",
+                        "value": {
+                          "type": "u64",
+                          "value": 9
+                        }
+                      },
+                      "bindings": []
+                    }
+                  ]
                 }
               }
-            ]
+            ],
+            "placements": [],
+            "suppressions": []
           }
         }
       },
@@ -557,10 +646,7 @@
             "kind": "path",
             "value": "reference-ui.prefab.json"
           },
-          "overrides": {
-            "format_version": 1,
-            "operations": []
-          }
+          "overrides": null
         }
       }
     ]

@@ -326,6 +326,7 @@ pub enum SceneInspectorReadOnlyReason {
     UnknownSchema,
     Unmigratable,
     FutureSchema,
+    UnresolvedOverlay,
 }
 
 impl SceneInspectorReadOnlyReason {
@@ -336,6 +337,7 @@ impl SceneInspectorReadOnlyReason {
             AuthoringRecordReadiness::UnknownSchema => Some(Self::UnknownSchema),
             AuthoringRecordReadiness::Unmigratable => Some(Self::Unmigratable),
             AuthoringRecordReadiness::FutureSchema => Some(Self::FutureSchema),
+            AuthoringRecordReadiness::UnresolvedOverlay => Some(Self::UnresolvedOverlay),
         }
     }
 }

@@ -909,12 +909,12 @@ logical_height = 540
     let mut anchor = SceneEntityRecord::new(prefab_anchor.clone());
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("reference-ui.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     let mut plain = SceneEntityRecord::new(plain_anchor.clone());
     plain.prefab = Some(PrefabInstance {
         source: AssetRef::path("plain.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     let image = SceneEntityRecord::new(nara_identity::SceneEntityId::new("strict-image").unwrap())
         .with_component(
@@ -3049,7 +3049,7 @@ fn external_play_restart_rechecks_saved_files_before_requesting_child_retirement
                 SceneEntityRecord::new(nara_identity::SceneEntityId::new("prefab-anchor").unwrap());
             anchor.prefab = Some(nara_scene::PrefabInstance {
                 source: AssetRef::path("actor.prefab.json").unwrap(),
-                overrides: ScenePatchDocument::default(),
+                overrides: None,
             });
             fs::write(
                 project.root.join("scenes/startup.scene.json"),
@@ -4487,7 +4487,7 @@ fn authoring_prefab_source_survives_failed_publication_close_and_reopen() {
     let mut anchor_record = SceneEntityRecord::new(anchor.clone());
     anchor_record.prefab = Some(PrefabInstance {
         source: AssetRef::Path(prefab),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     fs::write(
         project.root.join("scenes/startup.scene.json"),
@@ -4740,7 +4740,7 @@ logical_height = 540
     let mut anchor_record = SceneEntityRecord::new(anchor.clone());
     anchor_record.prefab = Some(PrefabInstance {
         source: AssetRef::path("reference-ui.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     let image = AssetRef::path("textures/player.png").unwrap();
     let player = SceneEntityRecord::new(nara_identity::SceneEntityId::new("player").unwrap())
@@ -7617,7 +7617,7 @@ logical_height = 540
             SceneEntityRecord::new(nara_identity::SceneEntityId::new("ui-anchor").unwrap());
         anchor.prefab = Some(PrefabInstance {
             source: AssetRef::path("ui.prefab.json").unwrap(),
-            overrides: ScenePatchDocument::default(),
+            overrides: None,
         });
         let mut entities = vec![anchor];
         if let Some(path) = additional_scene_image {

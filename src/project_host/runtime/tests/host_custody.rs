@@ -387,7 +387,7 @@ fn content_runtime_replacement_transfers_failed_cleanup_and_keeps_original_hosts
     let mut instance = SceneEntityRecord::new(anchor.clone());
     instance.prefab = Some(nara_scene::PrefabInstance {
         source: AssetRef::path("panel.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     fs::write(
         &source_path,

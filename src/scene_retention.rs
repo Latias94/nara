@@ -5,8 +5,7 @@ use nara_asset::AssetRef;
 use nara_scene::PrefabDocument;
 use nara_scene::{
     ExpandedSceneCandidate, PrefabInstance, PrefabProjectionPath, PrefabProjectionStep,
-    SceneDocument, SceneEntityId, SceneEntityProvenanceMap, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementAnchor, ScenePlacementOwner,
+    SceneDocument, SceneEntityId, SceneEntityProvenanceMap, SceneEntityRecord,
 };
 
 pub(crate) const STRING_ALLOCATION_OVERHEAD: usize = 2 * size_of::<usize>();
@@ -62,14 +61,22 @@ pub(crate) fn scene_provenance_retained_bytes(
                 size_of_val(source),
                 BTREE_ENTRY_OVERHEAD,
                 string_retained_bytes(expanded_entity.as_str())?,
-                string_retained_bytes(source.local_entity_id().as_str())?,
+                scene_provenance_dynamic_bytes(source)?,
             ])?,
         )?;
-        if let Some(path) = source.projection_path() {
-            checked_add_to(&mut total, projection_path_retained_bytes(path)?)?;
-        }
     }
     Ok(total)
+}
+
+pub(crate) fn scene_provenance_dynamic_bytes(
+    source: &nara_scene::SceneEntityProvenance,
+) -> Result<usize, SceneRetentionOverflow> {
+    checked_sum([
+        string_retained_bytes(source.local_entity_id().as_str())?,
+        source
+            .projection_path()
+            .map_or(Ok(0), projection_path_retained_bytes)?,
+    ])
 }
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
@@ -145,7 +152,235 @@ fn prefab_instance_retained_bytes(
     instance: &PrefabInstance,
 ) -> Result<usize, SceneRetentionOverflow> {
     let source = asset_ref_retained_bytes(&instance.source)?;
-    checked_sum([source, patch_retained_bytes(&instance.overrides)?])
+    checked_sum([
+        source,
+        instance
+            .overrides
+            .as_ref()
+            .map_or(Ok(0), overlay_retained_bytes)?,
+    ])
+}
+
+pub(crate) fn overlay_retained_bytes(
+    overlay: &nara_scene::PrefabOverlay,
+) -> Result<usize, SceneRetentionOverflow> {
+    use nara_scene::{PrefabComponentIntent, PrefabPropertyIntent};
+    let mut total = 0;
+    let mut pending = vec![overlay];
+    while let Some(overlay) = pending.pop() {
+        checked_add_to(
+            &mut total,
+            checked_sum([
+                overlay.base.retained_bytes(),
+                checked_product(
+                    overlay.additions.capacity(),
+                    size_of::<nara_scene::PrefabAddition>(),
+                )?,
+                checked_product(
+                    overlay.instances.capacity(),
+                    size_of::<nara_scene::PrefabInstanceClaim>(),
+                )?,
+                checked_product(
+                    overlay.components.capacity(),
+                    size_of::<PrefabComponentIntent>(),
+                )?,
+                checked_product(
+                    overlay.placements.capacity(),
+                    size_of::<nara_scene::PrefabPlacement>(),
+                )?,
+                checked_product(
+                    overlay.suppressions.capacity(),
+                    size_of::<nara_scene::PrefabEntityTarget>(),
+                )?,
+            ])?,
+        )?;
+        for addition in &overlay.additions {
+            checked_add_to(&mut total, string_retained_bytes(addition.id.as_str())?)?;
+            for (id, record) in &addition.components {
+                checked_add_to(&mut total, component_record_retained_bytes(id, record)?)?;
+            }
+            for (id, bindings) in &addition.bindings {
+                checked_add_to(
+                    &mut total,
+                    checked_sum([
+                        size_of_val(id),
+                        size_of_val(bindings),
+                        BTREE_ENTRY_OVERHEAD,
+                        string_retained_bytes(id.as_str())?,
+                        bindings_retained_bytes(bindings)?,
+                    ])?,
+                )?;
+            }
+            if let Some(instance) = &addition.prefab {
+                checked_add_to(&mut total, asset_ref_retained_bytes(&instance.source)?)?;
+                pending.extend(instance.overrides.iter());
+            }
+        }
+        for claim in &overlay.instances {
+            checked_add_to(&mut total, target_retained_bytes(&claim.target)?)?;
+            if let Some(instance) = &claim.value {
+                checked_add_to(&mut total, asset_ref_retained_bytes(&instance.source)?)?;
+                pending.extend(instance.overrides.iter());
+            }
+        }
+        for intent in &overlay.components {
+            let (target, component) = match intent {
+                PrefabComponentIntent::Set {
+                    target, component, ..
+                }
+                | PrefabComponentIntent::Suppress { target, component }
+                | PrefabComponentIntent::Properties {
+                    target, component, ..
+                } => (target, component),
+            };
+            checked_add_to(
+                &mut total,
+                checked_sum([
+                    target_retained_bytes(target)?,
+                    string_retained_bytes(component.as_str())?,
+                ])?,
+            )?;
+            match intent {
+                PrefabComponentIntent::Set {
+                    record, bindings, ..
+                } => {
+                    checked_add_to(
+                        &mut total,
+                        checked_sum([
+                            record
+                                .owner()
+                                .map_or(Ok(0), |owner| string_retained_bytes(owner.as_str()))?,
+                            component_value_retained_bytes(&record.value)?,
+                            bindings_retained_bytes(bindings)?,
+                        ])?,
+                    )?;
+                }
+                PrefabComponentIntent::Properties { claims, .. } => {
+                    checked_add_to(
+                        &mut total,
+                        checked_product(
+                            claims.capacity(),
+                            size_of::<nara_scene::PrefabPropertyClaim>(),
+                        )?,
+                    )?;
+                    for claim in claims {
+                        checked_add_to(&mut total, property_path_retained_bytes(&claim.path)?)?;
+                        checked_add_to(&mut total, bindings_retained_bytes(&claim.bindings)?)?;
+                        if let PrefabPropertyIntent::Set(value) = &claim.intent {
+                            checked_add_to(&mut total, component_value_retained_bytes(value)?)?;
+                        }
+                    }
+                }
+                PrefabComponentIntent::Suppress { .. } => {}
+            }
+        }
+        for placement in &overlay.placements {
+            checked_add_to(&mut total, target_retained_bytes(&placement.target)?)?;
+            if let nara_scene::PrefabPlacementParent::Entity(target) = &placement.parent {
+                checked_add_to(&mut total, target_retained_bytes(target)?)?;
+            }
+            if let nara_scene::PrefabPlacementSlot::Before(target)
+            | nara_scene::PrefabPlacementSlot::After(target) = &placement.slot
+            {
+                checked_add_to(&mut total, target_retained_bytes(target)?)?;
+            }
+        }
+        for target in &overlay.suppressions {
+            checked_add_to(&mut total, target_retained_bytes(target)?)?;
+        }
+    }
+    Ok(total)
+}
+
+fn component_record_retained_bytes(
+    component: &nara_reflect::ComponentTypeId,
+    record: &nara_scene::SceneComponentRecord,
+) -> Result<usize, SceneRetentionOverflow> {
+    checked_sum([
+        size_of_val(component),
+        size_of_val(record),
+        BTREE_ENTRY_OVERHEAD,
+        string_retained_bytes(component.as_str())?,
+        record
+            .owner()
+            .map_or(Ok(0), |owner| string_retained_bytes(owner.as_str()))?,
+        component_value_retained_bytes(&record.value)?,
+    ])
+}
+
+fn target_retained_bytes(
+    target: &nara_scene::PrefabEntityTarget,
+) -> Result<usize, SceneRetentionOverflow> {
+    let mut total = checked_sum([
+        string_retained_bytes(target.entity.entity().as_str())?,
+        checked_product(
+            target.through.capacity(),
+            size_of::<nara_scene::PrefabInstanceHop>(),
+        )?,
+    ])?;
+    for hop in &target.through {
+        checked_add_to(
+            &mut total,
+            checked_sum([
+                string_retained_bytes(hop.anchor.entity().as_str())?,
+                hop.expected_base.retained_bytes(),
+            ])?,
+        )?;
+    }
+    Ok(total)
+}
+
+fn bindings_retained_bytes(
+    bindings: &Vec<nara_scene::PrefabReferenceBinding>,
+) -> Result<usize, SceneRetentionOverflow> {
+    let mut total = checked_product(
+        bindings.capacity(),
+        size_of::<nara_scene::PrefabReferenceBinding>(),
+    )?;
+    for binding in bindings {
+        checked_add_to(
+            &mut total,
+            checked_sum([
+                string_retained_bytes(binding.expected.as_str())?,
+                target_retained_bytes(&binding.target)?,
+                checked_product(
+                    binding.slot.segments().len(),
+                    size_of::<nara_reflect::ComponentFieldPathSegment>(),
+                )?,
+            ])?,
+        )?;
+        for segment in binding.slot.segments() {
+            if let nara_reflect::ComponentFieldPathSegment::Field(field) = segment {
+                checked_add_to(&mut total, string_retained_bytes(field)?)?;
+            }
+        }
+    }
+    Ok(total)
+}
+
+fn property_path_retained_bytes(
+    path: &nara_reflect::ComponentPropertyPath,
+) -> Result<usize, SceneRetentionOverflow> {
+    use nara_reflect::{ComponentPropertyKey, ComponentPropertyStep};
+    let mut total = checked_sum([
+        string_retained_bytes(path.root.as_str())?,
+        checked_product(path.steps.capacity(), size_of::<ComponentPropertyStep>())?,
+    ])?;
+    for step in &path.steps {
+        let bytes = match step {
+            ComponentPropertyStep::Member(member) => string_retained_bytes(member.as_str())?,
+            ComponentPropertyStep::MapEntry(key) => string_retained_bytes(key)?,
+            ComponentPropertyStep::ListItem { by, key } => checked_sum([
+                string_retained_bytes(by.as_str())?,
+                match key {
+                    ComponentPropertyKey::String(key) => string_retained_bytes(key)?,
+                    _ => 0,
+                },
+            ])?,
+        };
+        checked_add_to(&mut total, bytes)?;
+    }
+    Ok(total)
 }
 
 fn projection_path_retained_bytes(
@@ -180,129 +415,6 @@ fn asset_ref_retained_bytes(reference: &AssetRef) -> Result<usize, SceneRetentio
         AssetRef::Path(path) => string_retained_bytes(path.as_str()),
         AssetRef::StableId(_) => Ok(16),
     }
-}
-
-pub(crate) fn patch_retained_bytes(
-    patch: &ScenePatchDocument,
-) -> Result<usize, SceneRetentionOverflow> {
-    let mut total = checked_product(
-        patch.operations.capacity(),
-        size_of::<ScenePatchOperation>(),
-    )?;
-    for operation in &patch.operations {
-        let dynamic = match operation {
-            ScenePatchOperation::SetPrefabInstance {
-                entity,
-                expected,
-                value,
-            } => expected.iter().chain(value.iter()).try_fold(
-                string_retained_bytes(entity.as_str())?,
-                |total, instance| checked_sum([total, prefab_instance_retained_bytes(instance)?]),
-            )?,
-            ScenePatchOperation::AddEntity { entity, placement } => checked_sum([
-                entity_dynamic_bytes(entity)?,
-                placement_retained_bytes(placement)?,
-            ])?,
-            ScenePatchOperation::RestoreEntity {
-                entity,
-                descendants,
-                placement,
-            } => descendants.iter().try_fold(
-                checked_sum([
-                    entity_dynamic_bytes(entity)?,
-                    placement_retained_bytes(placement)?,
-                ])?,
-                |total, descendant| {
-                    total
-                        .checked_add(entity_dynamic_bytes(descendant)?)
-                        .ok_or(SceneRetentionOverflow)
-                },
-            )?,
-            ScenePatchOperation::AddComponent {
-                entity,
-                component,
-                value,
-            }
-            | ScenePatchOperation::ReplaceComponent {
-                entity,
-                component,
-                value,
-            } => checked_sum([
-                string_retained_bytes(entity.as_str())?,
-                string_retained_bytes(component.as_str())?,
-                value
-                    .owner()
-                    .map_or(Ok(0), |owner| string_retained_bytes(owner.as_str()))?,
-                component_value_retained_bytes(&value.value)?,
-            ])?,
-            ScenePatchOperation::SetField {
-                entity,
-                component,
-                field,
-                value,
-                ..
-            } => checked_sum([
-                string_retained_bytes(entity.as_str())?,
-                string_retained_bytes(component.as_str())?,
-                string_retained_bytes(field.as_str())?,
-                component_value_retained_bytes(value)?,
-            ])?,
-            ScenePatchOperation::SetAssetRefField {
-                entity,
-                component,
-                field,
-                asset_ref,
-                ..
-            } => checked_sum([
-                string_retained_bytes(entity.as_str())?,
-                string_retained_bytes(component.as_str())?,
-                string_retained_bytes(field.as_str())?,
-                match asset_ref {
-                    AssetRef::Path(path) => string_retained_bytes(path.as_str())?,
-                    AssetRef::StableId(_) => 16,
-                },
-            ])?,
-            ScenePatchOperation::RemoveEntity { entity, from } => checked_sum([
-                string_retained_bytes(entity.as_str())?,
-                placement_retained_bytes(from)?,
-            ])?,
-            ScenePatchOperation::RemoveComponent { entity, component } => checked_sum([
-                string_retained_bytes(entity.as_str())?,
-                string_retained_bytes(component.as_str())?,
-            ])?,
-            ScenePatchOperation::RemoveField {
-                entity,
-                component,
-                field,
-                ..
-            } => checked_sum([
-                string_retained_bytes(entity.as_str())?,
-                string_retained_bytes(component.as_str())?,
-                string_retained_bytes(field.as_str())?,
-            ])?,
-            ScenePatchOperation::MoveEntity { entity, from, to } => checked_sum([
-                string_retained_bytes(entity.as_str())?,
-                placement_retained_bytes(from)?,
-                placement_retained_bytes(to)?,
-            ])?,
-        };
-        checked_add_to(&mut total, dynamic)?;
-    }
-    Ok(total)
-}
-
-fn placement_retained_bytes(placement: &ScenePlacement) -> Result<usize, SceneRetentionOverflow> {
-    let owner = match &placement.owner {
-        ScenePlacementOwner::Root => 0,
-        ScenePlacementOwner::Parent { parent } => string_retained_bytes(parent.as_str())?,
-    };
-    let anchor = match &placement.anchor {
-        ScenePlacementAnchor::First | ScenePlacementAnchor::Last => 0,
-        ScenePlacementAnchor::Before { sibling } | ScenePlacementAnchor::After { sibling } => {
-            string_retained_bytes(sibling.as_str())?
-        }
-    };
-    checked_sum([owner, anchor])
 }
 
 fn component_value_retained_bytes(
@@ -353,17 +465,26 @@ mod tests {
     fn prefab_anchor(
         name: &str,
         source: AssetRef,
+        base: SourceDocumentKey,
         additions: Vec<SceneEntityRecord>,
     ) -> SceneEntityRecord {
         let mut anchor = SceneEntityRecord::new(scene_id(name));
+        let mut overlay = nara_scene::PrefabOverlay::new(base);
+        for entity in additions {
+            assert!(entity.children.is_empty());
+            let mut addition = nara_scene::PrefabAddition::new(entity.id.clone());
+            addition.components = entity.components;
+            addition.prefab = entity.prefab;
+            overlay.placements.push(nara_scene::PrefabPlacement {
+                target: nara_scene::PrefabEntityTarget::addition(entity.id),
+                parent: nara_scene::PrefabPlacementParent::Root,
+                slot: nara_scene::PrefabPlacementSlot::Last,
+            });
+            overlay.additions.push(addition);
+        }
         anchor.prefab = Some(PrefabInstance {
             source,
-            overrides: ScenePatchDocument::new(additions.into_iter().map(|entity| {
-                ScenePatchOperation::AddEntity {
-                    entity,
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                }
-            })),
+            overrides: Some(overlay),
         });
         anchor
     }
@@ -425,6 +546,7 @@ mod tests {
             let document = SceneDocument::from_ordered_roots([prefab_anchor(
                 "anchor",
                 request.clone(),
+                key.clone(),
                 vec![SceneEntityRecord::new(scene_id("added-by-instance"))],
             )]);
             let expansion = document.expand_prefabs(&registry, &resolver);
@@ -497,6 +619,7 @@ mod tests {
             let nested = prefab_anchor(
                 "nested-anchor",
                 inner_request.clone(),
+                inner_key.clone(),
                 vec![SceneEntityRecord::new(scene_id("nested-addition"))],
             );
             let mut outer_entities = vec![SceneEntityRecord::new(scene_id("outer-source"))];
@@ -522,6 +645,7 @@ mod tests {
             let document = SceneDocument::from_ordered_roots([prefab_anchor(
                 "anchor",
                 outer_request.clone(),
+                outer_key.clone(),
                 outer_additions,
             )]);
             let expansion = document.expand_prefabs(&registry, &resolver);
@@ -613,44 +737,6 @@ mod tests {
                 ],
             );
         }
-    }
-
-    #[test]
-    fn exact_instance_snapshots_retain_both_payloads_even_when_they_are_equal() {
-        let snapshot = PrefabInstance {
-            source: AssetRef::path("deep/base.prefab.json").unwrap(),
-            overrides: ScenePatchDocument::new([ScenePatchOperation::SetField {
-                entity: scene_id("nested-entity"),
-                component: nara_reflect::ComponentTypeId::new("test.Snapshot"),
-                component_version: nara_reflect::ComponentSchemaVersion::ONE,
-                field: nara_reflect::ComponentFieldId::new("payload"),
-                value: nara_reflect::ComponentValue::map([(
-                    "items",
-                    nara_reflect::ComponentValue::String("retained payload".repeat(32)),
-                )]),
-            }]),
-        };
-        let target = scene_id("anchor");
-        let patch = |expected, value| {
-            ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
-                entity: target.clone(),
-                expected,
-                value,
-            }])
-        };
-        let empty = patch(None, None);
-        let old = patch(Some(snapshot.clone()), None);
-        let new = patch(None, Some(snapshot.clone()));
-        let both = patch(Some(snapshot.clone()), Some(snapshot));
-        let base = patch_retained_bytes(&empty).unwrap();
-        let old_bytes = patch_retained_bytes(&old).unwrap() - base;
-        let new_bytes = patch_retained_bytes(&new).unwrap() - base;
-        assert!(old_bytes > "retained payload".len() * 32);
-        assert_eq!(old_bytes, new_bytes);
-        assert_eq!(
-            patch_retained_bytes(&both).unwrap() - base,
-            old_bytes + new_bytes
-        );
     }
 
     #[test]

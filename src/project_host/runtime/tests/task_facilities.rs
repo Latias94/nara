@@ -664,7 +664,7 @@ fn held_play_io_does_not_block_authoring_prefab_edit_save_and_reopen() {
     let mut anchor = SceneEntityRecord::new(anchor_id.clone());
     anchor.prefab = Some(nara_scene::PrefabInstance {
         source: AssetRef::path("shared.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     fs::write(
         project.root.join("scenes/startup.scene.json"),

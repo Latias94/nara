@@ -21,6 +21,7 @@ mod product_transaction;
 mod provenance;
 mod runtime_hierarchy;
 mod scene_components;
+mod schema_authority;
 mod source;
 mod spawn;
 mod validation;
@@ -49,14 +50,14 @@ pub use authoring_decode::{
     AuthoringDirectMembers, AuthoringDocumentKind, AuthoringDocumentPublicationError,
     AuthoringDocumentReadiness, AuthoringDocumentReadmission, AuthoringDocumentSource,
     AuthoringEntityView, AuthoringFieldEdit, AuthoringFieldEditError, AuthoringFieldWrite,
-    AuthoringPatchRecordSlot, AuthoringPatchTargetKind, AuthoringPropertyValue, AuthoringReadError,
-    AuthoringRecordFact, AuthoringRecordLocation, AuthoringRecordOwnerClaim,
-    AuthoringRecordReadiness, AuthoringSchemaBasis, AuthoringSessionReopenError,
-    MAX_AUTHORING_EDIT_OPERATIONS, MAX_AUTHORING_FIELD_WRITES, PrefabAuthoringDocumentCandidate,
-    PublishedAuthoringPrefabDocument, PublishedAuthoringSceneDocument,
-    SceneAuthoringDocumentCandidate, UnavailableEntityReference, UnavailablePatchTarget,
-    UnavailableRecord, UnavailableRecordManifest, UnavailableRecordManifestEntry,
-    UnavailableValuePathSegment,
+    AuthoringOverlayPathSegment, AuthoringOverlayRecordSlot, AuthoringOverlayTargetKind,
+    AuthoringPropertyValue, AuthoringReadError, AuthoringRecordFact, AuthoringRecordLocation,
+    AuthoringRecordOwnerClaim, AuthoringRecordReadiness, AuthoringSchemaBasis,
+    AuthoringSessionReopenError, MAX_AUTHORING_EDIT_OPERATIONS, MAX_AUTHORING_FIELD_WRITES,
+    PrefabAuthoringDocumentCandidate, PublishedAuthoringPrefabDocument,
+    PublishedAuthoringSceneDocument, SceneAuthoringDocumentCandidate, UnavailableEntityReference,
+    UnavailableOverlayTarget, UnavailableRecord, UnavailableRecordManifest,
+    UnavailableRecordManifestEntry, UnavailableValuePathSegment,
 };
 pub use candidate::{ExpandedSceneCandidate, ExpandedSceneDocument};
 pub use document::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
@@ -78,9 +79,13 @@ pub use patch::{
     ScenePlacement, ScenePlacementAnchor, ScenePlacementOwner,
 };
 pub use prefab::{
-    InMemoryPrefabSourceResolver, PrefabDocument, PrefabExpansionBudgetKind, PrefabExpansionLimits,
-    PrefabExpansionOptions, PrefabExpansionReport, PrefabInstance, PrefabInstantiationReport,
-    PrefabSourceResolver, ResolvedPrefabSource,
+    InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
+    PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabExpansionBudgetKind,
+    PrefabExpansionLimits, PrefabExpansionOptions, PrefabExpansionReport,
+    PrefabExpansionWorkingSet, PrefabInstance, PrefabInstanceClaim, PrefabInstanceHop,
+    PrefabInstantiationReport, PrefabOverlay, PrefabOverlayConflict, PrefabPlacement,
+    PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent,
+    PrefabReferenceBinding, PrefabSourceResolver, ResolvedPrefabSource,
 };
 pub use provenance::{
     PrefabProjectionPath, PrefabProjectionStep, SceneEntityProvenance, SceneEntityProvenanceMap,
@@ -128,5 +133,9 @@ pub mod __private {
         AuthoringScenePreviewDocument, project_authoring_prefab_session_preview,
         project_authoring_scene_session_preview, project_published_authoring_prefab_preview,
         project_published_authoring_scene_preview,
+    };
+    pub use crate::prefab::{
+        AuthoringPrefabExpansionReport, AuthoringPrefabOmission, AuthoringPrefabOmissionReason,
+        try_expand_authoring_prefabs_with_loader,
     };
 }

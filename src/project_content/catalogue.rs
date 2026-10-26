@@ -24,12 +24,6 @@ pub(crate) struct DeliveryCatalogue {
 }
 
 impl LoadContext<'_> {
-    pub(super) fn reference_catalogue_complete(&self) -> bool {
-        self.catalogue
-            .as_ref()
-            .is_some_and(|catalogue| catalogue.complete)
-    }
-
     pub(super) fn take_delivery_catalogue(&mut self) -> Option<DeliveryCatalogue> {
         self.completed_delivery_catalogue.take()
     }

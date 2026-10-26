@@ -4,45 +4,49 @@ use nara_reflect::{
     ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueShape,
     PersistentComponentSchemaOwnerId, collect_declared_asset_references_from_schema,
 };
-use nara_scene::{SceneComponentRecord, SceneEntityId};
+use nara_scene::{
+    PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityTarget,
+    PrefabInstanceClaim, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
+    PrefabPlacementSlot, PrefabReferenceBinding, SceneComponentRecord, SceneEntityId,
+    SourceDocumentKey, SourceDocumentKind,
+};
+
+fn overlay_base(name: &str) -> SourceDocumentKey {
+    SourceDocumentKey::named(
+        "e3818e8d-e2d8-4f67-a82f-55074d3614b2".parse().unwrap(),
+        name,
+        SourceDocumentKind::Prefab,
+    )
+    .unwrap()
+}
 
 #[test]
-fn exact_instance_accounting_keeps_equal_snapshots_and_record_owner_payloads() {
+fn instance_retention_counts_record_owner_payloads() {
     let owner = PersistentComponentSchemaOwnerId::try_new("test.snapshot-owner").unwrap();
     let record = SceneComponentRecord::new(
         ComponentSchemaVersion::ONE,
         ComponentValue::String("full retained record".repeat(64)),
     );
-    let declaration = |record| PrefabInstance {
-        source: AssetRef::path("retained/base.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::new([ScenePatchOperation::AddComponent {
-            entity: SceneEntityId::new("nested").unwrap(),
+    let declaration = |record| {
+        let mut overlay = PrefabOverlay::new(overlay_base("retained"));
+        overlay.components.push(PrefabComponentIntent::Set {
+            mode: PrefabComponentSetMode::Add,
+            target: PrefabEntityTarget::source(SceneEntityId::new("nested").unwrap()),
             component: ComponentTypeId::new("test.Retained"),
-            value: record,
-        }]),
+            record,
+            bindings: Vec::new(),
+        });
+        PrefabInstance {
+            source: AssetRef::path("retained/base.prefab.json").unwrap(),
+            overrides: Some(overlay),
+        }
     };
     let unclaimed = declaration(record.clone());
     let claimed = declaration(record.with_owner(owner.clone()));
     assert_eq!(
         prefab_instance_retained_bytes(&claimed).unwrap()
             - prefab_instance_retained_bytes(&unclaimed).unwrap(),
-        owner.as_str().len(),
-    );
-    let patch = |expected, value| {
-        ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
-            entity: SceneEntityId::new("anchor").unwrap(),
-            expected,
-            value,
-        }])
-    };
-    let empty = patch_retained_bytes(&patch(None, None)).unwrap();
-    let prior = patch_retained_bytes(&patch(Some(claimed.clone()), None)).unwrap() - empty;
-    let next = patch_retained_bytes(&patch(None, Some(claimed.clone()))).unwrap() - empty;
-    assert!(prior > "full retained record".len() * 64);
-    assert_eq!(prior, next);
-    assert_eq!(
-        patch_retained_bytes(&patch(Some(claimed.clone()), Some(claimed))).unwrap() - empty,
-        prior + next,
+        owner.as_str().len() + crate::scene_retention::STRING_ALLOCATION_OVERHEAD,
     );
 }
 
@@ -203,6 +207,10 @@ fn published_unbound_default_assets_charge_both_projection_copies_at_the_budget_
                 record_facts: published.record_facts(),
                 asset_references_retained_bytes: projection_bytes,
                 unavailable_records: published.unavailable_manifest().total_count(),
+                overlay_declarations_retained_bytes: manifest_overlay_declarations_retained_bytes(
+                    published.unavailable_manifest(),
+                )
+                .unwrap(),
                 diagnostics: published.diagnostics(),
                 bundle_encoded_bytes,
             },
@@ -234,4 +242,240 @@ fn published_unbound_default_assets_charge_both_projection_copies_at_the_budget_
             ));
         }
     }
+}
+
+#[test]
+fn structural_overlay_manifests_charge_full_instance_copies_at_the_budget_boundary() {
+    use crate::project_host::authoring::AuthoringProjectAdmissionLimits;
+    use nara_scene::{AuthoringDocumentSource, SceneDocumentCandidate};
+
+    let mut nested = PrefabOverlay::new(overlay_base("nested"));
+    nested.instances.push(PrefabInstanceClaim {
+        target: PrefabEntityTarget::source(SceneEntityId::new("detached").unwrap()),
+        value: None,
+    });
+    let mut addition = PrefabAddition::new(SceneEntityId::new("addition").unwrap());
+    addition.prefab = Some(PrefabInstance {
+        source: AssetRef::path("nested.prefab.json").unwrap(),
+        overrides: Some(nested),
+    });
+    addition.bindings.insert(
+        ComponentTypeId::new("test.DormantBinding"),
+        vec![PrefabReferenceBinding {
+            slot: ComponentFieldPath::from_fields(["references", "target"]),
+            expected: SceneEntityId::new("preserved-reference").unwrap(),
+            target: PrefabEntityTarget::source(SceneEntityId::new("unresolved").unwrap()),
+        }],
+    );
+    let mut overlay = PrefabOverlay::new(overlay_base("structural"));
+    overlay.placements.push(PrefabPlacement {
+        target: PrefabEntityTarget::addition(addition.id.clone()),
+        parent: PrefabPlacementParent::Root,
+        slot: PrefabPlacementSlot::Last,
+    });
+    overlay.additions.push(addition);
+    overlay.suppressions.push(PrefabEntityTarget::source(
+        SceneEntityId::new("missing-target".repeat(128)).unwrap(),
+    ));
+    let instance = PrefabInstance {
+        source: AssetRef::path("structural.prefab.json").unwrap(),
+        overrides: Some(overlay),
+    };
+    let document = SceneDocument::from_ordered_roots(["first", "second"].map(|id| {
+        let mut entity = SceneEntityRecord::new(SceneEntityId::new(id).unwrap());
+        entity.prefab = Some(instance.clone());
+        entity
+    }));
+    let bundle = AuthoringSchemaBundle::new([]).unwrap();
+    let encoded = document.to_json_string().unwrap();
+    let published = SceneDocumentCandidate::decode_json_bytes(encoded.as_bytes())
+        .unwrap()
+        .admit_authoring(
+            AuthoringDocumentSource::new(AssetRef::path("scene.json").unwrap()),
+            &bundle,
+            &[],
+        )
+        .unwrap()
+        .publish();
+    assert_eq!(published.document(), &document);
+    assert!(published.record_facts().is_empty());
+    let manifest = published.unavailable_manifest();
+    assert_eq!(manifest.total_count(), 0);
+    assert_eq!(manifest.overlay_declarations().count(), 2);
+    for (_, retained) in manifest.overlay_declarations() {
+        assert_eq!(retained, &instance);
+    }
+    let manifest_bytes = manifest_overlay_declarations_retained_bytes(manifest).unwrap();
+    let retained_instance = manifest.overlay_declarations().next().unwrap().1;
+    let overlay_bytes = crate::scene_retention::overlay_retained_bytes(
+        retained_instance.overrides.as_ref().unwrap(),
+    )
+    .unwrap();
+    assert!(manifest_bytes > 2 * overlay_bytes);
+
+    let file = FileCapability::from_host_handle(
+        std::fs::File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap(),
+        nara_fs::TrustMode::TrustedLocal,
+        1,
+    )
+    .unwrap();
+    let source = AuthoringSourceFact {
+        kind: AuthoringSourceKind::Scene,
+        project_path: ProjectPath::new("scene.json").unwrap(),
+        identity: file.identity(),
+        parent_identity: None,
+        digest: ContentDigest::of_bytes(encoded.as_bytes()),
+        encoded_bytes: encoded.len(),
+        dependency_depth: 0,
+    };
+    let charge = |manifest_bytes, budget: &mut AuthoringProjectAdmissionBudget| {
+        charge_published_document(
+            PublishedDocumentCharge {
+                source: &source,
+                encoded_bytes: encoded.len(),
+                document: published.document(),
+                record_facts: published.record_facts(),
+                asset_references_retained_bytes: 0,
+                unavailable_records: manifest.total_count(),
+                overlay_declarations_retained_bytes: manifest_bytes,
+                diagnostics: published.diagnostics(),
+                bundle_encoded_bytes: bundle.to_json_string().unwrap().len(),
+            },
+            budget,
+        )
+    };
+    let mut baseline =
+        AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
+    charge(0, &mut baseline).unwrap();
+    let base_bytes = baseline.usage().retained_candidate_bytes();
+    let exact = base_bytes + manifest_bytes;
+    for maximum in [exact, exact - 1, base_bytes + manifest_bytes / 2] {
+        let mut budget = AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits {
+            retained_candidate_bytes: ByteLimit::new(maximum).unwrap(),
+            ..AuthoringProjectAdmissionLimits::default()
+        });
+        let result = charge(manifest_bytes, &mut budget);
+        if maximum == exact {
+            result.unwrap();
+            assert_eq!(budget.usage().retained_candidate_bytes(), exact);
+        } else {
+            assert!(matches!(
+                result,
+                Err(AuthoringProjectSourceAdmissionError::Budget(
+                    AuthoringProjectAdmissionError::RetainedCandidateBytesExceeded {
+                        maximum: rejected,
+                    },
+                )) if rejected == maximum
+            ));
+        }
+    }
+}
+
+#[test]
+fn raw_composition_accounting_retains_one_payload_and_no_publication_projections() {
+    use crate::project_host::authoring::AuthoringProjectAdmissionLimits;
+
+    let mut overlay = PrefabOverlay::new(overlay_base("raw"));
+    overlay.suppressions.push(PrefabEntityTarget::source(
+        SceneEntityId::new("obsolete-target".repeat(64)).unwrap(),
+    ));
+    let mut entity = SceneEntityRecord::new(SceneEntityId::new("raw").unwrap());
+    entity.prefab = Some(PrefabInstance {
+        source: AssetRef::path("missing.prefab.json").unwrap(),
+        overrides: Some(overlay),
+    });
+    entity.components.insert(
+        ComponentTypeId::new("test.Raw"),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::String("uninterpreted payload".repeat(128)),
+        )
+        .with_owner(PersistentComponentSchemaOwnerId::try_new("test.raw-owner").unwrap()),
+    );
+    let document = PrefabDocument::from_ordered_roots([entity]);
+    let encoded = document.to_json_string().unwrap();
+    let file = FileCapability::from_host_handle(
+        std::fs::File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap(),
+        nara_fs::TrustMode::TrustedLocal,
+        1,
+    )
+    .unwrap();
+    let source = AuthoringSourceFact {
+        kind: AuthoringSourceKind::Prefab,
+        project_path: ProjectPath::new("prefabs/raw.prefab.json").unwrap(),
+        identity: file.identity(),
+        parent_identity: None,
+        digest: ContentDigest::of_bytes(encoded.as_bytes()),
+        encoded_bytes: encoded.len(),
+        dependency_depth: 1,
+    };
+    let document_bytes = document.retained_bytes().unwrap();
+    let exact = document_bytes
+        + source_fact_retained_bytes(&source).unwrap()
+        + size_of::<Arc<PrefabDocument>>();
+    for maximum in [exact, exact - 1] {
+        let mut budget = AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits {
+            retained_candidate_bytes: ByteLimit::new(maximum).unwrap(),
+            ..Default::default()
+        });
+        let result = charge_composition_source(&source, encoded.len(), &document, &mut budget);
+        if maximum == exact {
+            result.unwrap();
+            assert_eq!(budget.usage().retained_candidate_bytes(), exact);
+            assert_eq!(budget.usage().decoded_bytes(), document_bytes);
+            assert_eq!(budget.usage().decode_work(), document_bytes + encoded.len());
+            assert_eq!(budget.usage().diagnostic_items(), 0);
+        } else {
+            assert!(matches!(
+                result,
+                Err(AuthoringProjectSourceAdmissionError::Budget(
+                    AuthoringProjectAdmissionError::RetainedCandidateBytesExceeded {
+                        maximum: rejected,
+                    },
+                )) if rejected == maximum
+            ));
+        }
+    }
+}
+
+#[test]
+fn composition_source_candidates_keep_selected_limits_and_validate_only_local_structure() {
+    let entity = SceneEntityRecord::new(SceneEntityId::new("local").unwrap()).with_component(
+        ComponentTypeId::new("test.Raw"),
+        SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
+    );
+    let document = PrefabDocument::from_ordered_roots([entity.clone()]);
+    let encoded = document.to_json_string().unwrap();
+    let limits = SceneFileLimits::default()
+        .with_entities(nara_core::ItemLimit::ONE)
+        .with_components(nara_core::ItemLimit::ONE)
+        .with_encoded_bytes(ByteLimit::new(encoded.len()).unwrap());
+    let candidate =
+        PrefabDocumentCandidate::decode_json_bytes_with_limits(encoded.as_bytes(), limits).unwrap();
+    assert_eq!(candidate.into_composition_source().unwrap(), document);
+    assert!(matches!(
+        PrefabDocumentCandidate::decode_json_bytes_with_limits(
+            encoded.as_bytes(),
+            limits.with_encoded_bytes(ByteLimit::new(encoded.len() - 1).unwrap()),
+        ),
+        Err(SceneFormatError::EncodedBytesExceeded { .. })
+    ));
+    let oversized = PrefabDocument::from_ordered_roots([
+        entity.clone(),
+        SceneEntityRecord::new(SceneEntityId::new("second").unwrap()),
+    ]);
+    assert!(matches!(
+        PrefabDocumentCandidate::from_source_document(oversized, limits),
+        Err(SceneFormatError::Budget(_))
+    ));
+
+    let invalid = PrefabDocument::new([SceneEntityId::new("missing").unwrap()], [entity]);
+    let candidate = PrefabDocumentCandidate::from_source_document(invalid, limits).unwrap();
+    let rejection = candidate.into_composition_source().unwrap_err();
+    assert!(
+        rejection
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.dangling-root" })
+    );
 }

@@ -414,6 +414,7 @@ impl EditorProjectSession {
                     EditorScenePersistenceLane {
                         project_path: relative_path,
                         source_key: source.source_key().clone(),
+                        authoring_source: Some(source),
                         document,
                         host,
                     },
@@ -455,6 +456,7 @@ impl EditorProjectSession {
                     EditorPrefabPersistenceLane {
                         project_path: relative_path,
                         source_key: source.source_key().clone(),
+                        authoring_source: Some(source),
                         document,
                         host,
                     },

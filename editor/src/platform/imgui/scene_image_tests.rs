@@ -166,6 +166,9 @@ impl SceneImageWorkflow<'_> {
             &self.native.scene,
             &frame,
             self.native.scene_extent,
+            self.application
+                .current_scene_preview_content_stamp()
+                .as_ref(),
         ) {
             return Err(
                 "the Scene image has no exact successful composite presentation".to_owned(),
@@ -175,6 +178,18 @@ impl SceneImageWorkflow<'_> {
             .scene
             .submitted
             .ok_or_else(|| "the displayed Scene has no submitted image receipt".to_owned())
+    }
+
+    fn wait_displayed(&mut self) -> Result<WgpuSubmittedImageReceipt, String> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            self.paint()?;
+            match self.displayed() {
+                Ok(receipt) => return Ok(receipt),
+                Err(error) if Instant::now() >= deadline => return Err(error),
+                Err(_) => std::thread::sleep(Duration::from_millis(1)),
+            }
+        }
     }
 
     fn import(&mut self) -> Result<PreparedImageSnapshot, String> {
@@ -229,12 +244,18 @@ impl SceneImageWorkflow<'_> {
         }
         // Inspect the exact immutable prepared image that the ordinary preview owner produces.
         // The next drive supplies its successor candidate to the real NativeHost, not a fake GPU.
-        self.application
-            .drive_editor_frame(Duration::ZERO, false, false);
-        let candidate = self
-            .application
-            .take_scene_preview_candidate()
-            .ok_or("the owner published no Scene candidate")?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let candidate = loop {
+            self.application
+                .drive_editor_frame(Duration::ZERO, false, false);
+            if let Some(candidate) = self.application.take_scene_preview_candidate() {
+                break candidate;
+            }
+            if Instant::now() >= deadline {
+                return Err("the owner published no validated Scene candidate".to_owned());
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        };
         let (_, _, _, _, batches, _) = candidate.into_parts();
         let images = batches
             .as_slice()
@@ -256,7 +277,7 @@ impl SceneImageWorkflow<'_> {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             self.paint()?;
-            if self.application.current_frame().is_some() && self.native.scene.submitted.is_some() {
+            if self.application.current_frame().is_some() && self.displayed().is_ok() {
                 break;
             }
             if Instant::now() >= deadline {
@@ -325,13 +346,12 @@ impl SceneImageWorkflow<'_> {
             .ok_or("the startup Scene is unavailable")?;
         let document = (scene.document, scene.revision);
         let extent = self.native.scene_extent;
-        let before_import = self.displayed()?;
+        let before_import = self.wait_displayed()?;
         let first = self.import()?;
         if first.resource().pixels() != [24, 120, 220, 255] {
             return Err("the first real import did not prepare the original blue pixel".to_owned());
         }
-        self.paint()?;
-        let first_display = self.displayed()?;
+        let first_display = self.wait_displayed()?;
         if first_display == before_import {
             return Err("successful image publication retained the old Scene submission despite a new prepared image".to_owned());
         }
@@ -345,8 +365,7 @@ impl SceneImageWorkflow<'_> {
                     .to_owned(),
             );
         }
-        self.paint()?;
-        let replacement_display = self.displayed()?;
+        let replacement_display = self.wait_displayed()?;
         if replacement_display == first_display {
             return Err("green-pixel Reimport retained the old blue Scene submission".to_owned());
         }

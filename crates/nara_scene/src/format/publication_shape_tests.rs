@@ -230,13 +230,25 @@ fn publication_shape_certificate_falls_back_without_rejecting_valid_unsupported_
     let mut embedded = document(ComponentValue::Null, false);
     embedded.entities[0].prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::new([ScenePatchOperation::SetField {
-            entity: id("nested"),
-            component: ComponentTypeId::new("test.Value"),
-            component_version: ComponentSchemaVersion::ONE,
-            field: nara_reflect::ComponentFieldId::new("value"),
-            value: ComponentValue::String("override".into()),
-        }]),
+        overrides: Some(crate::PrefabOverlay {
+            components: vec![crate::PrefabComponentIntent::Properties {
+                target: crate::PrefabEntityTarget::source(id("nested")),
+                component: ComponentTypeId::new("test.Value"),
+                version: ComponentSchemaVersion::ONE,
+                claims: vec![crate::PrefabPropertyClaim {
+                    path: nara_reflect::ComponentPropertyPath::new(
+                        nara_reflect::ComponentFieldId::new("value"),
+                    ),
+                    intent: crate::PrefabPropertyIntent::Set(ComponentValue::String(
+                        "override".into(),
+                    )),
+                    bindings: vec![],
+                }],
+            }],
+            ..crate::PrefabOverlay::new(crate::tests::named_prefab_source_key(
+                "publication-shape-base",
+            ))
+        }),
     });
     let prefab = PrefabDocument::new(embedded.roots.clone(), embedded.entities.clone());
     assert!(!certified(&embedded, SceneFileLimits::default()));

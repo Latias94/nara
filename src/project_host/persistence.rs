@@ -357,6 +357,12 @@ impl PersistenceFileState {
 }
 
 impl ScenePersistenceHost {
+    pub(super) fn accepted_source_observation(
+        &self,
+    ) -> Option<(FileIdentity, Option<FileIdentity>, ContentDigest)> {
+        self.file.publication.accepted_source_observation()
+    }
+
     pub(super) fn read_source(&self) -> super::file_publication::FilePublicationReadSource {
         self.file.publication.read_source()
     }
@@ -489,6 +495,12 @@ impl ScenePersistenceHost {
 }
 
 impl PrefabPersistenceHost {
+    pub(super) fn accepted_source_observation(
+        &self,
+    ) -> Option<(FileIdentity, Option<FileIdentity>, ContentDigest)> {
+        self.file.publication.accepted_source_observation()
+    }
+
     pub(super) fn read_source(&self) -> super::file_publication::FilePublicationReadSource {
         self.file.publication.read_source()
     }
@@ -868,6 +880,8 @@ fn file_byte_limit(limits: SceneFileLimits) -> u64 {
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests {
     use super::*;
+
+    mod source_observation;
 
     use std::{
         fs::{self, File},

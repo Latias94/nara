@@ -142,9 +142,10 @@ before R2/R3/R5b persistent contracts freeze.
 
 The [declarative Prefab overlay design](prefab-overlay-design.md) separates durable intent from
 exact edit/inverse patches. Private property and structural/reference comparisons challenge
-whole-root patches, old-basis placement and ambiguous reference binding. They retain production
-ADR 0038's patch storage until complete full-value admission, conflict persistence and
-source-owner replacement are qualified. The separate [typed-origin checkpoint](../knowledge/engineering/verification/2026-10/2026-10-26T041116Z-typed-prefab-instance-addition-provenance-and-complete-consumer-propagation-331ec66de92c4315971800928d8f2dc7.md)
+whole-root patches, old-basis placement and ambiguous reference binding. ADRs 0006/0026/0038/0043/0090
+now adopt the declarative contract. Its production replacement is in progress, including shared
+Authoring/Runtime compilation and actual dependency capture; complete source-owner and native
+qualification remain open. The separate historical [typed-origin checkpoint](../knowledge/engineering/verification/2026-10/2026-10-26T041116Z-typed-prefab-instance-addition-provenance-and-complete-consumer-propagation-331ec66de92c4315971800928d8f2dc7.md)
 corrects current production addition ancestry through Scene, Runtime, retention and UI keys;
 it does not qualify the Proposed overlay compiler. The [Unity/Godot editor study](../research/2026-10-26-unity-godot-prefab-editor-ownership.md)
 grounds editing contexts, explicit Apply/Revert, unused overrides and Inspector/history routing
@@ -168,13 +169,30 @@ locality limits; production overlay storage and activation remain separate work.
 The [canonical source codec](../knowledge/engineering/verification/2026-10/2026-10-26T103001Z-canonical-source-identity-codec-and-complete-nested-overlay-round-trips-3ce62b507a1a445582c811954dac28c6.md)
 preserves complete kind/origin identity through strict JSON/RON value encoding and removes the
 private comparison's second identity representation. Decoded claims do not grant Host admission.
-The overlay design now specifies pre-recursion effective declarations and actual source demand;
-that production replacement, conflict persistence and conversion remain unimplemented.
+At that checkpoint, the overlay design specified pre-recursion effective declarations and actual
+source demand; production replacement, conflict persistence and conversion remained unimplemented.
 The [nested repair baseline](../knowledge/engineering/verification/2026-10/2026-10-26T103859Z-nested-instance-repair-baseline-and-effective-source-demand-replacement-design-a6dbd3843c104c40b6ba817e428478f7.md)
 qualifies five current in-memory expansion cases: replacement, detach and complete removal avoid
 the discarded nested source, and stale complete declarations reject. Independent design review
-separately corrected early native admission and added-instance child ordering. Actual effective
-Host loading and the declarative format remain unqualified.
+separately corrected early native admission and added-instance child ordering.
+That baseline did not qualify actual effective Host loading or the declarative format.
+
+The [staged production successor](../knowledge/engineering/progress/2026-10/2026-10-26T175942Z-staged-prefab-structural-demand-and-selected-value-program-qualification-19ce2446522e4c28a5fbd70d31ab827f.md)
+replaces interleaved expansion with structural demand, layered layout and selected component
+programs. It separates raw dependency capture from strict standalone Open and retains exact source
+history. Scene 497, actual-file Host 52 and selected independent consumer 18 tests pass within the
+recorded scope. Complete second-document Editor capture, nested native preview/fences, structured conflicts,
+conversion and repeated-descriptor work remain open; the full foundation Goal is active.
+
+The [independent capture and preview-stamp checkpoint](../knowledge/engineering/progress/2026-10/2026-10-26T192056Z-independent-authoring-capture-and-preview-dependency-stamp-integration-c31cf6ef3eaa457a87528419c09ea49c.md)
+adds reusable actual-demand acquisition, immutable root/open-Prefab snapshots and exact dependency
+stamps, with source/Schema/metadata and retention regressions. Its Unity/Godot follow-up explicitly
+distinguishes Editor working-copy preview from file-backed Play/Check/Export. Its
+[actual Editor successor](../knowledge/engineering/verification/2026-10/2026-10-26T221436Z-captured-editor-scene-preview-and-ordered-image-publication-qualification-bd36086e52524bb1b227dbd21da81056.md)
+qualifies background capture, file/Schema fences, captured asset databases, ordered Image evidence
+and native presentation/picking through complete library, independent consumer and selected
+Windows/DX12 trajectories. The source-conflict controls, conversion, inherited Inspector and shared
+UI Canvas path remain open; this is a bounded checkpoint within the full foundation Goal.
 
 The [source-owned creation and construction design](authoring-construction-design.md) removes
 Workspace ordinal allocation and ID-reservation choreography from ordinary Scene/Prefab creation.

@@ -22,9 +22,6 @@ use crate::{
 
 mod creation;
 pub use creation::CreatedSourceEntity;
-#[cfg(test)]
-pub(crate) use creation::allocate_entity_id;
-
 #[cfg(feature = "serde")]
 mod construction;
 #[cfg(feature = "serde")]
@@ -291,7 +288,7 @@ impl AuthoringHistory {
 
     fn apply_forward<D>(
         &mut self,
-        document: &mut D,
+        document: &mut Arc<D>,
         patch: &ScenePatchDocument,
         prepared: Result<(D, ScenePatchReport), ScenePatchReport>,
     ) -> ScenePatchReport {
@@ -312,7 +309,7 @@ impl AuthoringHistory {
 
     fn publish_forward<D>(
         &mut self,
-        document: &mut D,
+        document: &mut Arc<D>,
         candidate: D,
         report: ScenePatchReport,
         cost: SceneAuthoringHistoryCost,
@@ -330,7 +327,7 @@ impl AuthoringHistory {
             .expect("admitted history owns its inverse");
 
         let before_state = self.content_state;
-        *document = candidate;
+        *document = Arc::new(candidate);
         self.advance_revision();
         let after_state = self.content_state_for_current_revision();
         self.content_state = after_state;
@@ -412,7 +409,7 @@ impl AuthoringHistory {
 
     fn apply_history<D>(
         &mut self,
-        document: &mut D,
+        document: &mut Arc<D>,
         direction: HistoryDirection,
         apply: impl FnOnce(&ScenePatchDocument, &D) -> Result<(D, ScenePatchReport), ScenePatchReport>,
     ) -> ScenePatchReport {
@@ -427,7 +424,7 @@ impl AuthoringHistory {
             );
         }
 
-        let (candidate, report) = match apply(&entry.patch, document) {
+        let (candidate, report) = match apply(&entry.patch, document.as_ref()) {
             Ok(prepared) => prepared,
             Err(report) => {
                 self.restore(direction, entry);
@@ -462,7 +459,7 @@ impl AuthoringHistory {
             to_state: entry.from_state,
             cost: entry.cost,
         };
-        *document = candidate;
+        *document = Arc::new(candidate);
         self.advance_revision();
         self.content_state = entry.to_state;
         self.restore(direction.opposite(), reverse);
@@ -657,7 +654,7 @@ pub struct SceneAuthoringSession {
 /// the Scene/Prefab workspace boundary.
 #[derive(Debug)]
 pub struct PrefabAuthoringSession {
-    document: PrefabDocument,
+    document: Arc<PrefabDocument>,
     history: AuthoringHistory,
     source_upgrade_required: bool,
     authority: AuthoringSessionAuthority,
@@ -735,7 +732,7 @@ impl PrefabAuthoringSession {
         history_limits: SceneAuthoringHistoryLimits,
     ) -> Self {
         Self {
-            document,
+            document: Arc::new(document),
             history: AuthoringHistory::new(history_limits),
             source_upgrade_required,
             authority: AuthoringSessionAuthority::Native,
@@ -761,7 +758,7 @@ impl PrefabAuthoringSession {
     ) -> Self {
         let (document, state) = published.into_parts();
         Self {
-            document,
+            document: Arc::new(document),
             history: AuthoringHistory::new(history_limits),
             source_upgrade_required: false,
             authority: AuthoringSessionAuthority::Published(state),
@@ -829,6 +826,20 @@ impl PrefabAuthoringSession {
     #[must_use]
     pub fn document(&self) -> &PrefabDocument {
         &self.document
+    }
+
+    /// Returns the source locator retained by authoring admission.
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn authoring_source(&self) -> Option<&crate::AuthoringDocumentSource> {
+        self.authority.published().map(|state| state.source())
+    }
+
+    /// Retains the exact immutable source without copying its document or authoring state.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn shared_document(&self) -> Arc<PrefabDocument> {
+        Arc::clone(&self.document)
     }
 
     #[must_use]
@@ -915,7 +926,7 @@ impl PrefabAuthoringSession {
         document: PrefabDocument,
         source_upgrade_required: bool,
     ) {
-        self.document = document;
+        self.document = Arc::new(document);
         self.history.replace_source();
         self.source_upgrade_required = source_upgrade_required;
         self.authority = AuthoringSessionAuthority::Native;
@@ -1277,6 +1288,20 @@ impl SceneAuthoringSession {
     #[must_use]
     pub fn document(&self) -> &SceneDocument {
         &self.document
+    }
+
+    /// Returns the source locator retained by authoring admission.
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn authoring_source(&self) -> Option<&crate::AuthoringDocumentSource> {
+        self.authority.published().map(|state| state.source())
+    }
+
+    /// Retains the exact immutable source without copying its document or authoring state.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn shared_document(&self) -> Arc<SceneDocument> {
+        Arc::clone(&self.document)
     }
 
     /// Returns the existing authoring basis for an Available, current direct component.
@@ -1728,7 +1753,7 @@ impl SceneAuthoringSession {
         prepared: Result<PreparedScenePatch, ScenePatchReport>,
     ) -> ScenePatchReport {
         let report = self.history.apply_forward(
-            Arc::make_mut(&mut self.document),
+            &mut self.document,
             patch,
             prepared.map(PreparedScenePatch::into_parts),
         );
@@ -1746,11 +1771,11 @@ impl SceneAuthoringSession {
             &SceneDocument,
         ) -> Result<PreparedScenePatch, ScenePatchReport>,
     ) -> ScenePatchReport {
-        let report = self.history.apply_history(
-            Arc::make_mut(&mut self.document),
-            direction,
-            |patch, document| apply(patch, document).map(PreparedScenePatch::into_parts),
-        );
+        let report =
+            self.history
+                .apply_history(&mut self.document, direction, |patch, document| {
+                    apply(patch, document).map(PreparedScenePatch::into_parts)
+                });
         if report.applied {
             self.live_dirty = true;
         }
@@ -1764,17 +1789,15 @@ impl SceneAuthoringSession {
             .published()
             .expect("an admitted authoring document owns classification state");
         let mut next_state = None;
-        let report = self.history.apply_history(
-            Arc::make_mut(&mut self.document),
-            direction,
-            |patch, document| {
-                let prepared = crate::authoring_decode::prepare_scene_authoring_patch(
-                    document, state, patch, true,
-                )?;
-                next_state = Some(prepared.state);
-                Ok((prepared.document, prepared.report))
-            },
-        );
+        let report =
+            self.history
+                .apply_history(&mut self.document, direction, |patch, document| {
+                    let prepared = crate::authoring_decode::prepare_scene_authoring_patch(
+                        document, state, patch, true,
+                    )?;
+                    next_state = Some(prepared.state);
+                    Ok((prepared.document, prepared.report))
+                });
         if report.applied {
             self.authority = AuthoringSessionAuthority::Published(
                 next_state.expect("accepted authoring history publishes classification state"),

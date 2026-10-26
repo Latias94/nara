@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use nara_asset::AssetRef;
+use nara_asset::{AssetPath, AssetRef};
 use nara_engine::{
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode},
     project_host::{
@@ -14,6 +14,7 @@ use nara_engine::{
         EditorProjectOpenProgress, EditorProjectSession,
     },
 };
+use nara_identity::EntityReference;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentCodecError,
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentPropertyError,
@@ -23,11 +24,16 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId, replace_component_property, resolve_component_property,
 };
 use nara_scene::{
-    AuthoringDocumentReadiness, AuthoringPropertyEdit, AuthoringRecordLocation,
-    AuthoringRecordReadiness, PrefabDocument, PrefabDocumentCandidate, PrefabInstance,
-    SceneAuthoringRevision, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-    ScenePlacementOwner, UnavailableRecordManifest, UnavailableRecordManifestEntry,
+    AuthoringDocumentReadiness, AuthoringOverlayPathSegment, AuthoringOverlayRecordSlot,
+    AuthoringPropertyEdit, AuthoringRecordLocation, AuthoringRecordReadiness,
+    InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
+    PrefabDocument, PrefabDocumentCandidate, PrefabEntityOrigin, PrefabEntityTarget,
+    PrefabInstance, PrefabInstanceHop, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
+    PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceBinding,
+    PrefabSourceResolver, SceneAuthoringRevision, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
+    ScenePatchOperation, ScenePlacement, ScenePlacementOwner, SourceDocumentKey,
+    SourceDocumentKind, UnavailableRecordManifest, UnavailableRecordManifestEntry,
 };
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentId, EditorDocumentKind,
@@ -41,8 +47,10 @@ use nara_tooling::{
 const COMPONENT: &str = "consumer.property.Settings";
 const FUTURE: &str = "consumer.property.Future";
 const UNKNOWN: &str = "consumer.unknown.Opaque";
+const LINKS: &str = "consumer.property.Links";
 const SCENE: &str = "scenes/startup.scene.json";
 const PREFAB: &str = "prefabs/settings.prefab.json";
+const BASE_PREFAB: &str = "prefabs/base.prefab.json";
 const MAP_KEY: &str = "literal.key[0]";
 
 fn id(value: &str) -> SceneEntityId {
@@ -110,6 +118,20 @@ fn bundle() -> AuthoringSchemaBundle {
                     ComponentValueKind::String,
                 )
                 .with_capabilities(ComponentCapability::SCENE_AUTHORING)]),
+                ComponentSchema::new(
+                    ComponentTypeId::new(LINKS),
+                    "Links",
+                    ComponentSchemaVersion::ONE,
+                )
+                .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                .with_fields([ComponentFieldSchema::required(
+                    ComponentFieldId::new("target"),
+                    "Target",
+                    ComponentFieldPath::from_fields(["target"]),
+                    ComponentValueKind::EntityRef,
+                )
+                .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                .with_capability(ComponentCapability::EntityRef)]),
             ],
             ..Default::default()
         },
@@ -226,12 +248,99 @@ fn patch(root: ComponentValue) -> ScenePatchDocument {
     }])
 }
 
-fn instance_patch(expected: Option<PrefabInstance>, value: Option<PrefabInstance>) -> ScenePatchDocument {
+fn instance_patch(
+    expected: Option<PrefabInstance>,
+    value: Option<PrefabInstance>,
+) -> ScenePatchDocument {
     ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
         entity: id("actor"),
         expected,
         value,
     }])
+}
+
+fn base_prefab_resolver() -> InMemoryPrefabSourceResolver {
+    // Match the fixture project's explicit project_location policy. Lookup requests are
+    // supplied separately; callers obtain an overlay base only from this actual resolver.
+    let key = SourceDocumentKey::project_location(
+        "2b67ec37-1dd4-550f-8956-6424db6ffd3b".parse().unwrap(),
+        AssetPath::new(BASE_PREFAB).unwrap(),
+        SourceDocumentKind::Prefab,
+    );
+    let prefab = PrefabDocument::from_ordered_roots([
+        SceneEntityRecord::new(id("actor")).with_component(
+            ComponentTypeId::new(COMPONENT),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([("payload", initial())]),
+            )
+            .with_owner(PersistentComponentSchemaOwnerId::try_new("consumer.property").unwrap()),
+        ),
+        SceneEntityRecord::new(id("observer")),
+    ]);
+    InMemoryPrefabSourceResolver::new().with_prefab(
+        AssetRef::path(BASE_PREFAB).unwrap(),
+        key,
+        prefab,
+    )
+}
+
+fn instance_declaration(root: ComponentValue) -> PrefabInstance {
+    let source = AssetRef::path(BASE_PREFAB).unwrap();
+    let resolved = base_prefab_resolver().resolve_prefab(&source).unwrap();
+    let mut overlay = PrefabOverlay::new(resolved.key().clone());
+    overlay.components.push(PrefabComponentIntent::Properties {
+        target: PrefabEntityTarget::source(id("actor")),
+        component: ComponentTypeId::new(COMPONENT),
+        version: ComponentSchemaVersion::ONE,
+        claims: vec![PrefabPropertyClaim {
+            path: ComponentPropertyPath::new(ComponentFieldId::new("settings")),
+            intent: PrefabPropertyIntent::Set(root),
+            bindings: Vec::new(),
+        }],
+    });
+    let mut addition = PrefabAddition::new(id("nested"));
+    addition.prefab = Some(PrefabInstance {
+        source: source.clone(),
+        overrides: None,
+    });
+    addition.components.insert(
+        ComponentTypeId::new(LINKS),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::map([(
+                "target",
+                ComponentValue::EntityReference(EntityReference::SceneLocal {
+                    entity: id("actor"),
+                }),
+            )]),
+        )
+        .with_owner(PersistentComponentSchemaOwnerId::try_new("consumer.property").unwrap()),
+    );
+    addition.bindings.insert(
+        ComponentTypeId::new(LINKS),
+        vec![PrefabReferenceBinding {
+            slot: ComponentFieldPath::from_fields(["target"]),
+            expected: id("actor"),
+            target: PrefabEntityTarget {
+                through: vec![PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::InstanceAddition(id("nested")),
+                    expected_base: resolved.key().clone(),
+                }],
+                entity: PrefabEntityOrigin::SourceEntity(id("actor")),
+            },
+        }],
+    );
+    overlay.additions.push(addition);
+    overlay.placements.push(PrefabPlacement {
+        target: PrefabEntityTarget::addition(id("nested")),
+        parent: PrefabPlacementParent::Root,
+        slot: PrefabPlacementSlot::Last,
+    });
+    PrefabInstance {
+        source,
+        overrides: Some(overlay),
+    }
 }
 
 #[derive(bevy_ecs::prelude::Component)]
@@ -897,15 +1006,8 @@ fn inactive_source_instance_attach_replace_and_detach_preserve_local_records_and
             (prefab, scene)
         };
 
-        // No base file exists: this exercises source intent, not nested preview or expansion.
-        let first = PrefabInstance {
-            source: AssetRef::path("prefabs/not-installed.prefab.json").unwrap(),
-            overrides: patch(settings(70, 80, "a", 1, "base override")),
-        };
-        let replacement = PrefabInstance {
-            overrides: patch(settings(71, 80, "a", 1, "replacement override")),
-            ..first.clone()
-        };
+        let first = instance_declaration(settings(70, 80, "a", 1, "base override"));
+        let replacement = instance_declaration(settings(71, 80, "a", 1, "replacement override"));
         let mut previous = None;
         for value in [Some(first), Some(replacement), None] {
             assert_applied(dispatch(
@@ -924,6 +1026,38 @@ fn inactive_source_instance_attach_replace_and_detach_preserve_local_records_and
             let basis = revision(&editor, document);
             let change = instance_patch(previous.clone(), value.clone());
             let inverse = instance_patch(value.clone(), previous.clone());
+            if let Some(prior) = previous.as_ref() {
+                let mut wrong_owner = prior.clone();
+                wrong_owner.overrides.as_mut().unwrap().additions[0]
+                    .components
+                    .get_mut(&ComponentTypeId::new(LINKS))
+                    .unwrap()
+                    .owner =
+                    Some(PersistentComponentSchemaOwnerId::try_new("consumer.other").unwrap());
+                let mut wrong_binding = prior.clone();
+                wrong_binding.overrides.as_mut().unwrap().additions[0]
+                    .bindings
+                    .get_mut(&ComponentTypeId::new(LINKS))
+                    .unwrap()[0]
+                    .target
+                    .entity = PrefabEntityOrigin::SourceEntity(id("observer"));
+                for wrong in [wrong_owner, wrong_binding] {
+                    let rejection = editor
+                        .prepare_authoring_edit(
+                            document,
+                            basis,
+                            &instance_patch(Some(wrong), value.clone()),
+                        )
+                        .unwrap_err();
+                    let EditorEditPreparationError::Document(report) = rejection else {
+                        panic!("{rejection:?}");
+                    };
+                    assert!(report.diagnostics.iter().any(|diagnostic| {
+                        diagnostic.code().as_str() == "scene.patch-prefab-instance-context-mismatch"
+                    }));
+                }
+                assert_eq!(editor.current_frame().workspace(), before.workspace());
+            }
             let cancelled = editor
                 .prepare_authoring_edit(document, basis, &change)
                 .unwrap();
@@ -961,7 +1095,12 @@ fn inactive_source_instance_attach_replace_and_detach_preserve_local_records_and
                 before.workspace().document(active)
             );
             assert_eq!(
-                committed.workspace().document(document).unwrap().history.undo_depth,
+                committed
+                    .workspace()
+                    .document(document)
+                    .unwrap()
+                    .history
+                    .undo_depth,
                 1
             );
             for redo in [false, true] {
@@ -996,8 +1135,18 @@ fn inactive_source_instance_attach_replace_and_detach_preserve_local_records_and
                     before.workspace().document(active)
                 );
                 assert_eq!(
-                    frame.workspace().documents.iter().map(|tab| tab.document).collect::<Vec<_>>(),
-                    before.workspace().documents.iter().map(|tab| tab.document).collect::<Vec<_>>()
+                    frame
+                        .workspace()
+                        .documents
+                        .iter()
+                        .map(|tab| tab.document)
+                        .collect::<Vec<_>>(),
+                    before
+                        .workspace()
+                        .documents
+                        .iter()
+                        .map(|tab| tab.document)
+                        .collect::<Vec<_>>()
                 );
                 let target = frame.workspace().document(document).unwrap();
                 assert_eq!(target.history.undo_depth, usize::from(redo));
@@ -1043,16 +1192,22 @@ fn inactive_source_instance_attach_replace_and_detach_preserve_local_records_and
 }
 
 #[test]
-fn exact_instance_mismatch_is_atomic_and_unknown_override_records_cannot_be_detached() {
+fn exact_instance_mismatch_is_atomic_and_unknown_override_repair_has_exact_history() {
     let project = Project::new();
     let mut local = records(initial());
+    let source = AssetRef::path(BASE_PREFAB).unwrap();
+    let resolved = base_prefab_resolver().resolve_prefab(&source).unwrap();
+    let mut overlay = PrefabOverlay::new(resolved.key().clone());
+    overlay.components.push(PrefabComponentIntent::Set {
+        mode: PrefabComponentSetMode::Add,
+        target: PrefabEntityTarget::source(id("actor")),
+        component: ComponentTypeId::new(UNKNOWN),
+        record: local[0].components[&ComponentTypeId::new(UNKNOWN)].clone(),
+        bindings: Vec::new(),
+    });
     let declaration = PrefabInstance {
-        source: AssetRef::path("prefabs/not-installed.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::new([ScenePatchOperation::AddComponent {
-            entity: id("base-node"),
-            component: ComponentTypeId::new(UNKNOWN),
-            value: local[0].components[&ComponentTypeId::new(UNKNOWN)].clone(),
-        }]),
+        source: source.clone(),
+        overrides: Some(overlay),
     };
     local[0].prefab = Some(declaration.clone());
     let mut expected = SceneDocument::from_ordered_roots(local);
@@ -1072,7 +1227,13 @@ fn exact_instance_mismatch_is_atomic_and_unknown_override_records_cannot_be_deta
         entry,
         UnavailableRecordManifestEntry::Record(record)
             if record.component().as_str() == UNKNOWN
-                && matches!(record.location(), AuthoringRecordLocation::PatchComponent { anchor, .. } if anchor == &id("actor"))
+                && matches!(record.location(), AuthoringRecordLocation::OverlayComponent {
+                    anchor, overlays, slot: AuthoringOverlayRecordSlot::Component { index: 0 }, target,
+                } if anchor == &id("actor")
+                    && target == &PrefabEntityTarget::source(id("actor"))
+                    && matches!(overlays.as_slice(), [AuthoringOverlayPathSegment::Root {
+                        source: request, base,
+                    }] if request == &source && base == resolved.key()))
     )));
     assert_applied(dispatch(
         &mut editor,
@@ -1088,15 +1249,15 @@ fn exact_instance_mismatch_is_atomic_and_unknown_override_records_cannot_be_deta
             .unwrap(),
     );
     let wrong = PrefabInstance {
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
         ..declaration.clone()
     };
     assert_eq!(wrong.source, declaration.source);
     assert_ne!(wrong.overrides, declaration.overrides);
     let mut failing = prefix.clone();
-    failing.operations.extend(
-        instance_patch(Some(wrong.clone()), Some(declaration.clone())).operations,
-    );
+    failing
+        .operations
+        .extend(instance_patch(Some(wrong.clone()), Some(declaration.clone())).operations);
     let rejection = editor
         .prepare_authoring_edit(prefab, basis, &failing)
         .unwrap_err();
@@ -1107,19 +1268,16 @@ fn exact_instance_mismatch_is_atomic_and_unknown_override_records_cannot_be_deta
         diagnostic.code().as_str() == "scene.patch-prefab-instance-context-mismatch"
     }));
     for value in [None, Some(wrong)] {
-        let rejection = editor
-            .prepare_authoring_edit(
-                prefab,
-                basis,
-                &instance_patch(Some(declaration.clone()), value),
-            )
-            .unwrap_err();
-        let EditorEditPreparationError::Document(report) = rejection else {
-            panic!("{rejection:?}")
-        };
-        assert!(report.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code().as_str() == "scene.authoring-structure-unavailable"
-        }));
+        let repair = instance_patch(Some(declaration.clone()), value.clone());
+        let prepared = editor
+            .prepare_authoring_edit(prefab, basis, &repair)
+            .unwrap();
+        assert_eq!(prepared.patch(), &repair);
+        assert_eq!(
+            prepared.inverse(),
+            &instance_patch(value, Some(declaration.clone()))
+        );
+        drop(prepared);
     }
     editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(editor.current_frame().workspace(), before.workspace());
@@ -1142,7 +1300,12 @@ fn exact_instance_mismatch_is_atomic_and_unknown_override_records_cannot_be_deta
         before.workspace().document(scene)
     );
     assert_eq!(
-        committed.workspace().document(prefab).unwrap().history.undo_depth,
+        committed
+            .workspace()
+            .document(prefab)
+            .unwrap()
+            .history
+            .undo_depth,
         1
     );
     assert_applied(dispatch(
@@ -1159,6 +1322,54 @@ fn exact_instance_mismatch_is_atomic_and_unknown_override_records_cannot_be_deta
         .unwrap()
         .value = ComponentValue::map([("payload", changed)]);
     save_and_reopen(&mut editor, &project, PREFAB, &expected, &manifest);
+    let repair = instance_patch(Some(declaration.clone()), None);
+    let prepared = editor
+        .prepare_authoring_edit(prefab, revision(&editor, prefab), &repair)
+        .unwrap();
+    assert_eq!(
+        prepared.inverse(),
+        &instance_patch(None, Some(declaration.clone()))
+    );
+    assert_applied(editor.commit_authoring_edit(prepared));
+    editor.drive_editor_frame(Duration::ZERO);
+    let base_revision = revision(&editor, prefab);
+    assert_applied(dispatch(
+        &mut editor,
+        EditorAction::Mutate(EditorDocumentMutation::Undo {
+            document: prefab,
+            base_revision,
+        }),
+    ));
+    assert_eq!(
+        editor.active_authoring_unavailable_record_manifest(),
+        Some(&manifest)
+    );
+    // Exact comparison also observes the restored owner/version/payload, not just the lookup.
+    drop(
+        editor
+            .prepare_authoring_edit(prefab, revision(&editor, prefab), &repair)
+            .unwrap(),
+    );
+    let base_revision = revision(&editor, prefab);
+    assert_applied(dispatch(
+        &mut editor,
+        EditorAction::Mutate(EditorDocumentMutation::Redo {
+            document: prefab,
+            base_revision,
+        }),
+    ));
+    expected
+        .entities
+        .iter_mut()
+        .find(|row| row.id == id("actor"))
+        .unwrap()
+        .prefab = None;
+    let repaired_manifest = editor
+        .active_authoring_unavailable_record_manifest()
+        .unwrap()
+        .clone();
+    assert_eq!(repaired_manifest.total_count(), 2);
+    save_and_reopen(&mut editor, &project, PREFAB, &expected, &repaired_manifest);
     close_editor(&mut editor);
 }
 
@@ -1367,10 +1578,7 @@ fn save_and_reopen(
     };
     assert_eq!(actual.as_bytes(), source_bytes(source, expected));
     assert_ne!(bytes, project.original(source));
-    assert_eq!(
-        editor.active_authoring_unavailable_record_manifest(),
-        Some(manifest)
-    );
+    assert_preserved_source_manifest(editor, expected, manifest);
     let attempt = editor
         .current_frame()
         .persistence()
@@ -1406,22 +1614,55 @@ fn save_and_reopen(
         EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
     );
     select(editor, document, "actor");
-    let actor = expected.entities.iter().find(|row| row.id == id("actor")).unwrap();
+    let actor = expected
+        .entities
+        .iter()
+        .find(|row| row.id == id("actor"))
+        .unwrap();
     let expected_root = actor.components[&ComponentTypeId::new(COMPONENT)]
         .value
         .get_path(&ComponentFieldPath::from_fields(["payload"]))
         .unwrap();
     assert_eq!(&root(editor), expected_root);
-    assert_eq!(
-        editor.active_authoring_unavailable_record_manifest(),
-        Some(manifest)
-    );
+    assert_preserved_source_manifest(editor, expected, manifest);
     let frame = editor.current_frame();
     let tab = frame.workspace().document(document).unwrap();
     assert!(!tab.dirty);
     assert_eq!(tab.history.undo_depth, 0);
     assert_eq!(tab.history.redo_depth, 0);
     assert_ne!(tab.revision, base_revision);
+}
+
+fn assert_preserved_source_manifest(
+    editor: &EditorProjectSession,
+    expected: &SceneDocument,
+    previous: &UnavailableRecordManifest,
+) {
+    let actual = editor
+        .active_authoring_unavailable_record_manifest()
+        .unwrap();
+    assert_eq!(actual.record_count(), previous.record_count());
+    assert_eq!(
+        actual.overlay_target_count(),
+        previous.overlay_target_count()
+    );
+    assert_eq!(actual.entries(), previous.entries());
+    // The unavailable records stay exact; the declaration inventory follows accepted source edits.
+    assert_eq!(
+        actual
+            .overlay_declarations()
+            .collect::<std::collections::BTreeMap<_, _>>(),
+        expected
+            .entities
+            .iter()
+            .filter_map(|record| {
+                record
+                    .prefab
+                    .as_ref()
+                    .map(|instance| (&record.id, instance))
+            })
+            .collect::<std::collections::BTreeMap<_, _>>(),
+    );
 }
 
 fn source_bytes(source: &str, document: &SceneDocument) -> Vec<u8> {
@@ -1482,6 +1723,14 @@ impl Project {
         )
         .unwrap();
         let project = Self { root };
+        let base = base_prefab_resolver()
+            .resolve_prefab(&AssetRef::path(BASE_PREFAB).unwrap())
+            .unwrap();
+        fs::write(
+            project.root.join(BASE_PREFAB),
+            base.document().to_json_string().unwrap(),
+        )
+        .unwrap();
         for source in [SCENE, PREFAB] {
             fs::write(project.root.join(source), project.original(source)).unwrap();
         }

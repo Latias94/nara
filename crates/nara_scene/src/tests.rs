@@ -609,7 +609,7 @@ fn unsupported_prefab_instance_prevents_world_mutation() {
         components: BTreeMap::new(),
         prefab: Some(PrefabInstance {
             source: AssetRef::path("prefabs/enemy.ron").unwrap(),
-            overrides: ScenePatchDocument::default(),
+            overrides: None,
         }),
     }]);
     let mut world = World::new();
@@ -693,22 +693,29 @@ fn scene_prefab_resolver_expands_one_level_instance_before_spawn() {
 }
 
 #[test]
-fn prefab_instance_override_patch_applies_before_projection() {
+fn prefab_instance_property_pin_applies_before_projection() {
     let registry = test_registry();
     let source = AssetRef::path("prefabs/enemy.ron").unwrap();
+    let base_key = named_prefab_source_key("property-pin-base");
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
-        crate::tests::prefab_source_key(&source),
+        base_key.clone(),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("visual"))
             .with_component(position_type_id(), position_record(3))]),
     );
-    let overrides = ScenePatchDocument::new([ScenePatchOperation::SetField {
-        entity: scene_id("visual"),
-        component: position_type_id(),
-        component_version: ComponentSchemaVersion(1),
-        field: ComponentFieldId::new("x"),
-        value: ComponentValue::I64(11),
-    }]);
+    let mut overrides = PrefabOverlay::new(base_key);
+    overrides
+        .components
+        .push(PrefabComponentIntent::Properties {
+            target: PrefabEntityTarget::source(scene_id("visual")),
+            component: position_type_id(),
+            version: ComponentSchemaVersion::ONE,
+            claims: vec![PrefabPropertyClaim {
+                path: nara_reflect::ComponentPropertyPath::new(ComponentFieldId::new("x")),
+                intent: PrefabPropertyIntent::Set(ComponentValue::I64(11)),
+                bindings: vec![],
+            }],
+        });
     let document = SceneDocument::from_ordered_roots([prefab_anchor_with_overrides(
         "enemy", source, overrides,
     )]);
@@ -739,6 +746,7 @@ fn prefab_instance_override_patch_applies_before_projection() {
 fn prefab_instance_override_preserves_ordered_placement_before_projection() {
     let registry = test_registry();
     let source = AssetRef::path("prefabs/ordered-overrides.ron").unwrap();
+    let base_key = named_prefab_source_key("ordered-override-base");
     let root_a = scene_id("root-a");
     let root_b = scene_id("root-b");
     let root_c = scene_id("root-c");
@@ -756,34 +764,27 @@ fn prefab_instance_override_preserves_ordered_placement_before_projection() {
             SceneEntityRecord::new(child_b.clone()),
         ],
     );
-    let overrides = ScenePatchDocument::new([
-        ScenePatchOperation::MoveEntity {
-            entity: root_b.clone(),
-            from: ScenePlacement::after(ScenePlacementOwner::Root, root_a.clone()),
-            to: ScenePlacement::first(ScenePlacementOwner::Root),
+    let mut overrides = PrefabOverlay::new(base_key.clone());
+    overrides.additions.push(PrefabAddition::new(added.clone()));
+    overrides.placements = vec![
+        PrefabPlacement {
+            target: PrefabEntityTarget::source(root_b.clone()),
+            parent: PrefabPlacementParent::Root,
+            slot: PrefabPlacementSlot::First,
         },
-        ScenePatchOperation::AddEntity {
-            entity: SceneEntityRecord::new(added.clone()),
-            placement: ScenePlacement::after(ScenePlacementOwner::Root, root_b),
+        PrefabPlacement {
+            target: PrefabEntityTarget::addition(added),
+            parent: PrefabPlacementParent::Root,
+            slot: PrefabPlacementSlot::After(PrefabEntityTarget::source(root_b)),
         },
-        ScenePatchOperation::MoveEntity {
-            entity: child_b.clone(),
-            from: ScenePlacement::after(
-                ScenePlacementOwner::Parent {
-                    parent: root_a.clone(),
-                },
-                child_a,
-            ),
-            to: ScenePlacement::first(ScenePlacementOwner::Parent {
-                parent: root_a.clone(),
-            }),
+        PrefabPlacement {
+            target: PrefabEntityTarget::source(child_b),
+            parent: PrefabPlacementParent::Entity(PrefabEntityTarget::source(root_a)),
+            slot: PrefabPlacementSlot::First,
         },
-    ]);
-    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
-        source.clone(),
-        crate::tests::prefab_source_key(&source),
-        prefab,
-    );
+    ];
+    let resolver =
+        InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), base_key, prefab);
     let document = SceneDocument::from_ordered_roots([prefab_anchor_with_overrides(
         "instance", source, overrides,
     )]);
@@ -1481,10 +1482,8 @@ fn prefab_reference_remap_rejects_a_target_outside_its_source_document() {
             && diagnostic_has_text_field(diagnostic, "entity-id", "source")
     }));
     assert_eq!(
-        resolver
-            .resolve_prefab(&source)
-            .map(ResolvedPrefabSource::document),
-        Some(&prefab)
+        resolver.resolve_prefab(&source).unwrap().document(),
+        &prefab
     );
 }
 
@@ -1536,6 +1535,47 @@ fn prefab_expansion_budgets_mapped_reference_value_growth_before_publication() {
             && diagnostic_has_u64_field(diagnostic, "observed", expected_bytes as u64)
             && diagnostic_has_u64_field(diagnostic, "maximum", (expected_bytes - 1) as u64)
     }));
+}
+
+#[test]
+fn prefab_reference_identifier_budget_failure_keeps_its_typed_budget_kind() {
+    let registry = entity_link_registry();
+    let source = AssetRef::path("prefabs/self-link.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        prefab_source_key(&source),
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("x")).with_component(
+            entity_link_type_id(),
+            entity_link_record(EntityReference::SceneLocal {
+                entity: scene_id("x"),
+            }),
+        )]),
+    );
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
+    // One generated ID fits; copying it into the surviving self-reference crosses the limit.
+    let report = document.expand_prefabs_with_options(
+        &registry,
+        &resolver,
+        PrefabExpansionOptions::default().with_limits(
+            PrefabExpansionLimits::default()
+                .with_generated_identifier_bytes(ByteLimit::new(15).unwrap()),
+        ),
+    );
+    assert!(report.candidate.is_none());
+    assert!(
+        report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.prefab-expansion-budget-exceeded"
+                && diagnostic_has_text_field(
+                    diagnostic,
+                    "budget-kind",
+                    "generated-identifier-bytes",
+                )
+                && diagnostic_has_u64_field(diagnostic, "observed", 16)
+                && diagnostic_has_u64_field(diagnostic, "maximum", 15)
+        }),
+        "{:?}",
+        report.diagnostics
+    );
 }
 
 #[test]
@@ -1856,36 +1896,39 @@ fn prefab_expansion_component_and_instance_budgets_are_independent() {
 }
 
 #[test]
-fn prefab_expansion_counts_override_operations_per_instance() {
+fn prefab_expansion_counts_overlay_declarations_per_instance() {
     let registry = test_registry();
     let source = AssetRef::path("prefabs/unit.ron").unwrap();
+    let base_key = named_prefab_source_key("overlay-declaration-budget-base");
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
-        crate::tests::prefab_source_key(&source),
+        base_key.clone(),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("body"))
             .with_component(position_type_id(), position_record(1))]),
     );
-    let overrides = ScenePatchDocument::new([ScenePatchOperation::SetField {
-        entity: scene_id("body"),
-        component: position_type_id(),
-        component_version: ComponentSchemaVersion::ONE,
-        field: ComponentFieldId::new("x"),
-        value: ComponentValue::I64(2),
-    }]);
+    let overrides = PrefabOverlay::new(base_key);
     let document = SceneDocument::from_ordered_roots([
         prefab_anchor_with_overrides("left", source.clone(), overrides.clone()),
         prefab_anchor_with_overrides("right", source, overrides),
     ]);
-    let options = PrefabExpansionOptions::default().with_limits(
-        PrefabExpansionLimits::default().with_applied_patch_operations(ItemLimit::ONE),
+    let options = PrefabExpansionOptions::default()
+        .with_limits(PrefabExpansionLimits::default().with_overlay_declarations(ItemLimit::ONE));
+
+    let inclusive = document.expand_prefabs_with_options(
+        &registry,
+        &resolver,
+        PrefabExpansionOptions::default().with_limits(
+            PrefabExpansionLimits::default().with_overlay_declarations(ItemLimit::new(2).unwrap()),
+        ),
     );
+    assert!(inclusive.candidate.is_some(), "{:?}", inclusive.diagnostics);
 
     let expansion = document.expand_prefabs_with_options(&registry, &resolver, options);
 
     assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
-        diagnostic_has_text_field(diagnostic, "budget-kind", "applied-patch-operations")
-            && diagnostic_has_u64_field(diagnostic, "observed", 2)
+        diagnostic_has_text_field(diagnostic, "budget-kind", "overlay-declarations")
+            && diagnostic_has_text_field(diagnostic, "entity-id", "right")
             && diagnostic_has_u64_field(diagnostic, "maximum", 1)
     }));
 }
@@ -5226,15 +5269,6 @@ fn coupled_field_scene_patch_validates_only_the_final_native_value() {
         assert_ne!(session.revision(), revision);
         assert!(session.undo(&registry).applied);
         assert_eq!(session.document(), &source);
-
-        let mut unpublished = source.clone();
-        let report = patch.apply_owned_to_unpublished_scene(&mut unpublished, &registry);
-        assert!(report.applied, "{:?}", report.diagnostics);
-        assert!(report.inverse.is_none());
-        assert_eq!(
-            unpublished,
-            SceneDocument::from_ordered_roots([coupled_fields_entity(2, 2)])
-        );
     }
 }
 
@@ -5482,7 +5516,7 @@ fn patch_validation_failure_preserves_sticky_pressure_stats_and_operation_contex
 }
 
 #[test]
-fn unpublished_patch_path_returns_no_inverse_and_canonicalizes_empty_patch() {
+fn empty_source_patch_canonicalizes_storage_preserves_root_order_and_has_an_empty_inverse() {
     let registry = test_registry();
     let mut document = SceneDocument {
         roots: vec![scene_id("z"), scene_id("a")],
@@ -5492,12 +5526,12 @@ fn unpublished_patch_path_returns_no_inverse_and_canonicalizes_empty_patch() {
         ],
     };
 
-    let report =
-        ScenePatchDocument::default().apply_owned_to_unpublished_scene(&mut document, &registry);
+    let report = ScenePatchDocument::default().apply_to_scene(&mut document, &registry);
 
     assert!(report.applied);
-    assert!(report.inverse.is_none());
+    assert!(report.inverse.unwrap().is_empty());
     assert!(!report.diagnostics.has_errors());
+    assert_eq!(document.roots, [scene_id("z"), scene_id("a")]);
     assert_eq!(
         document
             .entities
@@ -5509,27 +5543,27 @@ fn unpublished_patch_path_returns_no_inverse_and_canonicalizes_empty_patch() {
 }
 
 #[test]
-fn owned_unpublished_patch_moves_component_payload_into_candidate() {
+fn source_patch_preserves_its_component_payload_and_undo_restores_the_source() {
     let mut registry = ComponentRegistry::new();
     register_scene_components(&mut registry).unwrap();
     registry.freeze().unwrap();
     let entity_id = scene_id("named");
-    let payload = "owned-prefab-override-payload".repeat(128);
-    let payload_pointer = payload.as_ptr();
+    let payload = "exact-source-patch-payload".repeat(128);
     let patch = ScenePatchDocument::new([ScenePatchOperation::AddComponent {
         entity: entity_id.clone(),
         component: ComponentTypeId::new("nara.scene.Name"),
         value: SceneComponentRecord::new(
             ComponentSchemaVersion::ONE,
-            ComponentValue::String(payload),
+            ComponentValue::String(payload.clone()),
         ),
     }]);
     let mut document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(entity_id)]);
+    let source = document.clone();
+    let retained_patch = patch.clone();
 
-    let report = patch.apply_owned_to_unpublished_scene(&mut document, &registry);
+    let report = patch.apply_to_scene(&mut document, &registry);
 
     assert!(report.applied);
-    assert!(report.inverse.is_none());
     let stored = document.entities[0]
         .components
         .get(&ComponentTypeId::new("nara.scene.Name"))
@@ -5537,11 +5571,18 @@ fn owned_unpublished_patch_moves_component_payload_into_candidate() {
         .value
         .as_str()
         .unwrap();
-    assert_eq!(stored.as_ptr(), payload_pointer);
+    assert_eq!(stored, payload);
+    assert_eq!(patch, retained_patch);
+    let reverted = report
+        .inverse
+        .unwrap()
+        .apply_to_scene(&mut document, &registry);
+    assert!(reverted.applied, "{:?}", reverted.diagnostics);
+    assert_eq!(document, source);
 }
 
 #[test]
-fn unpublished_patch_failure_isolated_from_public_atomic_patch_contract() {
+fn final_source_patch_failure_publishes_no_intermediate_value_or_inverse() {
     let registry = test_registry();
     let source = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("enemy"))
         .with_component(position_type_id(), position_record(1))]);
@@ -5561,41 +5602,21 @@ fn unpublished_patch_failure_isolated_from_public_atomic_patch_contract() {
             value: ComponentValue::I64(12),
         },
     ]);
-    let public_patch = patch.clone();
-    let mut unpublished = source.clone();
-
-    let unpublished_report = patch.apply_owned_to_unpublished_scene(&mut unpublished, &registry);
-
-    assert!(!unpublished_report.applied);
-    assert!(unpublished_report.inverse.is_none());
-    assert_eq!(
-        unpublished.entities[0]
-            .components
-            .get(&position_type_id())
-            .unwrap()
-            .value
-            .field_i64("x")
-            .unwrap(),
-        9
-    );
-
-    let mut published = source;
-    let published_report = public_patch.apply_to_scene(&mut published, &registry);
-    assert!(!published_report.applied);
-    assert_eq!(
-        published.entities[0]
-            .components
-            .get(&position_type_id())
-            .unwrap()
-            .value
-            .field_i64("x")
-            .unwrap(),
-        1
-    );
+    let retained_patch = patch.clone();
+    let mut document = source.clone();
+    let report = patch.apply_to_scene(&mut document, &registry);
+    assert!(!report.applied);
+    assert!(report.inverse.is_none());
+    assert_eq!(document, source);
+    assert_eq!(patch, retained_patch);
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.patch-missing-entity"
+            && diagnostic_has_u64_field(diagnostic, "operation-index", 1)
+    }));
 }
 
 #[test]
-fn owned_unpublished_patch_matches_public_apply_for_supported_operations() {
+fn exact_source_patch_composes_supported_operations_and_inverse_restores_the_whole_source() {
     let registry = test_registry();
     let source = SceneDocument::new(
         [
@@ -5655,17 +5676,31 @@ fn owned_unpublished_patch_matches_public_apply_for_supported_operations() {
             from: ScenePlacement::after(ScenePlacementOwner::Root, scene_id("editable")),
         },
     ]);
-    let mut published = source.clone();
-    let mut unpublished = source;
-
-    let public_report = patch.apply_to_scene(&mut published, &registry);
-    let owned_report = patch.apply_owned_to_unpublished_scene(&mut unpublished, &registry);
-
-    assert!(public_report.applied);
-    assert!(public_report.inverse.is_some());
-    assert!(owned_report.applied, "{:?}", owned_report.diagnostics);
-    assert!(owned_report.inverse.is_none());
-    assert_eq!(unpublished, published);
+    let mut document = source.clone();
+    let report = patch.apply_to_scene(&mut document, &registry);
+    assert!(report.applied, "{:?}", report.diagnostics);
+    assert_eq!(
+        document,
+        SceneDocument::new(
+            [scene_id("root"), scene_id("editable"), scene_id("added")],
+            [
+                SceneEntityRecord::new(scene_id("root"))
+                    .with_children([scene_id("empty")])
+                    .with_component(position_type_id(), position_record(6)),
+                SceneEntityRecord::new(scene_id("editable"))
+                    .with_component(position_type_id(), position_record(5)),
+                SceneEntityRecord::new(scene_id("added"))
+                    .with_component(position_type_id(), position_record(3)),
+                SceneEntityRecord::new(scene_id("empty")),
+            ],
+        )
+    );
+    let reverted = report
+        .inverse
+        .unwrap()
+        .apply_to_scene(&mut document, &registry);
+    assert!(reverted.applied, "{:?}", reverted.diagnostics);
+    assert_eq!(document, source);
 }
 
 #[test]
@@ -5673,17 +5708,15 @@ fn failed_nested_prefab_override_does_not_poison_a_sibling_source_expansion() {
     let registry = test_registry();
     let inner_source = AssetRef::path("prefabs/inner.ron").unwrap();
     let outer_source = AssetRef::path("prefabs/outer.ron").unwrap();
-    let invalid_override = ScenePatchDocument::new([ScenePatchOperation::SetField {
-        entity: scene_id("missing"),
-        component: position_type_id(),
-        component_version: ComponentSchemaVersion::ONE,
-        field: ComponentFieldId::new("x"),
-        value: ComponentValue::I64(9),
-    }]);
+    let inner_key = named_prefab_source_key("nested-conflict-inner");
+    let mut invalid_override = PrefabOverlay::new(inner_key.clone());
+    invalid_override
+        .suppressions
+        .push(PrefabEntityTarget::source(scene_id("missing")));
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             inner_source.clone(),
-            crate::tests::prefab_source_key(&inner_source),
+            inner_key,
             PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("target"))]),
         )
         .with_prefab(
@@ -5703,7 +5736,7 @@ fn failed_nested_prefab_override_does_not_poison_a_sibling_source_expansion() {
         expansion
             .diagnostics
             .iter()
-            .any(|diagnostic| { diagnostic.code().as_str() == "scene.patch-missing-entity" })
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.prefab-overlay-conflict" })
     );
     assert!(
         !expansion
@@ -6570,19 +6603,30 @@ fn prefab_projection_id<'a>(
 }
 
 fn prefab_anchor(id: &str, source: AssetRef) -> SceneEntityRecord {
-    prefab_anchor_with_overrides(id, source, ScenePatchDocument::default())
+    SceneEntityRecord {
+        id: scene_id(id),
+        children: Vec::new(),
+        components: BTreeMap::new(),
+        prefab: Some(PrefabInstance {
+            source,
+            overrides: None,
+        }),
+    }
 }
 
 fn prefab_anchor_with_overrides(
     id: &str,
     source: AssetRef,
-    overrides: ScenePatchDocument,
+    overrides: PrefabOverlay,
 ) -> SceneEntityRecord {
     SceneEntityRecord {
         id: scene_id(id),
         children: Vec::new(),
         components: BTreeMap::new(),
-        prefab: Some(PrefabInstance { source, overrides }),
+        prefab: Some(PrefabInstance {
+            source,
+            overrides: Some(overrides),
+        }),
     }
 }
 
@@ -6651,7 +6695,7 @@ pub(crate) fn scene_occurrence(slot: &str) -> crate::SceneOccurrenceKey {
     crate::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
 }
 
-fn named_prefab_source_key(name: &str) -> crate::SourceDocumentKey {
+pub(crate) fn named_prefab_source_key(name: &str) -> crate::SourceDocumentKey {
     crate::SourceDocumentKey::named(
         "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
         name,

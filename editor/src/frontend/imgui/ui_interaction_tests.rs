@@ -16,7 +16,6 @@ use nara::{
     render::DisplayRect,
     scene::{
         PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
-        ScenePatchDocument,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorCloseDecision, EditorFrameModel,
@@ -132,7 +131,7 @@ impl UiProject {
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("ui-anchor").unwrap());
         anchor.prefab = Some(PrefabInstance {
             source: AssetRef::path("ui.prefab.json").unwrap(),
-            overrides: ScenePatchDocument::default(),
+            overrides: None,
         });
         // A real startup Sprite loads this catalog image through the trusted project's normal bootstrap.
         let sprite = SceneEntityRecord::new(SceneEntityId::new("image-source").unwrap())

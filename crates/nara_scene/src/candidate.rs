@@ -34,6 +34,28 @@ pub struct ExpandedSceneDocument {
 }
 
 impl ExpandedSceneDocument {
+    /// Filters only component presentation in an exclusively owned compiler result.
+    /// Entity identity, hierarchy and provenance remain paired with the original expansion.
+    #[cfg(feature = "serde")]
+    pub(crate) fn remove_compiler_components<'a>(
+        mut self,
+        removals: impl IntoIterator<
+            Item = (&'a crate::SceneEntityId, &'a nara_reflect::ComponentTypeId),
+        >,
+    ) -> Self {
+        let document = Arc::get_mut(&mut self.document)
+            .expect("a move-only compiler result owns its document allocation exclusively");
+        for (entity, component) in removals {
+            if let Ok(index) = document
+                .entities
+                .binary_search_by(|record| record.id.cmp(entity))
+            {
+                document.entities[index].components.remove(component);
+            }
+        }
+        self
+    }
+
     /// Retains a plain scene without copying its document allocation.
     ///
     /// Component, hierarchy and reference admission still occur when materializing the document.
@@ -287,7 +309,7 @@ mod tests {
         let mut anchor = SceneEntityRecord::new(id("anchor"));
         anchor.prefab = Some(PrefabInstance {
             source: request,
-            overrides: crate::ScenePatchDocument::default(),
+            overrides: None,
         });
         let report =
             SceneDocument::from_ordered_roots([anchor]).expand_prefabs(&registry, &resolver);
@@ -405,9 +427,7 @@ mod tests {
 
     #[test]
     fn independent_expansions_keep_same_generated_keys_bound_to_their_own_sources() {
-        use crate::{
-            InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, ScenePatchDocument,
-        };
+        use crate::{InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance};
         use nara_reflect::ComponentRegistry;
         let mut registry = ComponentRegistry::new();
         registry.freeze().unwrap();
@@ -421,7 +441,7 @@ mod tests {
             let mut anchor = SceneEntityRecord::new(id("anchor"));
             anchor.prefab = Some(PrefabInstance {
                 source,
-                overrides: ScenePatchDocument::default(),
+                overrides: None,
             });
             SceneDocument::from_ordered_roots([anchor])
                 .expand_prefabs(&registry, &resolver)

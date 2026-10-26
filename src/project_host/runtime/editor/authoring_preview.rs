@@ -3,10 +3,9 @@ use std::sync::Arc;
 use nara_scene::{
     __private::{
         AuthoringPreviewOmission, AuthoringPreviewProjectionError,
-        project_authoring_prefab_session_preview, project_authoring_scene_session_preview,
+        project_authoring_prefab_session_preview,
     },
-    PrefabAuthoringSession, PrefabDocument, SceneAuthoringRevision, SceneAuthoringSession,
-    SceneDocument,
+    PrefabAuthoringSession, PrefabDocument, SceneAuthoringRevision,
 };
 use nara_tooling::EditorDocumentId;
 
@@ -19,7 +18,7 @@ pub(super) struct EditorAuthoringPreviewOmissions {
 }
 
 impl EditorAuthoringPreviewOmissions {
-    fn new(
+    pub(super) fn new(
         document: EditorDocumentId,
         revision: SceneAuthoringRevision,
         facts: Vec<AuthoringPreviewOmission>,
@@ -50,17 +49,6 @@ impl EditorAuthoringPreviewOmissions {
     pub(super) fn is_empty(&self) -> bool {
         self.facts.is_empty()
     }
-}
-
-pub(super) fn project_scene(
-    document: EditorDocumentId,
-    revision: SceneAuthoringRevision,
-    session: &SceneAuthoringSession,
-) -> Result<(SceneDocument, EditorAuthoringPreviewOmissions), AuthoringPreviewProjectionError> {
-    let projection = project_authoring_scene_session_preview(session)?;
-    let (scene, facts) = projection.into_parts();
-    let omissions = EditorAuthoringPreviewOmissions::new(document, revision, facts);
-    Ok((scene, omissions))
 }
 
 pub(super) fn project_prefab(

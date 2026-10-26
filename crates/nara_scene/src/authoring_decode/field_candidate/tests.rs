@@ -108,11 +108,26 @@ fn fixture(kind: AuthoringDocumentKind, degraded: bool) -> (SceneDocument, Autho
         let mut anchor = SceneEntityRecord::new(id("anchor"));
         anchor.prefab = Some(crate::PrefabInstance {
             source: asset("prefabs/base.prefab.json"),
-            overrides: ScenePatchDocument::new([ScenePatchOperation::AddComponent {
-                entity: id("patch-only"),
-                component: ComponentTypeId::new("test.future.Patch"),
-                value: SceneComponentRecord::new(ComponentSchemaVersion(7), ComponentValue::Null),
-            }]),
+            overrides: Some(crate::PrefabOverlay {
+                components: vec![crate::PrefabComponentIntent::Set {
+                    mode: crate::PrefabComponentSetMode::Add,
+                    target: crate::PrefabEntityTarget::source(id("overlay-only")),
+                    component: ComponentTypeId::new("test.future.Overlay"),
+                    record: SceneComponentRecord::new(
+                        ComponentSchemaVersion(7),
+                        ComponentValue::Null,
+                    ),
+                    bindings: Vec::new(),
+                }],
+                ..crate::PrefabOverlay::new(
+                    crate::SourceDocumentKey::named(
+                        "e3818e8d-e2d8-4f67-a82f-55074d3614b2".parse().unwrap(),
+                        "test.base",
+                        crate::SourceDocumentKind::Prefab,
+                    )
+                    .unwrap(),
+                )
+            }),
         });
         document.entities.push(anchor);
         document.roots.push(id("anchor"));
@@ -154,8 +169,8 @@ fn assert_same(actual: &AuthoringDocumentState, expected: &AuthoringDocumentStat
     assert_eq!(actual.readiness, expected.readiness);
     assert_eq!(actual.record_facts, expected.record_facts);
     assert_eq!(
-        actual.patch_asset_references,
-        expected.patch_asset_references
+        actual.overlay_asset_references,
+        expected.overlay_asset_references
     );
     assert_eq!(actual.direct_record_facts, expected.direct_record_facts);
     assert_eq!(actual.unavailable_manifest, expected.unavailable_manifest);

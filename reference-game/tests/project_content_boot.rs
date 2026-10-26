@@ -154,9 +154,10 @@ fn assert_committed_content() {
         before_clone.high_water(ProjectContentBudgetKind::DependencyEdges),
         8,
     );
+    // Prefabs load on synchronous compiler demand; only the discovered image is queued.
     assert_eq!(
         before_clone.high_water(ProjectContentBudgetKind::QueuedJobs),
-        2,
+        1,
     );
     assert_eq!(
         before_clone.high_water(ProjectContentBudgetKind::InFlightJobs),

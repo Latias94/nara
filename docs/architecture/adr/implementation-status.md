@@ -391,6 +391,45 @@ declarations reject without publication. This does not qualify actual Host admis
 Proposed successor now separates source preservation from selected activation and retains
 ADR 0101 child ordering; those reviewed obligations are not new implemented contracts.
 
+The [declarative production replacement](../prefab-overlay-design.md) is now in progress under
+ADRs 0006/0026/0038/0043/0090. It removes patch-as-overlay storage and the private comparison
+compiler in favor of complete typed source intent and one Scene compiler. The first integrated
+cohorts are superseded by the [shared-owner/Host checkpoint](../../knowledge/engineering/sessions/2026-10/2026-10-26T163304Z-shared-prefab-compiler-owner-and-host-verification-before-staged-structural-demand-replacement-45d427ddb20d40b0acde05d288566775.md):
+Reflect passes 291/291; Scene passes 389/390 with one executed structural-demand counterexample;
+the Host passes 47 selected cases (434 filtered); no-default Scene library compilation passes.
+Shared Schema authority, selected source capture and explicit source repair have this bounded
+evidence. The [staged production successor](../../knowledge/engineering/progress/2026-10/2026-10-26T175942Z-staged-prefab-structural-demand-and-selected-value-program-qualification-19ce2446522e4c28a5fbd70d31ab827f.md)
+then replaces the interleaved compiler with shell/structural demand, layered layout and selected
+value programs; raw Prefab capture no longer requires eager standalone component publication.
+Scene 497/497, actual-file Host 52/52, selected independent consumer 18/18 and no-default compilation
+pass. Three independent allocation/prepare observations remain ignored; no native/performance
+qualification or merge is implied. Complete second-document Editor capture, Host/native workflows,
+nested preview fencing, conflict observations, conversion and repeated-descriptor work remain open.
+Earlier evidence above retains its original pre-replacement scope; the full foundation Goal is active.
+
+The [independent-capture checkpoint](../../knowledge/engineering/progress/2026-10/2026-10-26T192056Z-independent-authoring-capture-and-preview-dependency-stamp-integration-c31cf6ef3eaa457a87528419c09ea49c.md)
+extracts reusable actual-demand acquisition from startup, retains immutable Scene/Prefab working
+copies with exact source and Schema receipts, and distinguishes session content from file publication.
+Root/metadata/omission retention corrections and dependency-aware preview payloads have 33 selected
+root regressions; current Scene passes 507/507 with three existing ignored observations. The
+complete root library passes 501/501 with three existing ignored observations, and the Editor
+compilation check passes; none is native preview execution. At that checkpoint, the
+ordinary Editor still used its direct-only preview helper: async capture scheduling, persistence
+receipt refresh, dependency selection invalidation, new Image publication and native input/pixel
+authorization remain unqualified. This checkpoint does not close the remaining workflow above.
+
+The [Editor capture qualification](../../knowledge/engineering/verification/2026-10/2026-10-26T221436Z-captured-editor-scene-preview-and-ordered-image-publication-qualification-bd36086e52524bb1b227dbd21da81056.md)
+connects actual-demand working copies, background composition and revalidation, persistence receipts,
+captured asset databases and complete native content stamps. ADR 0047 adopts the preview policy;
+0115 clarifies ordered Image evidence reconciliation. Final root/Editor libraries pass 754 cases;
+Scene/Tooling/UI pass 677; the combined focused/native cohort passes 84, including six actual
+Windows/DX12 trajectories. Independent consumers pass 18 and the selected Reference Game cohort
+passes 13. Workspace all-feature/all-target compilation and the public overlay example pass.
+Prefab geometry selects its containing anchor; Image changes require new captured evidence.
+These are overlapping scoped cohorts, not full foundation or all-platform qualification.
+Conversion, structured conflict repair, inherited Inspector selection, the direct UI Canvas path
+and repeated Schema descriptor work remain open; this checkpoint does not merge the branch.
+
 The [R5c custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md)
 implements typed per-document Scene/Prefab file custody under ADRs 0047/0118. Save retains its
 admission-time Host through acknowledgement/uncertainty; Reopen validates exact retained Host

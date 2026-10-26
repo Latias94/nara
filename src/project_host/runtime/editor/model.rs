@@ -128,6 +128,18 @@ impl EditorProjectSession {
             })
             .unwrap_or(EditorReopenTarget::Unavailable);
         let image_import_work_pending = self.editor_image_import_work_pending();
+        #[cfg(feature = "presentation-2d")]
+        let preview_work = if self.authoring_runtime.preview_extent().is_some() {
+            (
+                self.scene_capture.has_pending_work(),
+                self.scene_capture.recheck_after(),
+                self.scene_capture.unsaved_dependencies(),
+            )
+        } else {
+            (false, None, 0)
+        };
+        #[cfg(not(feature = "presentation-2d"))]
+        let preview_work = (false, None, 0);
         let frame = Arc::new(
             self.frame_clock
                 .publish(
@@ -144,6 +156,7 @@ impl EditorProjectSession {
                 )
                 .with_document_open(self.document_open_view())
                 .with_authoring_retirement_pending(self.authoring_retirements.is_pending())
+                .with_scene_preview_work(preview_work.0, preview_work.1, preview_work.2)
                 .with_scene_preview_document(self.scene_preview_document),
         );
         #[cfg(feature = "runtime-ui")]

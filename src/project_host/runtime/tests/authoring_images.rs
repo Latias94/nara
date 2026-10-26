@@ -606,8 +606,18 @@ fn generic_editor_retires_an_image_when_its_metadata_becomes_invalid() {
         (2, vec![(image_path.to_owned(), settings)])
     );
     editor.set_editor_preview_extent(nara_render::Extent2d::new(320, 240));
-    editor.drive_editor_frame(Duration::ZERO);
-    let before = editor.take_editor_preview_candidate().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let before = loop {
+        editor.drive_editor_frame(Duration::ZERO);
+        if let Some(candidate) = editor.take_editor_preview_candidate() {
+            break candidate;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the initial Scene capture did not publish"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    };
     let before_stamp = before.content_stamp();
     let (_, _, _, _, before_batches, _) = before.into_parts();
     assert!(
@@ -626,9 +636,24 @@ fn generic_editor_retires_an_image_when_its_metadata_becomes_invalid() {
     drive_image_import_host_until_idle(&mut editor);
 
     editor.drive_editor_frame(Duration::ZERO);
-    let after = editor.take_editor_preview_candidate().unwrap();
-    let after_stamp = after.content_stamp();
-    let (_, _, _, _, after_batches, _) = after.into_parts();
+    let after_stamp = editor.current_editor_preview_content_stamp();
+    let after = editor.take_editor_preview_candidate();
+    if let Some(after) = after {
+        assert_eq!(after_stamp, Some(after.content_stamp()));
+        let (_, _, _, _, after_batches, _) = after.into_parts();
+        assert!(
+            after_batches
+                .as_slice()
+                .iter()
+                .all(|batch| batch.image.is_none()),
+            "invalid metadata must revoke Image pixels from new Scene preview packets"
+        );
+    } else {
+        assert!(
+            after_stamp.is_none(),
+            "an unavailable capture cannot authorize old pixels"
+        );
+    }
     let close = drive_editor_close_to_completion(&mut editor);
     assert!(matches!(
         close,
@@ -646,15 +671,9 @@ fn generic_editor_retires_an_image_when_its_metadata_becomes_invalid() {
         "invalid metadata must retire the image from the authoring publication"
     );
     assert_ne!(
-        before_stamp, after_stamp,
+        Some(before_stamp),
+        after_stamp,
         "identity retirement must invalidate Scene content reuse"
-    );
-    assert!(
-        after_batches
-            .as_slice()
-            .iter()
-            .all(|batch| batch.image.is_none()),
-        "invalid metadata must revoke Image pixels from new Scene preview packets"
     );
 }
 

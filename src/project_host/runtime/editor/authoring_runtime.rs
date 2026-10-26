@@ -49,7 +49,10 @@ use super::authoring_images::{
     EditorAuthoringImageCatalogCandidate, EditorAuthoringImageCatalogError,
 };
 #[cfg(feature = "presentation-2d")]
-use super::preview::{EditorPreviewCandidate, EditorPreviewSession, EditorPreviewSource};
+use super::preview::{
+    EditorPreviewCandidate, EditorPreviewContentStamp, EditorPreviewDependencies,
+    EditorPreviewSession, EditorPreviewSource,
+};
 
 const EDITOR_IMAGE_IMPORT_TASK_DOMAIN: TaskDomainKey = TaskDomainKey::new(0x6e61_7261_696d_6701);
 
@@ -96,6 +99,16 @@ impl EditorImageSourceCompletion {
 pub(super) struct EditorImageRuntimeTask {
     handle: Handle<ImageAsset>,
     task: TaskHandle<EditorImageTaskOutput>,
+}
+
+impl EditorImageRuntimeTask {
+    pub(super) fn cancel(&self) {
+        let _ = self.task.cancel();
+    }
+
+    pub(super) fn return_observer(&self) -> nara_tasks::TaskReturnObserver {
+        self.task.return_observer()
+    }
 }
 
 #[cfg(test)]
@@ -334,13 +347,43 @@ impl EditorAuthoringRuntime {
     }
 
     #[cfg(feature = "presentation-2d")]
+    pub(super) const fn preview_extent(&self) -> Option<nara_render::Extent2d> {
+        self.preview.extent()
+    }
+
+    #[cfg(feature = "presentation-2d")]
+    pub(super) const fn image_publication_revision(&self) -> u64 {
+        self.image_publication_revision
+    }
+
+    #[cfg(feature = "presentation-2d")]
+    pub(super) fn current_preview_content_stamp(&self) -> Option<EditorPreviewContentStamp> {
+        if self.image_revocation_failure.is_some() {
+            return None;
+        }
+        self.preview
+            .current_content_stamp()
+            .filter(|stamp| stamp.image_publication_revision() == self.image_publication_revision)
+    }
+
+    #[cfg(feature = "presentation-2d")]
+    pub(super) fn invalidate_preview_content(&mut self) {
+        self.preview.invalidate_content();
+    }
+
+    #[cfg(feature = "presentation-2d")]
     pub(super) fn preview_requires_source_projection(
         &self,
         document: EditorDocumentId,
         revision: SceneAuthoringRevision,
+        dependencies: &EditorPreviewDependencies,
     ) -> bool {
-        self.preview
-            .requires_source_projection(self.runtime.world(), document, revision)
+        self.preview.requires_source_projection(
+            self.runtime.world(),
+            document,
+            revision,
+            dependencies,
+        )
     }
 
     #[cfg(feature = "presentation-2d")]
@@ -349,6 +392,7 @@ impl EditorAuthoringRuntime {
         source: Option<EditorPreviewSource>,
     ) -> Option<DiagnosticReport> {
         if self.image_revocation_failure.is_some() {
+            self.invalidate_preview_content();
             return None;
         }
         self.preview
@@ -357,12 +401,27 @@ impl EditorAuthoringRuntime {
 
     #[cfg(feature = "presentation-2d")]
     pub(super) fn take_preview_candidate(&mut self) -> Option<EditorPreviewCandidate> {
+        if self.current_preview_content_stamp().is_none() {
+            self.invalidate_preview_content();
+            return None;
+        }
         self.preview.take_candidate()
     }
 
     #[cfg(feature = "presentation-2d")]
     pub(super) fn preview_world_snapshot(&self) -> Option<&WorldIdentitySnapshot> {
         self.preview.world_snapshot()
+    }
+
+    #[cfg(all(test, feature = "presentation-2d"))]
+    pub(super) fn test_preview_world(&self) -> &World {
+        self.runtime.world()
+    }
+
+    #[cfg(all(test, feature = "presentation-2d"))]
+    pub(super) fn test_preview_candidate(&self) -> Option<&nara_scene::ExpandedSceneCandidate> {
+        self.preview
+            .test_accepted_authoring_candidate(self.runtime.world())
     }
 
     pub(super) fn spawn_image_import(
@@ -457,6 +516,7 @@ impl EditorAuthoringRuntime {
         #[cfg(feature = "presentation-2d")]
         {
             self.image_publication_revision = successor;
+            self.invalidate_preview_content();
         }
         // Publication is already committed. Its caller must register this version as last-good
         // before the normal authoring drive follows the Runtime's sticky fault policy.
@@ -1101,12 +1161,16 @@ mod preview_content_tests {
     use nara_asset::{AssetPath, ProjectAssetDatabase, StableAssetId};
     use nara_image::ImageBytesImportRequest;
     use nara_render::Extent2d;
-    use nara_scene::{SceneAuthoringSession, SceneDocument};
+    use nara_scene::{ExpandedSceneCandidate, SceneAuthoringSession, SceneDocument};
 
     use super::*;
     use crate::project_host::runtime::editor::{
         authoring_preview::EditorAuthoringPreviewOmissions, preview::EditorPreviewProjection,
     };
+
+    fn preview_database(runtime: &EditorAuthoringRuntime) -> Arc<ProjectAssetDatabase> {
+        super::super::preview::test_authoring_asset_database(runtime.runtime.world())
+    }
 
     fn preview_source_key() -> nara_scene::SourceDocumentKey {
         nara_scene::SourceDocumentKey::named(
@@ -1144,10 +1208,14 @@ mod preview_content_tests {
                     .drive_preview(Some(EditorPreviewSource {
                         document,
                         revision,
-                        projection: Some(EditorPreviewProjection::new(
-                            key.clone(),
-                            source.document().clone(),
+                        dependencies: EditorPreviewDependencies::empty(),
+                        projection: Some(EditorPreviewProjection::authoring(
+                            ExpandedSceneCandidate::plain(
+                                key.clone(),
+                                Arc::new(source.document().clone()),
+                            ),
                             EditorAuthoringPreviewOmissions::empty(document, revision),
+                            preview_database(&runtime),
                         )),
                     }))
                     .is_none()
@@ -1258,15 +1326,26 @@ mod preview_content_tests {
         runtime: &mut EditorAuthoringRuntime,
         source: &SceneAuthoringSession,
     ) -> EditorPreviewCandidate {
+        preview_with_dependencies(runtime, source, &EditorPreviewDependencies::empty())
+    }
+
+    fn preview_with_dependencies(
+        runtime: &mut EditorAuthoringRuntime,
+        source: &SceneAuthoringSession,
+        dependencies: &EditorPreviewDependencies,
+    ) -> EditorPreviewCandidate {
         let document = EditorDocumentId::from_raw(1);
         let revision = source.revision();
         let projection = runtime
-            .preview_requires_source_projection(document, revision)
+            .preview_requires_source_projection(document, revision, dependencies)
             .then(|| {
-                EditorPreviewProjection::new(
-                    preview_source_key(),
-                    source.document().clone(),
+                EditorPreviewProjection::authoring(
+                    ExpandedSceneCandidate::plain(
+                        preview_source_key(),
+                        Arc::new(source.document().clone()),
+                    ),
                     EditorAuthoringPreviewOmissions::empty(document, revision),
+                    preview_database(&runtime),
                 )
             });
         assert!(
@@ -1274,6 +1353,7 @@ mod preview_content_tests {
                 .drive_preview(Some(EditorPreviewSource {
                     document,
                     revision,
+                    dependencies: dependencies.clone(),
                     projection,
                 }))
                 .is_none()
@@ -1302,8 +1382,24 @@ mod preview_content_tests {
         let source = SceneAuthoringSession::new(SceneDocument::default());
         let before = preview(&mut runtime, &source);
         let unchanged = preview(&mut runtime, &source);
+        assert_eq!(
+            runtime.current_preview_content_stamp(),
+            Some(unchanged.content_stamp())
+        );
+        assert!(
+            runtime
+                .drive_preview(Some(EditorPreviewSource {
+                    document: EditorDocumentId::from_raw(1),
+                    revision: source.revision(),
+                    dependencies: EditorPreviewDependencies::empty(),
+                    projection: None,
+                }))
+                .is_none()
+        );
         let imported = imported_image(&runtime, &record, handle);
         let version = runtime.commit_image_import(imported).unwrap();
+        assert!(runtime.current_preview_content_stamp().is_none());
+        assert!(runtime.take_preview_candidate().is_none());
         let published = preview(&mut runtime, &source);
         let repainted = preview(&mut runtime, &source);
         let actual_pixels = runtime
@@ -1338,6 +1434,7 @@ mod preview_content_tests {
         retire(&mut predecessor);
         let (mut replacement, _, _) = authoring_runtime();
         replacement.set_preview_extent(Extent2d::new(320, 240));
+        assert!(replacement.current_preview_content_stamp().is_none());
         let after = preview(&mut replacement, &source);
         retire(&mut replacement);
         assert_eq!(before.document(), after.document());
@@ -1380,10 +1477,13 @@ mod preview_content_tests {
         let retained_drive = runtime.drive_preview(Some(EditorPreviewSource {
             document: EditorDocumentId::from_raw(1),
             revision: source.revision(),
+            dependencies: EditorPreviewDependencies::empty(),
             projection: None,
         }));
         runtime.test_exhaust_image_publication_revision();
+        assert!(runtime.current_preview_content_stamp().is_none());
         let revoked = runtime.revoke_images(vec![handle]);
+        assert!(runtime.current_preview_content_stamp().is_none());
         let retained_candidate = runtime.take_preview_candidate().is_some();
         let subsequent_report = runtime.drive_preview(None);
         let new_candidate = runtime.take_preview_candidate().is_some();

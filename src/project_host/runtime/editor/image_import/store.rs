@@ -4,6 +4,8 @@ use nara_asset::{AssetId, AssetPath, AssetVersion, Handle, ImportSettingsHash, S
 use nara_fs::{ContentDigest, FileIdentity};
 use nara_image::ImageAsset;
 
+use super::hydration::EditorImageHydrationSource;
+
 use crate::project_host::authoring::{
     AuthoringProjectAttemptGeneration, ProjectSourceIndexGeneration,
 };
@@ -29,6 +31,7 @@ pub(crate) struct EditorImageLastGood {
     source_digest: ContentDigest,
     settings_hash: ImportSettingsHash,
     version: AssetVersion,
+    capture_source: Option<Box<EditorImageHydrationSource>>,
 }
 
 impl EditorImageLastGood {
@@ -50,7 +53,21 @@ impl EditorImageLastGood {
             source_digest,
             settings_hash,
             version,
+            capture_source: None,
         }
+    }
+
+    pub(super) fn with_capture_source(mut self, source: EditorImageHydrationSource) -> Self {
+        self.capture_source = Some(Box::new(source));
+        self
+    }
+
+    pub(super) fn capture_source(&self) -> Option<&EditorImageHydrationSource> {
+        self.capture_source.as_deref()
+    }
+
+    pub(super) fn refresh_capture_source(&mut self, source: EditorImageHydrationSource) {
+        self.capture_source = Some(Box::new(source));
     }
 
     #[must_use]
@@ -107,6 +124,21 @@ impl EditorImageLastGoodStore {
 
     pub(super) fn get_mut(&mut self, asset_path: &AssetPath) -> Option<&mut EditorImageLastGood> {
         self.images.get_mut(asset_path)
+    }
+
+    pub(super) fn iter(&self) -> impl Iterator<Item = (&AssetPath, &EditorImageLastGood)> {
+        self.images.iter()
+    }
+
+    pub(super) fn remove_if_matches(
+        &mut self,
+        asset_path: &AssetPath,
+        expected: &EditorImageLastGood,
+    ) {
+        if self.images.get(asset_path) == Some(expected) {
+            self.images.remove(asset_path);
+            self.changed = true;
+        }
     }
 
     #[must_use]

@@ -15,6 +15,7 @@ const DEFAULT_ENTITY_REFERENCE_TRAVERSAL_NODES: usize = 16_384;
 const DEFAULT_ENTITY_REFERENCE_TRAVERSAL_BYTES: usize = 4 * 1024 * 1024;
 const DEFAULT_ENTITY_REFERENCE_TRAVERSAL_DEPTH: usize = 64;
 const PERSISTENT_RUNTIME_UUID_TEXT_BYTES: usize = 36;
+const MODELED_REFERENCE_BTREE_ENTRY_BYTES: usize = 96;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntityReferenceTraversalLimits {
@@ -225,23 +226,15 @@ pub fn plan_declared_value_entity_references<E>(
     value: &ComponentValue,
     limits: EntityReferenceTraversalLimits,
 ) -> Result<DeclaredEntityReferencePlan, ComponentEntityReferenceRewriteError<E>> {
-    let root = ComponentFieldPath::empty();
-    let _ = find_undeclared_reference_path(value, limits, &BTreeSet::new(), 0, 0, &root)?;
-    let mut traversal = PresentReferenceTraversal::new(limits, ComponentValueKind::EntityRef);
-    traversal.visit_field_shape(field, shape, value, &root)?;
-    if let Some(path) = find_undeclared_reference_path(
+    let references = collect_present_value_reference_leaves(
+        field,
+        shape,
         value,
         limits,
-        &traversal.entity_paths,
-        traversal.result_nodes,
-        traversal.result_bytes,
-        &root,
-    )? {
-        return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path });
-    }
+        ComponentValueKind::EntityRef,
+    )?;
     Ok(DeclaredEntityReferencePlan {
-        references: traversal
-            .references
+        references: references
             .into_iter()
             .map(|reference| PlannedEntityReference {
                 field_id: reference.field.id().clone(),
@@ -328,18 +321,133 @@ fn invalid_planned_reference<E>(
     }
 }
 
-pub(crate) struct PresentReferenceLeaf<'schema> {
+pub(crate) enum ReferenceTraversalError<R, E> {
+    Reference(ComponentEntityReferenceRewriteError<R>),
+    Admission(E),
+}
+
+impl<R, E> From<ComponentEntityReferenceRewriteError<R>> for ReferenceTraversalError<R, E> {
+    fn from(error: ComponentEntityReferenceRewriteError<R>) -> Self {
+        Self::Reference(error)
+    }
+}
+
+fn without_admission<T, R>(
+    result: Result<T, ReferenceTraversalError<R, std::convert::Infallible>>,
+) -> Result<T, ComponentEntityReferenceRewriteError<R>> {
+    result.map_err(|error| match error {
+        ReferenceTraversalError::Reference(error) => error,
+        ReferenceTraversalError::Admission(never) => match never {},
+    })
+}
+
+struct ReferenceAdmission<'a, E> {
+    callback: &'a mut dyn FnMut(usize, usize, usize) -> Result<(), E>,
+    maximum_bytes: usize,
+}
+
+impl<E> ReferenceAdmission<'_, E> {
+    fn charge<R>(
+        &mut self,
+        nodes: usize,
+        logical_bytes: usize,
+        allocation_bytes: usize,
+    ) -> Result<(), ReferenceTraversalError<R, E>> {
+        (self.callback)(nodes, logical_bytes, allocation_bytes)
+            .map_err(ReferenceTraversalError::Admission)
+    }
+
+    fn allocation<R>(&mut self, bytes: Option<usize>) -> Result<(), ReferenceTraversalError<R, E>> {
+        let bytes = bytes.ok_or(ComponentEntityReferenceRewriteError::ByteLimit {
+            maximum: self.maximum_bytes,
+        })?;
+        self.charge(0, 0, bytes)
+    }
+
+    fn reserve<T, R>(
+        &mut self,
+        values: &mut Vec<T>,
+        additional: usize,
+    ) -> Result<(), ReferenceTraversalError<R, E>> {
+        if values.capacity().saturating_sub(values.len()) >= additional {
+            return Ok(());
+        }
+        let overflow = || ComponentEntityReferenceRewriteError::ByteLimit {
+            maximum: self.maximum_bytes,
+        };
+        let needed = values.len().checked_add(additional).ok_or_else(overflow)?;
+        let capacity = needed.max(values.capacity().saturating_mul(2)).max(4);
+        // Charge the entire new request: working allocation is cumulative, without refunds.
+        self.allocation(capacity.checked_mul(size_of::<T>()))?;
+        values.reserve_exact(capacity - values.len());
+        Ok(())
+    }
+
+    fn path<R>(
+        &mut self,
+        segments: &[ComponentFieldPathSegment],
+    ) -> Result<ComponentFieldPath, ReferenceTraversalError<R, E>> {
+        self.allocation(path_allocation_bytes(segments))?;
+        Ok(ComponentFieldPath::new(segments.iter().cloned()))
+    }
+}
+
+fn path_logical_bytes(segments: &[ComponentFieldPathSegment]) -> usize {
+    segments.iter().fold(0usize, |bytes, segment| {
+        bytes.saturating_add(match segment {
+            ComponentFieldPathSegment::Field(name) => name.len(),
+            ComponentFieldPathSegment::Index(_) => size_of::<u32>(),
+        })
+    })
+}
+
+fn path_allocation_bytes(segments: &[ComponentFieldPathSegment]) -> Option<usize> {
+    segments.iter().try_fold(
+        segments
+            .len()
+            .checked_mul(size_of::<ComponentFieldPathSegment>())?,
+        |bytes, segment| match segment {
+            ComponentFieldPathSegment::Field(name) => bytes.checked_add(name.len()),
+            ComponentFieldPathSegment::Index(_) => Some(bytes),
+        },
+    )
+}
+
+pub(crate) struct PresentReferenceLeaf<'schema, 'value> {
     pub(crate) field: &'schema ComponentFieldSchema,
     pub(crate) path: ComponentFieldPath,
+    pub(crate) value: &'value ComponentValue,
     required: bool,
 }
 
-pub(crate) fn collect_present_reference_leaves<'schema, E>(
+pub(crate) fn collect_present_reference_leaves<'schema, 'value, R>(
     schema: &'schema ComponentSchema,
-    value: &ComponentValue,
+    value: &'value ComponentValue,
     limits: EntityReferenceTraversalLimits,
     reference_kind: ComponentValueKind,
-) -> Result<Vec<PresentReferenceLeaf<'schema>>, ComponentEntityReferenceRewriteError<E>> {
+) -> Result<Vec<PresentReferenceLeaf<'schema, 'value>>, ComponentEntityReferenceRewriteError<R>> {
+    without_admission(collect_present_reference_leaves_with_admission(
+        schema,
+        value,
+        limits,
+        reference_kind,
+        false,
+        &mut |_, _, _| Ok::<(), std::convert::Infallible>(()),
+    ))
+}
+
+pub(crate) fn collect_present_reference_leaves_with_admission<'schema, 'value, R, E>(
+    schema: &'schema ComponentSchema,
+    value: &'value ComponentValue,
+    limits: EntityReferenceTraversalLimits,
+    reference_kind: ComponentValueKind,
+    admitted_schema: bool,
+    callback: &mut dyn FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<Vec<PresentReferenceLeaf<'schema, 'value>>, ReferenceTraversalError<R, E>> {
+    let mut admission = ReferenceAdmission {
+        callback,
+        maximum_bytes: limits.bytes().get(),
+    };
     let _ = find_undeclared_reference_path(
         value,
         limits,
@@ -347,49 +455,45 @@ pub(crate) fn collect_present_reference_leaves<'schema, E>(
         0,
         0,
         &ComponentFieldPath::empty(),
+        &mut admission,
     )?;
     if schema.fields.len() > limits.nodes().get() {
         return Err(ComponentEntityReferenceRewriteError::NodeLimit {
             maximum: limits.nodes().get(),
-        });
+        }
+        .into());
     }
-    let mut fields = schema.fields.iter().collect::<Vec<_>>();
-    fields.sort_by(|left, right| left.path.cmp(&right.path));
+    let mut fields: Vec<&ComponentFieldSchema> = Vec::new();
+    admission.reserve(&mut fields, schema.fields.len())?;
+    fields.extend(&schema.fields);
+    fields.sort_unstable_by(|left, right| left.path.cmp(&right.path));
     if let Some(duplicate) = fields.windows(2).find(|pair| pair[0].path == pair[1].path) {
-        return Err(
-            ComponentEntityReferenceRewriteError::DuplicateDeclaredPath {
-                path: duplicate[0].path.clone(),
-            },
-        );
+        let path = admission.path(duplicate[0].path.segments())?;
+        return Err(ComponentEntityReferenceRewriteError::DuplicateDeclaredPath { path }.into());
     }
 
-    let mut traversal = PresentReferenceTraversal::new(limits, reference_kind);
+    let mut traversal =
+        PresentReferenceTraversal::new(limits, reference_kind, admitted_schema, admission);
     for field in fields {
-        if !field.shape.contains_kind(ComponentValueKind::EntityRef)
+        traversal.admission.charge(
+            1,
+            field
+                .id()
+                .as_str()
+                .len()
+                .saturating_add(path_logical_bytes(field.path.segments())),
+            0,
+        )?;
+        if !admitted_schema
+            && !field.shape.contains_kind(ComponentValueKind::EntityRef)
             && !field.shape.contains_kind(ComponentValueKind::AssetRef)
             && !field.has_capability(ComponentCapability::EntityRef)
             && !field.has_capability(ComponentCapability::AssetRef)
         {
             continue;
         }
-        let field_value = match value.get_path(field.path()) {
-            Ok(value) => value,
-            Err(error)
-                if !field.is_required()
-                    && matches!(
-                        error,
-                        ComponentFieldPathError::MissingField { .. }
-                            | ComponentFieldPathError::IndexOutOfBounds { .. }
-                    ) =>
-            {
-                continue;
-            }
-            Err(error) => {
-                return Err(ComponentEntityReferenceRewriteError::InvalidPath {
-                    path: field.path.clone(),
-                    error,
-                });
-            }
+        let Some(field_value) = traversal.field_value(value, field)? else {
+            continue;
         };
         traversal.visit_field(field, field_value)?;
     }
@@ -400,51 +504,118 @@ pub(crate) fn collect_present_reference_leaves<'schema, E>(
         traversal.result_nodes,
         traversal.result_bytes,
         &ComponentFieldPath::empty(),
+        &mut traversal.admission,
     )?;
     if let Some(path) = undeclared {
-        return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path });
+        return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path }.into());
     }
     Ok(traversal.references)
 }
 
-pub(crate) fn collect_present_field_reference_leaves<'schema, E>(
+pub(crate) fn collect_present_field_reference_leaves<'schema, 'value, R>(
     field: &'schema ComponentFieldSchema,
-    value: &ComponentValue,
+    value: &'value ComponentValue,
     limits: EntityReferenceTraversalLimits,
     reference_kind: ComponentValueKind,
-) -> Result<Vec<PresentReferenceLeaf<'schema>>, ComponentEntityReferenceRewriteError<E>> {
-    let _ = find_undeclared_reference_path(value, limits, &BTreeSet::new(), 0, 0, field.path())?;
-    let mut traversal = PresentReferenceTraversal::new(limits, reference_kind);
-    traversal.visit_field(field, value)?;
-    if let Some(path) = find_undeclared_reference_path(
-        value,
-        limits,
-        &traversal.entity_paths,
-        traversal.result_nodes,
-        traversal.result_bytes,
-        field.path(),
-    )? {
-        return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path });
-    }
-    Ok(traversal.references)
+) -> Result<Vec<PresentReferenceLeaf<'schema, 'value>>, ComponentEntityReferenceRewriteError<R>> {
+    without_admission((|| {
+        let mut callback = |_, _, _| Ok::<(), std::convert::Infallible>(());
+        let mut admission = ReferenceAdmission {
+            callback: &mut callback,
+            maximum_bytes: limits.bytes().get(),
+        };
+        let _ = find_undeclared_reference_path(
+            value,
+            limits,
+            &BTreeSet::new(),
+            0,
+            0,
+            field.path(),
+            &mut admission,
+        )?;
+        let mut traversal =
+            PresentReferenceTraversal::new(limits, reference_kind, false, admission);
+        traversal.visit_field(field, value)?;
+        if let Some(path) = find_undeclared_reference_path(
+            value,
+            limits,
+            &traversal.entity_paths,
+            traversal.result_nodes,
+            traversal.result_bytes,
+            field.path(),
+            &mut traversal.admission,
+        )? {
+            return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path }.into());
+        }
+        Ok(traversal.references)
+    })())
+}
+
+/// Traverses an already selected payload without rebasing it onto component storage.
+pub(crate) fn collect_present_value_reference_leaves<'schema, 'value, R>(
+    field: &'schema ComponentFieldSchema,
+    shape: &ComponentValueShape,
+    value: &'value ComponentValue,
+    limits: EntityReferenceTraversalLimits,
+    reference_kind: ComponentValueKind,
+) -> Result<Vec<PresentReferenceLeaf<'schema, 'value>>, ComponentEntityReferenceRewriteError<R>> {
+    without_admission((|| {
+        let mut callback = |_, _, _| Ok::<(), std::convert::Infallible>(());
+        let mut admission = ReferenceAdmission {
+            callback: &mut callback,
+            maximum_bytes: limits.bytes().get(),
+        };
+        let root = ComponentFieldPath::empty();
+        let _ = find_undeclared_reference_path(
+            value,
+            limits,
+            &BTreeSet::new(),
+            0,
+            0,
+            &root,
+            &mut admission,
+        )?;
+        let mut traversal =
+            PresentReferenceTraversal::new(limits, reference_kind, false, admission);
+        traversal.visit_field_shape(field, shape, value, &root)?;
+        if let Some(path) = find_undeclared_reference_path(
+            value,
+            limits,
+            &traversal.entity_paths,
+            traversal.result_nodes,
+            traversal.result_bytes,
+            &root,
+            &mut traversal.admission,
+        )? {
+            return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path }.into());
+        }
+        Ok(traversal.references)
+    })())
 }
 
 fn path_depth(path: &ComponentFieldPath) -> usize {
     path.segments().len().saturating_add(1)
 }
 
-struct PresentReferenceTraversal<'schema> {
+struct PresentReferenceTraversal<'schema, 'value, 'admission, E> {
     limits: EntityReferenceTraversalLimits,
     reference_kind: ComponentValueKind,
     shape_nodes: usize,
     result_nodes: usize,
     result_bytes: usize,
     entity_paths: BTreeSet<ComponentFieldPath>,
-    references: Vec<PresentReferenceLeaf<'schema>>,
+    references: Vec<PresentReferenceLeaf<'schema, 'value>>,
+    admitted_schema: bool,
+    admission: ReferenceAdmission<'admission, E>,
 }
 
-impl<'schema> PresentReferenceTraversal<'schema> {
-    fn new(limits: EntityReferenceTraversalLimits, reference_kind: ComponentValueKind) -> Self {
+impl<'schema, 'value, 'admission, E> PresentReferenceTraversal<'schema, 'value, 'admission, E> {
+    fn new(
+        limits: EntityReferenceTraversalLimits,
+        reference_kind: ComponentValueKind,
+        admitted_schema: bool,
+        admission: ReferenceAdmission<'admission, E>,
+    ) -> Self {
         Self {
             limits,
             reference_kind,
@@ -453,73 +624,158 @@ impl<'schema> PresentReferenceTraversal<'schema> {
             result_bytes: 0,
             entity_paths: BTreeSet::new(),
             references: Vec::new(),
+            admitted_schema,
+            admission,
         }
     }
 
-    fn visit_field<E>(
+    fn field_value<R>(
+        &mut self,
+        mut value: &'value ComponentValue,
+        field: &ComponentFieldSchema,
+    ) -> Result<Option<&'value ComponentValue>, ReferenceTraversalError<R, E>> {
+        for (offset, segment) in field.path.segments().iter().enumerate() {
+            self.admission.charge(1, 0, 0)?;
+            let child = match (segment, value) {
+                (ComponentFieldPathSegment::Field(name), ComponentValue::Map(fields)) => {
+                    fields.get(name)
+                }
+                (ComponentFieldPathSegment::Index(index), ComponentValue::List(items)) => {
+                    items.get(usize::try_from(*index).unwrap_or(usize::MAX))
+                }
+                _ => None,
+            };
+            if let Some(child) = child {
+                value = child;
+                continue;
+            }
+            let missing = matches!(
+                (segment, value),
+                (ComponentFieldPathSegment::Field(_), ComponentValue::Map(_))
+                    | (ComponentFieldPathSegment::Index(_), ComponentValue::List(_))
+            );
+            if missing && !field.is_required() {
+                return Ok(None);
+            }
+            let path = self.admission.path(field.path.segments())?;
+            let error = match (segment, value) {
+                (ComponentFieldPathSegment::Field(name), ComponentValue::Map(_)) => {
+                    let path = self.admission.path(&field.path.segments()[..=offset])?;
+                    self.admission.allocation(Some(name.len()))?;
+                    ComponentFieldPathError::MissingField {
+                        path,
+                        field: name.clone(),
+                    }
+                }
+                (ComponentFieldPathSegment::Index(index), ComponentValue::List(items)) => {
+                    ComponentFieldPathError::IndexOutOfBounds {
+                        path: self.admission.path(&field.path.segments()[..=offset])?,
+                        index: *index,
+                        len: items.len(),
+                    }
+                }
+                (ComponentFieldPathSegment::Field(_), _) => ComponentFieldPathError::ExpectedMap {
+                    path: self.admission.path(&field.path.segments()[..offset])?,
+                },
+                (ComponentFieldPathSegment::Index(_), _) => ComponentFieldPathError::ExpectedList {
+                    path: self.admission.path(&field.path.segments()[..offset])?,
+                },
+            };
+            return Err(ComponentEntityReferenceRewriteError::InvalidPath { path, error }.into());
+        }
+        Ok(Some(value))
+    }
+
+    fn check_capability<R>(
+        &mut self,
+        field: &ComponentFieldSchema,
+        capability: ComponentCapability,
+    ) -> Result<(), ReferenceTraversalError<R, E>> {
+        if field.has_capability(capability) {
+            return Ok(());
+        }
+        let path = self.admission.path(field.path.segments())?;
+        Err(match capability {
+            ComponentCapability::EntityRef => {
+                ComponentEntityReferenceRewriteError::MissingEntityRefCapability { path }
+            }
+            _ => ComponentEntityReferenceRewriteError::MissingAssetRefCapability { path },
+        }
+        .into())
+    }
+
+    fn visit_field<R>(
         &mut self,
         field: &'schema ComponentFieldSchema,
-        value: &ComponentValue,
-    ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
+        value: &'value ComponentValue,
+    ) -> Result<(), ReferenceTraversalError<R, E>> {
         self.visit_field_shape(field, &field.shape, value, field.path())
     }
 
-    fn visit_field_shape<E>(
+    fn visit_field_shape<R>(
         &mut self,
         field: &'schema ComponentFieldSchema,
         shape: &ComponentValueShape,
-        value: &ComponentValue,
+        value: &'value ComponentValue,
         root: &ComponentFieldPath,
-    ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
-        shape.validate().map_err(|_| {
-            ComponentEntityReferenceRewriteError::InvalidReferenceValue {
-                path: field.path.clone(),
-                actual: value.kind(),
-            }
-        })?;
-        for (kind, capability) in [
-            (
-                ComponentValueKind::EntityRef,
-                ComponentCapability::EntityRef,
-            ),
-            (ComponentValueKind::AssetRef, ComponentCapability::AssetRef),
-        ] {
-            if shape.contains_kind(kind) && !field.has_capability(capability) {
-                return Err(match capability {
-                    ComponentCapability::EntityRef => {
-                        ComponentEntityReferenceRewriteError::MissingEntityRefCapability {
-                            path: field.path.clone(),
+    ) -> Result<(), ReferenceTraversalError<R, E>> {
+        if !self.admitted_schema {
+            shape.validate().map_err(|_| {
+                ComponentEntityReferenceRewriteError::InvalidReferenceValue {
+                    path: field.path.clone(),
+                    actual: value.kind(),
+                }
+            })?;
+            for (kind, capability) in [
+                (
+                    ComponentValueKind::EntityRef,
+                    ComponentCapability::EntityRef,
+                ),
+                (ComponentValueKind::AssetRef, ComponentCapability::AssetRef),
+            ] {
+                if shape.contains_kind(kind) && !field.has_capability(capability) {
+                    return Err(match capability {
+                        ComponentCapability::EntityRef => {
+                            ComponentEntityReferenceRewriteError::MissingEntityRefCapability {
+                                path: field.path.clone(),
+                            }
                         }
+                        _ => ComponentEntityReferenceRewriteError::MissingAssetRefCapability {
+                            path: field.path.clone(),
+                        },
                     }
-                    _ => ComponentEntityReferenceRewriteError::MissingAssetRefCapability {
-                        path: field.path.clone(),
-                    },
-                });
+                    .into());
+                }
             }
         }
+        self.admission
+            .allocation(path_allocation_bytes(root.segments()))?;
         let mut path = root.segments().to_vec();
         self.visit(field, shape, value, &mut path, path_depth(root))
     }
 
-    fn visit<E>(
+    fn visit<R>(
         &mut self,
         field: &'schema ComponentFieldSchema,
         mut shape: &ComponentValueShape,
-        value: &ComponentValue,
+        value: &'value ComponentValue,
         path: &mut Vec<ComponentFieldPathSegment>,
         depth: usize,
-    ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
+    ) -> Result<(), ReferenceTraversalError<R, E>> {
         if depth > self.limits.depth().get() {
             return Err(ComponentEntityReferenceRewriteError::DepthLimit {
                 maximum: self.limits.depth().get(),
-            });
+            }
+            .into());
         }
         loop {
+            self.admission.charge(1, 0, 0)?;
             self.shape_nodes = self.shape_nodes.saturating_add(1);
             if self.shape_nodes > self.limits.nodes().get() {
                 return Err(ComponentEntityReferenceRewriteError::NodeLimit {
                     maximum: self.limits.nodes().get(),
-                });
+                }
+                .into());
             }
             match shape {
                 ComponentValueShape::Optional { .. } if matches!(value, ComponentValue::Null) => {
@@ -542,23 +798,26 @@ impl<'schema> PresentReferenceTraversal<'schema> {
                 && numeric_interval
                     .is_none_or(|interval| interval.accepts_value(value, *numeric_domain)) => {}
             (ComponentValueShape::EntityRef, ComponentValue::EntityReference(_)) => {
-                self.record(field, path, ComponentValueKind::EntityRef)?;
+                self.check_capability(field, ComponentCapability::EntityRef)?;
+                self.record(field, path, ComponentValueKind::EntityRef, value)?;
             }
             (ComponentValueShape::AssetRef, value) => {
+                self.check_capability(field, ComponentCapability::AssetRef)?;
                 if self.reference_kind != ComponentValueKind::AssetRef
                     && !crate::asset_reference::is_asset_reference_value(value)
                 {
                     return Err(
                         ComponentEntityReferenceRewriteError::InvalidReferenceValue {
-                            path: ComponentFieldPath::new(path.iter().cloned()),
+                            path: self.admission.path(path)?,
                             actual: value.kind(),
-                        },
+                        }
+                        .into(),
                     );
                 }
                 if let Some(payload) = value.get("value").and_then(ComponentValue::as_str) {
                     self.result_bytes = self.result_bytes.saturating_add(payload.len());
                 }
-                self.record(field, path, ComponentValueKind::AssetRef)?;
+                self.record(field, path, ComponentValueKind::AssetRef, value)?;
             }
             (ComponentValueShape::Record { members }, ComponentValue::Map(values)) => {
                 self.visit_record(field, members, values, path, depth)?;
@@ -570,6 +829,7 @@ impl<'schema> PresentReferenceTraversal<'schema> {
                 for (index, value) in values.iter().enumerate() {
                     let index = u32::try_from(index)
                         .map_err(|_| ComponentEntityReferenceRewriteError::PathIndexOverflow)?;
+                    self.admission.reserve(path, 1)?;
                     path.push(ComponentFieldPathSegment::index(index));
                     self.visit(field, item, value, path, depth.saturating_add(1))?;
                     path.pop();
@@ -577,6 +837,8 @@ impl<'schema> PresentReferenceTraversal<'schema> {
             }
             (ComponentValueShape::Map { value: shape }, ComponentValue::Map(values)) => {
                 for (name, value) in values {
+                    self.admission.allocation(Some(name.len()))?;
+                    self.admission.reserve(path, 1)?;
                     path.push(ComponentFieldPathSegment::field(name));
                     self.visit(field, shape, value, path, depth.saturating_add(1))?;
                     path.pop();
@@ -584,69 +846,83 @@ impl<'schema> PresentReferenceTraversal<'schema> {
             }
             (ComponentValueShape::Opaque { kind }, value) if value.kind() == *kind => {}
             (_, value) => {
-                let path = ComponentFieldPath::new(path.iter().cloned());
-                return Err(
-                    if matches!(shape, ComponentValueShape::EntityRef)
-                        && matches!(value, ComponentValue::Null)
-                    {
-                        ComponentEntityReferenceRewriteError::RequiredReferenceMissing { path }
-                    } else {
-                        ComponentEntityReferenceRewriteError::InvalidReferenceValue {
-                            path,
-                            actual: value.kind(),
-                        }
-                    },
-                );
+                let path = self.admission.path(path)?;
+                return Err(if matches!(shape, ComponentValueShape::EntityRef)
+                    && matches!(value, ComponentValue::Null)
+                {
+                    ComponentEntityReferenceRewriteError::RequiredReferenceMissing { path }
+                } else {
+                    ComponentEntityReferenceRewriteError::InvalidReferenceValue {
+                        path,
+                        actual: value.kind(),
+                    }
+                }
+                .into());
             }
         }
         Ok(())
     }
 
-    fn visit_record<E>(
+    fn visit_record<R>(
         &mut self,
         field: &'schema ComponentFieldSchema,
         members: &[ComponentShapeMember],
-        values: &std::collections::BTreeMap<String, ComponentValue>,
+        values: &'value std::collections::BTreeMap<String, ComponentValue>,
         path: &mut Vec<ComponentFieldPathSegment>,
         depth: usize,
-    ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
+    ) -> Result<(), ReferenceTraversalError<R, E>> {
+        self.admission.allocation(
+            members
+                .len()
+                .checked_mul(MODELED_REFERENCE_BTREE_ENTRY_BYTES),
+        )?;
         let names = members
             .iter()
             .map(|member| member.name.as_str())
             .collect::<BTreeSet<_>>();
         for member in members {
+            self.admission
+                .charge(1, member.name.len(), member.name.len())?;
+            self.admission.reserve(path, 1)?;
             path.push(ComponentFieldPathSegment::field(&member.name));
-            let value = values.get(&member.name).ok_or_else(|| {
-                let path = ComponentFieldPath::new(path.iter().cloned());
-                ComponentEntityReferenceRewriteError::InvalidPath {
+            let Some(value) = values.get(&member.name) else {
+                let owned = self.admission.path(path)?;
+                let error_path = self.admission.path(path)?;
+                self.admission.allocation(Some(member.name.len()))?;
+                return Err(ComponentEntityReferenceRewriteError::InvalidPath {
                     error: ComponentFieldPathError::MissingField {
-                        path: path.clone(),
+                        path: error_path,
                         field: member.name.clone(),
                     },
-                    path,
+                    path: owned,
                 }
-            })?;
+                .into());
+            };
             self.visit(field, &member.shape, value, path, depth.saturating_add(1))?;
             path.pop();
         }
         if let Some(name) = values.keys().find(|name| !names.contains(name.as_str())) {
+            self.admission.allocation(Some(name.len()))?;
+            self.admission.reserve(path, 1)?;
             path.push(ComponentFieldPathSegment::field(name));
             return Err(
                 ComponentEntityReferenceRewriteError::InvalidReferenceValue {
-                    path: ComponentFieldPath::new(path.iter().cloned()),
+                    path: self.admission.path(path)?,
                     actual: values[name].kind(),
-                },
+                }
+                .into(),
             );
         }
         Ok(())
     }
 
-    fn record<E>(
+    fn record<R>(
         &mut self,
         field: &'schema ComponentFieldSchema,
         path: &[ComponentFieldPathSegment],
         kind: ComponentValueKind,
-    ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
+        value: &'value ComponentValue,
+    ) -> Result<(), ReferenceTraversalError<R, E>> {
         if kind != ComponentValueKind::EntityRef && kind != self.reference_kind {
             return Ok(());
         }
@@ -654,28 +930,69 @@ impl<'schema> PresentReferenceTraversal<'schema> {
         if self.result_nodes > self.limits.nodes().get() {
             return Err(ComponentEntityReferenceRewriteError::NodeLimit {
                 maximum: self.limits.nodes().get(),
-            });
+            }
+            .into());
         }
-        self.result_bytes = self.result_bytes.saturating_add(field.id().as_str().len());
-        for segment in path {
-            self.result_bytes = self.result_bytes.saturating_add(match segment {
-                ComponentFieldPathSegment::Field(name) => name.len(),
-                ComponentFieldPathSegment::Index(_) => size_of::<u32>(),
-            });
-        }
+        self.result_bytes = self
+            .result_bytes
+            .saturating_add(field.id().as_str().len())
+            .saturating_add(path_logical_bytes(path));
         if self.result_bytes > self.limits.bytes().get() {
             return Err(ComponentEntityReferenceRewriteError::ByteLimit {
                 maximum: self.limits.bytes().get(),
-            });
+            }
+            .into());
         }
-        let path = ComponentFieldPath::new(path.iter().cloned());
+        let payload_bytes = if kind == ComponentValueKind::AssetRef {
+            value
+                .get("value")
+                .and_then(ComponentValue::as_str)
+                .map_or(0, str::len)
+        } else {
+            0
+        };
+        let logical_bytes = field
+            .id()
+            .as_str()
+            .len()
+            .saturating_add(path_logical_bytes(path))
+            .saturating_add(payload_bytes);
+        let output_bytes = if kind == self.reference_kind && kind == ComponentValueKind::AssetRef {
+            size_of::<crate::DeclaredAssetReference>()
+                .checked_add(field.id().as_str().len())
+                .and_then(|bytes| {
+                    // Stable ID failures retain the supplied text in their typed error.
+                    let path_bytes = if matches!(
+                        value.get("kind").and_then(ComponentValue::as_str),
+                        Some("path" | "stable_id")
+                    ) {
+                        payload_bytes
+                    } else {
+                        0
+                    };
+                    bytes.checked_add(path_bytes)
+                })
+                .ok_or(ComponentEntityReferenceRewriteError::ByteLimit {
+                    maximum: self.limits.bytes().get(),
+                })?
+        } else {
+            0
+        };
+        // Admit the owned output before cloning even its first path or parsing its AssetRef.
+        self.admission.charge(1, logical_bytes, output_bytes)?;
+        let path = self.admission.path(path)?;
         if kind == ComponentValueKind::EntityRef {
-            self.entity_paths.insert(path.clone());
+            self.admission
+                .allocation(Some(MODELED_REFERENCE_BTREE_ENTRY_BYTES))?;
+            let declared_path = self.admission.path(path.segments())?;
+            self.entity_paths.insert(declared_path);
         }
         if kind == self.reference_kind {
+            self.admission.reserve(&mut self.references, 1)?;
             self.references.push(PresentReferenceLeaf {
                 field,
                 path,
+                value,
                 required: true,
             });
         }
@@ -683,30 +1000,30 @@ impl<'schema> PresentReferenceTraversal<'schema> {
     }
 }
 
-fn find_undeclared_reference_path<E>(
+fn find_undeclared_reference_path<R, E>(
     value: &ComponentValue,
     limits: EntityReferenceTraversalLimits,
     declared_paths: &BTreeSet<ComponentFieldPath>,
     result_nodes: usize,
     result_bytes: usize,
     root_path: &ComponentFieldPath,
-) -> Result<Option<ComponentFieldPath>, ComponentEntityReferenceRewriteError<E>> {
+    admission: &mut ReferenceAdmission<'_, E>,
+) -> Result<Option<ComponentFieldPath>, ReferenceTraversalError<R, E>> {
+    let mut path = Vec::new();
+    admission.reserve(&mut path, root_path.segments().len())?;
+    path.extend(root_path.segments().iter().map(|segment| match segment {
+        ComponentFieldPathSegment::Field(name) => TraversalPathSegment::Field(name),
+        ComponentFieldPathSegment::Index(index) => TraversalPathSegment::Index(*index),
+    }));
     let mut traversal = ReferencePathTraversal {
         limits,
         declared_paths,
-        path: root_path
-            .segments()
-            .iter()
-            .map(|segment| match segment {
-                ComponentFieldPathSegment::Field(name) => TraversalPathSegment::Field(name),
-                ComponentFieldPathSegment::Index(index) => TraversalPathSegment::Index(*index),
-            })
-            .collect(),
+        path,
         observed_nodes: result_nodes,
         observed_bytes: result_bytes,
         first_undeclared_path: None,
     };
-    traversal.visit(value, path_depth(root_path))?;
+    traversal.visit(value, path_depth(root_path), admission)?;
     Ok(traversal.first_undeclared_path)
 }
 
@@ -751,27 +1068,31 @@ enum ReferenceTraversalFrame<'a> {
 }
 
 impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
-    fn visit<E>(
+    fn visit<R, E>(
         &mut self,
         root: &'value ComponentValue,
         depth: usize,
-    ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
-        let mut stack = vec![ReferenceTraversalFrame::Visit {
+        admission: &mut ReferenceAdmission<'_, E>,
+    ) -> Result<(), ReferenceTraversalError<R, E>> {
+        let mut stack = Vec::new();
+        admission.reserve(&mut stack, 1)?;
+        stack.push(ReferenceTraversalFrame::Visit {
             value: root,
             depth,
             segment: None,
-        }];
+        });
         while let Some(frame) = stack.pop() {
             match frame {
                 ReferenceTraversalFrame::Visit {
                     value,
                     depth,
                     segment,
-                } => self.visit_value(value, depth, segment, &mut stack)?,
+                } => self.visit_value(value, depth, segment, &mut stack, admission)?,
                 ReferenceTraversalFrame::ContinueList { mut items, depth } => {
                     if let Some((index, item)) = items.next() {
                         let index = u32::try_from(index)
                             .map_err(|_| ComponentEntityReferenceRewriteError::PathIndexOverflow)?;
+                        admission.reserve(&mut stack, 2)?;
                         stack.push(ReferenceTraversalFrame::ContinueList { items, depth });
                         stack.push(ReferenceTraversalFrame::Visit {
                             value: item,
@@ -782,12 +1103,15 @@ impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
                 }
                 ReferenceTraversalFrame::ContinueMap { mut fields, depth } => {
                     if let Some((field, value)) = fields.next() {
+                        admission.charge(0, field.len(), 0)?;
                         self.observed_bytes = self.observed_bytes.saturating_add(field.len());
                         if self.observed_bytes > self.limits.bytes().get() {
                             return Err(ComponentEntityReferenceRewriteError::ByteLimit {
                                 maximum: self.limits.bytes().get(),
-                            });
+                            }
+                            .into());
                         }
+                        admission.reserve(&mut stack, 2)?;
                         stack.push(ReferenceTraversalFrame::ContinueMap { fields, depth });
                         stack.push(ReferenceTraversalFrame::Visit {
                             value,
@@ -804,21 +1128,30 @@ impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
         Ok(())
     }
 
-    fn visit_value<E>(
+    fn visit_value<R, E>(
         &mut self,
         value: &'value ComponentValue,
         depth: usize,
         segment: Option<TraversalPathSegment<'value>>,
         stack: &mut Vec<ReferenceTraversalFrame<'value>>,
-    ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
+        admission: &mut ReferenceAdmission<'_, E>,
+    ) -> Result<(), ReferenceTraversalError<R, E>> {
+        let dynamic_bytes =
+            dynamic_value_bytes(value).ok_or(ComponentEntityReferenceRewriteError::ByteLimit {
+                maximum: self.limits.bytes().get(),
+            })?;
+        admission.charge(1, dynamic_bytes, 0)?;
         if let Some(segment) = segment {
+            admission.reserve(&mut self.path, 1)?;
             self.path.push(segment);
+            admission.reserve(stack, 1)?;
             stack.push(ReferenceTraversalFrame::Exit);
         }
         if depth > self.limits.depth().get() {
             return Err(ComponentEntityReferenceRewriteError::DepthLimit {
                 maximum: self.limits.depth().get(),
-            });
+            }
+            .into());
         }
         self.observed_nodes = self.observed_nodes.checked_add(1).ok_or(
             ComponentEntityReferenceRewriteError::NodeLimit {
@@ -828,27 +1161,37 @@ impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
         if self.observed_nodes > self.limits.nodes().get() {
             return Err(ComponentEntityReferenceRewriteError::NodeLimit {
                 maximum: self.limits.nodes().get(),
-            });
+            }
+            .into());
         }
-        self.observed_bytes = self
-            .observed_bytes
-            .checked_add(dynamic_value_bytes(value).ok_or(
-                ComponentEntityReferenceRewriteError::ByteLimit {
-                    maximum: self.limits.bytes().get(),
-                },
-            )?)
-            .ok_or(ComponentEntityReferenceRewriteError::ByteLimit {
+        self.observed_bytes = self.observed_bytes.checked_add(dynamic_bytes).ok_or(
+            ComponentEntityReferenceRewriteError::ByteLimit {
                 maximum: self.limits.bytes().get(),
-            })?;
+            },
+        )?;
         if self.observed_bytes > self.limits.bytes().get() {
             return Err(ComponentEntityReferenceRewriteError::ByteLimit {
                 maximum: self.limits.bytes().get(),
-            });
+            }
+            .into());
         }
 
         match value {
             ComponentValue::EntityReference(_) => {
                 if self.first_undeclared_path.is_none() {
+                    let allocation_bytes = self
+                        .path
+                        .len()
+                        .checked_mul(size_of::<ComponentFieldPathSegment>())
+                        .and_then(|bytes| {
+                            self.path.iter().try_fold(bytes, |bytes, segment| {
+                                bytes.checked_add(match segment {
+                                    TraversalPathSegment::Field(name) => name.len(),
+                                    TraversalPathSegment::Index(_) => 0,
+                                })
+                            })
+                        });
+                    admission.allocation(allocation_bytes)?;
                     let candidate = ComponentFieldPath::new(
                         self.path.iter().map(TraversalPathSegment::to_owned),
                     );
@@ -858,12 +1201,14 @@ impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
                 }
             }
             ComponentValue::List(items) => {
+                admission.reserve(stack, 1)?;
                 stack.push(ReferenceTraversalFrame::ContinueList {
                     items: items.iter().enumerate(),
                     depth: depth.saturating_add(1),
                 });
             }
             ComponentValue::Map(fields) => {
+                admission.reserve(stack, 1)?;
                 stack.push(ReferenceTraversalFrame::ContinueMap {
                     fields: fields.iter(),
                     depth: depth.saturating_add(1),

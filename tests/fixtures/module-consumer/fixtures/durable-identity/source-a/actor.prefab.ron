@@ -16,7 +16,7 @@
             },
             prefab: Some((
                 source: (kind: "stable_id", value: "cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
-                overrides: (format_version: 1, operations: []),
+                overrides: None,
             )),
         )],
     ),

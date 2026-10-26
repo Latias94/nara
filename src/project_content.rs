@@ -20,6 +20,7 @@ use nara_asset::{
     AssetMetaCandidate, AssetMetaFileLimits, AssetMetaIdentityCandidate, AssetPath, AssetRecord,
     AssetRef, AssetSourceKind, ProjectAssetDatabase,
 };
+use nara_core::ByteLimit;
 use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
     PublicDiagnosticIdentifier, SafeSummary,
@@ -35,13 +36,12 @@ use nara_reflect::__private::{
 };
 use nara_reflect::{
     ComponentRegistrySnapshot, DeclaredAssetReferenceError, SchemaCompositionFingerprint,
-    collect_declared_asset_references, collect_declared_field_asset_references,
+    collect_declared_asset_references,
 };
 use nara_scene::{
-    ExpandedSceneCandidate, PrefabDocument, PrefabDocumentCandidate, PrefabInstance,
-    PrefabSourceResolver, ResolvedPrefabSource, SceneDocument, SceneDocumentCandidate,
-    SceneEntityProvenanceMap, SceneEntityRecord, SceneFormatError, ScenePatchDocument,
-    ScenePatchOperation, SourceDocumentKey, SourceDocumentKind,
+    ExpandedSceneCandidate, PrefabDocument, PrefabDocumentCandidate, PrefabSourceResolver,
+    ResolvedPrefabSource, SceneDocument, SceneDocumentCandidate, SceneEntityProvenanceMap,
+    SceneEntityRecord, SceneFormatError, SourceDocumentKey, SourceDocumentKind,
 };
 use nara_tilemap::{
     TileSetSource, TileSetSourceFileLimits, TilemapMembershipError,
@@ -431,6 +431,7 @@ impl ProjectContentSnapshot {
         let nara_scene::PrefabExpansionReport {
             candidate,
             diagnostics,
+            ..
         } = expansion;
         let expanded_candidate = candidate
             .ok_or_else(|| {
@@ -500,7 +501,7 @@ struct SnapshotPrefabResolver<'a> {
 }
 
 impl PrefabSourceResolver for SnapshotPrefabResolver<'_> {
-    fn resolve_prefab(&self, source: &AssetRef) -> Option<ResolvedPrefabSource<'_>> {
+    fn resolve_prefab(&self, source: &AssetRef) -> Option<ResolvedPrefabSource> {
         let path = match source {
             AssetRef::Path(path) => path,
             AssetRef::StableId(_) => self.database.resolve_ref(source).ok()?.path(),
@@ -508,7 +509,9 @@ impl PrefabSourceResolver for SnapshotPrefabResolver<'_> {
         self.prefabs
             .iter()
             .find(|prefab| prefab.path() == path)
-            .map(|prefab| ResolvedPrefabSource::bound(prefab.document(), prefab.source_key()))
+            .map(|prefab| {
+                ResolvedPrefabSource::bound(Arc::clone(&prefab.document), prefab.source.clone())
+            })
     }
 }
 
@@ -1231,13 +1234,118 @@ impl<'a> LoadContext<'a> {
         )?;
         let scene = self.decode_scene(scene_path.as_str(), &scene_bytes)?;
 
-        let loaded_prefabs = self.load_prefab_closure(
-            &prefabs,
-            &settings.paths.prefabs,
-            &scene,
-            settings.project.native_document_identity,
-            settings.project.source_universe,
+        let mut loaded_prefabs = BTreeMap::<AssetPath, LoadedPrefabContent>::new();
+        let mut prefab_cache_work = 0usize;
+        let mut compiler_work_limit = self
+            .remaining_expansion_work(0, self.loader.limits.prefab_expansion().working_bytes())?;
+        let expansion_limits = self
+            .loader
+            .limits
+            .prefab_expansion()
+            .with_working_bytes(compiler_work_limit);
+        let expansion_work = prefab_expansion_work_plan(expansion_limits)?;
+        let mut work_before = self.reserve_work(expansion_work)?;
+        let options = nara_scene::PrefabExpansionOptions::default();
+        let options = options.with_limits(expansion_limits).with_max_depth(
+            options.max_depth.min(
+                self.loader
+                    .limits
+                    .limit(ProjectContentBudgetKind::DirectoryDepth),
+            ),
+        );
+        let validation = self.validation;
+        let registry = validation.registry();
+        // The compiler owns selection, including complete replacement of nested instances.
+        // Only an actual surviving source request may read a document or require its metadata.
+        // Asset discovery and native publication follow compilation of effective values.
+        let expansion = scene.try_expand_prefabs_with_loader(
+            registry,
+            options,
+            None,
+            |reference, working_set| {
+                // Compilation is suspended here. Keep every admitted clone, output record and
+                // index charged, but lend unused worst-case capacity to bounded source decoding.
+                let suspended_work = working_set
+                    .checked_work_bytes()
+                    .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+                self.resize_work(&mut work_before, suspended_work)?;
+                self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
+                let path = self.resolve_reference_path(reference, &AssetSourceKind::Prefab)?;
+                self.observe_path(path.as_str())?;
+                let resolved = if let Some(loaded) = loaded_prefabs.get(&path) {
+                    ResolvedPrefabSource::bound(Arc::clone(&loaded.document), loaded.source.clone())
+                } else {
+                    let cache_work = checked_plan_sum(
+                        ProjectContentBudgetKind::WorkBytes,
+                        [
+                            size_of::<(AssetPath, LoadedPrefabContent)>(),
+                            BTREE_ENTRY_OVERHEAD,
+                            string_retained_bytes(path.as_str())?,
+                        ],
+                    )?;
+                    self.add_budget(ProjectContentBudgetKind::WorkBytes, cache_work)?;
+                    checked_add_to(
+                        &mut prefab_cache_work,
+                        cache_work,
+                        ProjectContentBudgetKind::WorkBytes,
+                    )?;
+                    self.add_budget(ProjectContentBudgetKind::InFlightJobs, 1)?;
+                    let loaded = self.load_prefab(
+                        &prefabs,
+                        &settings.paths.prefabs,
+                        &path,
+                        settings.project.native_document_identity,
+                        settings.project.source_universe,
+                    );
+                    self.subtract_budget(ProjectContentBudgetKind::InFlightJobs, 1);
+                    let loaded = loaded?;
+                    let resolved = ResolvedPrefabSource::bound(
+                        Arc::clone(&loaded.document),
+                        loaded.source.clone(),
+                    );
+                    loaded_prefabs.insert(path, loaded);
+                    resolved
+                };
+                // Cache, source receipts and stable-ID discovery can retain more Host work.
+                // Tighten both reservations together before the compiler can allocate again.
+                let resume_limit =
+                    self.remaining_expansion_work(work_before.reserved, compiler_work_limit)?;
+                if suspended_work > resume_limit.get() {
+                    return Err(ProjectContentError::budget(
+                        ProjectContentBudgetError::synthetic(
+                            ProjectContentBudgetKind::WorkBytes,
+                            suspended_work,
+                            resume_limit.get(),
+                        ),
+                    ));
+                }
+                self.resize_work(&mut work_before, resume_limit.get())?;
+                working_set.restrict_working_bytes(resume_limit);
+                compiler_work_limit = resume_limit;
+                Ok::<_, ProjectContentError>(Some(resolved))
+            },
         )?;
+        self.source_upgrade_required |= expansion.source_upgrade_required();
+        let nara_scene::PrefabExpansionReport {
+            candidate: expanded_candidate,
+            diagnostics,
+            ..
+        } = expansion;
+        let expanded_candidate = expanded_candidate
+            .ok_or_else(|| {
+                map_scene_diagnostics(ProjectContentErrorKind::PrefabExpansion, diagnostics)
+            })?
+            .bind_source(selected_scene_source.clone());
+        let expanded = expanded_candidate.document();
+        let provenance = expanded_candidate.provenance();
+        for (_, origin) in provenance.iter() {
+            if let Some(path) = origin.projection_path() {
+                self.observe_depth(path.steps().len())?;
+            }
+        }
+        let expanded_retained = startup_scene_retained_bytes(&expanded_candidate)?;
+        self.commit_work_as_retained(work_before, expanded_retained)?;
+
         if let Some(path) = self.expected_prefabs.keys().next() {
             return Err(ProjectContentError::with_identifier(
                 ProjectContentErrorKind::HostAuthorityRejected,
@@ -1247,34 +1355,6 @@ impl<'a> LoadContext<'a> {
                 path.as_str(),
             ));
         }
-        let expansion_work = prefab_expansion_work_plan(self.loader.limits.prefab_expansion())?;
-        let work_before = self.reserve_work(expansion_work)?;
-        let resolver = LoadedPrefabResolver::new(&loaded_prefabs, &self.asset_database);
-        let options = nara_scene::PrefabExpansionOptions::default()
-            .with_limits(self.loader.limits.prefab_expansion());
-        let expansion = if self.reference_catalogue_complete() {
-            scene.expand_prefabs_with_options_and_asset_database(
-                self.validation.registry(),
-                &resolver,
-                options,
-                &self.asset_database,
-            )
-        } else {
-            scene.expand_prefabs_with_options(self.validation.registry(), &resolver, options)
-        };
-        let nara_scene::PrefabExpansionReport {
-            candidate: expanded_candidate,
-            diagnostics,
-        } = expansion;
-        let expanded_candidate = expanded_candidate
-            .ok_or_else(|| {
-                map_scene_diagnostics(ProjectContentErrorKind::PrefabExpansion, diagnostics)
-            })?
-            .bind_source(selected_scene_source.clone());
-        let expanded = expanded_candidate.document();
-        let provenance = expanded_candidate.provenance();
-        let expanded_retained = startup_scene_retained_bytes(&expanded_candidate)?;
-        self.commit_work_as_retained(work_before, expanded_retained)?;
 
         if let Some(agreement) = self.runtime_agreement.take() {
             let (path, digest) = agreement.revalidate_and_into_closure_member(&self.loader.root)?;
@@ -1385,6 +1465,7 @@ impl<'a> LoadContext<'a> {
                 source: loaded.source,
             }
         }));
+        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, prefab_cache_work);
         let prefabs = prefab_values.into_boxed_slice();
         let mut images = images.into_boxed_slice();
         let tilesets = tilesets.into_boxed_slice();
@@ -1636,47 +1717,6 @@ impl<'a> LoadContext<'a> {
         }
     }
 
-    fn load_prefab_closure(
-        &mut self,
-        prefabs: &DirectoryCapability,
-        prefab_root: &nara_project::ProjectPath,
-        scene: &SceneDocument,
-        identity_policy: nara_project::NativeDocumentIdentity,
-        source_universe: nara_core::SourceUniverseId,
-    ) -> Result<BTreeMap<AssetPath, LoadedPrefabContent>, ProjectContentError> {
-        let mut queue = VecDeque::new();
-        let mut discovered = BTreeSet::new();
-        for entity in &scene.entities {
-            self.enqueue_prefab_references(entity, 1, &mut queue, &mut discovered)?;
-        }
-        let mut loaded = BTreeMap::new();
-        while let Some((path, depth)) = queue.pop_front() {
-            self.subtract_budget(ProjectContentBudgetKind::QueuedJobs, 1);
-            self.add_budget(ProjectContentBudgetKind::InFlightJobs, 1)?;
-            let loaded_result = self.load_prefab(
-                prefabs,
-                prefab_root,
-                &path,
-                identity_policy,
-                source_universe,
-            );
-            self.subtract_budget(ProjectContentBudgetKind::InFlightJobs, 1);
-            let loaded_prefab = loaded_result?;
-            for entity in &loaded_prefab.document.entities {
-                self.enqueue_prefab_references(
-                    entity,
-                    depth
-                        .checked_add(1)
-                        .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::DirectoryDepth))?,
-                    &mut queue,
-                    &mut discovered,
-                )?;
-            }
-            loaded.insert(path, loaded_prefab);
-        }
-        Ok(loaded)
-    }
-
     fn load_prefab(
         &mut self,
         prefabs: &DirectoryCapability,
@@ -1811,18 +1851,12 @@ impl<'a> LoadContext<'a> {
     ) -> Result<SceneDocument, ProjectContentError> {
         let work_before =
             self.reserve_work(scene_decode_work_plan(self.loader.limits.scene_file())?)?;
-        let canonical = decode_scene_candidate(path, bytes, self.loader.limits.scene_file())?
-            .canonicalize(self.validation.registry())
-            .map_err(map_scene_publication_error)?;
-        self.prepare_component_asset_references(&canonical.document().entities)?;
-        let published = if self.reference_catalogue_complete() {
-            canonical.publish_with_asset_database(self.validation.registry(), &self.asset_database)
-        } else {
-            canonical.publish(self.validation.registry())
-        }
-        .map_err(map_scene_publication_error)?;
-        self.source_upgrade_required |= published.source_upgrade_required();
-        let document = published.into_document();
+        let (document, source_upgrade_required) =
+            decode_scene_candidate(path, bytes, self.loader.limits.scene_file())?
+                .canonicalize(self.validation.registry())
+                .map_err(map_scene_publication_error)?
+                .into_source_document();
+        self.source_upgrade_required |= source_upgrade_required;
         let retained = scene_retained_bytes(&document)?;
         self.commit_work_as_retained(work_before, retained)?;
         Ok(document)
@@ -1835,158 +1869,14 @@ impl<'a> LoadContext<'a> {
     ) -> Result<PrefabDocument, ProjectContentError> {
         let work_before =
             self.reserve_work(scene_decode_work_plan(self.loader.limits.scene_file())?)?;
-        let canonical = decode_prefab_candidate(path, bytes, self.loader.limits.scene_file())?
-            .canonicalize(self.validation.registry())
+        let document = decode_prefab_candidate(path, bytes, self.loader.limits.scene_file())?
+            .into_composition_source()
             .map_err(map_scene_publication_error)?;
-        self.prepare_component_asset_references(&canonical.document().entities)?;
-        let published = if self.reference_catalogue_complete() {
-            canonical.publish_with_asset_database(self.validation.registry(), &self.asset_database)
-        } else {
-            canonical.publish(self.validation.registry())
-        }
-        .map_err(map_scene_publication_error)?;
-        self.source_upgrade_required |= published.source_upgrade_required();
-        let document = published.into_document();
         let retained = prefab_retained_bytes(&document)?
             .checked_add(ARC_CONTROL_BLOCK_BYTES)
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::RetainedBytes))?;
         self.commit_work_as_retained(work_before, retained)?;
         Ok(document)
-    }
-
-    fn enqueue_prefab_references(
-        &mut self,
-        entity: &SceneEntityRecord,
-        depth: usize,
-        queue: &mut VecDeque<(AssetPath, usize)>,
-        discovered: &mut BTreeSet<AssetPath>,
-    ) -> Result<(), ProjectContentError> {
-        if let Some(prefab) = &entity.prefab {
-            self.enqueue_prefab_instance(prefab, depth, queue, discovered)?;
-        }
-        Ok(())
-    }
-
-    fn enqueue_prefab_instance(
-        &mut self,
-        prefab: &PrefabInstance,
-        depth: usize,
-        queue: &mut VecDeque<(AssetPath, usize)>,
-        discovered: &mut BTreeSet<AssetPath>,
-    ) -> Result<(), ProjectContentError> {
-        self.enqueue_prefab_ref(&prefab.source, depth, queue, discovered)?;
-        self.enqueue_patch_prefabs(&prefab.overrides, depth, queue, discovered)
-    }
-
-    fn enqueue_patch_prefabs(
-        &mut self,
-        patch: &ScenePatchDocument,
-        depth: usize,
-        queue: &mut VecDeque<(AssetPath, usize)>,
-        discovered: &mut BTreeSet<AssetPath>,
-    ) -> Result<(), ProjectContentError> {
-        for operation in &patch.operations {
-            match operation {
-                ScenePatchOperation::SetPrefabInstance {
-                    expected, value, ..
-                } => {
-                    for prefab in expected.iter().chain(value.iter()) {
-                        self.enqueue_prefab_instance(prefab, depth, queue, discovered)?;
-                    }
-                }
-                ScenePatchOperation::AddEntity { entity, .. } => {
-                    self.prepare_component_asset_references(std::slice::from_ref(entity))?;
-                    self.enqueue_prefab_references(entity, depth, queue, discovered)?;
-                }
-                ScenePatchOperation::RestoreEntity {
-                    entity,
-                    descendants,
-                    ..
-                } => {
-                    self.prepare_component_asset_references(std::slice::from_ref(entity))?;
-                    self.prepare_component_asset_references(descendants)?;
-                    self.enqueue_prefab_references(entity, depth, queue, discovered)?;
-                    for descendant in descendants {
-                        self.enqueue_prefab_references(descendant, depth, queue, discovered)?;
-                    }
-                }
-                ScenePatchOperation::SetAssetRefField {
-                    asset_ref: AssetRef::StableId(_),
-                    ..
-                } => {
-                    self.ensure_reference_catalogue()?;
-                }
-                ScenePatchOperation::SetField {
-                    component,
-                    field,
-                    value,
-                    ..
-                } => {
-                    let field_schema =
-                        self.validation
-                            .registry()
-                            .schema(component)
-                            .and_then(|schema| {
-                                schema
-                                    .fields()
-                                    .iter()
-                                    .find(|candidate| candidate.id() == field)
-                            });
-                    let stable_asset = if let Some(field_schema) = field_schema {
-                        collect_declared_field_asset_references(component, field_schema, value)
-                            .map_err(map_asset_reference_error)?
-                            .iter()
-                            .any(|reference| matches!(reference.asset_ref(), AssetRef::StableId(_)))
-                    } else {
-                        false
-                    };
-                    if stable_asset {
-                        self.ensure_reference_catalogue()?;
-                    }
-                }
-                ScenePatchOperation::AddComponent {
-                    component, value, ..
-                }
-                | ScenePatchOperation::ReplaceComponent {
-                    component, value, ..
-                } => {
-                    let references = collect_declared_asset_references(
-                        self.validation.registry(),
-                        component,
-                        value.version,
-                        &value.value,
-                    )
-                    .map_err(map_asset_reference_error)?;
-                    if references
-                        .iter()
-                        .any(|reference| matches!(reference.asset_ref(), AssetRef::StableId(_)))
-                    {
-                        self.ensure_reference_catalogue()?;
-                    }
-                }
-                _ => {}
-            }
-        }
-        Ok(())
-    }
-
-    fn enqueue_prefab_ref(
-        &mut self,
-        source: &AssetRef,
-        depth: usize,
-        queue: &mut VecDeque<(AssetPath, usize)>,
-        discovered: &mut BTreeSet<AssetPath>,
-    ) -> Result<(), ProjectContentError> {
-        self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
-        self.observe_depth(depth)?;
-        let path = self.resolve_reference_path(source, &AssetSourceKind::Prefab)?;
-        self.observe_path(path.as_str())?;
-        if !discovered.contains(&path) {
-            self.add_budget(ProjectContentBudgetKind::QueuedJobs, 1)?;
-            discovered.insert(path.clone());
-            queue.push_back((path.clone(), depth));
-        }
-        Ok(())
     }
 
     fn collect_source_candidates(
@@ -2031,30 +1921,6 @@ impl<'a> LoadContext<'a> {
             }
         }
         Ok(sources)
-    }
-
-    fn prepare_component_asset_references(
-        &mut self,
-        entities: &[SceneEntityRecord],
-    ) -> Result<(), ProjectContentError> {
-        for entity in entities {
-            for (component, record) in &entity.components {
-                let references = collect_declared_asset_references(
-                    self.validation.registry(),
-                    component,
-                    record.version,
-                    &record.value,
-                )
-                .map_err(map_asset_reference_error)?;
-                if references
-                    .iter()
-                    .any(|reference| matches!(reference.asset_ref(), AssetRef::StableId(_)))
-                {
-                    self.ensure_reference_catalogue()?;
-                }
-            }
-        }
-        Ok(())
     }
 
     fn load_images(
@@ -2449,6 +2315,59 @@ impl<'a> LoadContext<'a> {
         })
     }
 
+    fn remaining_expansion_work(
+        &self,
+        reserved: usize,
+        upper: ByteLimit,
+    ) -> Result<ByteLimit, ProjectContentError> {
+        let snapshot = self.loader.budget_snapshot();
+        let mut available = upper.get();
+        for kind in [
+            ProjectContentBudgetKind::WorkBytes,
+            ProjectContentBudgetKind::AggregateBytes,
+        ] {
+            let other = snapshot
+                .active(kind)
+                .checked_sub(reserved)
+                .ok_or_else(|| overflow_budget(kind))?;
+            let limit = self.loader.limits.limit(kind);
+            let remaining = limit
+                .checked_sub(other)
+                .and_then(ByteLimit::new)
+                .ok_or_else(|| {
+                    ProjectContentError::budget(ProjectContentBudgetError::synthetic(
+                        kind,
+                        other.saturating_add(1),
+                        limit,
+                    ))
+                })?;
+            available = available.min(remaining.get());
+        }
+        // Every operand is a nonzero ByteLimit; exhausted capacity was rejected above.
+        ByteLimit::new(available)
+            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))
+    }
+
+    fn resize_work(
+        &mut self,
+        reservation: &mut WorkReservation,
+        amount: usize,
+    ) -> Result<(), ProjectContentError> {
+        let other_work = self
+            .budget_value(ProjectContentBudgetKind::WorkBytes)
+            .checked_sub(reservation.reserved)
+            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+        debug_assert!(other_work >= reservation.previous);
+        self.set_budget(
+            ProjectContentBudgetKind::WorkBytes,
+            other_work
+                .checked_add(amount)
+                .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?,
+        )?;
+        reservation.reserved = amount;
+        Ok(())
+    }
+
     fn commit_work_as_retained(
         &mut self,
         reservation: WorkReservation,
@@ -2781,32 +2700,6 @@ fn tilemap_membership_error(
     ProjectContentError::with_report(ProjectContentErrorKind::ScenePublication, report)
 }
 
-struct LoadedPrefabResolver<'a> {
-    prefabs: &'a BTreeMap<AssetPath, LoadedPrefabContent>,
-    database: &'a ProjectAssetDatabase,
-}
-
-impl<'a> LoadedPrefabResolver<'a> {
-    const fn new(
-        prefabs: &'a BTreeMap<AssetPath, LoadedPrefabContent>,
-        database: &'a ProjectAssetDatabase,
-    ) -> Self {
-        Self { prefabs, database }
-    }
-}
-
-impl PrefabSourceResolver for LoadedPrefabResolver<'_> {
-    fn resolve_prefab(&self, source: &AssetRef) -> Option<ResolvedPrefabSource<'_>> {
-        let path = match source {
-            AssetRef::Path(path) => path,
-            AssetRef::StableId(_) => self.database.resolve_ref(source).ok()?.path(),
-        };
-        self.prefabs
-            .get(path)
-            .map(|prefab| ResolvedPrefabSource::bound(prefab.document.as_ref(), &prefab.source))
-    }
-}
-
 fn content_revision(
     lineage: ProjectSettingsLineage,
     schema: SchemaCompositionFingerprint,
@@ -2857,7 +2750,7 @@ const IMAGE_METADATA_OVERHEAD: usize = 256;
 const ENTITY_WORK_BYTES: usize = 128;
 const COMPONENT_WORK_BYTES: usize = 96;
 const PREFAB_INSTANCE_WORK_BYTES: usize = 128;
-const PATCH_OPERATION_WORK_BYTES: usize = 128;
+const OVERLAY_DECLARATION_WORK_BYTES: usize = 256;
 const DIAGNOSTIC_SOURCE_WORK_BYTES: usize = 32;
 const SHAPE_NODE_WORK_BYTES: usize = 32;
 const SHAPE_ITEM_WORK_BYTES: usize = 64;
@@ -2898,8 +2791,8 @@ fn scene_decode_work_plan(
             )?,
             checked_plan_product(
                 ProjectContentBudgetKind::WorkBytes,
-                limits.patch_operations().get(),
-                PATCH_OPERATION_WORK_BYTES,
+                limits.overlay_declarations().get(),
+                OVERLAY_DECLARATION_WORK_BYTES,
             )?,
             checked_plan_product(
                 ProjectContentBudgetKind::WorkBytes,
@@ -2919,39 +2812,10 @@ fn scene_decode_work_plan(
 fn prefab_expansion_work_plan(
     limits: nara_scene::PrefabExpansionLimits,
 ) -> Result<usize, ProjectContentError> {
-    checked_plan_sum(
-        ProjectContentBudgetKind::WorkBytes,
-        [
-            checked_plan_product(
-                ProjectContentBudgetKind::WorkBytes,
-                limits.materialized_entities().get(),
-                ENTITY_WORK_BYTES,
-            )?,
-            checked_plan_product(
-                ProjectContentBudgetKind::WorkBytes,
-                limits.materialized_components().get(),
-                COMPONENT_WORK_BYTES,
-            )?,
-            checked_plan_product(
-                ProjectContentBudgetKind::WorkBytes,
-                limits.materialized_value_nodes().get(),
-                VALUE_NODE_ALLOCATION_BYTES,
-            )?,
-            limits.materialized_value_bytes().get(),
-            checked_plan_product(
-                ProjectContentBudgetKind::WorkBytes,
-                limits.resolved_instances().get(),
-                PREFAB_INSTANCE_WORK_BYTES,
-            )?,
-            checked_plan_product(
-                ProjectContentBudgetKind::WorkBytes,
-                limits.applied_patch_operations().get(),
-                PATCH_OPERATION_WORK_BYTES,
-            )?,
-            limits.generated_identifier_bytes().get(),
-            limits.provenance_bytes().get(),
-        ],
-    )
+    // Scene owns the same allocation model for full admission and suspended callbacks.
+    limits
+        .checked_work_bytes()
+        .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))
 }
 
 pub(crate) fn startup_scene_retained_bytes(
@@ -2977,14 +2841,6 @@ fn scene_retained_bytes(document: &SceneDocument) -> Result<usize, ProjectConten
 
 fn prefab_retained_bytes(document: &PrefabDocument) -> Result<usize, ProjectContentError> {
     crate::scene_retention::prefab_retained_bytes(document)
-        .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
-}
-
-#[cfg(test)]
-fn patch_retained_bytes(
-    patch: &nara_scene::ScenePatchDocument,
-) -> Result<usize, ProjectContentError> {
-    crate::scene_retention::patch_retained_bytes(patch)
         .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
 }
 
@@ -3309,67 +3165,494 @@ fn single_report(diagnostic: Diagnostic) -> DiagnosticReport {
 
 #[cfg(test)]
 mod tests {
-    use std::mem::size_of;
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+    };
 
+    use nara_asset::AssetRef;
+    use nara_fs::{
+        CapabilityRights, ContentDigest, DirectoryCapability, HostCapabilityOptions, RelativePath,
+        TrustMode,
+    };
     use nara_identity::SceneEntityId;
-    use nara_reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId};
+    use nara_reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue};
     use nara_scene::{
-        ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+        PrefabAddition, PrefabComponentIntent, PrefabDocument, PrefabEntityTarget, PrefabInstance,
+        PrefabInstanceClaim, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
+        PrefabPlacementSlot, SceneComponentRecord, SceneDocument, SceneEntityRecord,
+        SourceDocumentKey, SourceDocumentKind,
+    };
+
+    use crate::project_host::{
+        ProjectSettingsCandidate, RuntimePlan, ingest_project_manifest, resolve_product_recipe,
     };
 
     use super::{
-        ProjectContentBudgetKind, checked_plan_sum, patch_retained_bytes, string_retained_bytes,
+        LoadContext, ProjectContentBudgetKind, ProjectContentErrorKind, ProjectContentLimits,
+        ProjectContentLoader, ProjectContentMemberKind,
     };
 
     #[test]
-    fn patch_retained_plan_counts_every_owned_identifier() {
-        let entity = SceneEntityId::new("entity-with-owned-id").unwrap();
-        let parent = SceneEntityId::new("parent-with-owned-id").unwrap();
-        let component = ComponentTypeId::new("nara.test.ComponentWithOwnedId");
-        let field = ComponentFieldId::new("field-with-owned-id");
-        let patch = ScenePatchDocument::new([
-            ScenePatchOperation::RemoveComponent {
-                entity: entity.clone(),
-                component: component.clone(),
-            },
-            ScenePatchOperation::RemoveField {
-                entity: entity.clone(),
-                component: component.clone(),
-                component_version: ComponentSchemaVersion::ONE,
-                field: field.clone(),
-            },
-            ScenePatchOperation::MoveEntity {
-                entity: entity.clone(),
-                from: ScenePlacement::last(ScenePlacementOwner::Root),
-                to: ScenePlacement::last(ScenePlacementOwner::Parent {
-                    parent: parent.clone(),
-                }),
-            },
-            ScenePatchOperation::MoveEntity {
-                entity: entity.clone(),
-                from: ScenePlacement::last(ScenePlacementOwner::Parent {
-                    parent: parent.clone(),
-                }),
-                to: ScenePlacement::last(ScenePlacementOwner::Root),
-            },
-        ]);
-        let expected = checked_plan_sum(
-            ProjectContentBudgetKind::RetainedBytes,
+    fn runtime_content_loads_only_selected_prefabs_and_effective_asset_facts() {
+        let project = LazyContentProject::new();
+        let (candidate, plan, loader) = project.inputs();
+        let snapshot = loader.load(&candidate, &plan).unwrap();
+        assert_eq!(snapshot.prefabs().len(), 2);
+        assert_eq!(snapshot.images().len(), 0);
+        assert_eq!(
+            loader
+                .budget_snapshot()
+                .high_water(ProjectContentBudgetKind::Files),
+            3,
+            "two occurrences share the actual P and R source reads"
+        );
+        let closure = snapshot.content_closure();
+        let prefabs = closure
+            .members()
+            .iter()
+            .filter(|member| member.kind() == ProjectContentMemberKind::Prefab)
+            .map(|member| (member.path().as_str(), member.digest()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            prefabs,
             [
-                4 * size_of::<ScenePatchOperation>(),
-                string_retained_bytes(entity.as_str()).unwrap(),
-                string_retained_bytes(component.as_str()).unwrap(),
-                string_retained_bytes(entity.as_str()).unwrap(),
-                string_retained_bytes(component.as_str()).unwrap(),
-                string_retained_bytes(field.as_str()).unwrap(),
-                string_retained_bytes(entity.as_str()).unwrap(),
-                string_retained_bytes(parent.as_str()).unwrap(),
-                string_retained_bytes(entity.as_str()).unwrap(),
-                string_retained_bytes(parent.as_str()).unwrap(),
-            ],
+                (
+                    "prefabs/p.prefab.json",
+                    project.digest("prefabs/p.prefab.json")
+                ),
+                (
+                    "prefabs/r.prefab.json",
+                    project.digest("prefabs/r.prefab.json")
+                ),
+            ]
+        );
+        let preserved = snapshot
+            .prefabs()
+            .iter()
+            .find(|prefab| prefab.path().as_str() == "p.prefab.json")
+            .unwrap();
+        let nested = preserved
+            .document()
+            .entities
+            .iter()
+            .find(|entity| entity.id.as_str() == "n")
+            .unwrap();
+        assert_eq!(
+            nested.prefab.as_ref().unwrap().source,
+            AssetRef::path("missing-q.prefab.json").unwrap()
+        );
+        assert!(nested.prefab.as_ref().unwrap().overrides.is_some());
+        assert!(
+            nested
+                .components
+                .contains_key(&ComponentTypeId::new("nara.sprite.Sprite"))
+        );
+        assert!(
+            snapshot
+                .expanded_scene()
+                .entities
+                .iter()
+                .all(|entity| entity.components.is_empty())
+        );
+        assert_eq!(
+            snapshot
+                .expanded_scene_provenance()
+                .iter()
+                .filter(|(_, origin)| origin.local_entity_id().as_str() == "r")
+                .count(),
+            2
+        );
+        drop(closure);
+        drop(snapshot);
+        assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+    }
+
+    #[test]
+    fn runtime_content_checks_saved_receipts_against_actual_selected_sources() {
+        let project = LazyContentProject::new();
+        let (candidate, plan, loader) = project.inputs();
+        for (path, expected_code) in [
+            (
+                "missing-q.prefab.json",
+                "project.content.saved-prefab-outside-closure",
+            ),
+            (
+                "r.prefab.json",
+                "project.content.saved-prefab-source-changed",
+            ),
+        ] {
+            let mut context = LoadContext::new(
+                &loader,
+                plan.schema_validation(),
+                &plan.asset_domains,
+                None,
+                [(
+                    nara_asset::AssetPath::new(path).unwrap(),
+                    ContentDigest::of_bytes(b"saved bytes"),
+                )]
+                .into(),
+                candidate.manifest_digest(),
+                None,
+                None,
+                false,
+            )
+            .unwrap();
+            let error = context.load(&candidate, None).unwrap_err();
+            assert_eq!(error.kind(), ProjectContentErrorKind::HostAuthorityRejected);
+            assert!(
+                error
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| diagnostic.code().as_str() == expected_code)
+            );
+            drop(context);
+            assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+        }
+    }
+
+    #[test]
+    fn runtime_content_lazy_decode_keeps_the_live_expansion_work_charged() {
+        let project = LazyContentProject::new();
+        let (candidate, plan, default_loader) = project.inputs();
+        // Keep the compiler ceiling fixed below the source decoder's peak. The observed
+        // boundary then measures the live working set during decoding, not unused capacity.
+        let limits = ProjectContentLimits::default().with_prefab_expansion(
+            nara_scene::PrefabExpansionLimits::default()
+                .with_working_bytes(nara_core::ByteLimit::new(1024 * 1024).unwrap()),
+        );
+        let loader =
+            ProjectContentLoader::with_limits(default_loader.project_root(), limits).unwrap();
+        let snapshot = loader.load(&candidate, &plan).unwrap();
+        let required = loader
+            .budget_snapshot()
+            .high_water(ProjectContentBudgetKind::WorkBytes);
+        drop(snapshot);
+        assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+
+        let exact_limits = limits
+            .with_limit(ProjectContentBudgetKind::WorkBytes, required)
+            .unwrap();
+        let exact = ProjectContentLoader::with_limits(loader.project_root(), exact_limits).unwrap();
+        let snapshot = exact.load(&candidate, &plan).unwrap();
+        assert_eq!(
+            exact
+                .budget_snapshot()
+                .high_water(ProjectContentBudgetKind::WorkBytes),
+            required
+        );
+        drop(snapshot);
+        assert_eq!(exact.budget_snapshot().active_reservations(), 0);
+
+        let short_limits = limits
+            .with_limit(ProjectContentBudgetKind::WorkBytes, required - 1)
+            .unwrap();
+        let short = ProjectContentLoader::with_limits(loader.project_root(), short_limits).unwrap();
+        let error = short.load(&candidate, &plan).unwrap_err();
+        assert_eq!(error.kind(), ProjectContentErrorKind::BudgetExceeded);
+        assert_eq!(
+            short
+                .budget_snapshot()
+                .high_water(ProjectContentBudgetKind::Files),
+            3,
+            "the complete partial expansion must remain charged while decoding R"
+        );
+        assert_eq!(short.budget_snapshot().active_reservations(), 0);
+    }
+
+    #[test]
+    fn runtime_content_rejects_invalid_active_native_components() {
+        let project = LazyContentProject::new();
+        let invalid = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(
+            SceneEntityId::new("r").unwrap(),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.scene.Name"),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Bool(true)),
+        )]);
+        fs::write(
+            project.root.join("prefabs/r.prefab.json"),
+            invalid.to_json_string().unwrap(),
         )
         .unwrap();
+        let (candidate, plan, loader) = project.inputs();
+        let error = loader.load(&candidate, &plan).unwrap_err();
+        assert!(error.diagnostics().has_errors());
+        assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+    }
 
-        assert_eq!(patch_retained_bytes(&patch).unwrap(), expected);
+    #[test]
+    fn runtime_content_defers_source_payload_admission_until_complete_repair_is_selected() {
+        for repair in ["replace", "suppress", "inherit"] {
+            let project = LazyContentProject::new();
+            let id = |name| SceneEntityId::new(name).unwrap();
+            let component = ComponentTypeId::new("nara.scene.Name");
+            let source = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("n"))
+                .with_component(
+                    component.clone(),
+                    SceneComponentRecord::new(
+                        ComponentSchemaVersion::ONE,
+                        ComponentValue::Bool(true),
+                    ),
+                )]);
+            fs::write(
+                project.root.join("prefabs/p.prefab.json"),
+                source.to_json_string().unwrap(),
+            )
+            .unwrap();
+            let mut overlay = PrefabOverlay::new(SourceDocumentKey::project_location(
+                "39f9d09d-63e3-5fc4-8e3f-71e84893cb8d".parse().unwrap(),
+                nara_asset::AssetPath::new("prefabs/p.prefab.json").unwrap(),
+                SourceDocumentKind::Prefab,
+            ));
+            match repair {
+                "replace" => overlay.components.push(PrefabComponentIntent::Set {
+                    mode: nara_scene::PrefabComponentSetMode::Replace,
+                    target: PrefabEntityTarget::source(id("n")),
+                    component: component.clone(),
+                    record: SceneComponentRecord::new(
+                        ComponentSchemaVersion::ONE,
+                        ComponentValue::String("Repaired".into()),
+                    ),
+                    bindings: Vec::new(),
+                }),
+                "suppress" => overlay.components.push(PrefabComponentIntent::Suppress {
+                    target: PrefabEntityTarget::source(id("n")),
+                    component: component.clone(),
+                }),
+                _ => {}
+            }
+            let mut anchor = SceneEntityRecord::new(id("host"));
+            anchor.prefab = Some(PrefabInstance {
+                source: AssetRef::path("p.prefab.json").unwrap(),
+                overrides: Some(overlay),
+            });
+            fs::write(
+                project.root.join("scenes/startup.scene.json"),
+                SceneDocument::from_ordered_roots([anchor])
+                    .to_json_string()
+                    .unwrap(),
+            )
+            .unwrap();
+            let (candidate, plan, loader) = project.inputs();
+            let result = loader.load(&candidate, &plan);
+            if repair == "inherit" {
+                assert!(
+                    result.is_err(),
+                    "retaining the invalid value must still refuse native publication"
+                );
+            } else {
+                let snapshot = result.unwrap();
+                assert!(!snapshot.source_upgrade_required());
+                assert_eq!(snapshot.prefabs().len(), 1);
+                assert_eq!(
+                    snapshot.prefabs()[0].document().entities[0].components[&component].value,
+                    ComponentValue::Bool(true),
+                    "composition cannot rewrite the captured source",
+                );
+                let node = snapshot
+                    .expanded_scene()
+                    .entities
+                    .iter()
+                    .find(|entity| entity.id != id("host"))
+                    .unwrap();
+                assert_eq!(
+                    node.components.contains_key(&component),
+                    repair == "replace"
+                );
+                if repair == "replace" {
+                    assert_eq!(
+                        node.components[&component].value,
+                        ComponentValue::String("Repaired".into())
+                    );
+                }
+                drop(snapshot);
+            }
+            assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+        }
+    }
+
+    static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    struct LazyContentProject {
+        root: PathBuf,
+        temporary_parent: PathBuf,
+    }
+
+    impl LazyContentProject {
+        fn new() -> Self {
+            let temporary_parent = std::env::temp_dir().canonicalize().unwrap();
+            let root = temporary_parent.join(format!(
+                "nara_lazy_project_content_{}_{}",
+                std::process::id(),
+                TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+            ));
+            fs::create_dir(&root).unwrap();
+            let project = Self {
+                root,
+                temporary_parent,
+            };
+            for directory in ["assets", "prefabs", "scenes"] {
+                fs::create_dir(project.root.join(directory)).unwrap();
+            }
+            fs::write(
+                project.root.join("nara.toml"),
+                r#"schema_version = 1
+[project]
+source_universe = '39f9d09d-63e3-5fc4-8e3f-71e84893cb8d'
+native_document_identity = 'project_location'
+name = "Lazy content regression"
+[paths]
+assets = "assets"
+scenes = "scenes"
+prefabs = "prefabs"
+[startup]
+default_scene = "startup.scene.json"
+[capabilities]
+requested = ["runtime-2d"]
+"#,
+            )
+            .unwrap();
+            let id = |name| SceneEntityId::new(name).unwrap();
+            let key = |name| {
+                SourceDocumentKey::project_location(
+                    "39f9d09d-63e3-5fc4-8e3f-71e84893cb8d".parse().unwrap(),
+                    nara_asset::AssetPath::new(format!("prefabs/{name}.prefab.json")).unwrap(),
+                    SourceDocumentKind::Prefab,
+                )
+            };
+            let mut discarded = PrefabAddition::new(id("unavailable"));
+            discarded.components.insert(
+                ComponentTypeId::new("test.Unavailable"),
+                SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
+            );
+            let mut obsolete = PrefabOverlay::new(key("missing-q"));
+            obsolete.additions.push(discarded);
+            obsolete.placements.push(PrefabPlacement {
+                target: PrefabEntityTarget::addition(id("unavailable")),
+                parent: PrefabPlacementParent::Root,
+                slot: PrefabPlacementSlot::Last,
+            });
+            let mut nested = SceneEntityRecord::new(id("n")).with_component(
+                ComponentTypeId::new("nara.sprite.Sprite"),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::map([
+                        (
+                            "size",
+                            ComponentValue::map([
+                                ("x", ComponentValue::f64(1.0).unwrap()),
+                                ("y", ComponentValue::f64(1.0).unwrap()),
+                            ]),
+                        ),
+                        (
+                            "material",
+                            ComponentValue::map([
+                                (
+                                    "image",
+                                    ComponentValue::map([
+                                        ("kind", ComponentValue::String("stable_id".into())),
+                                        (
+                                            "value",
+                                            ComponentValue::String(
+                                                "706fd198-2412-4ccb-a398-f9f826fbe208".into(),
+                                            ),
+                                        ),
+                                    ]),
+                                ),
+                                (
+                                    "tint",
+                                    ComponentValue::map([
+                                        ("r", ComponentValue::f64(1.0).unwrap()),
+                                        ("g", ComponentValue::f64(1.0).unwrap()),
+                                        ("b", ComponentValue::f64(1.0).unwrap()),
+                                        ("a", ComponentValue::f64(1.0).unwrap()),
+                                    ]),
+                                ),
+                            ]),
+                        ),
+                    ]),
+                ),
+            );
+            nested.prefab = Some(PrefabInstance {
+                source: AssetRef::path("missing-q.prefab.json").unwrap(),
+                overrides: Some(obsolete),
+            });
+            let p = PrefabDocument::from_ordered_roots([nested]);
+            let r = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("r"))]);
+            let mut overlay = PrefabOverlay::new(key("p"));
+            overlay.instances.push(PrefabInstanceClaim {
+                target: PrefabEntityTarget::source(id("n")),
+                value: Some(PrefabInstance {
+                    source: AssetRef::path("r.prefab.json").unwrap(),
+                    overrides: None,
+                }),
+            });
+            overlay.components.push(PrefabComponentIntent::Suppress {
+                target: PrefabEntityTarget::source(id("n")),
+                component: ComponentTypeId::new("nara.sprite.Sprite"),
+            });
+            let scene = SceneDocument::from_ordered_roots(["outer-a", "outer-b"].map(|name| {
+                let mut anchor = SceneEntityRecord::new(id(name));
+                anchor.prefab = Some(PrefabInstance {
+                    source: AssetRef::path("p.prefab.json").unwrap(),
+                    overrides: Some(overlay.clone()),
+                });
+                anchor
+            }));
+            for (path, bytes) in [
+                ("scenes/startup.scene.json", scene.to_json_string().unwrap()),
+                ("prefabs/p.prefab.json", p.to_json_string().unwrap()),
+                ("prefabs/r.prefab.json", r.to_json_string().unwrap()),
+            ] {
+                fs::write(project.root.join(path), bytes).unwrap();
+            }
+            // Any premature stable-ID catalogue preparation encounters this invalid metadata.
+            fs::write(
+                project.root.join("assets/unused.png.meta"),
+                b"invalid metadata",
+            )
+            .unwrap();
+            project
+        }
+
+        fn inputs(&self) -> (ProjectSettingsCandidate, RuntimePlan, ProjectContentLoader) {
+            #[cfg(windows)]
+            let file = {
+                use std::{fs::OpenOptions, os::windows::fs::OpenOptionsExt};
+                OpenOptions::new()
+                    .read(true)
+                    .share_mode(0x1 | 0x2 | 0x4)
+                    .custom_flags(0x0200_0000 | 0x0020_0000)
+                    .open(&self.root)
+                    .unwrap()
+            };
+            #[cfg(not(windows))]
+            let file = fs::File::open(&self.root).unwrap();
+            let root = DirectoryCapability::from_host_handle(
+                file,
+                HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::TrustedLocal),
+            )
+            .unwrap();
+            let manifest = root
+                .open_file(&RelativePath::new("nara.toml").unwrap())
+                .unwrap();
+            let candidate = ingest_project_manifest(&manifest, None).unwrap();
+            let plan = resolve_product_recipe(&candidate, crate::ProductRecipe::new()).unwrap();
+            (candidate, plan, ProjectContentLoader::new(root).unwrap())
+        }
+
+        fn digest(&self, path: &str) -> ContentDigest {
+            ContentDigest::of_bytes(&fs::read(self.root.join(path)).unwrap())
+        }
+    }
+
+    impl Drop for LazyContentProject {
+        fn drop(&mut self) {
+            let relative = self.root.strip_prefix(&self.temporary_parent).unwrap();
+            assert_eq!(relative.components().count(), 1);
+            let _ = fs::remove_dir_all(&self.root);
+        }
     }
 }

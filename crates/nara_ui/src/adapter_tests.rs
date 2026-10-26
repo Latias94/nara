@@ -22,7 +22,7 @@ use nara_reflect::{
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, SceneDocument, SceneEntityId,
-    SceneEntityRecord, SceneEntitySource, ScenePatchDocument,
+    SceneEntityRecord, SceneEntitySource,
 };
 use nara_ui_kernel::{
     UiAccessibilityInput, UiActivationSource, UiButtonPhase, UiInputEvent, UiKey, UiLayer,
@@ -4126,7 +4126,7 @@ fn prefab_anchor(id: &str, source: AssetRef) -> SceneEntityRecord {
         components: BTreeMap::new(),
         prefab: Some(PrefabInstance {
             source,
-            overrides: ScenePatchDocument::default(),
+            overrides: None,
         }),
     }
 }

@@ -14,7 +14,7 @@ use nara_reflect::{
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, SceneComponentRecord,
-    SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, export_scene,
+    SceneDocument, SceneEntityId, SceneEntityRecord, export_scene,
 };
 #[cfg(feature = "serde")]
 use nara_scene::{SceneDocumentCandidate, SceneFileLimits};
@@ -198,7 +198,7 @@ fn repeated_prefabs_remap_default_local_reference_and_preserve_source_omission()
         let mut entity = SceneEntityRecord::new(scene_id(anchor));
         entity.prefab = Some(PrefabInstance {
             source: source.clone(),
-            overrides: ScenePatchDocument::default(),
+            overrides: None,
         });
         entity
     }));

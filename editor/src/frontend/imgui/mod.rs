@@ -1079,6 +1079,8 @@ fn paint_authoring_view(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) 
         context.output.canvas_pick_uv = canvas.pick_uv;
     } else {
         let frame = context.input.frame;
+        let unsaved = frame.scene_preview_unsaved_dependencies();
+        ui.text_disabled(format!("Unsaved Prefab dependencies: {unsaved}"));
         let editing = !context.input.read_only
             && frame
                 .scene_preview_document()

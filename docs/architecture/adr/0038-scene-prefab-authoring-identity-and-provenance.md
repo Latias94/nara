@@ -8,6 +8,7 @@ and Scene-owned logical occurrence
 and complete Runtime/Canvas logical-key lowering
 **Amended**: 2026-10-26 by explicit instance-addition origin throughout projection ancestry
 and exact containing-source instance-declaration transactions, plus source-owned identity encoding
+**Amended**: 2026-10-26 by declarative instance intent and selection before recursive activation
 **Refines**: ADR 0006: Scene and Prefab Data Model
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References;
@@ -18,8 +19,9 @@ UI, Text, Widget, and Presented-Frame Topology
 
 ## Context
 
-nara already has stable `SceneEntityId`, `PrefabDocument`, `PrefabInstance`, nested prefab
-resolution, patch-based prefab overrides, isolated Play Mode, and a narrow Apply Changes subset.
+nara has stable `SceneEntityId`, `PrefabDocument`, `PrefabInstance`, nested prefab
+resolution, isolated Play Mode, and a narrow Apply Changes subset. Earlier persistent overrides
+reused exact Scene patches, which could lose durable leaf intent and retain obsolete edit bases.
 The remaining high-cost ambiguity is provenance: when an entity appears in an authoring view or
 runtime projection, which document owns it, how should prefab-expanded entities be written back, and
 what happens when source prefab or scene references are renamed or moved?
@@ -45,8 +47,19 @@ Scene/prefab authoring identity is document-relative and provenance-aware.
   explicit logical occurrence and complete authored placement into opaque binary keys. The
   ECS-independent kernel does not expose Scene path types, inherit context from a root, or use
   lookup aliases as identity. ADR 0083 remains Proposed for broader asset/product identity.
-- Persistent overrides are `ScenePatchDocument` values applied relative to source prefab entity IDs
-  before expansion.
+- Persistent overrides are optional `PrefabOverlay` declarations bound to one canonical base.
+  They retain property pins, component intent, complete additions, desired placement, suppression
+  and optional-instance pins in typed source/addition target namespaces. Exact Scene patches remain
+  revision-bound source edits and inverse history; they are not durable inheritance intent.
+- Select complete instance declarations from inner to outer before resolving their nested sources.
+  A complete replacement can repair a missing old nested source without requesting it. Traversing
+  a nested target separately requires its per-hop canonical base. Compile ordinary component,
+  property and layout intent by active layer after recursion; preserve the original binding scope.
+- Source preservation admits bounded understood declarations without requiring every retained
+  overlay to activate. Only selected surviving declarations determine activation semantics and
+  actual source/asset demand. The Scene compiler owns selection; the Host owns bounded reads,
+  immutable source/metadata receipts and revalidation. Superseded branch diagnostics do not make
+  a valid replacement unsavable or force reads of its inactive dependencies.
 - Projection ancestry is a sequence of typed instance-entry steps. `SourceEntity` binds the
   admitted canonical Prefab source and its local entity, retaining lookup spelling as evidence.
   `InstanceAddition` enters the preceding anchor's overlay-local namespace without claiming the
@@ -67,6 +80,10 @@ Scene/prefab authoring identity is document-relative and provenance-aware.
   lookup resolution and activation. Source preparation may retain unresolved lookup/override
   intent without claiming an executable candidate. Local children and components are unchanged;
   detachment is not convert-to-local, and preservation of unavailable data remains mandatory.
+  A complete explicit replacement is also the repair boundary for that anchor's old overlay:
+  it compares and retains the complete old declaration in one inverse. Unrelated unavailable
+  declarations and direct component records remain protected; a generic field/placement edit
+  cannot acquire this repair authority by changing derived projection data.
 - Cross-document references should use `AssetRef` plus document-relative `SceneEntityId` when they
   become necessary. They must not rely on runtime entity IDs or backend handles.
 
@@ -77,7 +94,7 @@ flowchart TD
     Anchor --> Source[PrefabDocument via AssetRef]
     Source --> SourceEntity[source SceneEntityId]
     SourceEntity --> Expanded[projection: opaque source id plus structured path]
-    Override[ScenePatchDocument override] --> SourceEntity
+    Override[Declarative PrefabOverlay] --> SourceEntity
     Anchor --> Override
     Override --> Addition[instance-overlay addition]
     Addition --> Expanded
@@ -165,12 +182,12 @@ flowchart TD
 - Expansion admits modeled source-ancestry and provenance bytes before copying a source key or
   projection chain. Post-expansion retained-byte accounting cannot substitute for this bounded
   allocation admission. Limits model logical ownership, not allocator capacity or process RSS.
-- While durable overrides remain exact patches, expansion classifies top-level entity creation
-  declarations, including restored descendants, as addition origin after the whole patch succeeds.
-  Removing and recreating a base entity with the same spelling does not make the new record
-  inherited. The temporary creation index is bounded before allocation; nested override payloads
-  are classified when their own instance expands. This does not qualify declarative overlays,
-  durable source repair/history, or expanded write-back. No generated-ID prefix encodes origin.
+- Complete overlay additions retain explicit addition origin independently of source-local
+  spelling, including an added anchor with its own nested declaration. Placements are their sole
+  hierarchy authority. Bound declarations, targets, bindings, payload/default costs and provenance
+  before copying or compiling. No generated-ID prefix encodes origin. ADR 0101's nested-root
+  prefix and containing-layer child sequences still govern final order; `Parent::Root` means
+  the declaring overlay's effective roots, not its eventual physical anchor's local children.
 - Apply Changes may remain narrow. Any future prefab-expanded write-back must declare whether it is
   producing an override patch, editing the prefab source, or converting to local scene data.
 
@@ -217,7 +234,7 @@ ownership, and gives editor/AI write-back a clear contract.
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | Tooling forgets provenance after projection | High | Medium | Carry provenance with inspector/editor selection models. |
-| Override patches become hard to explain | Medium | Medium | Keep overrides as normal `ScenePatchDocument` values against source IDs. |
+| Override layers become hard to explain | Medium | Medium | Expose explicit declaring source, typed target, inheritance/pin state and conflicts; retain exact source transactions separately. |
 | Path-based prefab refs break on rename | Medium | Medium | Prefer stable IDs when project databases exist; path refs remain hand-authoring friendly. |
 | Conversion to local duplicates source data accidentally | Medium | Low | Make convert-to-local an explicit command with diagnostics. |
 

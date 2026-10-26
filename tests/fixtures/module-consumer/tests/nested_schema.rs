@@ -13,7 +13,7 @@ use nara_reflect::{
 use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, InMemoryPrefabSourceResolver,
     PrefabDocument, PrefabInstance, SceneAuthoringSession, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SceneEntityRecord, ScenePatchDocument, SourceDocumentKey, SourceDocumentKind,
+    SceneEntityId, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
     export_scene,
 };
 use nara_tooling::{SceneInspectorCommand, SceneInspectorState};
@@ -112,7 +112,7 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new(id).unwrap());
         anchor.prefab = Some(PrefabInstance {
             source: prefab_source.clone(),
-            overrides: ScenePatchDocument::default(),
+            overrides: None,
         });
         anchor
     });

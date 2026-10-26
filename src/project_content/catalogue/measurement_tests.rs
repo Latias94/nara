@@ -19,8 +19,8 @@ use nara_fs::{
 };
 use nara_identity::SceneEntityId;
 use nara_scene::{
-    PrefabDocument, PrefabInstance, SceneDocument, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation,
+    PrefabDocument, PrefabEntityTarget, PrefabInstance, PrefabInstanceClaim, PrefabOverlay,
+    SceneDocument, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
 };
 
 use crate::{
@@ -368,75 +368,105 @@ fn catalogue_capture_and_scene_copy_reject_budget_pressure_without_retaining_wor
 }
 
 #[test]
-fn exact_instance_snapshots_discover_both_sides_and_charge_repeated_edges() {
+fn lazy_loader_measures_selected_prefabs_and_reuses_the_catalogue_for_repeated_edges() {
     let project = CatalogueProject::new(2, 4);
+    let key = |index| {
+        SourceDocumentKey::project_location(
+            "257bb27b-5c5f-559d-8283-f498450385be".parse().unwrap(),
+            AssetPath::new(format!("prefabs/{}", prefab_path(index))).unwrap(),
+            SourceDocumentKind::Prefab,
+        )
+    };
+    // An outer pin supersedes the nested declaration, including its retained overlay.
+    // Catalogue metadata remains valid, but neither inactive source is decodable.
+    for index in [2, 3] {
+        fs::write(
+            project.root.join("prefabs").join(prefab_path(index)),
+            b"inactive prefab source must not be decoded",
+        )
+        .unwrap();
+    }
+    let mut inactive_overlay = PrefabOverlay::new(key(2));
+    inactive_overlay.instances.push(PrefabInstanceClaim {
+        target: PrefabEntityTarget::source(SceneEntityId::new("inactive-nested").unwrap()),
+        value: Some(PrefabInstance {
+            source: AssetRef::StableId(stable_id(3)),
+            overrides: None,
+        }),
+    });
+    let mut nested = SceneEntityRecord::new(SceneEntityId::new("nested").unwrap());
+    nested.prefab = Some(PrefabInstance {
+        source: AssetRef::StableId(stable_id(2)),
+        overrides: Some(inactive_overlay),
+    });
+    fs::write(
+        project.root.join("prefabs").join(prefab_path(0)),
+        PrefabDocument::from_ordered_roots([nested])
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    let mut overlay = PrefabOverlay::new(key(0));
+    overlay.instances.push(PrefabInstanceClaim {
+        target: PrefabEntityTarget::source(SceneEntityId::new("nested").unwrap()),
+        value: Some(PrefabInstance {
+            source: AssetRef::StableId(stable_id(1)),
+            overrides: None,
+        }),
+    });
+    let roots = ["left", "right"].map(|id| {
+        let mut anchor = SceneEntityRecord::new(SceneEntityId::new(id).unwrap());
+        anchor.prefab = Some(PrefabInstance {
+            source: AssetRef::StableId(stable_id(0)),
+            overrides: Some(overlay.clone()),
+        });
+        anchor
+    });
+    fs::write(
+        project.root.join("scenes/scene-000.scene.json"),
+        SceneDocument::from_ordered_roots(roots)
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
     let root = project.capability();
     let manifest = root
         .open_file(&RelativePath::new("nara.toml").unwrap())
         .unwrap();
     let candidate = ingest_project_manifest(&manifest, None).unwrap();
     let plan = resolve_product_recipe(&candidate, ProductRecipe::new()).unwrap();
+    drop(manifest);
     let loader = ProjectContentLoader::new(root.share()).unwrap();
-    let mut context = super::super::LoadContext::new(
-        &loader,
-        plan.schema_validation(),
-        &plan.asset_domains,
-        None,
-        Default::default(),
-        candidate.manifest_digest(),
-        None,
-        None,
-        false,
-    )
-    .unwrap();
-    context.catalogue_roots = Some([
-        candidate.settings().paths.assets.clone(),
-        candidate.settings().paths.prefabs.clone(),
-    ]);
-    let instance = |index, overrides| PrefabInstance {
-        source: AssetRef::StableId(stable_id(index)),
-        overrides,
-    };
-    let patch = ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
-        entity: SceneEntityId::new("nested").unwrap(),
-        expected: Some(instance(0, ScenePatchDocument::default())),
-        value: Some(instance(
-            1,
-            ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
-                entity: SceneEntityId::new("deep").unwrap(),
-                expected: Some(instance(2, ScenePatchDocument::default())),
-                value: Some(instance(
-                    3,
-                    ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
-                        entity: SceneEntityId::new("repeated").unwrap(),
-                        expected: Some(instance(0, ScenePatchDocument::default())),
-                        value: None,
-                    }]),
-                )),
-            }]),
-        )),
-    }]);
-    let mut queue = std::collections::VecDeque::new();
-    let mut discovered = std::collections::BTreeSet::new();
-    let (result, counts, _) =
-        measure(|| context.enqueue_patch_prefabs(&patch, 3, &mut queue, &mut discovered));
-    result.unwrap();
-    assert_eq!(counts.catalogue_builds, 1);
+    let (snapshot, counts, _) = measure(|| loader.load(&candidate, &plan).unwrap());
     assert_eq!(
-        queue.into_iter().collect::<Vec<_>>(),
-        (0..4)
-            .map(|index| { (AssetPath::new(prefab_path(index)).unwrap(), 3) })
+        counts,
+        CatalogueCounts {
+            metadata_revalidations: 2,
+            ..project.expected_counts()
+        }
+    );
+    assert_eq!(
+        snapshot
+            .prefabs()
+            .iter()
+            .map(|prefab| prefab.path().clone())
+            .collect::<Vec<_>>(),
+        (0..2)
+            .map(|index| AssetPath::new(prefab_path(index)).unwrap())
             .collect::<Vec<_>>()
     );
-    assert_eq!(discovered.len(), 4);
+    assert_eq!(snapshot.expanded_scene().entities.len(), 6);
+    let budget = loader.budget_snapshot();
+    // Two occurrences each request the selected outer and nested source; only unique sources
+    // are decoded and revalidated. There is no runtime dependency on exact-edit snapshots.
     assert_eq!(
-        loader
-            .budget_snapshot()
-            .active(ProjectContentBudgetKind::DependencyEdges),
-        5
+        budget.high_water(ProjectContentBudgetKind::DependencyEdges),
+        4
     );
-    drop(context);
+    assert_eq!(budget.high_water(ProjectContentBudgetKind::InFlightJobs), 1);
+    drop(snapshot);
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+    assert_eq!(loader.budget_snapshot().active_generations(), 0);
 }
 
 #[test]
@@ -557,7 +587,7 @@ requested = ["runtime-2d"]
                 );
                 entity.prefab = Some(PrefabInstance {
                     source: AssetRef::StableId(stable_id(identity)),
-                    overrides: ScenePatchDocument::default(),
+                    overrides: None,
                 });
                 entity
             });

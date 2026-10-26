@@ -26,6 +26,11 @@ pub enum AuthoringPreviewOmissionLocation {
         entity: SceneEntityId,
         component: ComponentTypeId,
     },
+    ProjectedEntityComponent {
+        entity: SceneEntityId,
+        provenance: crate::SceneEntityProvenance,
+        component: ComponentTypeId,
+    },
     NestedPrefab {
         entity: SceneEntityId,
     },
@@ -52,6 +57,34 @@ pub struct AuthoringPreviewOmission {
 }
 
 impl AuthoringPreviewOmission {
+    pub(crate) fn from_expansion(
+        fact: &crate::prefab::AuthoringPrefabOmission,
+        expanded: &crate::ExpandedSceneDocument,
+    ) -> Self {
+        let provenance = &expanded.provenance()[&fact.entity];
+        let location = if provenance.projection_path().is_some() {
+            AuthoringPreviewOmissionLocation::ProjectedEntityComponent {
+                entity: fact.entity.clone(),
+                provenance: provenance.clone(),
+                component: fact.component.clone(),
+            }
+        } else {
+            AuthoringPreviewOmissionLocation::DirectEntityComponent {
+                entity: fact.entity.clone(),
+                component: fact.component.clone(),
+            }
+        };
+        let reason = match fact.reason {
+            crate::prefab::AuthoringPrefabOmissionReason::RecordUnavailable(reason) => {
+                AuthoringPreviewOmissionReason::RecordUnavailable(reason)
+            }
+            crate::prefab::AuthoringPrefabOmissionReason::NativeBindingUnavailable => {
+                AuthoringPreviewOmissionReason::NativeBindingUnavailable
+            }
+        };
+        Self { location, reason }
+    }
+
     #[must_use]
     pub const fn location(&self) -> &AuthoringPreviewOmissionLocation {
         &self.location

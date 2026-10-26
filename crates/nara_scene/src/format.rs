@@ -31,6 +31,10 @@ use crate::{
     PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityId,
     SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
     patch::ScenePatchDocumentWire,
+    prefab::{
+        PrefabOverlayCostError, PrefabOverlayCostKind, PrefabOverlayCostLimits,
+        prefab_instance_cost,
+    },
 };
 
 const SCENE_KIND: &str = "scene";
@@ -50,6 +54,7 @@ pub struct SceneFileLimits {
     components: ItemLimit,
     prefab_instances: ItemLimit,
     patch_operations: ItemLimit,
+    overlay_declarations: ItemLimit,
     diagnostic_sources: ItemLimit,
     component_value_nodes: ItemLimit,
     component_value_bytes: ByteLimit,
@@ -76,6 +81,8 @@ impl Default for SceneFileLimits {
                 .expect("scene prefab instance limit is non-zero"),
             patch_operations: ItemLimit::new(100_000)
                 .expect("scene patch operation limit is non-zero"),
+            overlay_declarations: ItemLimit::new(100_000)
+                .expect("scene overlay declaration limit is non-zero"),
             diagnostic_sources: ItemLimit::new(500_000)
                 .expect("scene diagnostic source limit is non-zero"),
             component_value_nodes: ItemLimit::new(5_000_000)
@@ -138,6 +145,12 @@ impl SceneFileLimits {
         self.patch_operations
     }
 
+    /// Raw overlays, declarations, property claims and reference bindings across all instances.
+    #[must_use]
+    pub const fn overlay_declarations(self) -> ItemLimit {
+        self.overlay_declarations
+    }
+
     #[must_use]
     pub const fn diagnostic_sources(self) -> ItemLimit {
         self.diagnostic_sources
@@ -148,6 +161,7 @@ impl SceneFileLimits {
         self.component_value_nodes
     }
 
+    /// Aggregate logical payload bytes, including raw overlay identities and record metadata.
     #[must_use]
     pub const fn component_value_bytes(self) -> ByteLimit {
         self.component_value_bytes
@@ -202,6 +216,12 @@ impl SceneFileLimits {
     }
 
     #[must_use]
+    pub const fn with_overlay_declarations(mut self, limit: ItemLimit) -> Self {
+        self.overlay_declarations = limit;
+        self
+    }
+
+    #[must_use]
     pub const fn with_diagnostic_sources(mut self, limit: ItemLimit) -> Self {
         self.diagnostic_sources = limit;
         self
@@ -243,6 +263,7 @@ pub enum SceneFileBudgetKind {
     Components,
     PrefabInstances,
     PatchOperations,
+    OverlayDeclarations,
     DiagnosticSources,
     ComponentValueNodes,
     ComponentValueBytes,
@@ -257,6 +278,7 @@ impl Display for SceneFileBudgetKind {
             Self::Components => formatter.write_str("components"),
             Self::PrefabInstances => formatter.write_str("prefab instances"),
             Self::PatchOperations => formatter.write_str("patch operations"),
+            Self::OverlayDeclarations => formatter.write_str("overlay declarations"),
             Self::DiagnosticSources => formatter.write_str("diagnostic sources"),
             Self::ComponentValueNodes => formatter.write_str("component value nodes"),
             Self::ComponentValueBytes => formatter.write_str("component value bytes"),
@@ -298,7 +320,7 @@ pub enum SceneFormatError {
         source: Box<dyn Error + Send + Sync>,
     },
     Contract(PersistentFileContractError),
-    EmbeddedPatchFormatVersion {
+    PatchFormatVersion {
         observed: u32,
         expected: u32,
     },
@@ -337,9 +359,9 @@ impl Display for SceneFormatError {
                 )
             }
             Self::Contract(error) => Display::fmt(error, formatter),
-            Self::EmbeddedPatchFormatVersion { observed, expected } => write!(
+            Self::PatchFormatVersion { observed, expected } => write!(
                 formatter,
-                "embedded scene patch format version is {observed}, expected {expected}"
+                "scene patch format version is {observed}, expected {expected}"
             ),
             Self::LegacyPlacementShape { entity_index } => {
                 if let Some(entity_index) = entity_index {
@@ -382,7 +404,7 @@ impl Error for SceneFormatError {
             Self::Contract(error) => Some(error),
             Self::Budget(error) => Some(error),
             Self::EncodedBytesExceeded { .. }
-            | Self::EmbeddedPatchFormatVersion { .. }
+            | Self::PatchFormatVersion { .. }
             | Self::LegacyPlacementShape { .. } => None,
         }
     }
@@ -470,7 +492,7 @@ impl SceneFormatError {
             | Self::Payload { source, .. } => Some(source.as_ref()),
             Self::EncodedBytesExceeded { .. }
             | Self::Contract(_)
-            | Self::EmbeddedPatchFormatVersion { .. }
+            | Self::PatchFormatVersion { .. }
             | Self::LegacyPlacementShape { .. }
             | Self::Budget(_)
             | Self::Encode { .. }
@@ -494,9 +516,11 @@ pub struct SceneDocumentCandidate {
     limits: SceneFileLimits,
 }
 
-/// A prefab file that passed encoded, structural, envelope, and domain-count checks.
+/// Bounded Prefab declarations awaiting source-local semantic validation.
 ///
-/// The candidate must be validated before a prefab source owner publishes it.
+/// File decoding checks the envelope, encoded shape and domain limits. Reusing an owned
+/// document checks domain limits without a wire round trip. Neither path validates component
+/// values or grants standalone authoring or runtime publication.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrefabDocumentCandidate {
     document: PrefabDocument,
@@ -512,6 +536,16 @@ pub struct CanonicalSceneDocumentCandidate {
 }
 
 impl CanonicalSceneDocumentCandidate {
+    /// Consumes bounded canonical source declarations before selected Prefab activation.
+    ///
+    /// Returns whether direct source normalization changed the stored representation. Overlay
+    /// intent remains unactivated. The Host must still capture sources and compile/validate the
+    /// selected effective candidate; this value does not authorize runtime materialization.
+    #[must_use]
+    pub fn into_source_document(self) -> (SceneDocument, bool) {
+        (self.document, self.source_upgrade_required)
+    }
+
     /// Returns the canonical value for host policy checks before semantic publication.
     #[must_use]
     pub const fn document(&self) -> &SceneDocument {
@@ -569,6 +603,15 @@ pub struct CanonicalPrefabDocumentCandidate {
 }
 
 impl CanonicalPrefabDocumentCandidate {
+    /// Consumes bounded canonical source declarations without activating their nested overlays.
+    ///
+    /// The boolean reports direct source normalization. Source identity, actual dependency
+    /// capture and selected effective validation remain the consuming Host/compiler's obligations.
+    #[must_use]
+    pub fn into_source_document(self) -> (PrefabDocument, bool) {
+        (self.document, self.source_upgrade_required)
+    }
+
     /// Returns the canonical value for host policy checks before semantic publication.
     #[must_use]
     pub const fn document(&self) -> &PrefabDocument {
@@ -832,7 +875,7 @@ impl SceneFilePayload for SceneDocument {
     }
 
     fn validate_contract(&self) -> Result<(), SceneFormatError> {
-        validate_embedded_patch_versions(&self.entities)
+        Ok(())
     }
 
     fn validate_budget(&self, limits: SceneFileLimits) -> Result<(), SceneFileBudgetError> {
@@ -859,7 +902,7 @@ impl SceneFilePayload for PrefabDocument {
     }
 
     fn validate_contract(&self) -> Result<(), SceneFormatError> {
-        validate_embedded_patch_versions(&self.entities)
+        Ok(())
     }
 
     fn validate_budget(&self, limits: SceneFileLimits) -> Result<(), SceneFileBudgetError> {
@@ -883,7 +926,7 @@ impl SceneFilePayload for ScenePatchDocument {
     fn canonicalize_payload(&mut self) {}
 
     fn validate_contract(&self) -> Result<(), SceneFormatError> {
-        validate_patch_tree_version(self)
+        validate_patch_version(self)
     }
 
     fn validate_budget(&self, limits: SceneFileLimits) -> Result<(), SceneFileBudgetError> {
@@ -1018,6 +1061,45 @@ impl SceneDocumentCandidate {
 }
 
 impl PrefabDocumentCandidate {
+    /// Reuses an owned source document without a wire round trip.
+    ///
+    /// This checks domain limits, not encoded bytes or wire shape. A captured source retains
+    /// that evidence from its original decoding. Standalone authoring publication must still
+    /// pass `admit_authoring_with_basis`; native publication requires registry validation.
+    #[doc(hidden)]
+    pub fn from_source_document(
+        document: PrefabDocument,
+        limits: SceneFileLimits,
+    ) -> Result<Self, SceneFormatError> {
+        Ok(Self {
+            document: finish_decode(document, limits)?,
+            limits,
+        })
+    }
+
+    /// Consumes bounded decoded declarations for deferred composition.
+    ///
+    /// File decoding already enforces its selected file limits; an owned-document candidate
+    /// retains only its domain checks here. This step validates the local hierarchy without
+    /// interpreting component payloads or stored overlays. The Host retains source evidence
+    /// and the exact Schema basis for deferred compilation. Successful composition admission
+    /// does not establish standalone publishability or editable source state.
+    #[doc(hidden)]
+    pub fn into_composition_source(self) -> Result<PrefabDocument, SceneFilePublicationError> {
+        let document = SceneDocument {
+            roots: self.document.roots,
+            entities: self.document.entities,
+        };
+        let diagnostics = crate::validation::validate_scene_structure(&document);
+        if diagnostics.has_errors() {
+            return Err(SceneFilePublicationError::new(diagnostics));
+        }
+        Ok(PrefabDocument {
+            roots: document.roots,
+            entities: document.entities,
+        })
+    }
+
     pub(crate) fn into_authoring_parts(self) -> (PrefabDocument, SceneFileLimits) {
         (self.document, self.limits)
     }
@@ -1265,10 +1347,12 @@ fn canonical_envelope<T: SceneFilePayload>(
     payload: &T,
     limits: SceneFileLimits,
 ) -> Result<PersistentFileEnvelope<T>, SceneFormatError> {
-    let mut payload = payload.clone();
-    payload.canonicalize_payload();
+    // Admit caller-owned raw declarations before Clone or serializer recursion can copy
+    // rejected payloads. This includes superseded claims and both exact snapshot sides.
     payload.validate_contract()?;
     payload.validate_budget(limits)?;
+    let mut payload = payload.clone();
+    payload.canonicalize_payload();
     Ok(PersistentFileEnvelope::canonical_v1(
         format_kind(T::KIND)?,
         engine_version(CANONICAL_V1_ENGINE_MIN_VERSION)?,
@@ -1393,22 +1477,12 @@ fn finish_decode<T: SceneFilePayload>(
     Ok(payload)
 }
 
-fn validate_embedded_patch_versions(
-    entities: &[SceneEntityRecord],
-) -> Result<(), SceneFormatError> {
-    for entity in entities {
-        if let Some(prefab) = &entity.prefab {
-            validate_patch_tree_version(&prefab.overrides)?;
-        }
-    }
-    Ok(())
-}
-
-fn validate_patch_tree_version(patch: &ScenePatchDocument) -> Result<(), SceneFormatError> {
-    let Some(observed) = patch.unsupported_format_version() else {
+fn validate_patch_version(patch: &ScenePatchDocument) -> Result<(), SceneFormatError> {
+    let observed = patch.format_version;
+    if observed == ScenePatchDocument::CURRENT_FORMAT_VERSION {
         return Ok(());
-    };
-    Err(SceneFormatError::EmbeddedPatchFormatVersion {
+    }
+    Err(SceneFormatError::PatchFormatVersion {
         observed,
         expected: ScenePatchDocument::CURRENT_FORMAT_VERSION,
     })
@@ -1477,8 +1551,11 @@ struct SceneFileCounts {
     components: usize,
     prefab_instances: usize,
     patch_operations: usize,
+    overlay_declarations: usize,
     diagnostic_sources: usize,
     component_value_cost: ComponentValueCost,
+    structural_logical_bytes: usize,
+    overlay_nodes: usize,
 }
 
 impl SceneFileCounts {
@@ -1523,11 +1600,12 @@ impl SceneFileCounts {
             limits.components(),
             SceneFileBudgetKind::Components,
         )?;
-        for _ in &entity.components {
+        for component in entity.components.keys() {
             self.observe_diagnostic_source(limits)?;
+            self.observe_structural_bytes(component.as_str().len(), limits)?;
         }
         for component in entity.components.values() {
-            self.observe_component_value(component.value.cost(), limits)?;
+            self.observe_component_record(component, limits)?;
         }
         if let Some(prefab) = &entity.prefab {
             self.observe_prefab_instance(prefab, limits)?;
@@ -1540,14 +1618,124 @@ impl SceneFileCounts {
         prefab: &PrefabInstance,
         limits: SceneFileLimits,
     ) -> Result<(), SceneFileBudgetError> {
+        let used_nodes = self
+            .component_value_cost
+            .nodes()
+            .saturating_add(self.overlay_nodes);
+        let used_bytes = self
+            .component_value_cost
+            .logical_bytes()
+            .saturating_add(self.structural_logical_bytes);
+        let overlay_limits = PrefabOverlayCostLimits {
+            nodes: limits
+                .component_value_nodes()
+                .get()
+                .saturating_sub(used_nodes),
+            depth: limits
+                .shape()
+                .depth()
+                .get()
+                .min(limits.placement_depth().get()),
+            declarations: limits
+                .overlay_declarations()
+                .get()
+                .saturating_sub(self.overlay_declarations),
+            entities: limits.entities().get().saturating_sub(self.entities),
+            placements: limits.placements().get().saturating_sub(self.placements),
+            components: limits.components().get().saturating_sub(self.components),
+            prefab_instances: limits
+                .prefab_instances()
+                .get()
+                .saturating_sub(self.prefab_instances),
+            value_nodes: limits
+                .component_value_nodes()
+                .get()
+                .saturating_sub(self.component_value_cost.nodes()),
+            value_bytes: limits
+                .component_value_bytes()
+                .get()
+                .saturating_sub(self.component_value_cost.logical_bytes()),
+            logical_bytes: limits
+                .component_value_bytes()
+                .get()
+                .saturating_sub(used_bytes),
+        };
+        let cost = prefab_instance_cost(prefab, overlay_limits)
+            .map_err(|error| self.overlay_budget_error(error, limits))?;
+        self.entities = self.entities.saturating_add(cost.entities);
+        self.placements = self.placements.saturating_add(cost.placements);
+        self.components = self.components.saturating_add(cost.components);
+        self.prefab_instances = self.prefab_instances.saturating_add(cost.prefab_instances);
+        self.overlay_declarations = self.overlay_declarations.saturating_add(cost.declarations);
+        self.overlay_nodes = self
+            .overlay_nodes
+            .saturating_add(cost.nodes.saturating_sub(cost.value_cost.nodes()));
+        self.structural_logical_bytes = self
+            .structural_logical_bytes
+            .saturating_add(cost.structural_logical_bytes);
+        self.component_value_cost = self.component_value_cost.saturating_add(cost.value_cost);
         increase(
-            &mut self.prefab_instances,
-            1,
-            limits.prefab_instances(),
-            SceneFileBudgetKind::PrefabInstances,
-        )?;
-        self.observe_diagnostic_source(limits)?;
-        self.observe_patch(&prefab.overrides, limits)
+            &mut self.diagnostic_sources,
+            cost.declarations
+                .saturating_add(cost.components)
+                .saturating_add(cost.prefab_instances),
+            limits.diagnostic_sources(),
+            SceneFileBudgetKind::DiagnosticSources,
+        )
+    }
+
+    fn overlay_budget_error(
+        &self,
+        error: PrefabOverlayCostError,
+        limits: SceneFileLimits,
+    ) -> SceneFileBudgetError {
+        let (kind, previous, maximum) = match error.kind {
+            PrefabOverlayCostKind::Nodes | PrefabOverlayCostKind::ValueNodes => (
+                SceneFileBudgetKind::ComponentValueNodes,
+                self.component_value_cost
+                    .nodes()
+                    .saturating_add(self.overlay_nodes),
+                limits.component_value_nodes().get(),
+            ),
+            PrefabOverlayCostKind::Depth => (SceneFileBudgetKind::PlacementDepth, 0, error.maximum),
+            PrefabOverlayCostKind::Declarations => (
+                SceneFileBudgetKind::OverlayDeclarations,
+                self.overlay_declarations,
+                limits.overlay_declarations().get(),
+            ),
+            PrefabOverlayCostKind::Entities => (
+                SceneFileBudgetKind::Entities,
+                self.entities,
+                limits.entities().get(),
+            ),
+            PrefabOverlayCostKind::Placements => (
+                SceneFileBudgetKind::Placements,
+                self.placements,
+                limits.placements().get(),
+            ),
+            PrefabOverlayCostKind::Components => (
+                SceneFileBudgetKind::Components,
+                self.components,
+                limits.components().get(),
+            ),
+            PrefabOverlayCostKind::PrefabInstances => (
+                SceneFileBudgetKind::PrefabInstances,
+                self.prefab_instances,
+                limits.prefab_instances().get(),
+            ),
+            PrefabOverlayCostKind::ValueBytes | PrefabOverlayCostKind::LogicalBytes => (
+                SceneFileBudgetKind::ComponentValueBytes,
+                self.component_value_cost
+                    .logical_bytes()
+                    .saturating_add(self.structural_logical_bytes),
+                limits.component_value_bytes().get(),
+            ),
+        };
+        SceneFileBudgetError {
+            kind,
+            observed: previous.saturating_add(error.observed),
+            maximum,
+        }
     }
 
     fn observe_patch(
@@ -1588,7 +1776,7 @@ impl SceneFileCounts {
                         SceneFileBudgetKind::Components,
                     )?;
                     self.observe_diagnostic_source(limits)?;
-                    self.observe_component_value(value.value.cost(), limits)?;
+                    self.observe_component_record(value, limits)?;
                 }
                 ScenePatchOperation::SetField { value, .. } => {
                     self.observe_component_value(value.cost(), limits)?;
@@ -1647,37 +1835,62 @@ impl SceneFileCounts {
         limits: SceneFileLimits,
     ) -> Result<(), SceneFileBudgetError> {
         let observed = self.component_value_cost.saturating_add(cost);
-        validate_component_value_cost(observed, limits)?;
+        self.validate_raw_cost(observed, self.structural_logical_bytes, limits)?;
         self.component_value_cost = observed;
         Ok(())
     }
-}
 
-pub(crate) fn validate_component_value_cost(
-    cost: ComponentValueCost,
-    limits: SceneFileLimits,
-) -> Result<(), SceneFileBudgetError> {
-    for (kind, observed, maximum) in [
-        (
-            SceneFileBudgetKind::ComponentValueNodes,
-            cost.nodes(),
-            limits.component_value_nodes().get(),
-        ),
-        (
-            SceneFileBudgetKind::ComponentValueBytes,
-            cost.logical_bytes(),
-            limits.component_value_bytes().get(),
-        ),
-    ] {
-        if observed > maximum {
-            return Err(SceneFileBudgetError {
-                kind,
-                observed,
-                maximum,
-            });
-        }
+    fn observe_component_record(
+        &mut self,
+        record: &SceneComponentRecord,
+        limits: SceneFileLimits,
+    ) -> Result<(), SceneFileBudgetError> {
+        self.observe_structural_bytes(
+            5_usize.saturating_add(record.owner().map_or(0, |owner| owner.as_str().len())),
+            limits,
+        )?;
+        self.observe_component_value(record.value.cost(), limits)
     }
-    Ok(())
+
+    fn observe_structural_bytes(
+        &mut self,
+        amount: usize,
+        limits: SceneFileLimits,
+    ) -> Result<(), SceneFileBudgetError> {
+        let observed = self.structural_logical_bytes.saturating_add(amount);
+        self.validate_raw_cost(self.component_value_cost, observed, limits)?;
+        self.structural_logical_bytes = observed;
+        Ok(())
+    }
+
+    fn validate_raw_cost(
+        &self,
+        values: ComponentValueCost,
+        structural_bytes: usize,
+        limits: SceneFileLimits,
+    ) -> Result<(), SceneFileBudgetError> {
+        for (kind, observed, maximum) in [
+            (
+                SceneFileBudgetKind::ComponentValueNodes,
+                values.nodes().saturating_add(self.overlay_nodes),
+                limits.component_value_nodes().get(),
+            ),
+            (
+                SceneFileBudgetKind::ComponentValueBytes,
+                values.logical_bytes().saturating_add(structural_bytes),
+                limits.component_value_bytes().get(),
+            ),
+        ] {
+            if observed > maximum {
+                return Err(SceneFileBudgetError {
+                    kind,
+                    observed,
+                    maximum,
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 fn validate_placement_depth(
@@ -1734,4 +1947,155 @@ fn increase(
     }
     *counter = observed;
     Ok(())
+}
+
+#[cfg(test)]
+mod overlay_storage_tests {
+    use nara_asset::{AssetPath, AssetRef};
+    use nara_reflect::{
+        ComponentFieldId, ComponentPropertyPath, ComponentSchemaVersion, ComponentTypeId,
+        ComponentValue,
+    };
+
+    use super::*;
+    use crate::{
+        PrefabAddition, PrefabComponentIntent, PrefabEntityTarget, PrefabOverlay,
+        PrefabPropertyClaim, PrefabPropertyIntent, SourceDocumentKey, SourceDocumentKind,
+    };
+
+    fn key() -> SourceDocumentKey {
+        SourceDocumentKey::named(
+            "72011426-37e2-48ba-bc06-78841468889a".parse().unwrap(),
+            "unresolved-base",
+            SourceDocumentKind::Prefab,
+        )
+        .unwrap()
+    }
+
+    fn instance(overlay: PrefabOverlay) -> PrefabInstance {
+        PrefabInstance {
+            source: AssetRef::Path(AssetPath::new("missing.prefab.json").unwrap()),
+            overrides: Some(overlay),
+        }
+    }
+
+    #[test]
+    fn json_and_ron_retain_unresolved_and_obsolete_claims_through_source_canonicalization() {
+        let mut overlay = PrefabOverlay::new(key());
+        overlay.components.push(PrefabComponentIntent::Properties {
+            target: PrefabEntityTarget::source(SceneEntityId::new("missing-entity").unwrap()),
+            component: ComponentTypeId::new("missing.component"),
+            version: ComponentSchemaVersion(99),
+            claims: vec![PrefabPropertyClaim {
+                path: ComponentPropertyPath::new(ComponentFieldId::new("removed-field")),
+                intent: PrefabPropertyIntent::Set(ComponentValue::String("original".to_owned())),
+                bindings: Vec::new(),
+            }],
+        });
+        let mut addition = PrefabAddition::new(SceneEntityId::new("added").unwrap());
+        addition.components.insert(
+            ComponentTypeId::new("unavailable.component"),
+            SceneComponentRecord::new(ComponentSchemaVersion(99), ComponentValue::Null),
+        );
+        overlay.additions.push(addition);
+        let mut entity = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
+        entity.prefab = Some(instance(overlay));
+        let document = SceneDocument::from_ordered_roots([entity]);
+        let mut registry = ComponentRegistry::new();
+        registry.freeze().unwrap();
+        for candidate in [
+            SceneDocumentCandidate::decode_json_str(&document.to_json_string().unwrap()).unwrap(),
+            SceneDocumentCandidate::decode_ron_str(&document.to_ron_string().unwrap()).unwrap(),
+        ] {
+            let canonical = candidate.canonicalize(&registry).unwrap();
+            assert_eq!(canonical.document(), &document);
+        }
+        let prefab = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+        for candidate in [
+            PrefabDocumentCandidate::decode_json_str(&prefab.to_json_string().unwrap()).unwrap(),
+            PrefabDocumentCandidate::decode_ron_str(&prefab.to_ron_string().unwrap()).unwrap(),
+        ] {
+            assert_eq!(
+                candidate.canonicalize(&registry).unwrap().document(),
+                &prefab
+            );
+        }
+    }
+
+    #[test]
+    fn standalone_snapshot_sides_share_all_overlay_domain_ceilings() {
+        let mut overlay = PrefabOverlay::new(key());
+        let mut addition = PrefabAddition::new(SceneEntityId::new("added").unwrap());
+        addition.prefab = Some(instance(PrefabOverlay::new(key())));
+        overlay.additions.push(addition);
+        let snapshot = instance(overlay);
+        let patch = ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
+            entity: SceneEntityId::new("anchor").unwrap(),
+            expected: Some(snapshot.clone()),
+            value: Some(snapshot),
+        }]);
+        let exact = SceneFileLimits::default()
+            .with_entities(ItemLimit::new(2).unwrap())
+            .with_prefab_instances(ItemLimit::new(4).unwrap())
+            .with_patch_operations(ItemLimit::new(1).unwrap())
+            .with_overlay_declarations(ItemLimit::new(6).unwrap());
+        assert!(patch.validate_budget(exact).is_ok());
+        for (limits, kind) in [
+            (
+                exact.with_entities(ItemLimit::new(1).unwrap()),
+                SceneFileBudgetKind::Entities,
+            ),
+            (
+                exact.with_prefab_instances(ItemLimit::new(3).unwrap()),
+                SceneFileBudgetKind::PrefabInstances,
+            ),
+            (
+                exact.with_overlay_declarations(ItemLimit::new(5).unwrap()),
+                SceneFileBudgetKind::OverlayDeclarations,
+            ),
+        ] {
+            assert_eq!(patch.validate_budget(limits).unwrap_err().kind, kind);
+        }
+        let json = patch.to_json_string().unwrap();
+        let ron = patch.to_ron_string().unwrap();
+        for result in [
+            decode_json::<ScenePatchDocument>(json.as_bytes(), exact),
+            decode_ron::<ScenePatchDocument>(ron.as_bytes(), exact),
+        ] {
+            assert!(result.is_ok());
+        }
+        let insufficient = exact.with_overlay_declarations(ItemLimit::new(5).unwrap());
+        for result in [
+            decode_json::<ScenePatchDocument>(json.as_bytes(), insufficient),
+            decode_ron::<ScenePatchDocument>(ron.as_bytes(), insufficient),
+        ] {
+            assert!(matches!(
+                result,
+                Err(SceneFormatError::Budget(SceneFileBudgetError {
+                    kind: SceneFileBudgetKind::OverlayDeclarations,
+                    ..
+                }))
+            ));
+        }
+    }
+
+    #[test]
+    fn metadata_is_admitted_before_encoder_copies_the_payload() {
+        let mut overlay = PrefabOverlay::new(key());
+        overlay.suppressions.push(PrefabEntityTarget::source(
+            SceneEntityId::new("x".repeat(1_024)).unwrap(),
+        ));
+        let mut entity = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
+        entity.prefab = Some(instance(overlay));
+        let document = SceneDocument::from_ordered_roots([entity]);
+        let limits =
+            SceneFileLimits::default().with_component_value_bytes(ByteLimit::new(512).unwrap());
+        assert!(matches!(
+            canonical_envelope(&document, limits),
+            Err(SceneFormatError::Budget(SceneFileBudgetError {
+                kind: SceneFileBudgetKind::ComponentValueBytes,
+                ..
+            }))
+        ));
+    }
 }

@@ -19,7 +19,7 @@ use nara::{
     render::DisplayRect,
     scene::{
         PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityId,
-        SceneEntityRecord, ScenePatchDocument,
+        SceneEntityRecord,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentKind, EditorFrameModel,
@@ -148,7 +148,7 @@ impl InteractionProject {
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("prefab-anchor").unwrap());
         anchor.prefab = Some(PrefabInstance {
             source: AssetRef::path("ordinary.prefab.json").unwrap(),
-            overrides: ScenePatchDocument::default(),
+            overrides: None,
         });
         fs::write(
             root.join("worlds/entry.scene.json"),

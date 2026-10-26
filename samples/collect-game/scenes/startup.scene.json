@@ -110,10 +110,7 @@
             "kind": "path",
             "value": "player.prefab.json"
           },
-          "overrides": {
-            "format_version": 1,
-            "operations": []
-          }
+          "overrides": null
         }
       },
       {

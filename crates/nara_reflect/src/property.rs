@@ -154,6 +154,26 @@ impl ComponentPropertyPath {
         }
         Ok(bytes)
     }
+
+    /// Replaces a property in an isolated, unpublished candidate without cloning its siblings.
+    ///
+    /// This internal owner seam consumes the candidate on success or failure. It shares selector,
+    /// replacement shape and value-budget validation with `replace_component_property`. Complete
+    /// candidate validation is deferred to its owner, including default interpretation and keyed
+    /// list uniqueness. The owner must admit allocations and validate the result before publishing.
+    #[doc(hidden)]
+    pub fn replace_in_owned_value(
+        &self,
+        schema: &ComponentSchema,
+        version: ComponentSchemaVersion,
+        mut value: ComponentValue,
+        replacement: ComponentValue,
+    ) -> Result<ComponentValue, ComponentPropertyError> {
+        let (resolved, storage) = resolve_location(schema, version, &value, self)?;
+        validate_property_replacement(resolved.shape, self, &replacement)?;
+        replace_prepared_property(&mut value, &storage, replacement)?;
+        Ok(value)
+    }
 }
 
 /// A borrowed observation tied to the exact supplied schema and value. No reusable storage
@@ -162,6 +182,16 @@ impl ComponentPropertyPath {
 pub struct ResolvedComponentProperty<'schema, 'value> {
     pub shape: &'schema ComponentValueShape,
     pub value: &'value ComponentValue,
+}
+
+/// A selector's declaration in an admitted current schema, without any value observation.
+///
+/// The owning field retains its original identity, metadata and capabilities. The selected
+/// shape describes a replacement payload; it does not prove that a target or value exists.
+#[derive(Debug, Clone, Copy)]
+pub struct ComponentPropertySchemaClaim<'schema> {
+    pub field: &'schema ComponentFieldSchema,
+    pub shape: &'schema ComponentValueShape,
 }
 
 /// Finite selector lookup work, independent of the selected value's copying budget.
@@ -317,6 +347,36 @@ pub fn resolve_component_property<'schema, 'value>(
     Ok(resolved)
 }
 
+/// Resolves only a selector's schema claim, retaining its owning field and selected shape.
+///
+/// The caller supplies an admitted schema. Current version, durable IDs, tombstones and keyed
+/// list identity policy are checked through the same walker as value resolution. Selector size,
+/// selected declaration depth and declaration scans are bounded; the budget includes selector
+/// bytes and examined root declarations/tombstones as well as nested lookup work.
+///
+/// No actual component, list item, map entry or optional value is required or inspected. This
+/// does not validate a target, replacement value, default, binding, edit or native authority.
+pub fn resolve_component_property_schema_claim<'schema>(
+    schema: &'schema ComponentSchema,
+    version: ComponentSchemaVersion,
+    path: &ComponentPropertyPath,
+    budget: &mut ComponentPropertyReadBudget,
+) -> Result<ComponentPropertySchemaClaim<'schema>, ComponentPropertyError> {
+    if version != schema.version {
+        return Err(ComponentPropertyError::VersionMismatch {
+            expected: schema.version,
+            actual: version,
+        });
+    }
+    budget.observe(path.logical_bytes()?)?;
+    let field = resolve_root_field(schema, &path.root, Some(&mut *budget))?;
+    let selected = resolve_root_location(field, None, path, Some(budget), None)?;
+    Ok(ComponentPropertySchemaClaim {
+        field,
+        shape: selected.shape,
+    })
+}
+
 /// Borrows a descendant of an already admitted root, without validating/materializing siblings.
 /// The caller owns current Schema/version admission and explicit/default source interpretation.
 /// This is neither arbitrary input validation nor permission to edit the observed value.
@@ -330,7 +390,13 @@ pub fn resolve_component_property_in_root<'schema, 'value>(
     if field.id != path.root {
         return Err(ComponentPropertyError::UnknownRoot(path.root.clone()));
     }
-    resolve_root_location(field, value, path, Some(budget), None).map(|(resolved, _)| resolved)
+    let selected = resolve_root_location(field, Some(value), path, Some(budget), None)?;
+    Ok(ResolvedComponentProperty {
+        shape: selected.shape,
+        value: selected
+            .value
+            .expect("value resolution retains its observation"),
+    })
 }
 
 /// Replaces exactly one existing target, returning its previous value.
@@ -348,27 +414,41 @@ pub fn replace_component_property(
 ) -> Result<ComponentValue, ComponentPropertyError> {
     let (resolved, storage) = resolve_location(schema, version, value, path)?;
     validate_component_value(schema, value).map_err(ComponentPropertyError::InvalidValue)?;
-    validate_component_value_budget(&replacement).map_err(ComponentPropertyError::ValueBudget)?;
-    resolved
-        .shape
-        .validate_value(&replacement)
-        .map_err(|error| {
-            if error.kind == crate::ComponentShapeErrorKind::NumericInterval {
-                ComponentPropertyError::InvalidReplacement(crate::registry::numeric_range_error(
-                    &path.root,
-                ))
-            } else {
-                ComponentPropertyError::InvalidReplacementShape(error)
-            }
-        })?;
+    validate_property_replacement(resolved.shape, path, &replacement)?;
     let mut candidate = value.clone();
-    let previous = candidate
-        .replace_path(&storage, replacement)
-        .map_err(ComponentPropertyError::ValueUnavailable)?;
-    validate_component_value_budget(&candidate).map_err(ComponentPropertyError::ValueBudget)?;
+    let previous = replace_prepared_property(&mut candidate, &storage, replacement)?;
     validate_component_value(schema, &candidate)
         .map_err(ComponentPropertyError::InvalidReplacement)?;
     *value = candidate;
+    Ok(previous)
+}
+
+fn validate_property_replacement(
+    shape: &ComponentValueShape,
+    path: &ComponentPropertyPath,
+    replacement: &ComponentValue,
+) -> Result<(), ComponentPropertyError> {
+    validate_component_value_budget(replacement).map_err(ComponentPropertyError::ValueBudget)?;
+    shape.validate_value(replacement).map_err(|error| {
+        if error.kind == crate::ComponentShapeErrorKind::NumericInterval {
+            ComponentPropertyError::InvalidReplacement(crate::registry::numeric_range_error(
+                &path.root,
+            ))
+        } else {
+            ComponentPropertyError::InvalidReplacementShape(error)
+        }
+    })
+}
+
+fn replace_prepared_property(
+    candidate: &mut ComponentValue,
+    storage: &ComponentFieldPath,
+    replacement: ComponentValue,
+) -> Result<ComponentValue, ComponentPropertyError> {
+    let previous = candidate
+        .replace_path(storage, replacement)
+        .map_err(ComponentPropertyError::ValueUnavailable)?;
+    validate_component_value_budget(candidate).map_err(ComponentPropertyError::ValueBudget)?;
     Ok(previous)
 }
 
@@ -394,51 +474,56 @@ fn resolve_location<'schema, 'value>(
     validate_component_shape_budget(schema)
         .map_err(|(_, error)| ComponentPropertyError::InvalidSchema(error))?;
     validate_component_value_budget(value).map_err(ComponentPropertyError::ValueBudget)?;
-    refuse_retired(schema, &path.root)?;
-    let root = schema
-        .fields
-        .iter()
-        .find(|field| field.id == path.root)
-        .ok_or_else(|| ComponentPropertyError::UnknownRoot(path.root.clone()))?;
+    let root = resolve_root_field(schema, &path.root, None)?;
     let current = value
         .get_path(&root.path)
         .map_err(ComponentPropertyError::ValueUnavailable)?;
-    let (resolved, storage) = resolve_root_location(
+    let selected = resolve_root_location(
         root,
-        current,
+        Some(current),
         path,
         None,
         Some(root.path.segments().to_vec()),
     )?;
     Ok((
-        resolved,
-        storage.expect("complete resolution records its storage path"),
+        ResolvedComponentProperty {
+            shape: selected.shape,
+            value: selected
+                .value
+                .expect("value resolution retains its observation"),
+        },
+        selected
+            .storage
+            .expect("complete resolution records its storage path"),
     ))
+}
+
+struct PropertyLocation<'schema, 'value> {
+    shape: &'schema ComponentValueShape,
+    value: Option<&'value ComponentValue>,
+    storage: Option<ComponentFieldPath>,
 }
 
 fn resolve_root_location<'schema, 'value>(
     root: &'schema ComponentFieldSchema,
-    mut current: &'value ComponentValue,
+    mut current: Option<&'value ComponentValue>,
     path: &ComponentPropertyPath,
     mut budget: Option<&mut ComponentPropertyReadBudget>,
     mut storage: Option<Vec<ComponentFieldPathSegment>>,
-) -> Result<
-    (
-        ResolvedComponentProperty<'schema, 'value>,
-        Option<ComponentFieldPath>,
-    ),
-    ComponentPropertyError,
-> {
+) -> Result<PropertyLocation<'schema, 'value>, ComponentPropertyError> {
     let mut shape = &root.shape;
     let mut declaration = Vec::new();
+    let mut depth = 0;
     for (step, selector) in path.steps.iter().enumerate() {
         while let ComponentValueShape::Optional { value } = shape {
             observe_read(&mut budget, 0)?;
-            if matches!(current, ComponentValue::Null) {
+            if matches!(current, Some(ComponentValue::Null)) {
                 return Err(ComponentPropertyError::OptionalAbsent { step });
             }
+            advance_declaration_depth(&mut depth)?;
             shape = value;
         }
+        advance_declaration_depth(&mut depth)?;
         match selector {
             ComponentPropertyStep::Member(id) => {
                 declaration.push(ComponentMemberPathSegment::Member(id.clone()));
@@ -480,7 +565,8 @@ fn resolve_root_location<'schema, 'value>(
                     id: id.clone(),
                 })?;
                 current = current
-                    .field(&member.name)
+                    .map(|value| value.field(&member.name))
+                    .transpose()
                     .map_err(ComponentPropertyError::InvalidValue)?;
                 if let Some(storage) = &mut storage {
                     storage.push(ComponentFieldPathSegment::field(&member.name));
@@ -534,7 +620,12 @@ fn resolve_root_location<'schema, 'value>(
                         actual: key.value_kind(),
                     });
                 }
-                let ComponentValue::List(items) = current else {
+                shape = item;
+                declaration.push(ComponentMemberPathSegment::ListItem);
+                let Some(value) = current else {
+                    continue;
+                };
+                let ComponentValue::List(items) = value else {
                     return Err(ComponentPropertyError::InvalidValue(
                         ComponentCodecError::invalid_field("keyed list", "list"),
                     ));
@@ -562,28 +653,29 @@ fn resolve_root_location<'schema, 'value>(
                     step,
                     key: key.clone(),
                 })?;
-                current = &items[index];
+                current = Some(&items[index]);
                 if let Some(storage) = &mut storage {
                     storage.push(ComponentFieldPathSegment::index(
                         u32::try_from(index)
                             .map_err(|_| ComponentPropertyError::StorageIndexOverflow)?,
                     ));
                 }
-                shape = item;
-                declaration.push(ComponentMemberPathSegment::ListItem);
             }
             ComponentPropertyStep::MapEntry(key) => {
                 let ComponentValueShape::Map { value: entry } = shape else {
                     return Err(ComponentPropertyError::ExpectedMap { step });
                 };
                 observe_read(&mut budget, key.len())?;
-                current =
-                    current
-                        .get(key)
-                        .ok_or_else(|| ComponentPropertyError::MapEntryNotFound {
-                            step,
-                            key: key.clone(),
-                        })?;
+                current = current
+                    .map(|value| {
+                        value
+                            .get(key)
+                            .ok_or_else(|| ComponentPropertyError::MapEntryNotFound {
+                                step,
+                                key: key.clone(),
+                            })
+                    })
+                    .transpose()?;
                 if let Some(storage) = &mut storage {
                     storage.push(ComponentFieldPathSegment::field(key));
                 }
@@ -592,13 +684,19 @@ fn resolve_root_location<'schema, 'value>(
             }
         }
     }
-    Ok((
-        ResolvedComponentProperty {
-            shape,
-            value: current,
-        },
-        storage.map(ComponentFieldPath::new),
-    ))
+    Ok(PropertyLocation {
+        shape,
+        value: current,
+        storage: storage.map(ComponentFieldPath::new),
+    })
+}
+
+fn advance_declaration_depth(depth: &mut usize) -> Result<(), ComponentPropertyError> {
+    *depth += 1;
+    if *depth > MAX_SHAPE_DEPTH {
+        return Err(ComponentPropertyError::PathDepthLimit);
+    }
+    Ok(())
 }
 
 fn observe_read(
@@ -611,13 +709,22 @@ fn observe_read(
     }
 }
 
-fn refuse_retired(
-    schema: &ComponentSchema,
+fn resolve_root_field<'schema>(
+    schema: &'schema ComponentSchema,
     id: &ComponentFieldId,
-) -> Result<(), ComponentPropertyError> {
-    if schema.field_tombstones.contains(id) {
-        Err(ComponentPropertyError::RetiredField(id.clone()))
-    } else {
-        Ok(())
+    mut budget: Option<&mut ComponentPropertyReadBudget>,
+) -> Result<&'schema ComponentFieldSchema, ComponentPropertyError> {
+    for tombstone in &schema.field_tombstones {
+        observe_read(&mut budget, tombstone.as_str().len())?;
+        if tombstone == id {
+            return Err(ComponentPropertyError::RetiredField(id.clone()));
+        }
     }
+    for field in &schema.fields {
+        observe_read(&mut budget, field.id.as_str().len())?;
+        if &field.id == id {
+            return Ok(field);
+        }
+    }
+    Err(ComponentPropertyError::UnknownRoot(id.clone()))
 }

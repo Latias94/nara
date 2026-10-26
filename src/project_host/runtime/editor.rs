@@ -24,6 +24,8 @@ mod presentation;
 #[cfg(feature = "presentation-2d")]
 mod preview;
 mod project_browser;
+#[cfg(feature = "presentation-2d")]
+mod scene_capture;
 mod source_admission;
 mod source_asset_import;
 #[cfg(test)]
@@ -793,6 +795,7 @@ struct EditorScenePersistenceLane {
     source_key: nara_scene::SourceDocumentKey,
     document: EditorDocumentId,
     host: persistence::RetainedHost<ScenePersistenceHost>,
+    authoring_source: Option<crate::project_host::authoring::document::AuthoringDocumentSourceFact>,
 }
 
 #[derive(Clone)]
@@ -801,6 +804,7 @@ struct EditorPrefabPersistenceLane {
     source_key: nara_scene::SourceDocumentKey,
     document: EditorDocumentId,
     host: persistence::RetainedHost<PrefabPersistenceHost>,
+    authoring_source: Option<crate::project_host::authoring::document::AuthoringDocumentSourceFact>,
 }
 
 struct TrustedCompiledEditorLane {
@@ -836,6 +840,8 @@ pub struct EditorProjectSession {
     persistence_authority: EditorPersistenceAuthority,
     scene_lanes: BTreeMap<EditorDocumentId, EditorScenePersistenceLane>,
     scene_preview_document: Option<EditorDocumentId>,
+    #[cfg(feature = "presentation-2d")]
+    scene_capture: scene_capture::EditorSceneCapture,
     execution: EditorExecutionLane,
     project_content: EditorProjectContentView,
     next_project_content_generation: u64,
@@ -1001,6 +1007,8 @@ impl EditorProjectSession {
     #[doc(hidden)]
     pub fn advance_close(&mut self) -> EditorProjectCloseProgress {
         self.closing = true;
+        #[cfg(feature = "presentation-2d")]
+        self.scene_capture.cancel();
         let play_closed = self.advance_session_play_close();
         self.advance_authoring_retirement();
         self.cancel_pending_document_open();
@@ -1271,6 +1279,8 @@ impl EditorProjectSession {
     }
 
     fn advance_editor_image_import(&mut self) {
+        #[cfg(feature = "presentation-2d")]
+        let images_before = self.authoring_runtime.image_publication_revision();
         let revocation_failure = {
             let EditorProjectSession {
                 execution,
@@ -1284,6 +1294,11 @@ impl EditorProjectSession {
                 None
             }
         };
+        #[cfg(feature = "presentation-2d")]
+        if self.authoring_runtime.image_publication_revision() != images_before {
+            self.scene_capture.invalidate();
+            self.authoring_runtime.invalidate_preview_content();
+        }
         if revocation_failure.is_some() {
             let _ = self.diagnostics.extend(single_warning(
                 "project.editor.authoring-image-revocation-failed",
@@ -1477,6 +1492,11 @@ impl EditorProjectSession {
                 .revalidate(&project_root)
                 .map_err(|error| editor_open_error(error.code()))?;
             let startup_source_key = parts.snapshot.startup_native_source().key().clone();
+            let startup_authoring_source =
+                crate::project_host::authoring::document::AuthoringDocumentSourceFact::from_captured_source(
+                    startup_source,
+                    parts.snapshot.startup_native_source(),
+                ).map_err(|error| editor_open_error(error.code()))?;
             let (persistence, opened_digest) = ScenePersistenceHost::bind_authoring_source(
                 &scenes,
                 startup.as_str(),
@@ -1484,7 +1504,8 @@ impl EditorProjectSession {
                 startup_source.digest(),
             )
             .map_err(editor_persistence_open_error)?;
-            let diagnostics = parts.startup_scene.diagnostics().clone();
+            let mut diagnostics = parts.startup_scene.diagnostics().clone();
+            diagnostics.extend(parts.snapshot.startup_compilation_diagnostics().clone());
             let (mut workspace, mut persistence_authority) = EditorWorkspace::new_hosted();
             let report = workspace
                 .open_authoring_scene_document(
@@ -1516,6 +1537,7 @@ impl EditorProjectSession {
                     EditorScenePersistenceLane {
                         project_path: startup_project_path,
                         source_key: startup_source_key,
+                        authoring_source: Some(startup_authoring_source),
                         document,
                         host: authoring_runtime
                             .host_custody()
@@ -1526,6 +1548,8 @@ impl EditorProjectSession {
                     },
                 )]),
                 scene_preview_document: Some(document),
+                #[cfg(feature = "presentation-2d")]
+                scene_capture: Default::default(),
                 execution: EditorExecutionLane::Authoring(parts.snapshot),
                 project_content: EditorProjectContentView::NotInstalled,
                 next_project_content_generation: 1,
@@ -1580,6 +1604,8 @@ impl EditorProjectSession {
                 #[cfg(feature = "runtime-ui")]
                 ui_authoring_projection_cache: None,
             };
+            #[cfg(feature = "presentation-2d")]
+            session.initialize_authoring_scene_capture();
             session.publish_editor_frame(false);
             Ok(session)
         })();
@@ -1737,6 +1763,7 @@ impl EditorProjectSession {
                     EditorScenePersistenceLane {
                         project_path: startup_project_path,
                         source_key: snapshot.selected_scene_source_key().clone(),
+                        authoring_source: None,
                         document,
                         host: authoring_runtime
                             .host_custody()
@@ -1747,6 +1774,8 @@ impl EditorProjectSession {
                     },
                 )]),
                 scene_preview_document: Some(document),
+                #[cfg(feature = "presentation-2d")]
+                scene_capture: Default::default(),
                 execution: EditorExecutionLane::TrustedCompiled(Box::new(
                     TrustedCompiledEditorLane {
                         plan,
@@ -1855,6 +1884,10 @@ impl EditorProjectSession {
     #[doc(hidden)]
     #[must_use]
     pub fn take_editor_preview_candidate(&mut self) -> Option<EditorPreviewCandidate> {
+        if self.current_editor_preview_content_stamp().is_none() {
+            self.authoring_runtime.invalidate_preview_content();
+            return None;
+        }
         self.authoring_runtime.take_preview_candidate()
     }
 
@@ -2385,80 +2418,44 @@ impl EditorProjectSession {
 
     #[cfg(feature = "presentation-2d")]
     fn drive_editor_preview(&mut self) {
-        let authoring = self.authoring_project().is_some();
-        let mut projection_rejected = false;
-        let mut projection_omitted = false;
-        let scene_document = self.scene_preview_document;
-        let source_identity = scene_document.and_then(|document| {
-            self.workspace
-                .scene(document)
-                .map(|slot| (document, slot.revision()))
-        });
-        let requires_projection = source_identity.is_some_and(|(document, revision)| {
-            self.authoring_runtime
-                .preview_requires_source_projection(document, revision)
-        });
-        let source = scene_document.and_then(|document| {
-            self.workspace.scene(document).and_then(|slot| {
-                let scene = if requires_projection {
-                    let (scene, omissions) = if authoring {
-                        match authoring_preview::project_scene(
-                            document,
-                            slot.revision(),
-                            slot.session(),
-                        ) {
-                            Ok((scene, omissions)) => (scene, omissions),
-                            Err(_) => {
-                                projection_rejected = true;
-                                return None;
-                            }
-                        }
-                    } else {
-                        (
+        if self.closing || self.authoring_runtime.preview_extent().is_none() {
+            return;
+        }
+        let source = if self.authoring_project().is_some() {
+            self.drive_authoring_scene_capture()
+        } else {
+            self.scene_preview_document.and_then(|document| {
+                let slot = self.workspace.scene(document)?;
+                let dependencies = preview::EditorPreviewDependencies::empty();
+                let projection = self
+                    .authoring_runtime
+                    .preview_requires_source_projection(document, slot.revision(), &dependencies)
+                    .then(|| {
+                        preview::EditorPreviewProjection::trusted_compiled(
+                            self.scene_lanes
+                                .get(&document)
+                                .expect("an open Scene retains its admitted source")
+                                .source_key
+                                .clone(),
                             slot.session().document().clone(),
                             authoring_preview::EditorAuthoringPreviewOmissions::empty(
                                 document,
                                 slot.revision(),
                             ),
                         )
-                    };
-                    projection_omitted = !omissions.is_empty();
-                    Some((scene, omissions))
-                } else {
-                    None
-                };
+                    });
                 Some(preview::EditorPreviewSource {
                     document,
                     revision: slot.revision(),
-                    projection: scene.map(|(scene, omissions)| {
-                        preview::EditorPreviewProjection::new(
-                            self.scene_lanes
-                                .get(&document)
-                                .expect("an open Scene retains its admitted source")
-                                .source_key
-                                .clone(),
-                            scene,
-                            omissions,
-                        )
-                    }),
+                    dependencies,
+                    projection,
                 })
             })
-        });
-        if projection_rejected {
-            let _ = self.diagnostics.extend(single_error(
-                "project.editor.authoring-scene-preview-projection-rejected",
-                "the authoring Scene could not publish a safe preview projection",
-            ));
-        } else if projection_omitted {
-            let _ = self.diagnostics.extend(single_warning(
-                "project.editor.authoring-scene-preview-source-omitted",
-                "the Scene preview omitted source values that are unavailable to generic authoring",
-            ));
-        }
-        let report = self.authoring_runtime.drive_preview(source);
-        if let Some(report) = report {
+        };
+        if let Some(report) = self.authoring_runtime.drive_preview(source) {
             let _ = self.diagnostics.extend(report);
         }
+        self.release_published_scene_capture();
     }
 
     #[cfg(test)]

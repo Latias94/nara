@@ -590,7 +590,7 @@ fn prefab_anchor_does_not_bypass_direct_source_reference_closure() {
     let mut anchor = SceneEntityRecord::new(scene_id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source,
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     let mut source_document = document();
     source_document.roots.push(anchor.id.clone());

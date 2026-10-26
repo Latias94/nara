@@ -19,7 +19,7 @@ fn browser_prefab_save_and_reopen_keep_the_anchor_source_observation_after_close
         let mut anchor = SceneEntityRecord::new(anchor_id.clone());
         anchor.prefab = Some(PrefabInstance {
             source: AssetRef::path("shared.prefab.json").unwrap(),
-            overrides: Default::default(),
+            overrides: None,
         });
         fs::write(
             project.root.join("scenes/startup.scene.json"),
@@ -170,7 +170,7 @@ fn anchored_prefab_open_reuses_the_browser_slot_despite_locator_scope() {
     let mut anchor = SceneEntityRecord::new(anchor_id.clone());
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("shared.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     fs::write(
         project.root.join("scenes/startup.scene.json"),
@@ -309,7 +309,7 @@ fn pending_exit_rejects_anchored_prefab_activation_and_new_source_admission() {
             let mut anchor = SceneEntityRecord::new(entity.clone());
             anchor.prefab = Some(PrefabInstance {
                 source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
-                overrides: ScenePatchDocument::default(),
+                overrides: None,
             });
             entities.push(anchor);
         }
@@ -411,7 +411,7 @@ fn trusted_anchored_prefabs_keep_independent_dirty_sources_and_exact_save_receip
         let mut instance = SceneEntityRecord::new(entity.clone());
         instance.prefab = Some(PrefabInstance {
             source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
-            overrides: ScenePatchDocument::default(),
+            overrides: None,
         });
         instances.push(instance);
         anchors.push(entity);

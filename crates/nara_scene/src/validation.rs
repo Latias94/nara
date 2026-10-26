@@ -4,9 +4,10 @@ use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::__private::plan_declared_entity_references;
 use nara_reflect::{
-    ComponentCodecError, ComponentDecodeContext, ComponentEntityReferenceRewriteError,
-    ComponentFieldId, ComponentMigrationError, ComponentRegistry, ComponentSchema, ComponentTypeId,
-    ComponentValue, ComponentValueMaterializationLimits, EntityReference,
+    ComponentCapability, ComponentCodecError, ComponentDecodeContext,
+    ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentMigrationError,
+    ComponentRegistry, ComponentSchema, ComponentTypeId, ComponentValue,
+    ComponentValueMaterializationLimits, DeclaredAssetReference, EntityReference,
     EntityReferenceTraversalLimits, PreparedComponent,
     collect_declared_asset_references_from_schema_with_limits, effective_component_value,
     validate_component_value,
@@ -18,6 +19,7 @@ use crate::{
         error as diagnostic_error, push_with_operation_index, with_asset_ref, with_codec_error,
         with_entity_reference_rewrite_error, with_migration_error, with_public_locator,
     },
+    schema_authority::SchemaAuthority,
 };
 
 pub(crate) struct PreparedScene {
@@ -58,6 +60,194 @@ enum PlacementOwner {
 enum SceneValidationMode {
     Native,
     Shape,
+}
+
+pub(crate) struct EffectiveSceneValidation {
+    pub(crate) diagnostics: DiagnosticReport,
+    #[cfg(feature = "serde")]
+    pub(crate) asset_references: Vec<DeclaredAssetReference>,
+}
+
+/// Admits a complete expanded value graph before asset realization or native decoding.
+/// Runtime preparation still crosses the ordinary native path after the Host captures assets.
+pub(crate) fn validate_expanded_values<E>(
+    document: &SceneDocument,
+    authority: SchemaAuthority<'_>,
+    context: &mut ComponentDecodeContext<'_>,
+    mut admit_asset_work: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<EffectiveSceneValidation, E> {
+    let (placement, mut diagnostics) = validate_scene_structure_with_operation(document, None);
+    let mut asset_references = Vec::new();
+    if let Some(registry) = authority.native_registry() {
+        if registry.snapshot().is_err() {
+            diagnostics.push(diagnostic_error(
+                "scene.component-registry-not-frozen",
+                "Scene validation requires a frozen component registry",
+            ));
+            return Ok(EffectiveSceneValidation {
+                diagnostics,
+                #[cfg(feature = "serde")]
+                asset_references,
+            });
+        }
+        if let Some(entity) = placement.as_ref().and_then(|placement| {
+            first_unavailable_hierarchy_projection_entity(document, placement, registry)
+        }) {
+            diagnostics.push(with_public_locator(
+                diagnostic_error(
+                    "scene.hierarchy-projection-unavailable",
+                    "Scene hierarchy requires a runtime projection that is not implemented",
+                ),
+                "entity-id",
+                entity.as_str(),
+            ));
+        }
+    }
+    let namespace = document
+        .entities
+        .iter()
+        .map(|entity| &entity.id)
+        .collect::<BTreeSet<_>>();
+    let limits = context.materialization_limits();
+    let traversal = reference_traversal_limits(limits);
+    for entity in sorted_entities(document) {
+        if let Some(instance) = &entity.prefab {
+            diagnostics.push(with_asset_ref(
+                with_public_locator(
+                    diagnostic_error(
+                        "scene.prefab-instance-unsupported",
+                        "Prefab instances require expansion before scene spawn",
+                    ),
+                    "entity-id",
+                    entity.id.as_str(),
+                ),
+                "asset-ref",
+                &instance.source,
+            ));
+        }
+        for (component, record) in &entity.components {
+            let locate = |diagnostic| {
+                with_public_locator(
+                    with_public_locator(diagnostic, "entity-id", entity.id.as_str()),
+                    "component-id",
+                    component.as_str(),
+                )
+            };
+            let Some(schema) = authority.schema(component) else {
+                diagnostics.push(locate(diagnostic_error(
+                    "scene.unknown-component",
+                    "Component type is not registered",
+                )));
+                continue;
+            };
+            if !authority.owner_matches(component, record) {
+                diagnostics.push(locate(diagnostic_error(
+                    "scene.component-owner-mismatch",
+                    "Persistent component owner does not match the admitted schema owner",
+                )));
+                continue;
+            }
+            if record.version != schema.version() {
+                diagnostics.push(component_migration_diagnostic(
+                    entity.id.as_str(),
+                    component.as_str(),
+                    &ComponentMigrationError::UnsupportedVersion {
+                        component_id: component.clone(),
+                        from_version: record.version,
+                        target_version: schema.version(),
+                    },
+                ));
+                continue;
+            }
+            if !schema.has_capability(ComponentCapability::Scene) {
+                diagnostics.push(locate(diagnostic_error(
+                    "scene.component-not-scene-capable",
+                    "Component is not scene-capable",
+                )));
+                continue;
+            }
+            let invalid = |error: &ComponentCodecError| {
+                locate(with_codec_error(
+                    diagnostic_error(
+                        "scene.invalid-component-payload",
+                        "Component payload is invalid",
+                    ),
+                    error,
+                    Some(schema),
+                ))
+            };
+            if let Err(error) = nara_reflect::__private::validate_schema_capabilities(
+                schema,
+                [ComponentCapability::Scene],
+            ) {
+                diagnostics.push(invalid(&ComponentCodecError::Message(error.to_string())));
+                continue;
+            }
+            if let Err(error) =
+                nara_reflect::validate_component_value_with_limits(schema, &record.value, limits)
+            {
+                diagnostics.push(invalid(&error));
+                continue;
+            }
+            let references = match nara_reflect::__private::collect_declared_effective_asset_references_with_admission(
+                schema, record.version, &record.value, traversal, &mut admit_asset_work,
+            ) {
+                Ok(references) => references,
+                Err(nara_reflect::__private::AssetReferenceCollectionError::Admission(error)) =>
+                    return Err(error),
+                Err(nara_reflect::__private::AssetReferenceCollectionError::Reference(_)) => {
+                    diagnostics.push(invalid(&ComponentCodecError::Message("Schema-declared asset reference traversal failed".into())));
+                    continue;
+                }
+            };
+            if let Some(database) = context.project_asset_database()
+                && let Some(reference) = references
+                    .iter()
+                    .find(|reference| database.resolve_ref(reference.asset_ref()).is_err())
+            {
+                diagnostics.push(invalid(&ComponentCodecError::invalid_asset_ref(
+                    reference.path().to_string(),
+                    reference.asset_ref().to_string(),
+                    "Asset reference is not declared in the project asset database",
+                )));
+                continue;
+            }
+            if let Err(error) = validate_effective_local_references(
+                schema,
+                &record.value,
+                |target| namespace.contains(target),
+                traversal,
+            ) {
+                diagnostics.push(with_entity_reference_rewrite_error(
+                    locate(diagnostic_error(
+                        "scene.local-reference-invalid",
+                        "Scene component references do not close over the document namespace",
+                    )),
+                    &error,
+                    |_| "scene-local-target-missing",
+                ));
+                continue;
+            }
+            // Admit the complete new allocation when growing the retained inventory.
+            // Doubling amortizes component-by-component collection without hidden reallocations.
+            let required = asset_references.len().saturating_add(references.len());
+            if required > asset_references.capacity() {
+                let capacity = required.max(asset_references.capacity().saturating_mul(2));
+                admit_asset_work(
+                    0,
+                    0,
+                    capacity.saturating_mul(size_of::<DeclaredAssetReference>()),
+                )?;
+                asset_references.reserve_exact(capacity - asset_references.len());
+            }
+            asset_references.extend(references);
+        }
+    }
+    Ok(EffectiveSceneValidation {
+        diagnostics,
+        #[cfg(feature = "serde")]
+        asset_references,
+    })
 }
 
 pub(crate) fn preflight_scene(
@@ -167,72 +357,6 @@ pub(crate) fn preflight_authoring_scene_with_context_for_patch(
         Some(operation_index),
         SceneValidationMode::Native,
         true,
-    )
-}
-
-pub(crate) fn preflight_authoring_scene_for_prefab_source(
-    document: &SceneDocument,
-    registry: &ComponentRegistry,
-) -> PreparedScene {
-    let mut context = ComponentDecodeContext::new();
-    preflight_scene_with_context_options(
-        document,
-        registry,
-        &mut context,
-        true,
-        None,
-        SceneValidationMode::Native,
-        false,
-    )
-}
-
-pub(crate) fn preflight_authoring_scene_with_context_for_prefab_source(
-    document: &SceneDocument,
-    registry: &ComponentRegistry,
-    context: &mut ComponentDecodeContext<'_>,
-) -> PreparedScene {
-    preflight_scene_with_context_options(
-        document,
-        registry,
-        context,
-        true,
-        None,
-        SceneValidationMode::Native,
-        false,
-    )
-}
-
-pub(crate) fn preflight_authoring_scene_for_prefab_operation(
-    document: &SceneDocument,
-    registry: &ComponentRegistry,
-    operation_index: usize,
-) -> PreparedScene {
-    let mut context = ComponentDecodeContext::new();
-    preflight_scene_with_context_options(
-        document,
-        registry,
-        &mut context,
-        true,
-        Some(operation_index),
-        SceneValidationMode::Native,
-        false,
-    )
-}
-
-pub(crate) fn preflight_authoring_scene_with_context_for_prefab_operation(
-    document: &SceneDocument,
-    registry: &ComponentRegistry,
-    context: &mut ComponentDecodeContext<'_>,
-    operation_index: usize,
-) -> PreparedScene {
-    preflight_scene_with_context_options(
-        document,
-        registry,
-        context,
-        true,
-        Some(operation_index),
-        SceneValidationMode::Native,
-        false,
     )
 }
 
@@ -504,7 +628,9 @@ fn preflight_scene_with_context_options(
                         operation_index,
                     );
                 }
-                continue;
+                if matches!(mode, SceneValidationMode::Shape) {
+                    continue;
+                }
             }
 
             let asset_references = match collect_declared_asset_references_from_schema_with_limits(

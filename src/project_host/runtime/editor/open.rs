@@ -446,6 +446,17 @@ fn source_failure(error: AuthoringProjectSourceAdmissionError) -> EditorProjectO
         AuthoringProjectSourceAdmissionError::SourcePublication { path, source, .. } => {
             (Some(path.as_str().to_owned()), source.into_diagnostics())
         }
+        AuthoringProjectSourceAdmissionError::SourceStructure { path, source, .. } => {
+            (Some(path.as_str().to_owned()), source.into_diagnostics())
+        }
+        AuthoringProjectSourceAdmissionError::CompilationBudget(diagnostics) => (None, diagnostics),
+        AuthoringProjectSourceAdmissionError::SourceChanged { path, .. } => (
+            Some(path.as_str().to_owned()),
+            single_error(
+                "project.editor.authoring-source-changed",
+                "A required source changed during authoring capture; retry project admission",
+            ),
+        ),
         AuthoringProjectSourceAdmissionError::SourcePath { path, .. }
         | AuthoringProjectSourceAdmissionError::SourceHost { path, .. }
         | AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict { path }
@@ -557,6 +568,7 @@ fn session_failure(error: EditorProjectOpenError) -> EditorProjectOpenFailure {
 
 fn source_directory_name(kind: AuthoringSourceKind) -> Option<&'static str> {
     match kind {
+        AuthoringSourceKind::ProjectManifest | AuthoringSourceKind::SchemaBundle => None,
         AuthoringSourceKind::Scene => Some("scenes"),
         AuthoringSourceKind::Prefab => Some("prefabs"),
         AuthoringSourceKind::AssetMetadata | AuthoringSourceKind::AssetSource => Some("assets"),

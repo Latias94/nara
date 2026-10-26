@@ -2,10 +2,10 @@ use nara_asset::AssetRef;
 use nara_ecs::World;
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
-    InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, PrefabProjectionStep,
-    PrefabSourceResolver, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
-    SceneOccurrenceKey, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-    ScenePlacementOwner, SourceDocumentKey, SourceDocumentKind,
+    InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument, PrefabEntityTarget,
+    PrefabInstance, PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
+    PrefabProjectionStep, PrefabSourceResolver, SceneDocument, SceneEntityId, SceneEntityRecord,
+    SceneEntitySource, SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -16,7 +16,7 @@ fn anchor(name: &str, source: AssetRef) -> SceneEntityRecord {
     let mut record = SceneEntityRecord::new(id(name));
     record.prefab = Some(PrefabInstance {
         source,
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     record
 }
@@ -58,11 +58,14 @@ fn canonical_aliases_share_one_document_and_recover_after_cycle_refusal() {
     );
     assert_eq!(resolver, before);
 
+    let retained = resolver.resolve_prefab(&path).unwrap();
     let successor = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("leaf"))]);
     assert_eq!(
         resolver.insert(stable.clone(), key.clone(), successor.clone()),
-        Some(recursive)
+        Some(recursive.clone())
     );
+    assert_eq!(retained.key(), &key);
+    assert_eq!(retained.document(), &recursive);
     let path_source = resolver.resolve_prefab(&path).unwrap();
     let stable_source = resolver.resolve_prefab(&stable).unwrap();
     assert_eq!(path_source.key(), &key);
@@ -123,18 +126,6 @@ fn nested_instance_additions_preserve_tagged_provenance_through_public_spawn() {
         SourceDocumentKey::named(universe, "consumer.outer", SourceDocumentKind::Prefab).unwrap();
     let inner_key =
         SourceDocumentKey::named(universe, "consumer.inner", SourceDocumentKind::Prefab).unwrap();
-    let mut nested = anchor("nested-added", inner_request.clone());
-    nested.prefab.as_mut().unwrap().overrides =
-        ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-            entity: SceneEntityRecord::new(id("inner-added")),
-            placement: ScenePlacement::last(ScenePlacementOwner::Root),
-        }]);
-    let mut outer = anchor("outer", outer_request.clone());
-    outer.prefab.as_mut().unwrap().overrides =
-        ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-            entity: nested,
-            placement: ScenePlacement::last(ScenePlacementOwner::Root),
-        }]);
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             outer_request.clone(),
@@ -146,12 +137,43 @@ fn nested_instance_additions_preserve_tagged_provenance_through_public_spawn() {
             inner_key.clone(),
             PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("inner-leaf"))]),
         );
-    let expansion = SceneDocument::from_ordered_roots([outer]).expand_prefabs(&registry, &resolver);
+    let mut inner_overlay =
+        PrefabOverlay::new(resolver.resolve_prefab(&inner_request).unwrap().key().clone());
+    inner_overlay
+        .additions
+        .push(PrefabAddition::new(id("inner-added")));
+    inner_overlay.placements.push(PrefabPlacement {
+        target: PrefabEntityTarget::addition(id("inner-added")),
+        parent: PrefabPlacementParent::Root,
+        slot: PrefabPlacementSlot::Last,
+    });
+    let mut nested = PrefabAddition::new(id("nested-added"));
+    nested.prefab = Some(PrefabInstance {
+        source: inner_request.clone(),
+        overrides: Some(inner_overlay),
+    });
+    let mut outer_overlay =
+        PrefabOverlay::new(resolver.resolve_prefab(&outer_request).unwrap().key().clone());
+    outer_overlay.additions.push(nested);
+    outer_overlay.placements.push(PrefabPlacement {
+        target: PrefabEntityTarget::addition(id("nested-added")),
+        parent: PrefabPlacementParent::Root,
+        slot: PrefabPlacementSlot::Last,
+    });
+    let anchors = ["outer", "other-outer"].map(|name| {
+        let mut record = anchor(name, outer_request.clone());
+        record.prefab.as_mut().unwrap().overrides = Some(outer_overlay.clone());
+        record
+    });
+    let scene = SceneDocument::from_ordered_roots(anchors);
+    let original = scene.clone();
+    let expansion = scene.expand_prefabs(&registry, &resolver);
     assert!(
         !expansion.diagnostics.has_errors(),
         "{:?}",
         expansion.diagnostics
     );
+    assert_eq!(scene, original);
     let candidate = expansion.candidate.unwrap();
     let addition = PrefabProjectionStep::InstanceAddition {
         entity: id("nested-added"),
@@ -187,18 +209,27 @@ fn nested_instance_additions_preserve_tagged_provenance_through_public_spawn() {
             ],
         ),
     ] {
-        let provenance = candidate
+        let provenances = candidate
             .provenance()
             .values()
-            .find(|source| source.local_entity_id().as_str() == local)
-            .unwrap();
-        let path = provenance.projection_path().unwrap();
-        assert_eq!(path.root_anchor(), &id("outer"));
-        assert_eq!(path.steps(), expected.as_slice());
+            .filter(|source| source.local_entity_id().as_str() == local)
+            .collect::<Vec<_>>();
+        assert_eq!(provenances.len(), 2);
         assert_eq!(
-            path.steps().last().unwrap().entity_id(),
-            provenance.local_entity_id(),
+            provenances
+                .iter()
+                .map(|source| source.projection_path().unwrap().root_anchor().clone())
+                .collect::<std::collections::BTreeSet<_>>(),
+            [id("outer"), id("other-outer")].into_iter().collect(),
         );
+        for provenance in provenances {
+            let path = provenance.projection_path().unwrap();
+            assert_eq!(path.steps(), expected.as_slice());
+            assert_eq!(
+                path.steps().last().unwrap().entity_id(),
+                provenance.local_entity_id(),
+            );
+        }
     }
 
     let expected_provenance = candidate.provenance().clone();
@@ -214,9 +245,9 @@ fn nested_instance_additions_preserve_tagged_provenance_through_public_spawn() {
         spawned.diagnostics
     );
     let instance = spawned.instance.unwrap();
-    assert_eq!(instance.len(), 5);
+    assert_eq!(instance.len(), 10);
     let mut query = world.query::<&SceneEntitySource>();
-    assert_eq!(query.iter(&world).count(), 5);
+    assert_eq!(query.iter(&world).count(), 10);
     for materialized in query.iter(&world) {
         assert_eq!(materialized.instance_id, instance.instance_id());
         assert_eq!(materialized.containing_source(), &source);

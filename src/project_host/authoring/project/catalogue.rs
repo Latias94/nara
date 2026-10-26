@@ -32,6 +32,10 @@ impl ReferenceCatalogue {
         self.indexed
     }
 
+    pub(super) fn lookup_sources(&self) -> impl Iterator<Item = &Arc<AuthoringSourceFact>> {
+        self.metadata.values().map(|(_, source)| source)
+    }
+
     pub(super) fn resolve(
         &mut self,
         reference: &AssetRef,

@@ -839,7 +839,7 @@ impl EditorProjectSession {
                     || entity
                         .prefab
                         .as_ref()
-                        .is_some_and(|prefab| prefab_patch_uses_ui_domain(&prefab.overrides))
+                        .is_some_and(prefab_instance_uses_ui_domain)
             })
         })
     }
@@ -986,7 +986,9 @@ pub(super) fn prefab_patch_uses_ui_domain(patch: &nara_scene::ScenePatchDocument
                 expected, value, ..
             } => {
                 for prefab in expected.iter().chain(value.iter()) {
-                    pending.extend(prefab.overrides.operations.iter());
+                    if prefab_instance_uses_ui_domain(prefab) {
+                        return true;
+                    }
                 }
             }
             ScenePatchOperation::AddEntity { entity, .. } => {
@@ -994,7 +996,9 @@ pub(super) fn prefab_patch_uses_ui_domain(patch: &nara_scene::ScenePatchDocument
                     return true;
                 }
                 if let Some(prefab) = &entity.prefab {
-                    pending.extend(prefab.overrides.operations.iter());
+                    if prefab_instance_uses_ui_domain(prefab) {
+                        return true;
+                    }
                 }
             }
             ScenePatchOperation::RestoreEntity {
@@ -1007,7 +1011,9 @@ pub(super) fn prefab_patch_uses_ui_domain(patch: &nara_scene::ScenePatchDocument
                         return true;
                     }
                     if let Some(prefab) = &entity.prefab {
-                        pending.extend(prefab.overrides.operations.iter());
+                        if prefab_instance_uses_ui_domain(prefab) {
+                            return true;
+                        }
                     }
                 }
             }
@@ -1022,6 +1028,37 @@ pub(super) fn prefab_patch_uses_ui_domain(patch: &nara_scene::ScenePatchDocument
                 }
             }
             _ => {}
+        }
+    }
+    false
+}
+
+fn prefab_instance_uses_ui_domain(instance: &nara_scene::PrefabInstance) -> bool {
+    use nara_scene::PrefabComponentIntent;
+    let mut pending = instance.overrides.iter().collect::<Vec<_>>();
+    while let Some(overlay) = pending.pop() {
+        for addition in &overlay.additions {
+            if addition.components.keys().any(component_uses_ui_domain) {
+                return true;
+            }
+            if let Some(instance) = &addition.prefab {
+                pending.extend(instance.overrides.iter());
+            }
+        }
+        for claim in &overlay.instances {
+            if let Some(instance) = &claim.value {
+                pending.extend(instance.overrides.iter());
+            }
+        }
+        if overlay.components.iter().any(|intent| {
+            let component = match intent {
+                PrefabComponentIntent::Set { component, .. }
+                | PrefabComponentIntent::Suppress { component, .. }
+                | PrefabComponentIntent::Properties { component, .. } => component,
+            };
+            component_uses_ui_domain(component)
+        }) {
+            return true;
         }
     }
     false
@@ -1153,7 +1190,11 @@ mod tests {
     use super::prefab_patch_uses_ui_domain;
     use nara_asset::AssetRef;
     use nara_reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue};
-    use nara_scene::{PrefabInstance, SceneEntityId, ScenePatchDocument, ScenePatchOperation};
+    use nara_scene::{
+        PrefabComponentIntent, PrefabEntityTarget, PrefabInstance, PrefabInstanceClaim,
+        PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent, SceneEntityId,
+        ScenePatchDocument, ScenePatchOperation, SourceDocumentKey, SourceDocumentKind,
+    };
 
     #[test]
     fn ui_domain_guard_checks_nested_expected_and_value_snapshots() {
@@ -1162,22 +1203,44 @@ mod tests {
             source: AssetRef::path("base.prefab.json").unwrap(),
             overrides,
         };
-        let field = ScenePatchDocument::new([ScenePatchOperation::SetField {
-            entity: id.clone(),
+        let overlay = || {
+            PrefabOverlay::new(
+                SourceDocumentKey::named(
+                    "92387b8a-a667-47e5-bda4-6c0c77cc84df".parse().unwrap(),
+                    "ui.guard",
+                    SourceDocumentKind::Prefab,
+                )
+                .unwrap(),
+            )
+        };
+        let mut field = overlay();
+        field.components.push(PrefabComponentIntent::Properties {
+            target: PrefabEntityTarget::source(id.clone()),
             component: ComponentTypeId::new("nara.ui.UiText"),
-            component_version: ComponentSchemaVersion::ONE,
-            field: ComponentFieldId::new("text"),
-            value: ComponentValue::String("authored text".to_owned()),
-        }]);
+            version: ComponentSchemaVersion::ONE,
+            claims: vec![PrefabPropertyClaim {
+                path: nara_reflect::ComponentPropertyPath::new(ComponentFieldId::new("text")),
+                intent: PrefabPropertyIntent::Set(ComponentValue::String(
+                    "authored text".to_owned(),
+                )),
+                bindings: Vec::new(),
+            }],
+        });
         for outer_expected in [false, true] {
-            for inner_expected in [false, true] {
-                let ui = Some(instance(field.clone()));
-                let inner = ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
-                    entity: id.clone(),
-                    expected: if inner_expected { ui.clone() } else { None },
-                    value: if inner_expected { None } else { ui },
-                }]);
-                let nested = Some(instance(inner));
+            for added_anchor in [false, true] {
+                let ui = instance(Some(field.clone()));
+                let mut inner = overlay();
+                if added_anchor {
+                    let mut addition = nara_scene::PrefabAddition::new(id.clone());
+                    addition.prefab = Some(ui);
+                    inner.additions.push(addition);
+                } else {
+                    inner.instances.push(PrefabInstanceClaim {
+                        target: PrefabEntityTarget::source(id.clone()),
+                        value: Some(ui),
+                    });
+                }
+                let nested = Some(instance(Some(inner)));
                 let outer = ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
                     entity: id.clone(),
                     expected: if outer_expected { nested.clone() } else { None },
@@ -1189,7 +1252,7 @@ mod tests {
         assert!(!prefab_patch_uses_ui_domain(&ScenePatchDocument::new([
             ScenePatchOperation::SetPrefabInstance {
                 entity: id,
-                expected: Some(instance(ScenePatchDocument::default())),
+                expected: Some(instance(None)),
                 value: None,
             },
         ])));

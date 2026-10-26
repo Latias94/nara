@@ -80,6 +80,7 @@ impl ReopenFixture {
                         )
                         .unwrap(),
                         document: self.document,
+                        authoring_source: None,
                         host: self.host.clone(),
                     }),
                     document: self.document,

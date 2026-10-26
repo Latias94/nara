@@ -23,7 +23,6 @@ use nara::{
     reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{
         PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityRecord,
-        ScenePatchDocument,
     },
 };
 use project_content_fixture::{
@@ -679,7 +678,7 @@ fn prefab_anchor(id: &str, source: AssetRef) -> SceneEntityRecord {
     );
     entity.prefab = Some(PrefabInstance {
         source,
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     entity
 }

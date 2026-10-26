@@ -10,9 +10,10 @@ use nara_core::ByteLimit;
 use nara_fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
 use nara_identity::SceneEntityId;
 use nara_reflect::{
-    AuthoringSchemaBundleOwner, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    PersistentComponentSchemaOwnerId,
+    AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, PersistentComponentSchemaOwnerId,
 };
+use nara_scene::__private::AuthoringAdapterReceipt;
 use nara_scene::{
     AuthoringDocumentReadiness, PrefabDocument, SceneComponentRecord, SceneDocument,
     SceneEntityRecord,
@@ -23,6 +24,9 @@ use super::*;
 use crate::project_host::authoring::{
     AuthoringProjectAdmissionHost, source_index::ProjectSourceIndexState,
 };
+
+#[path = "source_receipts.rs"]
+mod source_receipts;
 
 const SCENE_PATH: &str = "scenes/external.scene.json";
 const PREFAB_PATH: &str = "prefabs/external.prefab.ron";
@@ -48,8 +52,9 @@ fn owned_requests_share_the_basis_and_prepare_both_kinds_after_the_owner_is_drop
     project.write(PREFAB_PATH, prefab.to_ron_string().unwrap().as_bytes());
     let (schema, index) = project.admission();
     let adapters: Arc<[AuthoringAdapterReceipt]> = Arc::from([]);
+    let schema_basis = AuthoringSchemaBasis::admit(schema.bundle(), &adapters).unwrap();
     let basis =
-        AuthoringDocumentAdmissionBasis::new(&schema, &adapters, SceneFileLimits::default());
+        AuthoringDocumentAdmissionBasis::new(&schema, &schema_basis, SceneFileLimits::default());
     let scene_request = basis
         .capture(
             Arc::clone(&index),
@@ -65,16 +70,13 @@ fn owned_requests_share_the_basis_and_prepare_both_kinds_after_the_owner_is_drop
         )
         .unwrap();
     assert!(Arc::ptr_eq(&scene_request.index, &index));
-    assert!(Arc::ptr_eq(
-        &scene_request.bundle,
-        &schema.bundle.shared_bundle()
-    ));
-    assert!(Arc::ptr_eq(&scene_request.adapters, &adapters));
-    assert!(Arc::ptr_eq(&scene_request.bundle, &prefab_request.bundle));
+    assert_eq!(scene_request.basis, schema_basis);
+    assert_eq!(scene_request.basis, prefab_request.basis);
     let expected_root = schema.root_identity();
     drop(schema);
     drop(index);
     drop(adapters);
+    drop(schema_basis);
 
     let (scene_admitted, prefab_admitted) = thread::spawn(move || {
         assert_eq!(scene_request.root.identity(), expected_root);
@@ -117,8 +119,11 @@ fn capture_checks_authority_without_opening_the_source() {
     let (schema, index) = project.admission();
     fs::remove_file(project.path(SCENE_PATH)).unwrap();
     let adapters: Arc<[AuthoringAdapterReceipt]> = Arc::from([]);
-    let basis =
-        AuthoringDocumentAdmissionBasis::new(&schema, &adapters, SceneFileLimits::default());
+    let basis = AuthoringDocumentAdmissionBasis::new(
+        &schema,
+        &AuthoringSchemaBasis::admit(schema.bundle(), &adapters).unwrap(),
+        SceneFileLimits::default(),
+    );
     let request = basis
         .capture(
             Arc::clone(&index),
@@ -171,7 +176,11 @@ fn prepare_reads_later_bytes_and_preserves_borrowed_admission_errors() {
             "project.editor.document-source-too-large",
         ),
     ] {
-        let basis = AuthoringDocumentAdmissionBasis::new(&schema, &adapters, limits);
+        let basis = AuthoringDocumentAdmissionBasis::new(
+            &schema,
+            &AuthoringSchemaBasis::admit(schema.bundle(), &adapters).unwrap(),
+            limits,
+        );
         let request = basis
             .capture(
                 Arc::clone(&index),
@@ -199,8 +208,11 @@ fn owned_preparation_rejects_a_replaced_indexed_file() {
     let project = TestProject::new();
     let (schema, index) = project.admission();
     let adapters: Arc<[AuthoringAdapterReceipt]> = Arc::from([]);
-    let basis =
-        AuthoringDocumentAdmissionBasis::new(&schema, &adapters, SceneFileLimits::default());
+    let basis = AuthoringDocumentAdmissionBasis::new(
+        &schema,
+        &AuthoringSchemaBasis::admit(schema.bundle(), &adapters).unwrap(),
+        SceneFileLimits::default(),
+    );
     let request = basis
         .capture(
             Arc::clone(&index),
@@ -241,8 +253,11 @@ fn capture_rejects_an_index_from_another_schema_authority() {
     let other = TestProject::new();
     let (other_schema, _) = other.admission();
     let adapters: Arc<[AuthoringAdapterReceipt]> = Arc::from([]);
-    let basis =
-        AuthoringDocumentAdmissionBasis::new(&other_schema, &adapters, SceneFileLimits::default());
+    let basis = AuthoringDocumentAdmissionBasis::new(
+        &other_schema,
+        &AuthoringSchemaBasis::admit(other_schema.bundle(), &adapters).unwrap(),
+        SceneFileLimits::default(),
+    );
     assert_eq!(
         basis
             .capture(
@@ -278,8 +293,11 @@ fn location_admission_keeps_each_opened_document_in_its_full_project_location() 
     );
     let (schema, index) = project.admission();
     let adapters: Arc<[AuthoringAdapterReceipt]> = Arc::from([]);
-    let basis =
-        AuthoringDocumentAdmissionBasis::new(&schema, &adapters, SceneFileLimits::default());
+    let basis = AuthoringDocumentAdmissionBasis::new(
+        &schema,
+        &AuthoringSchemaBasis::admit(schema.bundle(), &adapters).unwrap(),
+        SceneFileLimits::default(),
+    );
     let first = basis
         .admit(&index, SCENE_PATH, AuthoringDocumentKind::Scene)
         .unwrap();
@@ -311,8 +329,11 @@ fn stable_admission_requires_exact_metadata_and_revalidates_its_prepared_observa
     project.write("nara.toml", manifest.as_bytes());
     let (schema, index) = project.admission();
     let adapters: Arc<[AuthoringAdapterReceipt]> = Arc::from([]);
-    let basis =
-        AuthoringDocumentAdmissionBasis::new(&schema, &adapters, SceneFileLimits::default());
+    let basis = AuthoringDocumentAdmissionBasis::new(
+        &schema,
+        &AuthoringSchemaBasis::admit(schema.bundle(), &adapters).unwrap(),
+        SceneFileLimits::default(),
+    );
     assert!(
         basis
             .admit(&index, SCENE_PATH, AuthoringDocumentKind::Scene)
@@ -410,8 +431,11 @@ fn stable_documents_use_their_containing_configured_root_instead_of_the_document
     }
     let (schema, index) = project.admission();
     let adapters: Arc<[AuthoringAdapterReceipt]> = Arc::from([]);
-    let basis =
-        AuthoringDocumentAdmissionBasis::new(&schema, &adapters, SceneFileLimits::default());
+    let basis = AuthoringDocumentAdmissionBasis::new(
+        &schema,
+        &AuthoringSchemaBasis::admit(schema.bundle(), &adapters).unwrap(),
+        SceneFileLimits::default(),
+    );
     let id = StableAssetId::parse_str("98ded649-6558-4d57-a287-d74c05b20d9e").unwrap();
     for (path, declaration) in [
         (

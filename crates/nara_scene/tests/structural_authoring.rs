@@ -1,5 +1,8 @@
 #![cfg(feature = "serde")]
 
+#[path = "support/prefab_source.rs"]
+mod prefab_source;
+
 use nara_asset::AssetRef;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
@@ -9,9 +12,10 @@ use nara_reflect::{
 };
 use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, PrefabAuthoringSession,
-    PrefabDocument, PrefabDocumentCandidate, PrefabInstance, SceneAuthoringSession,
-    SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    PrefabComponentIntent, PrefabComponentSetMode, PrefabDocument, PrefabDocumentCandidate,
+    PrefabEntityTarget, PrefabInstance, PrefabOverlay, SceneAuthoringSession, SceneComponentRecord,
+    SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
+    ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -59,16 +63,17 @@ fn move_preserves_unknown_payloads_and_exact_history_in_both_document_kinds() {
         ),
     );
     let mut anchor = SceneEntityRecord::new(id("anchor"));
+    let mut overlay = PrefabOverlay::new(prefab_source::key("structural.base"));
+    overlay.components.push(PrefabComponentIntent::Set {
+        mode: PrefabComponentSetMode::Add,
+        target: PrefabEntityTarget::source(id("source-entity")),
+        component: missing,
+        record: SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Bool(true)),
+        bindings: Vec::new(),
+    });
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::new([ScenePatchOperation::AddComponent {
-            entity: id("source-entity"),
-            component: missing,
-            value: SceneComponentRecord::new(
-                ComponentSchemaVersion::ONE,
-                ComponentValue::Bool(true),
-            ),
-        }]),
+        overrides: Some(overlay),
     });
     let document = SceneDocument::from_ordered_roots([
         SceneEntityRecord::new(id("plain")),
@@ -321,7 +326,7 @@ fn deletion_does_not_guess_unknown_references_or_prefab_namespaces() {
         if prefab {
             blocker.prefab = Some(PrefabInstance {
                 source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
-                overrides: ScenePatchDocument::default(),
+                overrides: None,
             });
         } else {
             blocker.components.insert(

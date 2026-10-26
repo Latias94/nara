@@ -13,13 +13,14 @@ use nara_hierarchy::HierarchyRoots;
 use nara_identity::WorldIdentityDomain;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind,
+    ComponentPropertyPath, ComponentRegistry, ComponentSchema, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 use nara_scene::{
-    InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, PrefabSourceResolver,
+    InMemoryPrefabSourceResolver, PrefabComponentIntent, PrefabDocument, PrefabEntityTarget,
+    PrefabInstance, PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent, PrefabSourceResolver,
     ResolvedPrefabSource, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation, SourceDocumentKey,
+    SourceDocumentKey,
 };
 
 fn scene_id(value: &str) -> SceneEntityId {
@@ -30,7 +31,7 @@ fn anchor(source: AssetRef) -> SceneEntityRecord {
     let mut anchor = SceneEntityRecord::new(scene_id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source,
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     anchor
 }
@@ -38,12 +39,13 @@ fn anchor(source: AssetRef) -> SceneEntityRecord {
 struct RawPrefabSource {
     source: AssetRef,
     key: SourceDocumentKey,
-    document: PrefabDocument,
+    document: Arc<PrefabDocument>,
 }
 
 impl PrefabSourceResolver for RawPrefabSource {
-    fn resolve_prefab(&self, source: &AssetRef) -> Option<ResolvedPrefabSource<'_>> {
-        (source == &self.source).then(|| ResolvedPrefabSource::bound(&self.document, &self.key))
+    fn resolve_prefab(&self, source: &AssetRef) -> Option<ResolvedPrefabSource> {
+        (source == &self.source)
+            .then(|| ResolvedPrefabSource::bound(Arc::clone(&self.document), self.key.clone()))
     }
 }
 
@@ -172,10 +174,10 @@ fn assert_raw_source_rejected(prefab: PrefabDocument, code: &str) {
     let resolver = RawPrefabSource {
         source: source.clone(),
         key: key.clone(),
-        document: prefab.clone(),
+        document: Arc::new(prefab.clone()),
     };
     assert_rejected_without_mutation(&document, &resolver, code);
-    assert_eq!(resolver.document, prefab);
+    assert_eq!(resolver.document.as_ref(), &prefab);
     assert_eq!(resolver.key, key);
     assert_eq!(resolver.source, source);
 }
@@ -270,7 +272,7 @@ fn raw_prefab_topology_diagnostics_preserve_bounded_loss_accounting() {
 struct DefaultAmount(i64);
 
 #[test]
-fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_extra_native_decode() {
+fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_native_decode() {
     let component_id = ComponentTypeId::new("nara.test.DefaultAmount");
     let mut field = ComponentFieldSchema::required(
         ComponentFieldId::new("amount"),
@@ -329,7 +331,7 @@ fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_extra_
         "{:?}",
         expansion.diagnostics
     );
-    assert_eq!(decode_count.load(Ordering::Relaxed), 1);
+    assert_eq!(decode_count.load(Ordering::Relaxed), 0);
     let expanded = expansion.document().unwrap();
     let component = expanded
         .entities
@@ -338,14 +340,18 @@ fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_extra_
         .unwrap();
     assert_eq!(component.value.field_i64("amount").unwrap(), 5);
 
-    document.entities[0].prefab.as_mut().unwrap().overrides =
-        ScenePatchDocument::new([ScenePatchOperation::SetField {
-            entity: scene_id("root"),
-            component: component_id.clone(),
-            component_version: ComponentSchemaVersion::ONE,
-            field: ComponentFieldId::new("amount"),
-            value: ComponentValue::I64(9),
-        }]);
+    let mut overlay = PrefabOverlay::new(key.clone());
+    overlay.components.push(PrefabComponentIntent::Properties {
+        target: PrefabEntityTarget::source(scene_id("root")),
+        component: component_id.clone(),
+        version: ComponentSchemaVersion::ONE,
+        claims: vec![PrefabPropertyClaim {
+            path: ComponentPropertyPath::new(ComponentFieldId::new("amount")),
+            intent: PrefabPropertyIntent::Set(ComponentValue::I64(9)),
+            bindings: Vec::new(),
+        }],
+    });
+    document.entities[0].prefab.as_mut().unwrap().overrides = Some(overlay);
     let expansion = document.expand_prefabs(&registry, &resolver);
     assert!(
         !expansion.diagnostics.has_errors(),
@@ -359,6 +365,7 @@ fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_extra_
         .find_map(|entity| entity.components.get(&component_id))
         .unwrap();
     assert_eq!(component.value.field_i64("amount").unwrap(), 9);
+    assert_eq!(decode_count.load(Ordering::Relaxed), 0);
     let resolved = resolver.resolve_prefab(&source).unwrap();
     assert_eq!(resolved.document(), &prefab);
     assert_eq!(resolved.key(), &key);
@@ -367,6 +374,27 @@ fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_extra_
             .value
             .get("amount")
             .is_none()
+    );
+    // Native decoding belongs to activation of the selected effective document.
+    let candidate = expansion
+        .candidate
+        .unwrap()
+        .bind_source(scene_source_key("raw_prefab_topology_admission/defaulted"));
+    let mut world = World::new();
+    let report = nara_scene::spawn_scene(
+        &mut world,
+        &registry,
+        &candidate,
+        &scene_occurrence("raw_prefab_topology_admission/defaulted"),
+        None,
+    );
+    assert!(report.instance.is_some(), "{:?}", report.diagnostics);
+    assert_eq!(decode_count.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        world
+            .iter_entities()
+            .find_map(|entity| entity.get::<DefaultAmount>().map(|amount| amount.0)),
+        Some(9)
     );
 }
 

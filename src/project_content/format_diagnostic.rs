@@ -57,7 +57,7 @@ pub(crate) fn scene_format_diagnostic(
             let diagnostic = engine_version(diagnostic, "current_engine", current);
             engine_version(diagnostic, "required_engine", required)
         }
-        SceneFormatError::EmbeddedPatchFormatVersion { observed, expected } => {
+        SceneFormatError::PatchFormatVersion { observed, expected } => {
             let diagnostic = identifier(diagnostic, "reason", "embedded-patch-version-unsupported");
             let diagnostic = number(diagnostic, "observed_version", u64::from(*observed));
             number(diagnostic, "supported_version", u64::from(*expected))
@@ -79,6 +79,7 @@ pub(crate) fn scene_format_diagnostic(
                 SceneFileBudgetKind::Components => "components",
                 SceneFileBudgetKind::PrefabInstances => "prefab-instances",
                 SceneFileBudgetKind::PatchOperations => "patch-operations",
+                SceneFileBudgetKind::OverlayDeclarations => "overlay-declarations",
                 SceneFileBudgetKind::DiagnosticSources => "diagnostic-sources",
                 SceneFileBudgetKind::ComponentValueNodes => "component-value-nodes",
                 SceneFileBudgetKind::ComponentValueBytes => "component-value-bytes",

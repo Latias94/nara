@@ -292,7 +292,7 @@ declarative overlays or finish the broader source/history work below.
 
 Topics: T05, T07. ADRs: 0006, 0011, 0038, 0043, 0083, 0090, 0101.
 
-**Pressure.** `PrefabInstance.overrides` currently stores `ScenePatchDocument`; `MoveEntity`
+**Pressure at the reassessment baseline.** `PrefabInstance.overrides` stored `ScenePatchDocument`; `MoveEntity`
 contains revision-specific from/to state. R5a now provides stable nested member/key selectors,
 but lowering an edit to a whole-root patch loses which leaf was intentionally overridden.
 Current private `prefab_N` locators are not source

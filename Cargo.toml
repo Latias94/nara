@@ -345,8 +345,8 @@ path = "examples/component_schema_export.rs"
 required-features = ["presentation-2d", "serde"]
 
 [[example]]
-name = "prefab_patch_override"
-path = "examples/prefab_patch_override.rs"
+name = "prefab_overlay"
+path = "examples/prefab_overlay.rs"
 required-features = ["runtime-2d", "serde"]
 
 [[example]]

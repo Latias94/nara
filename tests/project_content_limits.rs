@@ -5,13 +5,17 @@ mod project_content_fixture;
 
 use nara::{
     asset::AssetRef,
+    diagnostic::DiagnosticValueRef,
     project_host::{
         ProjectContentBudgetHost, ProjectContentBudgetKind, ProjectContentBudgetSnapshot,
         ProjectContentErrorKind, ProjectContentLimits, ProjectContentLoader,
     },
-    scene::{PrefabDocument, PrefabInstance, SceneDocument, SceneEntityRecord, ScenePatchDocument},
+    reflect::{ComponentSchemaVersion, ComponentTypeId},
+    scene::{
+        PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityRecord,
+    },
 };
-use project_content_fixture::{TestProject, scene_id};
+use project_content_fixture::{TestProject, image_meta, scene_id, sprite_value, valid_png_bytes};
 
 #[test]
 fn every_content_budget_accepts_its_peak_and_rejects_one_less_without_leaking() {
@@ -58,24 +62,55 @@ fn assert_budget_boundary(kind: ProjectContentBudgetKind, expected: usize) {
 }
 
 #[test]
-fn queued_jobs_budget_counts_materialized_unique_work_before_processing() {
-    let observed = successful_high_water(ProjectContentBudgetKind::QueuedJobs, two_prefabs);
+fn synchronous_prefab_loading_does_not_add_queued_jobs() {
+    let single = successful_high_water(ProjectContentBudgetKind::QueuedJobs, |_| {});
+    let exact = ProjectContentLimits::default()
+        .with_limit(ProjectContentBudgetKind::QueuedJobs, single)
+        .unwrap();
+    let (project, loader, result) = load_with_limits(exact, two_prefabs);
+    let snapshot = result.unwrap();
+    assert_eq!(snapshot.prefabs().len(), 2);
+    assert_eq!(snapshot.images().len(), 1);
+    let budget = loader.budget_snapshot();
+    // Prefabs are requested synchronously; only the shared image occupies the queue.
+    assert_eq!(single, 1);
+    assert_eq!(
+        budget.high_water(ProjectContentBudgetKind::QueuedJobs),
+        single
+    );
+    assert_eq!(budget.high_water(ProjectContentBudgetKind::InFlightJobs), 1);
+    drop(snapshot);
+    assert_no_active_charges(loader.budget_snapshot());
+    drop(loader);
+    drop(project);
+}
+
+#[test]
+fn queued_jobs_budget_counts_unique_images_before_processing() {
+    let observed = successful_high_water(ProjectContentBudgetKind::QueuedJobs, two_images);
     assert_eq!(observed, 2);
 
     let exact = ProjectContentLimits::default()
         .with_limit(ProjectContentBudgetKind::QueuedJobs, observed)
         .unwrap();
     assert_eq!(
-        successful_high_water_with_limits(ProjectContentBudgetKind::QueuedJobs, exact, two_prefabs,),
+        successful_high_water_with_limits(ProjectContentBudgetKind::QueuedJobs, exact, two_images),
         observed,
     );
 
     let rejected = ProjectContentLimits::default()
         .with_limit(ProjectContentBudgetKind::QueuedJobs, observed - 1)
         .unwrap();
-    let (project, loader, result) = load_with_limits(rejected, two_prefabs);
-    let error = result.expect_err("the second materialized job must reject");
+    let (project, loader, result) = load_with_limits(rejected, two_images);
+    let error = result.expect_err("the second unique image must exceed the queue limit");
     assert_eq!(error.kind(), ProjectContentErrorKind::BudgetExceeded);
+    assert!(error.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "project.content.budget-exceeded"
+            && diagnostic.fields().iter().any(|field| {
+                field.key().as_str() == "budget"
+                    && field.value() == DiagnosticValueRef::Identifier("queued-jobs")
+            })
+    }));
     assert_no_active_charges(loader.budget_snapshot());
     drop(loader);
     drop(project);
@@ -328,27 +363,68 @@ fn two_prefabs(project: &TestProject) {
     let mut enemy = SceneEntityRecord::new(scene_id("enemy-anchor"));
     enemy.prefab = Some(PrefabInstance {
         source: AssetRef::path("enemy.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     let mut bonus = SceneEntityRecord::new(scene_id("bonus-anchor"));
     bonus.prefab = Some(PrefabInstance {
         source: AssetRef::path("bonus.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
-    project.write_prefab("bonus.prefab.json", &PrefabDocument::default());
+    let shared_image = SceneEntityRecord::new(scene_id("bonus"))
+        .with_component(
+            ComponentTypeId::new("nara.transform.Transform2d"),
+            project_content_fixture::identity_transform_record(),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.sprite.Sprite"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                sprite_value(&AssetRef::path("textures/player.png").unwrap()),
+            ),
+        );
+    project.write_prefab(
+        "bonus.prefab.json",
+        &PrefabDocument::from_ordered_roots([shared_image]),
+    );
     project.write_scene_source(&SceneDocument::from_ordered_roots([enemy, bonus]));
+}
+
+fn two_images(project: &TestProject) {
+    two_prefabs(project);
+    let path = "textures/bonus.png";
+    project.write_asset(
+        path,
+        valid_png_bytes(),
+        &image_meta("39b646c5-9f42-43e6-8ea1-dca814d7c3a3", path),
+    );
+    let bonus = SceneEntityRecord::new(scene_id("bonus"))
+        .with_component(
+            ComponentTypeId::new("nara.transform.Transform2d"),
+            project_content_fixture::identity_transform_record(),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.sprite.Sprite"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                sprite_value(&AssetRef::path(path).unwrap()),
+            ),
+        );
+    project.write_prefab(
+        "bonus.prefab.json",
+        &PrefabDocument::from_ordered_roots([bonus]),
+    );
 }
 
 fn duplicate_prefab_edges(project: &TestProject) {
     let mut left = SceneEntityRecord::new(scene_id("left"));
     left.prefab = Some(PrefabInstance {
         source: AssetRef::path("enemy.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     let mut right = SceneEntityRecord::new(scene_id("right"));
     right.prefab = Some(PrefabInstance {
         source: AssetRef::path("enemy.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     project.write_scene_source(&SceneDocument::from_ordered_roots([left, right]));
 }

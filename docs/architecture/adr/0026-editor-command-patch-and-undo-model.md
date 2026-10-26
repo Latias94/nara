@@ -36,7 +36,7 @@ Rules:
   history, or dirty state changes.
 - `SceneAuthoringSession` admits inverse history against fixed per-session record,
   operation-equivalent structural-item, value-node, and logical-byte ceilings before document
-  publication. Embedded entity records, child edges, component records, nested patch operations,
+  publication. Embedded entity records, child edges, component records, nested overlay declarations,
   and their stable identifiers are charged rather than hidden inside one compound operation. Undo
   and Redo share the same retained budget, and total pressure evicts only the oldest eligible Undo
   records.
@@ -110,6 +110,10 @@ Rules:
   a barrier to destructive replacement; this operation does not grant implicit repair authority.
   Borrowed programmatic input must satisfy bounded declaration/value depth before recursive
   equality, cloning or serialization; post-copy file validation is not allocation admission.
+- Exact patches edit a containing source's complete optional `PrefabInstance`, including its
+  declarative overlay, through one prepared transaction and inverse. Durable overlay claims do
+  not carry old-value or placement snapshots and are not produced by persisting root-field
+  coalescing. Projection compilation creates no source session, history or dirty transition.
 
 ```mermaid
 flowchart TD
@@ -172,8 +176,9 @@ Implementation notes as of 2026-07-08:
   same bounded validation-work shape instead of expanding one deletion into many intermediate
   operations.
 - `RemoveField` is only allowed for optional fields or fields with registered defaults.
-- Prefab overrides reuse `ScenePatchDocument`; overrides are applied relative to source prefab IDs
-  before prefab expansion namespaces them.
+- Prefab source transactions use exact `ScenePatchDocument`; durable instance overrides retain
+  `PrefabOverlay` intent under ADR 0038. Expansion resolves typed source/addition targets and
+  bindings without turning those declarations into a second history owner.
 - `SceneAuthoringSession` wraps a `SceneDocument`, records admitted inverse patches with their
   two-way history cost and content-state transition, tracks whether its live projection is dirty,
   and exposes sync methods for plain scenes, asset-aware scenes, and prefab-resolved scenes.

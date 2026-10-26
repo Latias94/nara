@@ -306,9 +306,77 @@ conflict persistence, admitted base evidence and source/Runtime/UI provenance be
 format change. Familiar Inspector behavior should test those owners rather than conceal missing
 semantics with UI fallbacks.
 
+## 5. Follow-Up: Working Copies, Save And Preview Dependencies
+
+This follow-up was inspected on 2026-10-27. The earlier Nara baseline and recommendations
+retain their historical scope; ADRs 0026/0038 adopt declarative overlays. At this follow-up's
+source inspection, the replacement was uncommitted and complete Editor qualification was outstanding.
+The subsequent [Editor checkpoint](../knowledge/engineering/verification/2026-10/2026-10-26T221436Z-captured-editor-scene-preview-and-ordered-image-publication-qualification-bd36086e52524bb1b227dbd21da81056.md)
+records its later bounded integration and native evidence. The additional
+Unity source baseline is `Unity-Technologies/UnityCsReference` at
+`1c2d7db69c060103b6dc087af725442d1efaef9c` (`6000.0.85f1`), not a moving branch.
+
+**Documentation and source observation:** Unity Prefab Mode Auto Save is an actual asset save
+and can be disabled. The inspected `readyToAutoSave`/`HandleAutoSave` path checks dirty state and
+save eligibility; `SavePrefab` invokes `PrefabUtility.SaveAsPrefabAsset`. This is distinct from
+applying a Scene instance's overrides to an asset. These paths do not establish that every
+unsaved Prefab Stage state is visible in every Scene.
+Sources: [Auto Save](https://docs.unity3d.com/6000.0/Documentation/Manual/EditingInPrefabMode.html#automatically-save-edits-to-the-prefab-asset),
+[save conditions](https://github.com/Unity-Technologies/UnityCsReference/blob/1c2d7db69c060103b6dc087af725442d1efaef9c/Editor/Mono/SceneManagement/StageManager/PrefabStage/PrefabStage.cs#L1334),
+[asset write](https://github.com/Unity-Technologies/UnityCsReference/blob/1c2d7db69c060103b6dc087af725442d1efaef9c/Editor/Mono/SceneManagement/StageManager/PrefabStage/PrefabStage.cs#L1446).
+
+**Source observation:** the same Unity source handles a dirty Stage whose disk source changed
+through an explicit keep/discard decision. It retains a source-file hash and observes asset
+changes. `OnSavingPrefab` documents merging after nested Prefab saves to avoid a redundant reload.
+The C# source does not expose the complete native merge algorithm.
+Sources: [disk conflict](https://github.com/Unity-Technologies/UnityCsReference/blob/1c2d7db69c060103b6dc087af725442d1efaef9c/Editor/Mono/SceneManagement/StageManager/PrefabStage/PrefabStage.cs#L1347),
+[nested save and hash observation](https://github.com/Unity-Technologies/UnityCsReference/blob/1c2d7db69c060103b6dc087af725442d1efaef9c/Editor/Mono/SceneManagement/StageManager/PrefabStage/PrefabStage.cs#L1732).
+
+**Source observation:** Godot's `_save_scene` recreates cached PackedScene state while preserving
+the old state referenced by existing instances for difference detection. `EditorData` checks
+inherited/instance sources' modification times, and `reload_scene_from_memory` packs local
+differences against the previous state before instantiating the replacement. This dependency
+check does not read another open tab's unsaved root.
+Sources: [saved state replacement](../../repo-ref/godot/editor/editor_node.cpp#L2553),
+[dependency check](../../repo-ref/godot/editor/editor_data.cpp#L719),
+[local difference preservation](../../repo-ref/godot/editor/editor_data.cpp#L770).
+
+**Nara design inference:** compare two valid policies rather than attributing an automatic
+working-copy policy to either upstream:
+
+| Policy | Benefit | Cost and limitation |
+| --- | --- | --- |
+| Saved dependencies only | The preview matches the file-backed dependency graph | Editing an open Prefab requires an explicit save before other Scene previews change |
+| Captured open working copies for Editor preview | Unsaved dependency edits can be inspected in their containing Scene | Source selection, full session lineage, file receipts and unsaved-dependency indication must all be explicit |
+
+The selected integration direction is the second policy for Editor authoring preview only.
+External Play, Check and Export continue using their admitted file-backed inputs. Source Save,
+Prefab Save, Apply and preview refresh remain separate operations. A dependency edit must not
+silently dirty or rewrite its containing Scene, and saving that Scene does not save the Prefab.
+
+Capture selects an open working copy only when the compiler actually requests its canonical
+source. A selected source must match the admitted project, source receipt and exact Schema basis;
+multiple sessions claiming that source reject as ambiguous. Unrelated open documents do not
+activate Schema or file checks. An immutable working document and its full revision describe
+session content; the last accepted file receipt separately describes disk content. A held `Arc`
+does not make an external file conflict disappear or authorize a file-backed publication.
+
+Preview invalidation must observe source selection as well as previous participants' revisions.
+A demanded disk source becoming an open session, a close, Save or Reopen can change the graph
+without changing the root Scene revision. Before publication, check the captured root, selected
+session lineages, Schema and file evidence. A rejected capture can retain last-good pixels, but
+those pixels cannot acquire the rejected graph's content stamp or input authority.
+
+Acceptance is a complete second-Scene workflow with a nested open Prefab: edit the Prefab without
+saving, observe changed preview with unchanged root revision/dirty state, Undo, Save/Reopen,
+close/reopen the dependency, and reject stale or externally changed captures. Native pixels and
+input authorization need separate execution evidence. Domain capture tests alone cannot qualify
+the Editor coordinator, image publication or UI indication.
+
 ## Limits
 
-- Unity documentation supplies public intent and API ergonomics, not a verified internal format,
+- Unity documentation and the bounded C# follow-up supply public intent and selected Editor
+  coordination mechanisms, not a verified internal format,
   memory bound, conflict algorithm, stable-property identity system or cross-document transaction.
 - Godot source supplies concrete owner and history mechanisms at one fixed development snapshot.
   It was not executed here. Do not generalize the inspected paths to every plugin/resource/reimport

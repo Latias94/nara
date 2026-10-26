@@ -10,7 +10,7 @@ use std::fs::OpenOptions;
 
 use nara::{
     app::PluginDefinition,
-    asset::{AssetRef, AssetSourceKind, StableAssetId},
+    asset::{AssetPath, AssetRef, AssetSourceKind, StableAssetId},
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode},
     prelude::{Component, ComponentRegistry, Transform2d, Vec2, World},
     project_host::advanced::{RuntimeProbe, resolve_product_recipe_with_probe},
@@ -18,10 +18,14 @@ use nara::{
         ProjectContentLoader, ProjectContentSnapshot, ProjectSettingsCandidate, RuntimePlan,
         ingest_project_manifest, resolve_product_recipe,
     },
-    reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
+    reflect::{
+        ComponentFieldId, ComponentPropertyPath, ComponentSchemaVersion, ComponentTypeId,
+        ComponentValue,
+    },
     scene::{
-        PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityRecord,
-        ScenePatchDocument, ScenePatchOperation,
+        PrefabComponentIntent, PrefabDocument, PrefabEntityTarget, PrefabInstance, PrefabOverlay,
+        PrefabPropertyClaim, PrefabPropertyIntent, SceneComponentRecord, SceneDocument,
+        SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
     },
 };
 use nara_reference_game::{
@@ -295,7 +299,7 @@ pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {
     let mut ui = SceneEntityRecord::new(scene_id("reference-ui"));
     ui.prefab = Some(PrefabInstance {
         source: AssetRef::path("reference-ui.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     SceneDocument::new(
         [
@@ -314,23 +318,35 @@ fn enemy_anchor(
     override_values: Option<(f64, u64)>,
     registry: &ComponentRegistry,
 ) -> SceneEntityRecord {
-    let overrides = override_values.map_or_else(ScenePatchDocument::default, |(x, spawn_tick)| {
-        ScenePatchDocument::new([
-            ScenePatchOperation::SetField {
-                entity: scene_id("enemy"),
+    let overrides = override_values.map(|(x, spawn_tick)| {
+        let mut overlay = PrefabOverlay::new(SourceDocumentKey::project_location(
+            "ee6d3cbc-9b11-5dc8-96fa-94299e28c369".parse().unwrap(),
+            AssetPath::new("prefabs/enemy.prefab.json").unwrap(),
+            SourceDocumentKind::Prefab,
+        ));
+        overlay.components = vec![
+            PrefabComponentIntent::Properties {
+                target: PrefabEntityTarget::source(scene_id("enemy")),
                 component: ComponentTypeId::new("nara.transform.Transform2d"),
-                component_version: ComponentSchemaVersion::ONE,
-                field: ComponentFieldId::new("translation.x"),
-                value: ComponentValue::f64(x).unwrap(),
+                version: ComponentSchemaVersion::ONE,
+                claims: vec![PrefabPropertyClaim {
+                    path: ComponentPropertyPath::new(ComponentFieldId::new("translation.x")),
+                    intent: PrefabPropertyIntent::Set(ComponentValue::f64(x).unwrap()),
+                    bindings: Vec::new(),
+                }],
             },
-            ScenePatchOperation::SetField {
-                entity: scene_id("enemy"),
+            PrefabComponentIntent::Properties {
+                target: PrefabEntityTarget::source(scene_id("enemy")),
                 component: ComponentTypeId::new("reference_game.WaveSpawn"),
-                component_version: ComponentSchemaVersion::ONE,
-                field: ComponentFieldId::new("tick"),
-                value: ComponentValue::U64(spawn_tick),
+                version: ComponentSchemaVersion::ONE,
+                claims: vec![PrefabPropertyClaim {
+                    path: ComponentPropertyPath::new(ComponentFieldId::new("tick")),
+                    intent: PrefabPropertyIntent::Set(ComponentValue::U64(spawn_tick)),
+                    bindings: Vec::new(),
+                }],
             },
-        ])
+        ];
+        overlay
     });
     let transform_id = ComponentTypeId::new("nara.transform.Transform2d");
     let mut anchor = SceneEntityRecord::new(scene_id(id)).with_component(

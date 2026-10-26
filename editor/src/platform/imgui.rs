@@ -991,14 +991,20 @@ impl NativeImgui {
                 self.scene.retire(&mut self.gpu, &mut self.renderer)?;
                 self.scene_presenter.retire();
             } else if let Some(candidate) = application.take_scene_preview_candidate() {
-                self.scene_presenter.prepare(
-                    &mut self.scene,
-                    &mut self.gpu,
-                    &mut self.renderer,
-                    window_packet,
-                    candidate,
-                    &mut self.next_view,
-                )?;
+                if application.current_scene_preview_content_stamp().as_ref()
+                    == Some(&candidate.content_stamp())
+                {
+                    self.scene_presenter.prepare(
+                        &mut self.scene,
+                        &mut self.gpu,
+                        &mut self.renderer,
+                        window_packet,
+                        candidate,
+                        &mut self.next_view,
+                    )?;
+                } else {
+                    self.scene_presenter.retire();
+                }
             }
         }
         self.prepare_game_start(application, window_packet)?;
@@ -1010,8 +1016,12 @@ impl NativeImgui {
             self.canvas.is_current(&self.scene, &frame)
         } else {
             application.current_frame().is_some_and(|frame| {
-                self.scene_presenter
-                    .is_presented(&self.scene, &frame, self.scene_extent)
+                self.scene_presenter.is_presented(
+                    &self.scene,
+                    &frame,
+                    self.scene_extent,
+                    application.current_scene_preview_content_stamp().as_ref(),
+                )
             })
         };
         let primary_viewport = self.context.main_viewport().id();
@@ -1155,6 +1165,7 @@ impl NativeImgui {
                 &self.scene,
                 authoring_receipts.iter().copied(),
                 mapping,
+                application.current_scene_preview_content_stamp().as_ref(),
             )?
         } else {
             false
@@ -1338,7 +1349,12 @@ impl NativeImgui {
         }
         if let Some((point, mapping)) = output.scene_pick_point.zip(output.scene_mapping)
             && let Some(frame) = application.current_frame()
-            && let Some(action) = self.scene_presenter.resolve_pick(&frame, point, mapping)
+            && let Some(action) = self.scene_presenter.resolve_pick(
+                &frame,
+                point,
+                mapping,
+                application.current_scene_preview_content_stamp().as_ref(),
+            )
             && let Some(batch) = output.actions.take()
         {
             let revision = batch.frame_revision();
@@ -2253,7 +2269,17 @@ fn imgui_frame_maintenance_deadline(
     .then_some(now + Duration::from_millis(16));
     earliest_deadline(
         earliest_deadline(
-            deadline,
+            earliest_deadline(
+                deadline,
+                earliest_deadline(
+                    frame
+                        .scene_preview_work_pending()
+                        .then_some(now + Duration::from_millis(8)),
+                    frame
+                        .scene_preview_recheck_after()
+                        .and_then(|delay| now.checked_add(delay)),
+                ),
+            ),
             play_lifecycle_poll_deadline(now, frame.play().state()),
         ),
         persistence_poll_deadline(now, frame.persistence().operation()),
@@ -2546,8 +2572,45 @@ mod opening_tests {
             .with_authoring_retirement_pending(true);
         let retirement_deadline = imgui_frame_maintenance_deadline(&retiring_frame, now);
         let retirement_presentation = imgui_frame_presentation_deadline(&retiring_frame, now);
-        let retired_frame = retiring_frame.with_authoring_retirement_pending(false);
+        let retired_frame = retiring_frame
+            .with_authoring_retirement_pending(false)
+            .with_scene_preview_work(false, None, 0);
         let retired_deadline = imgui_frame_maintenance_deadline(&retired_frame, now);
+        let rechecking_frame = retired_frame.clone().with_scene_preview_work(
+            false,
+            Some(Duration::from_millis(500)),
+            1,
+        );
+        let pending_preview_frame = rechecking_frame.clone().with_scene_preview_work(
+            true,
+            Some(Duration::from_millis(500)),
+            1,
+        );
+        let earlier_recheck_frame = pending_preview_frame.clone().with_scene_preview_work(
+            true,
+            Some(Duration::from_millis(2)),
+            1,
+        );
+        assert_eq!(
+            imgui_frame_maintenance_deadline(&rechecking_frame, now),
+            Some(now + Duration::from_millis(500)),
+        );
+        assert_eq!(
+            imgui_frame_maintenance_deadline(&pending_preview_frame, now),
+            Some(now + Duration::from_millis(8)),
+        );
+        assert_eq!(
+            imgui_frame_maintenance_deadline(&earlier_recheck_frame, now),
+            Some(now + Duration::from_millis(2)),
+        );
+        assert_eq!(
+            imgui_frame_presentation_deadline(&rechecking_frame, now),
+            None
+        );
+        assert_eq!(
+            imgui_frame_presentation_deadline(&pending_preview_frame, now),
+            None
+        );
         let other_work = application
             .current_frame()
             .unwrap()

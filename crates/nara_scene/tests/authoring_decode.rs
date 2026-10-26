@@ -1,5 +1,8 @@
 #![cfg(feature = "serde")]
 
+#[path = "support/prefab_source.rs"]
+mod prefab_source;
+
 use std::collections::BTreeMap;
 
 use nara_asset::AssetRef;
@@ -7,18 +10,21 @@ use nara_ecs::World;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentNumericBound, ComponentNumericInterval,
-    ComponentRegistry, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape, EntityReference,
-    PersistentComponentSchemaOwnerId,
+    ComponentPropertyPath, ComponentRegistry, ComponentSchema, ComponentSchemaCatalog,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentValueShape, EntityReference, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
     AuthoringDocumentReadiness, AuthoringDocumentSource, AuthoringFieldEdit,
     AuthoringRecordReadiness, AuthoringSessionAuthorityError, AuthoringSessionReplacementError,
-    PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate, PrefabInstance,
-    SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneAuthoringSession,
-    SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
-    SceneFormatError, ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
-    UnavailableRecordManifestEntry, UnavailableValuePathSegment,
+    PrefabAddition, PrefabAuthoringSession, PrefabComponentIntent, PrefabComponentSetMode,
+    PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance, PrefabOverlay,
+    PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyClaim,
+    PrefabPropertyIntent, SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER,
+    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+    SceneEntityId, SceneEntityRecord, SceneFormatError, ScenePatchDocument, ScenePatchOperation,
+    ScenePlacement, ScenePlacementOwner, UnavailableRecordManifestEntry,
+    UnavailableValuePathSegment,
 };
 
 const OWNER: &str = "nara.scene.hierarchy.components";
@@ -206,17 +212,21 @@ fn authoring_preview_projects_only_exact_available_direct_records() {
             .with_owner(owner.clone()),
         );
     let nested_source = AssetRef::path("prefabs/nested.prefab.json").unwrap();
+    let mut overlay = PrefabOverlay::new(prefab_source::key("decode.nested"));
+    overlay.components.push(PrefabComponentIntent::Set {
+        mode: PrefabComponentSetMode::Replace,
+        target: PrefabEntityTarget::source(entity.clone()),
+        component: component_id("nara.scene.Name"),
+        record: SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::String("Pinned name".to_owned()),
+        )
+        .with_owner(owner),
+        bindings: Vec::new(),
+    });
     source_entity.prefab = Some(PrefabInstance {
         source: nested_source.clone(),
-        overrides: ScenePatchDocument::new([ScenePatchOperation::ReplaceComponent {
-            entity: entity.clone(),
-            component: component_id("nara.scene.Name"),
-            value: SceneComponentRecord::new(
-                ComponentSchemaVersion::ONE,
-                ComponentValue::String("Patched name".to_owned()),
-            )
-            .with_owner(owner),
-        }]),
+        overrides: Some(overlay),
     });
     let source_scene = SceneDocument::from_ordered_roots([source_entity.clone()]);
     let source_prefab = PrefabDocument::from_ordered_roots([source_entity]);
@@ -285,7 +295,10 @@ fn authoring_preview_projects_only_exact_available_direct_records() {
         scene_before.entities[0]
             .prefab
             .as_ref()
-            .is_some_and(|prefab| !prefab.overrides.is_empty())
+            .is_some_and(|prefab| prefab
+                .overrides
+                .as_ref()
+                .is_some_and(|overlay| !overlay.is_empty()))
     );
 
     let scene_session = SceneAuthoringSession::from_published_authoring_document(published_scene);
@@ -541,7 +554,7 @@ fn available_field_edit_preserves_known_unbound_manifest_across_reopen() {
     );
     let manifest = published.unavailable_manifest().clone();
     assert_eq!(manifest.record_count(), 1);
-    assert_eq!(manifest.patch_target_count(), 0);
+    assert_eq!(manifest.overlay_target_count(), 0);
     let diagnostics = published.diagnostics();
     assert_eq!(diagnostics.len(), 1);
     let diagnostic = diagnostics.iter().next().unwrap();
@@ -668,26 +681,34 @@ fn prefab_unknown_records_and_target_barriers_round_trip_semantically() {
     let unknown = component_id("nara.project.MissingBehavior");
     let anchor = scene_id("anchor");
     let added = scene_id("added");
-    let overrides = ScenePatchDocument::new([
-        ScenePatchOperation::AddEntity {
-            entity: SceneEntityRecord::new(added.clone()).with_component(
-                unknown.clone(),
-                SceneComponentRecord::new(
-                    ComponentSchemaVersion::ONE,
-                    ComponentValue::map([("enabled", ComponentValue::Bool(true))]),
-                )
-                .with_owner(persistent_owner("nara.project.behavior")),
-            ),
-            placement: ScenePlacement::last(ScenePlacementOwner::Root),
-        },
-        ScenePatchOperation::SetField {
-            entity: added,
+    let mut overrides = PrefabOverlay::new(prefab_source::key("decode.base"));
+    let mut addition = PrefabAddition::new(added.clone());
+    addition.components.insert(
+        unknown.clone(),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::map([("enabled", ComponentValue::Bool(true))]),
+        )
+        .with_owner(persistent_owner("nara.project.behavior")),
+    );
+    overrides.additions.push(addition);
+    overrides.placements.push(PrefabPlacement {
+        target: PrefabEntityTarget::addition(added.clone()),
+        parent: PrefabPlacementParent::Root,
+        slot: PrefabPlacementSlot::Last,
+    });
+    overrides
+        .components
+        .push(PrefabComponentIntent::Properties {
+            target: PrefabEntityTarget::source(added),
             component: unknown.clone(),
-            component_version: ComponentSchemaVersion::ONE,
-            field: ComponentFieldId::new("enabled"),
-            value: ComponentValue::Bool(false),
-        },
-    ]);
+            version: ComponentSchemaVersion::ONE,
+            claims: vec![PrefabPropertyClaim {
+                path: ComponentPropertyPath::new(ComponentFieldId::new("enabled")),
+                intent: PrefabPropertyIntent::Set(ComponentValue::Bool(false)),
+                bindings: Vec::new(),
+            }],
+        });
     let prefab = PrefabDocument::from_ordered_roots([SceneEntityRecord {
         id: anchor,
         children: Vec::new(),
@@ -701,7 +722,7 @@ fn prefab_unknown_records_and_target_barriers_round_trip_semantically() {
         )]),
         prefab: Some(PrefabInstance {
             source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
-            overrides,
+            overrides: Some(overrides),
         }),
     }]);
     let source = source("prefabs/missing.prefab.json");
@@ -716,7 +737,7 @@ fn prefab_unknown_records_and_target_barriers_round_trip_semantically() {
 
     assert_eq!(published.readiness(), AuthoringDocumentReadiness::Degraded);
     assert_eq!(published.unavailable_manifest().record_count(), 2);
-    assert_eq!(published.unavailable_manifest().patch_target_count(), 1);
+    assert_eq!(published.unavailable_manifest().overlay_target_count(), 1);
     assert!(
         published
             .record_facts()

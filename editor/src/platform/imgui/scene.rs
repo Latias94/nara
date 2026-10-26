@@ -110,30 +110,39 @@ impl ImguiScenePresenter {
         target: &ImguiTarget,
         frame: &EditorFrameModel,
         requested_extent: Option<Extent2d>,
+        expected_content: Option<&EditorPreviewContentStamp>,
     ) -> bool {
+        if !self.require_current_content(expected_content) {
+            return false;
+        }
         let Some(scene) = frame
             .scene_preview_document()
             .and_then(|document| frame.workspace().scene(document))
         else {
+            self.retire();
             return false;
         };
-        if let Some(prepared) = self.prepared.as_ref() {
-            return prepared.accepted.document() == scene.document
+        let current = if let Some(prepared) = self.prepared.as_ref() {
+            prepared.accepted.document() == scene.document
                 && prepared.accepted.revision() == scene.revision
                 && requested_extent == Some(prepared.submission.target().extent())
-                && matches_target(target, prepared.submission, prepared.texture);
-        }
-        let Some(presented) = self.presented.as_ref() else {
-            return false;
+                && matches_target(target, prepared.submission, prepared.texture)
+        } else if let Some(presented) = self.presented.as_ref() {
+            requested_extent == Some(presented.receipt.image().target().extent())
+                && matches_target(target, presented.receipt.image(), presented.texture)
+                && self.authority.token(
+                    scene.document,
+                    scene.revision,
+                    presentation_image(presented.receipt.image()),
+                    presented.mapping,
+                ) == Some(presented.token)
+        } else {
+            false
         };
-        requested_extent == Some(presented.receipt.image().target().extent())
-            && matches_target(target, presented.receipt.image(), presented.texture)
-            && self.authority.token(
-                scene.document,
-                scene.revision,
-                presentation_image(presented.receipt.image()),
-                presented.mapping,
-            ) == Some(presented.token)
+        if !current {
+            self.retire();
+        }
+        current
     }
 
     pub(super) fn is_presented(
@@ -141,8 +150,10 @@ impl ImguiScenePresenter {
         target: &ImguiTarget,
         frame: &EditorFrameModel,
         requested_extent: Option<Extent2d>,
+        expected_content: Option<&EditorPreviewContentStamp>,
     ) -> bool {
-        self.prepared.is_none() && self.is_current(target, frame, requested_extent)
+        self.is_current(target, frame, requested_extent, expected_content)
+            && self.prepared.is_none()
     }
 
     /// The caller supplies receipts only for the window that displayed this mapping.
@@ -151,7 +162,11 @@ impl ImguiScenePresenter {
         target: &ImguiTarget,
         receipts: impl IntoIterator<Item = WgpuEditorCompositeReceipt>,
         mapping: DisplayMapping2d,
+        expected_content: Option<&EditorPreviewContentStamp>,
     ) -> Result<bool, EditorRunError> {
+        if !self.require_current_content(expected_content) {
+            return Ok(false);
+        }
         let Some(submission) = target.submitted else {
             self.retire();
             return Ok(false);
@@ -226,7 +241,11 @@ impl ImguiScenePresenter {
         frame: &EditorFrameModel,
         point: [f32; 2],
         mapping: DisplayMapping2d,
+        expected_content: Option<&EditorPreviewContentStamp>,
     ) -> Option<EditorAction> {
+        if !self.require_current_content(expected_content) {
+            return None;
+        }
         let presented = self.presented.as_ref()?;
         if presented.mapping != mapping {
             return None;
@@ -249,6 +268,20 @@ impl ImguiScenePresenter {
         Some(EditorAction::Navigate(
             EditorNavigationAction::SelectEntity { document, entity },
         ))
+    }
+
+    fn require_current_content(&mut self, expected: Option<&EditorPreviewContentStamp>) -> bool {
+        let retained = self
+            .prepared
+            .as_ref()
+            .map(|prepared| &prepared.content)
+            .or_else(|| self.presented.as_ref().map(|presented| &presented.content));
+        if expected.is_some() && retained == expected {
+            return true;
+        }
+        // Keep the target's last-good pixels, but never revive their input token on redisplay.
+        self.retire();
+        false
     }
 
     pub(super) fn retire(&mut self) {
@@ -333,18 +366,28 @@ mod binding_tests {
 
     fn run_binding_test(canvas_priority: bool) {
         let project = UiProject::new();
-        fs::write(
-            project.0.join("prefabs/ordinary.prefab.json"),
-            PrefabDocument::from_ordered_roots([SceneEntityRecord::new(
-                SceneEntityId::new("ordinary").unwrap(),
-            )])
-            .to_json_string()
-            .unwrap(),
-        )
-        .unwrap();
         let source = project.0.join("scenes/startup.scene.json");
         let mut scene: serde_json::Value =
             serde_json::from_slice(&fs::read(&source).unwrap()).unwrap();
+        let entities = scene["payload"]["entities"].as_array_mut().unwrap();
+        let sprite = entities
+            .iter()
+            .position(|entity| entity["id"] == "image-source")
+            .expect("the fixture has a real Sprite source");
+        let mut inherited: SceneEntityRecord =
+            serde_json::from_value(entities.remove(sprite)).unwrap();
+        inherited.id = SceneEntityId::new("ordinary").unwrap();
+        scene["payload"]["roots"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|root| root != "image-source");
+        fs::write(
+            project.0.join("prefabs/ordinary.prefab.json"),
+            PrefabDocument::from_ordered_roots([inherited])
+                .to_json_string()
+                .unwrap(),
+        )
+        .unwrap();
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("ordinary-anchor").unwrap());
         anchor.prefab = Some(PrefabInstance {
             source: AssetRef::path("ordinary.prefab.json").unwrap(),
@@ -473,6 +516,31 @@ mod binding_tests {
                 EditorActionBatch::new(frame.revision(), [EditorAction::Navigate(action)]),
                 Duration::ZERO,
             );
+        }
+
+        fn wait_for_scene_presentation(&mut self) -> Result<(), String> {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                self.paint()?;
+                if let Some(frame) = self.application.current_frame()
+                    && self.native.scene_presenter.is_presented(
+                        &self.native.scene,
+                        &frame,
+                        self.native.scene_extent,
+                        self.application
+                            .current_scene_preview_content_stamp()
+                            .as_ref(),
+                    )
+                {
+                    return Ok(());
+                }
+                if Instant::now() >= deadline {
+                    return Err(
+                        "the captured Scene has no current composite presentation".to_owned()
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
         }
 
         fn open_prefab(&mut self, document: EditorDocumentId, entity: &str) -> Result<(), String> {
@@ -677,6 +745,9 @@ mod binding_tests {
                         &self.native.scene,
                         &frame,
                         self.native.scene_extent,
+                        self.application
+                            .current_scene_preview_content_stamp()
+                            .as_ref(),
                     ) {
                         break;
                     }
@@ -694,11 +765,6 @@ mod binding_tests {
                 return self.run_canvas_priority(scene);
             }
             self.verify_scene_epochs_reuse_target(scene)?;
-            let image = self
-                .native
-                .scene
-                .submitted
-                .ok_or("the Scene has no submitted image")?;
             self.open_prefab(scene, "ordinary-anchor")?;
             let frame = self.application.current_frame().unwrap();
             let prefab = frame
@@ -720,6 +786,14 @@ mod binding_tests {
                         .to_owned(),
                 );
             }
+            // Opening a participating source changes its capture selection, not its Scene binding.
+            self.wait_for_scene_presentation()?;
+            let frame = self.application.current_frame().unwrap();
+            let image = self
+                .native
+                .scene
+                .submitted
+                .ok_or("the Scene has no submitted image")?;
             let mapping = self
                 .native
                 .scene_presenter
@@ -736,10 +810,20 @@ mod binding_tests {
                 &self.native.scene,
                 &frame,
                 self.native.scene_extent,
+                self.application
+                    .current_scene_preview_content_stamp()
+                    .as_ref(),
             ) || self
                 .native
                 .scene_presenter
-                .resolve_pick(&frame, point, mapping)
+                .resolve_pick(
+                    &frame,
+                    point,
+                    mapping,
+                    self.application
+                        .current_scene_preview_content_stamp()
+                        .as_ref(),
+                )
                 .is_some()
             {
                 return Err(
@@ -754,6 +838,9 @@ mod binding_tests {
                     &self.native.scene,
                     &frame,
                     self.native.scene_extent,
+                    self.application
+                        .current_scene_preview_content_stamp()
+                        .as_ref(),
                 )
             {
                 return Err(
@@ -775,16 +862,54 @@ mod binding_tests {
                 (content.min[0] + content.max[0]) * 0.5,
                 (content.min[1] + content.max[1]) * 0.5,
             ];
+            let action = self
+                .native
+                .scene_presenter
+                .resolve_pick(
+                    &frame,
+                    point,
+                    mapping,
+                    self.application
+                        .current_scene_preview_content_stamp()
+                        .as_ref(),
+                )
+                .ok_or("the current Prefab Sprite has no selection action")?;
             if !matches!(
-                self.native.scene_presenter.resolve_pick(&frame, point, mapping),
-                Some(EditorAction::Navigate(EditorNavigationAction::SelectEntity { document, .. }))
-                    if document == scene
+                &action,
+                EditorAction::Navigate(EditorNavigationAction::SelectEntity { document, entity: Some(entity) })
+                    if *document == scene && entity.as_str() == "ordinary-anchor"
             ) {
                 return Err(
-                    "explicit Scene activation did not recover the unchanged receipt's picking authority"
-                        .to_owned(),
+                    "the Prefab Sprite did not resolve to its containing Scene anchor".to_owned(),
                 );
             }
+            let selection = self.application.submit_and_drive(
+                EditorActionBatch::new(frame.revision(), [action]),
+                Duration::ZERO,
+            );
+            if !matches!(
+                selection.actions(),
+                [crate::EditorApplicationActionDispatch::Dispatched(
+                    nara::tooling::EditorActionOutcome::Workspace(report)
+                )] if report.applied
+            ) || self
+                .application
+                .current_frame()
+                .and_then(|frame| {
+                    frame
+                        .workspace()
+                        .active_scene
+                        .as_ref()
+                        .filter(|model| model.document == scene)
+                        .and_then(|scene| scene.selection.top_entity().cloned())
+                })
+                .is_none_or(|entity| entity.as_str() != "ordinary-anchor")
+            {
+                return Err(
+                    "the presented Prefab Sprite could not select its instance anchor".to_owned(),
+                );
+            }
+            self.verify_dependency_content_fences(scene, prefab)?;
             let second = self.open_scene("scenes/other.scene.json")?;
             let frame = self.application.current_frame().unwrap();
             if second == scene
@@ -794,7 +919,14 @@ mod binding_tests {
                 || self
                     .native
                     .scene_presenter
-                    .resolve_pick(&frame, point, mapping)
+                    .resolve_pick(
+                        &frame,
+                        point,
+                        mapping,
+                        self.application
+                            .current_scene_preview_content_stamp()
+                            .as_ref(),
+                    )
                     .is_some()
             {
                 return Err(
@@ -802,12 +934,15 @@ mod binding_tests {
                         .to_owned(),
                 );
             }
-            self.paint()?;
+            self.wait_for_scene_presentation()?;
             let frame = self.application.current_frame().unwrap();
             if !self.native.scene_presenter.is_presented(
                 &self.native.scene,
                 &frame,
                 self.native.scene_extent,
+                self.application
+                    .current_scene_preview_content_stamp()
+                    .as_ref(),
             ) {
                 return Err("the second Scene did not receive its own presentation".to_owned());
             }
@@ -823,6 +958,228 @@ mod binding_tests {
                 return Err("closing the bound Scene changed the active ordinary Prefab".to_owned());
             }
             self.ensure_retired()
+        }
+
+        fn verify_dependency_content_fences(
+            &mut self,
+            scene: EditorDocumentId,
+            prefab: EditorDocumentId,
+        ) -> Result<(), String> {
+            use nara::{
+                scene::{ScenePlacement, ScenePlacementOwner},
+                tooling::{
+                    EditorDocumentMutation, PrefabCompositionCommand, PrefabCompositionEntityDraft,
+                },
+            };
+
+            let root_revision = self
+                .application
+                .current_frame()
+                .unwrap()
+                .workspace()
+                .document(scene)
+                .unwrap()
+                .revision;
+            for guard in 0..4 {
+                self.wait_for_scene_presentation()?;
+                let previous = self.native.scene_presenter.presented.as_ref().unwrap();
+                let old_token = previous.token;
+                let old_content = previous.content.clone();
+                let receipt = previous.receipt;
+                let mapping = previous.mapping;
+                let rect = mapping.content_rect();
+                let point = [
+                    (rect.min[0] + rect.max[0]) * 0.5,
+                    (rect.min[1] + rect.max[1]) * 0.5,
+                ];
+                if guard == 3 {
+                    // Hold an accepted submission that has not yet received a composite receipt.
+                    let deadline = Instant::now() + Duration::from_secs(10);
+                    let candidate = loop {
+                        self.application
+                            .drive_editor_frame(Duration::ZERO, false, false);
+                        if let Some(candidate) = self.application.take_scene_preview_candidate() {
+                            break candidate;
+                        }
+                        if Instant::now() >= deadline {
+                            return Err("the current capture has no candidate for prepared-content coverage".to_owned());
+                        }
+                        std::thread::sleep(Duration::from_millis(1));
+                    };
+                    self.native.scene_presenter.retire();
+                    self.native.frame_index += 1;
+                    let window = super::super::editor_window_packet(&self.native.window);
+                    self.native
+                        .gpu
+                        .begin_editor_frame(window, self.native.frame_index)
+                        .map_err(|error| error.to_string())?;
+                    self.native
+                        .scene_presenter
+                        .prepare(
+                            &mut self.native.scene,
+                            &mut self.native.gpu,
+                            &mut self.native.renderer,
+                            window,
+                            candidate,
+                            &mut self.native.next_view,
+                        )
+                        .map_err(|error| error.to_string())?;
+                    if self.native.scene_presenter.prepared.is_none() {
+                        return Err(
+                            "the prepared-content fixture did not retain its submission".to_owned()
+                        );
+                    }
+                }
+                let image = self.native.scene.submitted;
+                let identity = self.native.scene.identity;
+                let texture = self.native.scene.texture;
+                let frame = self.application.current_frame().unwrap();
+                let revision = frame.workspace().document(prefab).unwrap().revision;
+                let mutation = if guard % 2 == 0 {
+                    EditorDocumentMutation::ComposePrefab {
+                        document: prefab,
+                        base_revision: revision,
+                        command: PrefabCompositionCommand::CreateEntity {
+                            draft: PrefabCompositionEntityDraft::new(Default::default()).unwrap(),
+                            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                        },
+                    }
+                } else {
+                    EditorDocumentMutation::Undo {
+                        document: prefab,
+                        base_revision: revision,
+                    }
+                };
+                let submission = self.application.submit_and_drive(
+                    EditorActionBatch::new(frame.revision(), [EditorAction::Mutate(mutation)]),
+                    Duration::ZERO,
+                );
+                if !matches!(submission.actions(), [crate::EditorApplicationActionDispatch::Dispatched(nara::tooling::EditorActionOutcome::Workspace(report))] if report.applied)
+                {
+                    return Err(format!(
+                        "the participating Prefab edit was rejected: {:?}",
+                        submission.actions()
+                    ));
+                }
+                if self
+                    .application
+                    .current_scene_preview_content_stamp()
+                    .as_ref()
+                    == Some(&old_content)
+                {
+                    return Err(
+                        "a changed dependency retained the previous content authorization"
+                            .to_owned(),
+                    );
+                }
+                let deadline = Instant::now() + Duration::from_secs(10);
+                let expected = loop {
+                    if let Some(stamp) = self.application.current_scene_preview_content_stamp() {
+                        break stamp;
+                    }
+                    if Instant::now() >= deadline {
+                        return Err(
+                            "the changed dependency did not publish a successor capture".to_owned()
+                        );
+                    }
+                    self.application
+                        .drive_editor_frame(Duration::ZERO, false, false);
+                    std::thread::sleep(Duration::from_millis(1));
+                };
+                let frame = self.application.current_frame().unwrap();
+                if frame.workspace().document(scene).unwrap().revision != root_revision
+                    || expected == old_content
+                {
+                    return Err(
+                        "the dependency fixture changed the root or reused its old content"
+                            .to_owned(),
+                    );
+                }
+                let changed_mapping = mapping
+                    .with_uv(nara::render::DisplayRect {
+                        min: [0.125, 0.125],
+                        max: [0.875, 0.875],
+                    })
+                    .ok_or("the stale redisplay fixture has no valid mapping")?;
+                let stale_accepted = match guard {
+                    0 => self.native.scene_presenter.is_presented(
+                        &self.native.scene,
+                        &frame,
+                        self.native.scene_extent,
+                        Some(&expected),
+                    ),
+                    1 => self
+                        .native
+                        .scene_presenter
+                        .resolve_pick(&frame, point, mapping, Some(&expected))
+                        .is_some(),
+                    _ => self
+                        .native
+                        .scene_presenter
+                        .promote(
+                            &self.native.scene,
+                            [receipt],
+                            changed_mapping,
+                            Some(&expected),
+                        )
+                        .map_err(|error| error.to_string())?,
+                };
+                if stale_accepted
+                    || self
+                        .native
+                        .scene_presenter
+                        .authority
+                        .pick(old_token, point)
+                        .is_ok()
+                    || self.native.scene_presenter.prepared.is_some()
+                    || self.native.scene_presenter.presented.is_some()
+                    || self.native.scene.submitted != image
+                    || self.native.scene.identity != identity
+                    || self.native.scene.texture != texture
+                {
+                    return Err("stale dependency content survived a native authorization guard or retired last-good pixels".to_owned());
+                }
+                if self
+                    .native
+                    .scene_presenter
+                    .promote(
+                        &self.native.scene,
+                        [receipt],
+                        changed_mapping,
+                        Some(&expected),
+                    )
+                    .map_err(|error| error.to_string())?
+                {
+                    return Err(
+                        "redisplaying stale pixels restored their retired authority".to_owned()
+                    );
+                }
+                self.wait_for_scene_presentation()?;
+                let submitted = self.native.scene.submitted;
+                let token = self
+                    .native
+                    .scene_presenter
+                    .presented
+                    .as_ref()
+                    .unwrap()
+                    .token;
+                for _ in 0..2 {
+                    self.paint()?;
+                    if self.native.scene.submitted != submitted
+                        || self.native.scene.identity != identity
+                        || self.native.scene.texture != texture
+                        || self
+                            .native
+                            .scene_presenter
+                            .presented
+                            .as_ref()
+                            .is_none_or(|presented| presented.token != token)
+                    {
+                        return Err("an unchanged dependency graph replaced its pixels or presentation token".to_owned());
+                    }
+                }
+            }
+            Ok(())
         }
 
         fn verify_scene_epochs_reuse_target(
@@ -874,6 +1231,9 @@ mod binding_tests {
                 &self.native.scene,
                 &frame,
                 self.native.scene_extent,
+                self.application
+                    .current_scene_preview_content_stamp()
+                    .as_ref(),
             ) || self
                 .native
                 .scene_presenter
@@ -937,7 +1297,14 @@ mod binding_tests {
                         || self
                             .native
                             .scene_presenter
-                            .resolve_pick(&frame, point, mapping)
+                            .resolve_pick(
+                                &frame,
+                                point,
+                                mapping,
+                                self.application
+                                    .current_scene_preview_content_stamp()
+                                    .as_ref(),
+                            )
                             .is_some()
                     {
                         return Err(
@@ -952,6 +1319,9 @@ mod binding_tests {
                             &self.native.scene,
                             &frame,
                             self.native.scene_extent,
+                            self.application
+                                .current_scene_preview_content_stamp()
+                                .as_ref(),
                         ) {
                             break;
                         }

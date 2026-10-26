@@ -999,7 +999,7 @@ fn expanded_candidate_keeps_nested_source_paths_through_spawn_and_product_replac
     let mut branch = SceneEntityRecord::new(scene_id("branch"));
     branch.prefab = Some(PrefabInstance {
         source: inner.clone(),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
@@ -1015,7 +1015,7 @@ fn expanded_candidate_keeps_nested_source_paths_through_spawn_and_product_replac
     let mut anchor = SceneEntityRecord::new(scene_id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source: outer.clone(),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     let expansion =
         SceneDocument::from_ordered_roots([anchor]).expand_prefabs(&registry, &resolver);
@@ -1104,7 +1104,7 @@ fn expanded_candidate_source_observer_rejects_before_publication_and_preserves_o
     let mut anchor = SceneEntityRecord::new(fixture.target.clone());
     anchor.prefab = Some(PrefabInstance {
         source: prefab_source,
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     let expansion =
         SceneDocument::from_ordered_roots([anchor]).expand_prefabs(&fixture.registry, &resolver);
@@ -1162,7 +1162,7 @@ fn plain_candidate_with_unresolved_prefab_rejects_spawn_and_replacement_without_
     let mut anchor = SceneEntityRecord::new(fixture.target.clone());
     anchor.prefab = Some(PrefabInstance {
         source: nara_asset::AssetRef::path("prefabs/unresolved.ron").unwrap(),
-        overrides: ScenePatchDocument::default(),
+        overrides: None,
     });
     let candidate = ExpandedSceneCandidate::plain(
         scene_source_key(

@@ -9,15 +9,15 @@ use nara_fs::{
     ContentDigest, DirectoryCapability, FileIdentity, FsError, PathValidationError, RelativePath,
 };
 use nara_project::{ProjectPath, ProjectPathError};
-use nara_reflect::AuthoringSchemaBundle;
-use nara_scene::__private::AuthoringAdapterReceipt;
 use nara_scene::{
-    AuthoringDocumentPublicationError, AuthoringDocumentSource, PrefabDocumentCandidate,
-    PublishedAuthoringPrefabDocument, PublishedAuthoringSceneDocument, SceneDocumentCandidate,
-    SceneFileLimits, SceneFormatError, SourceDocumentKey, SourceDocumentKind,
+    AuthoringDocumentPublicationError, AuthoringDocumentSource, AuthoringSchemaBasis,
+    PrefabDocumentCandidate, PublishedAuthoringPrefabDocument, PublishedAuthoringSceneDocument,
+    SceneDocumentCandidate, SceneFileLimits, SceneFormatError, SourceDocumentKey,
+    SourceDocumentKind, SourceDocumentOrigin,
 };
 
 use super::native_source::{AdmittedNativeDocumentSource, NativeDocumentSourcePolicy};
+use super::project::{AuthoringSourceFact, AuthoringSourceKind};
 use super::{
     AuthoringSchemaReceipt, ProjectSourceIndexSnapshot, source_index::ProjectSourceOpenCapability,
 };
@@ -37,10 +37,75 @@ pub(crate) struct AuthoringDocumentSourceFact {
     identity: FileIdentity,
     parent_identity: Option<FileIdentity>,
     digest: ContentDigest,
+    encoded_bytes: usize,
     native: AdmittedNativeDocumentSource,
 }
 
 impl AuthoringDocumentSourceFact {
+    /// Retains an already admitted document observation without reopening its source.
+    pub(crate) fn from_captured_source(
+        source: &AuthoringSourceFact,
+        native: &AdmittedNativeDocumentSource,
+    ) -> Result<Self, AuthoringDocumentAdmissionError> {
+        let kind = match source.kind() {
+            AuthoringSourceKind::Scene => SourceDocumentKind::Scene,
+            AuthoringSourceKind::Prefab => SourceDocumentKind::Prefab,
+            _ => return Err(AuthoringDocumentAdmissionError::DocumentKindMismatch),
+        };
+        let relative_path = source.project_path().as_str();
+        validate_native_source_receipt(relative_path, kind, source.identity(), native)?;
+        Ok(Self {
+            relative_path: Arc::from(relative_path),
+            identity: source.identity(),
+            parent_identity: source.parent_identity(),
+            digest: source.digest(),
+            encoded_bytes: source.encoded_bytes(),
+            native: native.clone(),
+        })
+    }
+
+    /// Copies an actual accepted Save/Reopen observation; this does not revalidate disk state.
+    pub(crate) fn with_persistence_observation(
+        &self,
+        identity: FileIdentity,
+        parent_identity: Option<FileIdentity>,
+        digest: ContentDigest,
+    ) -> Result<Self, AuthoringDocumentAdmissionError> {
+        let encoded_bytes = usize::try_from(digest.length()).map_err(|_| {
+            AuthoringDocumentAdmissionError::SourceTooLarge {
+                maximum: usize::MAX as u64,
+            }
+        })?;
+        Ok(Self {
+            relative_path: Arc::clone(&self.relative_path),
+            identity,
+            parent_identity,
+            digest,
+            encoded_bytes,
+            native: self.native.with_source_identity(identity),
+        })
+    }
+
+    /// Replaces freshly admitted metadata without changing the document's canonical identity.
+    pub(crate) fn with_native_source(
+        &self,
+        native: AdmittedNativeDocumentSource,
+    ) -> Result<Self, AuthoringDocumentAdmissionError> {
+        validate_native_source_receipt(
+            self.relative_path(),
+            self.source_key().kind(),
+            self.identity,
+            &native,
+        )?;
+        if native.key() != self.source_key() {
+            return Err(AuthoringDocumentAdmissionError::NativeSourceIdentityConflict);
+        }
+        Ok(Self {
+            native,
+            ..self.clone()
+        })
+    }
+
     #[must_use]
     pub(crate) fn relative_path(&self) -> &str {
         &self.relative_path
@@ -61,6 +126,14 @@ impl AuthoringDocumentSourceFact {
         self.digest
     }
 
+    pub(crate) const fn encoded_bytes(&self) -> usize {
+        self.encoded_bytes
+    }
+
+    pub(super) const fn native_source(&self) -> &AdmittedNativeDocumentSource {
+        &self.native
+    }
+
     pub(crate) fn source_key(&self) -> &SourceDocumentKey {
         self.native.key()
     }
@@ -71,6 +144,35 @@ impl AuthoringDocumentSourceFact {
     ) -> Result<(), AuthoringDocumentAdmissionError> {
         self.native.revalidate(root)
     }
+}
+
+fn validate_native_source_receipt(
+    relative_path: &str,
+    kind: SourceDocumentKind,
+    identity: FileIdentity,
+    native: &AdmittedNativeDocumentSource,
+) -> Result<(), AuthoringDocumentAdmissionError> {
+    RelativePath::new(relative_path).map_err(AuthoringDocumentAdmissionError::RelativePath)?;
+    if native.key().kind() != kind {
+        return Err(AuthoringDocumentAdmissionError::DocumentKindMismatch);
+    }
+    if native.source_identity() != identity {
+        return Err(AuthoringDocumentAdmissionError::SourceIdentityChanged);
+    }
+    let path_matches = match native.key().origin() {
+        SourceDocumentOrigin::ProjectLocation { path, .. } => path.as_str() == relative_path,
+        SourceDocumentOrigin::StableAsset { .. } => {
+            native.metadata_source().is_some_and(|metadata| {
+                metadata.kind() == AuthoringSourceKind::AssetMetadata
+                    && metadata.project_path().as_str().strip_suffix(".meta") == Some(relative_path)
+            })
+        }
+        SourceDocumentOrigin::Named { .. } => false,
+    };
+    if !path_matches {
+        return Err(AuthoringDocumentAdmissionError::NativeSourceMetadataMismatch);
+    }
+    Ok(())
 }
 
 pub(crate) enum AdmittedAuthoringDocument {
@@ -103,19 +205,19 @@ impl AdmittedAuthoringDocument {
 
 pub(super) struct AuthoringDocumentAdmissionBasis<'basis> {
     schema: &'basis AuthoringSchemaReceipt,
-    adapters: &'basis Arc<[AuthoringAdapterReceipt]>,
+    basis: AuthoringSchemaBasis,
     limits: SceneFileLimits,
 }
 
 impl<'basis> AuthoringDocumentAdmissionBasis<'basis> {
-    pub(super) const fn new(
+    pub(super) fn new(
         schema: &'basis AuthoringSchemaReceipt,
-        adapters: &'basis Arc<[AuthoringAdapterReceipt]>,
+        basis: &AuthoringSchemaBasis,
         limits: SceneFileLimits,
     ) -> Self {
         Self {
             schema,
-            adapters,
+            basis: basis.clone(),
             limits,
         }
     }
@@ -134,8 +236,7 @@ impl<'basis> AuthoringDocumentAdmissionBasis<'basis> {
             relative_path,
             expected_kind,
             self.limits,
-            self.schema.bundle(),
-            self.adapters,
+            &self.basis,
             &NativeDocumentSourcePolicy::new(self.schema.settings()),
         )
     }
@@ -155,8 +256,7 @@ impl<'basis> AuthoringDocumentAdmissionBasis<'basis> {
             index,
             relative_path,
             expected_kind,
-            bundle: self.schema.bundle.shared_bundle(),
-            adapters: Arc::clone(self.adapters),
+            basis: self.basis.clone(),
             limits: self.limits,
             lineage,
             source_policy: NativeDocumentSourcePolicy::new(self.schema.settings()),
@@ -170,8 +270,7 @@ pub(crate) struct OwnedAuthoringDocumentRequest {
     index: Arc<ProjectSourceIndexSnapshot>,
     relative_path: Arc<str>,
     expected_kind: AuthoringDocumentKind,
-    bundle: Arc<AuthoringSchemaBundle>,
-    adapters: Arc<[AuthoringAdapterReceipt]>,
+    basis: AuthoringSchemaBasis,
     limits: SceneFileLimits,
     lineage: DocumentIndexLineage,
     source_policy: NativeDocumentSourcePolicy,
@@ -192,8 +291,7 @@ impl OwnedAuthoringDocumentRequest {
             &self.relative_path,
             self.expected_kind,
             self.limits,
-            &self.bundle,
-            &self.adapters,
+            &self.basis,
             &self.source_policy,
         )
     }
@@ -265,8 +363,7 @@ fn admit_indexed_document(
     relative_path: &str,
     expected_kind: AuthoringDocumentKind,
     limits: SceneFileLimits,
-    bundle: &AuthoringSchemaBundle,
-    adapters: &[AuthoringAdapterReceipt],
+    basis: &AuthoringSchemaBasis,
     source_policy: &NativeDocumentSourcePolicy,
 ) -> Result<AdmittedAuthoringDocument, AuthoringDocumentAdmissionError> {
     let (path, relative, expected_identity) =
@@ -290,6 +387,7 @@ fn admit_indexed_document(
         identity: capability.identity(),
         parent_identity: capability.parent_identity(),
         digest: ContentDigest::of_bytes(&bytes),
+        encoded_bytes: bytes.len(),
         native: source_policy.admit(
             root,
             relative_path,
@@ -303,23 +401,22 @@ fn admit_indexed_document(
     match expected_kind {
         AuthoringDocumentKind::Scene => Ok(AdmittedAuthoringDocument::Scene {
             source,
-            document: admit_scene_bytes(&path, &bytes, limits, bundle, adapters)
+            document: admit_scene_bytes_with_basis(&path, &bytes, limits, basis)
                 .map_err(AuthoringDocumentAdmissionError::Document)?,
         }),
         AuthoringDocumentKind::Prefab => Ok(AdmittedAuthoringDocument::Prefab {
             source,
-            document: admit_prefab_bytes(&path, &bytes, limits, bundle, adapters)
+            document: admit_prefab_bytes_with_basis(&path, &bytes, limits, basis)
                 .map_err(AuthoringDocumentAdmissionError::Document)?,
         }),
     }
 }
 
-pub(super) fn admit_scene_bytes(
+pub(super) fn admit_scene_bytes_with_basis(
     path: &ProjectPath,
     bytes: &[u8],
     limits: SceneFileLimits,
-    bundle: &AuthoringSchemaBundle,
-    adapters: &[AuthoringAdapterReceipt],
+    basis: &AuthoringSchemaBasis,
 ) -> Result<PublishedAuthoringSceneDocument, AuthoringDocumentDataError> {
     let candidate = if path.as_str().ends_with(".ron") {
         SceneDocumentCandidate::decode_ron_bytes_with_limits(bytes, limits)
@@ -330,17 +427,16 @@ pub(super) fn admit_scene_bytes(
     }
     .map_err(AuthoringDocumentDataError::Format)?;
     Ok(candidate
-        .admit_authoring(document_source(path)?, bundle, adapters)
+        .admit_authoring_with_basis(document_source(path)?, basis)
         .map_err(AuthoringDocumentDataError::Publication)?
         .publish())
 }
 
-pub(super) fn admit_prefab_bytes(
+pub(super) fn admit_prefab_bytes_with_basis(
     path: &ProjectPath,
     bytes: &[u8],
     limits: SceneFileLimits,
-    bundle: &AuthoringSchemaBundle,
-    adapters: &[AuthoringAdapterReceipt],
+    basis: &AuthoringSchemaBasis,
 ) -> Result<PublishedAuthoringPrefabDocument, AuthoringDocumentDataError> {
     let candidate = if path.as_str().ends_with(".ron") {
         PrefabDocumentCandidate::decode_ron_bytes_with_limits(bytes, limits)
@@ -351,7 +447,7 @@ pub(super) fn admit_prefab_bytes(
     }
     .map_err(AuthoringDocumentDataError::Format)?;
     Ok(candidate
-        .admit_authoring(document_source(path)?, bundle, adapters)
+        .admit_authoring_with_basis(document_source(path)?, basis)
         .map_err(AuthoringDocumentDataError::Publication)?
         .publish())
 }
@@ -366,6 +462,7 @@ fn document_source(
 
 #[derive(Debug)]
 pub(crate) enum AuthoringDocumentDataError {
+    SessionSnapshot,
     UnsupportedEncoding,
     Format(SceneFormatError),
     Source(AssetPathError),
@@ -465,6 +562,9 @@ impl AuthoringDocumentAdmissionError {
             Self::ReadSource(_) => "project.editor.document-source-read-failed",
             Self::Document(AuthoringDocumentDataError::UnsupportedEncoding) => {
                 "project.editor.document-source-encoding-unsupported"
+            }
+            Self::Document(AuthoringDocumentDataError::SessionSnapshot) => {
+                "project.editor.session-snapshot-publication-rejected"
             }
             Self::Document(AuthoringDocumentDataError::Format(_)) => {
                 "project.editor.document-source-format-invalid"

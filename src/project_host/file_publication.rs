@@ -238,6 +238,21 @@ impl FilePublicationHost {
         self.uncertain
     }
 
+    /// Returns the last accepted observation without inspecting the filesystem.
+    pub(in crate::project_host) fn accepted_source_observation(
+        &self,
+    ) -> Option<(FileIdentity, Option<FileIdentity>, ContentDigest)> {
+        if self.uncertain {
+            return None;
+        }
+        match self.binding {
+            FilePublicationBinding::Missing => None,
+            FilePublicationBinding::Existing { identity, digest } => {
+                Some((identity, Some(self.parent.identity()), digest))
+            }
+        }
+    }
+
     pub(in crate::project_host) fn has_cleanup(&self) -> bool {
         self.cleanup.is_some()
     }
@@ -316,10 +331,6 @@ impl FilePublicationHost {
             debug_assert!(self.cleanup.is_none());
             self.cleanup = failure.into_parts().1;
         }
-    }
-
-    pub(in crate::project_host) fn open_target(&self) -> Result<FileCapability, FsError> {
-        self.parent.open_child_file(&self.target)
     }
 
     pub(in crate::project_host) fn read_source(&self) -> FilePublicationReadSource {

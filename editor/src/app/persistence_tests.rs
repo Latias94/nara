@@ -10,15 +10,19 @@ use nara::{
         App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
         PluginShutdownContext,
     },
-    project_host::{EditorProjectCloseReceipt, TrustedCompiledEditorProjectIntent},
+    project_host::{
+        EditorPreviewCandidate, EditorProjectCloseReceipt, TrustedCompiledEditorProjectIntent,
+    },
     scene::{
         SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
         ScenePlacement, ScenePlacementOwner,
     },
     tooling::{
-        EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentMutation,
-        EditorPersistenceAction, EditorPersistenceOperation, EditorPersistenceRequestResult,
-        EditorPersistenceResult, EditorPlayAction, EditorPlayRequestResult, EditorPlayState,
+        EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentId,
+        EditorDocumentMutation, EditorDocumentOpenResult, EditorPersistenceAction,
+        EditorPersistenceOperation, EditorPersistenceRequestResult, EditorPersistenceResult,
+        EditorPlayAction, EditorPlayRequestResult, EditorPlayState, EditorProjectBrowserAction,
+        EditorProjectBrowserActionOutcome,
     },
 };
 
@@ -45,6 +49,45 @@ fn advance_to_session_publication(application: &mut EditorApplication) {
         }
         assert!(Instant::now() < deadline, "Open did not prepare its source");
         application.advance(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+fn wait_for_scene_preview(application: &mut EditorApplication) -> EditorPreviewCandidate {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        application.advance(Duration::ZERO);
+        if let Some(candidate) = application.take_scene_preview_candidate() {
+            assert_eq!(
+                application.current_scene_preview_content_stamp(),
+                Some(candidate.content_stamp())
+            );
+            return candidate;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the Scene preview did not validate its capture"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+fn settle_background_imports(application: &mut EditorApplication) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        application.advance(Duration::ZERO);
+        let frame = application.current_frame().unwrap();
+        if !frame.project_browser().has_pending_work()
+            && !frame.image_import_work_pending()
+            && !frame.source_asset_import_work_pending()
+            && !frame.authoring_retirement_pending()
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "background imports did not settle"
+        );
         std::thread::sleep(Duration::from_millis(1));
     }
 }
@@ -415,10 +458,7 @@ fn ordinary_replacement_close_drives_once_and_publication_does_not_drive_the_suc
     let fixture = PersistenceFixture::new();
     let mut application = fixture.open();
     application.set_scene_preview_extent(nara::render::Extent2d::new(640, 480));
-    application.advance(Duration::ZERO);
-    let preview = application.take_scene_preview_candidate().unwrap();
-    let geometry = preview.geometry_revision();
-    drop(preview);
+    let geometry = wait_for_scene_preview(&mut application).geometry_revision();
     let incumbent = application.current_frame().unwrap();
     assert!(application.request_project_replacement(&fixture.root, Some("desktop".to_owned())));
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -790,6 +830,7 @@ fn pending_reopen_replacement_waits_for_the_original_source_publication() {
 fn reopen_completion_is_observed_without_repainting_unchanged_polls() {
     let fixture = PersistenceFixture::new();
     let mut application = fixture.open();
+    settle_background_imports(&mut application);
     queue_reopen(&mut application);
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut saw_completion = false;
@@ -821,12 +862,79 @@ fn reopen_completion_is_observed_without_repainting_unchanged_polls() {
 fn pending_save_replacement_retries_close_and_refreshes_the_prepared_source() {
     let fixture = PersistenceFixture::new();
     let mut application = fixture.open();
-    application.set_scene_preview_extent(nara::render::Extent2d::new(640, 480));
-    queue_save(&mut application);
-    let geometry = application
-        .take_scene_preview_candidate()
+    let saved_document = edit_save_source(&mut application);
+    // Save revokes its source's preview receipt. Count drives using an independent Scene.
+    let preview_path = "worlds/external.scene.json";
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while application
+        .current_frame()
         .unwrap()
-        .geometry_revision();
+        .project_browser()
+        .entry(preview_path)
+        .is_none()
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the preview Scene was not indexed"
+        );
+        application.advance(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let frame = application.current_frame().unwrap();
+    let dispatch = application.dispatch_editor_actions(EditorActionBatch::new(
+        frame.revision(),
+        [EditorAction::ProjectBrowser(
+            EditorProjectBrowserAction::Open {
+                relative_path: preview_path.into(),
+            },
+        )],
+    ));
+    let request = match dispatch.feedback().unwrap().unwrap().outcomes() {
+        [
+            EditorActionOutcome::ProjectBrowser(EditorProjectBrowserActionOutcome::Preparing {
+                request,
+            }),
+        ] => *request,
+        other => panic!("the preview Scene did not start opening: {other:?}"),
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let preview_document = loop {
+        application.advance(Duration::ZERO);
+        let frame = application.current_frame().unwrap();
+        match frame.document_open().result() {
+            Some(EditorDocumentOpenResult::Opened {
+                request: completed,
+                document,
+            }) => {
+                assert_eq!(completed, request);
+                assert_ne!(document, saved_document);
+                break document;
+            }
+            Some(other) => panic!("the preview Scene did not open: {other:?}"),
+            None => {}
+        }
+        assert!(Instant::now() < deadline, "the preview Scene did not open");
+        std::thread::sleep(Duration::from_millis(1));
+    };
+    let frame = application.current_frame().unwrap();
+    let dispatch = application.dispatch_editor_actions(EditorActionBatch::new(
+        frame.revision(),
+        [EditorAction::ProjectBrowser(
+            EditorProjectBrowserAction::AcknowledgeOpen { request },
+        )],
+    ));
+    assert!(matches!(
+        dispatch.feedback().unwrap().unwrap().outcomes(),
+        [EditorActionOutcome::ProjectBrowser(
+            EditorProjectBrowserActionOutcome::OpenAcknowledged { request: completed }
+        )] if *completed == request
+    ));
+    application.set_scene_preview_extent(nara::render::Extent2d::new(640, 480));
+    let preview = wait_for_scene_preview(&mut application);
+    assert_eq!(preview.document(), preview_document);
+    let geometry = preview.geometry_revision();
+    drop(preview);
+    dispatch_save(&mut application, saved_document);
     assert!(application.request_project_replacement(&fixture.root, Some("desktop".to_owned())));
     application.advance(Duration::ZERO);
     let maintained_geometry = application
@@ -878,6 +986,7 @@ fn pending_save_replacement_retries_close_and_refreshes_the_prepared_source() {
 fn persistence_completion_is_observed_without_repainting_unchanged_polls() {
     let fixture = PersistenceFixture::new();
     let mut application = fixture.open();
+    settle_background_imports(&mut application);
     queue_save(&mut application);
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut saw_completion = false;
@@ -916,8 +1025,14 @@ fn persistence_completion_is_observed_without_repainting_unchanged_polls() {
 }
 
 fn queue_save(application: &mut EditorApplication) {
+    let document = edit_save_source(application);
+    dispatch_save(application, document);
+}
+
+fn edit_save_source(application: &mut EditorApplication) -> EditorDocumentId {
     let frame = application.current_frame().unwrap();
     let scene = frame.workspace().active_scene.as_ref().unwrap();
+    let document = scene.document;
     application.submit_and_drive(
         EditorActionBatch::new(
             frame.revision(),
@@ -937,7 +1052,13 @@ fn queue_save(application: &mut EditorApplication) {
         Duration::ZERO,
     );
     let frame = application.current_frame().unwrap();
-    let scene = frame.workspace().active_scene.as_ref().unwrap();
+    assert!(frame.workspace().scene(document).unwrap().dirty);
+    document
+}
+
+fn dispatch_save(application: &mut EditorApplication, document: EditorDocumentId) {
+    let frame = application.current_frame().unwrap();
+    let scene = frame.workspace().scene(document).unwrap();
     assert!(scene.dirty);
     // Do not drive here: the next lifecycle request must observe the admitted Save owner.
     let dispatch = application.dispatch_editor_actions(EditorActionBatch::new(
