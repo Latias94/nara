@@ -310,6 +310,11 @@ described an internal headless panel test as independent; the successor and the
 correct that claim without rewriting historical evidence. This is not recursive/collection
 discovery, Prefab-overlay, native-window or full R2 qualification.
 
+The [private Prefab intent comparison](../../knowledge/engineering/verification/2026-10/2026-10-26T025005Z-private-prefab-property-intent-comparison-and-next-owner-replacement-70ca642be09045ab909751b87ed5164d.md)
+separately demonstrates the difference between real root-patch lowering and retained scalar leaf
+intent. Its six test-private cases and Proposed design do not replace ADR 0038's current overlay
+format, implement structural/reference rebasing or qualify conflict persistence.
+
 The [R5c custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md)
 implements typed per-document Scene/Prefab file custody under ADRs 0047/0118. Save retains its
 admission-time Host through acknowledgement/uncertainty; Reopen validates exact retained Host

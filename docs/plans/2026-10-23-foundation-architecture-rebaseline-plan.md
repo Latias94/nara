@@ -309,7 +309,7 @@ selected custody, source/preview, refresh, additive Open and Play-source contrac
 separately scoped implementation evidence in the ledger. Neither the design nor those bounded
 qualifications complete the broader R5c projection/history lifetime work.
 
-The next bounded R5c unit adopts a [same-World disposable Scene epoch](../architecture/editor-preview-projection-lifetime-design.md),
+The bounded R5c projection successor adopts a [same-World disposable Scene epoch](../architecture/editor-preview-projection-lifetime-design.md),
 not full authoring Runtime reconstruction or a second authoring history. Identity proves the
 complete predecessor history/live-token responsibility before Scene prepares and again before
 exclusive publication. Ordinary same-domain Scene consumers retain their existing history.
@@ -321,23 +321,30 @@ Incremental projection,
 durable addressing and the remaining waves are not closed by an epoch policy.
 
 Separate source identity, structured projection chain, durable property and runtime incarnation.
-The [R5a proposal](../architecture/durable-property-addressing-design.md) narrows its first
+The [R5a design](../architecture/durable-property-addressing-design.md) bounds its qualified
 implementation to a Schema-relative property selector: root field IDs are component-scoped and
 nested IDs are sibling-scoped; root-relative declaration-path tombstones retain retired scopes.
 Tagged selectors distinguish members, keyed items and map entries, and keyed selectors name the
 stable identity member as well as its value. Component version is a value basis, and only
 migrated/current values resolve. Same key
 means same logical identity; arbitrary deletion history is not manufactured to detect accidental
-reuse. Complete source/document/occurrence identity remains owned outside Reflect. R5a must update
-0011/0081 only after the selected metadata and lineage contract is independently reviewed.
+reuse. Complete source/document/occurrence identity remains owned outside Reflect. The selected
+metadata/lineage contract and ADR 0011/0081 amendments have separately scoped qualification; do
+not repeat that work as a prerequisite to overlay preparation.
 
-The R5 review also found a likely persistent UI-root collision when two source Scenes contribute
-the same local ID into one World. Prove it through an exact public consumer first. If reproduced,
-treat source provenance and UI-key correction as a separate owner unit, with a focused ADR 0038 /
-0102 amendment and ADR 0102 conformance refreeze; never substitute runtime instance, preview epoch
-or process-local workspace IDs. Separate declarative Prefab overrides from exact editor
-operation/inverse patches; retain unresolved migration/rebase conflicts. Qualify ordinary
-incremental projection versus epoch reconstruction, not a generic incremental graph.
+The earlier persistent UI-root collision has a
+[complete-key successor](../knowledge/engineering/verification/2026-10/2026-10-24T185535Z-complete-persistent-ui-identity-and-neutral-conformance-successor-0cf84bdfd2f54766be84f3ca206f7931.md)
+under ADRs 0038/0102; it is not an outstanding reproduction or an overlay implementation. Never
+substitute runtime instance, preview epoch or process-local Workspace IDs for that identity.
+
+The next R5b unit follows the [declarative Prefab overlay design](../architecture/prefab-overlay-design.md):
+first compare real root-patch lowering with preserved leaf intent privately, then settle nested
+targets, local additions, structural placement, keyed identity changes and value-reference
+bindings before freezing the complete replacement. Separate durable intent from exact editor
+operation/inverse patches and retain unresolved migration/rebase conflicts. Reconcile owning ADRs
+before the production format switch; a scalar comparison does not complete that replacement.
+Qualify ordinary incremental projection versus epoch reconstruction only when an actual measured
+projection workflow requires it, not by adding a generic incremental graph.
 
 Acceptance: nested and repeated instances, base rename/reorder/delete, same-name members,
 Behavior migration, convert-to-local and explicit remap. Long edit churn preserves stale-alias

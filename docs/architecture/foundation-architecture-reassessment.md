@@ -286,14 +286,16 @@ R5c custody replacements separate per-document persistence, retained preview and
 startup, with additive Open and exact Play-source retention through physical retirement.
 The [implementation ledger](adr/implementation-status.md) links their distinct public/native
 qualifications. A retained tab without its file Host remains invalid; the earlier bounded
-Scene-plus-Prefab consumer alone did not qualify those changes. Durable properties, declarative
-overlays and projection/history lifetime below remain separate unimplemented design work.
+Scene-plus-Prefab consumer alone did not qualify those changes. Durable property selectors and
+disposable projection epochs have separately scoped qualification; they do not implement
+declarative overlays or finish the broader source/history work below.
 
 Topics: T05, T07. ADRs: 0006, 0011, 0038, 0043, 0083, 0090, 0101.
 
 **Pressure.** `PrefabInstance.overrides` currently stores `ScenePatchDocument`; `MoveEntity`
-contains revision-specific from/to state. Root field IDs are stable, but nested member names and
-list indices do not provide durable identity. Current private `prefab_N` locators are not source
+contains revision-specific from/to state. R5a now provides stable nested member/key selectors,
+but lowering an edit to a whole-root patch loses which leaf was intentionally overridden.
+Current private `prefab_N` locators are not source
 entity identity; do not report an obsolete string-concatenation description as the current bug.
 
 **Alternatives.** Persisting editor operation patches requires explicit rebase/migration against
@@ -317,6 +319,11 @@ the overlay is not a second competing document truth.
 unmigratable overrides as repairable conflicts. Verify repeated source instances, nested instances,
 base rename/reorder, removed targets, Behavior upgrades, external bindings and convert-to-local.
 No guessed remap, silent dropping or regenerated product IDs may make a failed rebase look valid.
+
+The [Scene-owned overlay design](prefab-overlay-design.md) scopes a private scalar comparison
+before the complete structural/reference replacement. It separates base evidence from target
+identity, preserves explicit equal-value pins, and records keyed-identity/reference-binding
+questions that block a production format freeze rather than the first experiment.
 
 ## D06: Packages, Contributions And Execution Placement
 

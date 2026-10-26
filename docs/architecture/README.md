@@ -140,6 +140,11 @@ Prefab occurrence, operation basis and runtime incarnation as separate owner axe
 scoped nested-ID lineage, keyed-item, migration and unresolved-target rules that must be settled
 before R2/R3/R5b persistent contracts freeze.
 
+The [declarative Prefab overlay design](prefab-overlay-design.md) separates durable intent from
+exact edit/inverse patches. Its private property comparison challenges whole-root lowering as a
+long-term overlay while retaining production ADR 0038 until nested structure, reference binding,
+conflict persistence and complete source-owner replacement are qualified.
+
 The [source-owned creation and construction design](authoring-construction-design.md) removes
 Workspace ordinal allocation and ID-reservation choreography from ordinary Scene/Prefab creation.
 Native registry/database-aware and Published admission retain their distinct owners. Its retained

@@ -171,8 +171,10 @@ are not silently preserved or dropped and require an explicit migration. Native 
 responsible for complete business invariants on the final candidate.
 
 Adding semantic member IDs or list identity metadata changes catalog meaning and canonical
-fingerprints. Catalog and authoring-bundle envelopes move to canonical v3; v1/v2 reject explicitly.
-The fingerprint domain also moves to v3. Repository fixtures retain their component histories and
+fingerprints. Catalog and authoring-bundle envelopes use canonical v1 after the separately
+[qualified unreleased format reset](../knowledge/engineering/verification/2026-10/2026-10-24T-schema-envelope-v1-reset-qualification.md);
+the fingerprint domain is v3. These are different version
+axes, not a v3 file envelope. Repository fixtures retain their component histories and
 recompute predecessor links under that encoding; root-only metadata does not silently acquire
 stable member identities. Scene/Prefab/patch value envelopes are unchanged. Nara is unreleased:
 there is no compatibility alias/reader or new migration guide. This explicit metadata reset does
@@ -230,21 +232,23 @@ registry, or arbitrary IDs for every scalar.
    distinct dependencies under their own ADRs, including 0038/0102, not silently implemented by a
    relative component-property path.
 
-## Adjacent Source-Identity Finding
+## Adjacent Source-Identity Finding And Implemented Successor
 
-The [public same-World/two-Scene characterization](../../crates/nara_ui/tests/source_identity.rs)
-confirms the cross-document collision: `nara_ui` derives persistent root/local keys from
-`source_entity_id` and an optional Prefab path, while `SceneEntitySource` lacks the containing Scene
-source. Two different documents with the same authored local root ID reject the candidate through
-`root-key-duplicate`; distinct local IDs compile two roots. This proves a valid-composition gap,
-not action misrouting. Equal anchors/chains across containing Scenes and repeated complete-source
-occurrences remain separately qualified follow-up cases.
+The earlier public same-World/two-Scene characterization established a cross-document collision:
+root/local keys then lacked containing source and logical occurrence. That was a valid-composition
+gap, not action misrouting. The current
+[source-identity tests](../../crates/nara_ui/tests/source_identity.rs) exercise the replacement;
+do not present their successor assertions as reproducing the old defect.
 
 The [source-context and occurrence proposal](scene-source-and-occurrence-identity-design.md)
-develops this independent Scene/source/UI owner replacement. It does not add source ownership to
-Reflect. Never substitute `SceneInstanceId`, preview epochs or process-local Workspace IDs for
-source or logical placement. ADR 0102's frozen conformance gate requires a focused amendment,
-updated independent consumer and refreeze before changing shared UI key semantics.
+developed the independent Scene/source/UI owner replacement. Canonical containing source,
+structured Prefab placement and Scene-owned logical occurrence now have separate implementation
+evidence. The
+[complete Runtime/Canvas successor](../knowledge/engineering/verification/2026-10/2026-10-24T185535Z-complete-persistent-ui-identity-and-neutral-conformance-successor-0cf84bdfd2f54766be84f3ca206f7931.md)
+records the owning ADR 0038/0102 amendments, complete keys and scoped conformance. Source ownership
+does not move into Reflect. Never substitute `SceneInstanceId`, preview epochs or process-local
+Workspace IDs for source or logical placement. Durable overlay intent remains a separate owner
+contract, developed in the [Prefab overlay comparison](prefab-overlay-design.md).
 
 ## Acceptance And Limits
 
