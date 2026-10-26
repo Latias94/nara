@@ -336,6 +336,14 @@ and opaque UI lowering distinguish both origins. Current durable patch storage, 
 constraints and the separate closure owner remain. This is not declarative-overlay, Apply/Revert,
 repair-history or conflict-persistence completion; actual verification limits belong to the record.
 
+The [full-value comparison successor](../../knowledge/engineering/verification/2026-10/2026-10-26T061353Z-complete-value-projection-comparison-without-source-history-or-templates-047bc67b5dec41c2a940091b39ceedba.md)
+shares production source classification's complete-value validation core with the private
+declarative compiler. Direct whole-value construction preserves lawful absent versus empty
+containers and no longer needs source edit/construction history, a creation template or an Edit
+Adapter. Its strict whole-document entry remains test-only; aggregate effective-value checks
+include defaults but do not prove full pre-copy admission. This closes the private lowering
+counterexample, not durable overlay storage, source repair/history or Host publication.
+
 The [R5c custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md)
 implements typed per-document Scene/Prefab file custody under ADRs 0047/0118. Save retains its
 admission-time Host through acknowledgement/uncertainty; Reopen validates exact retained Host

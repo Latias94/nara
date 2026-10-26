@@ -831,7 +831,7 @@ fn default_introduced_references_cannot_bind_to_an_unrelated_containing_scene_en
 }
 
 #[test]
-fn whole_component_intent_is_never_silently_changed_by_optional_container_lowering() {
+fn whole_component_intent_preserves_distinct_lawful_optional_container_values() {
     let projection = projection(outer(&["socket"]), false);
     let component = ComponentTypeId::new("game.Nested");
     let schema = ComponentSchema::new(component.clone(), "Nested", ComponentSchemaVersion::ONE)
@@ -865,9 +865,18 @@ fn whole_component_intent_is_never_silently_changed_by_optional_container_loweri
         value: ComponentValue::Map(BTreeMap::new()),
         bindings: vec![],
     }];
+    let (prepared, targets) = prepare(&projection, &base, &intent).unwrap();
     assert_eq!(
-        prepare(&projection, &base, &intent).unwrap_err(),
-        Conflict::Component
+        prepared
+            .unwrap()
+            .document()
+            .entities
+            .iter()
+            .find(|record| record.id == targets[&direct("socket")])
+            .unwrap()
+            .components[&component]
+            .value,
+        ComponentValue::Map(BTreeMap::new())
     );
     assert_eq!(base.history_status().undo_depth, 0);
     assert_eq!(base.document(), projection.expanded.document());
@@ -890,4 +899,68 @@ fn whole_component_intent_is_never_silently_changed_by_optional_container_loweri
         unreachable!()
     };
     assert_eq!(actual, value);
+}
+
+#[test]
+fn projection_admission_needs_neither_creation_templates_adapters_nor_edit_history() {
+    let projection = projection(outer(&["socket", "tail"]), false);
+    let mut catalog = schemas().owners()[0].current().clone();
+    for schema in &mut catalog.components {
+        schema.authoring_initial_value = None;
+        schema.capabilities.remove(&ComponentCapability::Edit);
+        for field in &mut schema.fields {
+            field.capabilities.remove(&ComponentCapability::Edit);
+        }
+    }
+    let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+        PersistentComponentSchemaOwnerId::try_new("game.overlay-comparison").unwrap(),
+        catalog,
+        None,
+    )])
+    .unwrap();
+    let published = SceneDocumentCandidate::decode_json_bytes(
+        projection
+            .expanded
+            .document()
+            .to_json_string()
+            .unwrap()
+            .as_bytes(),
+    )
+    .unwrap()
+    .admit_authoring(
+        AuthoringDocumentSource::new(AssetRef::path("scenes/comparison.scene.json").unwrap()),
+        &bundle,
+        &[],
+    )
+    .unwrap()
+    .publish();
+    let base = SceneAuthoringSession::from_published_authoring_document_with_history_limits(
+        published,
+        crate::SceneAuthoringHistoryLimits::new(1, 1, 1, 1, 1, 1, 1).unwrap(),
+    );
+    let revision = base.revision();
+    let history = base.history_status();
+    let mut intent = overlay();
+    intent.additions.push(id("socket"));
+    intent
+        .placements
+        .push(place(added("socket"), Parent::Root, Slot::Last));
+    intent
+        .components
+        .push(link(added("socket"), Some(direct("tail")), "full value"));
+    let (candidate, targets) = prepare(&projection, &base, &intent).unwrap();
+    let candidate = candidate.unwrap();
+    assert_link(
+        candidate.document(),
+        &targets[&added("socket")],
+        &targets[&direct("tail")],
+        "full value",
+    );
+    let origin = &candidate.provenance()[&targets[&added("socket")]];
+    assert_eq!(origin.local_entity_id(), &id("socket"));
+    assert!(matches!(origin.projection_path().unwrap().steps(),
+        [crate::PrefabProjectionStep::InstanceAddition { entity }] if entity == &id("socket")));
+    assert_eq!(base.document(), projection.expanded.document());
+    assert_eq!(base.revision(), revision);
+    assert_eq!(base.history_status(), history);
 }

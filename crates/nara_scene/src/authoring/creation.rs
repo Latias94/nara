@@ -160,7 +160,7 @@ fn finish_creation(
     }
 }
 
-pub(super) fn allocate_entity_id(
+pub(crate) fn allocate_entity_id(
     occupied: impl FnMut(&SceneEntityId) -> bool,
 ) -> Result<SceneEntityId, ScenePatchReport> {
     allocate_entity_id_with(occupied, getrandom::fill)

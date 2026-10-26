@@ -156,9 +156,11 @@ turning the durable overlay back into an ordered operation log.
 ## Structural Comparison And Selected Limits
 
 The private compiler in `crates/nara_scene/src/prefab/overlay_structure_comparison.rs` uses real
-Prefab expansion and canonical provenance, the existing construction owner for fresh entity IDs,
-and one final source-owner preparation. Intermediate structure uses existing exact Scene
-placement operations on an unpublished copy; there is no new ID allocator or Undo authority.
+Prefab expansion and canonical provenance. Its initial checkpoint used the existing construction
+owner and one final source-owner preparation. The subsequent full-value comparison instead
+reuses the underlying ID allocator and complete-record validation core without source edit or
+construction preparation. Intermediate structure uses existing exact Scene placement operations
+on an unpublished copy; there is no new ID allocator or Undo authority.
 It compares a real old-basis `MoveEntity` override against desired placement on a reordered base.
 Repeated source occurrences, nested targets and lookup aliases are separate executable cases.
 
@@ -191,9 +193,10 @@ Two owner-boundary counterexamples matter to production design:
    binding precedes default materialization. Default-before-bind now rejects that ambiguity.
 2. Creation-template plus root-field edits are not a complete component-value codec. Removing
    optional `group.note` from a template leaves `{ group: {} }`, even if the valid intended
-   full value is `{}`. The private comparison checks the final admitted component against the
-   full materialized/bound input and conflicts on mismatch. It does not claim support for that
-   lawful input or "fix" it with a second ancestor-container reconstruction algorithm.
+   full value is `{}`. The initial private comparison rejected that mismatch. Its full-value
+   successor reproduces the lawful input's rejection first, then accepts both distinct values by
+   directly constructing complete records and sharing source classification's value validator.
+   It does not reconstruct ancestor containers or broaden generic source-edit permissions.
 
 Consequently, production effective-projection compilation must reuse full candidate
 classification/admission, not widen generic source-authoring edits merely to compile derived
@@ -203,12 +206,13 @@ switch prerequisite, not a reason to keep the lossy template lowering as a fallb
 
 ### Full-Value Admission Boundary
 
-The next owner extraction remains crate-private until a real compiler consumer needs a public
-contract. Reuse `AuthoringClassificationBasis::classify_record` and `classify_complete_record`
-in `authoring_decode.rs` as the starting semantic core, without constructing an authoring
-Session. Source classification retains its readiness, manifest and source-location duties;
-projection admission must not require a creation template, editable field adapter or Undo budget
-to validate an already supplied complete component value.
+The shared complete-value validator is production code used by `classify_complete_record` in
+`authoring_decode.rs`. Source classification retains its existing readiness, manifest,
+source-location and local-reference duties. The strict whole-document entry remains test-only,
+used by the private compiler until a real production compiler establishes its public needs and
+evidence holder. It admits current known Schema independently of editing Adapter availability,
+and requires neither a creation template nor Undo budget. No unused public candidate family is
+introduced to make this comparison appear production-complete.
 
 The compiler supplies unpublished full values after default materialization and explicit
 reference binding/remapping. Reflect continues to own value shape, defaults and declared-reference
@@ -224,18 +228,24 @@ existing materialization path; the compiler does not issue a substitute executio
 Full-record migration likewise does not migrate durable selectors or version-bound reference
 slot coordinates implicitly.
 
-Borrowed source/value accounting must precede copying input, defaults, bindings and provenance.
+Borrowed source/value accounting must precede copying input, defaults, bindings and provenance
+in the production replacement.
 Neither `effective_component_value`'s borrowed fast path nor a final publication-shape check
 proves that condition: the latter currently constructs a canonical envelope by cloning. Reuse
-the existing file/value counters rather than create another recursive format validator. A final
-bounded candidate check remains useful, but is not an allocation-before-admission proof.
+the existing file/value counters rather than create another recursive format validator. The
+comparison now reuses these counters for the borrowed base and final aggregate effective values,
+including defaults. This is still not complete pre-copy aggregate default/binding/provenance
+admission: individual default materialization may allocate before the final aggregate rejects.
+Keep that limitation explicit until the actual production compiler owns its complete budget.
 
 The exact Schema basis and actual base/source revision evidence must flow from the first real
 compiler and existing Host holder. Do not introduce a public publication-token family solely for
 this extraction. Tests should prove both lawful container shapes, template independence,
 unknown-field/version refusal, defaults-before-reference binding and last-record failure.
-Until the comparison actually consumes this core, retain its current expected-conflict test;
-changing that assertion alone would hide the known lowering limitation.
+The private compiler now consumes this core and returns an expanded document with complete
+typed provenance, rather than a source edit/inverse. Its tests preserve the real source document,
+revision and history, including under a one-byte history budget. This does not qualify durable
+overlay storage, a captured base closure, native materialization or Host publication.
 
 ### Remaining Production Identity And Publication Obligations
 

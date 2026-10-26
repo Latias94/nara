@@ -22,6 +22,8 @@ use crate::{
 
 mod creation;
 pub use creation::CreatedSourceEntity;
+#[cfg(test)]
+pub(crate) use creation::allocate_entity_id;
 
 #[cfg(feature = "serde")]
 mod construction;

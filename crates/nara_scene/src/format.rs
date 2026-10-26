@@ -836,7 +836,7 @@ impl SceneFilePayload for SceneDocument {
     }
 
     fn validate_budget(&self, limits: SceneFileLimits) -> Result<(), SceneFileBudgetError> {
-        SceneFileCounts::validate_entities(&self.roots, &self.entities, limits)
+        validate_scene_value_budget(self, limits)
     }
 
     fn entity_document(&self) -> Option<(&[SceneEntityId], &[SceneEntityRecord])> {
@@ -961,6 +961,13 @@ pub(crate) fn validate_scene_publication_shape(
     limits: SceneFileLimits,
 ) -> Result<(), SceneFormatError> {
     validate_publication_shape(document, limits)
+}
+
+pub(crate) fn validate_scene_value_budget(
+    document: &SceneDocument,
+    limits: SceneFileLimits,
+) -> Result<(), SceneFileBudgetError> {
+    SceneFileCounts::validate_entities(&document.roots, &document.entities, limits)
 }
 
 pub(crate) fn validate_prefab_publication_shape(
@@ -1623,29 +1630,37 @@ impl SceneFileCounts {
         limits: SceneFileLimits,
     ) -> Result<(), SceneFileBudgetError> {
         let observed = self.component_value_cost.saturating_add(cost);
-        for (kind, observed, maximum) in [
-            (
-                SceneFileBudgetKind::ComponentValueNodes,
-                observed.nodes(),
-                limits.component_value_nodes().get(),
-            ),
-            (
-                SceneFileBudgetKind::ComponentValueBytes,
-                observed.logical_bytes(),
-                limits.component_value_bytes().get(),
-            ),
-        ] {
-            if observed > maximum {
-                return Err(SceneFileBudgetError {
-                    kind,
-                    observed,
-                    maximum,
-                });
-            }
-        }
+        validate_component_value_cost(observed, limits)?;
         self.component_value_cost = observed;
         Ok(())
     }
+}
+
+pub(crate) fn validate_component_value_cost(
+    cost: ComponentValueCost,
+    limits: SceneFileLimits,
+) -> Result<(), SceneFileBudgetError> {
+    for (kind, observed, maximum) in [
+        (
+            SceneFileBudgetKind::ComponentValueNodes,
+            cost.nodes(),
+            limits.component_value_nodes().get(),
+        ),
+        (
+            SceneFileBudgetKind::ComponentValueBytes,
+            cost.logical_bytes(),
+            limits.component_value_bytes().get(),
+        ),
+    ] {
+        if observed > maximum {
+            return Err(SceneFileBudgetError {
+                kind,
+                observed,
+                maximum,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn validate_placement_depth(

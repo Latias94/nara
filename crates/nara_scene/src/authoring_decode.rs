@@ -1,9 +1,11 @@
 //! Registry-free Scene and Prefab admission for persistent authoring.
 
+mod complete_value;
 mod field_candidate;
 mod read;
 mod structure;
 
+use complete_value::validate_complete_value;
 pub use read::{
     AuthoringComponentView, AuthoringDirectMembers, AuthoringEntityView, AuthoringPropertyValue,
     AuthoringReadError,
@@ -1778,47 +1780,8 @@ fn classify_complete_record(
             .resolved_owner
             .as_ref()
             .expect("available authoring record retains its admitted schema owner");
-        let effective = effective_component_value(
-            schema,
-            &record.value,
-            context.limits.component_materialization_limits(),
-        )
-        .map_err(|error| {
-            rejection(with_codec_error(
-                with_public_locator(
-                    with_public_locator(
-                        diagnostic_error(
-                            "scene.authoring-component-value-invalid",
-                            "Persistent authoring record exceeds its effective-value policy",
-                        ),
-                        "schema-owner",
-                        owner.as_str(),
-                    ),
-                    "component-id",
-                    component.as_str(),
-                ),
-                &error,
-                Some(schema),
-            ))
-        })?;
-        nara_reflect::validate_component_value(schema, &effective).map_err(|error| {
-            rejection(with_codec_error(
-                with_public_locator(
-                    with_public_locator(
-                        diagnostic_error(
-                            "scene.authoring-component-value-invalid",
-                            "Persistent authoring record does not satisfy its declared schema",
-                        ),
-                        "schema-owner",
-                        owner.as_str(),
-                    ),
-                    "component-id",
-                    component.as_str(),
-                ),
-                &error,
-                Some(schema),
-            ))
-        })?;
+        let effective =
+            validate_complete_value(schema, owner, component, &record.value, context.limits)?;
         if matches!(&location, AuthoringRecordLocation::EntityComponent { .. }) {
             validate_effective_local_references(
                 schema,

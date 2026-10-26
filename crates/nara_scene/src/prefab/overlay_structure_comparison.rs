@@ -1,4 +1,4 @@
-//! Private comparison of declarative structure against exact source-owned operations.
+//! Private comparison of declarative structure with history-free complete-value admission.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -8,9 +8,9 @@ use nara_reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ExpandedSceneDocument, PreparedSceneAuthoringEdit, SceneAuthoringSession, SceneDocument,
-    SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-    ScenePlacementOwner, SourceDocumentKey, SourceDocumentOrigin,
+    ExpandedSceneDocument, SceneAuthoringSession, SceneDocument, SceneEntityId, SceneEntityRecord,
+    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    SourceDocumentKey, SourceDocumentOrigin,
 };
 
 mod references;
@@ -218,7 +218,7 @@ fn prepare(
     projection: &Projection,
     base: &SceneAuthoringSession,
     overlay: &Overlay,
-) -> Result<(Option<PreparedSceneAuthoringEdit>, TargetMap), Conflict> {
+) -> Result<(Option<ExpandedSceneDocument>, TargetMap), Conflict> {
     if projection.source != overlay.source {
         return Err(Conflict::SourceChanged);
     }
@@ -233,34 +233,46 @@ fn prepare(
     {
         return Err(Conflict::WorkLimit);
     }
+    let limits = crate::SceneFileLimits::default();
+    crate::format::validate_scene_value_budget(base.document(), limits)
+        .map_err(|_| Conflict::WorkLimit)?;
     let mut targets = projection.targets();
     let mut working = base.document().clone();
     let mut operations = Vec::new();
-    if !overlay.additions.is_empty() {
-        let mut draft = base
-            .begin_authoring_construction(base.revision())
-            .map_err(|_| Conflict::OwnerAdmission)?;
-        let mut locals = Vec::new();
-        let mut seen = BTreeSet::new();
-        for added in &overlay.additions {
-            if !seen.insert(added) {
-                return Err(Conflict::DuplicateIntent);
-            }
-            let local = draft
-                .create_entity(ScenePlacement::last(ScenePlacementOwner::Parent {
+    let mut provenance = projection.expanded.provenance().clone();
+    let mut seen = BTreeSet::new();
+    for added in &overlay.additions {
+        if !seen.insert(added) {
+            return Err(Conflict::DuplicateIntent);
+        }
+        let entity = crate::authoring::allocate_entity_id(|id| {
+            working.entities.iter().any(|record| &record.id == id)
+        })
+        .map_err(|_| Conflict::OwnerAdmission)?;
+        emit(
+            &mut working,
+            &mut operations,
+            ScenePatchOperation::AddEntity {
+                entity: SceneEntityRecord::new(entity.clone()),
+                placement: ScenePlacement::last(ScenePlacementOwner::Parent {
                     parent: projection.anchor.clone(),
-                }))
-                .map_err(|_| Conflict::OwnerAdmission)?;
-            locals.push((Target::Added(added.clone()), local));
-        }
-        let constructed = base
-            .prepare_authoring_construction(&draft)
-            .map_err(|_| Conflict::OwnerAdmission)?;
-        for (target, local) in locals {
-            targets.insert(target, constructed.entity(&local).unwrap().clone());
-        }
-        working = constructed.document().clone();
-        operations.extend(constructed.patch().operations.iter().cloned());
+                }),
+            },
+        )?;
+        provenance.insert(
+            entity.clone(),
+            crate::SceneEntityProvenance::projected(
+                added.clone(),
+                crate::PrefabProjectionPath::from_resolved_step(
+                    None,
+                    &projection.anchor,
+                    crate::PrefabProjectionStep::InstanceAddition {
+                        entity: added.clone(),
+                    },
+                ),
+            ),
+        );
+        targets.insert(Target::Added(added.clone()), entity);
     }
 
     let layout = layout(projection, &working, &targets, &overlay.placements)?;
@@ -322,13 +334,7 @@ fn prepare(
         return Err(Conflict::Placement);
     }
 
-    let expected_components = lower_components(
-        base,
-        &mut working,
-        &targets,
-        &overlay.components,
-        &mut operations,
-    )?;
+    compile_components(base, &mut working, &targets, &overlay.components)?;
     let removed = overlay
         .suppressions
         .iter()
@@ -400,32 +406,25 @@ fn prepare(
             return Err(Conflict::Placement);
         }
     }
-    if operations.is_empty() {
+    let basis = base
+        .authoring_schema_basis()
+        .ok_or(Conflict::OwnerAdmission)?;
+    basis
+        .validate_effective_document(&working, limits)
+        .map_err(|_| Conflict::OwnerAdmission)?;
+    if &working == base.document() {
         return Ok((None, targets));
     }
-    let prepared = base
-        .prepare_authoring_edit(base.revision(), &ScenePatchDocument::new(operations))
+    let survivors = working
+        .entities
+        .iter()
+        .map(|record| &record.id)
+        .collect::<BTreeSet<_>>();
+    provenance.retain(|id, _| survivors.contains(id));
+    targets.retain(|_, id| survivors.contains(id));
+    let candidate = ExpandedSceneDocument::from_expansion(working, provenance)
         .map_err(|_| Conflict::OwnerAdmission)?;
-    // Field lowering is not a full-value codec: optional ancestor containers can differ.
-    for ((entity, component), value) in expected_components {
-        let actual = prepared
-            .document()
-            .entities
-            .iter()
-            .find(|record| record.id == entity)
-            .and_then(|record| record.components.get(&component));
-        if actual.is_none_or(|record| record.value != value) {
-            return Err(Conflict::Component);
-        }
-    }
-    targets.retain(|_, id| {
-        prepared
-            .document()
-            .entities
-            .iter()
-            .any(|record| record.id == *id)
-    });
-    Ok((Some(prepared), targets))
+    Ok((Some(candidate), targets))
 }
 
 fn layout(
@@ -556,15 +555,13 @@ fn append_slot(
     Ok(())
 }
 
-fn lower_components(
+fn compile_components(
     base: &SceneAuthoringSession,
     working: &mut SceneDocument,
     targets: &TargetMap,
     intents: &[ComponentIntent],
-    operations: &mut Vec<ScenePatchOperation>,
-) -> Result<BTreeMap<(SceneEntityId, ComponentTypeId), ComponentValue>, Conflict> {
+) -> Result<(), Conflict> {
     let mut touched = BTreeSet::new();
-    let mut expected = BTreeMap::new();
     for intent in intents {
         let (target, component) = match intent {
             ComponentIntent::Set {
@@ -576,21 +573,14 @@ fn lower_components(
             return Err(Conflict::DuplicateIntent);
         }
         let entity = resolve(targets, target)?;
-        if working
+        let record = working
             .entities
-            .iter()
+            .iter_mut()
             .find(|record| record.id == entity)
-            .is_some_and(|record| record.components.contains_key(component))
+            .ok_or(Conflict::Component)?;
+        if record.components.remove(component).is_none()
+            && matches!(intent, ComponentIntent::Suppress { .. })
         {
-            emit(
-                working,
-                operations,
-                ScenePatchOperation::RemoveComponent {
-                    entity: entity.clone(),
-                    component: component.clone(),
-                },
-            )?;
-        } else if matches!(intent, ComponentIntent::Suppress { .. }) {
             return Err(Conflict::Component);
         }
         let ComponentIntent::Set {
@@ -604,9 +594,7 @@ fn lower_components(
         };
         let schema = base
             .authoring_catalog_components()
-            .find_map(|(schema, available)| {
-                (available && schema.id() == component).then_some(schema)
-            })
+            .find_map(|(schema, _available)| (schema.id() == component).then_some(schema))
             .ok_or(Conflict::Component)?;
         if schema.version() != *version {
             return Err(Conflict::Component);
@@ -620,36 +608,10 @@ fn lower_components(
         )
         .map_err(|_| Conflict::Component)?;
         let value = bind_references(schema, effective.as_ref(), bindings, targets)?;
-        let template = base
-            .authoring_initial_component(component)
-            .ok_or(Conflict::Component)?;
-        emit(
-            working,
-            operations,
-            ScenePatchOperation::AddComponent {
-                entity: entity.clone(),
-                component: component.clone(),
-                value: template,
-            },
-        )?;
-        for field in schema.fields() {
-            operations.push(match value.get_path(field.path()) {
-                Ok(value) => ScenePatchOperation::SetField {
-                    entity: entity.clone(),
-                    component: component.clone(),
-                    component_version: *version,
-                    field: field.id().clone(),
-                    value: value.clone(),
-                },
-                Err(_) => ScenePatchOperation::RemoveField {
-                    entity: entity.clone(),
-                    component: component.clone(),
-                    component_version: *version,
-                    field: field.id().clone(),
-                },
-            });
-        }
-        expected.insert((entity, component.clone()), value);
+        record.components.insert(
+            component.clone(),
+            crate::SceneComponentRecord::new(*version, value),
+        );
     }
-    Ok(expected)
+    Ok(())
 }
