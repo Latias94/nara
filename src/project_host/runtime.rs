@@ -279,6 +279,8 @@ struct ProjectHost {
     next_epoch: u64,
     cleanup_policy: RuntimeClosePolicy,
     slot: ProjectHostSlot,
+    // A Runtime retains one sticky fault; delivering it does not imply a cleanup failure.
+    delivered_runtime_fault: Option<RuntimeGeneration>,
 }
 
 enum ProjectHostSlot {
@@ -445,7 +447,10 @@ impl CleanupOwner {
         }
     }
 
-    fn completion_failure_report(&self) -> DiagnosticReport {
+    fn completion_failure_report(
+        &self,
+        delivered_runtime_fault: Option<RuntimeGeneration>,
+    ) -> DiagnosticReport {
         let mut diagnostics = DiagnosticReport::default();
         if let Some(evidence) = self.close_evidence()
             && evidence.has_terminal_failure()
@@ -455,8 +460,11 @@ impl CleanupOwner {
                 self.plugin_failure_report(),
             ));
         }
-        if matches!(self, Self::Candidate(owner) if owner.fault().is_some()) {
-            diagnostics.extend(runtime_faulted_report());
+        if let Self::Candidate(owner) = self
+            && Some(owner.generation()) != delivered_runtime_fault
+            && let Some(fault) = owner.fault()
+        {
+            diagnostics.extend(runtime_scope_failure_report(fault));
         }
         diagnostics
     }
@@ -469,6 +477,7 @@ impl ProjectHost {
             next_epoch: 1,
             cleanup_policy,
             slot: ProjectHostSlot::Empty,
+            delivered_runtime_fault: None,
         }
     }
 
@@ -496,10 +505,19 @@ impl ProjectHost {
     }
 
     #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-    fn running_runtime_has_fault(&self) -> bool {
+    fn running_runtime_fault(&self) -> Option<&RuntimeFault> {
         match &self.slot {
-            ProjectHostSlot::Running(published) => published.runtime().fault().is_some(),
-            ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => false,
+            ProjectHostSlot::Running(published) => published.runtime().fault(),
+            ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => None,
+        }
+    }
+
+    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+    fn acknowledge_running_runtime_fault(&mut self) {
+        if let ProjectHostSlot::Running(published) = &self.slot
+            && published.runtime().fault().is_some()
+        {
+            self.delivered_runtime_fault = Some(published.runtime().generation());
         }
     }
 
@@ -599,12 +617,14 @@ impl ProjectHost {
             )));
         };
         let expected = published._plan.schema_validation().snapshot().clone();
+        let generation = published.runtime().generation();
         verify_published_runtime_registry(published.runtime().world(), &expected)?;
         let drive = published.runtime_mut().drive(real_delta);
         verify_published_runtime_registry(published.runtime().world(), &expected)?;
-        drive
-            .map(|_| ())
-            .map_err(|error| HostFault::new(runtime_scope_failure_report(error.fault())))
+        drive.map(|_| ()).map_err(|error| {
+            self.delivered_runtime_fault = Some(generation);
+            HostFault::new(runtime_scope_failure_report(error.fault()))
+        })
     }
 
     fn release_stopped_runtime(&mut self) -> bool {
@@ -839,22 +859,25 @@ impl ProjectHost {
             .ok()
             .and_then(OnceLock::into_inner);
         let Some(materialization) = materialization else {
-            self.install_start_cleanup(
-                epoch,
-                CleanupOwner::Candidate(candidate.begin_retirement()),
-                task_report_required,
-            );
             let admission_fault = match &admission {
                 Ok(outcome) => outcome.post_operation_fault.as_ref(),
                 Err(error) => error.fault(),
             };
             let diagnostics = match admission_fault {
-                Some(fault) => runtime_scope_failure_report(fault),
+                Some(fault) => {
+                    self.delivered_runtime_fault = Some(candidate.generation());
+                    runtime_scope_failure_report(fault)
+                }
                 None => single_error(
                     "project.run.candidate-scope-failed",
                     "Project runtime candidate admission failed",
                 ),
             };
+            self.install_start_cleanup(
+                epoch,
+                CleanupOwner::Candidate(candidate.begin_retirement()),
+                task_report_required,
+            );
             return Err(HostFault::new(diagnostics));
         };
         let diagnostics = match materialization {
@@ -874,22 +897,25 @@ impl ProjectHost {
                 return Err(fault);
             }
             Ok(_) => {
-                self.install_start_cleanup(
-                    epoch,
-                    CleanupOwner::Candidate(candidate.begin_retirement()),
-                    task_report_required,
-                );
                 let diagnostics = match &admission {
                     Ok(outcome) => outcome.post_operation_fault.as_ref(),
                     Err(error) => error.fault(),
                 }
-                .map(runtime_scope_failure_report)
+                .map(|fault| {
+                    self.delivered_runtime_fault = Some(candidate.generation());
+                    runtime_scope_failure_report(fault)
+                })
                 .unwrap_or_else(|| {
                     single_error(
                         "project.run.candidate-scope-failed",
                         "Project runtime candidate admission failed",
                     )
                 });
+                self.install_start_cleanup(
+                    epoch,
+                    CleanupOwner::Candidate(candidate.begin_retirement()),
+                    task_report_required,
+                );
                 return Err(HostFault::new(diagnostics));
             }
         };
@@ -997,11 +1023,12 @@ impl ProjectHost {
             )));
         };
         let expected = published._plan.schema_validation().snapshot().clone();
+        let generation = published.runtime().generation();
         verify_published_runtime_registry(published.runtime().world(), &expected)?;
-        let outcome = published
-            .runtime_mut()
-            .drive(real_delta)
-            .map_err(|error| HostFault::new(runtime_scope_failure_report(error.fault())))?;
+        let outcome = published.runtime_mut().drive(real_delta).map_err(|error| {
+            self.delivered_runtime_fault = Some(generation);
+            HostFault::new(runtime_scope_failure_report(error.fault()))
+        })?;
         let frame = outcome.frame().ok_or_else(|| {
             HostFault::new(single_error(
                 "project.run.frame-unavailable",
@@ -1022,8 +1049,13 @@ impl ProjectHost {
         };
 
         let expected = published._plan.schema_validation().snapshot().clone();
+        let generation = published.runtime().generation();
         verify_published_runtime_registry(published.runtime().world(), &expected)?;
         let runtime = published.runtime_mut();
+        if let Some(fault) = runtime.fault() {
+            self.delivered_runtime_fault = Some(generation);
+            return Err(HostFault::new(runtime_scope_failure_report(fault)));
+        }
         if runtime.state() == RuntimeState::Running {
             let RuntimeControlRequestResult::Accepted(pause) =
                 runtime.request_control(RuntimeControl::Pause)
@@ -1033,9 +1065,10 @@ impl ProjectHost {
                     "Project runtime rejected exact-step preparation",
                 )));
             };
-            runtime
-                .drive(Duration::ZERO)
-                .map_err(|error| HostFault::new(runtime_scope_failure_report(error.fault())))?;
+            runtime.drive(Duration::ZERO).map_err(|error| {
+                self.delivered_runtime_fault = Some(generation);
+                HostFault::new(runtime_scope_failure_report(error.fault()))
+            })?;
             if runtime.state() != RuntimeState::Paused
                 || runtime.control_status(pause) != Some(RuntimeControlStatus::Applied)
             {
@@ -1060,9 +1093,10 @@ impl ProjectHost {
                 "Project runtime rejected an exact fixed step",
             )));
         };
-        let outcome = runtime
-            .drive(Duration::ZERO)
-            .map_err(|error| HostFault::new(runtime_scope_failure_report(error.fault())))?;
+        let outcome = runtime.drive(Duration::ZERO).map_err(|error| {
+            self.delivered_runtime_fault = Some(generation);
+            HostFault::new(runtime_scope_failure_report(error.fault()))
+        })?;
         let actual = outcome.frame().map_or(0, |frame| frame.status.fixed_steps);
         if actual != 1
             || runtime.state() != RuntimeState::Paused
@@ -1080,7 +1114,7 @@ impl ProjectHost {
         Ok(exit)
     }
 
-    fn capture_outcome<O>(&self) -> Result<O, HostFault>
+    fn capture_outcome<O>(&mut self) -> Result<O, HostFault>
     where
         O: Resource + Clone,
     {
@@ -1088,7 +1122,7 @@ impl ProjectHost {
     }
 
     fn capture_outcome_if<O>(
-        &self,
+        &mut self,
         predicate: &(dyn Fn(&O) -> bool + Send + 'static),
     ) -> Result<Option<O>, HostFault>
     where
@@ -1098,7 +1132,7 @@ impl ProjectHost {
         Ok(predicate(outcome).then(|| outcome.clone()))
     }
 
-    fn outcome_resource<O>(&self) -> Result<&O, HostFault>
+    fn outcome_resource<O>(&mut self) -> Result<&O, HostFault>
     where
         O: Resource,
     {
@@ -1108,8 +1142,9 @@ impl ProjectHost {
                 "Project runtime is not available for outcome capture",
             )));
         };
-        if published.runtime().fault().is_some() {
-            return Err(HostFault::new(runtime_faulted_report()));
+        if let Some(fault) = published.runtime().fault() {
+            self.delivered_runtime_fault = Some(published.runtime().generation());
+            return Err(HostFault::new(runtime_scope_failure_report(fault)));
         }
         published
             .runtime()
@@ -1177,13 +1212,21 @@ impl ProjectHost {
 
         match published.runtime().state() {
             RuntimeState::Stopped => {
+                let mut diagnostics = DiagnosticReport::default();
                 if published.runtime().close_evidence().has_terminal_failure() {
-                    Err(HostFault::new(cleanup_failed_report(
+                    diagnostics.extend(cleanup_failed_report(
                         published.runtime().close_evidence(),
                         published.runtime().plugin_failure_report(),
-                    )))
-                } else if published.runtime().fault().is_some() {
-                    Err(HostFault::new(runtime_faulted_report()))
+                    ));
+                }
+                if let Some(fault) = published.runtime().fault()
+                    && self.delivered_runtime_fault != Some(published.runtime().generation())
+                {
+                    self.delivered_runtime_fault = Some(published.runtime().generation());
+                    diagnostics.extend(runtime_scope_failure_report(fault));
+                }
+                if diagnostics.has_errors() {
+                    Err(HostFault::new(diagnostics))
                 } else {
                     Ok(())
                 }
@@ -1194,8 +1237,11 @@ impl ProjectHost {
                     published.runtime().close_evidence(),
                     published.runtime().plugin_failure_report(),
                 );
-                if published.runtime().fault().is_some() {
-                    diagnostics.extend(runtime_faulted_report());
+                if let Some(fault) = published.runtime().fault()
+                    && self.delivered_runtime_fault != Some(published.runtime().generation())
+                {
+                    self.delivered_runtime_fault = Some(published.runtime().generation());
+                    diagnostics.extend(runtime_scope_failure_report(fault));
                 }
                 if published.runtime().close_evidence().has_terminal_failure() {
                     diagnostics.extend(single_error(
@@ -1299,7 +1345,7 @@ impl ProjectHost {
         match state {
             RuntimeCandidateRetirementState::Retired => {
                 let observation = owner.close_observation(epoch, task_report_required);
-                let mut diagnostics = owner.completion_failure_report();
+                let mut diagnostics = owner.completion_failure_report(self.delivered_runtime_fault);
                 if observation.task_report_invalid() {
                     diagnostics.extend(single_error(
                         "project.run.task-shutdown-report-invalid",
@@ -1811,13 +1857,6 @@ fn admission_failure_report(error: &RuntimeAdmissionError) -> DiagnosticReport {
     ))
 }
 
-fn runtime_faulted_report() -> DiagnosticReport {
-    single_error(
-        "project.run.runtime-faulted",
-        "Project runtime reported a fault before product completion",
-    )
-}
-
 fn runtime_scope_failure_report(fault: &RuntimeFault) -> DiagnosticReport {
     let (code, summary) = if fault.kind() == RuntimeFaultKind::RuntimeAuthority {
         (
@@ -1830,6 +1869,14 @@ fn runtime_scope_failure_report(fault: &RuntimeFault) -> DiagnosticReport {
             "Project runtime reported a fault before product completion",
         )
     };
+    runtime_fault_report(fault, code, summary)
+}
+
+fn runtime_fault_report(
+    fault: &RuntimeFault,
+    code: &'static str,
+    summary: &'static str,
+) -> DiagnosticReport {
     let diagnostic = runtime_fault_diagnostic(fault.detail(), code, summary);
     let diagnostic = attach_identifier(
         diagnostic,

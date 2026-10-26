@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-10-25 (owner-local close and optional task activity custody)
+**Last Revised**: 2026-10-26 (activation-scoped fault delivery and retained close observations)
 **Owner**: `nara_app` and concrete executable hosts
 **Refined By**: [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): 2D Foundation Ownership and Authoring Contracts
 **Admission Trigger**: RGD-U2 through RGD-U6 replaced the plan/World behavior split, removed
@@ -181,6 +181,15 @@ need it.
   admission, task activity, mutable assets, backend sessions, control requests, and faults are not shared across
   generations. Deliberately shared caller-owned resources remain outside the runtime's isolation and
   `Stopped` proof unless the caller explicitly transfers a close obligation at App sealing.
+- Execution-fault delivery and cleanup failure are separate observations. Retaining the same
+  activation for physical retirement must not publish an already delivered sticky execution
+  fault as a new retirement failure. A fault not yet delivered, including one first raised during
+  cleanup, remains observable with its available typed fields. Participant, plugin and task
+  cleanup failures remain independently reportable even when the original execution fault was
+  already delivered; a failed execution does not become a successful product run just because
+  its subsequent cleanup succeeds. Delivery association is activation-local, not global
+  diagnostic-text/code deduplication. A Runner result acknowledges only the Runtime fault it
+  actually represents, not an unrelated stored fault.
 - Physical task workers/queues may be explicitly shared under ADRs 0008/0052. Each registered
   activity retains separate admission, coalescing, completion-cutoff and physical-return custody.
   Runtime `Stopped` proves that activity returned, not that the Host's shared workers joined.

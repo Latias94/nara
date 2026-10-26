@@ -1,7 +1,9 @@
 use std::{fmt, num::NonZeroU32, time::Duration};
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-use nara_app::{AppExit, AppRunError, RuntimeCloseCause, RuntimeFaultKind, RuntimeState};
+use nara_app::{
+    AppExit, AppRunError, RuntimeCloseCause, RuntimeFault, RuntimeFaultKind, RuntimeState,
+};
 use nara_app::{RuntimeCloseEvidence, RuntimeClosePolicy};
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::Resource;
@@ -32,7 +34,7 @@ use super::{
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use super::{
     append_plugin_shutdown_diagnostics, attach_identifier, runtime_fault_diagnostic,
-    runtime_fault_kind_id, single_diagnostic,
+    runtime_fault_kind_id, runtime_fault_report, single_diagnostic,
 };
 use crate::ProductRecipe;
 
@@ -554,14 +556,24 @@ impl DesktopRun {
         let close_evidence = host
             .running_runtime_close_evidence()
             .expect("the desktop Host retains close evidence until terminal lowering");
-        let runtime_faulted = host.running_runtime_has_fault();
+        let active_fault = host.running_runtime_fault();
+        let runtime_fault_delivered = active_fault.is_some_and(|fault| match &run_result {
+            Err(error) => {
+                runtime_fault(error) == Some((fault.kind(), fault.source()))
+                    && error.runtime_fault_detail() == fault.detail()
+            }
+            Ok(_) => runtime_state == RuntimeState::Stopped,
+        });
         let mut terminal = desktop_terminal_after_runner(
             run_result,
             runtime_state,
             &close_evidence,
-            runtime_faulted,
+            active_fault,
             &mut self.diagnostics,
         );
+        if runtime_fault_delivered {
+            host.acknowledge_running_runtime_fault();
+        }
         if let Some(report) = host.running_runtime_close_failure_report() {
             self.diagnostics.extend(report);
         } else {
@@ -721,7 +733,7 @@ fn desktop_terminal_after_runner(
     run_result: Result<AppExit, AppRunError>,
     runtime_state: RuntimeState,
     close_evidence: &RuntimeCloseEvidence,
-    runtime_faulted: bool,
+    runtime_fault: Option<&RuntimeFault>,
     diagnostics: &mut DiagnosticReport,
 ) -> PendingDesktopTerminal {
     if runtime_state == RuntimeState::CloseIncomplete {
@@ -746,8 +758,9 @@ fn desktop_terminal_after_runner(
 
     match run_result {
         Ok(exit) if runtime_state == RuntimeState::Stopped => {
-            if runtime_faulted {
-                diagnostics.extend(single_error(
+            if let Some(fault) = runtime_fault {
+                diagnostics.extend(runtime_fault_report(
+                    fault,
                     "project.desktop.runtime-faulted",
                     "Desktop runtime retained a runtime fault after stopping",
                 ));
@@ -1005,7 +1018,7 @@ mod desktop_terminal_tests {
             Err(AppRunError::runner("managed runtime close is incomplete")),
             RuntimeState::CloseIncomplete,
             &deadline_close_evidence(),
-            false,
+            None,
             &mut diagnostics,
         );
 
@@ -1044,7 +1057,7 @@ mod desktop_terminal_tests {
             )),
             RuntimeState::CloseIncomplete,
             &participant_close_evidence(),
-            false,
+            None,
             &mut diagnostics,
         );
 
@@ -1078,7 +1091,7 @@ mod desktop_terminal_tests {
                 Ok(AppExit::Success),
                 RuntimeState::Stopped,
                 &RuntimeCloseEvidence::default(),
-                false,
+                None,
                 &mut stopped_diagnostics,
             ),
             PendingDesktopTerminal::Completed(AppExit::Success)
@@ -1091,7 +1104,7 @@ mod desktop_terminal_tests {
                 Ok(AppExit::Success),
                 RuntimeState::Running,
                 &RuntimeCloseEvidence::default(),
-                false,
+                None,
                 &mut running_diagnostics,
             ),
             PendingDesktopTerminal::Failed
@@ -1111,7 +1124,7 @@ mod desktop_terminal_tests {
                 Ok(AppExit::Success),
                 RuntimeState::Stopped,
                 &terminal_evidence,
-                false,
+                None,
                 &mut close_error_diagnostics,
             ),
             PendingDesktopTerminal::Failed
@@ -1127,7 +1140,10 @@ mod desktop_terminal_tests {
                 Ok(AppExit::Success),
                 RuntimeState::Stopped,
                 &RuntimeCloseEvidence::default(),
-                true,
+                Some(&RuntimeFault::engine(
+                    RuntimeFaultKind::System,
+                    "nara.test.desktop-stopped-fault"
+                )),
                 &mut fault_diagnostics,
             ),
             PendingDesktopTerminal::Failed
@@ -1150,10 +1166,16 @@ mod desktop_terminal_tests {
                 },
             )
             .unwrap();
+        stopped_runtime(App::new(), obligations)
+            .close_evidence()
+            .clone()
+    }
+
+    fn stopped_runtime(app: App, obligations: RuntimeObligationLedger) -> RuntimeInstance {
         let mut runtime = RuntimeAdmissionReservation::try_acquire()
             .unwrap()
             .admit(
-                App::new().seal().unwrap(),
+                app.seal().unwrap(),
                 obligations,
                 RuntimeClosePolicy::default(),
             )
@@ -1166,7 +1188,69 @@ mod desktop_terminal_tests {
             RuntimeControlRequestResult::Accepted(_)
         ));
         drive_until_state(&mut runtime, RuntimeState::Stopped);
-        runtime.close_evidence().clone()
+        runtime
+    }
+
+    #[test]
+    fn stopped_desktop_fault_keeps_the_real_close_time_identity() {
+        struct ShutdownFault;
+        impl nara_app::Plugin for ShutdownFault {
+            fn declaration() -> &'static nara_app::PluginDeclaration {
+                static DECLARATION: nara_app::PluginDeclaration = nara_app::PluginDeclaration::new(
+                    nara_app::PluginId::new("nara.test.desktop-close-fault"),
+                    nara_app::PluginCategory::Runtime,
+                );
+                &DECLARATION
+            }
+            fn build(&self, _app: &mut App) -> Result<(), nara_app::PluginError> {
+                Ok(())
+            }
+            fn shutdown(
+                &self,
+                context: &mut nara_app::PluginShutdownContext<'_>,
+            ) -> Result<(), nara_app::PluginError> {
+                context
+                    .world()
+                    .resource::<nara_app::RuntimeFaultReporter>()
+                    .report(nara_app::RuntimeFault::engine(
+                        RuntimeFaultKind::RequiredService,
+                        "nara.test.desktop-close-fault",
+                    ));
+                Ok(())
+            }
+        }
+        let mut app = App::new();
+        app.add_plugin(ShutdownFault).unwrap();
+        let runtime = stopped_runtime(app, RuntimeObligationLedger::new());
+        assert!(runtime.close_evidence().is_empty());
+        let mut diagnostics = DiagnosticReport::default();
+        assert!(matches!(
+            desktop_terminal_after_runner(
+                Ok(AppExit::Success),
+                runtime.state(),
+                runtime.close_evidence(),
+                runtime.fault(),
+                &mut diagnostics
+            ),
+            PendingDesktopTerminal::Failed
+        ));
+        assert_eq!(
+            diagnostic_field(
+                &diagnostics,
+                "project.desktop.runtime-faulted",
+                "fault-source"
+            )
+            .as_deref(),
+            Some("nara.test.desktop-close-fault")
+        );
+        assert_eq!(
+            diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.severity()
+                    == nara_diagnostic::DiagnosticSeverity::Error)
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -1295,14 +1379,17 @@ where
         self.state = match state {
             HeadlessRunState::Fresh(inputs) => self.execute_fresh(inputs),
             HeadlessRunState::Cleaning { mut host, terminal } => match host.drive_cleanup_once() {
-                CleanupDriveOutcome::Complete { failed: false, .. } => terminal.finish(),
                 CleanupDriveOutcome::Complete {
-                    failed: true,
+                    failed,
                     diagnostics,
                     ..
                 } => {
                     self.diagnostics.extend(diagnostics);
-                    HeadlessRunState::Failed
+                    if failed {
+                        HeadlessRunState::Failed
+                    } else {
+                        terminal.finish()
+                    }
                 }
                 CleanupDriveOutcome::Retiring | CleanupDriveOutcome::RetirementIncomplete => {
                     HeadlessRunState::Cleaning { host, terminal }

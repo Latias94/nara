@@ -6307,8 +6307,159 @@ fn prepared_publication_unwind_keeps_the_host_slot_empty() {
 }
 
 #[test]
-fn close_time_runtime_fault_cannot_complete_the_product_run() {
-    let project = TestProject::new("close-time-runtime-fault");
+fn reported_execution_fault_is_not_reemitted_by_runtime_retirement() {
+    let drives: [fn(&mut ProjectHost) -> Result<(), HostFault>; 3] = [
+        |host| host.drive_one_frame(Duration::ZERO).map(|_| ()),
+        |host| host.drive_one_fixed_tick().map(|_| ()),
+        |host| host.drive_running_runtime(Duration::ZERO),
+    ];
+    for drive in drives {
+        let project = TestProject::new("reported-execution-fault-retirement");
+        let (snapshot, plan) = project.snapshot_and_plan(false);
+        let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+        let mut attempt = host
+            .begin_start(snapshot.clone(), plan.clone(), Vec::new())
+            .unwrap();
+        host.complete_start(&mut attempt).unwrap();
+        let fault = RuntimeFault::engine(
+            RuntimeFaultKind::System,
+            "nara.test.reported-execution-fault",
+        );
+        assert!(
+            host.running_runtime_mut()
+                .unwrap()
+                .fault_reporter()
+                .report(fault.clone())
+        );
+
+        let mut primary = drive(&mut host).unwrap_err().diagnostics;
+        assert_eq!(
+            identifier_field(&primary, "project.run.runtime-faulted", "fault-source"),
+            Some("nara.test.reported-execution-fault")
+        );
+        host.retire_running();
+        let (failed, diagnostics) = drive_host_cleanup_to_completion(&mut host);
+        assert!(!failed);
+        assert!(!diagnostics.has_errors());
+        primary.extend(diagnostics);
+        assert_eq!(
+            primary
+                .iter()
+                .filter(|diagnostic| diagnostic.code().as_str() == "project.run.runtime-faulted")
+                .count(),
+            1
+        );
+
+        // Identical fault metadata in a successor is still a new, undelivered execution fault.
+        let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+        host.complete_start(&mut attempt).unwrap();
+        assert!(
+            host.running_runtime_mut()
+                .unwrap()
+                .fault_reporter()
+                .report(fault)
+        );
+        host.retire_running();
+        let (failed, diagnostics) = drive_host_cleanup_to_completion(&mut host);
+        assert!(failed);
+        assert_eq!(
+            identifier_field(&diagnostics, "project.run.runtime-faulted", "fault-source"),
+            Some("nara.test.reported-execution-fault")
+        );
+        assert!(matches!(host.slot, ProjectHostSlot::Empty));
+    }
+}
+
+#[test]
+fn reported_execution_fault_does_not_suppress_terminal_cleanup_failures() {
+    struct FailedClose;
+    impl RuntimeCloseParticipant for FailedClose {
+        fn begin_close(
+            &mut self,
+            _context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            Ok(RuntimeCloseProgress::CompleteWithError {
+                code: "nara.test.retirement-participant-failed",
+            })
+        }
+
+        fn poll_close(
+            &mut self,
+            context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            self.begin_close(context)
+        }
+    }
+
+    let project = TestProject::new("reported-fault-with-cleanup-failures");
+    let control = Arc::new(CloseFailureControl::new(false));
+    let (snapshot, plan) = project.snapshot_and_fault_plan(
+        close_probe_definition(
+            &Arc::new(AtomicUsize::new(0)),
+            &Arc::new(AtomicUsize::new(0)),
+        ),
+        close_failure_definition(&control, false, true),
+    );
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    attempt
+        .inputs
+        .as_mut()
+        .unwrap()
+        .obligations
+        .register(
+            RuntimeCloseParticipantId::new("nara.test.retirement-participant"),
+            FailedClose,
+        )
+        .unwrap();
+    host.complete_start(&mut attempt).unwrap();
+    assert!(
+        host.running_runtime_mut()
+            .unwrap()
+            .fault_reporter()
+            .report(RuntimeFault::engine(
+                RuntimeFaultKind::System,
+                "nara.test.primary-before-cleanup"
+            ))
+    );
+    let primary = host.drive_one_frame(Duration::ZERO).unwrap_err();
+    assert!(report_has_code(
+        &primary.diagnostics,
+        "project.run.runtime-faulted"
+    ));
+
+    host.retire_running();
+    assert!(matches!(
+        host.drive_cleanup_once(),
+        CleanupDriveOutcome::Retiring | CleanupDriveOutcome::RetirementIncomplete
+    ));
+    control.release();
+    let (failed, diagnostics) = drive_host_cleanup_to_completion(&mut host);
+
+    assert!(failed);
+    assert!(!report_has_code(
+        &diagnostics,
+        "project.run.runtime-faulted"
+    ));
+    assert!(report_has_code(&diagnostics, "project.run.cleanup-failed"));
+    assert!(report_has_code(
+        &diagnostics,
+        "project.run.cleanup-plugin-shutdown"
+    ));
+    assert_eq!(
+        identifier_field(
+            &diagnostics,
+            "project.run.cleanup-participant-error",
+            "failure-code"
+        ),
+        Some("nara.test.retirement-participant-failed")
+    );
+    assert!(matches!(host.slot, ProjectHostSlot::Empty));
+}
+
+#[test]
+fn runtime_retirement_reports_a_fault_first_raised_during_cleanup() {
+    let project = TestProject::new("retirement-first-runtime-fault");
     let control = Arc::new(CloseFailureControl::new(true));
     let (snapshot, plan) = project.snapshot_and_fault_plan(
         close_probe_definition(
@@ -6320,28 +6471,120 @@ fn close_time_runtime_fault_cannot_complete_the_product_run() {
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
     let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
     host.complete_start(&mut attempt).unwrap();
+    assert!(host.running_runtime_mut().unwrap().fault().is_none());
 
-    let failure = host.stop_running().unwrap_err();
+    host.retire_running();
+    let (failed, diagnostics) = drive_host_cleanup_to_completion(&mut host);
 
-    assert!(report_has_code(
-        &failure.diagnostics,
-        "project.run.runtime-faulted"
-    ));
-    let had_cleanup = host.has_cleanup_owner();
-    let mut cleanup_failed = false;
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while host.has_cleanup_owner() && std::time::Instant::now() < deadline {
-        match host.drive_cleanup_once() {
-            CleanupDriveOutcome::Complete { failed, .. } => cleanup_failed = failed,
-            CleanupDriveOutcome::Retiring | CleanupDriveOutcome::RetirementIncomplete => {
-                std::thread::yield_now();
+    assert!(failed);
+    assert_eq!(
+        identifier_field(&diagnostics, "project.run.runtime-faulted", "fault-source"),
+        Some("nara.test.project-close-fault")
+    );
+    assert!(!report_has_code(&diagnostics, "project.run.cleanup-failed"));
+    assert!(matches!(host.slot, ProjectHostSlot::Empty));
+}
+
+#[test]
+fn outcome_capture_delivers_typed_fault_metadata_before_retirement() {
+    let project = TestProject::new("outcome-fault-delivery");
+    let (snapshot, plan) = project.snapshot_and_plan(false);
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    host.complete_start(&mut attempt).unwrap();
+    host.drive_one_frame(Duration::ZERO).unwrap();
+    let detail = nara_app::RuntimeFaultDetail::new(
+        "game.outcome-fault",
+        "Outcome capture observed a runtime fault",
+        "game.outcome",
+    )
+    .unwrap();
+    host.running_runtime_mut()
+        .unwrap()
+        .fault_reporter()
+        .report(RuntimeFault::engine_with_detail(
+            RuntimeFaultKind::RequiredService,
+            "nara.test.outcome-fault",
+            detail,
+        ));
+    let failure = host
+        .capture_outcome::<RuntimeServiceSessionId>()
+        .unwrap_err();
+    host.retire_running();
+    let (failed, diagnostics) = drive_host_cleanup_to_completion(&mut host);
+    assert_eq!(
+        identifier_field(&failure.diagnostics, "game.outcome-fault", "fault-source"),
+        Some("nara.test.outcome-fault")
+    );
+    assert_eq!(
+        identifier_field(&failure.diagnostics, "game.outcome-fault", "fault-origin"),
+        Some("game.outcome")
+    );
+    assert!(!failed);
+    assert!(!diagnostics.has_errors());
+}
+
+#[test]
+fn close_time_runtime_fault_cannot_complete_the_product_run() {
+    for fail_shutdown in [false, true] {
+        for released in [false, true] {
+            let project = TestProject::new("close-time-runtime-fault");
+            let control = Arc::new(CloseFailureControl::new(released));
+            let (snapshot, plan) = project.snapshot_and_fault_plan(
+                close_probe_definition(
+                    &Arc::new(AtomicUsize::new(0)),
+                    &Arc::new(AtomicUsize::new(0)),
+                ),
+                close_failure_definition(&control, true, fail_shutdown),
+            );
+            let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+            let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+            host.complete_start(&mut attempt).unwrap();
+
+            let failure = host.stop_running().unwrap_err();
+            control.release();
+            let cleanup = host
+                .has_cleanup_owner()
+                .then(|| drive_host_cleanup_to_completion(&mut host));
+
+            assert!(report_has_code(
+                &failure.diagnostics,
+                "project.run.runtime-faulted"
+            ));
+            assert_eq!(
+                identifier_field(
+                    &failure.diagnostics,
+                    "project.run.runtime-faulted",
+                    "fault-kind"
+                ),
+                Some("required-service")
+            );
+            assert_eq!(
+                identifier_field(
+                    &failure.diagnostics,
+                    "project.run.runtime-faulted",
+                    "fault-source"
+                ),
+                Some("nara.test.project-close-fault")
+            );
+            assert_eq!(
+                report_has_code(&failure.diagnostics, "project.run.cleanup-failed"),
+                fail_shutdown
+            );
+            if let Some((failed, diagnostics)) = cleanup {
+                assert_eq!(failed, fail_shutdown);
+                assert!(!report_has_code(
+                    &diagnostics,
+                    "project.run.runtime-faulted"
+                ));
+                assert_eq!(
+                    report_has_code(&diagnostics, "project.run.cleanup-plugin-shutdown"),
+                    fail_shutdown
+                );
             }
+            assert!(matches!(host.slot, ProjectHostSlot::Empty));
         }
     }
-    if had_cleanup {
-        assert!(cleanup_failed);
-    }
-    assert!(matches!(host.slot, ProjectHostSlot::Empty));
 }
 
 #[test]

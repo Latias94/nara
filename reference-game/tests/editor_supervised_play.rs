@@ -262,12 +262,22 @@ fn drive_until_external_state(
 fn drive_until_exit_ready(application: &mut EditorApplication, timeout: Duration) {
     let deadline = Instant::now() + timeout;
     loop {
-        let frame = current_frame(application);
-        let phase = frame.workspace_intent().phase();
-        let result = frame.workspace_intent().result();
-        let update = application
-            .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
-        if update.update().exit_ready() {
+        let frame = application.current_frame();
+        let phase = frame
+            .as_ref()
+            .and_then(|frame| frame.workspace_intent().phase());
+        let result = frame
+            .as_ref()
+            .and_then(|frame| frame.workspace_intent().result());
+        let update = if let Some(frame) = &frame {
+            application
+                .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
+                .update()
+        } else {
+            // Workspace retirement can precede physical Open Host shutdown.
+            application.advance_project_open()
+        };
+        if update.exit_ready() {
             return;
         }
         assert!(
