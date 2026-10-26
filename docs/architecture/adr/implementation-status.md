@@ -376,6 +376,14 @@ uses full classification; this is a correctness scope, not an unchanged-latency 
 activation claim. Verification and the conservative unavailable-manifest copy charge belong to
 the linked evidence.
 
+The [canonical source codec successor](../../knowledge/engineering/verification/2026-10/2026-10-26T103001Z-canonical-source-identity-codec-and-complete-nested-overlay-round-trips-3ce62b507a1a445582c811954dac28c6.md)
+adds source-owned strict JSON/RON identity values under ADRs 0038/0043. Complete kind and origin
+replace the private comparison's second representation; real mixed-origin target, binding,
+placement and conflict round trips pass. Scene's 429-test cohort, no-default build and affected
+correctness Clippy pass. A decoded identity remains a claim, not Host/source admission. Durable
+overlay storage, actual effective closure capture, source repair/history and conversion remain
+open; the new pre-recursion declaration design is Proposed, not production qualification.
+
 The [R5c custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md)
 implements typed per-document Scene/Prefab file custody under ADRs 0047/0118. Save retains its
 admission-time Host through acknowledgement/uncertainty; Reopen validates exact retained Host

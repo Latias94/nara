@@ -34,7 +34,7 @@ fn inherited(steps: &[(&str, &str)]) -> Target {
             .windows(2)
             .map(|pair| InstanceHop {
                 anchor: EntityOrigin::Source(id(pair[0].1)),
-                expected_base: SourceIdentity::of(&key(pair[1].0)),
+                expected_base: key(pair[1].0),
             })
             .collect(),
         entity: EntityOrigin::Source(id(terminal)),
@@ -161,7 +161,7 @@ fn inside(anchor: EntityOrigin, base: &str, entity: EntityOrigin) -> Target {
     Target {
         through: vec![InstanceHop {
             anchor,
-            expected_base: SourceIdentity::of(&key(base)),
+            expected_base: key(base),
         }],
         entity,
     }
@@ -329,7 +329,7 @@ fn addition_only_targets_still_bind_root_and_nested_bases_while_aliases_keep_mea
             let ComponentIntent::Set { target, .. } = &mut intent.components[0] else {
                 unreachable!()
             };
-            target.through[0].expected_base = SourceIdentity::of(&key("replacement_inner"));
+            target.through[0].expected_base = key("replacement_inner");
             assert!(
                 prepare_document(&changed_inner, &intent)
                     .0
@@ -343,6 +343,83 @@ fn addition_only_targets_still_bind_root_and_nested_bases_while_aliases_keep_mea
             if nested { 2 } else { 1 }
         );
     }
+}
+
+#[test]
+fn canonical_source_codec_retains_kind_through_overlay_and_nested_binding_round_trips() {
+    let projection = mixed_origin_projection();
+    let mut intent = overlay();
+    let target = inside(
+        EntityOrigin::Addition(id("added_anchor")),
+        "leaf",
+        EntityOrigin::Source(id("socket")),
+    );
+    let referent = inside(
+        EntityOrigin::Source(id("nested")),
+        "leaf",
+        EntityOrigin::Addition(id("added_leaf")),
+    );
+    intent
+        .components
+        .push(link(target.clone(), Some(referent), "bound"));
+    intent.placements.push(place(
+        target,
+        Parent::Entity(added("added_anchor")),
+        Slot::Before(inside(
+            EntityOrigin::Addition(id("added_anchor")),
+            "leaf",
+            EntityOrigin::Source(id("tip")),
+        )),
+    ));
+    let encoded = ron::ser::to_string(&intent).unwrap();
+    let loaded: Overlay = ron::from_str(&encoded).unwrap();
+    assert_eq!(loaded, intent);
+    let expected = prepare_document(&projection, &intent).0;
+    assert_eq!(prepare_document(&projection, &loaded).0, expected);
+    let json_loaded: Overlay =
+        serde_json::from_slice(&serde_json::to_vec(&intent).unwrap()).unwrap();
+    assert_eq!(json_loaded, intent);
+    assert_eq!(prepare_document(&projection, &json_loaded).0, expected);
+
+    let mut wrong_kind = loaded.clone();
+    wrong_kind.source = SourceDocumentKey::named(
+        match key("outer").origin() {
+            crate::SourceDocumentOrigin::Named { universe, .. } => *universe,
+            _ => unreachable!(),
+        },
+        "outer",
+        SourceDocumentKind::Scene,
+    )
+    .unwrap();
+    assert_eq!(
+        assert_conflict(&projection, &wrong_kind),
+        Conflict::SourceChanged
+    );
+
+    let mut wrong_nested_kind = loaded;
+    let ComponentIntent::Set {
+        target: selected, ..
+    } = &mut wrong_nested_kind.components[0]
+    else {
+        unreachable!()
+    };
+    let crate::SourceDocumentOrigin::Named { universe, .. } = key("leaf").origin().clone() else {
+        unreachable!()
+    };
+    selected.through[0].expected_base =
+        SourceDocumentKey::named(universe, "leaf", SourceDocumentKind::Scene).unwrap();
+    let rejected = selected.clone();
+    let conflict = assert_conflict(&projection, &wrong_nested_kind);
+    assert_eq!(conflict, Conflict::MissingTarget(rejected));
+    let unresolved = UnresolvedOverlay {
+        overlay: wrong_nested_kind,
+        conflict,
+    };
+    let encoded = ron::to_string(&unresolved).unwrap();
+    assert_eq!(
+        ron::from_str::<UnresolvedOverlay>(&encoded).unwrap(),
+        unresolved
+    );
 }
 
 fn schemas() -> AuthoringSchemaBundle {
@@ -421,7 +498,7 @@ fn open_with_bundle(
 
 fn overlay() -> Overlay {
     Overlay {
-        source: SourceIdentity::of(&key("outer")),
+        source: key("outer"),
         additions: vec![],
         placements: vec![],
         suppressions: vec![],
@@ -713,7 +790,7 @@ fn an_unchanged_projection_needs_no_edit_but_explicit_intent_remains_authored() 
     ));
     assert!(prepare(&projection, &base, &intent).unwrap().0.is_none());
     assert_eq!(intent.placements.len(), 1);
-    intent.source = SourceIdentity::of(&key("different"));
+    intent.source = key("different");
     assert_eq!(
         assert_conflict(&projection, &intent),
         Conflict::SourceChanged

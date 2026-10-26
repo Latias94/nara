@@ -4,6 +4,7 @@
 **Date**: 2026-07-09
 **Amended**: 2026-07-10 for the unreleased canonical-version reset policy
 **Amended**: 2026-10-26 for exact instance-declaration snapshot semantics
+and source-owned canonical identity encoding
 **Implemented Slice**: RGF-U1 on 2026-07-12
 **Refines**: ADR 0006, ADR 0011, ADR 0026, ADR 0038
 **Refined By**: ADR 0047: Editor Workspace and Scene Document State; ADR 0049: Untrusted Project
@@ -84,6 +85,11 @@ Rules:
   does not grant native activation or destructive replacement of unavailable records.
 - Migrations must preserve authoring identity and provenance. They may rewrite IDs only through an
   explicit documented migration that also updates references and overrides.
+- A stored `SourceDocumentKey` uses the source owner's strict kind-and-origin representation in
+  JSON or RON. It carries no independent file envelope, compatibility reader or source-admission
+  receipt. Constructors validate its identity fields; the containing format and actual Host
+  retain bounded file admission and immutable-source validation. This value codec alone does
+  not replace the current patch-based durable Prefab override format.
 - AI/editor tooling emits canonical version 1. Loading another version is supported only when the
   compatibility matrix links to its authorizing ADR.
 - Automatic write-back of migrated files is an explicit tool/editor action. Runtime loading should

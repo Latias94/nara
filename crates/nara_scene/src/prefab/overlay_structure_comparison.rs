@@ -2,15 +2,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use nara_asset::{AssetPath, AssetRef, StableAssetId};
-use nara_core::SourceUniverseId;
+use nara_asset::AssetRef;
 use nara_reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     ExpandedSceneDocument, SceneAuthoringSession, SceneDocument, SceneEntityId, SceneEntityRecord,
     ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
-    SourceDocumentKey, SourceDocumentOrigin,
+    SourceDocumentKey,
 };
 
 mod properties;
@@ -19,49 +18,6 @@ mod tests;
 
 use properties::{PropertyClaim, PropertyIntent, admit_claims, apply_claims};
 use references::{ReferenceBinding, bind_property_references, bind_references};
-
-// A private wire comparison, not the source owner's selected persistent codec.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(tag = "origin", rename_all = "snake_case", deny_unknown_fields)]
-enum SourceIdentity {
-    Named {
-        universe: SourceUniverseId,
-        name: String,
-    },
-    ProjectLocation {
-        universe: SourceUniverseId,
-        path: AssetPath,
-    },
-    StableAsset {
-        stable_id: StableAssetId,
-    },
-}
-
-impl SourceIdentity {
-    fn of(key: &SourceDocumentKey) -> Self {
-        match key.origin() {
-            SourceDocumentOrigin::Named { universe, name } => Self::Named {
-                universe: *universe,
-                name: name.to_string(),
-            },
-            SourceDocumentOrigin::ProjectLocation { universe, path } => Self::ProjectLocation {
-                universe: *universe,
-                path: path.clone(),
-            },
-            SourceDocumentOrigin::StableAsset { stable_id } => Self::StableAsset {
-                stable_id: *stable_id,
-            },
-        }
-    }
-
-    fn logical_bytes(&self) -> usize {
-        match self {
-            Self::Named { name, .. } => 16usize.saturating_add(name.len()),
-            Self::ProjectLocation { path, .. } => 16usize.saturating_add(path.as_str().len()),
-            Self::StableAsset { .. } => 16,
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(
@@ -97,7 +53,7 @@ impl EntityOrigin {
 #[serde(deny_unknown_fields)]
 struct InstanceHop {
     anchor: EntityOrigin,
-    expected_base: SourceIdentity,
+    expected_base: SourceDocumentKey,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -125,7 +81,7 @@ impl Target {
             .fold(self.entity.entity().as_str().len(), |bytes, hop| {
                 bytes
                     .saturating_add(hop.anchor.entity().as_str().len())
-                    .saturating_add(hop.expected_base.logical_bytes())
+                    .saturating_add(hop.expected_base.retained_bytes())
             }))
     }
 }
@@ -179,7 +135,12 @@ struct BoundPropertyClaim {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 enum ComponentIntent {
     Set {
         mode: ComponentSetMode,
@@ -204,7 +165,7 @@ enum ComponentIntent {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Overlay {
-    source: SourceIdentity,
+    source: SourceDocumentKey,
     additions: Vec<SceneEntityId>,
     placements: Vec<Placement>,
     suppressions: Vec<Target>,
@@ -240,7 +201,7 @@ type TargetMap = BTreeMap<Target, SceneEntityId>;
 
 struct Projection {
     anchor: SceneEntityId,
-    source: SourceIdentity,
+    source: SourceDocumentKey,
     expanded: ExpandedSceneDocument,
     instance_bases: BTreeMap<SceneEntityId, SourceDocumentKey>,
 }
@@ -256,7 +217,7 @@ impl Projection {
             super::PrefabExpansionContext::new(registry, resolver, Default::default(), None);
         let report = context.expand_scene_document(scene);
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
-        let source = SourceIdentity::of(&context.resolved_instance_bases[&anchor]);
+        let source = context.resolved_instance_bases[&anchor].clone();
         Self {
             anchor,
             source,
@@ -297,7 +258,7 @@ impl Projection {
                     .ok_or(Conflict::OwnerAdmission)?;
                 through.push(InstanceHop {
                     anchor: anchor.clone(),
-                    expected_base: SourceIdentity::of(base),
+                    expected_base: base.clone(),
                 });
             }
             if targets

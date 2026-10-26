@@ -7,7 +7,7 @@ and Scene-owned logical occurrence
 **Amended**: 2026-10-25 by owned unbound ordinary Scene preparation
 and complete Runtime/Canvas logical-key lowering
 **Amended**: 2026-10-26 by explicit instance-addition origin throughout projection ancestry
-and exact containing-source instance-declaration transactions
+and exact containing-source instance-declaration transactions, plus source-owned identity encoding
 **Refines**: ADR 0006: Scene and Prefab Data Model
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References;
@@ -140,6 +140,13 @@ flowchart TD
   lookup-request fallback for cycle identity. In-memory authors supply the key explicitly, rather
   than having Scene infer it from a path, request, callsite or pointer. Aliases must resolve to the
   same key and immutable document; the source owner remains responsible for that association.
+- The source owner provides one strict JSON/RON representation for `SourceDocumentKey`,
+  preserving both document kind and the complete Named, ProjectLocation or StableAsset origin.
+  Decoding rebuilds keys through the existing validated identity constructors. A decoded key is
+  an identity claim, not evidence that a file, metadata record or immutable closure was admitted;
+  only the actual source owner can establish that association. Containing formats retain their
+  encoded-input preflight and aggregate budgets. Debug text, UI occurrence encodings and lookup
+  aliases are not persistent canonical source identity.
 - Projection origin is not a dependency-closure inventory. A resolved base remains captured and
   revalidated by its source/Host owner even if only additions survive and no source-entity step
   names that base. Stable addition identity across an explicit base replacement grants neither

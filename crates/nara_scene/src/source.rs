@@ -3,6 +3,9 @@ use std::{error::Error, fmt, sync::Arc};
 use nara_asset::{AssetPath, StableAssetId};
 use nara_core::SourceUniverseId;
 
+#[cfg(feature = "serde")]
+mod wire;
+
 /// The authored kind of one entity-bearing source document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SourceDocumentKind {
@@ -30,6 +33,11 @@ pub enum SourceDocumentOrigin {
 }
 
 /// Canonical semantic identity for one admitted Scene or Prefab document.
+///
+/// With the `serde` feature, the representation preserves the document kind and explicit
+/// origin. Deserialization validates an identity claim; it does not resolve a source or grant
+/// Host admission. Standalone serde is not file admission: the containing Scene format owns
+/// input preflight and aggregate bounds.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceDocumentKey {
     origin: SourceDocumentOrigin,

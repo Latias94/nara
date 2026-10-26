@@ -144,7 +144,7 @@ mod tests {
         collect_declared_asset_references_from_schema,
     };
 
-    use super::super::{EntityOrigin, InstanceHop, SourceIdentity};
+    use super::super::{EntityOrigin, InstanceHop};
     use super::*;
 
     fn id(value: &str) -> SceneEntityId {
@@ -155,11 +155,13 @@ mod tests {
         ComponentValue::EntityReference(EntityReference::SceneLocal { entity: id(value) })
     }
 
-    fn source(name: &str) -> SourceIdentity {
-        SourceIdentity::Named {
-            universe: "72011426-37e2-48ba-bc06-78841468889a".parse().unwrap(),
-            name: name.to_owned(),
-        }
+    fn source(name: &str) -> crate::SourceDocumentKey {
+        crate::SourceDocumentKey::named(
+            "72011426-37e2-48ba-bc06-78841468889a".parse().unwrap(),
+            name,
+            crate::SourceDocumentKind::Prefab,
+        )
+        .unwrap()
     }
 
     fn inherited(anchor: &str) -> Target {

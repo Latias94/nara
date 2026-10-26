@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "02205ae65f314a854386d3dcfa96e644c2686bb81bca8f9c01749c315efb2cc7"
+source_fingerprint: "db9b6aeefe232ee50bee30724cbbfce0016c5df49d9792ba3de1a9396eeb0851"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "02205ae65f314a854386d3dcfa96e644c2686bb81bca8f9c01749c315ef
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `02205ae65f314a854386d3dcfa96e644c2686bb81bca8f9c01749c315efb2cc7`
-- Immutable records: 948
+- Source fingerprint: `db9b6aeefe232ee50bee30724cbbfce0016c5df49d9792ba3de1a9396eeb0851`
+- Immutable records: 949
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Canonical source identity codec and complete nested overlay round trips](verification/2026-10/2026-10-26T103001Z-canonical-source-identity-codec-and-complete-nested-overlay-round-trips-3ce62b507a1a445582c811954dac28c6.md) - Strict source-owned JSON/RON identity claims preserve all kind/origin axes without granting source admission.
 - **Verification Evidence**: [Source-owned field asset facts and actual Authoring closure capture](verification/2026-10/2026-10-26T092102Z-source-owned-field-asset-facts-and-actual-authoring-closure-capture-198247ca51f4465880fb2cb1f3240ccb.md) - Current Schema field/default references join complete record facts for bounded source dependency publication and real Host capture.
 - **Verification Evidence**: [Exact source-owned Prefab instance transactions and complete snapshot custody](verification/2026-10/2026-10-26T083507Z-exact-source-owned-prefab-instance-transactions-and-complete-snapshot-custody-85b9ca4381b94cad9c61fb829f479247.md) - Source instance declaration replacement through existing preparation/history and real Host consumers; durable declarative overlay storage remains separate.
 - **Verification Evidence**: [Complete mixed-origin overlay targets and payload-relative property claims](verification/2026-10/2026-10-26T074532Z-complete-mixed-origin-overlay-targets-and-payload-relative-property-claims-0949791c549242739236d36eb00d4fa2.md) - Complete private mixed-origin target indexing and bounded property claims with shared Reflect payload reference traversal; production overlay storage remains unchanged.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Typed Prefab instance-addition provenance and complete consumer propagation](verification/2026-10/2026-10-26T041116Z-typed-prefab-instance-addition-provenance-and-complete-consumer-propagation-331ec66de92c4315971800928d8f2dc7.md) - Replace flattened base-source provenance with tagged instance-entry origins through expansion, retained custody, Runtime and opaque UI keys while retaining the current durable patch contract.
 - **Verification Evidence**: [Private Prefab structure and reference comparison with owner-boundary counterexamples](verification/2026-10/2026-10-26T034052Z-private-prefab-structure-and-reference-comparison-with-owner-boundary-counterexamples-c823420a09444940993ed9d948a28273.md) - Executed nested structure and explicit reference binding comparison, corrected default namespace and mixed-owner failures, and rejected lossy full-component lowering without changing production Prefab storage.
 - **Verification Evidence**: [Private Prefab property intent comparison and next owner replacement](verification/2026-10/2026-10-26T025005Z-private-prefab-property-intent-comparison-and-next-owner-replacement-70ca642be09045ab909751b87ed5164d.md) - Compared real root-patch lowering with retained scalar leaf intent, reviewed the proposed full overlay replacement, and recorded structural/reference freeze blockers without changing production format.
-- **Verification Evidence**: [Pre-budget query ownership and independent direct-member panel workflow](verification/2026-10/2026-10-26T024129Z-pre-budget-query-ownership-and-independent-direct-member-panel-workflow-1acbda3fb8cc47218dd9b54bcd59f367.md) - Removed caller-ID cloning before query budget admission and qualified a separately compiled non-active Scene direct-member panel through retained edits, history and divergent-memory Save/Reopen.
 
 # Integration Notes
 
