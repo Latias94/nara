@@ -16,7 +16,7 @@ use nara_fs::{
     RelativePath,
 };
 use nara_project::{EffectiveProjectSettings, ProjectPath, ProjectPathError};
-use nara_reflect::AuthoringSchemaBundle;
+use nara_reflect::{AuthoringSchemaBundle, ComponentFieldPathSegment, DeclaredAssetReference};
 use nara_scene::__private::{
     AuthoringAdapterReceipt, fork_published_authoring_prefab_document,
     fork_published_authoring_scene_document,
@@ -847,7 +847,7 @@ impl PreparedAuthoringProject {
             &mut self.schema.budget,
         )?;
         enqueue_document_assets(
-            startup_scene.record_facts(),
+            startup_scene.schema_declared_asset_references(),
             0,
             &mut pending_assets,
             &mut unresolved_dependencies,
@@ -974,7 +974,7 @@ impl PreparedAuthoringProject {
                 &mut self.schema.budget,
             )?;
             enqueue_document_assets(
-                document.record_facts(),
+                document.schema_declared_asset_references(),
                 depth,
                 &mut pending_assets,
                 &mut unresolved_dependencies,
@@ -1509,6 +1509,9 @@ fn admit_scene_document(
             encoded_bytes: source.bytes.len(),
             document: published.document(),
             record_facts: published.record_facts(),
+            asset_references_retained_bytes: declared_asset_references_retained_bytes(
+                published.schema_declared_asset_references(),
+            )?,
             unavailable_records: published.unavailable_manifest().total_count(),
             diagnostics: published.diagnostics(),
             bundle_encoded_bytes,
@@ -1545,6 +1548,9 @@ fn admit_prefab_document(
             encoded_bytes: source.bytes.len(),
             document: published.document(),
             record_facts: published.record_facts(),
+            asset_references_retained_bytes: declared_asset_references_retained_bytes(
+                published.schema_declared_asset_references(),
+            )?,
             unavailable_records: published.unavailable_manifest().total_count(),
             diagnostics: published.diagnostics(),
             bundle_encoded_bytes,
@@ -1600,6 +1606,7 @@ struct PublishedDocumentCharge<'a, D> {
     encoded_bytes: usize,
     document: &'a D,
     record_facts: &'a [AuthoringRecordFact],
+    asset_references_retained_bytes: usize,
     unavailable_records: usize,
     diagnostics: &'a nara_diagnostic::DiagnosticReport,
     bundle_encoded_bytes: usize,
@@ -1637,9 +1644,22 @@ fn charge_published_document<D: AuthoringDocumentMetrics>(
         charge.source.project_path().as_str().len(),
         size_of::<Arc<AuthoringSourceFact>>(),
     ])?;
+    // Unavailable complete records retain another reference projection in their manifest.
+    // Schema defaults can introduce those references without any authored value bytes, so the
+    // document-payload allowance above cannot cover them. Conservatively reserve a second copy
+    // of all projections whenever the manifest is nonempty.
+    let asset_references_retained = checked_product(
+        charge.asset_references_retained_bytes,
+        if charge.unavailable_records == 0 {
+            1
+        } else {
+            2
+        },
+    )?;
     let retained_bytes = checked_sum([
         document_retained,
         record_retained,
+        asset_references_retained,
         unavailable_retained,
         basis_retained,
         source_retained,
@@ -1827,8 +1847,35 @@ fn asset_ref_retained_bytes(
     })
 }
 
-fn enqueue_document_assets(
-    records: &[AuthoringRecordFact],
+fn declared_asset_references_retained_bytes<'a>(
+    references: impl IntoIterator<Item = &'a DeclaredAssetReference>,
+) -> Result<usize, AuthoringProjectSourceAdmissionError> {
+    // These owned projections include effective defaults absent from the authored payload.
+    let mut total = 0;
+    for reference in references {
+        checked_add_to(
+            &mut total,
+            checked_sum([
+                size_of::<DeclaredAssetReference>(),
+                reference.field_id().as_str().len(),
+                checked_product(
+                    reference.path().segments().len(),
+                    size_of::<ComponentFieldPathSegment>(),
+                )?,
+                asset_ref_retained_bytes(reference.asset_ref())?,
+            ])?,
+        )?;
+        for segment in reference.path().segments() {
+            if let ComponentFieldPathSegment::Field(field) = segment {
+                checked_add_to(&mut total, field.len())?;
+            }
+        }
+    }
+    Ok(total)
+}
+
+fn enqueue_document_assets<'a>(
+    references: impl IntoIterator<Item = &'a DeclaredAssetReference>,
     current_depth: usize,
     pending: &mut BTreeMap<AssetPath, usize>,
     unresolved_dependencies: &mut Vec<AuthoringUnresolvedDependency>,
@@ -1838,27 +1885,25 @@ fn enqueue_document_assets(
     let dependency_depth = current_depth
         .checked_add(1)
         .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
-    for record in records {
-        for declared in record.schema_declared_asset_references() {
-            let reference = declared.asset_ref();
-            match catalogue.resolve(reference, false, budget)? {
-                Some(path) => {
-                    budget.charge_reference(path.as_str().len(), dependency_depth, true)?;
-                    pending
-                        .entry(path)
-                        .and_modify(|observed_depth| {
-                            *observed_depth = (*observed_depth).min(dependency_depth);
-                        })
-                        .or_insert(dependency_depth);
-                }
-                None => {
-                    budget.charge_reference(16, dependency_depth, true)?;
-                    unresolved_dependencies.push(AuthoringUnresolvedDependency {
-                        kind: AuthoringUnresolvedDependencyKind::Asset,
-                        reference: reference.clone(),
-                        dependency_depth,
-                    });
-                }
+    for declared in references {
+        let reference = declared.asset_ref();
+        match catalogue.resolve(reference, false, budget)? {
+            Some(path) => {
+                budget.charge_reference(path.as_str().len(), dependency_depth, true)?;
+                pending
+                    .entry(path)
+                    .and_modify(|observed_depth| {
+                        *observed_depth = (*observed_depth).min(dependency_depth);
+                    })
+                    .or_insert(dependency_depth);
+            }
+            None => {
+                budget.charge_reference(16, dependency_depth, true)?;
+                unresolved_dependencies.push(AuthoringUnresolvedDependency {
+                    kind: AuthoringUnresolvedDependencyKind::Asset,
+                    reference: reference.clone(),
+                    dependency_depth,
+                });
             }
         }
     }

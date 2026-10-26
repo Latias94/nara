@@ -466,10 +466,12 @@ The exact declaration transaction counts both snapshots and retains their unmodi
 semantics. Native canonicalization rejects a snapshot requiring component migration; an equality
 precondition cannot be silently migrated independently of its source basis. Attaching, replacing
 and detaching declarations preserve local components/children. Detachment is not conversion.
-Authoring dependency capture still has a separate pre-existing gap for assets introduced by
-embedded field writes: complete record facts carry declared assets, but partial field payloads do
-not yet publish equivalent source-owned dependency facts. Recursive snapshot scanning alone does
-not close that gap; production overlay activation must account for all declared payload assets.
+The source classifier now publishes dependencies from complete records and current field payloads,
+including recursive assets, both exact snapshot sides and defaults exposed by RemoveField. The
+Authoring Host consumes the borrowed document projection through its existing closure capture and
+receipts; partial writes do not masquerade as complete component records. Unknown/incompatible
+Schema payloads remain preserved without guessed references. This closes that current source-fact
+gap, not the future overlay codec/activation fence or arbitrary unavailable payload interpretation.
 
 ## Experiment Gates And Risks
 

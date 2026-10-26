@@ -21,13 +21,15 @@ use std::{
 };
 
 use nara_asset::AssetRef;
+use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, CatalogFingerprint, ComponentCapability,
     ComponentFieldId, ComponentFieldPathSegment, ComponentSchema,
     ComponentSchemaContributionReceipt, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     ComponentValueShape, DeclaredAssetReference, EntityReference, PersistentComponentSchemaOwnerId,
-    collect_declared_asset_references_from_schema_with_limits, effective_component_value,
+    collect_declared_asset_references_from_schema_with_limits,
+    collect_declared_field_asset_references_with_limits, effective_component_value,
 };
 
 use crate::{
@@ -1101,6 +1103,14 @@ impl PublishedAuthoringSceneDocument {
         &self.state.record_facts
     }
 
+    /// Borrows declared asset dependencies from complete records and current field declarations.
+    /// This includes defaults exposed by field removal, not inferred assets in unavailable values.
+    pub fn schema_declared_asset_references(
+        &self,
+    ) -> impl Iterator<Item = &DeclaredAssetReference> {
+        self.state.schema_declared_asset_references()
+    }
+
     #[must_use]
     pub const fn unavailable_manifest(&self) -> &UnavailableRecordManifest {
         &self.state.unavailable_manifest
@@ -1149,6 +1159,13 @@ impl PublishedAuthoringPrefabDocument {
         &self.state.record_facts
     }
 
+    /// Borrows source-classified dependencies without requiring Host-side Schema interpretation.
+    pub fn schema_declared_asset_references(
+        &self,
+    ) -> impl Iterator<Item = &DeclaredAssetReference> {
+        self.state.schema_declared_asset_references()
+    }
+
     #[must_use]
     pub const fn unavailable_manifest(&self) -> &UnavailableRecordManifest {
         &self.state.unavailable_manifest
@@ -1181,6 +1198,7 @@ pub(crate) struct AuthoringDocumentState {
     kind: AuthoringDocumentKind,
     readiness: AuthoringDocumentReadiness,
     record_facts: Vec<AuthoringRecordFact>,
+    patch_asset_references: Vec<DeclaredAssetReference>,
     direct_record_facts: BTreeMap<SceneEntityId, BTreeMap<ComponentTypeId, usize>>,
     unavailable_manifest: UnavailableRecordManifest,
     diagnostics: DiagnosticReport,
@@ -1203,6 +1221,12 @@ impl AuthoringComponentTemplate<'_> {
 }
 
 impl AuthoringDocumentState {
+    fn schema_declared_asset_references(&self) -> impl Iterator<Item = &DeclaredAssetReference> {
+        self.record_facts
+            .iter()
+            .flat_map(|record| record.schema_declared_asset_references())
+            .chain(&self.patch_asset_references)
+    }
     pub(crate) fn schema_basis(&self) -> AuthoringSchemaBasis {
         AuthoringSchemaBasis(Arc::clone(&self.basis))
     }
@@ -1546,10 +1570,74 @@ struct ClassificationContext<'a> {
     kind: AuthoringDocumentKind,
     basis: &'a AuthoringClassificationBasis,
     record_facts: Vec<AuthoringRecordFact>,
+    patch_asset_references: Vec<DeclaredAssetReference>,
     manifest: Vec<UnavailableRecordManifestEntry>,
     placements: BTreeMap<SceneEntityId, crate::ScenePlacement>,
     namespace: BTreeSet<&'a SceneEntityId>,
     limits: SceneFileLimits,
+    asset_reference_nodes: usize,
+    asset_reference_bytes: usize,
+}
+
+impl ClassificationContext<'_> {
+    // Source payload and retained reference projections are separate bounded work. Reserve the
+    // remaining projection allowance before Reflect copies paths/references or supplies defaults.
+    fn asset_reference_limits(
+        &self,
+    ) -> Result<nara_reflect::ComponentValueMaterializationLimits, AuthoringDocumentPublicationError>
+    {
+        let nodes = self
+            .limits
+            .component_value_nodes()
+            .get()
+            .saturating_sub(self.asset_reference_nodes);
+        let bytes = self
+            .limits
+            .component_value_bytes()
+            .get()
+            .saturating_sub(self.asset_reference_bytes);
+        Ok(nara_reflect::ComponentValueMaterializationLimits::new(
+            ItemLimit::new(nodes).ok_or_else(asset_reference_budget_rejection)?,
+            ByteLimit::new(bytes).ok_or_else(asset_reference_budget_rejection)?,
+            self.limits.shape().depth(),
+        ))
+    }
+
+    fn reserve_asset_references(
+        &mut self,
+        references: &[DeclaredAssetReference],
+    ) -> Result<(), AuthoringDocumentPublicationError> {
+        for reference in references {
+            self.asset_reference_nodes = self.asset_reference_nodes.saturating_add(1);
+            self.asset_reference_bytes = self
+                .asset_reference_bytes
+                .saturating_add(reference.field_id().as_str().len())
+                .saturating_add(match reference.asset_ref() {
+                    AssetRef::Path(path) => path.as_str().len(),
+                    AssetRef::StableId(id) => id.to_string().len(),
+                });
+            for segment in reference.path().segments() {
+                self.asset_reference_bytes =
+                    self.asset_reference_bytes.saturating_add(match segment {
+                        ComponentFieldPathSegment::Field(name) => name.len(),
+                        ComponentFieldPathSegment::Index(_) => std::mem::size_of::<u32>(),
+                    });
+            }
+        }
+        if self.asset_reference_nodes > self.limits.component_value_nodes().get()
+            || self.asset_reference_bytes > self.limits.component_value_bytes().get()
+        {
+            return Err(asset_reference_budget_rejection());
+        }
+        Ok(())
+    }
+}
+
+fn asset_reference_budget_rejection() -> AuthoringDocumentPublicationError {
+    rejection(diagnostic_error(
+        "scene.authoring-asset-reference-budget-exceeded",
+        "Persistent authoring asset reference facts exceed their aggregate budget",
+    ))
 }
 
 fn classify_scene_document(
@@ -1564,12 +1652,13 @@ fn classify_scene_document(
         return Err(AuthoringDocumentPublicationError::new(structure));
     }
 
-    let (record_facts, manifest) = {
+    let (record_facts, patch_asset_references, manifest) = {
         let mut context = ClassificationContext {
             source: &source,
             kind,
             basis: &basis,
             record_facts: Vec::new(),
+            patch_asset_references: Vec::new(),
             manifest: Vec::new(),
             placements: crate::patch::authoring_entity_placements(
                 &document.roots,
@@ -1577,11 +1666,17 @@ fn classify_scene_document(
             ),
             namespace: document.entities.iter().map(|entity| &entity.id).collect(),
             limits,
+            asset_reference_nodes: 0,
+            asset_reference_bytes: 0,
         };
         for entity in &document.entities {
             classify_entity_components(entity, AuthoringRecordOrigin::Direct, &mut context)?;
         }
-        (context.record_facts, context.manifest)
+        (
+            context.record_facts,
+            context.patch_asset_references,
+            context.manifest,
+        )
     };
     let unavailable_manifest = UnavailableRecordManifest::new(manifest);
     let diagnostics = unavailable_record_diagnostics(unavailable_manifest.entries());
@@ -1604,6 +1699,7 @@ fn classify_scene_document(
         kind,
         readiness,
         record_facts,
+        patch_asset_references,
         direct_record_facts,
         unavailable_manifest,
         diagnostics,
@@ -1819,15 +1915,34 @@ fn classify_complete_record(
     {
         Vec::new()
     } else {
+        let schema = classified
+            .schema
+            .as_ref()
+            .expect("a current known record retains its schema");
+        let has_assets = schema.fields().iter().any(|field| {
+            field
+                .shape()
+                .contains_kind(nara_reflect::ComponentValueKind::AssetRef)
+        });
+        let reference_limits = if has_assets {
+            context.asset_reference_limits()?
+        } else {
+            context.limits.component_materialization_limits()
+        };
         collect_declared_asset_references_from_schema_with_limits(
-            classified
-                .schema
-                .as_ref()
-                .expect("a current known record retains its schema"),
+            schema,
             record.version,
             &record.value,
-            context.limits.component_materialization_limits(),
-            reference_traversal_limits(context.limits.component_materialization_limits()),
+            reference_limits,
+            if has_assets {
+                nara_reflect::EntityReferenceTraversalLimits::new(
+                    reference_limits.nodes(),
+                    reference_limits.bytes(),
+                    reference_limits.depth(),
+                )
+            } else {
+                reference_traversal_limits(reference_limits)
+            },
         )
         .map_err(|_| {
             rejection(with_public_locator(
@@ -1840,6 +1955,7 @@ fn classify_complete_record(
             ))
         })?
     };
+    context.reserve_asset_references(&schema_declared_asset_references)?;
     context.record_facts.push(AuthoringRecordFact {
         location: location.clone(),
         owner: classified.owner.clone(),
@@ -2091,6 +2207,52 @@ fn classify_patch_target(
         _ => unreachable!("only finite component-target operations use target classification"),
     };
     let classified = context.basis.classify_target(component, version)?;
+    if let Some(schema) = classified
+        .schema
+        .as_ref()
+        .filter(|schema| version == Some(schema.version()))
+        && let Some(field) =
+            field.and_then(|id| schema.fields().iter().find(|field| field.id() == id))
+        && field
+            .shape()
+            .contains_kind(nara_reflect::ComponentValueKind::AssetRef)
+    {
+        let asset_value;
+        let payload = match operation {
+            ScenePatchOperation::SetField { value, .. } => Some(value),
+            ScenePatchOperation::SetAssetRefField { asset_ref, .. } => {
+                asset_value = crate::patch::asset_ref_value(asset_ref);
+                Some(&asset_value)
+            }
+            ScenePatchOperation::RemoveField { .. } => field.default_value(),
+            _ => None,
+        };
+        if let Some(payload) = payload {
+            let reference_limits = context.asset_reference_limits()?;
+            let references = collect_declared_field_asset_references_with_limits(
+                component,
+                field,
+                payload,
+                nara_reflect::EntityReferenceTraversalLimits::new(
+                    reference_limits.nodes(),
+                    reference_limits.bytes(),
+                    reference_limits.depth(),
+                ),
+            )
+            .map_err(|_| {
+                rejection(with_public_locator(
+                    diagnostic_error(
+                        "scene.authoring-declared-asset-reference-invalid",
+                        "Persistent authoring field has an invalid schema-declared asset reference",
+                    ),
+                    "component-id",
+                    component.as_str(),
+                ))
+            })?;
+            context.reserve_asset_references(&references)?;
+            context.patch_asset_references.extend(references);
+        }
+    }
     if classified.readiness.is_available() {
         if let Some(field) = field {
             let schema = &context

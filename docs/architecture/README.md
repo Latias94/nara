@@ -161,6 +161,10 @@ The [exact instance transaction](../knowledge/engineering/verification/2026-10/2
 adds production source declaration replacement through the existing prepared-edit and history
 owner while retaining current override storage. It is a prerequisite to the complete replacement,
 with actual validation evidence and remaining dependency/preview obligations scoped separately.
+The [field-asset source-fact correction](../knowledge/engineering/verification/2026-10/2026-10-26T092102Z-source-owned-field-asset-facts-and-actual-authoring-closure-capture-198247ca51f4465880fb2cb1f3240ccb.md)
+adds current field/default dependencies to the same Authoring closure without Host-side Schema
+interpretation. It bounds fact projection and retains explicit unavailable/version and preparation
+locality limits; production overlay storage and activation remain separate work.
 
 The [source-owned creation and construction design](authoring-construction-design.md) removes
 Workspace ordinal allocation and ID-reservation choreography from ordinary Scene/Prefab creation.

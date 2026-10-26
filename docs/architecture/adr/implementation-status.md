@@ -367,6 +367,15 @@ snapshot migration and unavailable-preservation rules. Both sides remain complet
 source preparation does not imply resolution, activation, nested preview or conversion. Production
 durable overrides remain patches, with partial-field asset dependency capture still a separate gap.
 
+The [field-asset fact successor](../../knowledge/engineering/verification/2026-10/2026-10-26T092102Z-source-owned-field-asset-facts-and-actual-authoring-closure-capture-198247ca51f4465880fb2cb1f3240ccb.md)
+closes that current Authoring dependency gap through source-classified current field/default
+references, bounded aggregate projection and actual Host capture. It reuses Reflect's declared
+visitor and the existing catalogue/receipts without fake complete-record facts. Unknown/version-
+incompatible data remains preserved without inferred dependencies. Reference-bearing preparation
+uses full classification; this is a correctness scope, not an unchanged-latency or durable-overlay
+activation claim. Verification and the conservative unavailable-manifest copy charge belong to
+the linked evidence.
+
 The [R5c custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md)
 implements typed per-document Scene/Prefab file custody under ADRs 0047/0118. Save retains its
 admission-time Host through acknowledgement/uncertainty; Reopen validates exact retained Host

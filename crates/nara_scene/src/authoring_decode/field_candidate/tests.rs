@@ -153,6 +153,10 @@ fn assert_same(actual: &AuthoringDocumentState, expected: &AuthoringDocumentStat
     assert_eq!(actual.kind, expected.kind);
     assert_eq!(actual.readiness, expected.readiness);
     assert_eq!(actual.record_facts, expected.record_facts);
+    assert_eq!(
+        actual.patch_asset_references,
+        expected.patch_asset_references
+    );
     assert_eq!(actual.direct_record_facts, expected.direct_record_facts);
     assert_eq!(actual.unavailable_manifest, expected.unavailable_manifest);
     assert_eq!(actual.diagnostics, expected.diagnostics);
@@ -186,10 +190,11 @@ fn field_candidate_matches_full_classification_for_both_kinds_and_preservation_s
                 "multiple writes reclassify one complete record"
             );
             let expected = full(candidate.document(), &state).unwrap();
-            let actual = candidate
-                .try_classify()
-                .unwrap()
-                .expect("the proven field path uses local classification");
+            assert!(
+                candidate.try_classify().unwrap().is_none(),
+                "reference-bearing fields require the document-wide allowance"
+            );
+            let actual = candidate.classify().unwrap();
             assert_same(&actual, &expected);
             assert_ne!(
                 actual.record_facts, state.record_facts,
@@ -211,6 +216,54 @@ fn field_candidate_matches_full_classification_for_both_kinds_and_preservation_s
             assert_eq!(restored.document(), &document);
             assert_same(&restored.classify().unwrap(), &state);
         }
+    }
+}
+
+#[test]
+fn scalar_only_candidate_retains_local_classification_without_reference_facts() {
+    let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+        owner(),
+        ComponentSchemaCatalog {
+            components: vec![
+                ComponentSchema::new(component(), "Value", ComponentSchemaVersion::ONE)
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                    .with_fields([field("number", ComponentValueKind::U64)]),
+            ],
+            ..Default::default()
+        },
+        None,
+    )])
+    .unwrap();
+    let adapter =
+        AuthoringAdapterReceipt::from_schema_owner(&bundle.owners()[0], &BTreeSet::new()).unwrap();
+    let basis = Arc::new(AuthoringClassificationBasis::new(&bundle, &[adapter]).unwrap());
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("z"))
+        .with_component(
+            component(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([("number", ComponentValue::U64(1))]),
+            )
+            .with_owner(owner()),
+        )]);
+    for kind in [AuthoringDocumentKind::Scene, AuthoringDocumentKind::Prefab] {
+        let state = classify_scene_document(
+            &document,
+            AuthoringDocumentSource::new(asset("source.json")),
+            kind,
+            Arc::clone(&basis),
+            SceneFileLimits::default(),
+        )
+        .unwrap();
+        let patch = ScenePatchDocument::new([set("z", "number", ComponentValue::U64(9))]);
+        let edits = field_edits_from_patch(&patch).unwrap();
+        let candidate = prepare(document.clone(), &state, &edits).unwrap();
+        let local = candidate
+            .try_classify()
+            .unwrap()
+            .expect("scalar-only edit retains the proven local path");
+        assert_same(&local, &full(candidate.document(), &state).unwrap());
+        assert!(local.schema_declared_asset_references().next().is_none());
     }
 }
 

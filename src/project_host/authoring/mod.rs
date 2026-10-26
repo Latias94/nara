@@ -929,7 +929,7 @@ mod tests {
         AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId, ComponentFieldPath,
         ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerId,
         ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-        PersistentComponentSchemaOwnerId,
+        ComponentValueShape, PersistentComponentSchemaOwnerId,
     };
     use nara_scene::{
         PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityId,
@@ -1583,6 +1583,307 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn field_patch_assets_capture_actual_sources_without_complete_record_facts() {
+        let owner = PersistentComponentSchemaOwnerId::try_new("nara.test.field-assets").unwrap();
+        let component = ComponentTypeId::new("nara.test.FieldAssets");
+        let reference_value = |reference: AssetRef| {
+            let (kind, value) = match reference {
+                AssetRef::Path(path) => ("path", path.as_str().to_owned()),
+                AssetRef::StableId(id) => ("stable_id", id.to_string()),
+            };
+            ComponentValue::map([
+                ("kind", ComponentValue::String(kind.to_owned())),
+                ("value", ComponentValue::String(value)),
+            ])
+        };
+        let path_value =
+            |name: &str| reference_value(AssetRef::path(format!("{name}.png")).unwrap());
+        let schema = ComponentSchema::new(
+            component.clone(),
+            "Field assets",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_capabilities([ComponentCapability::Scene])
+        .with_fields([
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("image"),
+                "Image",
+                ComponentFieldPath::from_fields(["settings", "image"]),
+                ComponentValueShape::AssetRef,
+            )
+            .with_capability(ComponentCapability::AssetRef),
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("gallery"),
+                "Gallery",
+                ComponentFieldPath::from_fields(["gallery"]),
+                ComponentValueShape::list(ComponentValueShape::AssetRef),
+            )
+            .with_capability(ComponentCapability::AssetRef),
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("palette"),
+                "Palette",
+                ComponentFieldPath::from_fields(["palette"]),
+                ComponentValueShape::map(ComponentValueShape::AssetRef),
+            )
+            .with_capability(ComponentCapability::AssetRef),
+            ComponentFieldSchema::optional_with_default(
+                ComponentFieldId::new("fallback"),
+                "Fallback",
+                ComponentFieldPath::from_fields(["defaults", "image"]),
+                ComponentValueShape::AssetRef,
+                path_value("default"),
+            )
+            .with_capability(ComponentCapability::AssetRef),
+        ]);
+        let project = TestAuthoringProject::new(
+            "field-asset-capture",
+            AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+                owner,
+                ComponentSchemaCatalog {
+                    components: vec![schema],
+                    ..ComponentSchemaCatalog::default()
+                },
+                None,
+            )])
+            .unwrap(),
+        );
+        project.write_startup_manifest();
+        for directory in ["scenes", "prefabs", "assets"] {
+            fs::create_dir_all(project.root.join(directory)).unwrap();
+        }
+        let target = SceneEntityId::new("not-a-complete-local-record").unwrap();
+        let set = |field: &str, value| ScenePatchOperation::SetField {
+            entity: target.clone(),
+            component: component.clone(),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new(field),
+            value,
+        };
+        let remove_default = || ScenePatchOperation::RemoveField {
+            entity: target.clone(),
+            component: component.clone(),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("fallback"),
+        };
+        let instance = |name: &str, operations| PrefabInstance {
+            source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
+            overrides: ScenePatchDocument::new(operations),
+        };
+        let missing = StableAssetId::parse_str("cb39569e-e9c8-4a10-b527-6c21f3d271f0").unwrap();
+        let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
+        anchor.prefab = Some(instance(
+            "outer",
+            vec![
+                set("image", path_value("direct")),
+                set(
+                    "gallery",
+                    ComponentValue::List(vec![path_value("list-a"), path_value("list-b")]),
+                ),
+                ScenePatchOperation::SetPrefabInstance {
+                    entity: target.clone(),
+                    expected: Some(instance(
+                        "prior",
+                        vec![ScenePatchOperation::SetAssetRefField {
+                            entity: target.clone(),
+                            component: component.clone(),
+                            component_version: ComponentSchemaVersion::ONE,
+                            field: ComponentFieldId::new("image"),
+                            asset_ref: AssetRef::path("prior.png").unwrap(),
+                        }],
+                    )),
+                    value: Some(instance(
+                        "next",
+                        vec![ScenePatchOperation::SetPrefabInstance {
+                            entity: target.clone(),
+                            expected: Some(instance(
+                                "nested-prior",
+                                vec![set(
+                                    "palette",
+                                    ComponentValue::map([
+                                        ("a", path_value("map-a")),
+                                        ("b", path_value("map-b")),
+                                        ("missing", reference_value(AssetRef::StableId(missing))),
+                                    ]),
+                                )],
+                            )),
+                            value: Some(instance("nested-next", vec![remove_default()])),
+                        }],
+                    )),
+                },
+            ],
+        ));
+        let scene = SceneDocument::from_ordered_roots([anchor]);
+        fs::write(
+            project.root.join("scenes/startup.scene.json"),
+            scene.to_json_string().unwrap(),
+        )
+        .unwrap();
+        let mut prefab_anchor =
+            SceneEntityRecord::new(SceneEntityId::new("prefab-anchor").unwrap());
+        prefab_anchor.prefab = Some(instance(
+            "next",
+            vec![
+                remove_default(),
+                ScenePatchOperation::SetPrefabInstance {
+                    entity: target.clone(),
+                    expected: Some(instance(
+                        "prior",
+                        vec![set("image", path_value("prefab-prior"))],
+                    )),
+                    value: Some(instance(
+                        "next",
+                        vec![set("image", path_value("prefab-next"))],
+                    )),
+                },
+            ],
+        ));
+        let outer = PrefabDocument::from_ordered_roots([prefab_anchor]);
+        for name in ["outer", "prior", "next", "nested-prior", "nested-next"] {
+            let encoded = if name == "outer" {
+                outer.to_json_string().unwrap()
+            } else {
+                PrefabDocument::default().to_json_string().unwrap()
+            };
+            fs::write(
+                project.root.join(format!("prefabs/{name}.prefab.json")),
+                encoded,
+            )
+            .unwrap();
+        }
+        let names = [
+            "direct",
+            "list-a",
+            "list-b",
+            "prior",
+            "map-a",
+            "map-b",
+            "default",
+            "prefab-prior",
+            "prefab-next",
+        ];
+        for (index, name) in names.iter().chain(["unreferenced"].iter()).enumerate() {
+            fs::write(
+                project.root.join(format!("assets/{name}.png")),
+                name.as_bytes(),
+            )
+            .unwrap();
+            fs::write(
+                project.root.join(format!("assets/{name}.png.meta")),
+                AssetMeta::new(
+                    AssetMetaIdentity::new(
+                        StableAssetId::parse_str(&format!("2f0d71c7-14fc-4ed4-b48b-{index:012x}"))
+                            .unwrap(),
+                        AssetPath::new(format!("{name}.png")).unwrap(),
+                        AssetSourceKind::Image,
+                    ),
+                    (),
+                )
+                .to_json_string()
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        let mut host = AuthoringProjectAdmissionHost::default();
+        let schema = host
+            .prepare(project.capability(), None)
+            .unwrap()
+            .admit_bundle()
+            .unwrap()
+            .publish();
+        let receipt = PreparedAuthoringProject::new(schema, Box::new([]))
+            .admit_startup_closure()
+            .unwrap()
+            .publish();
+        let snapshot = receipt.snapshot();
+        assert_eq!(snapshot.readiness(), AuthoringProjectReadiness::Degraded);
+        assert_eq!(snapshot.startup_scene().document(), &scene);
+        assert!(snapshot.startup_scene().record_facts().is_empty());
+        assert_eq!(
+            snapshot
+                .startup_scene()
+                .schema_declared_asset_references()
+                .count(),
+            8
+        );
+        assert_eq!(snapshot.prefabs().len(), 5);
+        let captured_outer = snapshot
+            .prefabs()
+            .iter()
+            .find(|source| source.path().as_str() == "outer.prefab.json")
+            .unwrap();
+        assert_eq!(captured_outer.document().document(), &outer);
+        assert!(captured_outer.document().record_facts().is_empty());
+        assert_eq!(
+            captured_outer
+                .document()
+                .schema_declared_asset_references()
+                .count(),
+            3
+        );
+        assert_eq!(snapshot.assets().len(), names.len());
+        for name in names {
+            let asset = snapshot
+                .assets()
+                .iter()
+                .find(|asset| asset.path().as_str() == format!("{name}.png"))
+                .unwrap();
+            assert_eq!(asset.bytes(), name.as_bytes());
+            for fact in [asset.source(), asset.metadata_source()] {
+                assert!(
+                    snapshot
+                        .source_facts()
+                        .any(|captured| std::ptr::eq(fact, captured))
+                );
+                assert_eq!(
+                    fact.digest(),
+                    ContentDigest::of_bytes(
+                        &fs::read(project.root.join(fact.project_path().as_str())).unwrap()
+                    )
+                );
+            }
+        }
+        let unresolved = snapshot.unresolved_dependencies();
+        assert_eq!(unresolved.len(), 1);
+        assert_eq!(
+            unresolved[0].kind(),
+            project::AuthoringUnresolvedDependencyKind::Asset
+        );
+        assert_eq!(unresolved[0].reference(), &AssetRef::StableId(missing));
+        assert_eq!(unresolved[0].dependency_depth(), 1);
+        let mut expected_sources =
+            std::collections::BTreeSet::from(["scenes/startup.scene.json".to_owned()]);
+        for name in ["outer", "prior", "next", "nested-prior", "nested-next"] {
+            expected_sources.insert(format!("prefabs/{name}.prefab.json"));
+        }
+        for name in names {
+            expected_sources.insert(format!("assets/{name}.png"));
+            expected_sources.insert(format!("assets/{name}.png.meta"));
+        }
+        assert_eq!(
+            snapshot
+                .source_facts()
+                .map(|fact| fact.project_path().as_str().to_owned())
+                .collect::<std::collections::BTreeSet<_>>(),
+            expected_sources
+        );
+
+        drop(snapshot);
+        drop(receipt);
+        fs::remove_file(project.root.join("assets/map-a.png")).unwrap();
+        let schema = host
+            .prepare(project.capability(), None)
+            .unwrap()
+            .admit_bundle()
+            .unwrap()
+            .publish();
+        assert!(matches!(
+            PreparedAuthoringProject::new(schema, Box::new([])).admit_startup_closure(),
+            Err(AuthoringProjectSourceAdmissionError::SourceHost { kind: AuthoringSourceKind::AssetSource, path, .. })
+                if path.as_str() == "assets/map-a.png"
+        ));
     }
 
     #[test]

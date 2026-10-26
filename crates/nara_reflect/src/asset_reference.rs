@@ -265,10 +265,28 @@ pub fn collect_declared_field_asset_references(
     field: &ComponentFieldSchema,
     value: &ComponentValue,
 ) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
-    let leaves = collect_present_field_reference_leaves::<()>(
+    collect_declared_field_asset_references_with_limits(
+        component,
         field,
         value,
         EntityReferenceTraversalLimits::default(),
+    )
+}
+
+/// Collects references from a selected field subtree with explicit reference-work limits.
+///
+/// Paths remain component-relative. This does not fill defaults or grant native authority;
+/// reference target existence remains the owning transaction's responsibility.
+pub fn collect_declared_field_asset_references_with_limits(
+    component: &ComponentTypeId,
+    field: &ComponentFieldSchema,
+    value: &ComponentValue,
+    traversal_limits: EntityReferenceTraversalLimits,
+) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
+    let leaves = collect_present_field_reference_leaves::<()>(
+        field,
+        value,
+        traversal_limits,
         ComponentValueKind::AssetRef,
     )
     .map_err(|source| DeclaredAssetReferenceError::Traversal {

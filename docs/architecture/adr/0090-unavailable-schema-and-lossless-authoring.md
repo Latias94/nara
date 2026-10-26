@@ -126,6 +126,19 @@ Unavailable component-targeting field writes retain their complete replacement p
 canonical asset-reference values. Preserving only the target/field identity does not preserve the
 operation. Payload-free removal and an explicit Null replacement remain different declarations.
 
+The source classifier publishes one borrowed declared-asset projection covering complete records
+and current-version field declarations, including recursive values and defaults exposed by
+RemoveField. Expected/replacement instance branches use that same owner. Host dependency capture
+consumes these facts instead of interpreting Schema again or inventing complete component records
+for partial writes. Current known-but-unbound Schema can describe dependencies without acquiring
+an Adapter/native binding; unknown or incompatible versions retain data without inferred assets.
+The retained reference projection has a document-wide node/logical-byte allowance using the
+selected file policy's component-value ceilings. Each traversal receives the remaining allowance
+before paths/references/defaults are copied. Payload budget and reference projection budget are
+separate admissions. Field-only classification reuse must preserve this aggregate proof or use
+the complete source classifier. Reference-bearing edits currently take that complete path; this
+does not claim unchanged preparation latency.
+
 ```mermaid
 flowchart TD
     Bytes[Bounded source bytes]

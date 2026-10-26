@@ -74,6 +74,12 @@ impl PreparedFieldCandidate<'_> {
         &self,
     ) -> Result<Option<AuthoringDocumentState>, AuthoringDocumentPublicationError> {
         let state = self.state;
+        // Reference projections have a document-wide allowance and full-classifier order.
+        // Reuse the scalar fast path only when neither retained nor touched data can add facts;
+        // do not admit an edited reference subtree against a fresh, independent allowance.
+        if state.schema_declared_asset_references().next().is_some() {
+            return Ok(None);
+        }
         let mut targets = Vec::with_capacity(self.touched.len());
         // Retain full-classifier order, including the first error in a multi-record edit.
         for (index, fact) in state.record_facts.iter().enumerate() {
@@ -101,13 +107,20 @@ impl PreparedFieldCandidate<'_> {
                 .map_or(AuthoringRecordOwnerClaim::Unclaimed, |owner| {
                     AuthoringRecordOwnerClaim::Declared(owner.clone())
                 });
+            let Some(schema) = state.available_component_schema(entity, &fact.component) else {
+                return Ok(None);
+            };
             if !fact.readiness.is_available()
                 || fact.owner != owner
                 || fact.version != record.version
-                || state
-                    .available_component_schema(entity, &fact.component)
-                    .is_none()
             {
+                return Ok(None);
+            }
+            if schema.fields().iter().any(|field| {
+                field
+                    .shape()
+                    .contains_kind(nara_reflect::ComponentValueKind::AssetRef)
+            }) {
                 return Ok(None);
             }
             targets.push((index, fact, record));
@@ -120,6 +133,7 @@ impl PreparedFieldCandidate<'_> {
             kind: state.kind,
             basis: &state.basis,
             record_facts: Vec::with_capacity(targets.len()),
+            patch_asset_references: Vec::new(),
             manifest: Vec::new(),
             // Available direct records produce no preservation placement or patch facts.
             placements: BTreeMap::new(),
@@ -130,6 +144,8 @@ impl PreparedFieldCandidate<'_> {
                 .map(|entity| &entity.id)
                 .collect(),
             limits: state.limits,
+            asset_reference_nodes: 0,
+            asset_reference_bytes: 0,
         };
         for (_, fact, record) in &targets {
             classify_complete_record(

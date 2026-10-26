@@ -31,6 +31,7 @@ pub use asset_reference::{
     collect_declared_asset_references_from_schema,
     collect_declared_asset_references_from_schema_with_limits,
     collect_declared_asset_references_with_limits, collect_declared_field_asset_references,
+    collect_declared_field_asset_references_with_limits,
 };
 pub use authoring::PersistentComponentProvider;
 #[cfg(feature = "serde")]
