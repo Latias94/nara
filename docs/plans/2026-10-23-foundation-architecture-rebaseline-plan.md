@@ -201,9 +201,12 @@ by preview/commit and ordinary direct apply. A bounded one-level direct Record-m
 now reuses the same basis, cursor owner and scan/row/metadata limits; the Session and registered
 panel facades expose it without mutable document access. An independently compiled non-active
 panel consumer proves entity -> component -> root -> direct member -> bounded read -> prepare ->
-retain -> commit. This still does not close transaction-local reference allocation, recursive or
-collection nested discovery, Prefab overlay, full field query, shared-owner preparation locality
-or preparation-cost comparison obligations above. Do not turn process-local incarnation counters
+retain -> commit, Undo/Redo and Save/Reopen through its
+[independent successor](../knowledge/engineering/verification/2026-10/2026-10-26T024129Z-pre-budget-query-ownership-and-independent-direct-member-panel-workflow-1acbda3fb8cc47218dd9b54bcd59f367.md).
+The [retained construction qualification](../knowledge/engineering/verification/2026-10/2026-10-24T224939Z-retained-source-construction-pinned-public-and-native-qualification-e1813acad6f04a93898a1e342989fa44.md)
+separately covers transaction-local allocation and references. Recursive or collection nested
+discovery, Prefab overlay, full field query, shared-owner preparation locality and the remaining
+preparation-cost comparison obligations stay open. Do not turn process-local incarnation counters
 into durable allocated identities merely to complete the first consumer.
 
 ## R3: Behavior Representation And Immutable Module Publications

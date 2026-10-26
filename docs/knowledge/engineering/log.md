@@ -5,6 +5,7 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-10-26
+* **Verification Evidence**: [Pre-budget query ownership and independent direct-member panel workflow](verification/2026-10/2026-10-26T024129Z-pre-budget-query-ownership-and-independent-direct-member-panel-workflow-1acbda3fb8cc47218dd9b54bcd59f367.md) - Removed caller-ID cloning before query budget admission and qualified a separately compiled non-active Scene direct-member panel through retained edits, history and divergent-memory Save/Reopen.
 * **Verification Evidence**: [Public Exit drivers retain maintenance after Workspace retirement](verification/2026-10/2026-10-26T022556Z-public-exit-drivers-retain-maintenance-after-workspace-retirement-2c1f097eeed04d499d81adc33d3232dd.md) - Corrected public and independent Exit callers, a deterministic held-worker regression, and successor clarification of earlier lifecycle and panel evidence.
 * **Verification Evidence**: [Bounded direct-member discovery and non-active panel query workflow](verification/2026-10/2026-10-26T004155Z-bounded-direct-member-discovery-and-panel-query-workflow-7003450c49204d8eba92ba90db765dc0.md) - Qualified one-level durable Record-member discovery, selection-independent Session/panel query forwarding, and an independently compiled non-active panel discover/read/prepare/retain/commit workflow.
 
@@ -136,4 +137,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 
 ## 2026-10-20
 * **Work Registration**: [Hosted Scene committed; two-level headless maintenance gap isolated](registry/2026-10/2026-10-20T191110Z-persistent-two-level-game-codex-root-8eff546032334342a5b19d09a8312574.md) - Work Registration for Hosted Scene committed; two-level headless maintenance gap isolated.
-* **Session Handoff**: [Hosted Scene committed and two-level consumer verification open](sessions/2026-10/2026-10-20T190703Z-hosted-scene-committed-and-two-level-consumer-verification-open-ac1d26bed07c4a4ba3ebb1fab17c5ac8.md) - Session Handoff for Hosted Scene committed and two-level consumer verification open.

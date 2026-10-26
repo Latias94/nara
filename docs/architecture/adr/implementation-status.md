@@ -299,6 +299,17 @@ Undo/Redo/clean-Save refusal/dirty Save/Reopen evidence retains its scope. Compl
 cannot omit fields, and missing storage ancestors/list slots remain refused; no new framework,
 default projection policy, full R2 or foundation completion is implied.
 
+The [independent direct-member successor](../../knowledge/engineering/verification/2026-10/2026-10-26T024129Z-pre-budget-query-ownership-and-independent-direct-member-panel-workflow-1acbda3fb8cc47218dd9b54bcd59f367.md)
+removes a caller-controlled projection clone before metadata admission. Borrowed rows become
+owned only after the full page/continuation budget gate. An actually separately compiled
+registered panel discovers a direct Record member in a non-active Scene, performs a bounded
+scalar read and retained prepared edit, receives exact accepted/stale results, and completes
+Undo/Redo and Save/Reopen without moving selection or preview. The earlier direct-member receipt
+described an internal headless panel test as independent; the successor and the
+[Exit-driver correction](../../knowledge/engineering/verification/2026-10/2026-10-26T022556Z-public-exit-drivers-retain-maintenance-after-workspace-retirement-2c1f097eeed04d499d81adc33d3232dd.md)
+correct that claim without rewriting historical evidence. This is not recursive/collection
+discovery, Prefab-overlay, native-window or full R2 qualification.
+
 The [R5c custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md)
 implements typed per-document Scene/Prefab file custody under ADRs 0047/0118. Save retains its
 admission-time Host through acknowledgement/uncertainty; Reopen validates exact retained Host

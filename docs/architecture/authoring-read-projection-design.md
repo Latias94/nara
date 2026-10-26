@@ -19,8 +19,12 @@ The [read-query qualification](../knowledge/engineering/verification/2026-10/202
 records owner/public/native/static evidence, complete nine-lens review and the independently
 rechecked multi-row budget test correction. The [direct-member and panel query qualification](../knowledge/engineering/verification/2026-10/2026-10-26T004155Z-bounded-direct-member-discovery-and-panel-query-workflow-7003450c49204d8eba92ba90db765dc0.md)
 adds budget-aware one-level member discovery, selection-independent Session/panel query
-facades, and an independently compiled non-active panel discover/read/prepare/retain/commit
-consumer. Neither record qualifies full R2. The [selected-root baseline](../benchmarks/2026-10-25-authoring-root-read.md) separates
+facades and an internal headless panel workflow. Its independent-compilation claim is corrected
+by the [public Exit successor](../knowledge/engineering/verification/2026-10/2026-10-26T022556Z-public-exit-drivers-retain-maintenance-after-workspace-retirement-2c1f097eeed04d499d81adc33d3232dd.md).
+The [independent direct-member successor](../knowledge/engineering/verification/2026-10/2026-10-26T024129Z-pre-budget-query-ownership-and-independent-direct-member-panel-workflow-1acbda3fb8cc47218dd9b54bcd59f367.md)
+removes a pre-budget projection clone and adds the actually separate non-active Scene panel
+discover/read/prepare/retain/commit, Undo/Redo and Save/Reopen consumer. These records do not
+qualify full R2. The [selected-root baseline](../benchmarks/2026-10-25-authoring-root-read.md) separates
 operation-local diagnostic timing from normal Application/frame work.
 
 Source interpretation belongs to Scene/Prefab. Tooling owns explicit workspace/document routing,

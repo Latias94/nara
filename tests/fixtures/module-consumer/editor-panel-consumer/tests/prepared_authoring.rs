@@ -53,6 +53,9 @@ mod prepared_panel_cost;
 #[path = "support/property_read.rs"]
 mod property_read;
 
+#[path = "support/direct_member_authoring.rs"]
+mod direct_member_authoring;
+
 const OWNER: &str = "consumer.prepared";
 
 fn id(value: &str) -> SceneEntityId {
@@ -441,6 +444,9 @@ impl ImguiEditorPanel for ComputedEditPanel {
                                 limits: EditorAuthoringQueryLimits::new(1, 1, 1024).unwrap(),
                             })
                         }
+                    }
+                    EditorAuthoringProjection::Members { .. } => {
+                        panic!("the root-scalar panel does not request member discovery")
                     }
                 });
             }

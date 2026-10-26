@@ -61,8 +61,9 @@ impl EditorWorkspace {
 
     /// Discovers actual direct components, declared roots, or one-level Record members without
     /// reading their value trees.
-    /// Every inspected entry produces one row. Metadata is preflighted for the complete page and
-    /// its continuation before any source IDs are copied; insufficient budgets reject terminally.
+    /// Entries without direct durable identity consume scan work without producing a row.
+    /// Metadata is preflighted for the complete page and its continuation before any source IDs
+    /// are copied; insufficient budgets reject terminally.
     pub fn query_document_authoring(
         &self,
         query: EditorAuthoringQuery,
@@ -94,9 +95,7 @@ impl EditorWorkspace {
         let slot = self.resolve_document_query_slot(&target.basis, expected_kind)?;
         let entity = entity_view(slot, &target.entity)?;
         let count = query.limits.max_scan_entries().min(query.limits.max_rows());
-        // Keep borrowed member rows independent from the target moved into the returned page.
-        let projection = target.projection.clone();
-        let (rows, next, scanned_entries): (Vec<_>, _, _) = match (&projection, position) {
+        let (rows, next, scanned_entries): (Vec<_>, _, _) = match (&target.projection, position) {
             (
                 EditorAuthoringProjection::Components,
                 AuthoringPagePosition::Components { after, visited },
@@ -220,9 +219,10 @@ impl EditorWorkspace {
             kind: slot.kind(),
             position: position.into_owned(),
         });
+        let rows = rows.into_iter().map(BorrowedRow::into_owned).collect();
         Ok(EditorAuthoringPage {
             target,
-            rows: rows.into_iter().map(BorrowedRow::into_owned).collect(),
+            rows,
             scanned_entries,
             metadata_bytes,
             next,

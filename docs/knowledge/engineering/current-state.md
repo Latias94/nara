@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "07638dd8d08d46c041db091fa89c1e49fde3f5e4703fc66918338c09dcf35e89"
+source_fingerprint: "313a9e18c76775d7a9fa157ea8b2cbfecea97d4469077ddeb8268baa028db517"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "07638dd8d08d46c041db091fa89c1e49fde3f5e4703fc66918338c09dcf
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `07638dd8d08d46c041db091fa89c1e49fde3f5e4703fc66918338c09dcf35e89`
-- Immutable records: 936
+- Source fingerprint: `313a9e18c76775d7a9fa157ea8b2cbfecea97d4469077ddeb8268baa028db517`
+- Immutable records: 937
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Pre-budget query ownership and independent direct-member panel workflow](verification/2026-10/2026-10-26T024129Z-pre-budget-query-ownership-and-independent-direct-member-panel-workflow-1acbda3fb8cc47218dd9b54bcd59f367.md) - Removed caller-ID cloning before query budget admission and qualified a separately compiled non-active Scene direct-member panel through retained edits, history and divergent-memory Save/Reopen.
 - **Verification Evidence**: [Public Exit drivers retain maintenance after Workspace retirement](verification/2026-10/2026-10-26T022556Z-public-exit-drivers-retain-maintenance-after-workspace-retirement-2c1f097eeed04d499d81adc33d3232dd.md) - Corrected public and independent Exit callers, a deterministic held-worker regression, and successor clarification of earlier lifecycle and panel evidence.
 - **Verification Evidence**: [Bounded direct-member discovery and non-active panel query workflow](verification/2026-10/2026-10-26T004155Z-bounded-direct-member-discovery-and-panel-query-workflow-7003450c49204d8eba92ba90db765dc0.md) - Qualified one-level durable Record-member discovery, selection-independent Session/panel query forwarding, and an independently compiled non-active panel discover/read/prepare/retain/commit workflow.
 - **Verification Evidence**: [Startup preparation owner retry and final Application shutdown](verification/2026-10/2026-10-25T232708Z-startup-preparation-owner-retry-and-final-application-shutdown-4281deb3281042fc9095f7cf2e247c4b.md) - Bounded R4b standalone startup facility ownership, exact failure evidence, independent review and serial qualification.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Initial authoring construction and failed Open physical custody qualification](verification/2026-10/2026-10-25T191539Z-initial-authoring-construction-and-failed-open-physical-custody-qualification-ad41f2c430ac4e56bdaf88fbb457f1cd.md) - Binds initial App and failed Session publication custody to actual owner, public Open, Application and selected native evidence, with explicit remaining deployment limits.
 - **Session Handoff**: [Authoring retirement merged and initial construction custody design in progress](sessions/2026-10/2026-10-25T181535Z-authoring-retirement-merged-and-initial-construction-custody-design-in-progress-e1574e61206a4dc885356b44896703b0.md) - Pins the verified retained authoring unit to main and preserves the next raw App versus planned candidate design question without claiming initial Open custody or full R4b complete.
 - **Verification Evidence**: [Retained authoring replacement and physical retirement qualification](verification/2026-10/2026-10-25T172648Z-retained-authoring-replacement-and-physical-retirement-qualification-f93efd28e9324ff4accf45fc3d38311c.md) - Bounded predecessor and rejected candidate custody, exact file Host transfer, sticky disjoint completion and affected Editor maintenance evidence.
-- **Session Handoff**: [Demand activation merged with measured task isolation direction](sessions/2026-10/2026-10-25T164658Z-demand-activation-merged-with-measured-task-isolation-direction-b4f47bf5eb9346d092120ce798f90f90.md) - Pins the qualified lazy/shared comparison and local source commit, records the next concrete Editor deployment and retirement obligations, and preserves the full foundation Goal.
 
 # Integration Notes
 
