@@ -6,6 +6,11 @@ change the current `PrefabInstance.overrides: ScenePatchDocument` production con
 The [private comparison evidence](../knowledge/engineering/verification/2026-10/2026-10-26T025005Z-private-prefab-property-intent-comparison-and-next-owner-replacement-70ca642be09045ab909751b87ed5164d.md)
 records six executed scalar cases and independent review corrections. That evidence does not
 qualify the structural/reference compiler, conflict persistence or a production format switch.
+The [structural/reference successor](../knowledge/engineering/verification/2026-10/2026-10-26T034052Z-private-prefab-structure-and-reference-comparison-with-owner-boundary-counterexamples-c823420a09444940993ed9d948a28273.md)
+adds a private executable comparison and owner-boundary counterexamples. It still does not
+replace production storage or qualify Host publication. The
+[Unity/Godot editor study](../research/2026-10-26-unity-godot-prefab-editor-ownership.md) supplies
+editing-context, Apply/Revert and Inspector evidence, separately from runtime qualification.
 
 ## Problem And Scope
 
@@ -72,10 +77,15 @@ valid projection are separate admissions; a conflict must not make the source un
 Target addressing alone does not bind references inside a replacement value.
 `EntityReference::SceneLocal` contains only a local entity ID; Schema traversal can find its slot
 but cannot infer whether `socket` denotes inherited data, a local addition or one of two nested
-placements. The second comparison must select a bounded overlay-owned reference binding carrying
-the complete inherited target or explicit added-entity target for each declared reference slot.
-Compare an overlay-specific value representation with explicit owner-held slot bindings; do not
-silently reinterpret the ordinary `SceneLocal` wire type or add a global reference resolver.
+placements. The structural comparison selects ordinary `ComponentValue` plus explicit bindings
+for each declared local-reference slot, rather than duplicating the recursive value model.
+Each binding carries the exact payload coordinate, expected local spelling, and complete
+inherited target or explicit added-entity target. The slot is version-bound payload evidence,
+not a durable property selector; payload/schema migration invalidates it. Defaults are
+materialized before binding because they can introduce local references too. Every local slot
+consumes exactly one binding; duplicate, missing, stray and mismatched bindings reject. Persistent
+references and typed asset references keep their existing meaning and accept no local binding.
+Do not silently reinterpret the ordinary `SceneLocal` wire type or add a global reference resolver.
 Ambiguous/unbound references remain conflicts. Production replacement is blocked until existing
 valid inherited-to-added and added-to-inherited references work, including equal local spellings
 and repeated nested sources. The first scalar comparison intentionally exercises none of these.
@@ -140,6 +150,117 @@ Ordinary revision-bound source transactions retain their existing sequential key
 Any later finer-grained normalization must prove logical identity/reference preservation without
 turning the durable overlay back into an ordered operation log.
 
+## Structural Comparison And Selected Limits
+
+The private compiler in `crates/nara_scene/src/prefab/overlay_structure_comparison.rs` uses real
+Prefab expansion and canonical provenance, the existing construction owner for fresh entity IDs,
+and one final source-owner preparation. Intermediate structure uses existing exact Scene
+placement operations on an unpublished copy; there is no new ID allocator or Undo authority.
+It compares a real old-basis `MoveEntity` override against desired placement on a reordered base.
+Repeated source occurrences, nested targets and lookup aliases are separate executable cases.
+
+The chosen placement rules for this experiment are:
+
+- Each target has at most one placement claim. Multiple claims on the same target reject.
+- `First`, `Last`, `Before` and `After` describe slots in the instance's projected sibling
+  subsequence. A slot cohort follows placement-declaration order, not entity allocation order or
+  a replay of old placements. Unclaimed inherited siblings retain source order.
+- Relative anchors must exist in the final same parent. Attachment cycles and parent cycles
+  reject. Ancestors are placed before their final descendants, allowing a valid parent rotation
+  without constructing a transient cycle in exact Scene operations.
+- Containing-owner children are not inherited targets. Only projected entities are moved;
+  foreign records and their relative order are retained. Existing foreign interleaving does not
+  cause a no-op edit. No cross-owner placement is inferred from a sibling's expanded locator.
+- Suppression follows desired layout, so an explicitly moved descendant can survive its old
+  parent's suppression. Overlapping ancestor/descendant suppressions reject independent of
+  input order. Any declaration or declared placement relation erased by suppression conflicts.
+  The returned target map excludes removed entities.
+
+The comparison preserves intent and a private conflict through JSON encode/decode for controlled
+fixtures. This proves neither hostile persistent admission nor production conflict Save/Reopen.
+The private source-identity wire shape is not the selected persistent source-owner codec. The
+64-declaration/reference limits and existing Schema traversal budgets bound this experiment;
+they are not a measured product workload budget or a complete pre-copy overlay admission policy.
+
+Two owner-boundary counterexamples matter to production design:
+
+1. A default local reference can resolve to an unrelated same-named containing-Scene entity if
+   binding precedes default materialization. Default-before-bind now rejects that ambiguity.
+2. Creation-template plus root-field edits are not a complete component-value codec. Removing
+   optional `group.note` from a template leaves `{ group: {} }`, even if the valid intended
+   full value is `{}`. The private comparison checks the final admitted component against the
+   full materialized/bound input and conflicts on mismatch. It does not claim support for that
+   lawful input or "fix" it with a second ancestor-container reconstruction algorithm.
+
+Consequently, production effective-projection compilation must reuse full candidate
+classification/admission, not widen generic source-authoring edits merely to compile derived
+data. Source overlay mutation and its exact inverse/history remain at the existing source owner;
+projection preparation publishes no source history. Complete full-value support is a production
+switch prerequisite, not a reason to keep the lossy template lowering as a fallback.
+
+### Remaining Production Identity And Publication Obligations
+
+- An addition belongs to its containing source's instance overlay, not the base Prefab. Its
+  durable address needs explicit containing-owner placement and an overlay-local entity kind.
+  A local namespace in this private `TargetMap` does not yet propagate that fact to provenance.
+  Do not fabricate a base-source entity or encode the distinction in an `overlay:` ID prefix.
+- An overlay declared inside a Prefab source can itself appear through repeated/nested outer
+  instances. Carry that actual owning-source chain and explicit local origin through complete
+  Scene/Runtime/UI logical keys; a single outer anchor or a runtime occurrence alone is not
+  enough. Reuse current occurrence/epoch custody rather than introduce another global registry.
+- Activation must retain and revalidate the actual admitted immutable nested base closure and
+  Schema. Full document equality in a private fixture is not a filesystem publication protocol.
+- The production compiler still needs complete property grammar (including explicit absence,
+  whole keyed-container replacement and overlap rules), full component admission, persistent
+  bounded conflict/source encoding, and complete source edit/history/repair and conversion paths.
+  These obligations have not been qualified by combining two separate private comparisons.
+
+The next provenance change is a typed origin axis within the existing placement model, not a
+replacement identity service. Conceptually, an entity address combines its owning-source
+placement with either a source-local entity or an overlay-local addition at an explicit instance
+address. For Scene `S`, anchor `a` instantiating `P`, addition `x` belongs to `S/a`'s overlay,
+not to `(P, x)`. For Prefab `P`, anchor `n` instantiating `Q`, addition `x` belongs to `P/n`'s
+overlay; each outer placement of `P` supplies its own existing occurrence and source chain.
+
+An added entity can itself carry a `PrefabInstance`, so the origin distinction must also occur
+in instance-anchor ancestry, not just as a terminal `is_added` flag. Existing `PrefabProjectionPath`
+already distinguishes repeated/nested placements; current `expand_prefab_instance` instead
+flattens patched-in additions into the base's source/entity namespace before constructing that
+path. Current admission refuses duplicate IDs in that effective copy. This is a missing ownership
+representation, not evidence of an already demonstrated Runtime ID collision.
+
+Carry the corrected typed address through existing expansion, candidate validation, retained-byte
+admission, `SceneEntitySource` publication and UI placement encoding. Preserve canonical source,
+logical occurrence, Runtime activation/incarnation and preview epochs. The ECS-independent UI
+kernel continues to receive opaque context/placement keys; it need not learn Scene origin types.
+Durable overlay edits remain on `SceneAuthoringSession` or `PrefabAuthoringSession` according to
+the declaration's real source. Reopening a disposable authoring session merely to classify the
+derived projection would introduce the wrong source/history lineage.
+
+## Editor Workflow Consequences
+
+Unity and Godot are the primary editor-workflow references; Bevy is principally an ECS/Rust
+composition reference. The [versioned official Unity and pinned Godot study](../research/2026-10-26-unity-godot-prefab-editor-ownership.md)
+separates observed behavior from these proposed Nara consequences:
+
+- Inspector and scene breadcrumbs identify the edited source/layer separately from selection and
+  visible preview context. A Prefab source session and an instance overlay are different owners.
+- Revert removes the selected authored intent to restore inheritance; writing the current base
+  value instead would create another explicit pin. Source edit, instance override and Apply to a
+  chosen ancestor source must not share one ambiguous write command.
+- Apply identifies its destination source and scope, previews widened effects, and fences all
+  participating evidence. Updating a source and removing an instance override is cross-document
+  work, not an excuse for a universal transaction manager or a silent partial success.
+- Ordinary and custom Inspector controls use the same semantic prepare/commit/history path.
+  Multi-object mixed values and per-target compatibility are explicit; observing the first value
+  does not prove all selected targets agree or make a loop of writes one atomic owner edit.
+- Unresolved overrides stay visible and savable with explicit repair/removal. Unity's documented
+  unused-override behavior is useful product precedent, not proof of our proposed implementation.
+
+These are design requirements for the later public/native workflow, not implemented UI features.
+Current Accepted ADR 0038 and the current narrow Apply Changes scope remain authoritative until
+the owning contracts and complete replacement are reconciled.
+
 ## Ordered Implementation
 
 1. **Private semantic comparison:** compare the real existing root-patch path with original leaf
@@ -153,8 +274,10 @@ turning the durable overlay back into an ordered operation log.
    before a public API if any existing structural/reference capability has no replacement.
 3. **Reconcile owning ADRs:** amend 0006/0038 for durable versus exact operations, 0026/0090 for
    source transaction/repair authority, and 0043 for value/address evolution and canonical v1 reset.
-   Amend 0101 only if its stable placement rules actually change. Record narrower implementation
-   status separately; do not promote Proposed ADR 0083 as an incidental dependency.
+   Reconcile 0038/0058/0102 for explicit overlay-local origin throughout nested ancestry and its
+   existing Runtime/UI lowering. Amend 0101 only if its stable placement rules actually change.
+   Record narrower implementation status separately; do not promote Proposed ADR 0083 as an
+   incidental dependency.
 4. **Replace production owner and consumers:** switch `PrefabInstance.overrides`, bounded wire
    admission, expansion, source-edit/history and persistence together. Remove operation-patch-as-
    overlay and obsolete in-repository fixtures; no legacy reader, compatibility alias or new

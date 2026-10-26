@@ -141,9 +141,12 @@ scoped nested-ID lineage, keyed-item, migration and unresolved-target rules that
 before R2/R3/R5b persistent contracts freeze.
 
 The [declarative Prefab overlay design](prefab-overlay-design.md) separates durable intent from
-exact edit/inverse patches. Its private property comparison challenges whole-root lowering as a
-long-term overlay while retaining production ADR 0038 until nested structure, reference binding,
-conflict persistence and complete source-owner replacement are qualified.
+exact edit/inverse patches. Private property and structural/reference comparisons challenge
+whole-root patches, old-basis placement and ambiguous reference binding. They retain production
+ADR 0038 until complete full-value admission, added-entity provenance, conflict persistence and
+source-owner replacement are qualified. The [Unity/Godot editor study](../research/2026-10-26-unity-godot-prefab-editor-ownership.md)
+grounds editing contexts, explicit Apply/Revert, unused overrides and Inspector/history routing
+without adopting either engine's object model or claiming native UI support.
 
 The [source-owned creation and construction design](authoring-construction-design.md) removes
 Workspace ordinal allocation and ID-reservation choreography from ordinary Scene/Prefab creation.

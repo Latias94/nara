@@ -320,10 +320,14 @@ unmigratable overrides as repairable conflicts. Verify repeated source instances
 base rename/reorder, removed targets, Behavior upgrades, external bindings and convert-to-local.
 No guessed remap, silent dropping or regenerated product IDs may make a failed rebase look valid.
 
-The [Scene-owned overlay design](prefab-overlay-design.md) scopes a private scalar comparison
-before the complete structural/reference replacement. It separates base evidence from target
-identity, preserves explicit equal-value pins, and records keyed-identity/reference-binding
-questions that block a production format freeze rather than the first experiment.
+The [Scene-owned overlay design](prefab-overlay-design.md) records private scalar and
+structural/reference comparisons before the production replacement. It separates base evidence
+from target identity, preserves explicit equal-value pins, selects version-bound reference-slot
+binding and normalized placement cohorts, and records full-value/provenance/publication gaps
+that still block a production format freeze. The editor workflow follows the
+[Unity/Godot ownership study](../research/2026-10-26-unity-godot-prefab-editor-ownership.md):
+selection, instance override, source editing, explicit Apply destination and restoring inheritance
+must remain distinct author concepts; custom Inspector controls must not own another Undo system.
 
 ## D06: Packages, Contributions And Execution Placement
 

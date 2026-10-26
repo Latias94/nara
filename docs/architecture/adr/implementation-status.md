@@ -314,6 +314,13 @@ The [private Prefab intent comparison](../../knowledge/engineering/verification/
 separately demonstrates the difference between real root-patch lowering and retained scalar leaf
 intent. Its six test-private cases and Proposed design do not replace ADR 0038's current overlay
 format, implement structural/reference rebasing or qualify conflict persistence.
+The [structural/reference successor](../../knowledge/engineering/verification/2026-10/2026-10-26T034052Z-private-prefab-structure-and-reference-comparison-with-owner-boundary-counterexamples-c823420a09444940993ed9d948a28273.md)
+adds real nested expansion, explicit reference-slot binding, normalized placement, additions and
+suppression comparisons. Default-reference, mixed-owner child and optional-container
+counterexamples correct or bound the private compiler; complete component admission, production
+addition provenance, closure publication and source repair/history remain open. The
+[Unity/Godot editor study](../../research/2026-10-26-unity-godot-prefab-editor-ownership.md)
+informs the Proposed editor workflow, not an ADR amendment or native implementation claim.
 
 The [R5c custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md)
 implements typed per-document Scene/Prefab file custody under ADRs 0047/0118. Save retains its

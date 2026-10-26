@@ -32,6 +32,9 @@ use crate::{
     },
 };
 
+#[cfg(all(test, feature = "serde"))]
+mod overlay_structure_comparison;
+
 #[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]

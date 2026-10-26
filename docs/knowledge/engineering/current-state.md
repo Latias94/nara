@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "5bb608ac014a556afb96b4eacc4d632ada59b182802f24d1b66c0082a6ea7921"
+source_fingerprint: "a4d1d14f614e2f6641ac30ee3fa43b1b8dca311006ae553576849cd9ebf5ee4d"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "5bb608ac014a556afb96b4eacc4d632ada59b182802f24d1b66c0082a6e
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `5bb608ac014a556afb96b4eacc4d632ada59b182802f24d1b66c0082a6ea7921`
-- Immutable records: 938
+- Source fingerprint: `a4d1d14f614e2f6641ac30ee3fa43b1b8dca311006ae553576849cd9ebf5ee4d`
+- Immutable records: 939
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Private Prefab structure and reference comparison with owner-boundary counterexamples](verification/2026-10/2026-10-26T034052Z-private-prefab-structure-and-reference-comparison-with-owner-boundary-counterexamples-c823420a09444940993ed9d948a28273.md) - Executed nested structure and explicit reference binding comparison, corrected default namespace and mixed-owner failures, and rejected lossy full-component lowering without changing production Prefab storage.
 - **Verification Evidence**: [Private Prefab property intent comparison and next owner replacement](verification/2026-10/2026-10-26T025005Z-private-prefab-property-intent-comparison-and-next-owner-replacement-70ca642be09045ab909751b87ed5164d.md) - Compared real root-patch lowering with retained scalar leaf intent, reviewed the proposed full overlay replacement, and recorded structural/reference freeze blockers without changing production format.
 - **Verification Evidence**: [Pre-budget query ownership and independent direct-member panel workflow](verification/2026-10/2026-10-26T024129Z-pre-budget-query-ownership-and-independent-direct-member-panel-workflow-1acbda3fb8cc47218dd9b54bcd59f367.md) - Removed caller-ID cloning before query budget admission and qualified a separately compiled non-active Scene direct-member panel through retained edits, history and divergent-memory Save/Reopen.
 - **Verification Evidence**: [Public Exit drivers retain maintenance after Workspace retirement](verification/2026-10/2026-10-26T022556Z-public-exit-drivers-retain-maintenance-after-workspace-retirement-2c1f097eeed04d499d81adc33d3232dd.md) - Corrected public and independent Exit callers, a deterministic held-worker regression, and successor clarification of earlier lifecycle and panel evidence.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Session Handoff**: [Initial authoring custody merged and private lazy Editor facilities design](sessions/2026-10/2026-10-25T195253Z-initial-authoring-custody-merged-and-private-lazy-editor-facilities-design-d80d2ecede8147fab5bcdedddd4a37d2.md) - Pins the qualified initial construction/Open custody stage to main and the next bounded private-lazy Editor deployment, without reducing the full foundation Goal.
 - **Verification Evidence**: [Native document metadata in supervised Play source closure facts](verification/2026-10/2026-10-25T194117Z-native-document-metadata-in-supervised-play-source-closure-facts-0fb93990d7d44da9a8111b48f82aee59.md) - Records the actual generated-starter handshake refusal, its source-fact owner correction and matched Editor/Runtime metadata-closure regression evidence.
 - **Verification Evidence**: [Initial authoring construction and failed Open physical custody qualification](verification/2026-10/2026-10-25T191539Z-initial-authoring-construction-and-failed-open-physical-custody-qualification-ad41f2c430ac4e56bdaf88fbb457f1cd.md) - Binds initial App and failed Session publication custody to actual owner, public Open, Application and selected native evidence, with explicit remaining deployment limits.
-- **Session Handoff**: [Authoring retirement merged and initial construction custody design in progress](sessions/2026-10/2026-10-25T181535Z-authoring-retirement-merged-and-initial-construction-custody-design-in-progress-e1574e61206a4dc885356b44896703b0.md) - Pins the verified retained authoring unit to main and preserves the next raw App versus planned candidate design question without claiming initial Open custody or full R4b complete.
 
 # Integration Notes
 
