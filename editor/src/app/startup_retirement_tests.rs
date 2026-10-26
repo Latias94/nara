@@ -21,7 +21,7 @@ pub(crate) fn preparing_application() -> EditorApplication {
         {
             return application;
         }
-        application.advance_project_open();
+        application.advance(Duration::ZERO);
     }
     panic!("the fixture did not reach startup submission");
 }
@@ -34,7 +34,7 @@ pub(crate) fn held_startup_application() -> (EditorApplication, Sender<()>, Work
     let (_, probe) =
         TaskPools::with_worker_spawn_failure_for_tests(TaskPoolKind::Io, usize::MAX, || {
             TaskPools::hold_partial_worker_exit_for_tests(receiver);
-            application.advance_project_open();
+            application.advance(Duration::ZERO);
         });
     finish_open(&mut application);
     assert_eq!(probe.started(), 1);
@@ -45,16 +45,17 @@ fn finish_open(application: &mut EditorApplication) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while application.current_frame().is_none() {
         assert!(Instant::now() < deadline, "startup did not publish");
-        application.advance_project_open();
+        application.advance(Duration::ZERO);
         std::thread::sleep(Duration::from_millis(1));
     }
 }
 
 fn finish_exit(application: &mut EditorApplication) {
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !application.request_exit().exit_ready() {
+    let mut exited = application.request_exit().exit_ready();
+    while !exited {
         assert!(Instant::now() < deadline, "startup custody did not retire");
-        application.drive_editor_frame(Duration::ZERO, false, false);
+        exited = application.advance(Duration::ZERO).exit_ready();
         std::thread::sleep(Duration::from_millis(1));
     }
 }
@@ -63,7 +64,7 @@ fn finish_exit(application: &mut EditorApplication) {
 fn actual_startup_failure_gates_retry_and_host_only_maintenance_allows_explicit_open() {
     let mut application = preparing_application();
     let (_, probe) = TaskPools::with_worker_spawn_failure_for_tests(TaskPoolKind::Io, 0, || {
-        application.advance_project_open();
+        application.advance(Duration::ZERO);
     });
     assert_eq!(probe.started(), 0);
     assert_eq!(application.state(), EditorApplicationState::Recovery);
@@ -93,13 +94,12 @@ fn actual_startup_failure_gates_retry_and_host_only_maintenance_allows_explicit_
     // The failure may outlive the Application's slot; Host-only maintenance still owns progress.
     let failure = application.failed_open.take().unwrap();
     assert!(application.project_open_retirement_pending());
-    application.advance_project_open();
+    application.advance(Duration::ZERO);
     assert!(!application.project_open_retirement_pending());
     assert!(failure.startup_tasks_close_report().unwrap().is_complete());
     assert!(application.open_host_tasks_close_report().is_complete());
     for _ in 0..3 {
-        application.advance_project_open();
-        application.drive_editor_frame(Duration::ZERO, false, false);
+        application.advance(Duration::ZERO);
     }
     assert_eq!(application.state(), EditorApplicationState::ProjectManager);
     application.submit_shell_action(EditorProjectShellAction::OpenProject {
@@ -122,11 +122,7 @@ fn healthy_open_host_final_exit_waits_in_every_shell_state_and_stays_irreversibl
             let deadline = Instant::now() + Duration::from_secs(10);
             while application.current_frame().is_some() {
                 assert!(Instant::now() < deadline, "CloseProject did not finish");
-                assert!(
-                    !application
-                        .drive_editor_frame(Duration::ZERO, false, false)
-                        .exit_ready()
-                );
+                assert!(!application.advance(Duration::ZERO).exit_ready());
                 std::thread::sleep(Duration::from_millis(1));
             }
             assert!(!application.final_exit_committed);
@@ -155,23 +151,13 @@ fn healthy_open_host_final_exit_waits_in_every_shell_state_and_stays_irreversibl
                 Instant::now() < deadline,
                 "Exit was not committed: {origin}"
             );
-            assert!(
-                !application
-                    .drive_editor_frame(Duration::ZERO, false, false)
-                    .exit_ready()
-            );
+            assert!(!application.advance(Duration::ZERO).exit_ready());
             std::thread::sleep(Duration::from_millis(1));
         }
         for _ in 0..3 {
             assert!(application.has_pending_exit());
             assert!(application.project_open_retirement_pending());
-            assert!(!application.advance_project_open().exit_ready());
-            assert!(
-                !application
-                    .drive_editor_frame(Duration::ZERO, false, false)
-                    .exit_ready()
-            );
-            assert!(!application.request_exit().exit_ready());
+            assert!(!application.advance(Duration::ZERO).exit_ready());
         }
         assert_eq!(probe.exited(), 0);
         release.send(()).unwrap();
@@ -203,7 +189,7 @@ fn exit_before_native_ready_cannot_rearm_the_launch_request() {
     assert!(application.request_exit().exit_ready());
     assert!(!application.native_shell_ready().actions_observed());
     assert_eq!(application.state(), EditorApplicationState::ProjectManager);
-    assert!(application.advance_project_open().exit_ready());
+    assert!(application.advance(Duration::ZERO).exit_ready());
 }
 
 #[test]
@@ -251,7 +237,7 @@ fn dirty_exit_cancel_keeps_healthy_startup_facilities_available() {
         Duration::ZERO,
     );
     for _ in 0..3 {
-        application.drive_editor_frame(Duration::ZERO, false, false);
+        application.advance(Duration::ZERO);
     }
     assert!(!application.has_pending_exit());
     assert!(!application.final_exit_committed);
@@ -293,11 +279,7 @@ fn dirty_exit_cancel_keeps_healthy_startup_facilities_available() {
     let deadline = Instant::now() + Duration::from_secs(10);
     while application.current_frame().is_some() {
         assert!(Instant::now() < deadline, "CloseProject did not finish");
-        assert!(
-            !application
-                .drive_editor_frame(Duration::ZERO, false, false)
-                .exit_ready()
-        );
+        assert!(!application.advance(Duration::ZERO).exit_ready());
         std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(application.state(), EditorApplicationState::ProjectManager);

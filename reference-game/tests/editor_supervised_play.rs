@@ -199,7 +199,7 @@ fn open_reference_game_application() -> EditorApplication {
                 panic!("Reference Game generic authoring open entered Recovery")
             }
             EditorApplicationState::OpeningInitial | EditorApplicationState::OpeningReplacement => {
-                let _ = application.advance_project_open();
+                let _ = application.advance(Duration::ZERO);
             }
             EditorApplicationState::ProjectManager => {
                 panic!("the native shell must arm the initial project-open request")
@@ -253,8 +253,7 @@ fn drive_until_external_state(
             frame.play().result(),
             external.output(),
         );
-        let _ = application
-            .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
+        let _ = application.advance(Duration::ZERO);
         thread::sleep(Duration::from_millis(5));
     }
 }
@@ -269,14 +268,7 @@ fn drive_until_exit_ready(application: &mut EditorApplication, timeout: Duration
         let result = frame
             .as_ref()
             .and_then(|frame| frame.workspace_intent().result());
-        let update = if let Some(frame) = &frame {
-            application
-                .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
-                .update()
-        } else {
-            // Workspace retirement can precede physical Open Host shutdown.
-            application.advance_project_open()
-        };
+        let update = application.advance(Duration::ZERO);
         if update.exit_ready() {
             return;
         }

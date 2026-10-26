@@ -44,7 +44,7 @@ fn advance_to_session_publication(application: &mut EditorApplication) {
             return;
         }
         assert!(Instant::now() < deadline, "Open did not prepare its source");
-        application.advance_project_open();
+        application.advance(Duration::ZERO);
         std::thread::sleep(Duration::from_millis(1));
     }
 }
@@ -62,7 +62,7 @@ fn failed_initial_open_retains_cleanup_across_retry_manager_and_exit() {
         let mut changed = original.clone();
         changed.extend_from_slice(b"\n");
         fs::write(&source, changed).unwrap();
-        application.advance_project_open();
+        application.advance(Duration::ZERO);
         let rejected_state = application.state();
         let initially_pending = application.project_open_retirement_pending();
         let early_retry = application.retry_project_open();
@@ -82,7 +82,7 @@ fn failed_initial_open_retains_cleanup_across_retry_manager_and_exit() {
                 Instant::now() < deadline,
                 "failed Open cleanup did not return"
             );
-            exit_ready |= application.advance_project_open().exit_ready();
+            exit_ready |= application.advance(Duration::ZERO).exit_ready();
             std::thread::sleep(Duration::from_millis(1));
         }
         assert_eq!(rejected_state, EditorApplicationState::Recovery);
@@ -100,7 +100,7 @@ fn failed_initial_open_retains_cleanup_across_retry_manager_and_exit() {
                     Instant::now() < deadline,
                     "retry after physical return did not open"
                 );
-                application.advance_project_open();
+                application.advance(Duration::ZERO);
                 std::thread::sleep(Duration::from_millis(1));
             }
             queue_save(&mut application);
@@ -121,7 +121,7 @@ fn failed_replacement_open_preserves_the_incumbent_while_cleanup_gates_another_c
     let mut changed = original.clone();
     changed.extend_from_slice(b"\n");
     fs::write(&source, changed).unwrap();
-    application.advance_project_open();
+    application.advance(Duration::ZERO);
     let same_incumbent = std::sync::Arc::ptr_eq(&incumbent, &application.current_frame().unwrap());
     let pending = application.project_open_retirement_pending();
     let early_replacement =
@@ -133,7 +133,7 @@ fn failed_replacement_open_preserves_the_incumbent_while_cleanup_gates_another_c
             Instant::now() < deadline,
             "failed replacement cleanup did not return"
         );
-        application.drive_editor_frame(Duration::ZERO, true, false);
+        application.advance(Duration::ZERO);
         std::thread::sleep(Duration::from_millis(1));
     }
     queue_save(&mut application);
@@ -339,6 +339,187 @@ fn start_trusted_play(application: &mut EditorApplication) {
     }
 }
 
+#[test]
+fn ordinary_advance_consumes_each_delta_once_and_native_maintenance_can_suppress_runtime() {
+    use std::sync::Mutex;
+
+    use nara::{
+        app::{CoreStage, RealTime},
+        ecs::Res,
+    };
+
+    static FRAMES: Mutex<Vec<RealTime>> = Mutex::new(Vec::new());
+
+    #[derive(Default)]
+    struct ClockProbe;
+
+    impl Plugin for ClockProbe {
+        fn declaration() -> &'static PluginDeclaration {
+            static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+                PluginId::new("nara.test.application-advance-clock"),
+                PluginCategory::Runtime,
+            );
+            &DECLARATION
+        }
+
+        fn build(&self, app: &mut App) -> Result<(), PluginError> {
+            app.add_systems(CoreStage::First, |time: Res<RealTime>| {
+                FRAMES.lock().unwrap().push(*time);
+            })?;
+            Ok(())
+        }
+    }
+
+    let fixture = PersistenceFixture::trusted();
+    let mut application = EditorApplication::open_trusted_compiled(
+        EditorLaunchOptions::new(&fixture.root).with_profile("desktop"),
+        TrustedCompiledEditorProjectIntent::new()
+            .with_profile("desktop")
+            .with_recipe(ProductRecipe::new().add_plugin::<ClockProbe>().unwrap()),
+    )
+    .unwrap();
+    start_trusted_play(&mut application);
+    FRAMES.lock().unwrap().clear();
+
+    application.advance_with_runtime(Duration::from_secs(2), false);
+    let suppressed = FRAMES.lock().unwrap().is_empty();
+    application.advance(Duration::from_millis(13));
+    application.advance(Duration::ZERO);
+    application.advance(Duration::from_millis(7));
+    let frames = FRAMES.lock().unwrap().clone();
+    close(&mut application);
+
+    assert!(
+        suppressed,
+        "native maintenance must honor its runtime cadence"
+    );
+    assert_eq!(
+        frames.len(),
+        3,
+        "each ordinary pass drives one runtime frame"
+    );
+    assert_eq!(frames[0].delta, Duration::from_millis(13));
+    assert_eq!(frames[1].delta, Duration::ZERO);
+    assert_eq!(frames[2].delta, Duration::from_millis(7));
+    assert_eq!(frames[1].frame, frames[0].frame + 1);
+    assert_eq!(frames[2].frame, frames[1].frame + 1);
+    assert_eq!(frames[1].elapsed, frames[0].elapsed);
+    assert_eq!(
+        frames[2].elapsed - frames[0].elapsed,
+        Duration::from_millis(7)
+    );
+}
+
+#[test]
+fn ordinary_replacement_close_drives_once_and_publication_does_not_drive_the_successor() {
+    let fixture = PersistenceFixture::new();
+    let mut application = fixture.open();
+    application.set_scene_preview_extent(nara::render::Extent2d::new(640, 480));
+    application.advance(Duration::ZERO);
+    let preview = application.take_scene_preview_candidate().unwrap();
+    let geometry = preview.geometry_revision();
+    drop(preview);
+    let incumbent = application.current_frame().unwrap();
+    assert!(application.request_project_replacement(&fixture.root, Some("desktop".to_owned())));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let successor = loop {
+        if let super::EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
+            candidate,
+            close_started: false,
+            ..
+        }) = &application.state
+        {
+            break candidate.session.current_frame();
+        }
+        assert!(Instant::now() < deadline, "replacement did not prepare");
+        application.advance(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    };
+    let preparation_preserved_incumbent =
+        std::sync::Arc::ptr_eq(&incumbent, &application.current_frame().unwrap());
+    application.advance(Duration::ZERO);
+    let close_geometry = application
+        .state
+        .published_mut()
+        .and_then(|project| project.session.take_editor_preview_candidate())
+        .map(|candidate| candidate.geometry_revision());
+    let close_retained_incumbent =
+        application.state() == EditorApplicationState::OpeningReplacement;
+    while application.state() == EditorApplicationState::OpeningReplacement {
+        assert!(Instant::now() < deadline, "replacement did not retire");
+        application.advance(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let published_without_drive =
+        std::sync::Arc::ptr_eq(&successor, &application.current_frame().unwrap());
+    close(&mut application);
+
+    assert!(preparation_preserved_incumbent);
+    assert_eq!(
+        close_geometry,
+        Some(geometry + 1),
+        "starting Close drives only once"
+    );
+    assert!(
+        close_retained_incumbent,
+        "the new Close is not completed recursively"
+    );
+    assert!(
+        published_without_drive,
+        "publication preserves the candidate's exact frame"
+    );
+}
+
+#[test]
+fn ordinary_open_pass_consumes_retained_supervised_completion_in_each_replacement_phase() {
+    use nara::tooling::{EditorExternalPlayRequest, EditorPlayOperation};
+
+    for refreshing in [false, true] {
+        let fixture = PersistenceFixture::new();
+        let mut application = fixture.open();
+        assert!(application.request_project_replacement(&fixture.root, Some("desktop".to_owned())));
+        let state = application.take_state();
+        let super::EditorProductState::OpeningReplacement(OpeningReplacementState::Preparing {
+            mut retained,
+            opening,
+        }) = state
+        else {
+            unreachable!()
+        };
+        // A real owner rejects Pause without an active child and retains the completion
+        // until polled. No process, seeded observation, or test-only poll counter is used.
+        retained.supervised_play.submit(
+            EditorExternalPlayRequest::new(1, EditorPlayOperation::Pause, None).unwrap(),
+            fixture.root.clone(),
+            Instant::now(),
+        );
+        application.state = super::EditorProductState::OpeningReplacement(if refreshing {
+            OpeningReplacementState::Refreshing { retained, opening }
+        } else {
+            OpeningReplacementState::Preparing { retained, opening }
+        });
+        application.advance(Duration::ZERO);
+        let consumed = application
+            .state
+            .published_mut()
+            .unwrap()
+            .supervised_play
+            .advance(Instant::now())
+            .is_none();
+        let candidate_still_opening =
+            application.state() == EditorApplicationState::OpeningReplacement;
+        close(&mut application);
+        assert!(
+            candidate_still_opening,
+            "one pass must not recursively publish Open"
+        );
+        assert!(
+            consumed,
+            "ordinary Open must maintain the retained supervised owner"
+        );
+    }
+}
+
 // Shared with the native result tests: this receipt comes from public trusted construction,
 // public Play dispatch and actual whole-Session close, without a seeded receipt or close hook.
 pub(crate) fn failed_trusted_session_close_receipt() -> EditorProjectCloseReceipt {
@@ -410,12 +591,7 @@ fn replacement_handoff_retains_session_cleanup_failure_through_a_clean_successor
                 Instant::now() < deadline,
                 "replacement handoff did not finish"
             );
-            assert!(!application.advance_project_open().exit_ready());
-            assert!(
-                !application
-                    .drive_editor_frame(Duration::ZERO, false, true)
-                    .exit_ready()
-            );
+            assert!(!application.advance(Duration::ZERO).exit_ready());
             std::thread::sleep(Duration::from_millis(1));
         }
         assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
@@ -486,9 +662,7 @@ fn startup_preparation_exit_revokes_initial_and_replacement_publication() {
         while !exited && Instant::now() < deadline {
             exited |= application.advance_project_open().exit_ready();
             assert_no_candidate_publication(&application);
-            exited |= application
-                .drive_editor_frame(Duration::ZERO, false, false)
-                .exit_ready();
+            exited |= application.advance(Duration::ZERO).exit_ready();
             assert_no_candidate_publication(&application);
             assert!(!matches!(
                 application.state(),
@@ -527,9 +701,7 @@ fn pending_save_retries_close_project_and_exit_after_its_receipt() {
             || (retirement == EditorSessionRetirement::ExitProcess && !exited))
             && Instant::now() < deadline
         {
-            exited |= application
-                .drive_editor_frame(Duration::ZERO, false, false)
-                .exit_ready();
+            exited |= application.advance(Duration::ZERO).exit_ready();
             std::thread::sleep(Duration::from_millis(1));
         }
         assert_eq!(application.state(), EditorApplicationState::ProjectManager);
@@ -567,9 +739,7 @@ fn pending_reopen_retries_close_project_and_exit_after_owner_publication() {
             || (retirement == EditorSessionRetirement::ExitProcess && !exited))
             && Instant::now() < deadline
         {
-            exited |= application
-                .drive_editor_frame(Duration::ZERO, false, false)
-                .exit_ready();
+            exited |= application.advance(Duration::ZERO).exit_ready();
             std::thread::sleep(Duration::from_millis(1));
         }
         assert_eq!(application.state(), EditorApplicationState::ProjectManager);
@@ -595,8 +765,7 @@ fn pending_reopen_replacement_waits_for_the_original_source_publication() {
     while application.state() == EditorApplicationState::OpeningReplacement
         && Instant::now() < deadline
     {
-        application.advance_project_open();
-        application.drive_editor_frame(Duration::ZERO, false, false);
+        application.advance(Duration::ZERO);
         std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(
@@ -652,11 +821,22 @@ fn reopen_completion_is_observed_without_repainting_unchanged_polls() {
 fn pending_save_replacement_retries_close_and_refreshes_the_prepared_source() {
     let fixture = PersistenceFixture::new();
     let mut application = fixture.open();
+    application.set_scene_preview_extent(nara::render::Extent2d::new(640, 480));
     queue_save(&mut application);
+    let geometry = application
+        .take_scene_preview_candidate()
+        .unwrap()
+        .geometry_revision();
     assert!(application.request_project_replacement(&fixture.root, Some("desktop".to_owned())));
+    application.advance(Duration::ZERO);
+    let maintained_geometry = application
+        .state
+        .published_mut()
+        .and_then(|project| project.session.take_editor_preview_candidate())
+        .map(|candidate| candidate.geometry_revision());
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
-        application.advance_project_open();
+        application.advance(Duration::ZERO);
         if matches!(
             application.state,
             super::EditorProductState::OpeningReplacement(OpeningReplacementState::Closing { .. })
@@ -669,8 +849,7 @@ fn pending_save_replacement_retries_close_and_refreshes_the_prepared_source() {
     while application.state() == EditorApplicationState::OpeningReplacement
         && Instant::now() < deadline
     {
-        application.advance_project_open();
-        application.drive_editor_frame(Duration::ZERO, false, false);
+        application.advance(Duration::ZERO);
         std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(
@@ -688,6 +867,11 @@ fn pending_save_replacement_retries_close_and_refreshes_the_prepared_source() {
             .any(|entity| entity.id == SceneEntityId::new("saved-before-retirement").unwrap())
     );
     close(&mut application);
+    assert_eq!(
+        maintained_geometry,
+        Some(geometry + 1),
+        "Preparing maintains the admitted Save through exactly one Session drive"
+    );
 }
 
 #[test]
@@ -825,10 +1009,7 @@ fn close(application: &mut EditorApplication) {
     let mut exited = application.request_exit().exit_ready();
     let deadline = Instant::now() + Duration::from_secs(10);
     while !exited && Instant::now() < deadline {
-        // Workspace Exit must drive the trusted Play lifecycle before physical Session close.
-        exited = application
-            .drive_editor_frame(Duration::ZERO, false, true)
-            .exit_ready();
+        exited = application.advance(Duration::ZERO).exit_ready();
         std::thread::sleep(Duration::from_millis(1));
     }
     assert!(exited, "the persistence fixture retained its session");

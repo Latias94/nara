@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "5138db0045620e65a6790cf60ed84f802b4de298d3b90cf5e57690c6f32951ef"
+source_fingerprint: "25b52b0c94fb88e70c2e2f286d02a8d3e673e3165beb94bd0b02865f7d426124"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "5138db0045620e65a6790cf60ed84f802b4de298d3b90cf5e57690c6f32
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `5138db0045620e65a6790cf60ed84f802b4de298d3b90cf5e57690c6f32951ef`
-- Immutable records: 942
+- Source fingerprint: `25b52b0c94fb88e70c2e2f286d02a8d3e673e3165beb94bd0b02865f7d426124`
+- Immutable records: 945
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,9 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Work Progress**: [Complete nested overlay target grammar and next production replacement gates](progress/2026-10/2026-10-26T065759Z-complete-nested-overlay-target-grammar-and-next-production-replacement-gates-630e9676fa7f496b9000e4aa4ef27f45.md) - Read-only owner analysis exposes mixed-origin target omissions and bounds the next durable grammar, source codec and source-history replacement without adopting a public format.
+- **Verification Evidence**: [One bounded Application no-action pass through Open and physical retirement](verification/2026-10/2026-10-26T063246Z-one-bounded-application-no-action-pass-through-open-and-physical-retirement-f8c6241efa2b48f8af54f1603482cd39.md) - Replace public frame/no-frame maintenance choreography with one bounded Application pass while preserving action evidence, quiet wakes and physical Exit completion.
+- **Verification Evidence**: [Complete-value projection comparison without source history or templates](verification/2026-10/2026-10-26T061353Z-complete-value-projection-comparison-without-source-history-or-templates-047bc67b5dec41c2a940091b39ceedba.md) - Share production full-value validation with a private history-free projection compiler; preserve lawful containers without selecting a durable format or public activation API.
 - **Work Progress**: [Typed Prefab origin merged and next owner refactors bounded](progress/2026-10/2026-10-26T060135Z-typed-prefab-origin-merged-and-next-owner-refactors-bounded-4fb257d72ad2415ea82c1412961c36f9.md) - Qualified origin and fault-delivery commits are on local main; complete-value projection admission and a single Application no-action pass remain bounded owner work.
 - **Verification Evidence**: [Retained Runtime fault delivery and Reference Game Exit driver correction](verification/2026-10/2026-10-26T052536Z-retained-runtime-fault-delivery-and-reference-game-exit-driver-correction-19b2541631464d8798e3fa47ace8bfca.md) - Separate already delivered execution faults from retirement failures while preserving typed fault data and physical Exit progress after Workspace retirement.
 - **Verification Evidence**: [Typed Prefab instance-addition provenance and complete consumer propagation](verification/2026-10/2026-10-26T041116Z-typed-prefab-instance-addition-provenance-and-complete-consumer-propagation-331ec66de92c4315971800928d8f2dc7.md) - Replace flattened base-source provenance with tagged instance-entry origins through expansion, retained custody, Runtime and opaque UI keys while retaining the current durable patch contract.
@@ -78,9 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Public Exit drivers retain maintenance after Workspace retirement](verification/2026-10/2026-10-26T022556Z-public-exit-drivers-retain-maintenance-after-workspace-retirement-2c1f097eeed04d499d81adc33d3232dd.md) - Corrected public and independent Exit callers, a deterministic held-worker regression, and successor clarification of earlier lifecycle and panel evidence.
 - **Verification Evidence**: [Bounded direct-member discovery and non-active panel query workflow](verification/2026-10/2026-10-26T004155Z-bounded-direct-member-discovery-and-panel-query-workflow-7003450c49204d8eba92ba90db765dc0.md) - Qualified one-level durable Record-member discovery, selection-independent Session/panel query forwarding, and an independently compiled non-active panel discover/read/prepare/retain/commit workflow.
 - **Verification Evidence**: [Startup preparation owner retry and final Application shutdown](verification/2026-10/2026-10-25T232708Z-startup-preparation-owner-retry-and-final-application-shutdown-4281deb3281042fc9095f7cf2e247c4b.md) - Bounded R4b standalone startup facility ownership, exact failure evidence, independent review and serial qualification.
-- **Verification Evidence**: [Reopen preparation failure fidelity before native source admission](verification/2026-10/2026-10-25T220113Z-reopen-preparation-failure-fidelity-before-native-source-admission-9e51c9e94971464ab4876bdf2ff2ff07.md) - Records the source-confirmed prior Reopen error-priority defect, bounded Scene/Prefab correction, unchanged public failure assertions and source-gated native callback ordering.
-- **Verification Evidence**: [Private lazy Editor tasks and whole Session physical close qualification](verification/2026-10/2026-10-25T213241Z-private-lazy-editor-tasks-and-whole-session-physical-close-qualification-4c62c82789e4449dba02bb60f145760c.md) - Binds the bounded Editor deployment and trusted Play close contract to actual owner, failure, public-consumer and native evidence, without closing all R4b or the foundation Goal.
-- **Subagent Finding**: [Startup preparation facility retry and final Host custody follow-up](subagents/2026-10/2026-10-25T210930Z-startup-preparation-facility-retry-and-final-host-custody-follow-up-8a1cb30c55e442498e0e752712d65439.md) - Source-grounded next bounded R4b design, distinguishing activation failure from ordinary pressure and whole Session cleanup from the separate Open Host.
 
 # Integration Notes
 

@@ -41,6 +41,14 @@ also continues physical maintenance after Workspace retirement. Exact verificati
 Application progress ergonomics belong to the record; no general fault bus or lifecycle redesign
 is introduced by this correction.
 
+The [ordinary Application progress successor](../../knowledge/engineering/verification/2026-10/2026-10-26T063246Z-one-bounded-application-no-action-pass-through-open-and-physical-retirement-f8c6241efa2b48f8af54f1603482cd39.md)
+provides one public bounded no-action pass across Open, Session and physical retirement.
+Native maintenance shares it without changing effects-only wake ownership; real submissions
+retain their own evidence and drive. Retained supervised owners progress during replacement,
+and failure cancellation publishes on the next pass rather than recursively driving again.
+Ordinary/public/Reference Game and selected actual Windows/DX12 scope belong to the linked
+record. Existing ADRs 0047/0118/0084 own these contracts; no universal lifecycle kernel is added.
+
 The [R4b activity-custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-25T155728Z-independent-task-activity-custody-and-shared-image-runtime-qualification-13caef5f8c39471aa58529789ae9c530.md)
 adds optional Host-owned Tasks facilities and independently closed activities. ADRs 0008/0052
 adopt scope-local admission/coalescing/cutoffs and physical-return accounting; 0082/0084 distinguish

@@ -182,9 +182,13 @@ impl QuietExitHost {
     fn check_quiet(&self, event_loop: &ActiveEventLoop) -> Result<(), String> {
         if let Phase::Quiet(baseline) = self.phase {
             self.retained_worker_and_owner(event_loop)?;
+            let current = self.presentation()?;
             check(
-                self.presentation()? == baseline,
-                "unchanged retirement delivered a redraw, frame or presentation after settling",
+                current == baseline,
+                &format!(
+                    "unchanged retirement delivered a redraw, frame or presentation after settling: baseline={baseline:?}, current={current:?}, wakes={}, deadline_wake={}",
+                    self.quiet_wakes, self.deadline_wake
+                ),
             )?;
         }
         Ok(())
@@ -250,20 +254,6 @@ impl QuietExitHost {
             self.show_after = None;
         }
 
-        if matches!(self.phase, Phase::Quiet(_)) && self.quiet_wakes >= 3 && self.deadline_wake {
-            check(
-                !self.host.application.request_exit().exit_ready(),
-                "Exit became ready while the startup worker was held",
-            )?;
-            self.release
-                .take()
-                .ok_or("the worker was already released")?
-                .send(())
-                .map_err(|error| error.to_string())?;
-            self.phase = Phase::Released;
-            self.deadline = Instant::now() + RETIREMENT_TIMEOUT;
-        }
-
         self.host.about_to_wait(event_loop);
         self.check_quiet(event_loop)?;
         if event_loop.exiting() {
@@ -307,6 +297,22 @@ impl QuietExitHost {
             self.maintenance_deadline = maintenance;
         } else {
             self.maintenance_deadline = None;
+        }
+        if matches!(self.phase, Phase::Quiet(_)) && self.quiet_wakes >= 3 {
+            // The third actual maintenance wake completes the unchanged-state proof. Waiting
+            // for a fourth can cross the real join deadline and legitimately change its report.
+            self.check_quiet(event_loop)?;
+            check(
+                !self.host.application.request_exit().exit_ready(),
+                "Exit became ready while the startup worker was held",
+            )?;
+            self.release
+                .take()
+                .ok_or("the worker was already released")?
+                .send(())
+                .map_err(|error| error.to_string())?;
+            self.phase = Phase::Released;
+            self.deadline = Instant::now() + RETIREMENT_TIMEOUT;
         }
         self.deadline_wake = false;
 

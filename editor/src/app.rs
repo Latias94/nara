@@ -153,7 +153,7 @@ impl EditorApplicationOpenError {
     }
 }
 
-/// Result of consuming one native redraw through the exact Editor action boundary.
+/// Observation from one Application owner pass or action submission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EditorApplicationUpdate {
     actions_observed: bool,
@@ -594,10 +594,51 @@ impl EditorApplication {
         }
     }
 
+    /// Advances one bounded Application owner pass without submitting actions.
+    ///
+    /// Drives the current Open, workspace or retirement owner, including maintenance when
+    /// `real_delta` is zero or no workspace frame remains. A pass offers the delta to at most
+    /// one Session drive and does not drive a successor published during that pass.
+    /// Resolve dirty-document decisions through ordinary action submission. Only `exit_ready`
+    /// proves that a requested process Exit has physically completed.
+    pub fn advance(&mut self, real_delta: Duration) -> EditorApplicationUpdate {
+        self.advance_with_runtime(real_delta, true)
+    }
+
+    pub(crate) fn advance_with_runtime(
+        &mut self,
+        real_delta: Duration,
+        drive_runtime: bool,
+    ) -> EditorApplicationUpdate {
+        match &self.state {
+            EditorProductState::OpeningInitial(_)
+            | EditorProductState::OpeningReplacement(
+                OpeningReplacementState::Preparing { .. }
+                | OpeningReplacementState::Refreshing { .. }
+                | OpeningReplacementState::Closing {
+                    close_started: false,
+                    ..
+                },
+            ) => self.advance_project_open_with_runtime(real_delta, drive_runtime),
+            // Preparing may drive persistence, and starting replacement Close drives its
+            // retained Session. Never append a second frame drive to either owner step.
+            _ => self.drive_editor_frame(real_delta, false, drive_runtime),
+        }
+    }
+
     /// Advances at most one bounded project-open phase at the current frame boundary.
     /// Also advances retained Open Host retirement after the last workspace frame is gone.
+    /// Ordinary no-action callers should use `advance` for the complete Application lifecycle.
     #[doc(hidden)]
     pub fn advance_project_open(&mut self) -> EditorApplicationUpdate {
+        self.advance_project_open_with_runtime(Duration::ZERO, true)
+    }
+
+    fn advance_project_open_with_runtime(
+        &mut self,
+        real_delta: Duration,
+        drive_runtime: bool,
+    ) -> EditorApplicationUpdate {
         let cleanup_changed = self.advance_failed_open_retirement();
         if self.final_exit_committed {
             return self.finish_process_exit(cleanup_changed);
@@ -611,15 +652,16 @@ impl EditorApplication {
                 let (state, progressed) = self.advance_initial_open(opening);
                 self.state = state;
                 EditorApplicationUpdate {
-                    actions_observed: progressed,
+                    actions_observed: cleanup_changed || progressed,
                     exit_ready: false,
                 }
             }
             EditorProductState::OpeningReplacement(replacement) => {
-                let (state, progressed) = self.advance_replacement_open(replacement);
+                let (state, progressed) =
+                    self.advance_replacement_open(replacement, real_delta, drive_runtime);
                 self.state = state;
                 EditorApplicationUpdate {
-                    actions_observed: progressed,
+                    actions_observed: cleanup_changed || progressed,
                     exit_ready: false,
                 }
             }
@@ -1486,7 +1528,9 @@ impl EditorApplication {
         self.session_close_retry_at = None;
         let update = match &mut self.state {
             EditorProductState::AuthoringReady(project)
-            | EditorProductState::AuthoringDegraded(project) => request_exit_on_project(project),
+            | EditorProductState::AuthoringDegraded(project) => {
+                request_exit_on_project(project, Duration::ZERO, true)
+            }
             EditorProductState::ProjectManager(_)
             | EditorProductState::OpeningInitial(_)
             | EditorProductState::OpeningReplacement(_)
@@ -1643,15 +1687,15 @@ impl EditorApplication {
             {
                 // Persistence may have kept the initial Exit request Busy. Retain the user's
                 // retirement intent and admit it only after that operation has settled.
-                let update = match &mut self.state {
+                let dispatch = match &mut self.state {
                     EditorProductState::AuthoringReady(project)
                     | EditorProductState::AuthoringDegraded(project) => {
-                        request_exit_on_project(project)
+                        dispatch_exit_on_project(project)
                     }
-                    _ => EditorApplicationUpdate::idle(),
+                    _ => EditorApplicationDispatch::default(),
                 };
                 EditorApplicationUpdate {
-                    actions_observed: actions_observed || update.actions_observed(),
+                    actions_observed: actions_observed || dispatch.actions_observed(),
                     exit_ready: false,
                 }
             }
@@ -1665,8 +1709,8 @@ impl EditorApplication {
     /// Requests process Exit, retaining the Open Host until its physical shutdown completes.
     ///
     /// A completed Session can release its frame before this operation returns `exit_ready`.
-    /// Continue driving a retained frame through `submit_and_drive`, or call
-    /// `advance_project_open` when no frame remains. Repeating this request does not bypass
+    /// Continue with `advance`, resolving any dirty-document decision through ordinary action
+    /// submission. Repeating this request does not bypass
     /// dirty-document decisions or restore admission after final Exit commits.
     pub fn request_exit(&mut self) -> EditorApplicationUpdate {
         if self.final_exit_committed {
@@ -1782,39 +1826,46 @@ impl EditorApplication {
     fn advance_replacement_open(
         &mut self,
         replacement: OpeningReplacementState,
+        real_delta: Duration,
+        drive_runtime: bool,
     ) -> (EditorProductState, bool) {
         match replacement {
             OpeningReplacementState::Preparing {
                 mut retained,
                 mut opening,
             } => {
+                let external_observed = drive_supervised_play_owner(&mut retained, Instant::now());
                 // Finish admitted persistence before preparing a replacement, so its source
                 // and the retained workspace cannot straddle two publication attempts.
-                if matches!(&opening.step, OpeningProjectStep::ProjectRoot)
-                    && retained.session.persistence_view().operation().is_some()
-                {
-                    let observed = drive_project_frame(&mut retained, Duration::ZERO, false);
-                    if retained
+                let persistence_pending = matches!(&opening.step, OpeningProjectStep::ProjectRoot)
+                    && retained.session.persistence_view().operation().is_some();
+                let frame_observed = if persistence_pending || external_observed {
+                    drive_project_frame(&mut retained, real_delta, false)
+                } else {
+                    false
+                };
+                let observed = external_observed || frame_observed;
+                if persistence_pending
+                    && retained
                         .session
                         .current_frame()
                         .persistence()
                         .operation()
                         .is_some()
-                    {
-                        return (
-                            EditorProductState::OpeningReplacement(
-                                OpeningReplacementState::Preparing { retained, opening },
-                            ),
-                            observed,
-                        );
-                    }
+                {
+                    return (
+                        EditorProductState::OpeningReplacement(
+                            OpeningReplacementState::Preparing { retained, opening },
+                        ),
+                        observed,
+                    );
                 }
                 match self.advance_opening_step(&mut opening) {
                     OpenStepResult::Pending(changed) => (
                         EditorProductState::OpeningReplacement(
                             OpeningReplacementState::Preparing { retained, opening },
                         ),
-                        changed,
+                        observed || changed,
                     ),
                     OpenStepResult::Rejected(_) => {
                         (EditorProductState::from_published(retained), true)
@@ -1833,33 +1884,40 @@ impl EditorApplication {
                 }
             }
             OpeningReplacementState::Refreshing {
-                retained,
+                mut retained,
                 mut opening,
-            } => match self.advance_opening_step(&mut opening) {
-                OpenStepResult::Pending(changed) => (
-                    EditorProductState::OpeningReplacement(OpeningReplacementState::Refreshing {
-                        retained,
-                        opening,
-                    }),
-                    changed,
-                ),
-                OpenStepResult::Rejected(_) => {
-                    let mut retained = retained;
-                    let _ = abort_prepared_exit(&mut retained);
-                    (EditorProductState::from_published(retained), true)
+            } => {
+                let external_observed = drive_supervised_play_owner(&mut retained, Instant::now());
+                let progress = self.advance_opening_step(&mut opening);
+                // Rejection publishes AbortPrepared through its own single Session drive below.
+                if external_observed && !matches!(&progress, OpenStepResult::Rejected(_)) {
+                    drive_project_frame(&mut retained, real_delta, false);
                 }
-                OpenStepResult::Opened(candidate) => (
-                    EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
-                        entry_generation: opening.entry_generation,
-                        attempt_generation: opening.attempt_generation,
-                        retained,
-                        candidate,
-                        close_started: true,
-                        save_attempted: false,
-                    }),
-                    true,
-                ),
-            },
+                match progress {
+                    OpenStepResult::Pending(changed) => (
+                        EditorProductState::OpeningReplacement(
+                            OpeningReplacementState::Refreshing { retained, opening },
+                        ),
+                        external_observed || changed,
+                    ),
+                    OpenStepResult::Rejected(_) => {
+                        let mut retained = retained;
+                        let _ = abort_prepared_exit(&mut retained);
+                        (EditorProductState::from_published(retained), true)
+                    }
+                    OpenStepResult::Opened(candidate) => (
+                        EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
+                            entry_generation: opening.entry_generation,
+                            attempt_generation: opening.attempt_generation,
+                            retained,
+                            candidate,
+                            close_started: true,
+                            save_attempted: false,
+                        }),
+                        true,
+                    ),
+                }
+            }
             OpeningReplacementState::Closing {
                 entry_generation,
                 attempt_generation,
@@ -1881,7 +1939,8 @@ impl EditorApplication {
                         false,
                     );
                 }
-                let update = request_exit_on_project(&mut retained);
+                let external_observed = drive_supervised_play_owner(&mut retained, Instant::now());
+                let update = request_exit_on_project(&mut retained, real_delta, drive_runtime);
                 let frame = retained.session.current_frame();
                 let close_started = frame.workspace_intent().intent()
                     == Some(EditorWorkspaceIntent::Exit)
@@ -1900,7 +1959,7 @@ impl EditorApplication {
                         close_started,
                         save_attempted,
                     }),
-                    update.actions_observed(),
+                    external_observed || update.actions_observed(),
                 )
             }
         }
@@ -2007,12 +2066,16 @@ impl EditorApplication {
                 self.state = EditorProductState::from_published(retained);
                 actions_observed = true;
             }
-            _ if persistence_save_failed && cancel_pending_exit(&mut retained) => {
-                self.session_close_retry_at = None;
-                self.state = EditorProductState::from_published(retained);
-                actions_observed = true;
-            }
             _ if persistence_save_failed => {
+                // This pass already drove the Session. Publish the cancellation on the next
+                // pass before restoring the incumbent, rather than driving it a second time.
+                if let Some(prompt) = frame.workspace_intent().decision_prompt() {
+                    let dispatch = dispatch_workspace_intent_action(
+                        &mut retained,
+                        prompt.resolve(nara::tooling::EditorCloseDecision::Cancel),
+                    );
+                    actions_observed |= dispatch.actions_observed();
+                }
                 self.state =
                     EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
                         entry_generation,
@@ -2443,7 +2506,20 @@ fn drive_project_frame(
         || before.authoring_retirement_pending() != after.authoring_retirement_pending()
 }
 
-fn request_exit_on_project(project: &mut PublishedEditorProject) -> EditorApplicationUpdate {
+fn request_exit_on_project(
+    project: &mut PublishedEditorProject,
+    real_delta: Duration,
+    drive_runtime: bool,
+) -> EditorApplicationUpdate {
+    let dispatch = dispatch_exit_on_project(project);
+    let frame_observed = drive_project_frame(project, real_delta, drive_runtime);
+    EditorApplicationUpdate {
+        actions_observed: dispatch.actions_observed() || frame_observed,
+        exit_ready: false,
+    }
+}
+
+fn dispatch_exit_on_project(project: &mut PublishedEditorProject) -> EditorApplicationDispatch {
     let frame = project.session.current_frame();
     let mut actions = Vec::with_capacity(2);
     if frame.workspace_intent().intent().is_none() {
@@ -2456,15 +2532,10 @@ fn request_exit_on_project(project: &mut PublishedEditorProject) -> EditorApplic
             EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::Exit),
         ));
     }
-    let dispatch = if actions.is_empty() {
+    if actions.is_empty() {
         EditorApplicationDispatch::default()
     } else {
         dispatch_project_actions(project, EditorActionBatch::new(frame.revision(), actions))
-    };
-    let frame_observed = drive_project_frame(project, Duration::ZERO, true);
-    EditorApplicationUpdate {
-        actions_observed: dispatch.actions_observed() || frame_observed,
-        exit_ready: false,
     }
 }
 

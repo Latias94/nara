@@ -169,12 +169,19 @@ The returned observations stay associated with that call across later drives and
 panel callbacks. Save/Play request admission still needs its owning asynchronous completion
 observation; an Accepted request can later fail. Ordered actions are not an atomic transaction.
 
-After requesting process Exit, keep driving until an update reports `exit_ready()`. Workspace
-retirement can remove `current_frame()` before the retained Open Host has physically joined its
-facilities. With a frame, submit against its current revision and resolve any ordinary dirty
-document decision; without a frame, continue `advance_project_open()`. Frame absence, an accepted
-Exit action and a completed Session are not process-exit completion. A poll-only driver must not
-issue another Exit to hide a rejected original request.
+For ordinary progress without actions, call `application.advance(real_delta)`. Each call advances
+one bounded owner pass through initial Open, a retained project replacement, the published
+workspace or physical retirement. Zero delta still performs maintenance. A pass drives at most
+one Session frame and does not drive a successor it just published. Action submissions already
+include their own drive; use `advance` at the next maintenance boundary, not as an extra step
+after each submission.
+
+After requesting process Exit, keep calling `advance` until an update reports `exit_ready()`.
+Resolve any ordinary dirty-document decision by submitting against the current frame revision.
+Workspace retirement can remove `current_frame()` before the retained Open Host has physically
+joined its facilities; `advance` continues that same request without a frame. Frame absence, an
+accepted Exit action and a completed Session are not process-exit completion. A poll-only driver
+must not issue another Exit to hide a rejected original request.
 
 For Save/Reopen, retain the admitted `EditorPersistenceAttemptId` and match the later Pending or
 Terminal observation to that attempt. Dismiss a terminal with the identity actually displayed,

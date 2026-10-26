@@ -83,13 +83,8 @@ fn direct_submission_retains_each_action_result_across_later_drives() {
         ]
     ));
     let retained = submission.actions().to_vec();
-    let current = current_frame(&application);
-    let empty = application.submit_and_drive(
-        EditorActionBatch::new(current.revision(), []),
-        Duration::ZERO,
-    );
-    assert!(empty.actions().is_empty());
-    assert!(!empty.update().actions_observed());
+    let advanced = application.advance(Duration::ZERO);
+    assert!(!advanced.actions_observed());
     assert_eq!(submission.actions(), retained);
     assert!(active_scene_has_entity(
         &current_frame(&application),
@@ -110,7 +105,7 @@ fn direct_submission_reports_whole_batch_rejection_without_dispatch() {
     let frame = current_frame(&application);
     let document = frame.workspace().active_document.unwrap();
     let received = frame.revision();
-    application.submit_and_drive(EditorActionBatch::new(received, []), Duration::ZERO);
+    application.advance(Duration::ZERO);
     let expected = current_frame(&application).revision();
     let submission = application.submit_and_drive(
         EditorActionBatch::new(
@@ -411,6 +406,13 @@ fn dirty_exit_cancel_preserves_the_session_and_discard_closes_it() {
             intent: EditorWorkspaceIntent::Exit,
         })
     ));
+    for _ in 0..3 {
+        assert!(!application.advance(Duration::ZERO).exit_ready());
+        assert_eq!(
+            active_scene_state(&current_frame(&application)),
+            active_scene_state(&cancelled_frame)
+        );
+    }
 
     let second_request = application.request_exit();
     let awaiting_discard = current_frame(&application);
@@ -467,19 +469,13 @@ fn final_exit_maintenance_outlives_the_workspace_frame() {
     assert_eq!(probe.started(), 1);
     assert!(!application.request_exit().exit_ready());
     let deadline = Instant::now() + Duration::from_secs(10);
-    while let Some(frame) = application.current_frame() {
+    while application.current_frame().is_some() {
         assert!(Instant::now() < deadline, "the workspace did not retire");
-        assert!(
-            !application
-                .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
-                .update()
-                .exit_ready()
-        );
+        assert!(!application.advance(Duration::ZERO).exit_ready());
         std::thread::sleep(Duration::from_millis(1));
     }
     for _ in 0..3 {
-        assert!(!application.advance_project_open().exit_ready());
-        assert!(!application.request_exit().exit_ready());
+        assert!(!application.advance(Duration::ZERO).exit_ready());
         assert!(application.current_frame().is_none());
     }
     assert_eq!(probe.exited(), 0);
@@ -487,7 +483,9 @@ fn final_exit_maintenance_outlives_the_workspace_frame() {
     assert!(drive_process_exit_to_terminal(&mut application));
     assert_eq!(probe.exited(), 1);
     assert!(application.request_exit().exit_ready());
-    assert!(!application.advance_project_open().actions_observed());
+    let completed = application.advance(Duration::ZERO);
+    assert!(completed.exit_ready());
+    assert!(!completed.actions_observed());
 }
 
 #[test]
@@ -1087,8 +1085,48 @@ fn retry_and_replacement_close_are_failure_atomic() {
                 .resolve(EditorCloseDecision::Save),
         )],
     );
-    let _ = application.submit_and_drive(save, Duration::ZERO);
-    settle_persistence(&mut application);
+    let failed_save_submission = application.submit_and_drive(save, Duration::ZERO);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while current_frame(&application)
+        .persistence()
+        .operation()
+        .is_some()
+    {
+        assert!(Instant::now() < deadline, "replacement Save did not settle");
+        application.advance(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let failure_frame = current_frame(&application);
+    let failure_still_replacing = application.state() == EditorApplicationState::OpeningReplacement;
+    let failure_phase = failure_frame.workspace_intent().phase();
+    application.advance(Duration::ZERO);
+    let cancel_frame = current_frame(&application);
+    let cancelled_on_next_pass = application.state() == EditorApplicationState::AuthoringReady;
+    assert!(
+        failure_still_replacing,
+        "Save failure must not recursively publish Cancel"
+    );
+    assert_eq!(
+        failure_phase,
+        Some(EditorWorkspaceIntentPhase::AwaitingDecision)
+    );
+    assert!(
+        cancelled_on_next_pass,
+        "the following pass publishes Cancel and restores the incumbent"
+    );
+    assert_eq!(failure_frame.persistence(), cancel_frame.persistence());
+    assert!(matches!(
+        cancel_frame.workspace_intent().result(),
+        Some(EditorWorkspaceIntentResult::Cancelled {
+            intent: EditorWorkspaceIntent::Exit
+        })
+    ));
+    assert!(matches!(
+        failed_save_submission.actions(),
+        [EditorApplicationActionDispatch::Dispatched(
+            EditorActionOutcome::WorkspaceIntent(_)
+        )]
+    ));
     assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
     assert_eq!(
         active_scene_state(&current_frame(&application)),
@@ -1462,8 +1500,7 @@ fn settle_persistence(application: &mut EditorApplication) {
         .is_some()
     {
         assert!(Instant::now() < deadline, "persistence did not settle");
-        let frame = current_frame(application);
-        application.submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
+        application.advance(Duration::ZERO);
         std::thread::sleep(Duration::from_millis(1));
     }
 }
@@ -1484,18 +1521,23 @@ fn close_direct_application(application: &mut EditorApplication) {
     }
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let update = if let Some(frame) = application.current_frame() {
-            let action = frame.workspace_intent().decision_prompt().map(|prompt| {
-                EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
-            });
+        let decision = application.current_frame().and_then(|frame| {
+            frame.workspace_intent().decision_prompt().map(|prompt| {
+                (
+                    frame.revision(),
+                    prompt.resolve(EditorCloseDecision::Discard),
+                )
+            })
+        });
+        let update = if let Some((revision, decision)) = decision {
             application
                 .submit_and_drive(
-                    EditorActionBatch::new(frame.revision(), action),
+                    EditorActionBatch::new(revision, [EditorAction::WorkspaceIntent(decision)]),
                     Duration::ZERO,
                 )
                 .update()
         } else {
-            application.advance_project_open()
+            application.advance(Duration::ZERO)
         };
         if update.exit_ready() {
             return;
@@ -1522,7 +1564,7 @@ fn drive_open_to_terminal(application: &mut EditorApplication) {
             | EditorApplicationState::AuthoringDegraded
             | EditorApplicationState::Recovery => return,
             EditorApplicationState::OpeningInitial | EditorApplicationState::OpeningReplacement => {
-                let _ = application.advance_project_open();
+                let _ = application.advance(Duration::ZERO);
             }
             EditorApplicationState::ProjectManager => {
                 panic!("the native shell must arm the project-open request")
@@ -1536,7 +1578,7 @@ fn drive_open_to_terminal(application: &mut EditorApplication) {
 fn drive_replacement_to_close_decision(application: &mut EditorApplication) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
-        let _ = application.advance_project_open();
+        let _ = application.advance(Duration::ZERO);
         if application.state() == EditorApplicationState::OpeningReplacement
             && current_frame(application).workspace_intent().phase()
                 == Some(EditorWorkspaceIntentPhase::AwaitingDecision)
@@ -1556,13 +1598,7 @@ fn drive_replacement_to_terminal(application: &mut EditorApplication) {
                 return;
             }
             EditorApplicationState::OpeningReplacement => {
-                let _ = application.advance_project_open();
-                if let Some(frame) = application.current_frame() {
-                    let _ = application.submit_and_drive(
-                        EditorActionBatch::new(frame.revision(), []),
-                        Duration::ZERO,
-                    );
-                }
+                let _ = application.advance(Duration::ZERO);
             }
             EditorApplicationState::Recovery => return,
             EditorApplicationState::ProjectManager | EditorApplicationState::OpeningInitial => {
@@ -1580,9 +1616,7 @@ fn drive_session_retirement_to_manager(application: &mut EditorApplication) {
         if application.state() == EditorApplicationState::ProjectManager {
             return;
         }
-        let frame = current_frame(application);
-        let _ = application
-            .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
+        let _ = application.advance(Duration::ZERO);
         std::thread::sleep(Duration::from_millis(1));
     }
     panic!("the session retirement did not return to Project Manager")
@@ -1591,13 +1625,7 @@ fn drive_session_retirement_to_manager(application: &mut EditorApplication) {
 fn drive_process_exit_to_terminal(application: &mut EditorApplication) -> bool {
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
-        let update = if let Some(frame) = application.current_frame() {
-            application
-                .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
-                .update()
-        } else {
-            application.advance_project_open()
-        };
+        let update = application.advance(Duration::ZERO);
         if update.exit_ready() {
             return true;
         }

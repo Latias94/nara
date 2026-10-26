@@ -2148,11 +2148,6 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
             return;
         }
         let now = Instant::now();
-        let open_update = self.application.advance_project_open();
-        if open_update.exit_ready() {
-            self.exit_after_native_retirement(event_loop);
-            return;
-        }
         let play_before = self
             .application
             .current_frame()
@@ -2174,9 +2169,7 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
         if running && let Some(native) = &mut self.native {
             native.input.mark_presented_stale();
         }
-        let update =
-            self.application
-                .drive_editor_frame(delta, open_update.actions_observed(), running);
+        let update = self.application.advance_with_runtime(delta, running);
         if update.exit_ready() {
             self.exit_after_native_retirement(event_loop);
             return;
