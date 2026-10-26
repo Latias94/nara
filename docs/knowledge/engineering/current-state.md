@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "de27843a044a35d1f41ae093f1e0e08d215526ffc4d3a1b63fb2445f5924e644"
+source_fingerprint: "5138db0045620e65a6790cf60ed84f802b4de298d3b90cf5e57690c6f32951ef"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "de27843a044a35d1f41ae093f1e0e08d215526ffc4d3a1b63fb2445f592
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `de27843a044a35d1f41ae093f1e0e08d215526ffc4d3a1b63fb2445f5924e644`
-- Immutable records: 941
+- Source fingerprint: `5138db0045620e65a6790cf60ed84f802b4de298d3b90cf5e57690c6f32951ef`
+- Immutable records: 942
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Work Progress**: [Typed Prefab origin merged and next owner refactors bounded](progress/2026-10/2026-10-26T060135Z-typed-prefab-origin-merged-and-next-owner-refactors-bounded-4fb257d72ad2415ea82c1412961c36f9.md) - Qualified origin and fault-delivery commits are on local main; complete-value projection admission and a single Application no-action pass remain bounded owner work.
 - **Verification Evidence**: [Retained Runtime fault delivery and Reference Game Exit driver correction](verification/2026-10/2026-10-26T052536Z-retained-runtime-fault-delivery-and-reference-game-exit-driver-correction-19b2541631464d8798e3fa47ace8bfca.md) - Separate already delivered execution faults from retirement failures while preserving typed fault data and physical Exit progress after Workspace retirement.
 - **Verification Evidence**: [Typed Prefab instance-addition provenance and complete consumer propagation](verification/2026-10/2026-10-26T041116Z-typed-prefab-instance-addition-provenance-and-complete-consumer-propagation-331ec66de92c4315971800928d8f2dc7.md) - Replace flattened base-source provenance with tagged instance-entry origins through expansion, retained custody, Runtime and opaque UI keys while retaining the current durable patch contract.
 - **Verification Evidence**: [Private Prefab structure and reference comparison with owner-boundary counterexamples](verification/2026-10/2026-10-26T034052Z-private-prefab-structure-and-reference-comparison-with-owner-boundary-counterexamples-c823420a09444940993ed9d948a28273.md) - Executed nested structure and explicit reference binding comparison, corrected default namespace and mixed-owner failures, and rejected lossy full-component lowering without changing production Prefab storage.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Reopen preparation failure fidelity before native source admission](verification/2026-10/2026-10-25T220113Z-reopen-preparation-failure-fidelity-before-native-source-admission-9e51c9e94971464ab4876bdf2ff2ff07.md) - Records the source-confirmed prior Reopen error-priority defect, bounded Scene/Prefab correction, unchanged public failure assertions and source-gated native callback ordering.
 - **Verification Evidence**: [Private lazy Editor tasks and whole Session physical close qualification](verification/2026-10/2026-10-25T213241Z-private-lazy-editor-tasks-and-whole-session-physical-close-qualification-4c62c82789e4449dba02bb60f145760c.md) - Binds the bounded Editor deployment and trusted Play close contract to actual owner, failure, public-consumer and native evidence, without closing all R4b or the foundation Goal.
 - **Subagent Finding**: [Startup preparation facility retry and final Host custody follow-up](subagents/2026-10/2026-10-25T210930Z-startup-preparation-facility-retry-and-final-host-custody-follow-up-8a1cb30c55e442498e0e752712d65439.md) - Source-grounded next bounded R4b design, distinguishing activation failure from ordinary pressure and whole Session cleanup from the separate Open Host.
-- **Session Handoff**: [Initial authoring custody merged and private lazy Editor facilities design](sessions/2026-10/2026-10-25T195253Z-initial-authoring-custody-merged-and-private-lazy-editor-facilities-design-d80d2ecede8147fab5bcdedddd4a37d2.md) - Pins the qualified initial construction/Open custody stage to main and the next bounded private-lazy Editor deployment, without reducing the full foundation Goal.
 
 # Integration Notes
 
