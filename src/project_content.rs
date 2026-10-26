@@ -2727,7 +2727,7 @@ fn tilemap_membership_error(
             diagnostic,
             DiagnosticField::public_identifier(
                 field_key("source-entity-id"),
-                PublicDiagnosticIdentifier::new(source.source_entity_id().as_str()).unwrap_or_else(
+                PublicDiagnosticIdentifier::new(source.local_entity_id().as_str()).unwrap_or_else(
                     |_| {
                         PublicDiagnosticIdentifier::new("invalid-source-entity-id")
                             .expect("literal is valid")

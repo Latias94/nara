@@ -15,9 +15,9 @@ use nara_reflect::{
 };
 
 use crate::{
-    ExpandedSceneDocument, PrefabProjectionPath, SceneDocument, SceneEntityId,
-    SceneEntityProvenance, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
-    SourceDocumentKey, SourceDocumentKind,
+    ExpandedSceneDocument, PrefabProjectionPath, PrefabProjectionStep, SceneDocument,
+    SceneEntityId, SceneEntityProvenance, SceneEntityRecord, ScenePatchDocument,
+    ScenePatchOperation, SourceDocumentKey, SourceDocumentKind,
     diagnostics::{
         error as diagnostic_error, usize_to_u64, with_asset_ref, with_codec_error,
         with_entity_reference_rewrite_error, with_migration_error, with_public_locator,
@@ -26,7 +26,7 @@ use crate::{
     patch::{
         scene_entities_source_value_cost, scene_entity_component_value_cost, scene_patch_value_cost,
     },
-    provenance::{provenance_asset_ref_bytes, provenance_entry_bytes},
+    provenance::{provenance_asset_ref_bytes, provenance_entry_bytes, provenance_string_bytes},
     validation::{
         preflight_scene_with_context, reference_traversal_limits, validate_scene_structure,
     },
@@ -928,6 +928,9 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             return Vec::new();
         }
 
+        let Some(additions) = self.override_additions(&overrides, anchor_id, &source) else {
+            return Vec::new();
+        };
         let mut source_document = prefab.instantiate();
         let structure = validate_scene_structure(&source_document);
         if structure.has_errors() {
@@ -973,26 +976,39 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
                 break;
             }
             let is_root = root_ids.contains(&entity.id);
-            let provenance_bytes = PrefabProjectionPath::extended_allocation_bytes(
-                parent_projection,
-                anchor_id,
-                &source,
-                canonical_key,
-                &entity.id,
-            )
-            .and_then(|bytes| {
-                bytes.checked_add(provenance_entry_bytes(&entity_ids[&entity.id], &entity.id)?)
-            });
+            let added = additions.contains(&entity.id);
+            let step_bytes = if added {
+                PrefabProjectionStep::addition_allocation_bytes(&entity.id)
+            } else {
+                PrefabProjectionStep::source_allocation_bytes(&source, canonical_key, &entity.id)
+            };
+            let provenance_bytes = step_bytes
+                .and_then(|step_bytes| {
+                    PrefabProjectionPath::extended_allocation_bytes(
+                        parent_projection,
+                        anchor_id,
+                        step_bytes,
+                    )
+                })
+                .and_then(|bytes| {
+                    bytes.checked_add(provenance_entry_bytes(&entity_ids[&entity.id], &entity.id)?)
+                });
             if !self.reserve_provenance_bytes(provenance_bytes, Some(anchor_id), Some(&source)) {
                 break;
             }
-            let projection = PrefabProjectionPath::from_resolved_step(
-                parent_projection,
-                anchor_id,
-                &source,
-                canonical_key,
-                &entity.id,
-            );
+            let step = if added {
+                PrefabProjectionStep::InstanceAddition {
+                    entity: entity.id.clone(),
+                }
+            } else {
+                PrefabProjectionStep::SourceEntity {
+                    source_document: source.clone(),
+                    canonical_source: canonical_key.clone(),
+                    entity: entity.id.clone(),
+                }
+            };
+            let projection =
+                PrefabProjectionPath::from_resolved_step(parent_projection, anchor_id, step);
             self.expand_prefab_entity(anchor_id, entity, is_root, projection, &entity_ids, output);
         }
 
@@ -1001,6 +1017,38 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             return Vec::new();
         }
         roots.iter().map(|root| entity_ids[root].clone()).collect()
+    }
+
+    fn override_additions(
+        &mut self,
+        overrides: &ScenePatchDocument,
+        anchor: &SceneEntityId,
+        source: &AssetRef,
+    ) -> Option<BTreeSet<SceneEntityId>> {
+        // Creation intent, not final-ID difference, owns a remove-and-recreate record too.
+        let records = overrides
+            .operations
+            .iter()
+            .filter_map(|operation| match operation {
+                ScenePatchOperation::AddEntity { entity, .. } => Some((entity, &[][..])),
+                ScenePatchOperation::RestoreEntity {
+                    entity,
+                    descendants,
+                    ..
+                } => Some((entity, descendants.as_slice())),
+                _ => None,
+            })
+            .flat_map(|(entity, descendants)| std::iter::once(entity).chain(descendants));
+        let bytes = records.clone().try_fold(0usize, |bytes, record| {
+            bytes
+                .checked_add(std::mem::size_of::<SceneEntityId>())?
+                .checked_add(6 * std::mem::size_of::<usize>())?
+                .checked_add(provenance_string_bytes(record.id.as_str())?)
+        });
+        if !self.reserve_provenance_bytes(bytes, Some(anchor), Some(source)) {
+            return None;
+        }
+        Some(records.map(|record| record.id.clone()).collect())
     }
 
     fn allocate_projected_entity_ids(
@@ -1057,7 +1105,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         let Some(original_value_cost) = self.reserve_materialized_entity(&entity) else {
             return;
         };
-        let source_entity_id = entity.id.clone();
+        let local_entity_id = entity.id.clone();
         let prefab_instance = entity.prefab.take();
         let current_generated_bytes = self.usage.generated_identifier_bytes;
         let single_limit = self.options.limits.single_generated_identifier_bytes();
@@ -1254,7 +1302,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         }
         self.provenance.insert(
             entity.id.clone(),
-            SceneEntityProvenance::projected(source_entity_id, projection),
+            SceneEntityProvenance::projected(local_entity_id, projection),
         );
         output.push(entity);
     }

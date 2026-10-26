@@ -310,8 +310,7 @@ impl PreparedScenePublication {
                 context: Arc::clone(&occurrence.context),
                 instance_id,
                 entity_id: entity_id.clone(),
-                source_entity_id: source.source_entity_id().clone(),
-                projection_path: source.projection_path().cloned(),
+                provenance: source.clone(),
             });
         }
         finalization.hierarchy.commit(world);

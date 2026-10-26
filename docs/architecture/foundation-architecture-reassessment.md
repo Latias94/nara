@@ -324,7 +324,9 @@ The [Scene-owned overlay design](prefab-overlay-design.md) records private scala
 structural/reference comparisons before the production replacement. It separates base evidence
 from target identity, preserves explicit equal-value pins, selects version-bound reference-slot
 binding and normalized placement cohorts, and records full-value/provenance/publication gaps
-that still block a production format freeze. The editor workflow follows the
+that block a production format freeze. The subsequent scoped production correction carries typed
+source/addition ancestry through existing Scene/Runtime/UI keys without switching durable storage;
+new overlay compiler and source repair/history qualification remain separate. The editor workflow follows the
 [Unity/Godot ownership study](../research/2026-10-26-unity-godot-prefab-editor-ownership.md):
 selection, instance override, source editing, explicit Apply destination and restoring inheritance
 must remain distinct author concepts; custom Inspector controls must not own another Undo system.

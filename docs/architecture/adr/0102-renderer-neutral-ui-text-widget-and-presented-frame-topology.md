@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Last Revised**: 2026-10-25
+**Last Revised**: 2026-10-26
 **Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline; 2026-08-10 by the UIF-U5 public-inventory and Host-authority audit; 2026-08-12 by the UIFD immutable dynamic-text projection correction; 2026-10-25 by the complete source/occurrence/placement key adoption
 **Owner**: UI authoring, text, widget behavior, input routing, presentation packets, and platform adapters
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
@@ -98,6 +98,13 @@ flowchart LR
   or omit identity axes. Runtime-created roots and
   nodes require explicit domain keys. Runtime entity bits, query order, sibling indexes, source
   locations, and `SceneInstanceId` are invalid logical identities.
+- Complete Prefab placement includes a tagged distinction between entering an admitted source
+  entity and entering the previous anchor's instance-addition namespace, at every ancestry step.
+  Source-entity steps encode canonical source and local entity; addition steps encode their own
+  local ID without falsely assigning the overridden base as an owner. A same-spelled inherited
+  entity and addition do not alias. The adapter consumes encapsulated Scene provenance; the
+  opaque UI kernel and its context/placement boundary remain unchanged. This does not qualify
+  Prefab overlay editing, Apply/Revert or conflict persistence.
 - Kernel consumes bounded opaque binary context and placement values, not Scene/ECS types or a
   public Prefab-path model. Adapters own tagged, length-delimited canonical lowering, preserve
   original UTF-8 and raw UUID bytes, and explicitly share context during a projection. Persistent

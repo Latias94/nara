@@ -81,7 +81,7 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
         .iter()
         .filter_map(|(id, source)| {
             let path = source.projection_path()?;
-            (source.source_entity_id().as_str() == "enemy")
+            (source.local_entity_id().as_str() == "enemy")
                 .then_some((path.root_anchor().as_str(), id))
         })
         .collect::<std::collections::BTreeMap<_, _>>();
@@ -93,10 +93,10 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
         .values()
         .filter(|source| {
             source.projection_path().is_some_and(|path| {
-                path.root_anchor().as_str() == "reference-ui" && path.source_chain().len() == 1
+                path.root_anchor().as_str() == "reference-ui" && path.steps().len() == 1
             })
         })
-        .map(|source| source.source_entity_id().as_str())
+        .map(|source| source.local_entity_id().as_str())
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
         ui_source_ids,

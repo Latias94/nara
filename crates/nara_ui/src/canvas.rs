@@ -18,7 +18,7 @@ use crate::authoring_model::{
     UiAuthoringCanvasFact, UiAuthoringCanvasReady, UiAuthoringComponentKind,
     UiAuthoringHierarchyNode, UiAuthoringProjection,
 };
-use crate::persistent_key::{persistent_identity, source_context};
+use crate::persistent_key::{local_identity, source_context};
 use crate::{authoring::resolve_controlled_button_visual, codec};
 
 const AUTHORING_CANVAS_SURFACE_ID: u64 = 1;
@@ -196,7 +196,7 @@ fn build_root(
         UiAuthoringComponentKind::Node,
         codec::decode_node,
     )?;
-    let root_key = UiRootKey::persistent(persistent_identity(context, entity, None)?)?;
+    let root_key = UiRootKey::persistent(local_identity(context, entity)?)?;
     let source_key = UiKey::root(root_key.clone())?;
     insert_source_key(source_by_key, source_key, entity)?;
 
@@ -268,7 +268,7 @@ fn build_node(
         UiAuthoringComponentKind::Node,
         codec::decode_node,
     )?;
-    let local_key = UiLocalKey::persistent(persistent_identity(context, entity, None)?)?;
+    let local_key = UiLocalKey::persistent(local_identity(context, entity)?)?;
     let source_key = UiKey::scoped(root_key.clone(), local_key.clone())?;
     insert_source_key(source_by_key, source_key.clone(), entity)?;
     let children = build_children(entity, context, projection, root_key, source_by_key)?;

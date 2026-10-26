@@ -4,9 +4,9 @@ use nara_asset::AssetRef;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 use nara_scene::PrefabDocument;
 use nara_scene::{
-    ExpandedSceneCandidate, PrefabInstance, PrefabProjectionPath, SceneDocument, SceneEntityId,
-    SceneEntityProvenanceMap, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
-    ScenePlacement, ScenePlacementAnchor, ScenePlacementOwner,
+    ExpandedSceneCandidate, PrefabInstance, PrefabProjectionPath, PrefabProjectionStep,
+    SceneDocument, SceneEntityId, SceneEntityProvenanceMap, SceneEntityRecord, ScenePatchDocument,
+    ScenePatchOperation, ScenePlacement, ScenePlacementAnchor, ScenePlacementOwner,
 };
 
 pub(crate) const STRING_ALLOCATION_OVERHEAD: usize = 2 * size_of::<usize>();
@@ -62,7 +62,7 @@ pub(crate) fn scene_provenance_retained_bytes(
                 size_of_val(source),
                 BTREE_ENTRY_OVERHEAD,
                 string_retained_bytes(expanded_entity.as_str())?,
-                string_retained_bytes(source.source_entity_id().as_str())?,
+                string_retained_bytes(source.local_entity_id().as_str())?,
             ])?,
         )?;
         if let Some(path) = source.projection_path() {
@@ -150,20 +150,24 @@ fn projection_path_retained_bytes(
 ) -> Result<usize, SceneRetentionOverflow> {
     let mut total = checked_sum([
         string_retained_bytes(path.root_anchor().as_str())?,
-        checked_product(
-            path.source_chain().len(),
-            size_of::<nara_scene::PrefabProjectionStep>(),
-        )?,
+        checked_product(path.steps().len(), size_of::<PrefabProjectionStep>())?,
     ])?;
-    for step in path.source_chain() {
-        checked_add_to(
-            &mut total,
-            checked_sum([
-                asset_ref_retained_bytes(step.source_document())?,
-                step.canonical_source().retained_bytes(),
-                string_retained_bytes(step.source_entity().as_str())?,
+    for step in path.steps() {
+        let dynamic = match step {
+            PrefabProjectionStep::SourceEntity {
+                source_document,
+                canonical_source,
+                entity,
+            } => checked_sum([
+                asset_ref_retained_bytes(source_document)?,
+                canonical_source.retained_bytes(),
+                string_retained_bytes(entity.as_str())?,
             ])?,
-        )?;
+            PrefabProjectionStep::InstanceAddition { entity } => {
+                string_retained_bytes(entity.as_str())?
+            }
+        };
+        checked_add_to(&mut total, dynamic)?;
     }
     Ok(total)
 }
@@ -322,9 +326,279 @@ fn checked_add_to(total: &mut usize, value: usize) -> Result<(), SceneRetentionO
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nara_reflect::ComponentRegistry;
+    use nara_scene::{
+        InMemoryPrefabSourceResolver, PrefabDocument, SceneEntityProvenance, SourceDocumentKey,
+        SourceDocumentKind,
+    };
 
     fn scene_id(value: &str) -> SceneEntityId {
         SceneEntityId::new(value).expect("test scene entity id must be valid")
+    }
+
+    fn prefab_anchor(
+        name: &str,
+        source: AssetRef,
+        additions: Vec<SceneEntityRecord>,
+    ) -> SceneEntityRecord {
+        let mut anchor = SceneEntityRecord::new(scene_id(name));
+        anchor.prefab = Some(PrefabInstance {
+            source,
+            overrides: ScenePatchDocument::new(additions.into_iter().map(|entity| {
+                ScenePatchOperation::AddEntity {
+                    entity,
+                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                }
+            })),
+        });
+        anchor
+    }
+
+    fn string_bytes(value: &str) -> usize {
+        value.len() + 2 * size_of::<usize>()
+    }
+
+    fn assert_provenance_retention(
+        provenance: &SceneEntityProvenanceMap,
+        expected_paths: &[(&str, usize)],
+    ) {
+        assert_eq!(provenance.len(), expected_paths.len());
+        let mut expected = size_of::<SceneEntityProvenanceMap>();
+        for (local_id, path_bytes) in expected_paths {
+            let (expanded, source) = provenance
+                .iter()
+                .find(|(_, source)| source.local_entity_id().as_str() == *local_id)
+                .expect("the expanded candidate must retain each entity's origin");
+            match source.projection_path() {
+                Some(path) => {
+                    assert_eq!(path.root_anchor(), &scene_id("anchor"));
+                    assert_eq!(projection_path_retained_bytes(path).unwrap(), *path_bytes);
+                }
+                None => assert_eq!(*path_bytes, 0),
+            }
+            expected += size_of::<SceneEntityId>()
+                + size_of::<SceneEntityProvenance>()
+                + 6 * size_of::<usize>()
+                + string_bytes(expanded.as_str())
+                + string_bytes(local_id)
+                + *path_bytes;
+        }
+        assert_eq!(
+            scene_provenance_retained_bytes(provenance).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn provenance_retention_distinguishes_source_entities_from_instance_additions() {
+        let mut registry = ComponentRegistry::new();
+        registry.freeze().unwrap();
+        let key = SourceDocumentKey::named(
+            "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+            "retention.direct-prefab-source",
+            SourceDocumentKind::Prefab,
+        )
+        .unwrap();
+        let path_request = AssetRef::path("prefabs/retained-source.prefab.ron").unwrap();
+        let path_request_bytes = string_bytes("prefabs/retained-source.prefab.ron");
+        let stable_request = AssetRef::stable_id("602e48c3-50ce-467b-8e0d-80ec1b4f1d2a").unwrap();
+        for (request, request_bytes) in [(path_request, path_request_bytes), (stable_request, 16)] {
+            let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+                request.clone(),
+                key.clone(),
+                PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("inherited"))]),
+            );
+            let document = SceneDocument::from_ordered_roots([prefab_anchor(
+                "anchor",
+                request.clone(),
+                vec![SceneEntityRecord::new(scene_id("added-by-instance"))],
+            )]);
+            let expansion = document.expand_prefabs(&registry, &resolver);
+            assert!(
+                !expansion.diagnostics.has_errors(),
+                "{:?}",
+                expansion.diagnostics
+            );
+            let candidate = expansion.candidate.unwrap();
+            let provenance = candidate.provenance();
+            for source in provenance.values() {
+                let Some(path) = source.projection_path() else {
+                    continue;
+                };
+                let expected = match source.local_entity_id().as_str() {
+                    "inherited" => PrefabProjectionStep::SourceEntity {
+                        source_document: request.clone(),
+                        canonical_source: key.clone(),
+                        entity: scene_id("inherited"),
+                    },
+                    "added-by-instance" => PrefabProjectionStep::InstanceAddition {
+                        entity: scene_id("added-by-instance"),
+                    },
+                    _ => panic!("unexpected projected entity"),
+                };
+                assert_eq!(path.steps(), &[expected]);
+            }
+
+            let path_base = string_bytes("anchor") + size_of::<PrefabProjectionStep>();
+            assert_provenance_retention(
+                provenance,
+                &[
+                    ("anchor", 0),
+                    (
+                        "inherited",
+                        path_base
+                            + request_bytes
+                            + key.retained_bytes()
+                            + string_bytes("inherited"),
+                    ),
+                    (
+                        "added-by-instance",
+                        path_base + string_bytes("added-by-instance"),
+                    ),
+                ],
+            );
+        }
+    }
+
+    #[test]
+    fn provenance_retention_counts_both_origins_through_nested_prefab_anchors() {
+        let mut registry = ComponentRegistry::new();
+        registry.freeze().unwrap();
+        let universe = "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap();
+        let outer_request = AssetRef::stable_id("602e48c3-50ce-467b-8e0d-80ec1b4f1d2a").unwrap();
+        let inner_request = AssetRef::path("prefabs/nested-retained.prefab.ron").unwrap();
+        let outer_key = SourceDocumentKey::named(
+            universe,
+            "retention.outer-prefab-source",
+            SourceDocumentKind::Prefab,
+        )
+        .unwrap();
+        let inner_key = SourceDocumentKey::named(
+            universe,
+            "retention.inner-prefab-source",
+            SourceDocumentKind::Prefab,
+        )
+        .unwrap();
+        for added_anchor in [false, true] {
+            let nested = prefab_anchor(
+                "nested-anchor",
+                inner_request.clone(),
+                vec![SceneEntityRecord::new(scene_id("nested-addition"))],
+            );
+            let mut outer_entities = vec![SceneEntityRecord::new(scene_id("outer-source"))];
+            let mut outer_additions = Vec::new();
+            if added_anchor {
+                outer_additions.push(nested);
+            } else {
+                outer_entities.push(nested);
+            }
+            let resolver = InMemoryPrefabSourceResolver::new()
+                .with_prefab(
+                    outer_request.clone(),
+                    outer_key.clone(),
+                    PrefabDocument::from_ordered_roots(outer_entities),
+                )
+                .with_prefab(
+                    inner_request.clone(),
+                    inner_key.clone(),
+                    PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id(
+                        "inner-source",
+                    ))]),
+                );
+            let document = SceneDocument::from_ordered_roots([prefab_anchor(
+                "anchor",
+                outer_request.clone(),
+                outer_additions,
+            )]);
+            let expansion = document.expand_prefabs(&registry, &resolver);
+            assert!(
+                !expansion.diagnostics.has_errors(),
+                "{:?}",
+                expansion.diagnostics
+            );
+            let candidate = expansion.candidate.unwrap();
+            let parent_step = if added_anchor {
+                PrefabProjectionStep::InstanceAddition {
+                    entity: scene_id("nested-anchor"),
+                }
+            } else {
+                PrefabProjectionStep::SourceEntity {
+                    source_document: outer_request.clone(),
+                    canonical_source: outer_key.clone(),
+                    entity: scene_id("nested-anchor"),
+                }
+            };
+            let nested_origin = |local_id: &str| {
+                candidate
+                    .provenance()
+                    .values()
+                    .find(|source| source.local_entity_id().as_str() == local_id)
+                    .unwrap()
+                    .projection_path()
+                    .unwrap()
+            };
+            assert_eq!(
+                nested_origin("nested-anchor").steps(),
+                &[parent_step.clone()],
+            );
+            assert_eq!(
+                nested_origin("inner-source").steps(),
+                &[
+                    parent_step.clone(),
+                    PrefabProjectionStep::SourceEntity {
+                        source_document: inner_request.clone(),
+                        canonical_source: inner_key.clone(),
+                        entity: scene_id("inner-source"),
+                    },
+                ],
+            );
+            assert_eq!(
+                nested_origin("nested-addition").steps(),
+                &[
+                    parent_step,
+                    PrefabProjectionStep::InstanceAddition {
+                        entity: scene_id("nested-addition"),
+                    },
+                ],
+            );
+
+            let path_base = string_bytes("anchor");
+            let source_base = size_of::<PrefabProjectionStep>() + 16 + outer_key.retained_bytes();
+            let parent_bytes = size_of::<PrefabProjectionStep>()
+                + string_bytes("nested-anchor")
+                + if added_anchor {
+                    0
+                } else {
+                    16 + outer_key.retained_bytes()
+                };
+            assert_provenance_retention(
+                candidate.provenance(),
+                &[
+                    ("anchor", 0),
+                    (
+                        "outer-source",
+                        path_base + source_base + string_bytes("outer-source"),
+                    ),
+                    ("nested-anchor", path_base + parent_bytes),
+                    (
+                        "inner-source",
+                        path_base
+                            + parent_bytes
+                            + size_of::<PrefabProjectionStep>()
+                            + string_bytes("prefabs/nested-retained.prefab.ron")
+                            + inner_key.retained_bytes()
+                            + string_bytes("inner-source"),
+                    ),
+                    (
+                        "nested-addition",
+                        path_base
+                            + parent_bytes
+                            + size_of::<PrefabProjectionStep>()
+                            + string_bytes("nested-addition"),
+                    ),
+                ],
+            );
+        }
     }
 
     #[test]

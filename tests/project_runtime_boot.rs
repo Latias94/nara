@@ -327,7 +327,7 @@ fn capture_boot_outcome(
     outcome.tick = fixed_time.tick();
     outcome.scene_entities = scene_entities
         .iter()
-        .map(|source| source.source_entity_id.as_str().to_owned())
+        .map(|source| source.provenance().local_entity_id().as_str().to_owned())
         .collect();
     outcome.scene_entities.sort();
 }

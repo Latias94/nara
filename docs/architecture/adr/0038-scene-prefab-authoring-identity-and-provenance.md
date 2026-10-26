@@ -6,6 +6,7 @@
 and Scene-owned logical occurrence
 **Amended**: 2026-10-25 by owned unbound ordinary Scene preparation
 and complete Runtime/Canvas logical-key lowering
+**Amended**: 2026-10-26 by explicit instance-addition origin throughout projection ancestry
 **Refines**: ADR 0006: Scene and Prefab Data Model
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References;
@@ -32,11 +33,12 @@ Scene/prefab authoring identity is document-relative and provenance-aware.
 - `SceneEntityId` identifies an entity inside one authoring document.
 - A scene-local entity is owned by the scene document that contains its record.
 - A prefab source entity is owned by its prefab document.
-- A prefab instance anchor is scene-local, but expanded children are projections of source prefab
-  entities.
-- Existing Scene projection may continue to expose the deterministic `anchor/source_entity`
-  namespace as a transitional instance-local locator. It is not a durable source identity and no
-  new UI, session, semantics, selection, or persistence key may parse or extend that encoding.
+- A prefab instance anchor belongs to its containing source. Expanded children retain either
+  inherited source-entity origin or explicit instance-overlay addition origin; visual parentage
+  does not transfer an addition into the base Prefab's source ownership.
+- Scene projection exposes private instance-local materialization locators. They are not durable
+  source identities; UI, session, semantics, selection and persistence keys must not parse or
+  extend their generated encoding.
 - Projection-aware Scene adapters receive the source `SceneEntityId` and a separate structured
   `PrefabProjectionPath`. ADR 0102 requires the UI adapter to lower canonical containing source,
   explicit logical occurrence and complete authored placement into opaque binary keys. The
@@ -44,10 +46,21 @@ Scene/prefab authoring identity is document-relative and provenance-aware.
   lookup aliases as identity. ADR 0083 remains Proposed for broader asset/product identity.
 - Persistent overrides are `ScenePatchDocument` values applied relative to source prefab entity IDs
   before expansion.
+- Projection ancestry is a sequence of typed instance-entry steps. `SourceEntity` binds the
+  admitted canonical Prefab source and its local entity, retaining lookup spelling as evidence.
+  `InstanceAddition` enters the preceding anchor's overlay-local namespace without claiming the
+  overridden base as its owner. This distinction applies to every step, including an added
+  entity which itself instances a Prefab, not only to terminal entities. The root anchor remains
+  a local record of the containing source. An addition declared in a Prefab source retains that
+  source's complete outer placement when the source is instantiated repeatedly.
+- The terminal local ID is meaningful only with its typed provenance. Runtime `SceneEntitySource`
+  retains the source owner's complete provenance as one value, rather than separately mutable
+  local-ID/path fields. Materialized entity locators remain separate and non-durable.
 - Runtime `Entity` values never become authoring identity.
-- Prefab-expanded write-back must either produce a source-prefab override patch or explicitly
-  convert the selected projection into local scene data. Writing a whole expanded entity back as if
-  it were scene-local is invalid.
+- Prefab-expanded write-back must explicitly edit the true owning source, change the chosen
+  containing instance's override, or convert the selected projection into local data. Each path
+  needs its own qualified source transaction. Writing a whole expanded entity back as if it were
+  a containing-source local record is invalid.
 - Cross-document references should use `AssetRef` plus document-relative `SceneEntityId` when they
   become necessary. They must not rely on runtime entity IDs or backend handles.
 
@@ -59,6 +72,9 @@ flowchart TD
     Source --> SourceEntity[source SceneEntityId]
     SourceEntity --> Expanded[projection: opaque source id plus structured path]
     Override[ScenePatchDocument override] --> SourceEntity
+    Anchor --> Override
+    Override --> Addition[instance-overlay addition]
+    Addition --> Expanded
     Expanded --> Runtime[Runtime Entity projection]
     Runtime -. invalid as persistent id .-> Scene
 ```
@@ -69,8 +85,9 @@ flowchart TD
 |---|---|---|---|
 | Scene local | Scene document | `SceneEntityId` | Patch scene directly |
 | Prefab source | Prefab document | source `SceneEntityId` | Patch prefab source document |
-| Prefab anchor | Scene document | anchor `SceneEntityId` plus `PrefabInstance.source` | Patch scene anchor or instance overrides |
-| Prefab expanded projection | Runtime/authoring projection | Opaque source `SceneEntityId` plus structured `PrefabProjectionPath`; existing `anchor/source_entity` locator is transitional | Write source override or convert to local |
+| Prefab anchor | Containing Scene or Prefab source | Local entity address plus `PrefabInstance.source` | Edit the containing source's anchor or instance overrides |
+| Inherited Prefab projection | Source Prefab document with explicit containing placement | Opaque source-local `SceneEntityId` plus typed `PrefabProjectionPath`; materialized locator is private | Write an explicit source/instance override or convert to local |
+| Instance-overlay addition | Containing Scene or Prefab source's instance overlay | Explicit addition-local ID plus the owning anchor and complete typed placement ancestry | Edit the containing source's overlay or explicitly convert to local; never edit the base as if it owned the addition |
 | Runtime-only | Runtime world | `Entity` | Never persistent by default |
 
 ## Rules
@@ -113,10 +130,14 @@ flowchart TD
   them from an `AssetRef` after lookup.
 - Canonical Prefab binding is required for every resolver, including code-authored and
   document-only expansion. The resolver has one required operation returning the bound key and
-  document. Every projection step retains that key; there is no source-keyless result or
+  document. Every `SourceEntity` projection step retains that key; there is no source-keyless result or
   lookup-request fallback for cycle identity. In-memory authors supply the key explicitly, rather
   than having Scene infer it from a path, request, callsite or pointer. Aliases must resolve to the
   same key and immutable document; the source owner remains responsible for that association.
+- Projection origin is not a dependency-closure inventory. A resolved base remains captured and
+  revalidated by its source/Host owner even if only additions survive and no source-entity step
+  names that base. Stable addition identity across an explicit base replacement grants neither
+  patch validity nor permission to silently retarget future durable intent.
 - Requiring canonical Prefab sources does not assign the containing Scene's source identity or
   a logical occurrence. Those are separate obligations at the materialization boundary; editing
   and document-only expansion do not acquire a runtime occurrence to inspect source data.
@@ -131,6 +152,12 @@ flowchart TD
 - Expansion admits modeled source-ancestry and provenance bytes before copying a source key or
   projection chain. Post-expansion retained-byte accounting cannot substitute for this bounded
   allocation admission. Limits model logical ownership, not allocator capacity or process RSS.
+- While durable overrides remain exact patches, expansion classifies top-level entity creation
+  declarations, including restored descendants, as addition origin after the whole patch succeeds.
+  Removing and recreating a base entity with the same spelling does not make the new record
+  inherited. The temporary creation index is bounded before allocation; nested override payloads
+  are classified when their own instance expands. This does not qualify declarative overlays,
+  durable source repair/history, or expanded write-back. No generated-ID prefix encodes origin.
 - Apply Changes may remain narrow. Any future prefab-expanded write-back must declare whether it is
   producing an override patch, editing the prefab source, or converting to local scene data.
 

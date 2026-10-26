@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, btree_map::Entry};
 
 use nara_scene::{
-    PrefabProjectionPath, SceneEntityId, SceneEntitySource, SceneOccurrenceKey, SourceDocumentKey,
-    SourceDocumentKind, SourceDocumentOrigin,
+    PrefabProjectionPath, PrefabProjectionStep, SceneEntityId, SceneEntityProvenance,
+    SceneEntitySource, SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind,
+    SourceDocumentOrigin,
 };
 use nara_ui_kernel::{UiKeyError, UiOpaqueId, UiPersistentIdentity};
 
@@ -24,11 +25,7 @@ impl<'a> PersistentKeyProjection<'a> {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => entry.insert(source_context(key.0, key.1)?),
         };
-        persistent_identity(
-            context,
-            &source.source_entity_id,
-            source.projection_path.as_ref(),
-        )
+        persistent_identity(context, source.provenance())
     }
 }
 
@@ -44,23 +41,54 @@ pub(crate) fn source_context(
     UiOpaqueId::new(bytes)
 }
 
-pub(crate) fn persistent_identity(
+fn persistent_identity(
+    context: &UiOpaqueId,
+    provenance: &SceneEntityProvenance,
+) -> Result<UiPersistentIdentity, UiKeyError> {
+    encode_identity(
+        context,
+        provenance.local_entity_id(),
+        provenance.projection_path(),
+    )
+}
+
+pub(crate) fn local_identity(
+    context: &UiOpaqueId,
+    entity: &SceneEntityId,
+) -> Result<UiPersistentIdentity, UiKeyError> {
+    encode_identity(context, entity, None)
+}
+
+fn encode_identity(
     context: &UiOpaqueId,
     entity: &SceneEntityId,
     projection: Option<&PrefabProjectionPath>,
 ) -> Result<UiPersistentIdentity, UiKeyError> {
     let mut bytes = vec![u8::from(projection.is_some())];
     if let Some(path) = projection {
-        if path.source_chain().len() > MAX_PROJECTION_STEPS {
+        if path.steps().len() > MAX_PROJECTION_STEPS {
             return Err(UiKeyError::ProjectionDepthExceeded {
                 maximum: MAX_PROJECTION_STEPS,
             });
         }
-        bytes.push(path.source_chain().len() as u8);
+        bytes.push(path.steps().len() as u8);
         field(&mut bytes, path.root_anchor().as_str().as_bytes())?;
-        for step in path.source_chain() {
-            field(&mut bytes, &canonical_source(step.canonical_source())?)?;
-            field(&mut bytes, step.source_entity().as_str().as_bytes())?;
+        for step in path.steps() {
+            match step {
+                PrefabProjectionStep::SourceEntity {
+                    canonical_source: source,
+                    entity,
+                    ..
+                } => {
+                    bytes.push(0);
+                    field(&mut bytes, &canonical_source(source)?)?;
+                    field(&mut bytes, entity.as_str().as_bytes())?;
+                }
+                PrefabProjectionStep::InstanceAddition { entity } => {
+                    bytes.push(1);
+                    field(&mut bytes, entity.as_str().as_bytes())?;
+                }
+            }
         }
     }
     field(&mut bytes, entity.as_str().as_bytes())?;

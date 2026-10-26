@@ -221,8 +221,8 @@ fn repeated_prefabs_remap_default_local_reference_and_preserve_source_omission()
                 .find(|(_, provenance)| {
                     provenance.projection_path().is_some_and(|path| {
                         path.root_anchor().as_str() == anchor
-                            && path.source_chain().len() == 1
-                            && path.source_chain()[0].source_entity().as_str() == source_entity
+                            && path.steps().len() == 1
+                            && path.steps()[0].entity_id().as_str() == source_entity
                     })
                 })
                 .map(|(entity, _)| entity)

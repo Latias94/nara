@@ -1844,9 +1844,9 @@ fn registered_scene_entity(world: &World, entity: Entity) -> bool {
 }
 
 fn is_first_enemy_source(source: &SceneEntitySource) -> bool {
-    source.source_entity_id.as_str() == "enemy"
-        && source.projection_path.as_ref().is_some_and(|path| {
-            path.root_anchor().as_str() == "enemy-anchor" && path.source_chain().len() == 1
+    source.provenance().local_entity_id().as_str() == "enemy"
+        && source.provenance().projection_path().is_some_and(|path| {
+            path.root_anchor().as_str() == "enemy-anchor" && path.steps().len() == 1
         })
 }
 

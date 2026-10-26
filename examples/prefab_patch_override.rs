@@ -61,7 +61,7 @@ fn main() {
         .provenance()
         .iter()
         .find_map(|(id, source)| {
-            (source.source_entity_id() == &scene_id("visual") && source.projection_path().is_some())
+            (source.local_entity_id() == &scene_id("visual") && source.projection_path().is_some())
                 .then_some(id)
         })
         .expect("the expanded visual retains its source identity");

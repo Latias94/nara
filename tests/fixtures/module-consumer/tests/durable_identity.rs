@@ -72,7 +72,7 @@ fn two_resolved_sources_merge_and_spawn_through_the_public_scene_module() {
         .iter(&world)
         .filter(|(_, source, name)| {
             source.instance_id == instance.instance_id()
-                && source.source_entity_id.as_str() == "opaque/shared"
+                && source.provenance().local_entity_id().as_str() == "opaque/shared"
                 && name.as_str() == "Shared"
         })
         .collect::<Vec<_>>();
@@ -84,12 +84,7 @@ fn two_resolved_sources_merge_and_spawn_through_the_public_scene_module() {
                 instance.resolve(&world, &source.entity_id),
                 EntityLookup::Resolved(*entity)
             );
-            source
-                .projection_path
-                .as_ref()
-                .unwrap()
-                .source_chain()
-                .len()
+            source.provenance().projection_path().unwrap().steps().len()
         })
         .collect::<Vec<_>>();
     depths.sort();
@@ -147,15 +142,9 @@ fn disposable_projection_keeps_repeated_prefab_provenance_in_bounded_epochs() {
             .filter_map(|(source, name)| {
                 assert_eq!(source.containing_source(), &source_key);
                 assert_eq!(source.occurrence(), &occurrence);
-                (source.source_entity_id.as_str() == "opaque/shared" && name.as_str() == "Shared")
-                    .then(|| {
-                        source
-                            .projection_path
-                            .as_ref()
-                            .unwrap()
-                            .source_chain()
-                            .len()
-                    })
+                (source.provenance().local_entity_id().as_str() == "opaque/shared"
+                    && name.as_str() == "Shared")
+                    .then(|| source.provenance().projection_path().unwrap().steps().len())
             })
             .collect::<Vec<_>>();
         depths.sort();

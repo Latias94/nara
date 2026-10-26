@@ -1,6 +1,6 @@
 use nara::{
     prelude::{Resource, World},
-    scene::SceneEntitySource,
+    scene::{PrefabProjectionStep, SceneEntitySource},
     ui::{UiButton, UiDimension, UiNode, UiSurfaceId, active_ui_surface_slots},
 };
 
@@ -129,7 +129,13 @@ impl ReferenceUiObservation {
                 && entity.contains::<UiButton>()
         })?;
         let source = retry.get::<SceneEntitySource>()?;
-        let source_step = source.projection_path.as_ref()?.source_chain().last()?;
+        let provenance = source.provenance();
+        let PrefabProjectionStep::SourceEntity {
+            source_document, ..
+        } = provenance.projection_path()?.steps().last()?
+        else {
+            return None;
+        };
         let node = retry.get::<UiNode>()?;
         let button = retry.get::<UiButton>()?;
         let (retry_authored_width, retry_authored_height) =
@@ -144,8 +150,8 @@ impl ReferenceUiObservation {
             authored_width: authored.width(),
             authored_height: authored.height(),
             retry_entity_id: source.entity_id.as_str().to_owned(),
-            retry_source_document: source_step.source_document().to_string(),
-            retry_source_entity: source.source_entity_id.as_str().to_owned(),
+            retry_source_document: source_document.to_string(),
+            retry_source_entity: provenance.local_entity_id().as_str().to_owned(),
             retry_action: button.action().as_str().to_owned(),
             retry_name: button.label().to_owned(),
             retry_enabled: button.enabled(),
@@ -254,15 +260,22 @@ impl ReferenceUiObservation {
 }
 
 pub(crate) fn reference_ui_source_entity(source: &SceneEntitySource) -> Option<&str> {
-    let projection = source.projection_path.as_ref()?;
-    let source_step = projection.source_chain().last()?;
+    let provenance = source.provenance();
+    let projection = provenance.projection_path()?;
+    let PrefabProjectionStep::SourceEntity {
+        source_document,
+        entity,
+        ..
+    } = projection.steps().last()?
+    else {
+        return None;
+    };
     (projection.root_anchor().as_str() == "reference-ui"
-        && source_step
-            .source_document()
+        && source_document
             .as_path()
             .is_some_and(|path| path.as_str() == "reference-ui.prefab.json")
-        && source_step.source_entity() == &source.source_entity_id)
-        .then_some(source.source_entity_id.as_str())
+        && entity == provenance.local_entity_id())
+    .then_some(provenance.local_entity_id().as_str())
 }
 
 impl ReferenceUiPresentationObservation {
@@ -393,4 +406,86 @@ fn escape_json(value: &str) -> String {
         }
     }
     escaped
+}
+
+#[cfg(test)]
+mod tests {
+    use nara::{
+        asset::AssetRef,
+        prelude::ComponentRegistry,
+        scene::{
+            InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, SceneDocument,
+            SceneEntityId, SceneEntityRecord, SceneOccurrenceKey, ScenePatchDocument,
+            ScenePatchOperation, ScenePlacement, ScenePlacementOwner, SourceDocumentKey,
+            SourceDocumentKind, spawn_scene,
+        },
+    };
+
+    use super::*;
+
+    #[test]
+    fn ui_source_identity_rejects_instance_additions_reusing_source_ids() {
+        let mut registry = ComponentRegistry::new();
+        registry.freeze().unwrap();
+        let universe = "f037335a-e03a-41c7-8fb1-310ff21dd9be".parse().unwrap();
+        let prefab_source =
+            SourceDocumentKey::named(universe, "reference-ui", SourceDocumentKind::Prefab).unwrap();
+        let scene_source =
+            SourceDocumentKey::named(universe, "startup", SourceDocumentKind::Scene).unwrap();
+        let source_document = AssetRef::path("reference-ui.prefab.json").unwrap();
+        let retry_id = SceneEntityId::new("retry-button").unwrap();
+        let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+            source_document.clone(),
+            prefab_source,
+            PrefabDocument::from_ordered_roots([SceneEntityRecord::new(retry_id.clone())]),
+        );
+        let recreated = ScenePatchDocument::new([
+            ScenePatchOperation::RemoveEntity {
+                entity: retry_id.clone(),
+                from: ScenePlacement::first(ScenePlacementOwner::Root),
+            },
+            ScenePatchOperation::AddEntity {
+                entity: SceneEntityRecord::new(retry_id.clone()),
+                placement: ScenePlacement::first(ScenePlacementOwner::Root),
+            },
+        ]);
+        for (overrides, expected) in [
+            (ScenePatchDocument::default(), Some("retry-button")),
+            (recreated, None),
+        ] {
+            let mut anchor = SceneEntityRecord::new(SceneEntityId::new("reference-ui").unwrap());
+            anchor.prefab = Some(PrefabInstance {
+                source: source_document.clone(),
+                overrides,
+            });
+            let expansion =
+                SceneDocument::from_ordered_roots([anchor]).expand_prefabs(&registry, &resolver);
+            assert!(!expansion.diagnostics.has_errors(), "{expansion:#?}");
+            let candidate = expansion
+                .candidate
+                .unwrap()
+                .bind_source(scene_source.clone());
+            let mut world = World::new();
+            let report = spawn_scene(
+                &mut world,
+                &registry,
+                &candidate,
+                &SceneOccurrenceKey::new("reference-game.tests", "ui-origin").unwrap(),
+                None,
+            );
+            assert!(!report.diagnostics.has_errors(), "{report:#?}");
+            let source = world
+                .iter_entities()
+                .filter_map(|entity| entity.get::<SceneEntitySource>())
+                .find(|source| source.provenance().local_entity_id() == &retry_id)
+                .expect("the retry entity must retain its local ID");
+            assert_eq!(reference_ui_source_entity(source), expected);
+            if expected.is_none() {
+                assert!(matches!(
+                    source.provenance().projection_path().unwrap().steps(),
+                    [PrefabProjectionStep::InstanceAddition { entity }] if entity == &retry_id
+                ));
+            }
+        }
+    }
 }

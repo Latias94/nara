@@ -32,19 +32,25 @@ pub(crate) fn provenance_entry_bytes(
         .checked_add(provenance_string_bytes(source_entity.as_str())?)
 }
 
-/// One source document/entity step in a concrete prefab projection.
+/// One instance-entry step in a concrete Prefab projection.
 ///
-/// Equality includes the authored lookup request as provenance evidence. It is not a canonical
-/// placement comparison: request aliases can name the same canonical source.
+/// Source steps retain lookup evidence as well as canonical identity. An addition instead
+/// belongs to the preceding anchor's overlay, not the overridden Prefab source.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PrefabProjectionStep {
-    source_document: AssetRef,
-    canonical_source: SourceDocumentKey,
-    source_entity: SceneEntityId,
+pub enum PrefabProjectionStep {
+    /// An entity belonging to the admitted Prefab source, with separate authored lookup evidence.
+    SourceEntity {
+        source_document: AssetRef,
+        canonical_source: SourceDocumentKey,
+        entity: SceneEntityId,
+    },
+    /// An entity owned by the preceding anchor's overlay, not by its overridden base source.
+    /// The preceding anchor is the root for the first step, or the entity in the previous step.
+    InstanceAddition { entity: SceneEntityId },
 }
 
 impl PrefabProjectionStep {
-    fn allocation_bytes(
+    pub(crate) fn source_allocation_bytes(
         source_document: &AssetRef,
         canonical_source: &SourceDocumentKey,
         source_entity: &SceneEntityId,
@@ -55,48 +61,38 @@ impl PrefabProjectionStep {
             .checked_add(provenance_string_bytes(source_entity.as_str())?)
     }
 
-    pub(crate) const fn new(
-        source_document: AssetRef,
-        canonical_source: SourceDocumentKey,
-        source_entity: SceneEntityId,
-    ) -> Self {
-        Self {
-            source_document,
-            canonical_source,
-            source_entity,
+    pub(crate) fn addition_allocation_bytes(entity: &SceneEntityId) -> Option<usize> {
+        size_of::<Self>().checked_add(provenance_string_bytes(entity.as_str())?)
+    }
+
+    fn allocation_bytes(&self) -> Option<usize> {
+        match self {
+            Self::SourceEntity {
+                source_document,
+                canonical_source,
+                entity,
+            } => Self::source_allocation_bytes(source_document, canonical_source, entity),
+            Self::InstanceAddition { entity } => Self::addition_allocation_bytes(entity),
         }
     }
 
-    /// Returns the authored request used to resolve this Prefab step.
-    ///
-    /// This is diagnostic/write-back context, not canonical source identity. Use
-    /// [`Self::canonical_source`] to compare the admitted source independently of lookup spelling.
+    /// Returns the local entity ID in this step's source or instance-addition namespace.
     #[must_use]
-    pub const fn source_document(&self) -> &AssetRef {
-        &self.source_document
-    }
-
-    /// Returns the admitted canonical source identity independently of its lookup request.
-    #[must_use]
-    pub const fn canonical_source(&self) -> &SourceDocumentKey {
-        &self.canonical_source
-    }
-
-    /// Returns the entity identity inside the owning prefab source.
-    #[must_use]
-    pub const fn source_entity(&self) -> &SceneEntityId {
-        &self.source_entity
+    pub const fn entity_id(&self) -> &SceneEntityId {
+        match self {
+            Self::SourceEntity { entity, .. } | Self::InstanceAddition { entity } => entity,
+        }
     }
 }
 
 /// Structured location of one prefab projection inside a containing scene.
 ///
-/// The root anchor and source chain remain separate from the private expanded runtime locator.
+/// The root anchor and typed instance ancestry remain separate from the private runtime locator.
 /// Consumers use this structured path rather than derive source identity from a generated ID.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrefabProjectionPath {
     root_anchor: SceneEntityId,
-    source_chain: Vec<PrefabProjectionStep>,
+    steps: Vec<PrefabProjectionStep>,
 }
 
 impl PrefabProjectionPath {
@@ -104,7 +100,7 @@ impl PrefabProjectionPath {
     pub(crate) const fn new(root_anchor: SceneEntityId) -> Self {
         Self {
             root_anchor,
-            source_chain: Vec::new(),
+            steps: Vec::new(),
         }
     }
 
@@ -115,109 +111,91 @@ impl PrefabProjectionPath {
         canonical_source: SourceDocumentKey,
         source_entity: SceneEntityId,
     ) -> Self {
-        self.source_chain.push(PrefabProjectionStep::new(
+        self.steps.push(PrefabProjectionStep::SourceEntity {
             source_document,
             canonical_source,
-            source_entity,
-        ));
+            entity: source_entity,
+        });
         self
     }
 
     pub(crate) fn extended_allocation_bytes(
         parent: Option<&Self>,
         root_anchor: &SceneEntityId,
-        source_document: &AssetRef,
-        canonical_source: &SourceDocumentKey,
-        source_entity: &SceneEntityId,
+        step_bytes: usize,
     ) -> Option<usize> {
         let root_anchor = parent.map_or(root_anchor, Self::root_anchor);
         let mut bytes = provenance_string_bytes(root_anchor.as_str())?;
         if let Some(parent) = parent {
-            for step in &parent.source_chain {
-                bytes = bytes.checked_add(PrefabProjectionStep::allocation_bytes(
-                    &step.source_document,
-                    &step.canonical_source,
-                    &step.source_entity,
-                )?)?;
+            for step in &parent.steps {
+                bytes = bytes.checked_add(step.allocation_bytes()?)?;
             }
         }
-        bytes.checked_add(PrefabProjectionStep::allocation_bytes(
-            source_document,
-            canonical_source,
-            source_entity,
-        )?)
+        bytes.checked_add(step_bytes)
     }
 
     // Call only after admitting extended_allocation_bytes and the containing map entry.
     pub(crate) fn from_resolved_step(
         parent: Option<&Self>,
         root_anchor: &SceneEntityId,
-        source_document: &AssetRef,
-        canonical_source: &SourceDocumentKey,
-        source_entity: &SceneEntityId,
+        step: PrefabProjectionStep,
     ) -> Self {
-        let mut source_chain =
-            Vec::with_capacity(parent.map_or(0, |path| path.source_chain.len()) + 1);
+        let mut steps = Vec::with_capacity(parent.map_or(0, |path| path.steps.len()) + 1);
         if let Some(parent) = parent {
-            source_chain.extend_from_slice(&parent.source_chain);
+            steps.extend_from_slice(&parent.steps);
         }
-        let step = PrefabProjectionStep::new(
-            source_document.clone(),
-            canonical_source.clone(),
-            source_entity.clone(),
-        );
-        source_chain.push(step);
+        steps.push(step);
         Self {
             root_anchor: parent.map_or(root_anchor, Self::root_anchor).clone(),
-            source_chain,
+            steps,
         }
     }
 
-    /// Returns the authored anchor in the containing scene document.
+    /// Returns the authored local anchor in the containing source document.
     #[must_use]
     pub const fn root_anchor(&self) -> &SceneEntityId {
         &self.root_anchor
     }
 
-    /// Returns the exact outer-to-inner prefab source chain.
+    /// Returns the exact outer-to-inner source and instance-addition transitions.
     #[must_use]
-    pub fn source_chain(&self) -> &[PrefabProjectionStep] {
-        &self.source_chain
+    pub fn steps(&self) -> &[PrefabProjectionStep] {
+        &self.steps
     }
 }
 
 /// Source identity carried beside one materialized scene entity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SceneEntityProvenance {
-    source_entity_id: SceneEntityId,
+    local_entity_id: SceneEntityId,
     projection_path: Option<PrefabProjectionPath>,
 }
 
 impl SceneEntityProvenance {
-    pub(crate) const fn local(source_entity_id: SceneEntityId) -> Self {
+    pub(crate) const fn local(local_entity_id: SceneEntityId) -> Self {
         Self {
-            source_entity_id,
+            local_entity_id,
             projection_path: None,
         }
     }
 
     pub(crate) fn projected(
-        source_entity_id: SceneEntityId,
+        local_entity_id: SceneEntityId,
         projection_path: PrefabProjectionPath,
     ) -> Self {
         Self {
-            source_entity_id,
+            local_entity_id,
             projection_path: Some(projection_path),
         }
     }
 
-    /// Returns the opaque entity identity in its owning source document.
+    /// Returns the opaque terminal ID, relative to the source or overlay named by its provenance.
     #[must_use]
-    pub const fn source_entity_id(&self) -> &SceneEntityId {
-        &self.source_entity_id
+    pub const fn local_entity_id(&self) -> &SceneEntityId {
+        &self.local_entity_id
     }
 
-    /// Returns the structured prefab location, or `None` for a scene-local entity.
+    /// Returns the structured instance location, or `None` for a containing-source local record.
     #[must_use]
     pub const fn projection_path(&self) -> Option<&PrefabProjectionPath> {
         self.projection_path.as_ref()

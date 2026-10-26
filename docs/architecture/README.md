@@ -143,8 +143,10 @@ before R2/R3/R5b persistent contracts freeze.
 The [declarative Prefab overlay design](prefab-overlay-design.md) separates durable intent from
 exact edit/inverse patches. Private property and structural/reference comparisons challenge
 whole-root patches, old-basis placement and ambiguous reference binding. They retain production
-ADR 0038 until complete full-value admission, added-entity provenance, conflict persistence and
-source-owner replacement are qualified. The [Unity/Godot editor study](../research/2026-10-26-unity-godot-prefab-editor-ownership.md)
+ADR 0038's patch storage until complete full-value admission, conflict persistence and
+source-owner replacement are qualified. The separate [typed-origin checkpoint](../knowledge/engineering/verification/2026-10/2026-10-26T041116Z-typed-prefab-instance-addition-provenance-and-complete-consumer-propagation-331ec66de92c4315971800928d8f2dc7.md)
+corrects current production addition ancestry through Scene, Runtime, retention and UI keys;
+it does not qualify the Proposed overlay compiler. The [Unity/Godot editor study](../research/2026-10-26-unity-godot-prefab-editor-ownership.md)
 grounds editing contexts, explicit Apply/Revert, unused overrides and Inspector/history routing
 without adopting either engine's object model or claiming native UI support.
 

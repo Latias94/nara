@@ -90,7 +90,7 @@ fn selected_scene_content_is_truthful_without_granting_startup_or_delivery_autho
     assert!(second.startup_content_closure().is_none());
     assert_eq!(second.scene(), &second_scene());
     assert!(second.expanded_scene_provenance().values().any(|source| {
-        source.source_entity_id() == &scene_id("second-enemy")
+        source.local_entity_id() == &scene_id("second-enemy")
             && source
                 .projection_path()
                 .is_some_and(|path| path.root_anchor() == &scene_id("second-anchor"))

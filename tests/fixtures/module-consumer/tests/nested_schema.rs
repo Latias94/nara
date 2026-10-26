@@ -150,7 +150,7 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
         );
         assert_eq!(
             expansion.provenance().unwrap()[target]
-                .source_entity_id()
+                .local_entity_id()
                 .as_str(),
             "friend"
         );

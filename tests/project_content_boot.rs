@@ -16,8 +16,8 @@ use nara::project_host::{
 };
 use nara::reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue};
 use nara::scene::{
-    PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityRecord,
-    ScenePatchDocument, SourceDocumentOrigin,
+    PrefabDocument, PrefabInstance, PrefabProjectionStep, SceneComponentRecord, SceneDocument,
+    SceneEntityRecord, ScenePatchDocument, SourceDocumentOrigin,
 };
 use project_content_fixture::{TestProject, player_image_meta, scene_id, tileset_meta};
 
@@ -813,15 +813,18 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
     assert_eq!(snapshot.images()[0].image().extent().height, 1);
     assert_eq!(snapshot.images()[0].image().pixels(), &[24, 120, 220, 255]);
     assert!(snapshot.expanded_scene_provenance().values().any(|source| {
-        source.source_entity_id() == &scene_id("enemy")
+        source.local_entity_id() == &scene_id("enemy")
             && source.projection_path().is_some_and(|path| {
                 path.root_anchor() == &scene_id("enemy-anchor")
-                    && path.source_chain().iter().any(|step| {
-                        matches!(
-                            step.canonical_source().origin(),
+                    && path.steps().iter().any(|step| match step {
+                        PrefabProjectionStep::SourceEntity {
+                            canonical_source, ..
+                        } => matches!(
+                            canonical_source.origin(),
                             SourceDocumentOrigin::ProjectLocation { path, .. }
                                 if path.as_str() == "prefabs/enemy.prefab.json"
-                        )
+                        ),
+                        PrefabProjectionStep::InstanceAddition { .. } => false,
                     })
             })
     }));

@@ -1026,14 +1026,20 @@ fn expanded_candidate_keeps_nested_source_paths_through_spawn_and_product_replac
     let (leaf_id, expected_source) = candidate
         .provenance()
         .iter()
-        .find(|(_, source)| source.source_entity_id() == &scene_id("leaf"))
+        .find(|(_, source)| source.local_entity_id() == &scene_id("leaf"))
         .unwrap();
     let path = expected_source.projection_path().unwrap();
     assert_eq!(path.root_anchor(), &scene_id("anchor"));
     assert_eq!(
-        path.source_chain()
+        path.steps()
             .iter()
-            .map(|step| step.source_document())
+            .map(|step| match step {
+                crate::PrefabProjectionStep::SourceEntity {
+                    source_document, ..
+                } => source_document,
+                crate::PrefabProjectionStep::InstanceAddition { .. } =>
+                    panic!("expected inherited source"),
+            })
             .collect::<Vec<_>>(),
         [&outer, &inner]
     );
@@ -1058,10 +1064,10 @@ fn expanded_candidate_keeps_nested_source_paths_through_spawn_and_product_replac
         ),
     );
     assert_eq!(
-        &old_source.source_entity_id,
-        expected_source.source_entity_id()
+        old_source.provenance().local_entity_id(),
+        expected_source.local_entity_id()
     );
-    assert_eq!(old_source.projection_path.as_ref(), Some(path));
+    assert_eq!(old_source.provenance().projection_path(), Some(path));
     let replacement = replace_expanded_scene_with_product(
         &mut world,
         &registry,
@@ -1078,8 +1084,11 @@ fn expanded_candidate_keeps_nested_source_paths_through_spawn_and_product_replac
     let source = world.get::<SceneEntitySource>(leaf).unwrap();
     assert_eq!(source.containing_source(), candidate.source_key());
     assert_eq!(source.occurrence(), old_source.occurrence());
-    assert_eq!(&source.source_entity_id, expected_source.source_entity_id());
-    assert_eq!(source.projection_path.as_ref(), Some(path));
+    assert_eq!(
+        source.provenance().local_entity_id(),
+        expected_source.local_entity_id()
+    );
+    assert_eq!(source.provenance().projection_path(), Some(path));
     assert_ne!(source.instance_id, old_source.instance_id);
 }
 

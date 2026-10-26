@@ -94,9 +94,9 @@ fn canonical_prefab_edit_reaches_reloaded_runtime_adapter_without_rust_changes()
         .expanded_scene_provenance()
         .iter()
         .find_map(|(id, source)| {
-            (source.source_entity_id().as_str() == RETRY_BUTTON
+            (source.local_entity_id().as_str() == RETRY_BUTTON
                 && source.projection_path().is_some_and(|path| {
-                    path.root_anchor().as_str() == "reference-ui" && path.source_chain().len() == 1
+                    path.root_anchor().as_str() == "reference-ui" && path.steps().len() == 1
                 }))
             .then_some(id)
         })

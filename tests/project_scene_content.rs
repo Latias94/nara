@@ -104,7 +104,7 @@ fn selected_scene_loads_only_its_dependency_closure_without_retargeting_startup(
     assert_eq!(second.expanded_scene().entities.len(), 2);
     assert_eq!(second.expanded_scene_provenance().len(), 2);
     assert!(second.expanded_scene_provenance().values().any(|source| {
-        source.source_entity_id() == &scene_id("second-enemy")
+        source.local_entity_id() == &scene_id("second-enemy")
             && source
                 .projection_path()
                 .is_some_and(|path| path.root_anchor() == &scene_id("second-anchor"))

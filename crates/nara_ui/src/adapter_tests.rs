@@ -4182,7 +4182,7 @@ fn repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance() 
                 .filter_map(|entity| {
                     entity
                         .get::<SceneEntitySource>()
-                        .filter(|source| source.source_entity_id.as_str() == "root")
+                        .filter(|source| source.provenance().local_entity_id().as_str() == "root")
                         .map(|_| entity.id())
                 })
                 .collect::<Vec<_>>();
@@ -4201,7 +4201,7 @@ fn repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance() 
         .filter_map(|entity| {
             entity
                 .get::<SceneEntitySource>()
-                .filter(|source| source.source_entity_id.as_str() == "root")
+                .filter(|source| source.provenance().local_entity_id().as_str() == "root")
                 .map(|source| (entity.id(), source.clone()))
         })
         .collect::<Vec<_>>();
@@ -4216,7 +4216,7 @@ fn repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance() 
     assert!(
         projected
             .iter()
-            .all(|(_, source)| source.projection_path.is_some())
+            .all(|(_, source)| source.provenance().projection_path().is_some())
     );
     let frame = latest_ui_frame(app.world(), surface_id())
         .expect("UI runtime should be available")
@@ -4335,7 +4335,9 @@ fn persistent_sources_and_occurrences_isolate_presented_focus_press_and_actions(
                         entity
                             .get::<SceneEntitySource>()
                             .filter(|source| source.instance_id == instance.instance_id())
-                            .map(|source| (entity.id(), source.source_entity_id.clone()))
+                            .map(|source| {
+                                (entity.id(), source.provenance().local_entity_id().clone())
+                            })
                     })
                     .collect::<Vec<_>>();
                 for (entity, local) in entities {
@@ -4586,7 +4588,7 @@ fn persistent_rebuild_keeps_keys_but_not_runtime_or_unpresented_behavior_authori
                     entity
                         .get::<SceneEntitySource>()
                         .filter(|source| source.instance_id == instance.instance_id())
-                        .map(|source| (entity.id(), source.source_entity_id.clone()))
+                        .map(|source| (entity.id(), source.provenance().local_entity_id().clone()))
                 })
                 .collect::<Vec<_>>();
             for (entity, local) in entities {

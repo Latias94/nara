@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-10-25
+**Last Revised**: 2026-10-26
 **Refines**: ADR 0034: Editor Play Mode World Boundary; ADR 0038: Scene/Prefab Authoring
 Identity and Provenance; ADR 0056: Headless Runtime and Dedicated Server Readiness
 **Refined By**: ADR 0076: Play Runtime Debug Control and Observation
@@ -64,6 +64,13 @@ patch, and component document schemas accept `EntityReference`, not `RuntimeEnti
 encode runtime references only inside their declared timeline and existing ADR 0049 parse budgets.
 
 ### Scene-owned active occurrence association
+
+Scene source provenance distinguishes inherited source entities from additions owned by an
+instance overlay, including added anchors in nested ancestry (ADR 0038). This extends the authored
+placement model; it does not create another Runtime identity domain, occurrence namespace,
+activation allocator or incarnation. An opaque terminal local ID alone does not identify an
+addition's owning source or placement. Runtime publication retains the complete owner-created
+provenance; existing exact runtime locators remain materialization identities, not source addresses.
 
 Scene owns one private, World-bound active association keyed only by a caller-declared logical
 namespace and slot. Its values bind the required containing source and exact World domain/Scene

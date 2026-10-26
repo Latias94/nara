@@ -1,9 +1,11 @@
 use nara_asset::AssetRef;
+use nara_ecs::World;
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
-    InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, PrefabSourceResolver,
-    SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, SourceDocumentKey,
-    SourceDocumentKind,
+    InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, PrefabProjectionStep,
+    PrefabSourceResolver, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
+    SceneOccurrenceKey, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
+    ScenePlacementOwner, SourceDocumentKey, SourceDocumentKind,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -87,9 +89,141 @@ fn canonical_aliases_share_one_document_and_recover_after_cycle_refusal() {
     assert_eq!(projected.len(), 2);
     assert_ne!(projected[0].root_anchor(), projected[1].root_anchor());
     for projection in projected {
-        assert_eq!(projection.source_chain().len(), 1);
-        let step = &projection.source_chain()[0];
-        assert_eq!(step.canonical_source(), &key);
-        assert_eq!(step.source_entity(), &id("leaf"));
+        let [step] = projection.steps() else {
+            panic!("each projection must contain one source step");
+        };
+        let PrefabProjectionStep::SourceEntity {
+            source_document,
+            canonical_source,
+            entity,
+        } = step
+        else {
+            panic!("the leaf must originate in the prefab source");
+        };
+        let expected_request = match projection.root_anchor().as_str() {
+            "left" => &path,
+            "right" => &stable,
+            _ => panic!("unexpected prefab anchor"),
+        };
+        assert_eq!(source_document, expected_request);
+        assert_eq!(canonical_source, &key);
+        assert_eq!(entity, &id("leaf"));
+        assert_eq!(step.entity_id(), entity);
+    }
+}
+
+#[test]
+fn nested_instance_additions_preserve_tagged_provenance_through_public_spawn() {
+    let mut registry = ComponentRegistry::new();
+    registry.freeze().unwrap();
+    let universe = "46806b15-ef25-4da2-9983-32078fd5b5a7".parse().unwrap();
+    let outer_request = AssetRef::path("prefabs/outer.ron").unwrap();
+    let inner_request = AssetRef::path("prefabs/inner.ron").unwrap();
+    let outer_key =
+        SourceDocumentKey::named(universe, "consumer.outer", SourceDocumentKind::Prefab).unwrap();
+    let inner_key =
+        SourceDocumentKey::named(universe, "consumer.inner", SourceDocumentKind::Prefab).unwrap();
+    let mut nested = anchor("nested-added", inner_request.clone());
+    nested.prefab.as_mut().unwrap().overrides =
+        ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(id("inner-added")),
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+        }]);
+    let mut outer = anchor("outer", outer_request.clone());
+    outer.prefab.as_mut().unwrap().overrides =
+        ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+            entity: nested,
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+        }]);
+    let resolver = InMemoryPrefabSourceResolver::new()
+        .with_prefab(
+            outer_request.clone(),
+            outer_key.clone(),
+            PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("outer-leaf"))]),
+        )
+        .with_prefab(
+            inner_request.clone(),
+            inner_key.clone(),
+            PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("inner-leaf"))]),
+        );
+    let expansion = SceneDocument::from_ordered_roots([outer]).expand_prefabs(&registry, &resolver);
+    assert!(
+        !expansion.diagnostics.has_errors(),
+        "{:?}",
+        expansion.diagnostics
+    );
+    let candidate = expansion.candidate.unwrap();
+    let addition = PrefabProjectionStep::InstanceAddition {
+        entity: id("nested-added"),
+    };
+    for (local, expected) in [
+        (
+            "outer-leaf",
+            vec![PrefabProjectionStep::SourceEntity {
+                source_document: outer_request,
+                canonical_source: outer_key,
+                entity: id("outer-leaf"),
+            }],
+        ),
+        ("nested-added", vec![addition.clone()]),
+        (
+            "inner-leaf",
+            vec![
+                addition.clone(),
+                PrefabProjectionStep::SourceEntity {
+                    source_document: inner_request,
+                    canonical_source: inner_key,
+                    entity: id("inner-leaf"),
+                },
+            ],
+        ),
+        (
+            "inner-added",
+            vec![
+                addition,
+                PrefabProjectionStep::InstanceAddition {
+                    entity: id("inner-added"),
+                },
+            ],
+        ),
+    ] {
+        let provenance = candidate
+            .provenance()
+            .values()
+            .find(|source| source.local_entity_id().as_str() == local)
+            .unwrap();
+        let path = provenance.projection_path().unwrap();
+        assert_eq!(path.root_anchor(), &id("outer"));
+        assert_eq!(path.steps(), expected.as_slice());
+        assert_eq!(
+            path.steps().last().unwrap().entity_id(),
+            provenance.local_entity_id(),
+        );
+    }
+
+    let expected_provenance = candidate.provenance().clone();
+    let source =
+        SourceDocumentKey::named(universe, "consumer.scene", SourceDocumentKind::Scene).unwrap();
+    let occurrence = SceneOccurrenceKey::new("consumer", "nested-additions").unwrap();
+    let candidate = candidate.bind_source(source.clone());
+    let mut world = World::new();
+    let spawned = nara_scene::spawn_scene(&mut world, &registry, &candidate, &occurrence, None);
+    assert!(
+        !spawned.diagnostics.has_errors(),
+        "{:?}",
+        spawned.diagnostics
+    );
+    let instance = spawned.instance.unwrap();
+    assert_eq!(instance.len(), 5);
+    let mut query = world.query::<&SceneEntitySource>();
+    assert_eq!(query.iter(&world).count(), 5);
+    for materialized in query.iter(&world) {
+        assert_eq!(materialized.instance_id, instance.instance_id());
+        assert_eq!(materialized.containing_source(), &source);
+        assert_eq!(materialized.occurrence(), &occurrence);
+        assert_eq!(
+            materialized.provenance(),
+            &expected_provenance[&materialized.entity_id],
+        );
     }
 }

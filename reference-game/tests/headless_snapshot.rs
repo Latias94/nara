@@ -43,9 +43,9 @@ fn authoritative_snapshot_uses_sorted_instance_local_identities() {
             .expanded_scene_provenance()
             .iter()
             .find_map(|(id, source)| {
-                (source.source_entity_id().as_str() == "enemy"
+                (source.local_entity_id().as_str() == "enemy"
                     && source.projection_path().is_some_and(|path| {
-                        path.root_anchor().as_str() == root_anchor && path.source_chain().len() == 1
+                        path.root_anchor().as_str() == root_anchor && path.steps().len() == 1
                     }))
                 .then(|| id.as_str().to_owned())
             })

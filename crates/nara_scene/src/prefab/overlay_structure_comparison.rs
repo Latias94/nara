@@ -176,13 +176,20 @@ impl Projection {
                     return None;
                 }
                 let chain = path
-                    .source_chain()
+                    .steps()
                     .iter()
-                    .map(|step| SourceEntity {
-                        source: SourceIdentity::of(step.canonical_source()),
-                        entity: step.source_entity().clone(),
+                    .map(|step| match step {
+                        crate::PrefabProjectionStep::SourceEntity {
+                            canonical_source,
+                            entity,
+                            ..
+                        } => Some(SourceEntity {
+                            source: SourceIdentity::of(canonical_source),
+                            entity: entity.clone(),
+                        }),
+                        crate::PrefabProjectionStep::InstanceAddition { .. } => None,
                     })
-                    .collect();
+                    .collect::<Option<Vec<_>>>()?;
                 Some((Target::Inherited(chain), entity.clone()))
             })
             .collect()

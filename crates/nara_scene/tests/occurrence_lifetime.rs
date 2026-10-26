@@ -65,7 +65,7 @@ fn explicit_slots_separate_sources_and_duplicate_slot_refusal_precedes_allocatio
         let runtime_source = world.get::<SceneEntitySource>(entity).unwrap();
         assert_eq!(runtime_source.containing_source(), key);
         assert_eq!(runtime_source.occurrence(), &slot);
-        assert_eq!(runtime_source.source_entity_id, root);
+        assert_eq!(runtime_source.provenance().local_entity_id(), &root);
     }
     let before = world
         .iter_entities()

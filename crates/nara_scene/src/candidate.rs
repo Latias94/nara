@@ -178,15 +178,15 @@ pub(crate) fn validate_scene_provenance(
     for entity in &document.entities {
         let source = provenance.get(&entity.id).ok_or(InvalidSceneProvenance)?;
         match source.projection_path() {
-            None if source.source_entity_id() == &entity.id => {}
+            None if source.local_entity_id() == &entity.id => {}
             Some(path)
                 if path
-                    .source_chain()
+                    .steps()
                     .last()
-                    .is_some_and(|step| step.source_entity() == source.source_entity_id())
+                    .is_some_and(|step| step.entity_id() == source.local_entity_id())
                     && provenance.get(path.root_anchor()).is_some_and(|anchor| {
                         anchor.projection_path().is_none()
-                            && anchor.source_entity_id() == path.root_anchor()
+                            && anchor.local_entity_id() == path.root_anchor()
                     }) => {}
             _ => return Err(InvalidSceneProvenance),
         }
@@ -241,7 +241,7 @@ mod tests {
         assert_eq!(candidate.provenance().len(), 2);
         for record in &document.entities {
             assert_eq!(
-                candidate.provenance()[&record.id].source_entity_id(),
+                candidate.provenance()[&record.id].local_entity_id(),
                 &record.id
             );
             assert!(
@@ -318,7 +318,9 @@ mod tests {
             .values()
             .find_map(SceneEntityProvenance::projection_path)
             .unwrap();
-        assert_eq!(projected.source_chain()[0].canonical_source(), &prefab_key);
+        assert!(
+            matches!(&projected.steps()[0], crate::PrefabProjectionStep::SourceEntity { canonical_source, .. } if canonical_source == &prefab_key)
+        );
         assert_ne!(candidate.source_key(), &prefab_key);
     }
 
@@ -439,8 +441,8 @@ mod tests {
             .find(|(_, source)| source.projection_path().is_some())
             .unwrap();
         assert_eq!(first_key, second_key);
-        assert_eq!(first_source.source_entity_id(), &id("first"));
-        assert_eq!(second_source.source_entity_id(), &id("second"));
+        assert_eq!(first_source.local_entity_id(), &id("first"));
+        assert_eq!(second_source.local_entity_id(), &id("second"));
         assert_ne!(
             first_source.projection_path(),
             second_source.projection_path()

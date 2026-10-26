@@ -175,7 +175,7 @@ requested = ["runtime-2d"]
             .expanded_scene_provenance()
             .iter()
             .filter(|(_, provenance)| {
-                provenance.source_entity_id() == source
+                provenance.local_entity_id() == source
                     && provenance
                         .projection_path()
                         .is_some_and(|path| path.root_anchor() == anchor)

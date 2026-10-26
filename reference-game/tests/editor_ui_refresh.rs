@@ -21,7 +21,7 @@ use nara::{
     prelude::{App, Assets, Children, ImageAsset, Parent, Resource, World},
     project_host::{EditorProjectSession, TrustedCompiledEditorProjectIntent},
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
-    scene::{PrefabDocument, SceneEntityId, SceneEntitySource},
+    scene::{PrefabDocument, PrefabProjectionStep, SceneEntityId, SceneEntitySource},
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentKind,
         EditorDocumentMutation, EditorGestureAction, EditorGestureOutcome, EditorNavigationAction,
@@ -731,15 +731,16 @@ fn observe_runtime_ui(world: &mut World) {
 fn runtime_structure_is_current(world: &World, expected: &SceneEntityId) -> bool {
     let Some(created) = world.iter_entities().find(|entity| {
         entity.get::<SceneEntitySource>().is_some_and(|source| {
-            source.source_entity_id == *expected
+            source.provenance().local_entity_id() == expected
                 && source
-                    .projection_path
-                    .as_ref()
-                    .and_then(|path| path.source_chain().last())
+                    .provenance()
+                    .projection_path()
+                    .and_then(|path| path.steps().last())
                     .is_some_and(|step| {
-                        step.source_document()
-                            .as_path()
-                            .is_some_and(|path| path.as_str() == "reference-ui.prefab.json")
+                        matches!(step, PrefabProjectionStep::SourceEntity { source_document, .. }
+                        if source_document.as_path().is_some_and(|path| {
+                            path.as_str() == "reference-ui.prefab.json"
+                        }))
                     })
         }) && entity.contains::<UiNode>()
             && entity.contains::<UiVisual>()
@@ -761,7 +762,7 @@ fn runtime_structure_is_current(world: &World, expected: &SceneEntityId) -> bool
     };
     if !parent
         .get::<SceneEntitySource>()
-        .is_some_and(|source| source.source_entity_id.as_str() == "terminal-overlay")
+        .is_some_and(|source| source.provenance().local_entity_id().as_str() == "terminal-overlay")
     {
         return false;
     }
@@ -775,7 +776,7 @@ fn runtime_structure_is_current(world: &World, expected: &SceneEntityId) -> bool
                 .get_entity(child)
                 .ok()?
                 .get::<SceneEntitySource>()
-                .map(|source| source.source_entity_id.clone())
+                .map(|source| source.provenance().local_entity_id().clone())
         })
         .collect::<Vec<_>>();
     if child_sources
@@ -786,7 +787,7 @@ fn runtime_structure_is_current(world: &World, expected: &SceneEntityId) -> bool
         || world.iter_entities().any(|entity| {
             entity
                 .get::<SceneEntitySource>()
-                .is_some_and(|source| source.source_entity_id.as_str() == "modal-dim")
+                .is_some_and(|source| source.provenance().local_entity_id().as_str() == "modal-dim")
         })
     {
         return false;

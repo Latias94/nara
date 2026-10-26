@@ -447,7 +447,7 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
         second
             .expanded_scene_provenance()
             .values()
-            .any(|source| source.source_entity_id() == &content_fixture::scene_id("second-sprite"))
+            .any(|source| source.local_entity_id() == &content_fixture::scene_id("second-sprite"))
     );
     assert_eq!(second.images().len(), 1);
     assert_eq!(second.images()[0].path().as_str(), "textures/second.png");

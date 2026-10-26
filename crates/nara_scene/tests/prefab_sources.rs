@@ -25,6 +25,208 @@ fn registry() -> ComponentRegistry {
     registry
 }
 
+fn inherited_key(step: &PrefabProjectionStep) -> &SourceDocumentKey {
+    match step {
+        PrefabProjectionStep::SourceEntity {
+            canonical_source, ..
+        } => canonical_source,
+        PrefabProjectionStep::InstanceAddition { .. } => panic!("expected inherited entity"),
+    }
+}
+
+#[test]
+fn instance_addition_origin_survives_nested_anchors_recreation_and_runtime_publication() {
+    use nara_scene::{
+        InMemoryPrefabSourceResolver, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    };
+    let registry = registry();
+    let outer = AssetRef::path("prefabs/outer.ron").unwrap();
+    let inner = AssetRef::path("prefabs/inner.ron").unwrap();
+    let outer_key =
+        SourceDocumentKey::named(universe(), "outer", SourceDocumentKind::Prefab).unwrap();
+    let inner_key =
+        SourceDocumentKey::named(universe(), "inner", SourceDocumentKind::Prefab).unwrap();
+    let addition = |name: &str| ScenePatchOperation::AddEntity {
+        entity: SceneEntityRecord::new(id(name)),
+        placement: ScenePlacement::last(ScenePlacementOwner::Root),
+    };
+    let mut nested = anchor("nested", inner.clone());
+    nested.prefab.as_mut().unwrap().overrides = ScenePatchDocument::new([addition("added_leaf")]);
+    let mut recreated = anchor("reused", inner.clone());
+    recreated.prefab.as_mut().unwrap().overrides =
+        ScenePatchDocument::new([addition("added_leaf")]);
+    let mut restored = SceneEntityRecord::new(id("restored"));
+    restored.children.push(id("restored_child"));
+    let overrides = ScenePatchDocument::new([
+        ScenePatchOperation::RemoveEntity {
+            entity: id("reused"),
+            from: ScenePlacement::first(ScenePlacementOwner::Root),
+        },
+        ScenePatchOperation::AddEntity {
+            entity: recreated,
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+        },
+        ScenePatchOperation::RestoreEntity {
+            entity: restored,
+            descendants: vec![SceneEntityRecord::new(id("restored_child"))],
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+        },
+    ]);
+    let resolver = InMemoryPrefabSourceResolver::new()
+        .with_prefab(
+            outer.clone(),
+            outer_key.clone(),
+            PrefabDocument::from_ordered_roots([
+                SceneEntityRecord::new(id("reused")),
+                nested,
+                SceneEntityRecord::new(id("added_leaf")),
+            ]),
+        )
+        .with_prefab(
+            inner.clone(),
+            inner_key.clone(),
+            PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("leaf"))]),
+        );
+    let scene = SceneDocument::from_ordered_roots(["host_a", "host_b"].map(|name| {
+        let mut host = anchor(name, outer.clone());
+        host.prefab.as_mut().unwrap().overrides = overrides.clone();
+        host
+    }));
+    let report = scene.expand_prefabs(&registry, &resolver);
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    let candidate = report.candidate.unwrap().bind_source(
+        SourceDocumentKey::named(universe(), "containing", SourceDocumentKind::Scene).unwrap(),
+    );
+    let inherited = |source: &AssetRef, key: &SourceDocumentKey, entity: &str| {
+        PrefabProjectionStep::SourceEntity {
+            source_document: source.clone(),
+            canonical_source: key.clone(),
+            entity: id(entity),
+        }
+    };
+    let added = |entity: &str| PrefabProjectionStep::InstanceAddition { entity: id(entity) };
+    let expected = [
+        // Nested creation payloads cannot claim a same-spelled record in this source.
+        (
+            "added_leaf",
+            vec![inherited(&outer, &outer_key, "added_leaf")],
+        ),
+        ("reused", vec![added("reused")]),
+        (
+            "leaf",
+            vec![added("reused"), inherited(&inner, &inner_key, "leaf")],
+        ),
+        ("added_leaf", vec![added("reused"), added("added_leaf")]),
+        ("nested", vec![inherited(&outer, &outer_key, "nested")]),
+        (
+            "leaf",
+            vec![
+                inherited(&outer, &outer_key, "nested"),
+                inherited(&inner, &inner_key, "leaf"),
+            ],
+        ),
+        (
+            "added_leaf",
+            vec![inherited(&outer, &outer_key, "nested"), added("added_leaf")],
+        ),
+        ("restored", vec![added("restored")]),
+        ("restored_child", vec![added("restored_child")]),
+    ];
+    for host in ["host_a", "host_b"] {
+        for (local, steps) in &expected {
+            let matches = candidate
+                .provenance()
+                .values()
+                .filter(|source| {
+                    source.local_entity_id() == &id(local)
+                        && source.projection_path().is_some_and(|path| {
+                            path.root_anchor() == &id(host) && path.steps() == steps
+                        })
+                })
+                .count();
+            assert_eq!(matches, 1, "{host}/{local}: {steps:?}");
+        }
+    }
+    let mut world = World::new();
+    let report = nara_scene::spawn_scene(
+        &mut world,
+        &registry,
+        &candidate,
+        &nara_scene::SceneOccurrenceKey::new("tests", "addition-origin").unwrap(),
+        None,
+    );
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    let instance = report.instance.unwrap();
+    for (materialized, provenance) in candidate.provenance() {
+        let nara_identity::EntityLookup::Resolved(entity) = instance.resolve(&world, materialized)
+        else {
+            panic!("missing materialized entity");
+        };
+        assert_eq!(
+            world.get::<SceneEntitySource>(entity).unwrap().provenance(),
+            provenance
+        );
+    }
+}
+
+#[test]
+fn addition_origin_index_and_typed_path_are_admitted_before_copying() {
+    use nara_scene::{
+        InMemoryPrefabSourceResolver, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    };
+    let registry = registry();
+    let source = AssetRef::path("prefabs/empty.ron").unwrap();
+    let key = SourceDocumentKey::named(universe(), "empty", SourceDocumentKind::Prefab).unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        key.clone(),
+        PrefabDocument::default(),
+    );
+    let mut host = anchor("host", source.clone());
+    host.prefab.as_mut().unwrap().overrides =
+        ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(id("local")),
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+        }]);
+    let scene = SceneDocument::from_ordered_roots([host]);
+    let before_index = size_of::<SceneEntityProvenanceMap>()
+        + entry_bytes("host", "host")
+        + stack_bytes(&source, &key);
+    let index = size_of::<SceneEntityId>() + 6 * size_of::<usize>() + string_bytes("local");
+    let rejected = scene.expand_prefabs_with_options(
+        &registry,
+        &resolver,
+        provenance_options(before_index + index - 1),
+    );
+    assert!(rejected.candidate.is_none());
+    assert_eq!(
+        assert_provenance_budget(&rejected.diagnostics, before_index + index - 1),
+        before_index + index
+    );
+
+    let full = before_index
+        + index
+        + entry_bytes("prefab_0", "local")
+        + string_bytes("host")
+        + size_of::<PrefabProjectionStep>()
+        + string_bytes("local");
+    let accepted =
+        scene.expand_prefabs_with_options(&registry, &resolver, provenance_options(full));
+    assert!(
+        !accepted.diagnostics.has_errors(),
+        "{:?}",
+        accepted.diagnostics
+    );
+    assert!(accepted.candidate.is_some());
+    let rejected =
+        scene.expand_prefabs_with_options(&registry, &resolver, provenance_options(full - 1));
+    assert!(rejected.candidate.is_none());
+    assert_eq!(
+        assert_provenance_budget(&rejected.diagnostics, full - 1),
+        full
+    );
+}
+
 fn anchor(name: &str, source: AssetRef) -> SceneEntityRecord {
     let mut entity = SceneEntityRecord::new(id(name));
     entity.prefab = Some(PrefabInstance {
@@ -258,9 +460,9 @@ fn sibling_aliases_share_a_source_but_keep_distinct_authored_placements() {
     assert_eq!(projections.len(), 2);
     assert_ne!(projections[0].root_anchor(), projections[1].root_anchor());
     for path in projections {
-        assert_eq!(path.source_chain().len(), 1);
-        assert_eq!(path.source_chain()[0].canonical_source(), &source.key);
-        assert_eq!(path.source_chain()[0].source_entity(), &id("local"));
+        assert_eq!(path.steps().len(), 1);
+        assert_eq!(inherited_key(&path.steps()[0]), &source.key);
+        assert_eq!(path.steps()[0].entity_id(), &id("local"));
     }
     let rejected =
         scene.expand_prefabs_with_options(&registry(), &source, provenance_options(exact - 1));
@@ -439,14 +641,14 @@ fn nested_projection_budget_counts_the_full_parent_key_for_every_leaf() {
     for leaf in ["leaf_0", "leaf_1"] {
         let path = provenance
             .values()
-            .find(|source| source.source_entity_id() == &id(leaf))
+            .find(|source| source.local_entity_id() == &id(leaf))
             .unwrap()
             .projection_path()
             .unwrap();
         assert_eq!(path.root_anchor(), &id("outer"));
-        assert_eq!(path.source_chain().len(), 2);
-        assert_eq!(path.source_chain()[0].canonical_source(), outer_key);
-        assert_eq!(path.source_chain()[1].canonical_source(), inner_key);
+        assert_eq!(path.steps().len(), 2);
+        assert_eq!(inherited_key(&path.steps()[0]), outer_key);
+        assert_eq!(inherited_key(&path.steps()[1]), inner_key);
     }
     let rejected =
         scene.expand_prefabs_with_options(&registry(), &sources, provenance_options(exact - 1));

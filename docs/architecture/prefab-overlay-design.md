@@ -11,6 +11,9 @@ adds a private executable comparison and owner-boundary counterexamples. It stil
 replace production storage or qualify Host publication. The
 [Unity/Godot editor study](../research/2026-10-26-unity-godot-prefab-editor-ownership.md) supplies
 editing-context, Apply/Revert and Inspector evidence, separately from runtime qualification.
+The [typed-origin production checkpoint](../knowledge/engineering/verification/2026-10/2026-10-26T041116Z-typed-prefab-instance-addition-provenance-and-complete-consumer-propagation-331ec66de92c4315971800928d8f2dc7.md)
+replaces flattened addition provenance in the current patch-based expansion under ADRs
+0038/0058/0102. It does not adopt this Proposed durable overlay format.
 
 ## Problem And Scope
 
@@ -198,16 +201,53 @@ data. Source overlay mutation and its exact inverse/history remain at the existi
 projection preparation publishes no source history. Complete full-value support is a production
 switch prerequisite, not a reason to keep the lossy template lowering as a fallback.
 
+### Full-Value Admission Boundary
+
+The next owner extraction remains crate-private until a real compiler consumer needs a public
+contract. Reuse `AuthoringClassificationBasis::classify_record` and `classify_complete_record`
+in `authoring_decode.rs` as the starting semantic core, without constructing an authoring
+Session. Source classification retains its readiness, manifest and source-location duties;
+projection admission must not require a creation template, editable field adapter or Undo budget
+to validate an already supplied complete component value.
+
+The compiler supplies unpublished full values after default materialization and explicit
+reference binding/remapping. Reflect continues to own value shape, defaults and declared-reference
+traversal. Scene validates final structure, effective local references and the complete typed
+provenance before constructing its existing expanded candidate. Keep `{}` distinct from
+`{ "group": {} }` when both satisfy the Schema; neither a template nor root-field reconstruction
+may select one on the author's behalf. The final invalid record must leave no admitted candidate.
+
+This data admission is not native execution admission. Missing/future/unmigratable source records
+may remain losslessly savable under ADR 0090 without becoming executable. Known current values
+must reject undeclared fields. Native codec, registry, asset and Runtime admission remain on the
+existing materialization path; the compiler does not issue a substitute execution credential.
+Full-record migration likewise does not migrate durable selectors or version-bound reference
+slot coordinates implicitly.
+
+Borrowed source/value accounting must precede copying input, defaults, bindings and provenance.
+Neither `effective_component_value`'s borrowed fast path nor a final publication-shape check
+proves that condition: the latter currently constructs a canonical envelope by cloning. Reuse
+the existing file/value counters rather than create another recursive format validator. A final
+bounded candidate check remains useful, but is not an allocation-before-admission proof.
+
+The exact Schema basis and actual base/source revision evidence must flow from the first real
+compiler and existing Host holder. Do not introduce a public publication-token family solely for
+this extraction. Tests should prove both lawful container shapes, template independence,
+unknown-field/version refusal, defaults-before-reference binding and last-record failure.
+Until the comparison actually consumes this core, retain its current expected-conflict test;
+changing that assertion alone would hide the known lowering limitation.
+
 ### Remaining Production Identity And Publication Obligations
 
-- An addition belongs to its containing source's instance overlay, not the base Prefab. Its
-  durable address needs explicit containing-owner placement and an overlay-local entity kind.
-  A local namespace in this private `TargetMap` does not yet propagate that fact to provenance.
-  Do not fabricate a base-source entity or encode the distinction in an `overlay:` ID prefix.
+- An addition belongs to its containing source's instance overlay, not the base Prefab. The
+  typed-origin checkpoint carries explicit `InstanceAddition` steps through current production
+  expansion, Runtime and UI keys. The private comparison's `TargetMap` is not that owner. The
+  eventual durable overlay codec and compiler must reuse the same ownership meaning; no
+  `overlay:` ID prefix or fabricated base-source entity may stand in for it.
 - An overlay declared inside a Prefab source can itself appear through repeated/nested outer
-  instances. Carry that actual owning-source chain and explicit local origin through complete
-  Scene/Runtime/UI logical keys; a single outer anchor or a runtime occurrence alone is not
-  enough. Reuse current occurrence/epoch custody rather than introduce another global registry.
+  instances. Production ancestry now distinguishes source-entry and addition-entry steps,
+  including an added instance anchor. This does not yet qualify the new durable overlay's
+  source edit/history/repair or full reference grammar. Existing occurrence/epoch custody stays.
 - Activation must retain and revalidate the actual admitted immutable nested base closure and
   Schema. Full document equality in a private fixture is not a filesystem publication protocol.
 - The production compiler still needs complete property grammar (including explicit absence,
@@ -215,24 +255,28 @@ switch prerequisite, not a reason to keep the lossy template lowering as a fallb
   bounded conflict/source encoding, and complete source edit/history/repair and conversion paths.
   These obligations have not been qualified by combining two separate private comparisons.
 
-The next provenance change is a typed origin axis within the existing placement model, not a
-replacement identity service. Conceptually, an entity address combines its owning-source
+The production provenance change is a typed origin axis within the existing placement model,
+not a replacement identity service. Conceptually, an entity address combines its owning-source
 placement with either a source-local entity or an overlay-local addition at an explicit instance
 address. For Scene `S`, anchor `a` instantiating `P`, addition `x` belongs to `S/a`'s overlay,
 not to `(P, x)`. For Prefab `P`, anchor `n` instantiating `Q`, addition `x` belongs to `P/n`'s
 overlay; each outer placement of `P` supplies its own existing occurrence and source chain.
 
 An added entity can itself carry a `PrefabInstance`, so the origin distinction must also occur
-in instance-anchor ancestry, not just as a terminal `is_added` flag. Existing `PrefabProjectionPath`
-already distinguishes repeated/nested placements; current `expand_prefab_instance` instead
-flattens patched-in additions into the base's source/entity namespace before constructing that
-path. Current admission refuses duplicate IDs in that effective copy. This is a missing ownership
-representation, not evidence of an already demonstrated Runtime ID collision.
+in instance-anchor ancestry, not just as a terminal `is_added` flag. `PrefabProjectionPath::steps`
+now carries either `SourceEntity` (canonical source plus entity and lookup evidence) or
+`InstanceAddition` (addition-local entity, owned by the preceding anchor). Earlier expansion
+flattened patched-in additions into the base's source/entity namespace. The current patch-based
+effective copy still refuses duplicate IDs; the correction does not enable same-spelled inherited
+and added records to coexist or claim a previously observed Runtime ID collision.
 
-Carry the corrected typed address through existing expansion, candidate validation, retained-byte
-admission, `SceneEntitySource` publication and UI placement encoding. Preserve canonical source,
-logical occurrence, Runtime activation/incarnation and preview epochs. The ECS-independent UI
-kernel continues to receive opaque context/placement keys; it need not learn Scene origin types.
+The corrected typed provenance travels through existing expansion, candidate validation,
+retained-byte admission, `SceneEntitySource` publication and UI placement encoding. Runtime
+retains one encapsulated provenance value, not separately mutable ID/path fields. Canonical source,
+logical occurrence, Runtime activation/incarnation and preview epochs remain unchanged. The
+ECS-independent UI kernel still receives opaque context/placement keys, not Scene origin types.
+Provenance is not a base-dependency inventory: actual resolved sources remain captured/revalidated
+by their Host even when only additions survive and their addresses omit the overridden base.
 Durable overlay edits remain on `SceneAuthoringSession` or `PrefabAuthoringSession` according to
 the declaration's real source. Reopening a disposable authoring session merely to classify the
 derived projection would introduce the wrong source/history lineage.

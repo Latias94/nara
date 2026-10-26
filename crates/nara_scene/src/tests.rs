@@ -855,36 +855,24 @@ fn scene_prefab_resolver_expands_nested_instances_with_deterministic_ids() {
         .unwrap()
         .get(flash_id)
         .expect("nested projection must retain source provenance");
-    assert_eq!(provenance.source_entity_id(), &scene_id("flash"));
+    assert_eq!(provenance.local_entity_id(), &scene_id("flash"));
     let projection = provenance
         .projection_path()
         .expect("nested prefab entity must carry a projection path");
     assert_eq!(projection.root_anchor(), &scene_id("enemy"));
-    assert_eq!(projection.source_chain().len(), 3);
-    assert_eq!(
-        projection.source_chain()[0].source_document(),
-        &enemy_source
+    assert_eq!(projection.steps().len(), 3);
+    assert!(
+        matches!(&projection.steps()[0], crate::PrefabProjectionStep::SourceEntity { source_document, .. } if source_document == &enemy_source)
     );
-    assert_eq!(
-        projection.source_chain()[0].source_entity(),
-        &scene_id("weapon")
+    assert_eq!(projection.steps()[0].entity_id(), &scene_id("weapon"));
+    assert!(
+        matches!(&projection.steps()[1], crate::PrefabProjectionStep::SourceEntity { source_document, .. } if source_document == &weapon_source)
     );
-    assert_eq!(
-        projection.source_chain()[1].source_document(),
-        &weapon_source
+    assert_eq!(projection.steps()[1].entity_id(), &scene_id("muzzle"));
+    assert!(
+        matches!(&projection.steps()[2], crate::PrefabProjectionStep::SourceEntity { source_document, .. } if source_document == &muzzle_source)
     );
-    assert_eq!(
-        projection.source_chain()[1].source_entity(),
-        &scene_id("muzzle")
-    );
-    assert_eq!(
-        projection.source_chain()[2].source_document(),
-        &muzzle_source
-    );
-    assert_eq!(
-        projection.source_chain()[2].source_entity(),
-        &scene_id("flash")
-    );
+    assert_eq!(projection.steps()[2].entity_id(), &scene_id("flash"));
     let expanded = expansion.document().unwrap();
     assert_eq!(expanded.entities.len(), 4);
     assert_eq!(expansion, document.expand_prefabs(&registry, &resolver));
@@ -915,13 +903,13 @@ fn scene_prefab_resolver_expands_nested_instances_with_deterministic_ids() {
         .get::<SceneEntitySource>(projected)
         .expect("spawned prefab projection must carry source provenance");
     assert_eq!(&source.entity_id, flash_id);
-    assert_eq!(source.source_entity_id, scene_id("flash"));
+    assert_eq!(source.provenance().local_entity_id(), &scene_id("flash"));
     assert_eq!(
         source
-            .projection_path
-            .as_ref()
+            .provenance()
+            .projection_path()
             .expect("spawned nested prefab entity must retain its path")
-            .source_chain()
+            .steps()
             .len(),
         3
     );
@@ -1005,7 +993,7 @@ fn prefab_opaque_ids_do_not_alias_distinct_nested_instances() {
     assert_eq!(expansion.provenance().unwrap().len(), 5);
     for root in &expanded.roots {
         let provenance = expansion.provenance().unwrap().get(root).unwrap();
-        assert_eq!(provenance.source_entity_id(), root);
+        assert_eq!(provenance.local_entity_id(), root);
         assert!(provenance.projection_path().is_none());
     }
 
@@ -1013,7 +1001,7 @@ fn prefab_opaque_ids_do_not_alias_distinct_nested_instances() {
         .provenance()
         .unwrap()
         .iter()
-        .filter(|(_, provenance)| provenance.source_entity_id() == &leaf_id)
+        .filter(|(_, provenance)| provenance.local_entity_id() == &leaf_id)
         .collect::<Vec<_>>();
     assert_eq!(leaves.len(), 2);
     assert_ne!(leaves[0].0, leaves[1].0);
@@ -1021,7 +1009,7 @@ fn prefab_opaque_ids_do_not_alias_distinct_nested_instances() {
         .iter()
         .map(|(_, provenance)| {
             let path = provenance.projection_path().unwrap();
-            (path.root_anchor().clone(), path.source_chain().len())
+            (path.root_anchor().clone(), path.steps().len())
         })
         .collect::<BTreeMap<_, _>>();
     assert_eq!(
@@ -2773,8 +2761,7 @@ fn scene_retirement_rejection_keeps_the_target_alive() {
             }),
             instance_id: source.instance_id,
             entity_id: scene_id("forged"),
-            source_entity_id: scene_id("forged"),
-            projection_path: None,
+            provenance: crate::SceneEntityProvenance::local(scene_id("forged")),
         })
         .id();
     let forged_components = world.entity(forged).archetype().components().len();
@@ -6569,12 +6556,12 @@ fn prefab_projection_id<'a>(
         .filter(|(_, provenance)| {
             provenance.projection_path().is_some_and(|path| {
                 path.root_anchor().as_str() == root_anchor
-                    && path.source_chain().len() == source_entities.len()
+                    && path.steps().len() == source_entities.len()
                     && path
-                        .source_chain()
+                        .steps()
                         .iter()
                         .zip(source_entities)
-                        .all(|(step, entity)| step.source_entity().as_str() == *entity)
+                        .all(|(step, entity)| step.entity_id().as_str() == *entity)
             })
         });
     let (id, _) = matches.next().expect("prefab projection must exist");

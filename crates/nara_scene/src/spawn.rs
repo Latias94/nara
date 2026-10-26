@@ -44,7 +44,7 @@ use nara_reflect::{
 };
 
 use crate::{
-    ExpandedSceneCandidate, PrefabProjectionPath, SceneEntityId, SceneEntityProvenanceMap,
+    ExpandedSceneCandidate, SceneEntityId, SceneEntityProvenance, SceneEntityProvenanceMap,
     SceneOccurrenceKey, SourceDocumentKey,
     asset_bindings::SceneAssetBindings,
     candidate::validate_scene_provenance,
@@ -101,15 +101,18 @@ pub struct SceneEntitySource {
     pub(crate) context: Arc<SceneSourceContext>,
     /// Identity of the concrete materialized scene instance.
     pub instance_id: SceneInstanceId,
-    /// Stable entity identity within the persistent scene document.
+    /// Entity locator within this materialized instance, not a durable source address.
     pub entity_id: SceneEntityId,
-    /// Opaque identity in the owning scene or prefab source document.
-    pub source_entity_id: SceneEntityId,
-    /// Structured prefab location, absent for scene-local entities.
-    pub projection_path: Option<PrefabProjectionPath>,
+    pub(crate) provenance: SceneEntityProvenance,
 }
 
 impl SceneEntitySource {
+    /// Returns the complete typed authored origin independently of the materialized locator.
+    #[must_use]
+    pub const fn provenance(&self) -> &SceneEntityProvenance {
+        &self.provenance
+    }
+
     /// Returns the required containing document source, independently of Prefab lookup requests.
     #[must_use]
     pub fn containing_source(&self) -> &SourceDocumentKey {
