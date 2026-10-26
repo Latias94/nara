@@ -92,6 +92,299 @@ fn prepared_panel_patch() -> ScenePatchDocument {
 }
 
 #[test]
+fn panel_context_forwards_selection_independent_document_queries() {
+    let mut harness = Harness::new(1);
+    let expected = authoring_basis(&harness);
+    let captured = Rc::new(RefCell::new(None));
+    let output = Rc::clone(&captured);
+    harness.panels[0].1.borrow_mut().paint = Some(Box::new(move |context| {
+        let basis = context.document_query_basis(expected.document).unwrap();
+        assert_eq!(basis, expected);
+        let entities = context
+            .query_document_entities(nara::tooling::EditorEntityQuery {
+                position: nara::tooling::EditorEntityQueryPosition::Start(basis.clone()),
+                limits: nara::tooling::EditorEntityQueryLimits::new(64, 64).unwrap(),
+            })
+            .unwrap();
+        let entity = entities
+            .entities
+            .iter()
+            .find(|entity| entity.as_str() == "preserved")
+            .cloned()
+            .unwrap();
+        let components = context
+            .query_document_authoring(nara::tooling::EditorAuthoringQuery {
+                position: nara::tooling::EditorAuthoringQueryPosition::Start(
+                    nara::tooling::EditorAuthoringQueryTarget {
+                        basis,
+                        entity: entity.clone(),
+                        projection: nara::tooling::EditorAuthoringProjection::Components,
+                    },
+                ),
+                limits: nara::tooling::EditorAuthoringQueryLimits::new(64, 64, 4096).unwrap(),
+            })
+            .unwrap();
+        assert_eq!(components.target.entity, entity);
+        assert!(matches!(
+            components.rows.as_slice(),
+            [nara::tooling::EditorAuthoringRow::Component {
+                component,
+                readiness: nara::scene::AuthoringRecordReadiness::UnknownSchema,
+                ..
+            }] if component.as_str() == "studio.unavailable.Payload"
+        ));
+        *output.borrow_mut() = Some(components.rows);
+    }));
+    let before = harness.application.current_frame().unwrap();
+    drop(harness.draw());
+    assert!(matches!(
+        captured.borrow().as_ref(),
+        Some(rows) if rows.len() == 1
+    ));
+    assert!(std::sync::Arc::ptr_eq(
+        &before,
+        &harness.application.current_frame().unwrap()
+    ));
+    assert!(harness.panels[0].1.borrow().queued.is_empty());
+    assert!(harness.panels[0].1.borrow().finished.is_empty());
+}
+
+#[test]
+fn workspace_panel_discovers_reads_and_commits_a_nested_property_on_a_nonactive_scene() {
+    use nara::{
+        reflect::{
+            ComponentFieldId, ComponentPropertyPath, ComponentPropertyStep, ComponentSchemaVersion,
+            ComponentTypeId, ComponentValue, PersistentComponentSchemaOwnerId,
+        },
+        scene::{AuthoringPropertyEdit, SceneComponentRecord},
+        tooling::{
+            EditorAuthoringMemberStatus, EditorAuthoringProjection, EditorAuthoringQuery,
+            EditorAuthoringQueryLimits, EditorAuthoringQueryPosition, EditorAuthoringQueryTarget,
+            EditorAuthoringRow, EditorDocumentMutation, EditorEntityQuery, EditorEntityQueryLimits,
+            EditorEntityQueryPosition, EditorPropertyRead, EditorPropertyReadLimits,
+            EditorPropertyTarget, EditorPropertyValue, PreparedEditorDocumentEdit,
+        },
+    };
+
+    let mut harness = Harness::with_project(
+        super::interaction_tests::InteractionProject::new_recursive(),
+        1,
+    );
+    let scene_document = authoring_basis(&harness).document;
+    let entity = SceneEntityId::new("prefab-anchor").unwrap();
+    let component = ComponentTypeId::new(super::interaction_tests::CUSTOM_COMPONENT);
+    let value = ComponentValue::map([
+        ("optional", ComponentValue::Null),
+        (
+            "vector",
+            ComponentValue::map([
+                ("x", ComponentValue::f64(1.0).unwrap()),
+                ("y", ComponentValue::f64(2.0).unwrap()),
+            ]),
+        ),
+        ("list", ComponentValue::List(vec![ComponentValue::U64(3)])),
+        (
+            "map",
+            ComponentValue::map([("first", ComponentValue::String("before".into()))]),
+        ),
+    ]);
+    let frame = harness.application.current_frame().unwrap();
+    let tab = frame.workspace().document(scene_document).unwrap();
+    harness.application.submit_and_drive(
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Mutate(
+                EditorDocumentMutation::ApplyScenePatch {
+                    document: scene_document,
+                    base_revision: tab.revision,
+                    patch: ScenePatchDocument::new([ScenePatchOperation::AddComponent {
+                        entity: entity.clone(),
+                        component: component.clone(),
+                        value: SceneComponentRecord::new(ComponentSchemaVersion::ONE, value)
+                            .with_owner(
+                                PersistentComponentSchemaOwnerId::try_new(
+                                    "studio.interaction.components",
+                                )
+                                .unwrap(),
+                            ),
+                    }]),
+                },
+            )],
+        ),
+        Duration::ZERO,
+    );
+    let basis = authoring_basis(&harness);
+    harness.application.submit_and_drive(
+        EditorActionBatch::new(
+            harness.application.current_frame().unwrap().revision(),
+            [EditorAction::Navigate(
+                EditorNavigationAction::SelectEntity {
+                    document: scene_document,
+                    entity: Some(entity.clone()),
+                },
+            )],
+        ),
+        Duration::ZERO,
+    );
+    harness.application.submit_and_drive(
+        EditorActionBatch::new(
+            harness.application.current_frame().unwrap().revision(),
+            [EditorAction::Navigate(
+                EditorNavigationAction::OpenPrefabSource {
+                    document: scene_document,
+                    base_revision: basis.revision,
+                    entity: entity.clone(),
+                },
+            )],
+        ),
+        Duration::ZERO,
+    );
+    harness
+        .application
+        .panel_workspace_mut()
+        .layout_mut()
+        .set_target(harness.panels[0].0, EditorPanelTarget::Workspace);
+
+    let retained = Rc::new(RefCell::new(None::<PreparedEditorDocumentEdit>));
+    let queued = Rc::new(RefCell::new(None::<PanelSubmissionId>));
+    let retained_for_panel = Rc::clone(&retained);
+    let queued_for_panel = Rc::clone(&queued);
+    harness.panels[0].1.borrow_mut().paint = Some(Box::new(move |context| {
+        assert!(context.model().document().is_none());
+        let basis = context.document_query_basis(scene_document).unwrap();
+        let entities = context
+            .query_document_entities(EditorEntityQuery {
+                position: EditorEntityQueryPosition::Start(basis.clone()),
+                limits: EditorEntityQueryLimits::new(64, 64).unwrap(),
+            })
+            .unwrap();
+        assert!(entities.entities.contains(&entity));
+        let components = context
+            .query_document_authoring(EditorAuthoringQuery {
+                position: EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
+                    basis: basis.clone(),
+                    entity: entity.clone(),
+                    projection: EditorAuthoringProjection::Components,
+                }),
+                limits: EditorAuthoringQueryLimits::new(64, 64, 4096).unwrap(),
+            })
+            .unwrap();
+        assert!(matches!(
+            components.rows.as_slice(),
+            [EditorAuthoringRow::Component {
+                component: actual,
+                readiness: nara::scene::AuthoringRecordReadiness::Available,
+                ..
+            }] if actual == &component
+        ));
+        let roots = context
+            .query_document_authoring(EditorAuthoringQuery {
+                position: EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
+                    basis: basis.clone(),
+                    entity: entity.clone(),
+                    projection: EditorAuthoringProjection::Roots {
+                        component: component.clone(),
+                    },
+                }),
+                limits: EditorAuthoringQueryLimits::new(64, 64, 4096).unwrap(),
+            })
+            .unwrap();
+        assert!(roots.rows.iter().any(|row| matches!(
+            row,
+            EditorAuthoringRow::Root { field, .. } if field.as_str() == "vector"
+        )));
+        let nested_property = ComponentPropertyPath::new(ComponentFieldId::new("vector"))
+            .with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("x"))]);
+        let members = context
+            .query_document_authoring(EditorAuthoringQuery {
+                position: EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
+                    basis: basis.clone(),
+                    entity: entity.clone(),
+                    projection: EditorAuthoringProjection::Members {
+                        component: component.clone(),
+                        root: ComponentFieldId::new("vector"),
+                    },
+                }),
+                limits: EditorAuthoringQueryLimits::new(64, 64, 4096).unwrap(),
+            })
+            .unwrap();
+        assert!(members.rows.iter().any(|row| matches!(
+            row,
+            EditorAuthoringRow::Member {
+                property,
+                kind: Some(nara::reflect::ComponentValueKind::F64),
+                edit_capability: true,
+                status: EditorAuthoringMemberStatus::Available,
+            } if property == &nested_property
+        )));
+        let observation = context
+            .read_document_property(EditorPropertyRead {
+                target: EditorPropertyTarget {
+                    basis: basis.clone(),
+                    entity: entity.clone(),
+                    component: component.clone(),
+                    property: nested_property.clone(),
+                },
+                limits: EditorPropertyReadLimits::new(4096, 4, 64).unwrap(),
+            })
+            .unwrap();
+        assert_eq!(
+            observation.value,
+            EditorPropertyValue::Present(ComponentValue::f64(1.0).unwrap())
+        );
+
+        if queued_for_panel.borrow().is_some() {
+            return;
+        }
+        let edit = context
+            .prepare_authoring_property_edit(
+                &basis,
+                &[AuthoringPropertyEdit {
+                    entity: entity.clone(),
+                    component: component.clone(),
+                    component_version: ComponentSchemaVersion::ONE,
+                    property: nested_property,
+                    value: ComponentValue::f64(9.0).unwrap(),
+                }],
+            )
+            .unwrap();
+        if retained_for_panel.borrow().is_none() {
+            *retained_for_panel.borrow_mut() = Some(edit);
+        } else {
+            let prepared = retained_for_panel.borrow_mut().take().unwrap();
+            *queued_for_panel.borrow_mut() = Some(context.commit_authoring_edit(prepared).unwrap());
+        }
+    }));
+
+    let before = harness.application.current_frame().unwrap();
+    drop(harness.draw());
+    assert!(retained.borrow().is_some());
+    assert!(queued.borrow().is_none());
+    assert!(std::sync::Arc::ptr_eq(
+        &before,
+        &harness.application.current_frame().unwrap()
+    ));
+    let candidate = harness.draw();
+    assert!(queued.borrow().is_some());
+    harness.submit(candidate);
+    let after = harness.application.current_frame().unwrap();
+    assert_eq!(
+        after.workspace().active_document,
+        before.workspace().active_document
+    );
+    assert_ne!(after.workspace().active_document, Some(scene_document));
+    assert_ne!(
+        after.workspace().document(scene_document).unwrap().revision,
+        basis.revision
+    );
+    assert!(matches!(
+        harness.panels[0].1.borrow().finished.as_slice(),
+        [(_, PanelActionDispatch::Dispatched(EditorActionOutcome::Workspace(report)))]
+            if report.applied
+    ));
+}
+
+#[test]
 fn a_workspace_panel_can_retain_and_drop_preparation_for_a_nonactive_source_without_mutation() {
     let mut harness = Harness::new(1);
     let basis = authoring_basis(&harness);
@@ -143,6 +436,37 @@ fn a_workspace_panel_can_retain_and_drop_preparation_for_a_nonactive_source_with
     let captured = Rc::clone(&retained);
     harness.panels[0].1.borrow_mut().paint = Some(Box::new(move |context| {
         assert!(context.model().document().is_none());
+        let queried_basis = context.document_query_basis(basis.document).unwrap();
+        assert_eq!(queried_basis, basis);
+        let entities = context
+            .query_document_entities(nara::tooling::EditorEntityQuery {
+                position: nara::tooling::EditorEntityQueryPosition::Start(queried_basis.clone()),
+                limits: nara::tooling::EditorEntityQueryLimits::new(64, 64).unwrap(),
+            })
+            .unwrap();
+        let entity = entities
+            .entities
+            .iter()
+            .find(|entity| entity.as_str() == "preserved")
+            .cloned()
+            .unwrap();
+        let components = context
+            .query_document_authoring(nara::tooling::EditorAuthoringQuery {
+                position: nara::tooling::EditorAuthoringQueryPosition::Start(
+                    nara::tooling::EditorAuthoringQueryTarget {
+                        basis: queried_basis,
+                        entity,
+                        projection: nara::tooling::EditorAuthoringProjection::Components,
+                    },
+                ),
+                limits: nara::tooling::EditorAuthoringQueryLimits::new(64, 64, 4096).unwrap(),
+            })
+            .unwrap();
+        assert!(matches!(
+            components.rows.as_slice(),
+            [nara::tooling::EditorAuthoringRow::Component { component, .. }]
+                if component.as_str() == "studio.unavailable.Payload"
+        ));
         let patch = prepared_panel_patch();
         let edit = context.prepare_authoring_edit(&basis, &patch).unwrap();
         assert_eq!(edit.document(), basis.document);
@@ -1069,7 +1393,13 @@ pub(super) struct Harness {
 
 impl Harness {
     pub(super) fn new(count: usize) -> Self {
-        let project = super::interaction_tests::InteractionProject::new();
+        Self::with_project(super::interaction_tests::InteractionProject::new(), count)
+    }
+
+    pub(super) fn with_project(
+        project: super::interaction_tests::InteractionProject,
+        count: usize,
+    ) -> Self {
         let mut application =
             EditorApplication::new(EditorLaunchOptions::new(&project.root).with_profile("desktop"));
         application.native_shell_ready();

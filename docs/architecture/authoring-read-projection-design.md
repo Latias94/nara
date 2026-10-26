@@ -1,7 +1,7 @@
 ---
 title: Selection-Independent Authoring Read Projections
 date: 2026-10-25
-status: Bounded selector-directed owner and public workflow qualified; full R2 remains open
+status: Bounded selector-directed and direct-member owner workflows qualified; panel query facade qualified; full R2 remains open
 ---
 
 # Selection-Independent Authoring Read Projections
@@ -11,13 +11,16 @@ status: Bounded selector-directed owner and public workflow qualified; full R2 r
 R2 needs an independently compiled tool to enumerate a non-active Scene or Prefab, discover an
 actual component and root field, read its current value, compute a replacement, and use the
 existing prepare/commit/history/persistence path. Supplying a value already known to the test
-does not prove this workflow. Entity enumeration is implemented; field discovery and reading are
-not qualified by the retained-construction unit at `7f2cafa`.
+does not prove this workflow. Entity enumeration, root discovery/reading and the bounded direct
+Record-member owner path are now qualified; the complete nested panel workflow is qualified
+separately below.
 
 The [read-query qualification](../knowledge/engineering/verification/2026-10/2026-10-25T002933Z-bounded-authoring-query-complete-review-and-aggregate-budget-qualification-893b5a3ffa104ec8bc7c7413c12e0c5d.md)
 records owner/public/native/static evidence, complete nine-lens review and the independently
-rechecked multi-row budget test correction. It does not qualify prepared panel submission or
-full R2. The [selected-root baseline](../benchmarks/2026-10-25-authoring-root-read.md) separates
+rechecked multi-row budget test correction. The [direct-member and panel query qualification](../knowledge/engineering/verification/2026-10/2026-10-26T004155Z-bounded-direct-member-discovery-and-panel-query-workflow-7003450c49204d8eba92ba90db765dc0.md)
+adds budget-aware one-level member discovery, selection-independent Session/panel query
+facades, and an independently compiled non-active panel discover/read/prepare/retain/commit
+consumer. Neither record qualifies full R2. The [selected-root baseline](../benchmarks/2026-10-25-authoring-root-read.md) separates
 operation-local diagnostic timing from normal Application/frame work.
 
 Source interpretation belongs to Scene/Prefab. Tooling owns explicit workspace/document routing,
@@ -35,7 +38,7 @@ keeps its inventory/borrowed-value split rather than adding another authority or
 | Flat component/field/value stream | One traversal can populate a complete inspector | A huge early field either blocks discovery or needs partial-value semantics; discovery unnecessarily reads values |
 | Actual inventory followed by root reads | Discovery remains cheap; callers read only values they need | Adds one explicit read operation, but no retained read session or query language |
 
-Select actual inventory plus finite root reads for the experiment. Discovery pages have an
+Select actual inventory plus finite property reads for the experiment. Discovery pages have an
 explicit projection: actual components of one entity, or declared root fields of one actual
 Available component. They do not enumerate catalog-only creation capabilities. A separate root
 read returns Present, Defaulted or Missing, with explicit Null represented as a Present value.
@@ -71,6 +74,28 @@ their admitted bounded-path/index responsibilities. A small scalar output is not
 elapsed-time or allocator bound; keyed lookup can scan its list and must refuse exhausted work.
 The full selector contributes to metadata accounting before any owned observation is constructed.
 
+### Bounded direct-member discovery
+
+The qualified successor adds a `Members { component, root }` projection for exactly one direct
+Record level. Scene/Prefab borrows the admitted root's immutable declaration and tombstone
+slices; Tooling advances through them with independent scan and row limits without building a
+sorted inventory for the whole Record. Current members without durable IDs consume scan work but
+produce no selector row. Direct tombstones produce retired rows. Nested members, collection
+items, arbitrary traversal and Prefab expansion remain outside this projection.
+
+Each returned row carries the durable `root + Member(id)` `ComponentPropertyPath`, the current
+member kind or retired state, and the root's declared edit capability. A retired row has no
+current kind and is never editable. Member order is the admitted Schema declaration order
+followed by retained tombstones; this is deterministic and does not imply value presence.
+
+`EditorWorkspace::document_query_basis`, `EditorProjectSession` query forwarding and the
+`ImguiEditorPanelContext` read-only query facade now expose the same exact basis without exposing
+mutable Session access. A registered Workspace-target panel can query an explicitly named
+non-active Scene, discover a direct member, perform a bounded read, prepare the existing
+source-owned candidate, retain it across a paint, and commit it through the existing ordered
+submission path. This is a consumer qualification, not a second query service or transaction
+authority.
+
 Direct Workspace, Session and Application action/result routes carry the same observation.
 Source-built panels may use a synchronous read-only Session borrow during paint, then retain or
 submit the ordinary source-owned candidate. No mutable document access, extra query session,
@@ -82,7 +107,7 @@ one-node/eight-byte output budget, selected scalar reading fits, and the observe
 real prepared edit through cancellation, stale refusal, history and Save/Reopen. Test scan and
 copy budgets separately, together with default/null/absence/retired-selector behavior. This is
 qualified by the [scoped successor evidence](../knowledge/engineering/verification/2026-10/2026-10-25T051125Z-selector-directed-property-reads-and-indexed-root-retirement-qualification-bd267ec01e4d44d3ad5f2a2d4543514d.md),
-not qualification of nested discovery, value pagination or full R2. Root field/tombstone lookups
+not qualification of recursive/collection discovery, value pagination or full R2. Root field/tombstone lookups
 reuse the admitted catalog's sorted slices; they do not hide full retired-root scans. Storage-path
 lookup still has its admitted bound and may build diagnostic prefixes; this is not allocation-free.
 Reading never creates source. The source-mutation successor under ADR 0026 may initialize only
@@ -170,8 +195,9 @@ separate.
   keyed-item scans have their explicit separate budget, not a logarithmic lookup promise. Do not
   freeze thresholds from fabricated timings.
 - Reconcile ADRs 0047/0118 before shipping changed public contracts. Update the implementation
-  ledger only after actual owner/public evidence. Selector-directed reads do not close durable
-  Prefab overlay, nested discovery, value pagination, unopened source queries, full R2 or the Goal.
+  ledger only after actual owner/public evidence. Selector-directed reads and one-level direct
+  member discovery do not close durable Prefab overlay, recursive/collection discovery, value
+  pagination, unopened source queries, full R2 or the Goal.
 
 If the borrowed view requires reimplementing recursive default materialization, a second
 classification service or a generic query planner, stop and deepen the existing source/Reflect seam instead. If inventory

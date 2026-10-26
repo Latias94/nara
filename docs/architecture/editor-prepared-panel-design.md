@@ -1,7 +1,7 @@
 ---
 title: Source-Owned Preparation In Registered Editor Panels
 date: 2026-10-25
-status: Bounded source-built workflow qualified; shared-owner locality and full R2 remain open
+status: Bounded source-built workflow and selection-independent query facade qualified; shared-owner locality and full R2 remain open
 ---
 
 # Source-Owned Preparation In Registered Editor Panels
@@ -33,8 +33,9 @@ preparation performance.
 | Borrow read-only preparation, then consume the candidate through existing actions | Matches current synchronous preparation and ordered mutation responsibilities | Select |
 
 Application splits its panel-workspace borrow from finite, read-only preparation access. Panel
-context forwards to existing Session entry points, including project/domain/lifecycle admission.
-It never exposes that Session publicly. Preparation from a query observation checks the complete
+context forwards to existing Session entry points, including project/domain/lifecycle admission,
+and exposes the same named-document entity/authoring query facade used by the qualified
+direct-member workflow. It never exposes that Session publicly. Preparation from a query observation checks the complete
 document incarnation/revision/Schema basis through Workspace's existing resolver, then invokes
 the ordinary preparation path. That check is not a revision reservation or another candidate
 validator. Construction drafts retain their own captured source/Schema and local scope.

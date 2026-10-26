@@ -210,8 +210,18 @@ do not grant a panel mutable document access. Owned observations distinguish def
 and explicit-null values, and preserve unavailable-record readiness without interpreting its
 payload as editable data. Continuations fix the complete entity/component/projection target;
 aggregate copied metadata includes page/continuation identity, not only each row separately.
-The [bounded read design](../authoring-read-projection-design.md) is an implementation experiment,
-not a claim that root-query actions or prepared panel submission are already qualified.
+The qualified successor adds one direct Record-member projection with durable root-relative
+selectors, direct tombstone rows and independent scan/row/metadata limits. It intentionally omits
+wire-only member fallback, recursive traversal, collection-item pagination and Prefab expansion.
+The [bounded read design](../authoring-read-projection-design.md) and its linked evidence separate
+this direct-member owner proof from recursive nested discovery and full R2.
+
+`EditorWorkspace::document_query_basis`, the project Session and the registered ImGui panel
+context forward the same selection-independent entity/authoring queries without exposing a
+mutable Session. A Workspace-target panel may now discover, read, prepare, retain and commit a
+direct nested property on an explicitly named non-active Scene through the existing source-owned
+candidate and ordered submission route. This does not introduce a second query service, history,
+candidate registry or panel-owned inverse.
 
 Source-built panels may borrow finite, read-only preparation access during paint. The existing
 Session may also return a bounded selector-directed property observation through that read-only

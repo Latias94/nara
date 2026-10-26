@@ -56,16 +56,39 @@ pub struct ImguiEditorPanelContext<'scope, 'frame> {
 }
 
 impl ImguiEditorPanelContext<'_, '_> {
+    /// Captures the exact basis for a named open Scene or Prefab.
+    pub fn document_query_basis(
+        &self,
+        document: nara::tooling::EditorDocumentId,
+    ) -> Result<nara::tooling::EditorDocumentQueryBasis, nara::tooling::EditorDocumentQueryRejection>
+    {
+        self.query_preparation()?.document_query_basis(document)
+    }
+
+    /// Enumerates bounded direct source entities without changing selection or active tabs.
+    pub fn query_document_entities(
+        &self,
+        query: nara::tooling::EditorEntityQuery,
+    ) -> Result<nara::tooling::EditorEntityPage, nara::tooling::EditorDocumentQueryRejection> {
+        self.query_preparation()?.query_document_entities(query)
+    }
+
+    /// Discovers bounded component/root/member metadata without copying values.
+    pub fn query_document_authoring(
+        &self,
+        query: nara::tooling::EditorAuthoringQuery,
+    ) -> Result<nara::tooling::EditorAuthoringPage, nara::tooling::EditorDocumentQueryRejection>
+    {
+        self.query_preparation()?.query_document_authoring(query)
+    }
+
     /// Reads one bounded source property synchronously, without mutable Session access.
     pub fn read_document_property(
         &self,
         request: nara::tooling::EditorPropertyRead,
     ) -> Result<nara::tooling::EditorPropertyObservation, nara::tooling::EditorDocumentQueryRejection>
     {
-        let session = self
-            .preparation
-            .as_ref()
-            .map_err(|_| nara::tooling::EditorDocumentQueryRejection::WorkspaceUnavailable)?;
+        let session = self.query_preparation()?;
         session.read_document_property(request)
     }
 
@@ -119,6 +142,21 @@ impl ImguiEditorPanelContext<'_, '_> {
 
     fn authoring_preparation(&self) -> Result<&EditorProjectSession, EditorEditPreparationError> {
         self.preparation.clone()
+    }
+
+    fn query_preparation(
+        &self,
+    ) -> Result<&EditorProjectSession, nara::tooling::EditorDocumentQueryRejection> {
+        match self.authoring_preparation() {
+            Ok(session) => Ok(session),
+            Err(EditorEditPreparationError::Closing) => {
+                Err(nara::tooling::EditorDocumentQueryRejection::Closing)
+            }
+            Err(EditorEditPreparationError::WorkspaceUnavailable) => {
+                Err(nara::tooling::EditorDocumentQueryRejection::WorkspaceUnavailable)
+            }
+            Err(_) => Err(nara::tooling::EditorDocumentQueryRejection::WorkspaceUnavailable),
+        }
     }
 
     /// Queues the exact owned candidate for commit after paint and application admission.

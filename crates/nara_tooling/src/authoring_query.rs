@@ -59,7 +59,13 @@ impl EditorAuthoringQueryLimits {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditorAuthoringProjection {
     Components,
-    Roots { component: ComponentTypeId },
+    Roots {
+        component: ComponentTypeId,
+    },
+    Members {
+        component: ComponentTypeId,
+        root: ComponentFieldId,
+    },
 }
 
 /// Exact source and projection to discover, independent of active navigation and selection.
@@ -78,6 +84,9 @@ impl EditorAuthoringQueryTarget {
             .saturating_add(match &self.projection {
                 EditorAuthoringProjection::Components => 0,
                 EditorAuthoringProjection::Roots { component } => component.as_str().len(),
+                EditorAuthoringProjection::Members { component, root } => {
+                    component.as_str().len().saturating_add(root.as_str().len())
+                }
             })
     }
 }
@@ -113,9 +122,23 @@ pub(crate) enum AuthoringPagePosition {
     Roots {
         next_root: usize,
     },
+    Members {
+        next_member: usize,
+        next_tombstone: usize,
+    },
 }
 
-/// Compact actual record/root metadata, not a Schema, creation capability or interpreted payload.
+/// Availability of one discovered durable Record member.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorAuthoringMemberStatus {
+    /// A current durable Schema declaration; this does not assert that a source value is present.
+    Available,
+    /// A retained declaration path with no current member shape.
+    Retired,
+}
+
+/// Compact actual record/root/member metadata, not a Schema, creation capability or interpreted
+/// payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditorAuthoringRow {
     Component {
@@ -129,6 +152,15 @@ pub enum EditorAuthoringRow {
         required: bool,
         /// Declared Edit capability only; final candidate admission still decides an edit.
         edit_capability: bool,
+    },
+    Member {
+        /// A Schema-relative selector with exactly one direct `Member` step.
+        property: ComponentPropertyPath,
+        /// Retired members have no current shape and therefore report `None`.
+        kind: Option<ComponentValueKind>,
+        /// Retired members are never editable.
+        edit_capability: bool,
+        status: EditorAuthoringMemberStatus,
     },
 }
 

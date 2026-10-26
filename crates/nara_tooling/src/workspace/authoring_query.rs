@@ -1,15 +1,17 @@
 use nara_core::{ByteLimit, ItemLimit};
 use nara_reflect::{
-    ComponentCapability, ComponentFieldSchema, ComponentPropertyReadBudget, ComponentTypeId,
+    ComponentCapability, ComponentFieldId, ComponentFieldSchema, ComponentMemberPathSegment,
+    ComponentPropertyPath, ComponentPropertyReadBudget, ComponentPropertyStep, ComponentTypeId,
 };
 use nara_scene::{AuthoringEntityView, AuthoringPropertyValue, AuthoringRecordFact, SceneEntityId};
 
 use super::{EditorDocumentSlot, EditorWorkspace};
 use crate::{
-    EditorAuthoringCursor, EditorAuthoringPage, EditorAuthoringProjection, EditorAuthoringQuery,
-    EditorAuthoringQueryPosition, EditorAuthoringRow, EditorDocumentKind, EditorDocumentQueryBasis,
-    EditorDocumentQueryRejection, EditorPropertyObservation, EditorPropertyRead,
-    EditorPropertyValue, authoring_query::AuthoringPagePosition,
+    EditorAuthoringCursor, EditorAuthoringMemberStatus, EditorAuthoringPage,
+    EditorAuthoringProjection, EditorAuthoringQuery, EditorAuthoringQueryPosition,
+    EditorAuthoringRow, EditorDocumentKind, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
+    EditorPropertyObservation, EditorPropertyRead, EditorPropertyValue,
+    authoring_query::AuthoringPagePosition,
 };
 
 impl EditorWorkspace {
@@ -57,7 +59,8 @@ impl EditorWorkspace {
         Ok(slot)
     }
 
-    /// Discovers actual direct components or declared roots without reading their value trees.
+    /// Discovers actual direct components, declared roots, or one-level Record members without
+    /// reading their value trees.
     /// Every inspected entry produces one row. Metadata is preflighted for the complete page and
     /// its continuation before any source IDs are copied; insufficient budgets reject terminally.
     pub fn query_document_authoring(
@@ -66,7 +69,7 @@ impl EditorWorkspace {
     ) -> Result<EditorAuthoringPage, EditorDocumentQueryRejection> {
         let (target, expected_kind, position) = match query.position {
             EditorAuthoringQueryPosition::Start(target) => {
-                let position = match target.projection {
+                let position = match &target.projection {
                     EditorAuthoringProjection::Components => AuthoringPagePosition::Components {
                         after: None,
                         visited: 0,
@@ -74,6 +77,10 @@ impl EditorWorkspace {
                     EditorAuthoringProjection::Roots { .. } => {
                         AuthoringPagePosition::Roots { next_root: 0 }
                     }
+                    EditorAuthoringProjection::Members { .. } => AuthoringPagePosition::Members {
+                        next_member: 0,
+                        next_tombstone: 0,
+                    },
                 };
                 (target, None, position)
             }
@@ -87,7 +94,9 @@ impl EditorWorkspace {
         let slot = self.resolve_document_query_slot(&target.basis, expected_kind)?;
         let entity = entity_view(slot, &target.entity)?;
         let count = query.limits.max_scan_entries().min(query.limits.max_rows());
-        let (rows, next): (Vec<_>, _) = match (&target.projection, position) {
+        // Keep borrowed member rows independent from the target moved into the returned page.
+        let projection = target.projection.clone();
+        let (rows, next, scanned_entries): (Vec<_>, _, _) = match (&projection, position) {
             (
                 EditorAuthoringProjection::Components,
                 AuthoringPagePosition::Components { after, visited },
@@ -112,7 +121,8 @@ impl EditorWorkspace {
                 } else {
                     None
                 };
-                (rows, next)
+                let scanned_entries = rows.len();
+                (rows, next, scanned_entries)
             }
             (
                 EditorAuthoringProjection::Roots { component },
@@ -129,7 +139,66 @@ impl EditorWorkspace {
                     .collect::<Vec<_>>();
                 let next_root = next_root + rows.len();
                 let next = (next_root < fields.len()).then_some(NextPosition::Roots { next_root });
-                (rows, next)
+                let scanned_entries = rows.len();
+                (rows, next, scanned_entries)
+            }
+            (
+                EditorAuthoringProjection::Members { component, root },
+                AuthoringPagePosition::Members {
+                    next_member,
+                    next_tombstone,
+                },
+            ) => {
+                let direct = entity.component(component)?.direct_members(root)?;
+                let members = direct.members();
+                let tombstones = direct.tombstones();
+                if next_member > members.len() || next_tombstone > tombstones.len() {
+                    return Err(EditorDocumentQueryRejection::InvalidContinuation);
+                }
+
+                let mut member_index = next_member;
+                let mut tombstone_index = next_tombstone;
+                let mut scanned_entries = 0;
+                let mut rows = Vec::new();
+                while scanned_entries < query.limits.max_scan_entries()
+                    && rows.len() < query.limits.max_rows()
+                {
+                    if let Some(member) = members.get(member_index) {
+                        member_index += 1;
+                        scanned_entries += 1;
+                        let Some(id) = member.id.as_ref() else {
+                            continue;
+                        };
+                        rows.push(BorrowedRow::Member {
+                            root,
+                            id,
+                            kind: Some(member.shape.value_kind()),
+                            edit_capability: direct.edit_capability(),
+                            retired: false,
+                        });
+                    } else if let Some(tombstone) = tombstones.get(tombstone_index) {
+                        tombstone_index += 1;
+                        scanned_entries += 1;
+                        let [ComponentMemberPathSegment::Member(id)] = tombstone.segments() else {
+                            continue;
+                        };
+                        rows.push(BorrowedRow::Member {
+                            root,
+                            id,
+                            kind: None,
+                            edit_capability: false,
+                            retired: true,
+                        });
+                    } else {
+                        break;
+                    }
+                }
+                let next = (member_index < members.len() || tombstone_index < tombstones.len())
+                    .then_some(NextPosition::Members {
+                        next_member: member_index,
+                        next_tombstone: tombstone_index,
+                    });
+                (rows, next, scanned_entries)
             }
             _ => return Err(EditorDocumentQueryRejection::InvalidContinuation),
         };
@@ -151,7 +220,6 @@ impl EditorWorkspace {
             kind: slot.kind(),
             position: position.into_owned(),
         });
-        let scanned_entries = rows.len();
         Ok(EditorAuthoringPage {
             target,
             rows: rows.into_iter().map(BorrowedRow::into_owned).collect(),
@@ -232,6 +300,13 @@ fn entity_view<'a>(
 enum BorrowedRow<'a> {
     Component(&'a AuthoringRecordFact),
     Root(&'a ComponentFieldSchema),
+    Member {
+        root: &'a ComponentFieldId,
+        id: &'a ComponentFieldId,
+        kind: Option<nara_reflect::ComponentValueKind>,
+        edit_capability: bool,
+        retired: bool,
+    },
 }
 
 impl BorrowedRow<'_> {
@@ -239,6 +314,7 @@ impl BorrowedRow<'_> {
         match self {
             Self::Component(fact) => fact.component().as_str().len(),
             Self::Root(field) => field.id().as_str().len(),
+            Self::Member { root, id, .. } => root.as_str().len().saturating_add(id.as_str().len()),
         }
     }
     fn into_owned(self) -> EditorAuthoringRow {
@@ -254,6 +330,23 @@ impl BorrowedRow<'_> {
                 required: field.required,
                 edit_capability: field.has_capability(ComponentCapability::Edit),
             },
+            Self::Member {
+                root,
+                id,
+                kind,
+                edit_capability,
+                retired,
+            } => EditorAuthoringRow::Member {
+                property: ComponentPropertyPath::new(root.clone())
+                    .with_steps([ComponentPropertyStep::Member(id.clone())]),
+                kind,
+                edit_capability,
+                status: if retired {
+                    EditorAuthoringMemberStatus::Retired
+                } else {
+                    EditorAuthoringMemberStatus::Available
+                },
+            },
         }
     }
 }
@@ -266,6 +359,10 @@ enum NextPosition<'a> {
     Roots {
         next_root: usize,
     },
+    Members {
+        next_member: usize,
+        next_tombstone: usize,
+    },
 }
 
 impl NextPosition<'_> {
@@ -273,6 +370,7 @@ impl NextPosition<'_> {
         match self {
             Self::Components { after, .. } => after.as_str().len(),
             Self::Roots { .. } => 0,
+            Self::Members { .. } => 0,
         }
     }
     fn into_owned(self) -> AuthoringPagePosition {
@@ -282,6 +380,13 @@ impl NextPosition<'_> {
                 visited,
             },
             Self::Roots { next_root } => AuthoringPagePosition::Roots { next_root },
+            Self::Members {
+                next_member,
+                next_tombstone,
+            } => AuthoringPagePosition::Members {
+                next_member,
+                next_tombstone,
+            },
         }
     }
 }

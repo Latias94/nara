@@ -1,5 +1,7 @@
 use super::*;
-use nara::reflect::{ComponentNumericDomain, ComponentValueShape};
+use nara::reflect::{
+    ComponentFieldId, ComponentNumericDomain, ComponentShapeMember, ComponentValueShape,
+};
 
 pub(super) fn configure(project: &InteractionProject) {
     let number = ComponentValueShape::scalar(ComponentValueKind::F64)
@@ -8,9 +10,9 @@ pub(super) fn configure(project: &InteractionProject) {
         ("optional", ComponentValueShape::optional(number.clone())),
         (
             "vector",
-            ComponentValueShape::record([
-                ("x".to_owned(), number.clone()),
-                ("y".to_owned(), number),
+            ComponentValueShape::record_members([
+                ComponentShapeMember::new("x", number.clone()).with_id(ComponentFieldId::new("x")),
+                ComponentShapeMember::new("y", number).with_id(ComponentFieldId::new("y")),
             ]),
         ),
         (

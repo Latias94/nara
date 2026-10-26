@@ -1,9 +1,10 @@
 use nara_asset::AssetRef;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
-    ComponentFieldPath, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    ComponentValueShape, PersistentComponentSchemaOwnerId,
+    ComponentFieldPath, ComponentFieldSchema, ComponentMemberPath, ComponentMemberPathSegment,
+    ComponentPropertyStep, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
+    ComponentShapeMember, ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape,
+    PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringReadError,
@@ -12,11 +13,12 @@ use nara_scene::{
     SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
 };
 use nara_tooling::{
-    EditorAuthoringPage, EditorAuthoringProjection, EditorAuthoringQuery,
-    EditorAuthoringQueryLimits, EditorAuthoringQueryPosition, EditorAuthoringQueryTarget,
-    EditorAuthoringRow, EditorDocumentId, EditorDocumentQueryBasis, EditorDocumentQueryRejection,
-    EditorDocumentSourceBinding, EditorPropertyRead, EditorPropertyReadLimits,
-    EditorPropertyTarget, EditorPropertyValue, EditorWorkspace, EditorWorkspaceCommand,
+    EditorAuthoringMemberStatus, EditorAuthoringPage, EditorAuthoringProjection,
+    EditorAuthoringQuery, EditorAuthoringQueryLimits, EditorAuthoringQueryPosition,
+    EditorAuthoringQueryTarget, EditorAuthoringRow, EditorDocumentId, EditorDocumentQueryBasis,
+    EditorDocumentQueryRejection, EditorDocumentSourceBinding, EditorPropertyRead,
+    EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue, EditorWorkspace,
+    EditorWorkspaceCommand,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -102,6 +104,37 @@ fn fixture_size(prefab: bool, extra_entities: usize) -> (EditorWorkspace, Editor
             ComponentFieldPath::from_fields(["tree"]),
             ComponentValueShape::list(ComponentValueShape::scalar(ComponentValueKind::U64)),
         ),
+        ComponentFieldSchema::required(
+            ComponentFieldId::new("record"),
+            "Record",
+            ComponentFieldPath::from_fields(["record"]),
+            ComponentValueShape::record_members([
+                ComponentShapeMember::new("wire_first", ComponentValueKind::U64)
+                    .with_id(ComponentFieldId::new("first")),
+                ComponentShapeMember::new(
+                    "wire_nested",
+                    ComponentValueShape::record_members([ComponentShapeMember::new(
+                        "wire_leaf",
+                        ComponentValueKind::Bool,
+                    )
+                    .with_id(ComponentFieldId::new("leaf"))]),
+                )
+                .with_id(ComponentFieldId::new("nested")),
+                ComponentShapeMember::new("wire_only", ComponentValueKind::Bool),
+                ComponentShapeMember::new("wire_second", ComponentValueKind::String)
+                    .with_id(ComponentFieldId::new("second")),
+            ]),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_member_tombstones([
+            ComponentMemberPath::new([ComponentMemberPathSegment::Member(ComponentFieldId::new(
+                "retired",
+            ))]),
+            ComponentMemberPath::new([
+                ComponentMemberPathSegment::Member(ComponentFieldId::new("nested")),
+                ComponentMemberPathSegment::Member(ComponentFieldId::new("retired_leaf")),
+            ]),
+        ]),
     ]);
     let tag = nara_reflect::__private::resolve_schema_provider(
         nara_reflect::ComponentSchemaProviderDefinition::new(
@@ -158,6 +191,21 @@ fn fixture_size(prefab: bool, extra_entities: usize) -> (EditorWorkspace, Editor
                             ComponentValue::List(vec![
                                 ComponentValue::U64(1),
                                 ComponentValue::U64(2),
+                            ]),
+                        ),
+                        (
+                            "record",
+                            ComponentValue::map([
+                                ("wire_first", ComponentValue::U64(13)),
+                                (
+                                    "wire_nested",
+                                    ComponentValue::map([(
+                                        "wire_leaf",
+                                        ComponentValue::Bool(true),
+                                    )]),
+                                ),
+                                ("wire_only", ComponentValue::Bool(false)),
+                                ("wire_second", ComponentValue::String("member".into())),
                             ]),
                         ),
                     ]),
@@ -250,6 +298,12 @@ fn query(
 fn roots() -> EditorAuthoringProjection {
     EditorAuthoringProjection::Roots {
         component: ComponentTypeId::new("game.Data"),
+    }
+}
+fn members() -> EditorAuthoringProjection {
+    EditorAuthoringProjection::Members {
+        component: ComponentTypeId::new("game.Data"),
+        root: ComponentFieldId::new("record"),
     }
 }
 fn read(
@@ -379,6 +433,7 @@ fn discovery_pages_actual_components_and_roots_without_reading_values_or_changin
                 "missing",
                 "null_default",
                 "nullable",
+                "record",
                 "tree"
             ]
         );
@@ -403,6 +458,146 @@ fn discovery_pages_actual_components_and_roots_without_reading_values_or_changin
         }
         assert_eq!(workspace.authoring_model(), before);
         assert_eq!(workspace.active_document(), Some(active));
+    }
+}
+
+#[test]
+fn member_discovery_is_one_level_durable_bounded_and_rejects_unreadable_roots() {
+    use nara_reflect::ComponentPropertyError;
+
+    for prefab in [false, true] {
+        let (workspace, document) = fixture(prefab);
+        let before = workspace.authoring_model();
+        let mut request = query(&workspace, document, members());
+        request.limits = EditorAuthoringQueryLimits::new(6, 4, 67).unwrap();
+        let page = workspace.query_document_authoring(request.clone()).unwrap();
+        assert_eq!(page.scanned_entries, 6);
+        assert_eq!(page.metadata_bytes, 67);
+        assert!(page.next.is_none());
+        let member = |id: &str, kind, status, edit_capability| EditorAuthoringRow::Member {
+            property: nara_reflect::ComponentPropertyPath::new(ComponentFieldId::new("record"))
+                .with_steps([ComponentPropertyStep::Member(ComponentFieldId::new(id))]),
+            kind,
+            edit_capability,
+            status,
+        };
+        assert_eq!(
+            page.rows,
+            vec![
+                member(
+                    "first",
+                    Some(ComponentValueKind::U64),
+                    EditorAuthoringMemberStatus::Available,
+                    true,
+                ),
+                member(
+                    "nested",
+                    Some(ComponentValueKind::Map),
+                    EditorAuthoringMemberStatus::Available,
+                    true,
+                ),
+                member(
+                    "second",
+                    Some(ComponentValueKind::String),
+                    EditorAuthoringMemberStatus::Available,
+                    true,
+                ),
+                member("retired", None, EditorAuthoringMemberStatus::Retired, false,),
+            ]
+        );
+
+        request.limits = EditorAuthoringQueryLimits::new(6, 4, 66).unwrap();
+        assert_eq!(
+            workspace.query_document_authoring(request),
+            Err(EditorDocumentQueryRejection::MetadataBudgetExceeded)
+        );
+
+        for (max_scan_entries, max_rows) in [(2, 1), (1, 2)] {
+            let mut page_request = query(&workspace, document, members());
+            page_request.limits =
+                EditorAuthoringQueryLimits::new(max_scan_entries, max_rows, 4096).unwrap();
+            let first = workspace
+                .query_document_authoring(page_request.clone())
+                .unwrap();
+            assert_eq!(first.rows.len(), 1);
+            assert!(first.next.is_some());
+
+            let second = workspace
+                .query_document_authoring(EditorAuthoringQuery {
+                    position: EditorAuthoringQueryPosition::Continue(first.next.unwrap()),
+                    limits: page_request.limits,
+                })
+                .unwrap();
+            assert_eq!(second.rows.len(), 1);
+            assert!(second.next.is_some());
+        }
+
+        for root in ["amount", "missing"] {
+            let mut invalid = query(
+                &workspace,
+                document,
+                EditorAuthoringProjection::Members {
+                    component: ComponentTypeId::new("game.Data"),
+                    root: ComponentFieldId::new(root),
+                },
+            );
+            assert_eq!(
+                workspace.query_document_authoring(invalid.clone()),
+                Err(EditorDocumentQueryRejection::Source(
+                    AuthoringReadError::Property(ComponentPropertyError::ExpectedRecord {
+                        step: 0
+                    })
+                ))
+            );
+            invalid.position = EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
+                basis: basis(&workspace, document),
+                entity: id("item"),
+                projection: EditorAuthoringProjection::Members {
+                    component: ComponentTypeId::new("game.Data"),
+                    root: ComponentFieldId::new("unknown"),
+                },
+            });
+            assert_eq!(
+                workspace.query_document_authoring(invalid),
+                Err(EditorDocumentQueryRejection::Source(
+                    AuthoringReadError::FieldNotFound
+                ))
+            );
+        }
+
+        let mut unavailable = query(
+            &workspace,
+            document,
+            EditorAuthoringProjection::Members {
+                component: ComponentTypeId::new("game.Unknown"),
+                root: ComponentFieldId::new("record"),
+            },
+        );
+        assert_eq!(
+            workspace.query_document_authoring(unavailable.clone()),
+            Err(EditorDocumentQueryRejection::Source(
+                AuthoringReadError::UnavailableComponent {
+                    readiness: AuthoringRecordReadiness::UnknownSchema,
+                }
+            ))
+        );
+        unavailable.position = EditorAuthoringQueryPosition::Start(EditorAuthoringQueryTarget {
+            basis: basis(&workspace, document),
+            entity: id("item"),
+            projection: EditorAuthoringProjection::Members {
+                component: ComponentTypeId::new("game.Data"),
+                root: ComponentFieldId::new("record"),
+            },
+        });
+        assert_eq!(
+            workspace
+                .query_document_authoring(unavailable)
+                .unwrap()
+                .rows
+                .len(),
+            1
+        );
+        assert_eq!(workspace.authoring_model(), before);
     }
 }
 
@@ -503,6 +698,30 @@ fn continuations_bind_workspace_target_and_basis_and_charge_the_complete_observa
         let (mut workspace, document) = fixture(prefab);
         let request = query(&workspace, document, roots());
         let first = workspace.query_document_authoring(request.clone()).unwrap();
+        let member_request = query(&workspace, document, members());
+        let member_page = workspace
+            .query_document_authoring(member_request.clone())
+            .unwrap();
+        let member_continuation = member_page.next.clone().unwrap();
+        let member_second = workspace
+            .query_document_authoring(EditorAuthoringQuery {
+                position: EditorAuthoringQueryPosition::Continue(member_continuation.clone()),
+                limits: member_request.limits,
+            })
+            .unwrap();
+        assert_eq!(member_second.rows.len(), 1);
+        assert!(member_second.next.is_some());
+        let EditorAuthoringRow::Member { property, .. } = &member_second.rows[0] else {
+            panic!("expected a member continuation row");
+        };
+        assert_eq!(
+            property,
+            &nara_reflect::ComponentPropertyPath::new(ComponentFieldId::new("record")).with_steps(
+                [ComponentPropertyStep::Member(ComponentFieldId::new(
+                    "nested"
+                ))]
+            )
+        );
         assert_eq!(
             first.metadata_bytes, 32,
             "two copies of item + game.Data, plus amount"
@@ -547,6 +766,13 @@ fn continuations_bind_workspace_target_and_basis_and_charge_the_complete_observa
         assert!(workspace.commit_authoring_edit(edit).applied);
         assert_eq!(
             workspace.query_document_authoring(continuation.clone()),
+            Err(EditorDocumentQueryRejection::StaleRevision)
+        );
+        assert_eq!(
+            workspace.query_document_authoring(EditorAuthoringQuery {
+                position: EditorAuthoringQueryPosition::Continue(member_continuation),
+                limits: request.limits,
+            }),
             Err(EditorDocumentQueryRejection::StaleRevision)
         );
         assert_eq!(
@@ -608,6 +834,40 @@ fn preparation_basis_reuses_exact_query_admission_without_changing_state() {
             workspace.validate_document_query_basis(&captured),
             Err(EditorDocumentQueryRejection::StaleRevision)
         );
+    }
+}
+
+#[test]
+fn document_query_basis_factory_returns_exact_current_facts_and_stales_captures() {
+    for prefab in [false, true] {
+        let (mut workspace, document) = fixture(prefab);
+        let captured = workspace.document_query_basis(document).unwrap();
+        assert_eq!(captured, basis(&workspace, document));
+        assert_eq!(
+            workspace.document_query_basis(EditorDocumentId::from_raw(u64::MAX)),
+            Err(EditorDocumentQueryRejection::DocumentNotOpen {
+                document: EditorDocumentId::from_raw(u64::MAX),
+            })
+        );
+
+        let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
+            entity: id("item"),
+            component: ComponentTypeId::new("game.Data"),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("amount"),
+            value: ComponentValue::U64(9),
+        }]);
+        let prepared = workspace
+            .prepare_authoring_edit(document, captured.revision, &patch)
+            .unwrap();
+        assert!(workspace.commit_authoring_edit(prepared).applied);
+        assert_eq!(
+            workspace.validate_document_query_basis(&captured),
+            Err(EditorDocumentQueryRejection::StaleRevision)
+        );
+        let current = workspace.document_query_basis(document).unwrap();
+        assert_ne!(current.revision, captured.revision);
+        assert_eq!(current.schema, captured.schema);
     }
 }
 

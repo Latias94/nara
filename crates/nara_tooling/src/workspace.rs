@@ -33,7 +33,10 @@ use crate::inspector::{SceneInspectorCommand, SceneInspectorCommandReport};
 use crate::play::{SceneEditorModel, SceneEditorState};
 use crate::snapshot::WorldIdentitySnapshot;
 use crate::{EditorAtomicFieldEdit, EditorFieldTarget};
-use crate::{EditorDocumentQueryRejection, document_query::EditorDocumentQueryOwner};
+use crate::{
+    EditorDocumentQueryBasis, EditorDocumentQueryRejection,
+    document_query::EditorDocumentQueryOwner,
+};
 
 mod authoring_query;
 mod construction;
@@ -573,6 +576,26 @@ impl EditorWorkspace {
         self.documents
             .get(&document)
             .map(EditorDocumentSlot::revision)
+    }
+
+    /// Captures the exact current query facts for an open Scene or Prefab document.
+    pub fn document_query_basis(
+        &self,
+        document: EditorDocumentId,
+    ) -> Result<EditorDocumentQueryBasis, EditorDocumentQueryRejection> {
+        let slot = self
+            .documents
+            .get(&document)
+            .ok_or(EditorDocumentQueryRejection::DocumentNotOpen { document })?;
+        let kind = slot.kind();
+        if !matches!(kind, EditorDocumentKind::Scene | EditorDocumentKind::Prefab) {
+            return Err(EditorDocumentQueryRejection::UnsupportedDocumentKind { kind });
+        }
+        Ok(EditorDocumentQueryBasis {
+            document,
+            revision: slot.revision(),
+            schema: slot.authoring_schema_basis(),
+        })
     }
 
     /// Enumerates a bounded page of direct source entity identities without changing selection,

@@ -46,16 +46,17 @@ pub use authoring::{
 #[cfg(feature = "serde")]
 pub use authoring_decode::{
     AuthoringAdapterEvidence, AuthoringAdapterIdentity, AuthoringComponentView,
-    AuthoringDocumentKind, AuthoringDocumentPublicationError, AuthoringDocumentReadiness,
-    AuthoringDocumentReadmission, AuthoringDocumentSource, AuthoringEntityView, AuthoringFieldEdit,
-    AuthoringFieldEditError, AuthoringFieldWrite, AuthoringPatchRecordSlot,
-    AuthoringPatchTargetKind, AuthoringPropertyValue, AuthoringReadError, AuthoringRecordFact,
-    AuthoringRecordLocation, AuthoringRecordOwnerClaim, AuthoringRecordReadiness,
-    AuthoringSchemaBasis, AuthoringSessionReopenError, MAX_AUTHORING_EDIT_OPERATIONS,
-    MAX_AUTHORING_FIELD_WRITES, PrefabAuthoringDocumentCandidate, PublishedAuthoringPrefabDocument,
-    PublishedAuthoringSceneDocument, SceneAuthoringDocumentCandidate, UnavailableEntityReference,
-    UnavailablePatchTarget, UnavailableRecord, UnavailableRecordManifest,
-    UnavailableRecordManifestEntry, UnavailableValuePathSegment,
+    AuthoringDirectMembers, AuthoringDocumentKind, AuthoringDocumentPublicationError,
+    AuthoringDocumentReadiness, AuthoringDocumentReadmission, AuthoringDocumentSource,
+    AuthoringEntityView, AuthoringFieldEdit, AuthoringFieldEditError, AuthoringFieldWrite,
+    AuthoringPatchRecordSlot, AuthoringPatchTargetKind, AuthoringPropertyValue, AuthoringReadError,
+    AuthoringRecordFact, AuthoringRecordLocation, AuthoringRecordOwnerClaim,
+    AuthoringRecordReadiness, AuthoringSchemaBasis, AuthoringSessionReopenError,
+    MAX_AUTHORING_EDIT_OPERATIONS, MAX_AUTHORING_FIELD_WRITES, PrefabAuthoringDocumentCandidate,
+    PublishedAuthoringPrefabDocument, PublishedAuthoringSceneDocument,
+    SceneAuthoringDocumentCandidate, UnavailableEntityReference, UnavailablePatchTarget,
+    UnavailableRecord, UnavailableRecordManifest, UnavailableRecordManifestEntry,
+    UnavailableValuePathSegment,
 };
 pub use candidate::{ExpandedSceneCandidate, ExpandedSceneDocument};
 pub use document::{SceneComponentRecord, SceneDocument, SceneEntityRecord};

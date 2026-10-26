@@ -27,6 +27,30 @@ pub enum EditorEditPreparationError {
 }
 
 impl EditorProjectSession {
+    /// Captures the exact basis for a named open Scene or Prefab without changing navigation.
+    pub fn document_query_basis(
+        &self,
+        document: EditorDocumentId,
+    ) -> Result<EditorDocumentQueryBasis, EditorDocumentQueryRejection> {
+        self.workspace.document_query_basis(document)
+    }
+
+    /// Runs a bounded selection-independent entity query through the owning workspace.
+    pub fn query_document_entities(
+        &self,
+        query: nara_tooling::EditorEntityQuery,
+    ) -> Result<nara_tooling::EditorEntityPage, EditorDocumentQueryRejection> {
+        self.workspace.query_document_entities(query)
+    }
+
+    /// Runs a bounded selection-independent component/root/member query through the owner.
+    pub fn query_document_authoring(
+        &self,
+        query: nara_tooling::EditorAuthoringQuery,
+    ) -> Result<nara_tooling::EditorAuthoringPage, EditorDocumentQueryRejection> {
+        self.workspace.query_document_authoring(query)
+    }
+
     /// Reads a named source property through the same owner and basis as action-based queries.
     /// This does not mutate navigation, reserve a revision or grant preparation authority.
     pub fn read_document_property(

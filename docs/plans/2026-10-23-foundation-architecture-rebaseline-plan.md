@@ -197,9 +197,13 @@ Amend 0026/0047/0118 for the selected contract, not an imagined universal docume
 
 The first concrete interface uses explicitly named source entities, admitted templates and
 direct entity-ID enumeration of open documents. Its owner-bound candidate and inverse are shared
-by preview/commit and ordinary direct apply. This does not close the transaction-local reference
-allocation, nested durable-property identity, full field query, panel-preparation ergonomics or
-preparation-cost comparison obligations above. Do not turn process-local incarnation counters
+by preview/commit and ordinary direct apply. A bounded one-level direct Record-member projection
+now reuses the same basis, cursor owner and scan/row/metadata limits; the Session and registered
+panel facades expose it without mutable document access. An independently compiled non-active
+panel consumer proves entity -> component -> root -> direct member -> bounded read -> prepare ->
+retain -> commit. This still does not close transaction-local reference allocation, recursive or
+collection nested discovery, Prefab overlay, full field query, shared-owner preparation locality
+or preparation-cost comparison obligations above. Do not turn process-local incarnation counters
 into durable allocated identities merely to complete the first consumer.
 
 ## R3: Behavior Representation And Immutable Module Publications

@@ -3,9 +3,10 @@
 use nara_asset::AssetRef;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
-    ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath, ComponentPropertyReadBudget,
-    ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind, PersistentComponentSchemaOwnerId,
+    ComponentFieldPath, ComponentFieldSchema, ComponentMemberPath, ComponentMemberPathSegment,
+    ComponentPropertyPath, ComponentPropertyReadBudget, ComponentSchema, ComponentSchemaCatalog,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringEntityView,
@@ -205,6 +206,13 @@ fn assert_actual_inventory(view: AuthoringEntityView<'_>, original: &SceneEntity
     );
     let data = view.component(&ComponentTypeId::new("game.Data")).unwrap();
     assert_eq!(data.root_fields().unwrap().len(), 6);
+    assert_eq!(
+        data.direct_members(&ComponentFieldId::new("amount"))
+            .unwrap_err(),
+        AuthoringReadError::Property(nara_reflect::ComponentPropertyError::ExpectedRecord {
+            step: 0
+        })
+    );
     let AuthoringPropertyValue::Present(amount) = data
         .property_value(
             &ComponentPropertyPath::new(ComponentFieldId::new("amount")),
@@ -276,6 +284,12 @@ fn assert_actual_inventory(view: AuthoringEntityView<'_>, original: &SceneEntity
                     &ComponentPropertyPath::new(ComponentFieldId::new("amount")),
                     &mut read_budget()
                 )
+                .unwrap_err(),
+            AuthoringReadError::UnavailableComponent { readiness }
+        );
+        assert_eq!(
+            component
+                .direct_members(&ComponentFieldId::new("amount"))
                 .unwrap_err(),
             AuthoringReadError::UnavailableComponent { readiness }
         );
@@ -612,11 +626,12 @@ fn selected_descendants_keep_default_origin_and_distinguish_unavailable_targets(
         ComponentPropertyError, ComponentPropertyStep, ComponentShapeMember, ComponentValueShape,
     };
     let component = ComponentTypeId::new("game.Nested");
-    let shape = ComponentValueShape::record_members([ComponentShapeMember::new(
-        "wire_score",
-        ComponentValueKind::U64,
-    )
-    .with_id(ComponentFieldId::new("score"))]);
+    let shape = ComponentValueShape::record_members([
+        ComponentShapeMember::new("wire_label", ComponentValueKind::String)
+            .with_id(ComponentFieldId::new("label")),
+        ComponentShapeMember::new("wire_score", ComponentValueKind::U64)
+            .with_id(ComponentFieldId::new("score")),
+    ]);
     let field = |name: &str| ComponentFieldId::new(name);
     let schema = ComponentSchema::new(component.clone(), "Nested", ComponentSchemaVersion::ONE)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
@@ -626,8 +641,15 @@ fn selected_descendants_keep_default_origin_and_distinguish_unavailable_targets(
                 "Root",
                 ComponentFieldPath::from_fields(["root"]),
                 shape.clone(),
-                ComponentValue::map([("wire_score", ComponentValue::U64(11))]),
-            ),
+                ComponentValue::map([
+                    ("wire_label", ComponentValue::String("default".into())),
+                    ("wire_score", ComponentValue::U64(11)),
+                ]),
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+            .with_member_tombstones([ComponentMemberPath::new([
+                ComponentMemberPathSegment::Member(field("retired")),
+            ])]),
             ComponentFieldSchema::optional(
                 field("absent"),
                 "Absent",
@@ -677,7 +699,10 @@ fn selected_descendants_keep_default_origin_and_distinguish_unavailable_targets(
                     ("maybe", ComponentValue::Null),
                     (
                         "root",
-                        ComponentValue::map([("wire_score", ComponentValue::U64(7))]),
+                        ComponentValue::map([
+                            ("wire_label", ComponentValue::String("explicit".into())),
+                            ("wire_score", ComponentValue::U64(7)),
+                        ]),
                     ),
                 ]),
             ),
@@ -720,6 +745,36 @@ fn selected_descendants_keep_default_origin_and_distinguish_unavailable_targets(
                     .unwrap()
                     .component(&component)
                     .unwrap();
+                let direct = view.direct_members(&field("root")).unwrap();
+                assert!(direct.edit_capability());
+                assert_eq!(
+                    direct
+                        .members()
+                        .iter()
+                        .filter_map(|member| {
+                            member.id.as_ref().map(|id| {
+                                (id.as_str(), Some(member.shape.value_kind()), true, false)
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                    [
+                        ("label", Some(ComponentValueKind::String), true, false,),
+                        ("score", Some(ComponentValueKind::U64), true, false),
+                    ]
+                );
+                assert_eq!(
+                    direct
+                        .tombstones()
+                        .iter()
+                        .filter_map(|path| match path.segments() {
+                            [nara_reflect::ComponentMemberPathSegment::Member(id)] => {
+                                Some((id.as_str(), None::<ComponentValueKind>, false, true))
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                    [("retired", None, false, true)]
+                );
                 assert_eq!(
                     view.property_value(&selected("root"), &mut read_budget())
                         .unwrap(),

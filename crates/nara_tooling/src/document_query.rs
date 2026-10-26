@@ -20,6 +20,9 @@ pub struct EditorDocumentQueryBasis {
 pub enum EditorDocumentQueryRejection {
     /// No readable project workspace is available through the current adapter.
     WorkspaceUnavailable,
+    /// The owning Editor is closing or resolving a workspace intent; callers must not retry a
+    /// read-only observation as though the workspace had merely not been installed yet.
+    Closing,
     /// The continuation belongs to another workspace, including a replaced project workspace.
     WrongWorkspace,
     /// The explicitly named document is no longer open, or was never open here.
@@ -62,6 +65,7 @@ impl fmt::Display for EditorDocumentQueryRejection {
             Self::WorkspaceUnavailable => {
                 formatter.write_str("no readable document workspace is available")
             }
+            Self::Closing => formatter.write_str("document workspace is closing"),
             Self::WrongWorkspace => {
                 formatter.write_str("document query belongs to another workspace")
             }

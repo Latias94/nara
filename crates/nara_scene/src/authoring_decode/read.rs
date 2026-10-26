@@ -1,9 +1,10 @@
 use std::{collections::BTreeMap, error::Error, fmt, ops::Bound};
 
 use nara_reflect::{
-    ComponentFieldPathError, ComponentFieldSchema, ComponentPropertyError, ComponentPropertyPath,
-    ComponentPropertyReadBudget, ComponentTypeId, ComponentValue,
-    resolve_component_property_in_root,
+    ComponentCapability, ComponentFieldId, ComponentFieldPathError, ComponentFieldSchema,
+    ComponentMemberPath, ComponentPropertyError, ComponentPropertyPath,
+    ComponentPropertyReadBudget, ComponentShapeMember, ComponentTypeId, ComponentValue,
+    ComponentValueShape, resolve_component_property_in_root,
 };
 
 use super::{
@@ -146,6 +147,35 @@ impl fmt::Debug for AuthoringComponentView<'_> {
     }
 }
 
+/// Borrowed direct Record-member declarations and their root-relative tombstones.
+///
+/// The view keeps the source Schema's declaration order. Tooling applies its own scan and row
+/// limits while advancing through the two borrowed slices; no complete member inventory is
+/// allocated merely to discover one page.
+#[derive(Debug, Clone, Copy)]
+pub struct AuthoringDirectMembers<'a> {
+    members: &'a [ComponentShapeMember],
+    tombstones: &'a [ComponentMemberPath],
+    edit_capability: bool,
+}
+
+impl<'a> AuthoringDirectMembers<'a> {
+    #[must_use]
+    pub const fn members(&self) -> &'a [ComponentShapeMember] {
+        self.members
+    }
+
+    #[must_use]
+    pub const fn tombstones(&self) -> &'a [ComponentMemberPath] {
+        self.tombstones
+    }
+
+    #[must_use]
+    pub const fn edit_capability(&self) -> bool {
+        self.edit_capability
+    }
+}
+
 impl<'a> AuthoringComponentView<'a> {
     #[must_use]
     pub const fn fact(&self) -> &'a AuthoringRecordFact {
@@ -155,6 +185,41 @@ impl<'a> AuthoringComponentView<'a> {
     /// Borrows the admitted root declaration sequence without materializing an effective value.
     pub fn root_fields(&self) -> Result<&'a [ComponentFieldSchema], AuthoringReadError> {
         Ok(self.schema()?.schema.fields())
+    }
+
+    /// Borrows one current Record root's directly addressable members and direct tombstones.
+    ///
+    /// Members without a durable Schema ID are retained in the borrowed declaration slice so a
+    /// caller can charge inspecting them, but must not fall back to their wire names. No value
+    /// tree or recursive member shape is interpreted or copied.
+    pub fn direct_members(
+        &self,
+        root: &ComponentFieldId,
+    ) -> Result<AuthoringDirectMembers<'a>, AuthoringReadError> {
+        let entry = self.schema()?;
+        if entry.schema.field_tombstones().binary_search(root).is_ok() {
+            return Err(ComponentPropertyError::RetiredField(root.clone()).into());
+        }
+        let fields = entry.schema.fields();
+        let field = fields
+            .binary_search_by(|candidate| candidate.id().cmp(root))
+            .ok()
+            .and_then(|index| fields.get(index))
+            .ok_or(AuthoringReadError::FieldNotFound)?;
+
+        let mut shape = field.shape();
+        while let ComponentValueShape::Optional { value } = shape {
+            shape = value;
+        }
+        let ComponentValueShape::Record { members } = shape else {
+            return Err(ComponentPropertyError::ExpectedRecord { step: 0 }.into());
+        };
+
+        Ok(AuthoringDirectMembers {
+            members,
+            tombstones: &field.member_tombstones,
+            edit_capability: field.has_capability(ComponentCapability::Edit),
+        })
     }
 
     /// Borrows one admitted root or descendant, preserving explicit/default origin.

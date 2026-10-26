@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-25
+**Last Revised**: 2026-10-26
 **Amended**: 2026-08-15 to make selection single-owner and separate monotonic revision from
 receipt-backed content state
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
@@ -70,6 +70,11 @@ Rules:
   history or dirty state. Bounded entity enumeration binds continuation to its document,
   incarnation, revision and retained Schema admission. Scan work and returned row limits are
   distinct; truncating an eagerly constructed Inspector is not bounded query execution.
+- The qualified authoring projection adds one direct Record-member level through the same exact
+  document basis: durable `root + Member(id)` paths, current member kind/edit capability and
+  retained direct tombstones. Schema members without durable IDs are not silently addressed by
+  wire name. Member discovery is declaration-order, scan/row bounded and does not read values;
+  recursive members, collection items and Prefab expansion remain separate contracts.
 - Actual component inventory is distinct from catalog creation capabilities and from semantic
   readability. Scene/Prefab own classification, root declaration/default interpretation and
   source-relative lookup. Available/current records may expose borrowed roots; unavailable records
