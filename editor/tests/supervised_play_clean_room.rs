@@ -160,17 +160,25 @@ fn drive_until_external_state(
 fn drive_until_exit_ready(application: &mut EditorApplication, timeout: Duration) {
     let deadline = Instant::now() + timeout;
     loop {
-        let frame = current_frame(application);
-        let update = application
-            .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
-        if update.update().exit_ready() {
+        let frame = application.current_frame();
+        let update = if let Some(frame) = &frame {
+            application
+                .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
+                .update()
+        } else {
+            application.advance_project_open()
+        };
+        if update.exit_ready() {
             return;
         }
         assert!(
             Instant::now() < deadline,
             "the clean-room Editor exit did not complete: state={:?}, output={:#?}",
             application.state(),
-            frame.play().external().map(|external| external.output()),
+            frame
+                .as_ref()
+                .and_then(|frame| frame.play().external())
+                .map(|external| external.output()),
         );
         thread::sleep(Duration::from_millis(5));
     }

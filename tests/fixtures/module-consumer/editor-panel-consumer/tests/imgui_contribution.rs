@@ -287,13 +287,14 @@ fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selecti
         if closed {
             break;
         }
-        let Some(frame) = application.current_frame() else {
-            break;
+        closed = if let Some(frame) = application.current_frame() {
+            application
+                .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
+                .update()
+                .exit_ready()
+        } else {
+            application.advance_project_open().exit_ready()
         };
-        closed = application
-            .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
-            .update()
-            .exit_ready();
         if !closed {
             std::thread::sleep(Duration::from_millis(2));
         }

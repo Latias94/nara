@@ -182,6 +182,8 @@ impl EditorApplicationUpdate {
     }
 
     #[must_use]
+    /// Reports completion of process-exit custody, not just Workspace or Session retirement.
+    /// An absent application frame alone does not establish this state.
     pub const fn exit_ready(self) -> bool {
         self.exit_ready
     }
@@ -593,6 +595,7 @@ impl EditorApplication {
     }
 
     /// Advances at most one bounded project-open phase at the current frame boundary.
+    /// Also advances retained Open Host retirement after the last workspace frame is gone.
     #[doc(hidden)]
     pub fn advance_project_open(&mut self) -> EditorApplicationUpdate {
         let cleanup_changed = self.advance_failed_open_retirement();
@@ -1659,6 +1662,12 @@ impl EditorApplication {
         }
     }
 
+    /// Requests process Exit, retaining the Open Host until its physical shutdown completes.
+    ///
+    /// A completed Session can release its frame before this operation returns `exit_ready`.
+    /// Continue driving a retained frame through `submit_and_drive`, or call
+    /// `advance_project_open` when no frame remains. Repeating this request does not bypass
+    /// dirty-document decisions or restore admission after final Exit commits.
     pub fn request_exit(&mut self) -> EditorApplicationUpdate {
         if self.final_exit_committed {
             let changed = self.advance_failed_open_retirement();

@@ -62,20 +62,20 @@ impl Drop for Application {
         let mut ready = self.0.request_exit().exit_ready();
         while !ready {
             assert!(Instant::now() < deadline, "panel consumer did not retire");
-            let Some(frame) = self.0.current_frame() else {
-                break;
+            ready = if let Some(frame) = self.0.current_frame() {
+                let actions = frame.workspace_intent().decision_prompt().map(|prompt| {
+                    EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
+                });
+                self.0
+                    .submit_and_drive(
+                        EditorActionBatch::new(frame.revision(), actions),
+                        Duration::ZERO,
+                    )
+                    .update()
+                    .exit_ready()
+            } else {
+                self.0.advance_project_open().exit_ready()
             };
-            let actions = frame.workspace_intent().decision_prompt().map(|prompt| {
-                EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
-            });
-            ready = self
-                .0
-                .submit_and_drive(
-                    EditorActionBatch::new(frame.revision(), actions),
-                    Duration::ZERO,
-                )
-                .update()
-                .exit_ready();
             std::thread::sleep(Duration::from_millis(1));
         }
     }

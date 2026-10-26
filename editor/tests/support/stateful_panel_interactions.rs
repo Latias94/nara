@@ -231,13 +231,14 @@ fn public_layout_reset_and_restore_retire_objects_before_reusing_instance_ids() 
     let mut closed = application.request_exit().exit_ready();
     let deadline = Instant::now() + Duration::from_secs(10);
     while !closed {
-        let Some(frame) = application.current_frame() else {
-            break;
+        let update = if let Some(frame) = application.current_frame() {
+            application
+                .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
+                .update()
+        } else {
+            application.advance_project_open()
         };
-        closed = application
-            .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
-            .update()
-            .exit_ready();
+        closed = update.exit_ready();
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(1));
     }
@@ -452,22 +453,23 @@ fn contributed_drafts_follow_instance_target_document_and_project_lifetimes() {
         "even reused document IDs must get fresh project drafts"
     );
 
-    application.request_exit();
+    let mut closed = application.request_exit().exit_ready();
     let deadline = Instant::now() + Duration::from_secs(10);
-    while let Some(frame) = application.current_frame() {
-        let actions = frame.workspace_intent().decision_prompt().map(|prompt| {
-            EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
-        });
-        if application
-            .submit_and_drive(
-                EditorActionBatch::new(frame.revision(), actions),
-                Duration::ZERO,
-            )
-            .update()
-            .exit_ready()
-        {
-            break;
-        }
+    while !closed {
+        let update = if let Some(frame) = application.current_frame() {
+            let actions = frame.workspace_intent().decision_prompt().map(|prompt| {
+                EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
+            });
+            application
+                .submit_and_drive(
+                    EditorActionBatch::new(frame.revision(), actions),
+                    Duration::ZERO,
+                )
+                .update()
+        } else {
+            application.advance_project_open()
+        };
+        closed = update.exit_ready();
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(1));
     }

@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-10-26
+* **Verification Evidence**: [Public Exit drivers retain maintenance after Workspace retirement](verification/2026-10/2026-10-26T022556Z-public-exit-drivers-retain-maintenance-after-workspace-retirement-2c1f097eeed04d499d81adc33d3232dd.md) - Corrected public and independent Exit callers, a deterministic held-worker regression, and successor clarification of earlier lifecycle and panel evidence.
+* **Verification Evidence**: [Bounded direct-member discovery and non-active panel query workflow](verification/2026-10/2026-10-26T004155Z-bounded-direct-member-discovery-and-panel-query-workflow-7003450c49204d8eba92ba90db765dc0.md) - Qualified one-level durable Record-member discovery, selection-independent Session/panel query forwarding, and an independently compiled non-active panel discover/read/prepare/retain/commit workflow.
+
 ## 2026-10-25
 * **Verification Evidence**: [Startup preparation owner retry and final Application shutdown](verification/2026-10/2026-10-25T232708Z-startup-preparation-owner-retry-and-final-application-shutdown-4281deb3281042fc9095f7cf2e247c4b.md) - Bounded R4b standalone startup facility ownership, exact failure evidence, independent review and serial qualification.
 * **Verification Evidence**: [Reopen preparation failure fidelity before native source admission](verification/2026-10/2026-10-25T220113Z-reopen-preparation-failure-fidelity-before-native-source-admission-9e51c9e94971464ab4876bdf2ff2ff07.md) - Records the source-confirmed prior Reopen error-priority defect, bounded Scene/Prefab correction, unchanged public failure assertions and source-gated native callback ordering.
@@ -133,5 +137,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 ## 2026-10-20
 * **Work Registration**: [Hosted Scene committed; two-level headless maintenance gap isolated](registry/2026-10/2026-10-20T191110Z-persistent-two-level-game-codex-root-8eff546032334342a5b19d09a8312574.md) - Work Registration for Hosted Scene committed; two-level headless maintenance gap isolated.
 * **Session Handoff**: [Hosted Scene committed and two-level consumer verification open](sessions/2026-10/2026-10-20T190703Z-hosted-scene-committed-and-two-level-consumer-verification-open-ac1d26bed07c4a4ba3ebb1fab17c5ac8.md) - Session Handoff for Hosted Scene committed and two-level consumer verification open.
-* **Work Registration**: [Hosted Scene residency qualified; two-level gameplay in progress](registry/2026-10/2026-10-20T183542Z-persistent-two-level-game-codex-root-e644ed97d88a4c28b41f7894c75c5cf4.md) - Work Registration for Hosted Scene residency qualified; two-level gameplay in progress.
-* **Verification Evidence**: [Hosted Scene residency and owned preparation qualification](verification/2026-10/2026-10-20T183137Z-hosted-scene-residency-and-owned-preparation-qualification-d8d63279f87c4b34bc83eeeccdc7550e.md) - Verification Evidence for Hosted Scene residency and owned preparation qualification.

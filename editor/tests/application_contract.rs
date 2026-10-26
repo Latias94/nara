@@ -453,6 +453,44 @@ fn clean_ordinary_exit_reaches_the_process_terminal() {
 }
 
 #[test]
+fn final_exit_maintenance_outlives_the_workspace_frame() {
+    use nara_tasks::{TaskPoolKind, TaskPools};
+    use std::sync::mpsc;
+
+    let project = StarterProject::new("exit-after-workspace-retirement");
+    let (release, receiver) = mpsc::channel();
+    let (mut application, probe) =
+        TaskPools::with_worker_spawn_failure_for_tests(TaskPoolKind::Io, usize::MAX, || {
+            TaskPools::hold_partial_worker_exit_for_tests(receiver);
+            open_ordinary(project.root())
+        });
+    assert_eq!(probe.started(), 1);
+    assert!(!application.request_exit().exit_ready());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while let Some(frame) = application.current_frame() {
+        assert!(Instant::now() < deadline, "the workspace did not retire");
+        assert!(
+            !application
+                .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
+                .update()
+                .exit_ready()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    for _ in 0..3 {
+        assert!(!application.advance_project_open().exit_ready());
+        assert!(!application.request_exit().exit_ready());
+        assert!(application.current_frame().is_none());
+    }
+    assert_eq!(probe.exited(), 0);
+    release.send(()).unwrap();
+    assert!(drive_process_exit_to_terminal(&mut application));
+    assert_eq!(probe.exited(), 1);
+    assert!(application.request_exit().exit_ready());
+    assert!(!application.advance_project_open().actions_observed());
+}
+
+#[test]
 fn ordinary_workspace_exit_action_joins_process_retirement_only_after_admission() {
     let project = StarterProject::new("workspace-action-close");
     let mut application = open_ordinary(project.root());
@@ -1445,15 +1483,21 @@ fn close_direct_application(application: &mut EditorApplication) {
         return;
     }
     let deadline = Instant::now() + Duration::from_secs(10);
-    while let Some(frame) = application.current_frame() {
-        let action = frame.workspace_intent().decision_prompt().map(|prompt| {
-            EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
-        });
-        let result = application.submit_and_drive(
-            EditorActionBatch::new(frame.revision(), action),
-            Duration::ZERO,
-        );
-        if result.update().exit_ready() {
+    loop {
+        let update = if let Some(frame) = application.current_frame() {
+            let action = frame.workspace_intent().decision_prompt().map(|prompt| {
+                EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
+            });
+            application
+                .submit_and_drive(
+                    EditorActionBatch::new(frame.revision(), action),
+                    Duration::ZERO,
+                )
+                .update()
+        } else {
+            application.advance_project_open()
+        };
+        if update.exit_ready() {
             return;
         }
         assert!(
@@ -1547,13 +1591,14 @@ fn drive_session_retirement_to_manager(application: &mut EditorApplication) {
 fn drive_process_exit_to_terminal(application: &mut EditorApplication) -> bool {
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
-        if application.current_frame().is_none() {
-            return false;
-        }
-        let frame = current_frame(application);
-        let update = application
-            .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
-        if update.update().exit_ready() {
+        let update = if let Some(frame) = application.current_frame() {
+            application
+                .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
+                .update()
+        } else {
+            application.advance_project_open()
+        };
+        if update.exit_ready() {
             return true;
         }
         std::thread::sleep(Duration::from_millis(1));

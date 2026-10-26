@@ -663,17 +663,19 @@ fn close(app: &mut EditorApplication) {
     }
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
-        let Some(current) = app.current_frame() else {
-            return;
+        let update = if let Some(current) = app.current_frame() {
+            let action = current.workspace_intent().decision_prompt().map(|prompt| {
+                EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
+            });
+            app.submit_and_drive(
+                EditorActionBatch::new(current.revision(), action),
+                Duration::ZERO,
+            )
+            .update()
+        } else {
+            app.advance_project_open()
         };
-        let action = current.workspace_intent().decision_prompt().map(|prompt| {
-            EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
-        });
-        let update = app.submit_and_drive(
-            EditorActionBatch::new(current.revision(), action),
-            Duration::ZERO,
-        );
-        if update.update().exit_ready() {
+        if update.exit_ready() {
             return;
         }
         std::thread::yield_now();

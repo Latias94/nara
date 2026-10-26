@@ -78,7 +78,6 @@ fn action(maximum: usize) -> EditorAction {
 }
 
 fn close(application: &mut nara_editor::EditorApplication) {
-    let revision = application.current_frame().unwrap().revision();
     let deadline = Instant::now() + Duration::from_secs(15);
     let mut ready = application.request_exit().exit_ready();
     while !ready {
@@ -86,10 +85,14 @@ fn close(application: &mut nara_editor::EditorApplication) {
             Instant::now() < deadline,
             "Editor retained incomplete close"
         );
-        ready = application
-            .submit_and_drive(EditorActionBatch::new(revision, []), Duration::ZERO)
-            .update()
-            .exit_ready();
+        ready = if let Some(frame) = application.current_frame() {
+            application
+                .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
+                .update()
+                .exit_ready()
+        } else {
+            application.advance_project_open().exit_ready()
+        };
         std::thread::sleep(Duration::from_millis(1));
     }
 }

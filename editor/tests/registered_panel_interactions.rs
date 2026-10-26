@@ -135,25 +135,27 @@ fn registered_panels_scroll_and_keep_independent_inspector_instances() {
     assert_eq!(current_scene.document, original_scene.document);
     assert_eq!(current_scene.revision, original_scene.revision);
     assert_eq!(current_scene.dirty, original_scene.dirty);
-    application.request_exit();
+    let mut closed = application.request_exit().exit_ready();
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while std::time::Instant::now() < deadline {
-        let Some(frame) = application.current_frame() else {
-            break;
+    while !closed {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the Application did not physically retire"
+        );
+        let update = if let Some(frame) = application.current_frame() {
+            let actions = frame.workspace_intent().decision_prompt().map(|prompt| {
+                EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
+            });
+            application
+                .submit_and_drive(
+                    EditorActionBatch::new(frame.revision(), actions),
+                    Duration::ZERO,
+                )
+                .update()
+        } else {
+            application.advance_project_open()
         };
-        let actions = frame.workspace_intent().decision_prompt().map(|prompt| {
-            EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard))
-        });
-        if application
-            .submit_and_drive(
-                EditorActionBatch::new(frame.revision(), actions),
-                Duration::ZERO,
-            )
-            .update()
-            .exit_ready()
-        {
-            break;
-        }
+        closed = update.exit_ready();
         std::thread::sleep(Duration::from_millis(2));
     }
     assert!(

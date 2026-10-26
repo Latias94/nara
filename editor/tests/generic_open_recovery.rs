@@ -527,7 +527,17 @@ fn ordinary_generic_open_preserves_degraded_source_through_reopen_and_recovery()
     let retained_hostile = fs::read(project.scene()).unwrap();
     assert_eq!(retained_hostile, hostile_bytes);
     assert_eq!(ContentDigest::of_bytes(&retained_hostile), hostile_digest);
-    assert!(rejected.request_exit().exit_ready());
+    let mut exit_ready = rejected.request_exit().exit_ready();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !exit_ready {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Recovery did not retire its Open Host"
+        );
+        exit_ready = rejected.advance_project_open().exit_ready();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(rejected.current_frame().is_none());
 }
 
 fn dispatch(

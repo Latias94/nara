@@ -1454,12 +1454,14 @@ fn close_application(application: &mut EditorApplication) {
     let deadline = Instant::now() + Duration::from_secs(10);
     if !application.request_exit().exit_ready() {
         loop {
-            let frame = current_frame(application);
-            if application
-                .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
-                .update()
-                .exit_ready()
-            {
+            let update = if let Some(frame) = application.current_frame() {
+                application
+                    .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO)
+                    .update()
+            } else {
+                application.advance_project_open()
+            };
+            if update.exit_ready() {
                 break;
             }
             assert!(

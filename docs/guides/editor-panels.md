@@ -169,6 +169,13 @@ The returned observations stay associated with that call across later drives and
 panel callbacks. Save/Play request admission still needs its owning asynchronous completion
 observation; an Accepted request can later fail. Ordered actions are not an atomic transaction.
 
+After requesting process Exit, keep driving until an update reports `exit_ready()`. Workspace
+retirement can remove `current_frame()` before the retained Open Host has physically joined its
+facilities. With a frame, submit against its current revision and resolve any ordinary dirty
+document decision; without a frame, continue `advance_project_open()`. Frame absence, an accepted
+Exit action and a completed Session are not process-exit completion. A poll-only driver must not
+issue another Exit to hide a rejected original request.
+
 For Save/Reopen, retain the admitted `EditorPersistenceAttemptId` and match the later Pending or
 Terminal observation to that attempt. Dismiss a terminal with the identity actually displayed,
 not a newly sampled latest result. `Refused` admission publishes nothing; an immediate published
