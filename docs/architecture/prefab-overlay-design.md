@@ -99,10 +99,13 @@ Ambiguous/unbound references remain conflicts. Production replacement is blocked
 valid inherited-to-added and added-to-inherited references work, including equal local spellings
 and repeated nested sources. The first scalar comparison intentionally exercises none of these.
 
-`SourceDocumentKey` is not currently a wire type. Freeze its bounded persistent encoding through
-the source owner before production format replacement; do not serialize Debug text, invent a new
-asset resolver, or derive canonical identity from a lookup path after resolution. Named,
-project-location and admitted stable-asset origins retain their existing continuity semantics.
+`SourceDocumentKey` now has one source-owned strict JSON/RON value codec, retaining document kind
+and complete Named, ProjectLocation or StableAsset origin. The private comparison uses that
+semantic type directly instead of a second identity representation which omitted kind.
+This is not bounded file admission: the production containing format must apply its preflight
+and aggregate policy before decoding and retaining an overlay. Do not serialize Debug text,
+invent a new asset resolver, or derive canonical identity from lookup spelling. Origins retain
+their existing continuity semantics.
 
 ### Complete Nested Target Grammar
 
@@ -161,7 +164,7 @@ remains Absent. Duplicate claims, ancestor/descendant overlap and keyed-item ide
 reject; whole keyed-container replacement is explicit. These are executable comparison rules,
 not production source editing or persistence qualification.
 
-Scene's format owner should use private wire structs for the existing source-key kind and
+Scene's source owner uses private wire structs for the existing source-key kind and
 Named/ProjectLocation/StableAsset origins, rebuilding semantic keys through their constructors.
 The UI's existing canonical key encoder is useful precedent, not the persistence owner; never
 persist its occurrence-bearing context. A decoded expected key does not itself admit a real file:
@@ -265,7 +268,11 @@ The chosen placement rules for this experiment are:
 
 The comparison preserves intent and a private conflict through JSON encode/decode for controlled
 fixtures. This proves neither hostile persistent admission nor production conflict Save/Reopen.
-The private source-identity wire shape is not the selected persistent source-owner codec. The
+The private comparison now uses the production source-owner identity codec. JSON/RON round trips
+retain kind through nested targets, reference bindings, placements and unresolved conflicts.
+Its component-intent enum uses adjacent tags: the former internal tag buffered nested native RON
+enums without their discriminants and failed a complete overlay round trip. This correction
+qualifies the controlled comparison, not the future production overlay grammar. The
 64-declaration/reference limits and existing Schema traversal budgets bound this experiment;
 they are not a measured product workload budget or a complete pre-copy overlay admission policy.
 
@@ -344,7 +351,7 @@ overlay storage, a captured base closure, native materialization or Host publica
   Schema. Full document equality in a private fixture is not a filesystem publication protocol.
 - The private compiler now combines explicit absence, whole keyed-container replacement, overlap
   rules, component-mode admission and mixed-origin reference binding with complete-value
-  validation. The production replacement still needs bounded canonical source/conflict encoding,
+  validation. The production replacement still needs bounded containing-overlay/conflict encoding,
   aggregate admission before copying, complete source edit/history/repair and conversion paths.
   Combining the private comparisons does not qualify those production obligations.
 - The private overlay's new additions are still IDs plus separate component declarations. It
@@ -352,6 +359,180 @@ overlay storage, a captured base closure, native materialization or Host publica
   declare a complete new record carrying its own `PrefabInstance`. Production additions must
   preserve complete records and recursively capture their sources; mixed-origin target coverage
   does not establish that declaration capability.
+
+### Effective Instance Declarations Before Recursion
+
+The next production replacement must support replacing or detaching an inherited anchor's
+complete optional instance declaration. The current exact patch path applies `SetPrefabInstance`
+to local Prefab records before recursing. The separate
+[nested repair baseline](../knowledge/engineering/verification/2026-10/2026-10-26T103859Z-nested-instance-repair-baseline-and-effective-source-demand-replacement-design-a6dbd3843c104c40b6ba817e428478f7.md)
+qualifies five current in-memory expansion cases, including no request for the discarded source;
+source-transaction evidence alone did not establish this. It does not qualify actual Host loading
+or the new grammar. Replacing this path with a compiler that first expands every old branch
+would lose an important repair capability:
+
+```text
+P contains n -> missing Q
+containing instance pins n.prefab = R
+required effective sources: P, R
+Q must not be requested merely to replace its declaration
+```
+
+Treat an instance-field claim as a complete declarative pin:
+
+- No claim means inherit. A claim of `None` explicitly detaches. `Some(instance)` fixes the
+  complete lookup and nested overlay; it does not merge the replaced declaration's old overlay.
+  Revert removes the claim, restoring inheritance, including any inherited conflict.
+- The durable claim carries a complete mixed-origin target and replacement value, not an
+  expected old declaration snapshot. The existing containing-source transaction still compares
+  complete expected/value snapshots for exact commit and inverse history. These are different
+  responsibilities: upstream edits must not invalidate a deliberate pin solely because the
+  old instance's unrelated override changed.
+- Replacing the declaration at `Source(n)` requires an admitted parent layer and that anchor,
+  not resolution of its old nested source. Traversing `through(Source(n), expected R)` requires
+  the actual selected nested base to equal R. A remaining independent claim through old Q
+  conflicts; it must not silently bind same-named entities in R.
+- Multiple layers select declarations from inner to outer, while duplicate claims within one
+  layer conflict. An outer replacement discards the old declaration's embedded overlay.
+  Independent claims retained in other active layers keep their own scope and base predicates.
+  Do not concatenate every layer into one duplicate-detection set.
+- Detachment preserves the anchor's local components and containing-layer children. It removes
+  projected children of the detached declaration; it does not materialize those children or
+  perform convert-to-local.
+
+The selected direction is **declaration selection before recursion, ordinary intent compilation
+after recursion**. Carry borrowed enclosing instance claims down typed target paths, retaining
+each claim's original declaring layer and binding scope. Check a hop against the actual selected
+base before entering it. Apply property/component/layout intents from inner to outer against each
+layer's effective input. A forwarded reference binding still names its original overlay's
+namespace; stripping a target prefix cannot turn an outer addition into an inner same-named
+addition.
+
+This differs from a pure bottom-up compiler, which cannot replace missing Q after Q has already
+failed to expand. Restricting targets to unqualified local IDs would instead lose repeated and
+mixed-origin placement. Neither is an acceptable shortcut to production adoption.
+
+The production grammar direction also makes two currently implicit choices explicit:
+
+```text
+PrefabInstance = { source: AssetRef, overrides: Option<Overlay> }
+Overlay = { base: SourceDocumentKey, additions, instances, components, placements, suppressions }
+Addition = { id, components: complete SceneComponentRecords, prefab: Option<PrefabInstance>,
+             bindings_by_component }
+InstanceClaim = { target: EntityTarget, value: Option<PrefabInstance> }
+```
+
+`overrides: None` permits an ordinary source link without inventing a canonical base key before
+actual resolution. An existing overlay always retains its explicit base, even if empty or
+conflicted; only explicit source editing removes it. This is a Proposed grammar, not a change
+to the current public struct.
+
+An addition carries all source data, including complete owner/version/value records and its
+optional instance. It has no separate child list: the existing desired-placement declarations
+are the one hierarchy authority, with exactly one placement for each current-layer addition.
+Added-to-added children use that same grammar. This avoids maintaining both `record.children`
+and placement as competing truths. Edits to an addition's own component or instance fold into
+its complete payload, rather than retaining duplicate claims for that current-layer record.
+Inherited additions reached through another instance remain legal targets. Reference bindings
+are per complete component payload; defaults still precede binding. This normalized carrier
+must preserve the full added subtree and nested source semantics currently expressible with
+ordinary records; an ID-only addition is insufficient.
+
+Preserve ADR 0101's child-order boundary: an anchor's selected Prefab roots precede the children
+owned directly by its containing layer. A current-layer addition placed under an instance anchor
+is one of those containing-layer children; `First` means first within that child sequence, after
+the selected nested roots. Before/After must name a sibling in the same ordering scope. Reject
+a relation that would interleave those children with nested roots rather than silently widening
+the scope. For `Parent::Entity(a)`, an explicit move to a different parent assigns the inherited
+entity to a's containing-layer child sequence; it does not change source/addition identity.
+`Parent::Root` instead always selects the original declaring overlay's effective root sequence,
+where inherited roots, moved-in descendants and root additions may explicitly order relative
+to one another. Do not reclassify it by its eventual physical instance-anchor parent: the whole
+effective root sequence precedes that outer anchor's own containing-source children.
+Prefix membership follows final effective placement, so a moved-out inherited root no longer
+belongs to its old anchor's prefix. Reordering under the same parent does not transfer an entity
+across the existing boundary.
+The production compiler must retain this scope while materializing the one final child list.
+Do not copy the private comparison's flat sibling handling as the complete production ordering policy.
+
+An entirely suppressed anchor with no surviving descendant demand must not force expansion of
+its old branch. Explicitly moved-out descendants can still require that base. Determine that
+requirement from the containing-layer structure and retained target/layout demands, not from a
+flattened generated-ID prefix. Retain final survivor reference and hierarchy validation.
+
+### Actual Source Demand And Host Capture
+
+The declaration-selection rule also applies before Host closure loading. Current
+`project_content::load_prefab_closure` scans raw source entities, and its patch scanner follows
+both expected and replacement snapshots. The Authoring Host likewise retains a raw source
+inventory. That inventory is useful for source preservation, but is not the effective activation
+dependency graph. Replacing the Scene compiler while keeping mandatory successful reads of Q
+would leave the repair counterexample broken at the real product entry.
+
+Selection must also precede recursive **activation semantics**, not only source discovery.
+Current native `decode_prefab -> canonicalize -> publish` recursively admits old embedded
+patch payloads before expansion. P may be decodable while n's old embedded overlay names a
+removed field or incompatible Schema version. An outer complete replacement by R must not fail
+first while trying to activate that discarded embedded overlay.
+
+The loader must therefore provide immutable declarations admitted for bounded format, structural
+shape, identity and source preservation. All raw payloads, including inactive ones, still pay
+decode, depth, retention and exact-source evidence costs. Syntax/envelope/identity errors are not
+silently accepted. Apply activation-required selector/version/reference/native checks to the
+selected surviving declarations through the Scene compiler; diagnostics of a superseded
+declaration remain source observations and do not reject that effective projection. An active
+invalid declaration still rejects. Source preservation under ADR 0090 supplies the retained data
+boundary, not permission to execute unknown values. Reconcile the native publication clauses in
+0043/0090 when implementing this pipeline. Keep 0043's independent rule that exact transaction
+snapshots cannot silently migrate or destructively replace unavailable source records.
+
+The same distinction applies to component assets. Raw Schema-declared asset facts remain source
+inventory, including inactive payloads; they must not force successful Runtime reads of images
+or metadata referenced only by discarded intent. Derive activation asset demand from the selected
+effective values and defaults through the existing Schema reference owner. A source-only lazy
+Prefab loader with the old eager component-asset scan would still have the early-failure gap.
+
+Use the same Scene declaration-selection kernel to determine actual next source requests.
+The concrete Host continues to own filesystem capabilities, path/metadata admission, aggregate
+budgets, immutable bytes and exact receipts. Do not implement a second overlay interpreter in
+Host scanners. The first production implementation should use a bounded synchronous, fallible
+mutable loading callback returning an owned shared immutable source result which binds key and
+document. It releases the loader borrow before recursion and preserves the concrete loading
+failure, without `RefCell`, self-references or a saved recursive-program state machine. Share
+raw admitted source allocations through the existing Host cache; compile distinct occurrences
+and active layers separately. Do not cache an effective result solely by source key.
+
+A concrete Scene continuation is the alternative if a real Editor loading path must yield
+between source requests for progress or cancellation. That requirement is not established by
+the current synchronous Host flow. Repeatedly restarting full compilation after each missing
+source is not a qualified locality policy, and a universal async/job framework is unnecessary.
+This is an implementation direction to qualify, not an adopted public loader signature.
+
+Capture P and R, every actual lookup/metadata observation needed to bind them, the containing
+source revision and exact Schema publication. Revalidate the complete captured set at activation,
+including a base with no surviving source-origin entity. Do not obtain dependencies by walking
+only final provenance. Authoring may preserve unresolved declarations without activating them;
+source inventory diagnostics and activation-required dependencies must remain distinguishable.
+
+The implementation acceptance cases must cross the actual Host as well as an in-memory resolver:
+
+| Case | Required observation |
+| --- | --- |
+| Missing or malformed Q replaced by R | No request for Q; P/R are the actual captured closure |
+| Invalid old embedded overlay inside decodable P | Full replacement succeeds through the actual Host without semantically activating discarded payload; raw retention bounds still apply |
+| Replacement and traversal | A descendant claim through R succeeds; one through Q retains a conflict |
+| Replaced embedded overlay | Its bad target is not executed; independent active claims retain predicates |
+| Complete added instance | Full components, hierarchy, nested additions and repeated outer provenance survive |
+| Layered pins and Revert | Inner 1, middle 2, outer 3 yields 3; removing outer claim yields 2; same-layer duplicates reject |
+| Equal local spelling | Outer addition, inner addition and inherited entity stay distinct through binding and reparenting |
+| Added instance child ordering | Q roots precede a's direct added children; their First/Before/After stay inside the containing-layer sequence |
+| Nested root moved to Root | q moved from nested n into the declaring overlay's Root can order Before inherited p, while the complete effective root sequence precedes the outer anchor's local children |
+| Suppressed old branch | No unnecessary resolution; a rescued descendant still demands its actual base |
+| Alias, cycle and publication | Alias equality is canonical; effective cycles reject; changed R rejects stale activation |
+| Source history and persistence | One containing-source inverse; conflicts Save/Reopen; final failure changes no source/history |
+
+These are the next production unit's obligations, not evidence of completed implementation.
+Existing transaction and private compiler results cannot be substituted for them.
 
 The production provenance change is a typed origin axis within the existing placement model,
 not a replacement identity service. Conceptually, an entity address combines its owning-source

@@ -170,6 +170,11 @@ preserves complete kind/origin identity through strict JSON/RON value encoding a
 private comparison's second identity representation. Decoded claims do not grant Host admission.
 The overlay design now specifies pre-recursion effective declarations and actual source demand;
 that production replacement, conflict persistence and conversion remain unimplemented.
+The [nested repair baseline](../knowledge/engineering/verification/2026-10/2026-10-26T103859Z-nested-instance-repair-baseline-and-effective-source-demand-replacement-design-a6dbd3843c104c40b6ba817e428478f7.md)
+qualifies five current in-memory expansion cases: replacement, detach and complete removal avoid
+the discarded nested source, and stale complete declarations reject. Independent design review
+separately corrected early native admission and added-instance child ordering. Actual effective
+Host loading and the declarative format remain unqualified.
 
 The [source-owned creation and construction design](authoring-construction-design.md) removes
 Workspace ordinal allocation and ID-reservation choreography from ordinary Scene/Prefab creation.

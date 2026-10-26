@@ -384,6 +384,13 @@ correctness Clippy pass. A decoded identity remains a claim, not Host/source adm
 overlay storage, actual effective closure capture, source repair/history and conversion remain
 open; the new pre-recursion declaration design is Proposed, not production qualification.
 
+The [nested repair baseline](../../knowledge/engineering/verification/2026-10/2026-10-26T103859Z-nested-instance-repair-baseline-and-effective-source-demand-replacement-design-a6dbd3843c104c40b6ba817e428478f7.md)
+adds five public current-expansion regressions in both feature configurations. Discarded sources
+are not resolved after exact replacement/detach or complete subtree removal; stale full
+declarations reject without publication. This does not qualify actual Host admission. The
+Proposed successor now separates source preservation from selected activation and retains
+ADR 0101 child ordering; those reviewed obligations are not new implemented contracts.
+
 The [R5c custody qualification](../../knowledge/engineering/verification/2026-10/2026-10-23T163942Z-per-document-persistence-custody-qualification-30cc4d7af3a445d18d9adf5b795886e2.md)
 implements typed per-document Scene/Prefab file custody under ADRs 0047/0118. Save retains its
 admission-time Host through acknowledgement/uncertainty; Reopen validates exact retained Host
