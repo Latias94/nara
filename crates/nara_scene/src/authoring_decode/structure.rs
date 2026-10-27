@@ -7,12 +7,52 @@ use super::{
 };
 use std::{collections::BTreeSet, sync::Arc};
 
+enum StructureAdmission<'a> {
+    Direct,
+    History,
+    PrefabConversion(&'a crate::authoring::prefab_conversion::PrefabConversionFootprint),
+}
+
 pub(super) fn prepare_scene_authoring_structure(
     document: &SceneDocument,
     state: &AuthoringDocumentState,
     patch: &ScenePatchDocument,
     history: bool,
 ) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
+    prepare_structure(
+        document,
+        state,
+        patch,
+        if history {
+            StructureAdmission::History
+        } else {
+            StructureAdmission::Direct
+        },
+    )
+}
+
+pub(super) fn prepare_conversion_structure(
+    document: &SceneDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    footprint: &crate::authoring::prefab_conversion::PrefabConversionFootprint,
+) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
+    footprint.admit_patch(patch)?;
+    prepare_structure(
+        document,
+        state,
+        patch,
+        StructureAdmission::PrefabConversion(footprint),
+    )
+}
+
+fn prepare_structure(
+    document: &SceneDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    admission: StructureAdmission<'_>,
+) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
+    let history = matches!(admission, StructureAdmission::History);
     if patch.format_version != ScenePatchDocument::CURRENT_FORMAT_VERSION
         || patch.is_empty()
         || patch.operations.len() > super::MAX_AUTHORING_EDIT_OPERATIONS
@@ -22,7 +62,9 @@ pub(super) fn prepare_scene_authoring_structure(
         ));
     }
     for operation in &patch.operations {
-        validate_operation_shape(operation, history)?;
+        if !matches!(admission, StructureAdmission::PrefabConversion(_)) {
+            validate_operation_shape(operation, history)?;
+        }
     }
     let field_operations = patch
         .operations
@@ -53,7 +95,13 @@ pub(super) fn prepare_scene_authoring_structure(
             inverses.push(inverse.operations);
             continue;
         }
-        validate_structure_operation(&candidate, state, operation, history, &created)?;
+        match &admission {
+            StructureAdmission::PrefabConversion(footprint) => {
+                footprint.admit_operation(&candidate, operation)?;
+                validate_conversion_record(state, operation)?;
+            }
+            _ => validate_structure_operation(&candidate, state, operation, history, &created)?,
+        }
         let inverse = crate::patch::apply_authoring_structure_operation(
             &mut candidate,
             operation,
@@ -176,6 +224,36 @@ pub(super) fn prepare_scene_authoring_structure(
             diagnostics: DiagnosticReport::default(),
         },
     })
+}
+
+fn validate_conversion_record(
+    state: &AuthoringDocumentState,
+    operation: &ScenePatchOperation,
+) -> Result<(), ScenePatchReport> {
+    let record = match operation {
+        ScenePatchOperation::AddEntity { entity, .. }
+        | ScenePatchOperation::RestoreEntity { entity, .. } => entity,
+        _ => return Ok(()),
+    };
+    for (component, value) in &record.components {
+        let Some(entry) = state.basis.schemas.get(component) else {
+            return Err(authoring_structure_rejection(
+                "Conversion insertion requires an admitted component Schema",
+            ));
+        };
+        if entry.adapter.is_none()
+            || !entry
+                .schema
+                .has_capability(nara_reflect::ComponentCapability::Scene)
+            || value.version != entry.schema.version()
+            || value.owner() != Some(&entry.owner)
+        {
+            return Err(authoring_structure_rejection(
+                "Conversion insertion requires a complete current data-authoring record",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn admit_replay_cost(patch: &ScenePatchDocument) -> Result<(), ScenePatchReport> {

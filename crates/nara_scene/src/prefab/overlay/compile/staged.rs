@@ -70,13 +70,21 @@ struct Scope {
 }
 
 struct Compiler<'root, 'context, 'owner, F, E> {
-    root: &'root SceneDocument,
+    root: SourceTopology<'root>,
+    selected_anchor: Option<NodeId>,
     context: &'context mut PrefabExpansionContext<'owner, F, E>,
     scopes: Vec<Scope>,
     nodes: Vec<Node>,
     locators: BTreeMap<SceneEntityId, NodeId>,
     value_ids: BTreeMap<SceneEntityId, SceneEntityId>,
     postorder: Vec<ScopeId>,
+}
+
+/// Borrows the actual source topology without changing its nominal document kind.
+#[derive(Clone, Copy)]
+pub(super) struct SourceTopology<'a> {
+    pub(super) roots: &'a [SceneEntityId],
+    pub(super) entities: &'a [SceneEntityRecord],
 }
 
 pub(super) fn expand<F, E>(
@@ -86,8 +94,45 @@ pub(super) fn expand<F, E>(
 where
     F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
+    compile(
+        context,
+        SourceTopology {
+            roots: &document.roots,
+            entities: &document.entities,
+        },
+        None,
+    )
+}
+
+#[cfg(feature = "serde")]
+pub(super) fn expand_selected<F, E>(
+    context: &mut PrefabExpansionContext<'_, F, E>,
+    source: SourceTopology<'_>,
+    anchor: &SceneEntityId,
+) -> Result<SceneDocument, PrefabExpansionFailure>
+where
+    F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
+{
+    // The containing scope registers direct shells first, in this source record order.
+    let selected = source
+        .entities
+        .iter()
+        .position(|entity| &entity.id == anchor && entity.prefab.is_some())
+        .ok_or(PrefabExpansionFailureKind::MissingTarget)?;
+    compile(context, source, Some(selected))
+}
+
+fn compile<F, E>(
+    context: &mut PrefabExpansionContext<'_, F, E>,
+    source: SourceTopology<'_>,
+    selected_anchor: Option<NodeId>,
+) -> Result<SceneDocument, PrefabExpansionFailure>
+where
+    F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
+{
     let mut compiler = Compiler {
-        root: document,
+        root: source,
+        selected_anchor,
         context,
         scopes: Vec::new(),
         nodes: Vec::new(),
@@ -117,6 +162,9 @@ where
         compiler.compose_programs()?;
         let mut binding_bytes = Some(0usize);
         for &node in &compiler.scopes[0].output {
+            if !compiler.selects_values(node) {
+                continue;
+            }
             for (component, program) in &compiler.nodes[node].programs {
                 compiler.program_bindings(component, program, |_, _, target| {
                     binding_bytes = binding_bytes.and_then(|bytes| {
@@ -130,6 +178,9 @@ where
         compiler.admit(binding_bytes)?;
         let mut demanded = Vec::new();
         for &node in &compiler.scopes[0].output {
+            if !compiler.selects_values(node) {
+                continue;
+            }
             for (component, program) in &compiler.nodes[node].programs {
                 compiler.program_bindings(component, program, |scope, slot, target| {
                     demanded.push((scope, slot, target.clone()))
@@ -161,18 +212,33 @@ where
             .ok_or_else(|| PrefabExpansionFailureKind::WorkLimit.into())
     }
 
+    /// Ownership follows instance entries, not visual parentage or locator spelling.
+    fn selects_values(&self, node: NodeId) -> bool {
+        let Some(selected) = self.selected_anchor else {
+            return true;
+        };
+        let mut scope = self.nodes[node].scope;
+        while let Some(anchor) = self.scopes[scope].anchor {
+            if anchor == selected {
+                return true;
+            }
+            scope = self.nodes[anchor].scope;
+        }
+        false
+    }
+
     fn source_entities(&self, scope: ScopeId) -> &[SceneEntityRecord] {
         self.scopes[scope]
             .source
             .as_ref()
-            .map_or(&self.root.entities, |source| &source.document().entities)
+            .map_or(self.root.entities, |source| &source.document().entities)
     }
 
     fn source_roots(&self, scope: ScopeId) -> &[SceneEntityId] {
         self.scopes[scope]
             .source
             .as_ref()
-            .map_or(&self.root.roots, |source| &source.document().roots)
+            .map_or(self.root.roots, |source| &source.document().roots)
     }
 
     fn instance(&self, site: &Site) -> Option<&PrefabInstance> {
@@ -354,14 +420,18 @@ where
                             .checked_add(size_of::<NodeId>())?
                             .checked_add(provenance_string_bytes(child.as_str())?.checked_mul(2)?)
                     })?)?
-                    .checked_add(entity.components.keys().try_fold(
-                        0usize,
-                        |bytes, component| {
-                            bytes
-                                .checked_add(128)?
-                                .checked_add(provenance_string_bytes(component.as_str())?)
-                        },
-                    )?)
+                    .checked_add(if scope == 0 && self.selected_anchor.is_some() {
+                        0
+                    } else {
+                        entity
+                            .components
+                            .keys()
+                            .try_fold(0usize, |bytes, component| {
+                                bytes
+                                    .checked_add(128)?
+                                    .checked_add(provenance_string_bytes(component.as_str())?)
+                            })?
+                    })
             })
             .and_then(|bytes| bytes.checked_add(additions.checked_mul(512)?));
         self.admit(bytes)?;
@@ -550,7 +620,7 @@ where
             self.scopes[scope].roots.push(node);
         }
         if scope == 0 {
-            for entity in &self.root.entities {
+            for entity in self.root.entities {
                 if !self.context.reserve_provenance_bytes(
                     provenance_entry_bytes(&entity.id, &entity.id),
                     Some(&entity.id),
@@ -1031,7 +1101,10 @@ where
                 .output
                 .iter()
                 .copied()
-                .filter(|&node| !self.nodes[node].opened)
+                .filter(|&node| {
+                    !self.nodes[node].opened
+                        && (self.selected_anchor == Some(node) || self.selects_values(node))
+                })
                 .collect::<Vec<_>>();
             if pending.is_empty() {
                 return Ok(document);
@@ -1060,11 +1133,21 @@ where
     }
 
     fn compose_programs(&mut self) -> Result<(), PrefabExpansionFailure> {
-        let bytes = self.nodes.iter().try_fold(0usize, |bytes, node| {
-            bytes.checked_add(self.components(node.record).len().checked_mul(256)?)
-        });
+        let bytes = self
+            .nodes
+            .iter()
+            .enumerate()
+            .try_fold(0usize, |bytes, (id, node)| {
+                if !self.selects_values(id) {
+                    return Some(bytes);
+                }
+                bytes.checked_add(self.components(node.record).len().checked_mul(256)?)
+            });
         self.admit(bytes)?;
         for node in 0..self.nodes.len() {
+            if !self.selects_values(node) {
+                continue;
+            }
             let record = self.nodes[node].record;
             self.nodes[node].programs = self
                 .components(record)

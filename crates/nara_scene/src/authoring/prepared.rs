@@ -1,15 +1,17 @@
 //! Owner-bound, move-only preparation over the existing authoring transaction.
 
+use std::sync::Arc;
+
 use super::{
-    AuthoringSessionAuthority, PrefabAuthoringSession, SceneAuthoringHistoryCost,
-    SceneAuthoringRevision, SceneAuthoringSession, authoring_field_edit_session_rejection,
-    history_error_report,
+    AuthoringHistory, AuthoringHistoryScope, AuthoringSessionAuthority, PrefabAuthoringSession,
+    SceneAuthoringHistoryCost, SceneAuthoringHistoryLimits, SceneAuthoringRevision,
+    SceneAuthoringSession, authoring_field_edit_session_rejection, history_error_report,
 };
 use crate::{
     PrefabDocument, SceneDocument, ScenePatchDocument, ScenePatchReport,
     authoring_decode::{
-        PreparedPrefabAuthoringPatch, PreparedSceneAuthoringPatch, prepare_prefab_authoring_patch,
-        prepare_scene_authoring_patch,
+        AuthoringDocumentState, PreparedPrefabAuthoringPatch, PreparedSceneAuthoringPatch,
+        prepare_prefab_authoring_patch, prepare_scene_authoring_patch,
     },
 };
 
@@ -19,9 +21,41 @@ pub struct PreparedSceneAuthoringEdit {
     revision: SceneAuthoringRevision,
     history_cost: SceneAuthoringHistoryCost,
     candidate: PreparedSceneAuthoringPatch,
+    scope: AuthoringHistoryScope,
 }
 
 impl PreparedSceneAuthoringEdit {
+    /// Prepares against the document and classification captured with this source revision.
+    pub(super) fn prepare_from_source(
+        revision: SceneAuthoringRevision,
+        document: &SceneDocument,
+        state: &AuthoringDocumentState,
+        limits: SceneAuthoringHistoryLimits,
+        patch: &ScenePatchDocument,
+        scope: AuthoringHistoryScope,
+    ) -> Result<Self, ScenePatchReport> {
+        AuthoringHistory::admit_input(limits, patch, &scope)?;
+        let mut candidate = match &scope {
+            AuthoringHistoryScope::Ordinary => {
+                prepare_scene_authoring_patch(document, state, patch, false)
+            }
+            AuthoringHistoryScope::PrefabConversion(footprint) => {
+                crate::authoring_decode::prepare_scene_prefab_conversion_patch(
+                    document, state, patch, footprint,
+                )
+            }
+        }?;
+        let (report, history_cost) =
+            AuthoringHistory::admit_report(limits, &candidate.patch, candidate.report, &scope)?;
+        candidate.report = report;
+        Ok(Self {
+            revision,
+            history_cost,
+            candidate,
+            scope,
+        })
+    }
+
     #[must_use]
     pub const fn base_revision(&self) -> SceneAuthoringRevision {
         self.revision
@@ -56,6 +90,15 @@ impl SceneAuthoringSession {
         base_revision: SceneAuthoringRevision,
         patch: &ScenePatchDocument,
     ) -> Result<PreparedSceneAuthoringEdit, ScenePatchReport> {
+        self.prepare_scoped_authoring_edit(base_revision, patch, AuthoringHistoryScope::Ordinary)
+    }
+
+    pub(super) fn prepare_scoped_authoring_edit(
+        &self,
+        base_revision: SceneAuthoringRevision,
+        patch: &ScenePatchDocument,
+        scope: AuthoringHistoryScope,
+    ) -> Result<PreparedSceneAuthoringEdit, ScenePatchReport> {
         if base_revision != self.revision() {
             return Err(stale_basis());
         }
@@ -63,17 +106,14 @@ impl SceneAuthoringSession {
             .authority
             .published()
             .ok_or_else(authoring_field_edit_session_rejection)?;
-        self.history.admit_forward_input(patch)?;
-        let mut candidate = prepare_scene_authoring_patch(&self.document, state, patch, false)?;
-        let (report, history_cost) = self
-            .history
-            .admit_forward_report(&candidate.patch, candidate.report)?;
-        candidate.report = report;
-        Ok(PreparedSceneAuthoringEdit {
-            revision: base_revision,
-            history_cost,
-            candidate,
-        })
+        PreparedSceneAuthoringEdit::prepare_from_source(
+            base_revision,
+            &self.document,
+            state,
+            self.history.limits(),
+            patch,
+            scope,
+        )
     }
 
     /// Consumes a prepared edit once, revalidating its basis before document/history publication.
@@ -92,14 +132,15 @@ impl SceneAuthoringSession {
             report,
             ..
         } = prepared.candidate;
-        let report = self.history.publish_forward(
+        let report = self.history.publish_forward_with_scope(
             &mut self.document,
             document,
             report,
             prepared.history_cost,
+            prepared.scope,
         );
         if report.applied {
-            self.authority = AuthoringSessionAuthority::Published(state);
+            self.authority = AuthoringSessionAuthority::Published(Arc::new(state));
             self.live_dirty = true;
         }
         report
@@ -112,9 +153,41 @@ pub struct PreparedPrefabAuthoringEdit {
     revision: SceneAuthoringRevision,
     history_cost: SceneAuthoringHistoryCost,
     candidate: PreparedPrefabAuthoringPatch,
+    scope: AuthoringHistoryScope,
 }
 
 impl PreparedPrefabAuthoringEdit {
+    /// Prepares against the document and classification captured with this source revision.
+    pub(super) fn prepare_from_source(
+        revision: SceneAuthoringRevision,
+        document: &PrefabDocument,
+        state: &AuthoringDocumentState,
+        limits: SceneAuthoringHistoryLimits,
+        patch: &ScenePatchDocument,
+        scope: AuthoringHistoryScope,
+    ) -> Result<Self, ScenePatchReport> {
+        AuthoringHistory::admit_input(limits, patch, &scope)?;
+        let mut candidate = match &scope {
+            AuthoringHistoryScope::Ordinary => {
+                prepare_prefab_authoring_patch(document, state, patch, false)
+            }
+            AuthoringHistoryScope::PrefabConversion(footprint) => {
+                crate::authoring_decode::prepare_prefab_conversion_patch(
+                    document, state, patch, footprint,
+                )
+            }
+        }?;
+        let (report, history_cost) =
+            AuthoringHistory::admit_report(limits, &candidate.patch, candidate.report, &scope)?;
+        candidate.report = report;
+        Ok(Self {
+            revision,
+            history_cost,
+            candidate,
+            scope,
+        })
+    }
+
     #[must_use]
     pub const fn base_revision(&self) -> SceneAuthoringRevision {
         self.revision
@@ -147,6 +220,15 @@ impl PrefabAuthoringSession {
         base_revision: SceneAuthoringRevision,
         patch: &ScenePatchDocument,
     ) -> Result<PreparedPrefabAuthoringEdit, ScenePatchReport> {
+        self.prepare_scoped_authoring_edit(base_revision, patch, AuthoringHistoryScope::Ordinary)
+    }
+
+    pub(super) fn prepare_scoped_authoring_edit(
+        &self,
+        base_revision: SceneAuthoringRevision,
+        patch: &ScenePatchDocument,
+        scope: AuthoringHistoryScope,
+    ) -> Result<PreparedPrefabAuthoringEdit, ScenePatchReport> {
         if base_revision != self.revision() {
             return Err(stale_basis());
         }
@@ -154,17 +236,14 @@ impl PrefabAuthoringSession {
             .authority
             .published()
             .ok_or_else(authoring_field_edit_session_rejection)?;
-        self.history.admit_forward_input(patch)?;
-        let mut candidate = prepare_prefab_authoring_patch(&self.document, state, patch, false)?;
-        let (report, history_cost) = self
-            .history
-            .admit_forward_report(&candidate.patch, candidate.report)?;
-        candidate.report = report;
-        Ok(PreparedPrefabAuthoringEdit {
-            revision: base_revision,
-            history_cost,
-            candidate,
-        })
+        PreparedPrefabAuthoringEdit::prepare_from_source(
+            base_revision,
+            &self.document,
+            state,
+            self.history.limits(),
+            patch,
+            scope,
+        )
     }
 
     /// Publishes the retained candidate and one history entry, or changes nothing on rejection.
@@ -183,14 +262,15 @@ impl PrefabAuthoringSession {
             report,
             ..
         } = prepared.candidate;
-        let report = self.history.publish_forward(
+        let report = self.history.publish_forward_with_scope(
             &mut self.document,
             document,
             report,
             prepared.history_cost,
+            prepared.scope,
         );
         if report.applied {
-            self.authority = AuthoringSessionAuthority::Published(state);
+            self.authority = AuthoringSessionAuthority::Published(Arc::new(state));
         }
         report
     }

@@ -303,7 +303,7 @@ impl ResolvedPrefabSource {
         }
     }
 
-    fn matches_authority(&self, authority: SchemaAuthority<'_>) -> bool {
+    pub(crate) fn matches_authority(&self, authority: SchemaAuthority<'_>) -> bool {
         match (&self.document, authority) {
             (ResolvedPrefabDocument::Native(_), SchemaAuthority::Native(_)) => true,
             #[cfg(feature = "serde")]
@@ -808,6 +808,131 @@ where
     })
 }
 
+/// An actual containing source, borrowed without a Scene-shaped surrogate.
+#[cfg(feature = "serde")]
+#[derive(Clone, Copy)]
+pub(crate) enum SelectedInstanceSource<'a> {
+    Scene(&'a SceneDocument),
+    Prefab(&'a PrefabDocument),
+}
+
+/// A semantic fragment has no authority to stand in for a complete expanded document.
+/// Unavailable surviving records are represented by the compilation's typed omissions.
+#[cfg(feature = "serde")]
+#[derive(Debug)]
+pub(crate) struct SelectedInstanceFragment {
+    pub(crate) roots: Vec<SceneEntityId>,
+    pub(crate) entities: Vec<SceneEntityRecord>,
+    pub(crate) provenance: crate::SceneEntityProvenanceMap,
+}
+
+#[cfg(feature = "serde")]
+#[derive(Debug)]
+pub(crate) struct SelectedInstanceCompilation {
+    pub(crate) fragment: Option<SelectedInstanceFragment>,
+    pub(crate) diagnostics: DiagnosticReport,
+    pub(crate) failure: Option<PrefabExpansionFailure>,
+    pub(crate) omissions: Vec<AuthoringPrefabOmission>,
+    pub(crate) asset_references: Vec<nara_reflect::DeclaredAssetReference>,
+    pub(crate) work_bytes: Option<usize>,
+    pub(crate) budget_failed: bool,
+}
+
+/// Private comparison entry: only a directly owned anchor's complete projection is interpreted.
+/// All containing-source IDs and topology remain actual external reference context.
+#[cfg(feature = "serde")]
+pub(crate) fn try_compile_selected_authoring_instance_with_loader<F, E>(
+    source: SelectedInstanceSource<'_>,
+    anchor: &SceneEntityId,
+    basis: &crate::AuthoringSchemaBasis,
+    options: PrefabExpansionOptions,
+    database: Option<&ProjectAssetDatabase>,
+    mut loader: F,
+) -> Result<SelectedInstanceCompilation, E>
+where
+    F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
+{
+    let mut context = PrefabExpansionContext::new(
+        SchemaAuthority::Authoring(basis),
+        &mut loader,
+        options,
+        database,
+    );
+    let result: Result<SelectedInstanceFragment, PrefabExpansionFailure> = (|| {
+        if !context.reserve_provenance_bytes(
+            Some(std::mem::size_of::<crate::SceneEntityProvenanceMap>()),
+            None,
+            None,
+        ) || !context.reserve_scratch_bytes(
+            std::mem::size_of::<SelectedInstanceCompilation>()
+                .checked_add(std::mem::size_of::<SelectedInstanceFragment>()),
+            None,
+            None,
+        ) {
+            return Err(PrefabExpansionFailureKind::WorkLimit.into());
+        }
+        let mut document =
+            overlay::compile::expand_selected_instance(&mut context, source, anchor)?;
+        document.canonicalize();
+        context.observe_authoring_omissions(&mut document);
+        if !context.diagnostics.has_errors() {
+            // The staged layout retains real containing-source shells. Their IDs close
+            // references, but they have no component programs in selected demand.
+            let validation = context.validate_document(&document);
+            context.diagnostics.extend(validation);
+        }
+        if context.diagnostics.has_errors() {
+            return Err(if context.budget_failed {
+                PrefabExpansionFailureKind::WorkLimit
+            } else {
+                PrefabExpansionFailureKind::OwnerAdmission
+            }
+            .into());
+        }
+        context.provenance.retain(|_, origin| {
+            origin
+                .projection_path()
+                .is_some_and(|path| path.root_anchor() == anchor)
+        });
+        let record = document
+            .entities
+            .iter_mut()
+            .find(|record| &record.id == anchor)
+            .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?;
+        // The existing layout owner puts projected roots before ordinary local children.
+        let mut roots = std::mem::take(&mut record.children);
+        roots.retain(|id| context.provenance.contains_key(id));
+        document
+            .entities
+            .retain(|record| context.provenance.contains_key(&record.id));
+        Ok(SelectedInstanceFragment {
+            roots,
+            entities: document.entities,
+            provenance: std::mem::take(&mut context.provenance),
+        })
+    })();
+    let (fragment, failure) = match result {
+        Ok(fragment) => (Some(fragment), None),
+        Err(failure) => {
+            context.push_expansion_failure(&failure);
+            (None, Some(failure))
+        }
+    };
+    let work_bytes = PrefabExpansionContext::<F, E>::usage_work_bytes(context.usage);
+    if let Some(error) = context.load_error {
+        return Err(error);
+    }
+    Ok(SelectedInstanceCompilation {
+        fragment,
+        diagnostics: context.diagnostics,
+        failure,
+        omissions: context.omissions,
+        asset_references: context.asset_references,
+        work_bytes,
+        budget_failed: context.budget_failed,
+    })
+}
+
 impl PrefabExpansionReport {
     /// Whether a retained source component was migrated during successful compilation.
     /// Discarded component payloads do not contribute to this observation.
@@ -871,6 +996,22 @@ impl PrefabExpansionWorkingSet {
         if limit.get() < self.working_limit.get() {
             self.working_limit = limit;
         }
+    }
+
+    #[cfg(feature = "serde")]
+    pub(crate) const fn working_byte_limit(&self) -> ByteLimit {
+        self.working_limit
+    }
+
+    /// A wrapper's loader sees its retained data as part of the suspended work.
+    /// Restore only that wrapper's debit in this copy; the compiler packet stays unchanged.
+    #[cfg(feature = "serde")]
+    pub(crate) fn including_retained_working_bytes(self, retained: usize) -> Option<Self> {
+        Some(Self {
+            bytes: Some(self.bytes?.checked_add(retained)?),
+            working_limit: ByteLimit::new(self.working_limit.get().checked_add(retained)?)?,
+            ..self
+        })
     }
 }
 

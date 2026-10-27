@@ -25,10 +25,17 @@ pub use creation::CreatedSourceEntity;
 #[cfg(feature = "serde")]
 mod construction;
 #[cfg(feature = "serde")]
+pub(crate) mod prefab_conversion;
+#[cfg(feature = "serde")]
 pub use construction::{
     AuthoringConstructionDraft, CommittedAuthoringConstruction, ConstructionEntity,
     ConstructionEntityMap, ConstructionPlacement, LocalConstructionEntity,
     PreparedPrefabAuthoringConstruction, PreparedSceneAuthoringConstruction,
+};
+#[cfg(feature = "serde")]
+pub use prefab_conversion::{
+    LocalizedPrefabEntity, PrefabConversionError, PrefabConversionReceipt, PrefabConversionRequest,
+    PreparedPrefabConversion, PreparedScenePrefabConversion, ScenePrefabConversionRequest,
 };
 
 #[cfg(feature = "serde")]
@@ -229,6 +236,30 @@ struct SceneAuthoringHistoryEntry {
     from_state: SceneAuthoringContentState,
     to_state: SceneAuthoringContentState,
     cost: SceneAuthoringHistoryCost,
+    scope: AuthoringHistoryScope,
+}
+
+#[derive(Debug, Default)]
+enum AuthoringHistoryScope {
+    #[default]
+    Ordinary,
+    #[cfg(feature = "serde")]
+    PrefabConversion(prefab_conversion::PrefabConversionFootprint),
+}
+
+impl AuthoringHistoryScope {
+    fn retained_bytes(&self) -> usize {
+        match self {
+            Self::Ordinary => 0,
+            #[cfg(feature = "serde")]
+            Self::PrefabConversion(footprint) => footprint.retained_bytes(),
+        }
+    }
+
+    fn add_cost(&self, mut cost: SceneAuthoringHistoryCost) -> SceneAuthoringHistoryCost {
+        cost.logical_bytes = cost.logical_bytes.saturating_add(self.retained_bytes());
+        cost
+    }
 }
 
 #[derive(Debug)]
@@ -320,7 +351,24 @@ impl AuthoringHistory {
         report: ScenePatchReport,
         cost: SceneAuthoringHistoryCost,
     ) -> ScenePatchReport {
-        if !self.entry_is_admissible(cost) {
+        self.publish_forward_with_scope(
+            document,
+            candidate,
+            report,
+            cost,
+            AuthoringHistoryScope::Ordinary,
+        )
+    }
+
+    fn publish_forward_with_scope<D>(
+        &mut self,
+        document: &mut Arc<D>,
+        candidate: D,
+        report: ScenePatchReport,
+        cost: SceneAuthoringHistoryCost,
+        scope: AuthoringHistoryScope,
+    ) -> ScenePatchReport {
+        if !Self::entry_is_admissible(self.limits, cost) {
             return reject_history_publication(
                 report,
                 "scene.authoring-history-entry-limit-exceeded",
@@ -343,6 +391,7 @@ impl AuthoringHistory {
             from_state: after_state,
             to_state: before_state,
             cost,
+            scope,
         });
         report
     }
@@ -352,6 +401,15 @@ impl AuthoringHistory {
         patch: &ScenePatchDocument,
         report: ScenePatchReport,
     ) -> Result<(ScenePatchReport, SceneAuthoringHistoryCost), ScenePatchReport> {
+        Self::admit_report(self.limits, patch, report, &AuthoringHistoryScope::Ordinary)
+    }
+
+    fn admit_report(
+        limits: SceneAuthoringHistoryLimits,
+        patch: &ScenePatchDocument,
+        report: ScenePatchReport,
+        scope: &AuthoringHistoryScope,
+    ) -> Result<(ScenePatchReport, SceneAuthoringHistoryCost), ScenePatchReport> {
         let Some(inverse) = report.inverse.as_ref() else {
             return Err(reject_history_publication(
                 report,
@@ -359,9 +417,11 @@ impl AuthoringHistory {
                 "accepted authoring patch did not produce an inverse",
             ));
         };
-        let cost = SceneAuthoringHistoryCost::for_patch(patch)
-            .max(SceneAuthoringHistoryCost::for_patch(inverse));
-        if !self.entry_is_admissible(cost) {
+        let cost = scope.add_cost(
+            SceneAuthoringHistoryCost::for_patch(patch)
+                .max(SceneAuthoringHistoryCost::for_patch(inverse)),
+        );
+        if !Self::entry_is_admissible(limits, cost) {
             return Err(reject_history_publication(
                 report,
                 "scene.authoring-history-entry-limit-exceeded",
@@ -372,7 +432,11 @@ impl AuthoringHistory {
     }
 
     #[cfg(feature = "serde")]
-    fn admit_forward_input(&self, patch: &ScenePatchDocument) -> Result<(), ScenePatchReport> {
+    fn admit_input(
+        limits: SceneAuthoringHistoryLimits,
+        patch: &ScenePatchDocument,
+        scope: &AuthoringHistoryScope,
+    ) -> Result<(), ScenePatchReport> {
         // Let the source preparer report cheap envelope/arity errors before value work.
         if patch.format_version != ScenePatchDocument::CURRENT_FORMAT_VERSION
             || patch.is_empty()
@@ -389,21 +453,28 @@ impl AuthoringHistory {
         {
             return Ok(());
         }
-        let limits = crate::ScenePatchApplyLimits::default()
+        let remaining_bytes = limits
+            .max_entry_logical_bytes
+            .checked_sub(scope.retained_bytes())
+            .and_then(nara_core::ByteLimit::new)
+            .ok_or_else(|| {
+                history_error_report(
+                    "scene.authoring-history-entry-limit-exceeded",
+                    "authoring preparation and its scope exceed the per-entry history limit",
+                )
+            })?;
+        let patch_limits = crate::ScenePatchApplyLimits::default()
             .with_validation_work(
-                nara_core::ItemLimit::new(self.limits.max_entry_operations)
+                nara_core::ItemLimit::new(limits.max_entry_operations)
                     .expect("nonzero history limit"),
             )
             .with_validation_value_nodes(
-                nara_core::ItemLimit::new(self.limits.max_entry_value_nodes)
+                nara_core::ItemLimit::new(limits.max_entry_value_nodes)
                     .expect("nonzero history limit"),
             )
-            .with_validation_value_bytes(
-                nara_core::ByteLimit::new(self.limits.max_entry_logical_bytes)
-                    .expect("nonzero history limit"),
-            );
-        let admitted = crate::patch::bounded_scene_patch_cost(patch, limits)
-            .is_some_and(|cost| cost.logical_bytes() <= self.limits.max_entry_logical_bytes);
+            .with_validation_value_bytes(remaining_bytes);
+        let admitted = crate::patch::bounded_scene_patch_cost(patch, patch_limits)
+            .is_some_and(|cost| cost.logical_bytes() <= remaining_bytes.get());
         if !admitted {
             return Err(history_error_report(
                 "scene.authoring-history-entry-limit-exceeded",
@@ -417,7 +488,11 @@ impl AuthoringHistory {
         &mut self,
         document: &mut Arc<D>,
         direction: HistoryDirection,
-        apply: impl FnOnce(&ScenePatchDocument, &D) -> Result<(D, ScenePatchReport), ScenePatchReport>,
+        apply: impl FnOnce(
+            &ScenePatchDocument,
+            &D,
+            &AuthoringHistoryScope,
+        ) -> Result<(D, ScenePatchReport), ScenePatchReport>,
     ) -> ScenePatchReport {
         let Some(entry) = self.pop(direction) else {
             return history_miss_report(direction.empty_code(), direction.empty_summary());
@@ -430,7 +505,7 @@ impl AuthoringHistory {
             );
         }
 
-        let (candidate, report) = match apply(&entry.patch, document.as_ref()) {
+        let (candidate, report) = match apply(&entry.patch, document.as_ref(), &entry.scope) {
             Ok(prepared) => prepared,
             Err(report) => {
                 self.restore(direction, entry);
@@ -445,8 +520,10 @@ impl AuthoringHistory {
                 "accepted history patch did not produce an inverse",
             );
         };
-        let observed_cost = SceneAuthoringHistoryCost::for_patch(&entry.patch)
-            .max(SceneAuthoringHistoryCost::for_patch(&inverse));
+        let observed_cost = entry.scope.add_cost(
+            SceneAuthoringHistoryCost::for_patch(&entry.patch)
+                .max(SceneAuthoringHistoryCost::for_patch(&inverse)),
+        );
         if observed_cost.operations > entry.cost.operations
             || observed_cost.value_nodes > entry.cost.value_nodes
             || observed_cost.logical_bytes > entry.cost.logical_bytes
@@ -464,6 +541,7 @@ impl AuthoringHistory {
             from_state: entry.to_state,
             to_state: entry.from_state,
             cost: entry.cost,
+            scope: entry.scope,
         };
         *document = Arc::new(candidate);
         self.advance_revision();
@@ -478,10 +556,13 @@ impl AuthoringHistory {
         self.cost = SceneAuthoringHistoryCost::default();
     }
 
-    fn entry_is_admissible(&self, cost: SceneAuthoringHistoryCost) -> bool {
-        cost.operations <= self.limits.max_entry_operations
-            && cost.value_nodes <= self.limits.max_entry_value_nodes
-            && cost.logical_bytes <= self.limits.max_entry_logical_bytes
+    fn entry_is_admissible(
+        limits: SceneAuthoringHistoryLimits,
+        cost: SceneAuthoringHistoryCost,
+    ) -> bool {
+        cost.operations <= limits.max_entry_operations
+            && cost.value_nodes <= limits.max_entry_value_nodes
+            && cost.logical_bytes <= limits.max_entry_logical_bytes
     }
 
     fn clear_redo(&mut self) {
@@ -615,7 +696,7 @@ impl From<crate::SceneFilePublicationError> for AuthoringSessionReplacementError
 enum AuthoringSessionAuthority {
     Native,
     #[cfg(feature = "serde")]
-    Published(crate::authoring_decode::AuthoringDocumentState),
+    Published(Arc<crate::authoring_decode::AuthoringDocumentState>),
 }
 
 impl AuthoringSessionAuthority {
@@ -628,10 +709,18 @@ impl AuthoringSessionAuthority {
     }
 
     #[cfg(feature = "serde")]
-    const fn published(&self) -> Option<&crate::authoring_decode::AuthoringDocumentState> {
+    fn published(&self) -> Option<&crate::authoring_decode::AuthoringDocumentState> {
         match self {
             Self::Native => None,
-            Self::Published(state) => Some(state),
+            Self::Published(state) => Some(state.as_ref()),
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    fn published_shared(&self) -> Option<Arc<crate::authoring_decode::AuthoringDocumentState>> {
+        match self {
+            Self::Native => None,
+            Self::Published(state) => Some(Arc::clone(state)),
         }
     }
 
@@ -767,7 +856,7 @@ impl PrefabAuthoringSession {
             document: Arc::new(document),
             history: AuthoringHistory::new(history_limits),
             source_upgrade_required: false,
-            authority: AuthoringSessionAuthority::Published(state),
+            authority: AuthoringSessionAuthority::Published(Arc::new(state)),
         }
     }
 
@@ -1029,7 +1118,7 @@ impl PrefabAuthoringSession {
         self.history.apply_history(
             &mut self.document,
             HistoryDirection::Undo,
-            |patch, document| {
+            |patch, document, _scope| {
                 patch
                     .prepare_to_prefab(document, registry)
                     .map(crate::patch::PreparedPrefabPatch::into_parts)
@@ -1059,7 +1148,7 @@ impl PrefabAuthoringSession {
         self.history.apply_history(
             &mut self.document,
             HistoryDirection::Undo,
-            |patch, document| {
+            |patch, document, _scope| {
                 patch
                     .prepare_to_prefab_with_asset_database(document, registry, database)
                     .map(crate::patch::PreparedPrefabPatch::into_parts)
@@ -1076,7 +1165,7 @@ impl PrefabAuthoringSession {
         self.history.apply_history(
             &mut self.document,
             HistoryDirection::Redo,
-            |patch, document| {
+            |patch, document, _scope| {
                 patch
                     .prepare_to_prefab(document, registry)
                     .map(crate::patch::PreparedPrefabPatch::into_parts)
@@ -1106,7 +1195,7 @@ impl PrefabAuthoringSession {
         self.history.apply_history(
             &mut self.document,
             HistoryDirection::Redo,
-            |patch, document| {
+            |patch, document, _scope| {
                 patch
                     .prepare_to_prefab_with_asset_database(document, registry, database)
                     .map(crate::patch::PreparedPrefabPatch::into_parts)
@@ -1123,17 +1212,26 @@ impl PrefabAuthoringSession {
         let mut next_state = None;
         let report =
             self.history
-                .apply_history(&mut self.document, direction, |patch, document| {
-                    let prepared = crate::authoring_decode::prepare_prefab_authoring_patch(
-                        document, state, patch, true,
-                    )?;
+                .apply_history(&mut self.document, direction, |patch, document, scope| {
+                    let prepared = match scope {
+                        AuthoringHistoryScope::Ordinary => {
+                            crate::authoring_decode::prepare_prefab_authoring_patch(
+                                document, state, patch, true,
+                            )
+                        }
+                        AuthoringHistoryScope::PrefabConversion(footprint) => {
+                            crate::authoring_decode::prepare_prefab_conversion_patch(
+                                document, state, patch, footprint,
+                            )
+                        }
+                    }?;
                     next_state = Some(prepared.state);
                     Ok((prepared.document, prepared.report))
                 });
         if report.applied {
-            self.authority = AuthoringSessionAuthority::Published(
+            self.authority = AuthoringSessionAuthority::Published(Arc::new(
                 next_state.expect("accepted authoring history publishes classification state"),
-            );
+            ));
         }
         report
     }
@@ -1229,7 +1327,7 @@ impl SceneAuthoringSession {
             live_instance: None,
             live_dirty: true,
             source_upgrade_required: false,
-            authority: AuthoringSessionAuthority::Published(state),
+            authority: AuthoringSessionAuthority::Published(Arc::new(state)),
         }
     }
 
@@ -1779,7 +1877,7 @@ impl SceneAuthoringSession {
     ) -> ScenePatchReport {
         let report =
             self.history
-                .apply_history(&mut self.document, direction, |patch, document| {
+                .apply_history(&mut self.document, direction, |patch, document, _scope| {
                     apply(patch, document).map(PreparedScenePatch::into_parts)
                 });
         if report.applied {
@@ -1797,17 +1895,26 @@ impl SceneAuthoringSession {
         let mut next_state = None;
         let report =
             self.history
-                .apply_history(&mut self.document, direction, |patch, document| {
-                    let prepared = crate::authoring_decode::prepare_scene_authoring_patch(
-                        document, state, patch, true,
-                    )?;
+                .apply_history(&mut self.document, direction, |patch, document, scope| {
+                    let prepared = match scope {
+                        AuthoringHistoryScope::Ordinary => {
+                            crate::authoring_decode::prepare_scene_authoring_patch(
+                                document, state, patch, true,
+                            )
+                        }
+                        AuthoringHistoryScope::PrefabConversion(footprint) => {
+                            crate::authoring_decode::prepare_scene_prefab_conversion_patch(
+                                document, state, patch, footprint,
+                            )
+                        }
+                    }?;
                     next_state = Some(prepared.state);
                     Ok((prepared.document, prepared.report))
                 });
         if report.applied {
-            self.authority = AuthoringSessionAuthority::Published(
+            self.authority = AuthoringSessionAuthority::Published(Arc::new(
                 next_state.expect("accepted authoring history publishes classification state"),
-            );
+            ));
             self.live_dirty = true;
         }
         report

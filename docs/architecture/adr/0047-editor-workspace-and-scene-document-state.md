@@ -109,6 +109,16 @@ Rules:
   Bound scanning and copied declarations before allocation. Declaration review focus is local
   tool state, not a second selected-entity owner. A prepared source repair may commit while
   composition remains rejected; source, composition, native preview and Save outcomes are separate.
+- Reviewed Prefab conversion retains its original nominal source candidate and actual dependency
+  evidence through submission. Root incarnation/revision/Schema, accepted source receipt and the
+  selected file or working-copy lineage for each demanded dependency must remain current.
+  Source-owner semantic snapshot checks do not substitute for Host file/metadata observations.
+  Stable lookups also need current resolution/ambiguity evidence, including changes introduced
+  by newly appearing metadata. Unrelated open-document edits do not acquire participation merely
+  because they share the project. A dedicated bounded Host operation ticket may transport this
+  custody without exposing an extractable ordinary prepared edit or another document store.
+  Pending validation and final publication are distinct outcomes; dispatch acknowledgement
+  cannot claim commit. Undo/Redo remains source-local replay after the first accepted conversion.
 - Retained construction uses that same source owner. Workspace routes an explicit document plus
   the draft's exact basis, and carries a nominal prepared construction with its fixed local mapping.
   No navigation change or generated-entity selection is implicit. Success returns the actual

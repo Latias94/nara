@@ -97,6 +97,13 @@ dependency acquisition and revalidation. The Editor renders an observation and s
 reviewed move-only candidate. A panel, Workspace ordinal or preview generation supplies neither
 source identity nor independent mutation authority.
 
+The source-owner implementation uses nominal Scene and Prefab owned requests. They capture the
+original revision with shared immutable document/classification state and prepare on an existing
+background task. Static source preparation serves both these requests and ordinary synchronous
+editing; no temporary session, synthetic source incarnation or second history is involved.
+Prepared conversion tokens keep the semantic dependency fence and expose no ordinary-edit
+extraction. Host custody additionally carries the physical observations described below.
+
 Extend shared acquisition with concrete Scene and Prefab source inputs where required by this
 workflow. Preserve their nominal ownership and file admission. This is not a reason to add an
 erased document store, a universal source-provider interface or a Runtime for every open document.
@@ -172,6 +179,31 @@ Forward conversion commit requires its exact root incarnation/revision, exact Sc
 working-copy lineages and actual file/metadata receipts. Changed selected dependencies reject the
 reviewed candidate and require new preparation. Changes to unrelated open documents must not
 revoke it. File-backed Play/Check/Export retain their existing source policy.
+
+The Host must retain this contextual evidence with the original source candidate through review
+and submission. A dedicated operation ticket can refer to one bounded Host custody slot; the
+ordinary source prepared edit cannot be extracted and submitted without its fence. Workspace
+still routes the nominal Scene/Prefab candidate into the existing source/history owner. This
+custody is one operation, not another document store or a second Undo stack.
+
+Keep conversion acquisition independent of native preview selection and `presentation-2d`.
+Reuse the concrete actual-demand acquisition inside the Authoring Host, accepting real Scene
+and Prefab root inputs. Do not expose the internal semantic fragment as a cross-crate mutation
+proof or publish the conversion through the filtered preview.
+
+Stable lookup requires resolution evidence as well as the selected file's identity/digest.
+The current `ReferenceCatalogue` indexes both source directories for a stable request and its
+lookup facts include all indexed metadata. Existing-file receipts alone cannot prove that a new
+metadata entry has not made the lookup ambiguous. Retain the actual used request and admitted
+canonical target, then re-resolve those requests under the owning catalogue's bounded admission
+at commit. Preserve metadata/absence/ambiguity obligations; neither dropping unused receipts
+without a replacement nor validating a stale captured index establishes current resolution.
+Separate this catalogue correction from source-local ID translation and record its actual scope.
+
+Review-time file revalidation cannot be replaced by the preview's periodic validation. If the
+final operation validates synchronously, measure its bounded owner occupancy. If it validates in
+the background, report a real pending operation and deliver a separately correlated terminal
+result only after commit. Do not report initial dispatch acknowledgement as publication.
 
 Undo/Redo replays the accepted exact source transformation through that history owner; it must not
 recompile a newer base or generate new IDs. Undo may restore a declaration whose current projection

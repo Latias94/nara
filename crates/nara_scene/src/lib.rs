@@ -35,9 +35,11 @@ mod tests;
 pub use authoring::{
     AuthoringConstructionDraft, AuthoringPropertyEdit, AuthoringSessionReplacementError,
     CommittedAuthoringConstruction, ConstructionEntity, ConstructionEntityMap,
-    ConstructionPlacement, LocalConstructionEntity, PrefabDeclarationError,
+    ConstructionPlacement, LocalConstructionEntity, LocalizedPrefabEntity, PrefabConversionError,
+    PrefabConversionReceipt, PrefabConversionRequest, PrefabDeclarationError,
     PrefabDeclarationLimits, PrefabInstanceObservation, PreparedPrefabAuthoringConstruction,
-    PreparedPrefabAuthoringEdit, PreparedSceneAuthoringConstruction, PreparedSceneAuthoringEdit,
+    PreparedPrefabAuthoringEdit, PreparedPrefabConversion, PreparedSceneAuthoringConstruction,
+    PreparedSceneAuthoringEdit, PreparedScenePrefabConversion, ScenePrefabConversionRequest,
 };
 pub use authoring::{
     AuthoringSessionAuthorityError, CreatedSourceEntity, PrefabAuthoringSession,

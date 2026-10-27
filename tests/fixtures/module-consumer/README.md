@@ -34,6 +34,12 @@ entity creation through the public, window-free Editor Host. Scene and Prefab ca
 unknown/future records, replay one history entry, save exact source bytes and reopen the stored
 generated identity. It does not predict generated ID spelling or qualify transaction-local drafts.
 
+`tests/prefab_conversion.rs` consumes complete selected-instance conversion through direct Scene
+and renamed root Prefab APIs. It moves an immutable request to a background thread, reviews the
+typed identity mapping, commits the same dependency-fenced candidate, replays one Undo/Redo and
+reopens stored data. Its loader refuses reads of the unrelated missing instance. This is source
+API evidence; Host file/lookup custody and the native Editor command have separate qualification.
+
 `editor-panel-consumer/` independently compiles a trusted selection-summary panel.
 It installs a semantic descriptor and a Dear ImGui painter through the same paths as built-ins,
 reads selection and emits existing navigation actions without mutable document or GPU access.

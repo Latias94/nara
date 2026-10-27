@@ -50,6 +50,9 @@ where
                 .locators
                 .get(&entity.id)
                 .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?;
+            if !self.selects_values(node) {
+                continue;
+            }
             if !entity.components.is_empty() {
                 return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
             }

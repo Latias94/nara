@@ -119,8 +119,8 @@ pub mod __private {
         AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
     };
     pub use crate::entity_reference::{
-        DeclaredEntityReferencePlan, plan_declared_entity_references,
-        plan_declared_value_entity_references,
+        DeclaredEntityReferencePlan, EntityReferencePlanError, plan_declared_entity_references,
+        plan_declared_entity_references_with_admission, plan_declared_value_entity_references,
     };
     pub use crate::persistent_apply::{
         PreparedComponentApplyBatch, UnboundComponentApplyBatch, declare_persistent_apply_targets,

@@ -124,6 +124,26 @@ Rules:
   Hosts may admit that immutable source-owned repair candidate for a UI Prefab without admitting
   arbitrary raw structural patches. The dedicated preparation origin is not caller-set metadata,
   and commit still checks the source owner, revision and Schema admission.
+- Complete instance conversion is a dedicated source-owned preparation, not an arbitrary populated
+  record patch. It compiles the actual selected instance, allocates persistent local IDs and lowers
+  one exact declaration/record transaction. Its closed replay footprint remains with the same
+  history entry and limits insertion/removal to that conversion's records and placements.
+  A copied patch or inverse cannot acquire that footprint. The ordinary creation-template and
+  whole-record editing restrictions remain in force.
+  Copying an interpreted Scene-capable record does not require an editable creation template or
+  field Edit capability; actual data Adapter, current version, Schema owner and complete final
+  source validation still apply. An unclaimed interpreted record receives the exact admitted
+  Schema-owner claim when it becomes a new local record.
+  Preparation retains fixed mapping and source dependencies with the move-only candidate.
+  An owned background request shares the original immutable document and classification snapshot
+  under that source revision. It does not reopen or re-admit a temporary session, allocate a
+  replacement source incarnation, or perform a separate dry run before preparing the candidate.
+  Commit checks the exact root revision/Schema and revalidates actual lookup/source inputs.
+  Host file/metadata and working-copy evidence remain additional requirements under ADR 0047.
+  No ordinary prepared-token extraction may erase that context.
+  Undo/Redo replays the accepted records and IDs without loading a newer base or allocating IDs.
+  Both directions, retained footprint and pre-copy path/placement work have their owning budgets;
+  older history-entry eviction retains the existing capacity policy.
 
 ```mermaid
 flowchart TD

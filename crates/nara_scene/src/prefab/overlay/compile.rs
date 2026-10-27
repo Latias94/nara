@@ -29,6 +29,10 @@ mod component_program_tests;
 
 mod staged;
 
+#[cfg(all(test, feature = "serde"))]
+#[path = "compile/selected_tests.rs"]
+mod selected_tests;
+
 pub(crate) fn expand_document<F, E>(
     context: &mut PrefabExpansionContext<'_, F, E>,
     document: &SceneDocument,
@@ -40,6 +44,29 @@ where
     ) -> Result<Option<ResolvedPrefabSource>, E>,
 {
     staged::expand(context, document)
+}
+
+#[cfg(feature = "serde")]
+pub(crate) fn expand_selected_instance<F, E>(
+    context: &mut PrefabExpansionContext<'_, F, E>,
+    source: crate::prefab::SelectedInstanceSource<'_>,
+    anchor: &SceneEntityId,
+) -> Result<SceneDocument, PrefabExpansionFailure>
+where
+    F: FnMut(
+        &nara_asset::AssetRef,
+        &mut crate::prefab::PrefabExpansionWorkingSet,
+    ) -> Result<Option<ResolvedPrefabSource>, E>,
+{
+    let (roots, entities) = match source {
+        crate::prefab::SelectedInstanceSource::Scene(document) => {
+            (document.roots.as_slice(), document.entities.as_slice())
+        }
+        crate::prefab::SelectedInstanceSource::Prefab(document) => {
+            (document.roots.as_slice(), document.entities.as_slice())
+        }
+    };
+    staged::expand_selected(context, staged::SourceTopology { roots, entities }, anchor)
 }
 
 impl<'a, F, E> PrefabExpansionContext<'a, F, E>

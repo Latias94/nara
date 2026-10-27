@@ -2286,6 +2286,37 @@ pub(crate) fn prepare_scene_authoring_patch(
     })
 }
 
+pub(crate) fn prepare_scene_prefab_conversion_patch(
+    document: &SceneDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    footprint: &crate::authoring::prefab_conversion::PrefabConversionFootprint,
+) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
+    structure::prepare_conversion_structure(document, state, patch, footprint)
+}
+
+pub(crate) fn prepare_prefab_conversion_patch(
+    document: &PrefabDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    footprint: &crate::authoring::prefab_conversion::PrefabConversionFootprint,
+) -> Result<PreparedPrefabAuthoringPatch, ScenePatchReport> {
+    let prepared =
+        structure::prepare_conversion_structure(&document.instantiate(), state, patch, footprint)?;
+    let document = PrefabDocument::new(prepared.document.roots, prepared.document.entities);
+    if crate::format::validate_prefab_publication_shape(&document, state.limits).is_err() {
+        return Err(authoring_structure_rejection(
+            "Conversion exceeds the persistent Prefab format boundary",
+        ));
+    }
+    Ok(PreparedPrefabAuthoringPatch {
+        document,
+        state: prepared.state,
+        patch: prepared.patch,
+        report: prepared.report,
+    })
+}
+
 pub(crate) fn prepare_prefab_authoring_patch(
     document: &PrefabDocument,
     state: &AuthoringDocumentState,

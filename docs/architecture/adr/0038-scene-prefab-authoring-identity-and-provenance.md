@@ -105,6 +105,23 @@ Scene/prefab authoring identity is document-relative and provenance-aware.
   explicit empty overlay and its base pin. Explicit overlay removal sets `overrides` to `None`
   while retaining the source link. Reverting an instance claim restores inheritance; writing
   `None` into that claim remains explicit detachment. None of these operations is conversion.
+- Complete conversion initially targets one directly owned instance anchor. It localizes every
+  surviving projected record whose complete typed ancestry belongs to that anchor, including
+  nested sources and overlay additions. The anchor keeps its local ID, raw components and
+  placement. Ordinary local children and their independent instance links remain outside the
+  selected projection. Converted roots precede those ordinary children in their existing order.
+- New local IDs come from the source owner's allocation policy, never expanded locator spelling
+  or a terminal inherited ID. A read-only remap retains each original typed provenance beside its
+  new ID. Declared local references translate through that complete mapping; actual untouched
+  local targets retain their IDs and Persistent references retain their namespace/UUID meaning.
+  Selected effective defaults become explicit in the converted data. Unavailable surviving
+  projected data refuses conversion; raw records retained unchanged require no interpretation.
+- Conversion preparation compiles from the actual owning session and retains every demanded
+  lookup/source observation, including structural dependencies without surviving entities.
+  Revalidation requires their current canonical bindings, admitted Schema basis and semantic
+  source snapshots. These observations are not filesystem evidence; the Host additionally owns
+  current file/metadata receipts and working-copy selection. A retained preview or an externally
+  assembled fragment cannot authorize source conversion.
 
 ```mermaid
 flowchart TD

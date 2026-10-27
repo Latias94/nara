@@ -148,6 +148,14 @@ as well as the other protected records. Unresolved Schema classification and an 
 or base conflict are different observations. A source declaration may be inspected or deliberately
 removed without an inherited entity selection, native binding or successful composition.
 
+Complete conversion requires interpretation only of surviving projected data that becomes local.
+An unavailable projected survivor rejects the whole conversion; native-binding absence alone does
+not. Unknown direct records on the retained anchor, ordinary local children and other sources
+remain exact raw data and do not alone block the operation. Dedicated source preparation and its
+closed history footprint preserve that scope on both directions. No conversion label grants
+ordinary raw-record replacement or deletion authority. Current interpreted unclaimed records gain
+the actual admitted Schema-owner claim only on their newly localized copies.
+
 Unavailable component-targeting field writes retain their complete replacement payload, including
 canonical asset-reference values. Preserving only the target/field identity does not preserve the
 operation. Payload-free removal and an explicit Null replacement remain different declarations.

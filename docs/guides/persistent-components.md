@@ -389,6 +389,61 @@ through the matching Scene/Prefab candidate method and check `preserves_scene` /
 before publication. This validates preservation; it grants no permission to replace a Workspace
 document or mark it saved. Those operations still require the original owner and persistence receipt.
 
+## Complete Prefab Conversion
+
+With `nara_scene/serde`, an admitted Scene or Prefab session can prepare complete conversion of
+one directly owned instance anchor. The source owner allocates fresh local IDs, materializes the
+selected effective values, rewrites declared local references and removes all Prefab links in
+that selected projection. It preserves the anchor's own records, ordinary source children and
+unrelated instances. Selected unavailable data or unresolved references refuse atomically.
+Copying current semantic data requires its admitted Scene adapter and matching Schema owner;
+it does not require a creation template, Edit capability or native component codec.
+
+```rust,ignore
+let request = session.request_complete_prefab_conversion(
+    session.revision(),
+    &anchor,
+    PrefabExpansionOptions::default(),
+)?;
+// The owned request can move to an existing background task.
+let prepared = request.prepare_with_loader(None, |reference, working| {
+    load_current_authoring_prefab(reference, working)
+})?;
+review(prepared.document(), prepared.entities());
+let receipt = session.commit_complete_prefab_conversion_with_loader(
+    prepared,
+    |reference| reload_current_authoring_prefab(reference),
+)?;
+assert!(receipt.report().applied);
+```
+
+Scene requests produce `PreparedScenePrefabConversion`; Prefab requests produce
+`PreparedPrefabConversion`. Each move-only token keeps its exact candidate, typed
+`LocalizedPrefabEntity` mapping and all actually demanded semantic source snapshots through
+review. `effective_asset_references()` observes typed references, including materialized
+defaults, for the selected result. It does not load resources. Dropping a request or candidate
+publishes no source mutation or history entry.
+
+Commit requires the original source incarnation/revision and exact Schema admission. Its loader
+must resolve every original request currently: a changed canonical key, body, authority or missing
+dependency rejects the entire candidate. `PrefabConversionError::Loader` preserves the provider's
+concrete error. Dependencies needed only for selected structural meaning remain part of this
+check even when no entity from them survives. Unrelated broken instances are not loaded.
+
+A filesystem or Editor Host additionally owns current file/metadata receipts, stable-lookup
+ambiguity and file-versus-working-copy selection. Semantic snapshot checks alone do not prove
+those physical facts. The Host must retain that evidence with the same reviewed token and
+revalidate it before publication. Native preview selection supplies no conversion authority.
+
+An accepted conversion occupies one entry in the existing source history. Undo/Redo replays
+the exact admitted records and declaration without loading a newer Prefab or generating new
+IDs. Encode and persist through the existing nominal Scene/Prefab Save workflow; Reopen starts
+a new source incarnation and invalidates earlier conversion tokens.
+
+The independent consumer is
+`tests/fixtures/module-consumer/tests/prefab_conversion.rs`. It exercises direct Scene and renamed
+root Prefab exports, background preparation, reference remapping, exact replay and disk Reopen.
+
 ## Stable Nested Properties
 
 Manual semantic Schemas can opt into nested identity without reflecting a Rust type. Use

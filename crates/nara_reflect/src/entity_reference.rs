@@ -214,6 +214,63 @@ pub fn plan_declared_entity_references<E>(
     Ok(DeclaredEntityReferencePlan { references })
 }
 
+/// Keeps the caller's work refusal separate from reference interpretation errors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EntityReferencePlanError<R, E> {
+    Reference(ComponentEntityReferenceRewriteError<R>),
+    Admission(E),
+}
+
+impl<R, E> From<ReferenceTraversalError<R, E>> for EntityReferencePlanError<R, E> {
+    fn from(error: ReferenceTraversalError<R, E>) -> Self {
+        match error {
+            ReferenceTraversalError::Reference(error) => Self::Reference(error),
+            ReferenceTraversalError::Admission(error) => Self::Admission(error),
+        }
+    }
+}
+
+/// Plans references in a borrowed normalized value under an already admitted current Schema.
+///
+/// The caller owns Schema admission and default materialization. This entry reuses the complete
+/// reference walker without revalidating Schema declarations or cloning the value tree. The
+/// callback receives work deltas: visited nodes, logical bytes and modeled allocation bytes.
+/// Scratch growth, paths, declared sets, output Vec capacity and field ID copies are admitted
+/// before allocation, with no refunds for discarded scratch. Leaf paths move into the plan.
+///
+/// A denied callback returns its exact error without allocating an error path. Neither an empty
+/// plan nor a value without EntityRef leaves bypasses structural scanning and its work admission.
+pub fn plan_declared_entity_references_with_admission<R, E>(
+    schema: &ComponentSchema,
+    value: &ComponentValue,
+    limits: EntityReferenceTraversalLimits,
+    mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<DeclaredEntityReferencePlan, EntityReferencePlanError<R, E>> {
+    let leaves = collect_present_reference_leaves_with_admission::<R, E>(
+        schema,
+        value,
+        limits,
+        ComponentValueKind::EntityRef,
+        true,
+        &mut admit,
+    )?;
+    let mut admission = ReferenceAdmission {
+        callback: &mut admit,
+        maximum_bytes: limits.bytes().get(),
+    };
+    let mut references = Vec::new();
+    admission.reserve(&mut references, leaves.len())?;
+    for leaf in leaves {
+        admission.allocation(Some(leaf.field.id().as_str().len()))?;
+        references.push(PlannedEntityReference {
+            field_id: leaf.field.id().clone(),
+            path: leaf.path,
+            required: leaf.required,
+        });
+    }
+    Ok(DeclaredEntityReferencePlan { references })
+}
+
 /// Plans references relative to one complete replacement payload for a resolved value shape.
 ///
 /// The caller supplies the admitted owning root field and its selected shape (for example from
