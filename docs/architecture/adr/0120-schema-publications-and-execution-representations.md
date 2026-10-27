@@ -66,7 +66,9 @@ adds a complete C# Editor-tool evaluation to the private gameplay evidence. Neit
 changes this ADR's status or makes metadata admission proof of an executable binding.
 Backend-free owner admission and explicit native/data source compilation now have scoped
 production evidence in the [implementation ledger](implementation-status.md); complete runtime
-materialization, managed ownership and replacement remain open.
+materialization and managed data ownership now have their narrow closed-family contract in
+ADR 0006. The broader publication/migration/cohort and executable-language replacement proposed
+here remain open; adopting pure data storage does not accept those execution mechanisms.
 
 ### Publication Scope
 

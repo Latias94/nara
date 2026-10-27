@@ -90,6 +90,40 @@ Scene spawning still preflights all declared data and the target-World eligibili
 before mutation. It does not claim that despawning new entities can roll back arbitrary hook effects
 on resources, foreign entities, native services, or deferred queues.
 
+### Explicit Native And Data Representations
+
+The native registry retains its exact Rust-type binding contract. A separately admitted
+`SceneComponentBindings` selection may combine that frozen native snapshot with disjoint
+owner-local data Schema snapshots. Missing native bindings never implicitly choose data storage.
+Data records require an explicit durable owner claim and current admitted Schema version.
+
+The shared compiler and preflight validate both families through the same Schema, defaults and
+declared-reference rules. One aggregate retained logical value allowance applies across entities
+and both families before engine-owned copies/default materialization. Trusted codec and migration
+internals keep their ordinary allocation and failure semantics.
+
+Complete data groups are staged with native prepared values and installed through the existing
+exclusive, lifecycle-free Scene publication tail. A carrier contains only current records and
+their owner-local data snapshots, with exact World/entity-incarnation custody; it does not retain
+native codecs, language runtimes or callbacks. Managed preparation, mutation and export require
+the exact selection installed through App composition. Ordinary and advanced managed replacement
+require the exact native definition too; explicitly selected independent preview projections
+retain ADRs 0081/0098's separate definition contract.
+
+Current-live export checks actual persistent membership for coverage before encoding. Selecting a
+smaller native catalog or omitting encountered data members rejects the complete export rather
+than producing a successful partial snapshot. A physically absent native member remains absent;
+arbitrary runtime-only ECS components do not become persistent. Export of flattened live instances
+is distinct from source Save. Data asset policy lowering uses admitted project metadata without
+native handles or asset loading.
+
+Guarded member enumeration, read, complete-value replacement and removal preserve sibling
+members and validate exact owner, current payload, references and runtime target before a write.
+Pure data retires through ordinary strict entity retirement with no carrier hook exemption.
+Materialization does not establish language/module execution readiness. Executable publications,
+owner migrations, dependency cohorts and physical code retirement remain separate proposed work
+under ADR 0120. Implementation status and actual verification belong in the implementation ledger.
+
 ## Data Shape
 
 Conceptually:

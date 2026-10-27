@@ -120,6 +120,7 @@ pub mod __private {
     pub use crate::asset_reference::{
         AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
     };
+    pub use crate::effective::effective_component_value_with_budget;
     pub use crate::entity_reference::{
         DeclaredEntityReferencePlan, EntityReferencePlanError, plan_declared_entity_references,
         plan_declared_entity_references_with_admission, plan_declared_value_entity_references,
@@ -127,7 +128,8 @@ pub mod __private {
     pub use crate::persistent_apply::{
         PreparedComponentApplyBatch, UnboundComponentApplyBatch, declare_persistent_apply_targets,
         validate_declared_persistent_apply_targets, validate_fresh_persistent_component_apply,
-        validate_persistent_apply_support_topology, validate_registered_persistent_apply_targets,
+        validate_persistent_apply_support_topology, validate_persistent_export_coverage,
+        validate_registered_persistent_apply_targets,
     };
     pub use crate::provider::{ComponentSchemaOwnerRecord, ResolvedComponentSchemaProvider};
     pub use crate::registry::{ComponentRegistrySnapshotWitness, validate_schema_capabilities};
@@ -161,6 +163,17 @@ pub mod __private {
         snapshot: &ComponentRegistrySnapshot,
     ) -> bool {
         witness.matches(snapshot)
+    }
+
+    pub fn component_snapshot_matches_runtime_type(
+        snapshot: &ComponentRegistrySnapshot,
+        world: &nara_ecs::World,
+        component: &crate::ComponentTypeId,
+        runtime: nara_ecs::bevy_ecs::component::ComponentId,
+    ) -> bool {
+        crate::registry::component_snapshot_matches_runtime_type(
+            snapshot, world, component, runtime,
+        )
     }
 }
 

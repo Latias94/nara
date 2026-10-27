@@ -381,12 +381,13 @@ The earlier persistent UI-root collision has a
 under ADRs 0038/0102; it is not an outstanding reproduction or an overlay implementation. Never
 substitute runtime instance, preview epoch or process-local Workspace IDs for that identity.
 
-The next R5b unit follows the [declarative Prefab overlay design](../architecture/prefab-overlay-design.md):
-first compare real root-patch lowering with preserved leaf intent privately, then settle nested
-targets, local additions, structural placement, keyed identity changes and value-reference
-bindings before freezing the complete replacement. Separate durable intent from exact editor
-operation/inverse patches and retain unresolved migration/rebase conflicts. Reconcile owning ADRs
-before the production format switch; a scalar comparison does not complete that replacement.
+The [declarative Prefab overlay design](../architecture/prefab-overlay-design.md) has progressed
+through its private comparison into the production replacement under ADRs 0038/0043. Durable
+leaf/component/instance intent, local additions, desired placement and typed reference bindings
+are distinct from exact Editor operation/inverse patches. The implementation ledger and linked
+verification own the completed scope; do not repeat the comparison as the next work item.
+Remaining R5 work includes its Behavior/schema-evolution consumer and the broader source/runtime
+lifetime outcomes below. Complete conversion has its separately qualified successor.
 Qualify ordinary incremental projection versus epoch reconstruction only when an actual measured
 projection workflow requires it, not by adding a generic incremental graph.
 
@@ -401,7 +402,8 @@ without the required evidence or use an explicit distinct epoch/timeline contrac
 resurrect it. No high-watermark claim for arbitrary history. This resolves earlier F5 as a lifecycle
 redesign, not by clearing tombstones or changing Scene data into World truth.
 
-Delete operation-patch-as-long-term-overlay and accidental source/runtime identity conflations.
+Keep the removed operation-patch-as-long-term-overlay path removed. Address any remaining
+source/runtime identity conflation in its actual consumer rather than reintroducing that reader.
 
 The [complete-conversion plan](2026-10-27-prefab-conversion-plan.md) now has a
 [qualified Source/Editor successor](../knowledge/engineering/verification/2026-10/2026-10-27T064545Z-complete-editor-prefab-conversion-and-source-admission-qualification-bc6d938e4ea5421fa42d0028230a11dc.md):
@@ -563,6 +565,14 @@ justify deleting the working frontend or claim its native capability has transfe
 For the selected completed units, run independent direct/renamed/public consumers and relevant
 root/Editor/native paths serially. Verify unknown data, exact operation results, content/identity
 retention, close and old-generation rejection together. Review adapters, not only owner unit tests.
+
+The [Scene/runtime extension review](../audits/2026-10-27-scene-runtime-and-extension-plan-review.md)
+adds bounded consumer-driven cleanup: verify whether the Schema-first registry still needs its
+embedded Bevy TypeRegistry; exercise observer/Event authoring through renamed dependencies before
+expanding facade-aware derives; and make unbound preparation, staged replacement custody, asset
+reservations and current-live export naming match their actual workflows. Remove unused storage
+or entry points only after tracing real consumers. These follow-ups do not block the current
+closed Scene data-family implementation or require a generic extension framework.
 
 Consolidate affected 0117 amendments into owning ADRs; narrow or replace obsolete proposals and
 remove duplicate current rules. Update guides, catalogue, ledger and immutable evidence. Keep

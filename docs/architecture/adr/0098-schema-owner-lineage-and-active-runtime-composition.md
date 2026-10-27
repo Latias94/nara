@@ -231,8 +231,11 @@ managed Host.
 
 ### Readiness Boundary
 
-This native composition slice does not admit placeholder ECS components or optional Runtime
-bindings. Accepted ADR 0090 separately governs bounded unavailable-schema preservation, save
+This native composition slice does not admit placeholder ECS components or optional native Runtime
+bindings. ADR 0006 separately admits an explicit disjoint pure-data representation with its own
+complete Schema/storage and managed-selection proof. A data carrier is not a placeholder native
+binding or evidence that a required language module is executable. Accepted ADR 0090 separately
+governs bounded unavailable-schema preservation, save
 and inspection. Package management remains an open product question, not a capability inferred
 from owner lineage.
 
@@ -243,8 +246,10 @@ operation-specific authoring rules determine which preservation/edit operations 
 Compiled provider definitions are the implemented native registration mechanism, not the
 permanent carrier for every future data/module Schema owner. Proposed
 [ADR 0120](0120-schema-publications-and-execution-representations.md) explores owner publications
-with their own execution proof. Until adopted, native snapshot pointer identity and frozen
-complete bindings remain required; content equality alone never grants managed Host authority.
+with their own execution proof. Native snapshot pointer identity and frozen complete bindings
+remain required for native members; content equality alone never grants managed Host authority.
+The adopted closed data-family subset keeps exact owner-local snapshots and does not adopt the
+broader executable publication/replacement mechanisms proposed there.
 
 ## Alternatives Considered
 

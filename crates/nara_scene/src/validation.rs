@@ -1,6 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+};
 
-use nara_core::{ByteLimit, ItemLimit};
+use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::__private::plan_declared_entity_references;
 use nara_reflect::{
@@ -9,12 +12,12 @@ use nara_reflect::{
     ComponentRegistry, ComponentSchema, ComponentTypeId, ComponentValue,
     ComponentValueMaterializationLimits, DeclaredAssetReference, EntityReference,
     EntityReferenceTraversalLimits, PreparedComponent,
-    collect_declared_asset_references_from_schema_with_limits, effective_component_value,
-    validate_component_value,
+    collect_declared_asset_references_from_schema_with_limits,
+    validate_component_value_with_limits,
 };
 
 use crate::{
-    SceneDocument, SceneEntityId, SceneEntityRecord,
+    SceneComponentBindings, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
     diagnostics::{
         error as diagnostic_error, push_with_operation_index, with_asset_ref, with_codec_error,
         with_entity_reference_rewrite_error, with_migration_error, with_public_locator,
@@ -32,11 +35,18 @@ pub(crate) struct PreparedSceneEntity {
     pub(crate) id: SceneEntityId,
     pub(crate) children: Vec<SceneEntityId>,
     pub(crate) components: Vec<PreparedSceneComponent>,
+    pub(crate) data_components: Vec<PreparedSceneDataComponent>,
 }
 
 pub(crate) struct PreparedSceneComponent {
     pub(crate) id: ComponentTypeId,
     pub(crate) prepared: PreparedComponent,
+}
+
+pub(crate) struct PreparedSceneDataComponent {
+    pub(crate) id: ComponentTypeId,
+    pub(crate) owner: nara_reflect::ComponentSchemaOwnerSnapshot,
+    pub(crate) record: SceneComponentRecord,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +70,13 @@ enum PlacementOwner {
 enum SceneValidationMode {
     Native,
     Shape,
+}
+
+struct ScenePreflightOptions {
+    allow_prefab_instances: bool,
+    operation_index: Option<usize>,
+    mode: SceneValidationMode,
+    validate_local_references: bool,
 }
 
 pub(crate) struct EffectiveSceneValidation {
@@ -275,11 +292,14 @@ pub(crate) fn preflight_authoring_scene_for_patch(
     preflight_scene_with_context_options(
         document,
         registry,
+        None,
         &mut context,
-        true,
-        Some(operation_index),
-        SceneValidationMode::Native,
-        true,
+        ScenePreflightOptions {
+            allow_prefab_instances: true,
+            operation_index: Some(operation_index),
+            mode: SceneValidationMode::Native,
+            validate_local_references: true,
+        },
     )
 }
 
@@ -293,11 +313,14 @@ pub(crate) fn validate_patch_intermediate_scene_with_limits(
     preflight_scene_with_context_options(
         document,
         registry,
+        None,
         &mut context,
-        true,
-        Some(operation_index),
-        SceneValidationMode::Shape,
-        false,
+        ScenePreflightOptions {
+            allow_prefab_instances: true,
+            operation_index: Some(operation_index),
+            mode: SceneValidationMode::Shape,
+            validate_local_references: false,
+        },
     )
     .diagnostics
 }
@@ -310,11 +333,35 @@ pub(crate) fn preflight_scene_with_context(
     preflight_scene_with_context_options(
         document,
         registry,
-        context,
-        false,
         None,
-        SceneValidationMode::Native,
-        true,
+        context,
+        ScenePreflightOptions {
+            allow_prefab_instances: false,
+            operation_index: None,
+            mode: SceneValidationMode::Native,
+            validate_local_references: true,
+        },
+    )
+}
+
+/// Preflights both representations through the same admission and reference-validation path.
+pub(crate) fn preflight_scene_with_context_and_bindings(
+    document: &SceneDocument,
+    registry: &ComponentRegistry,
+    bindings: &SceneComponentBindings,
+    context: &mut ComponentDecodeContext<'_>,
+) -> PreparedScene {
+    preflight_scene_with_context_options(
+        document,
+        registry,
+        Some(bindings),
+        context,
+        ScenePreflightOptions {
+            allow_prefab_instances: false,
+            operation_index: None,
+            mode: SceneValidationMode::Native,
+            validate_local_references: true,
+        },
     )
 }
 
@@ -335,11 +382,14 @@ pub(crate) fn preflight_authoring_scene_with_context_at_operation(
     preflight_scene_with_context_options(
         document,
         registry,
+        None,
         context,
-        true,
-        operation_index,
-        SceneValidationMode::Native,
-        true,
+        ScenePreflightOptions {
+            allow_prefab_instances: true,
+            operation_index,
+            mode: SceneValidationMode::Native,
+            validate_local_references: true,
+        },
     )
 }
 
@@ -352,11 +402,14 @@ pub(crate) fn preflight_authoring_scene_with_context_for_patch(
     preflight_scene_with_context_options(
         document,
         registry,
+        None,
         context,
-        true,
-        Some(operation_index),
-        SceneValidationMode::Native,
-        true,
+        ScenePreflightOptions {
+            allow_prefab_instances: true,
+            operation_index: Some(operation_index),
+            mode: SceneValidationMode::Native,
+            validate_local_references: true,
+        },
     )
 }
 
@@ -415,12 +468,17 @@ fn validate_scene_structure_with_operation(
 fn preflight_scene_with_context_options(
     document: &SceneDocument,
     registry: &ComponentRegistry,
+    bindings: Option<&SceneComponentBindings>,
     context: &mut ComponentDecodeContext<'_>,
-    allow_prefab_instances: bool,
-    operation_index: Option<usize>,
-    mode: SceneValidationMode,
-    validate_local_references: bool,
+    options: ScenePreflightOptions,
 ) -> PreparedScene {
+    let ScenePreflightOptions {
+        allow_prefab_instances,
+        operation_index,
+        mode,
+        validate_local_references,
+    } = options;
+    let authority = bindings.map_or(SchemaAuthority::Native(registry), SchemaAuthority::Mixed);
     let (placement, mut diagnostics) =
         validate_scene_structure_with_operation(document, operation_index);
     let execution = match registry.snapshot() {
@@ -437,6 +495,17 @@ fn preflight_scene_with_context_options(
             };
         }
     };
+    if bindings.is_some_and(|bindings| !execution.ptr_eq(bindings.native_snapshot())) {
+        diagnostics.push(diagnostic_error(
+            "scene.component-bindings-mismatch",
+            "Scene bindings do not select the supplied native component registry",
+        ));
+        return PreparedScene {
+            roots: Vec::new(),
+            entities: Vec::new(),
+            diagnostics,
+        };
+    }
 
     for entity in &document.entities {
         if let Some(prefab) = &entity.prefab
@@ -489,11 +558,14 @@ fn preflight_scene_with_context_options(
         .map(|entity| &entity.id)
         .collect::<BTreeSet<_>>();
     let value_limits = context.materialization_limits();
+    let mut value_budget = SceneValueBudget::new(value_limits);
     let traversal_limits = reference_traversal_limits(value_limits);
     for entity in sorted_entities(document) {
         let mut prepared_components = Vec::new();
+        let mut prepared_data_components = Vec::new();
         for (component_id, component) in &entity.components {
-            let Some(schema) = registry.schema(component_id) else {
+            let data_owner = bindings.and_then(|bindings| bindings.data_owner(component_id));
+            let Some(schema) = authority.schema(component_id) else {
                 push_with_operation_index(
                     &mut diagnostics,
                     with_public_locator(
@@ -512,29 +584,28 @@ fn preflight_scene_with_context_options(
                 );
                 continue;
             };
-            if let Some(declared_owner) = component.owner() {
-                let owner_matches = registry
-                    .component_schema_owner(component_id)
-                    .is_some_and(|owner| declared_owner.matches_executable(owner).unwrap_or(false));
-                if !owner_matches {
-                    push_with_operation_index(
-                        &mut diagnostics,
+            if !authority.owner_matches(component_id, component) {
+                push_with_operation_index(
+                    &mut diagnostics,
+                    with_public_locator(
                         with_public_locator(
-                            with_public_locator(
-                                diagnostic_error(
-                                    "scene.component-owner-mismatch",
-                                    "Persistent component owner does not match the executable schema owner",
-                                ),
-                                "entity-id",
-                                entity.id.as_str(),
+                            diagnostic_error(
+                                "scene.component-owner-mismatch",
+                                if data_owner.is_some() {
+                                    "Persistent component owner does not match the admitted schema owner"
+                                } else {
+                                    "Persistent component owner does not match the executable schema owner"
+                                },
                             ),
-                            "component-id",
-                            component_id.as_str(),
+                            "entity-id",
+                            entity.id.as_str(),
                         ),
-                        operation_index,
-                    );
-                    continue;
-                }
+                        "component-id",
+                        component_id.as_str(),
+                    ),
+                    operation_index,
+                );
+                continue;
             }
             if !schema.has_capability(nara_reflect::ComponentCapability::Scene) {
                 push_with_operation_index(
@@ -555,26 +626,9 @@ fn preflight_scene_with_context_options(
                 );
                 continue;
             }
-            let migrated = match registry.migrate_component_value(
-                component_id,
-                component.version,
-                &component.value,
-            ) {
-                Ok(migrated) => migrated,
-                Err(error) => {
-                    push_with_operation_index(
-                        &mut diagnostics,
-                        component_migration_diagnostic(
-                            entity.id.as_str(),
-                            component_id.as_str(),
-                            &error,
-                        ),
-                        operation_index,
-                    );
-                    continue;
-                }
-            };
-            if migrated.version != schema.version {
+            if component.version > schema.version()
+                || (data_owner.is_some() && component.version != schema.version())
+            {
                 push_with_operation_index(
                     &mut diagnostics,
                     component_migration_diagnostic(
@@ -582,8 +636,8 @@ fn preflight_scene_with_context_options(
                         component_id.as_str(),
                         &ComponentMigrationError::UnsupportedVersion {
                             component_id: component_id.clone(),
-                            from_version: migrated.version,
-                            target_version: schema.version,
+                            from_version: component.version,
+                            target_version: schema.version(),
                         },
                     ),
                     operation_index,
@@ -591,7 +645,55 @@ fn preflight_scene_with_context_options(
                 continue;
             }
 
-            let effective = match effective_component_value(schema, &migrated.value, value_limits) {
+            // Current-version values remain borrowed until complete effective admission. Only
+            // native migration requires an owned input; admit that input before its clone.
+            let migrated = if component.version == schema.version() {
+                Cow::Borrowed(&component.value)
+            } else {
+                if let Err(error) = value_budget.admit_input(&component.value) {
+                    push_with_operation_index(
+                        &mut diagnostics,
+                        component_payload_diagnostic(
+                            entity.id.as_str(),
+                            component_id,
+                            &error,
+                            authority,
+                        ),
+                        operation_index,
+                    );
+                    continue;
+                }
+                match registry.migrate_component_value(
+                    component_id,
+                    component.version,
+                    &component.value,
+                ) {
+                    Ok(migrated) if migrated.version == schema.version() => {
+                        Cow::Owned(migrated.value)
+                    }
+                    result => {
+                        let error = match result {
+                            Ok(migrated) => ComponentMigrationError::UnsupportedVersion {
+                                component_id: component_id.clone(),
+                                from_version: migrated.version,
+                                target_version: schema.version(),
+                            },
+                            Err(error) => error,
+                        };
+                        push_with_operation_index(
+                            &mut diagnostics,
+                            component_migration_diagnostic(
+                                entity.id.as_str(),
+                                component_id.as_str(),
+                                &error,
+                            ),
+                            operation_index,
+                        );
+                        continue;
+                    }
+                }
+            };
+            let effective = match value_budget.materialize(schema, &migrated) {
                 Ok(effective) => effective,
                 Err(error) => {
                     push_with_operation_index(
@@ -600,7 +702,7 @@ fn preflight_scene_with_context_options(
                             entity.id.as_str(),
                             component_id,
                             &error,
-                            registry,
+                            authority,
                         ),
                         operation_index,
                     );
@@ -608,14 +710,15 @@ fn preflight_scene_with_context_options(
                 }
             };
 
-            if matches!(mode, SceneValidationMode::Shape) {
-                let validation = registry
-                    .validate_whole_value_capabilities(
-                        component_id,
-                        [nara_reflect::ComponentCapability::Scene],
-                    )
-                    .map_err(|error| ComponentCodecError::Message(error.to_string()))
-                    .and_then(|()| validate_component_value(schema, &effective));
+            if matches!(mode, SceneValidationMode::Shape) || data_owner.is_some() {
+                let validation = nara_reflect::__private::validate_schema_capabilities(
+                    schema,
+                    [ComponentCapability::Scene],
+                )
+                .map_err(|error| ComponentCodecError::Message(error.to_string()))
+                .and_then(|()| {
+                    validate_component_value_with_limits(schema, &effective, value_limits)
+                });
                 if let Err(error) = validation {
                     push_with_operation_index(
                         &mut diagnostics,
@@ -623,10 +726,11 @@ fn preflight_scene_with_context_options(
                             entity.id.as_str(),
                             component_id,
                             &error,
-                            registry,
+                            authority,
                         ),
                         operation_index,
                     );
+                    continue;
                 }
                 if matches!(mode, SceneValidationMode::Shape) {
                     continue;
@@ -635,7 +739,7 @@ fn preflight_scene_with_context_options(
 
             let asset_references = match collect_declared_asset_references_from_schema_with_limits(
                 schema,
-                migrated.version,
+                schema.version(),
                 &effective,
                 value_limits,
                 traversal_limits,
@@ -650,7 +754,7 @@ fn preflight_scene_with_context_options(
                             &ComponentCodecError::Message(
                                 "Schema-declared asset reference traversal failed".to_owned(),
                             ),
-                            registry,
+                            authority,
                         ),
                         operation_index,
                     );
@@ -672,7 +776,7 @@ fn preflight_scene_with_context_options(
                             reference.asset_ref().to_string(),
                             "Asset reference is not declared in the project asset database",
                         ),
-                        registry,
+                        authority,
                     ),
                     operation_index,
                 );
@@ -710,6 +814,16 @@ fn preflight_scene_with_context_options(
                 continue;
             }
 
+            if let Some(owner) = data_owner {
+                prepared_data_components.push(PreparedSceneDataComponent {
+                    id: component_id.clone(),
+                    owner: owner.clone(),
+                    record: SceneComponentRecord::new(schema.version(), effective.into_owned())
+                        .with_owner(owner.owner_id().clone()),
+                });
+                continue;
+            }
+
             match execution.preflight_component_with_context(component_id, &effective, context) {
                 Ok(prepared) => prepared_components.push(PreparedSceneComponent {
                     id: component_id.clone(),
@@ -736,7 +850,7 @@ fn preflight_scene_with_context_options(
                         entity.id.as_str(),
                         component_id,
                         &error,
-                        registry,
+                        authority,
                     );
                     push_with_operation_index(&mut diagnostics, diagnostic, operation_index);
                 }
@@ -747,6 +861,7 @@ fn preflight_scene_with_context_options(
             id: entity.id.clone(),
             children: entity.children.clone(),
             components: prepared_components,
+            data_components: prepared_data_components,
         });
     }
 
@@ -757,11 +872,106 @@ fn preflight_scene_with_context_options(
     }
 }
 
+/// Logical effective-value admission is shared across entities and representations. Admission
+/// remains charged after later validation fails, so a rejected record cannot recycle allowance.
+struct SceneValueBudget {
+    nodes: usize,
+    bytes: usize,
+    depth: DepthLimit,
+}
+
+impl SceneValueBudget {
+    fn new(limits: ComponentValueMaterializationLimits) -> Self {
+        Self {
+            nodes: limits.nodes().get(),
+            bytes: limits.bytes().get(),
+            depth: limits.depth(),
+        }
+    }
+
+    fn admit_input(&self, value: &ComponentValue) -> Result<(), ComponentCodecError> {
+        if value.cost_up_to(self.nodes, self.bytes).is_none() {
+            return Err(if value.cost_up_to(self.nodes, usize::MAX).is_none() {
+                ComponentCodecError::MaterializationNodeLimit {
+                    observed: self.nodes.saturating_add(1),
+                    maximum: self.nodes,
+                }
+            } else {
+                ComponentCodecError::MaterializationByteLimit {
+                    observed: self.bytes.saturating_add(1),
+                    maximum: self.bytes,
+                }
+            });
+        }
+        validate_input_depth(value, self.depth)
+    }
+
+    fn materialize<'value>(
+        &mut self,
+        schema: &ComponentSchema,
+        value: &'value ComponentValue,
+    ) -> Result<Cow<'value, ComponentValue>, ComponentCodecError> {
+        // Reflect owns the default plan and checks the complete resulting cost before cloning.
+        // Raw usize ceilings intentionally preserve a zero residual byte allowance.
+        let (effective, cost) = nara_reflect::__private::effective_component_value_with_budget(
+            schema, value, self.nodes, self.bytes, self.depth,
+        )?;
+        self.nodes -= cost.nodes();
+        self.bytes -= cost.logical_bytes();
+        Ok(effective)
+    }
+}
+
+fn validate_input_depth(
+    value: &ComponentValue,
+    maximum: DepthLimit,
+) -> Result<(), ComponentCodecError> {
+    enum Frame<'value> {
+        List(std::slice::Iter<'value, ComponentValue>, usize),
+        Map(
+            std::collections::btree_map::Iter<'value, String, ComponentValue>,
+            usize,
+        ),
+    }
+
+    let mut pending = Vec::new();
+    let mut current = Some((value, 1_usize));
+    while let Some((value, depth)) = current {
+        if depth > maximum.get() {
+            return Err(ComponentCodecError::MaterializationDepthLimit {
+                observed: depth,
+                maximum: maximum.get(),
+            });
+        }
+        match value {
+            ComponentValue::List(values) if !values.is_empty() => {
+                pending.push(Frame::List(values.iter(), depth.saturating_add(1)));
+            }
+            ComponentValue::Map(values) if !values.is_empty() => {
+                pending.push(Frame::Map(values.iter(), depth.saturating_add(1)));
+            }
+            _ => {}
+        }
+        current = loop {
+            let next = match pending.last_mut() {
+                Some(Frame::List(values, depth)) => values.next().map(|value| (value, *depth)),
+                Some(Frame::Map(values, depth)) => values.next().map(|(_, value)| (value, *depth)),
+                None => break None,
+            };
+            if next.is_some() {
+                break next;
+            }
+            pending.pop();
+        };
+    }
+    Ok(())
+}
+
 fn component_payload_diagnostic(
     entity_id: &str,
     component_id: &ComponentTypeId,
     error: &ComponentCodecError,
-    registry: &ComponentRegistry,
+    authority: SchemaAuthority<'_>,
 ) -> Diagnostic {
     let diagnostic = with_codec_error(
         with_public_locator(
@@ -777,10 +987,19 @@ fn component_payload_diagnostic(
             component_id.as_str(),
         ),
         error,
-        registry.schema(component_id),
+        authority.schema(component_id),
     );
-    if let Some(owner) = registry.component_schema_owner(component_id) {
-        with_public_locator(diagnostic, "schema-owner", owner.as_str())
+    let owner = match authority {
+        SchemaAuthority::Mixed(bindings) if bindings.data_owner(component_id).is_some() => bindings
+            .data_owner(component_id)
+            .map(|owner| owner.owner_id().as_str()),
+        _ => authority
+            .native_registry()
+            .and_then(|registry| registry.component_schema_owner(component_id))
+            .map(|owner| owner.as_str()),
+    };
+    if let Some(owner) = owner {
+        with_public_locator(diagnostic, "schema-owner", owner)
     } else {
         diagnostic
     }
@@ -1061,4 +1280,429 @@ fn push_placement_diagnostic(
         None => diagnostic,
     };
     push_with_operation_index(diagnostics, diagnostic, operation_index);
+}
+
+#[cfg(test)]
+mod tests {
+    use nara_ecs::Component;
+    use nara_reflect::{
+        ComponentFieldPath, ComponentFieldSchema, ComponentSchemaCatalog,
+        ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentValueKind,
+        PersistentComponentSchemaOwnerId,
+    };
+
+    use super::*;
+
+    #[derive(Component)]
+    struct NativeFlag(bool);
+
+    fn native_id() -> ComponentTypeId {
+        ComponentTypeId::new("a.NativeFlag")
+    }
+
+    fn data_id() -> ComponentTypeId {
+        ComponentTypeId::new("z.Data")
+    }
+
+    fn limits(nodes: usize, bytes: usize, depth: usize) -> ComponentValueMaterializationLimits {
+        ComponentValueMaterializationLimits::new(
+            ItemLimit::new(nodes).unwrap(),
+            ByteLimit::new(bytes).unwrap(),
+            DepthLimit::new(depth).unwrap(),
+        )
+    }
+
+    fn data_schema(fields: impl IntoIterator<Item = ComponentFieldSchema>) -> ComponentSchema {
+        ComponentSchema::new(data_id(), "Data", ComponentSchemaVersion::ONE)
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+            .with_fields(fields)
+    }
+
+    fn definitions(schema: ComponentSchema) -> (ComponentRegistry, SceneComponentBindings) {
+        let mut registry = ComponentRegistry::new();
+        registry
+            .register_persistent_component_with_codec::<NativeFlag, _, _>(
+                ComponentSchema::new(native_id(), "Flag", ComponentSchemaVersion::ONE)
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                    .with_fields([ComponentFieldSchema::required(
+                        ComponentFieldId::new("x"),
+                        "Flag",
+                        ComponentFieldPath::from_fields(["x"]),
+                        ComponentValueKind::Bool,
+                    )
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING)]),
+                |value| Ok(NativeFlag(value.field_bool("x")?)),
+                |flag| Ok(ComponentValue::map([("x", ComponentValue::Bool(flag.0))])),
+            )
+            .unwrap();
+        registry.freeze().unwrap();
+        let owner = ComponentSchemaOwnerSnapshot::admit(
+            PersistentComponentSchemaOwnerId::try_new("game.data").unwrap(),
+            ComponentSchemaCatalog {
+                components: vec![schema],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        let bindings = SceneComponentBindings::new(registry.snapshot().unwrap(), [owner]).unwrap();
+        (registry, bindings)
+    }
+
+    fn data_record(value: ComponentValue) -> SceneComponentRecord {
+        SceneComponentRecord::new(ComponentSchemaVersion::ONE, value)
+            .with_owner(PersistentComponentSchemaOwnerId::try_new("game.data").unwrap())
+    }
+
+    fn mixed_document(value: ComponentValue, separate_entities: bool) -> SceneDocument {
+        let mut native = SceneEntityRecord::new(SceneEntityId::new("a").unwrap()).with_component(
+            native_id(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([("x", ComponentValue::Bool(true))]),
+            ),
+        );
+        if separate_entities {
+            SceneDocument::from_ordered_roots([
+                native,
+                SceneEntityRecord::new(SceneEntityId::new("z").unwrap())
+                    .with_component(data_id(), data_record(value)),
+            ])
+        } else {
+            native.components.insert(data_id(), data_record(value));
+            SceneDocument::from_ordered_roots([native])
+        }
+    }
+
+    fn prepare(
+        document: &SceneDocument,
+        registry: &ComponentRegistry,
+        bindings: &SceneComponentBindings,
+        limits: ComponentValueMaterializationLimits,
+    ) -> PreparedScene {
+        preflight_scene_with_context_and_bindings(
+            document,
+            registry,
+            bindings,
+            &mut ComponentDecodeContext::new().with_materialization_limits(limits),
+        )
+    }
+
+    #[test]
+    fn native_and_data_share_aggregate_allowance_including_zero_byte_residual() {
+        let (registry, bindings) = definitions(data_schema([]));
+        for separate_entities in [false, true] {
+            let document = mixed_document(ComponentValue::Map(BTreeMap::new()), separate_entities);
+            for (nodes, bytes, accepted) in [(3, 2, true), (2, 2, false), (3, 1, false)] {
+                let prepared = prepare(&document, &registry, &bindings, limits(nodes, bytes, 2));
+                assert_eq!(
+                    !prepared.diagnostics.has_errors(),
+                    accepted,
+                    "{:?}",
+                    prepared.diagnostics,
+                );
+                if accepted {
+                    assert_eq!(prepared.entities[0].components.len(), 1);
+                    assert_eq!(prepared.entities.last().unwrap().data_components.len(), 1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn defaults_consume_complete_effective_cost_without_changing_source() {
+        let schema = data_schema([ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("amount"),
+            "Amount",
+            ComponentFieldPath::from_fields(["amount"]),
+            ComponentValueKind::U64,
+            ComponentValue::U64(7),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
+        let (registry, bindings) = definitions(schema);
+        let document = mixed_document(ComponentValue::Map(BTreeMap::new()), false);
+        let before = document.clone();
+        for (nodes, bytes, accepted) in [(4, 16, true), (3, 16, false), (4, 15, false)] {
+            let prepared = prepare(&document, &registry, &bindings, limits(nodes, bytes, 2));
+            assert_eq!(
+                !prepared.diagnostics.has_errors(),
+                accepted,
+                "{:?}",
+                prepared.diagnostics
+            );
+            if accepted {
+                let data = &prepared.entities[0].data_components[0];
+                assert_eq!(data.record.value.field_u64("amount").unwrap(), 7);
+                assert!(data.owner.ptr_eq(bindings.data_owner(&data_id()).unwrap()));
+            }
+        }
+        assert_eq!(document, before);
+    }
+
+    #[test]
+    fn data_requires_explicit_matching_owner_and_current_version() {
+        let (registry, bindings) = definitions(data_schema([]));
+        for (owner, version, code) in [
+            (
+                None,
+                ComponentSchemaVersion::ONE,
+                "scene.component-owner-mismatch",
+            ),
+            (
+                Some(PersistentComponentSchemaOwnerId::try_new("game.other").unwrap()),
+                ComponentSchemaVersion::ONE,
+                "scene.component-owner-mismatch",
+            ),
+            (
+                Some(PersistentComponentSchemaOwnerId::try_new("game.data").unwrap()),
+                ComponentSchemaVersion(2),
+                "scene.unsupported-component-version",
+            ),
+        ] {
+            let mut document = mixed_document(ComponentValue::Map(BTreeMap::new()), false);
+            let record = document.entities[0].components.get_mut(&data_id()).unwrap();
+            record.owner = owner;
+            record.version = version;
+            let prepared = prepare(&document, &registry, &bindings, limits(8, 32, 3));
+            assert!(prepared.entities[0].data_components.is_empty());
+            assert!(
+                prepared
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code().as_str() == code)
+            );
+        }
+    }
+
+    #[test]
+    fn data_default_local_references_close_over_the_shared_namespace() {
+        let target = SceneEntityId::new("target").unwrap();
+        let schema = data_schema([ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("target"),
+            "Target",
+            ComponentFieldPath::from_fields(["target"]),
+            ComponentValueKind::EntityRef,
+            ComponentValue::EntityReference(EntityReference::SceneLocal {
+                entity: target.clone(),
+            }),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_capability(ComponentCapability::EntityRef)]);
+        let (registry, bindings) = definitions(schema);
+        for include_target in [false, true] {
+            let mut document = mixed_document(ComponentValue::Map(BTreeMap::new()), false);
+            if include_target {
+                document.roots.push(target.clone());
+                document
+                    .entities
+                    .push(SceneEntityRecord::new(target.clone()));
+            }
+            let prepared = prepare(&document, &registry, &bindings, limits(8, 64, 3));
+            assert_eq!(
+                !prepared.diagnostics.has_errors(),
+                include_target,
+                "{:?}",
+                prepared.diagnostics
+            );
+            if !include_target {
+                assert!(prepared.entities[0].data_components.is_empty());
+                assert!(prepared.diagnostics.iter().any(|diagnostic| {
+                    diagnostic.code().as_str() == "scene.local-reference-invalid"
+                }));
+            }
+        }
+    }
+
+    #[test]
+    fn data_default_assets_require_selected_project_metadata() {
+        let schema = data_schema([ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("image"),
+            "Image",
+            ComponentFieldPath::from_fields(["image"]),
+            ComponentValueKind::AssetRef,
+            ComponentValue::map([
+                ("kind", ComponentValue::String("path".into())),
+                (
+                    "value",
+                    ComponentValue::String("textures/missing.png".into()),
+                ),
+            ]),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_capability(ComponentCapability::AssetRef)]);
+        let (registry, bindings) = definitions(schema);
+        let document = mixed_document(ComponentValue::Map(BTreeMap::new()), false);
+        let database = nara_asset::ProjectAssetDatabase::default();
+        let mut context = ComponentDecodeContext::new().with_project_asset_database(&database);
+        let prepared = preflight_scene_with_context_and_bindings(
+            &document,
+            &registry,
+            &bindings,
+            &mut context,
+        );
+        assert!(prepared.diagnostics.has_errors());
+        assert!(prepared.entities[0].data_components.is_empty());
+    }
+
+    #[test]
+    fn bounded_input_and_no_default_effective_values_enforce_depth() {
+        let value = ComponentValue::List(vec![ComponentValue::List(vec![ComponentValue::Null])]);
+        let mut budget = SceneValueBudget::new(limits(3, 1, 2));
+        assert!(matches!(
+            budget.admit_input(&value),
+            Err(ComponentCodecError::MaterializationDepthLimit {
+                observed: 3,
+                maximum: 2
+            })
+        ));
+        assert!(matches!(
+            budget.materialize(&data_schema([]), &value),
+            Err(ComponentCodecError::MaterializationDepthLimit {
+                observed: 3,
+                maximum: 2
+            })
+        ));
+    }
+
+    #[test]
+    fn zero_byte_residual_accepts_zero_cost_values_and_rejects_positive_defaults() {
+        let mut budget = SceneValueBudget {
+            nodes: 4,
+            bytes: 0,
+            depth: DepthLimit::new(2).unwrap(),
+        };
+        let empty_schema = data_schema([]);
+        assert!(
+            budget
+                .materialize(&empty_schema, &ComponentValue::Null)
+                .is_ok()
+        );
+        let schema = data_schema([ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("x"),
+            "Flag",
+            ComponentFieldPath::from_fields(["x"]),
+            ComponentValueKind::Bool,
+            ComponentValue::Null,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
+        assert!(matches!(
+            budget.materialize(&schema, &ComponentValue::Map(BTreeMap::new())),
+            Err(ComponentCodecError::MaterializationByteLimit { maximum: 0, .. })
+        ));
+        assert_eq!(budget.nodes, 3);
+        assert_eq!(budget.bytes, 0);
+    }
+
+    #[test]
+    fn native_migration_input_is_admitted_before_invoking_the_hook() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut registry = ComponentRegistry::new();
+        registry
+            .register_persistent_component_with_codec::<NativeFlag, _, _>(
+                ComponentSchema::new(native_id(), "Flag", ComponentSchemaVersion(2))
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                    .with_fields([ComponentFieldSchema::required(
+                        ComponentFieldId::new("x"),
+                        "Flag",
+                        ComponentFieldPath::from_fields(["x"]),
+                        ComponentValueKind::Bool,
+                    )
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING)]),
+                |value| Ok(NativeFlag(value.field_bool("x")?)),
+                |flag| Ok(ComponentValue::map([("x", ComponentValue::Bool(flag.0))])),
+            )
+            .unwrap();
+        let hook_calls = Arc::clone(&calls);
+        registry
+            .register_component_migration(
+                &native_id(),
+                ComponentSchemaVersion::ONE,
+                ComponentSchemaVersion(2),
+                move |_| {
+                    hook_calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(ComponentValue::map([("x", ComponentValue::Bool(true))]))
+                },
+            )
+            .unwrap();
+        registry.freeze().unwrap();
+        for (value, limits) in [
+            (
+                ComponentValue::List(vec![ComponentValue::List(vec![ComponentValue::Null])]),
+                limits(8, 8, 2),
+            ),
+            (ComponentValue::String("too long".into()), limits(8, 1, 8)),
+            (
+                ComponentValue::List(vec![ComponentValue::Null; 2]),
+                limits(2, 8, 8),
+            ),
+        ] {
+            let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+                SceneEntityId::new("source").unwrap(),
+            )
+            .with_component(
+                native_id(),
+                SceneComponentRecord::new(ComponentSchemaVersion::ONE, value),
+            )]);
+            let prepared = preflight_scene_with_context(
+                &document,
+                &registry,
+                &mut ComponentDecodeContext::new().with_materialization_limits(limits),
+            );
+            assert!(prepared.diagnostics.has_errors());
+            assert!(prepared.entities[0].components.is_empty());
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+        }
+        let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            SceneEntityId::new("source").unwrap(),
+        )
+        .with_component(
+            native_id(),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
+        )]);
+        let prepared = preflight_scene_with_context(
+            &document,
+            &registry,
+            &mut ComponentDecodeContext::new().with_materialization_limits(limits(2, 2, 2)),
+        );
+        assert!(
+            !prepared.diagnostics.has_errors(),
+            "{:?}",
+            prepared.diagnostics
+        );
+        assert_eq!(prepared.entities[0].components.len(), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn patch_shape_mode_retains_operation_diagnostics_without_native_decode() {
+        let (registry, _) = definitions(data_schema([]));
+        let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            SceneEntityId::new("source").unwrap(),
+        )
+        .with_component(
+            native_id(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([("x", ComponentValue::U64(1))]),
+            ),
+        )]);
+        let diagnostics = validate_patch_intermediate_scene_with_limits(
+            &document,
+            &registry,
+            7,
+            ComponentValueMaterializationLimits::default(),
+        );
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.invalid-component-payload"
+                && diagnostic
+                    .fields()
+                    .iter()
+                    .any(|field| field.key().as_str() == "operation-index")
+        }));
+    }
 }

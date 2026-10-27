@@ -7,7 +7,9 @@ mod authoring_decode;
 #[cfg(feature = "serde")]
 mod authoring_preview;
 mod candidate;
+mod component_binding_plugin;
 mod component_bindings;
+mod data_components;
 mod diagnostics;
 mod document;
 mod export;
@@ -64,13 +66,20 @@ pub use authoring_decode::{
     UnavailableRecordManifestEntry, UnavailableValuePathSegment,
 };
 pub use candidate::{ExpandedSceneCandidate, ExpandedSceneDocument};
+pub use component_binding_plugin::{
+    SCENE_COMPONENT_BINDINGS_PLUGIN_DECLARATION, SCENE_COMPONENT_BINDINGS_PLUGIN_ID,
+    SCENE_COMPONENT_BINDINGS_PLUGIN_REQUIREMENT, SceneComponentBindingsAuthorityError,
+    SceneComponentBindingsPlugin, scene_component_bindings,
+    validate_scene_component_bindings_authority,
+};
 pub use component_bindings::{
     SceneComponentBindingError, SceneComponentBindingLimits, SceneComponentBindings,
 };
+pub use data_components::{SceneDataComponentError, SceneDataComponents};
 pub use document::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
 pub use export::{
     SceneExportOptions, SceneExportOutput, SceneExportRemap, SceneExportReport, export_scene,
-    export_scene_with_options,
+    export_scene_with_asset_database, export_scene_with_options,
 };
 #[cfg(feature = "serde")]
 pub use format::{

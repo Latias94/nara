@@ -117,9 +117,52 @@ binding never chooses this family implicitly.
 Use the selection's `expand_prefabs` or `try_expand_prefabs_with_loader` for the same production
 compiler with data Schemas. Defaults, references, declarative overlays, source demand and bounded
 work retain their existing semantics. See the [public compiler
-tests](../../crates/nara_scene/tests/component_bindings.rs). This is **compilation support only**:
-the selection does not install a managed Runtime definition, materialize a data carrier, or prove
-gameplay callbacks are available. Those production-family paths remain under implementation.
+tests](../../crates/nara_scene/tests/component_bindings.rs).
+
+For runtime storage, use the selection's `prepare_scene` or `prepare_scene_replacement`; each
+returns the same move-only `PreparedScene` token as native preparation. The complete native/data
+candidate preflights before target allocation and commits through one guarded publication tail.
+`prepare_scene_with_limits` and `prepare_scene_replacement_with_limits` apply one aggregate
+logical allowance across both families. Data Schemas do not acquire independent Rust types.
+
+In a managed App, add `SceneComponentBindingsPlugin::new(data_owners)` alongside the native registry
+plugin, then obtain `scene_component_bindings(world)` at `StartupStage::Scene` or a later safe
+point. The plugin captures the actual frozen native definition at seal. Passing independently
+re-admitted catalogs with the same bytes cannot replace that installed authority. Several engine
+domain guards coexist and are checked at the existing App/runtime boundaries.
+
+```rust,ignore
+let bindings = scene_component_bindings(world).ok_or(MissingSceneDefinitions)?.clone();
+let report = bindings.prepare_scene(world, candidate, occurrence, database)?.commit(world);
+let current = report.instance.ok_or(report.diagnostics)?;
+
+for (component, record) in bindings.data_components(world, entity)? {
+    inspect(component, record);
+}
+bindings.set_data_component(world, entity, component, value, database, limits)?;
+bindings.remove_data_component(world, entity, component)?;
+```
+
+Guarded reads distinguish absent members from unavailable definitions or stale targets. Full-value
+replacement and removal preserve siblings and validate the complete retained group, exact
+owner/version, declared references and current Scene identity before mutation. Runtime writes
+change the live carrier, not source documents or authoring history. Access and change tracking are
+currently at carrier granularity; this is not per-Schema ECS query/scheduler presence.
+
+`bindings.export_scene` snapshots all current live registered Scene identities, flattening Prefabs.
+`export_scene_with_options` additionally accepts explicit project metadata for `Path` or
+`StableIdWhenKnown` asset lowering. Native free functions reject encountered data members rather
+than omit them; `export_scene_with_asset_database` provides the same metadata lowering for a
+native-only caller, including assets supplied by defaults after encoding. Managed native export
+uses the installed native definition. The independent preview publication exception does not
+transfer managed export authority. Source Save remains the authoring document owner's operation.
+
+The carrier retains only data and exact owner-local Schema snapshots. Strict entity/instance
+retirement releases it without a hook exemption. A product owning native retirement work can use
+the advanced mixed claims preparation method and retain its existing commit/retry/discard custody.
+Plain data materialization does not install a language module, prove gameplay callbacks available,
+or replace the product recipe's required-contribution checks. Those execution-owner integrations
+remain separate from this storage family.
 
 ## Prepare And Materialize A Scene
 

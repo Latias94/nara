@@ -1,7 +1,8 @@
 # Scene-Owned Native And Data Representations
 
-**Status:** Proposed implementation design under ADR 0120, not an Accepted contract or a public
-API announcement. **Baseline:** `65402b9`. The foundation Goal remains active.
+**Status:** The closed native/data storage and publication subset is adopted in ADR 0006;
+broader executable publication, migration and language-owner work remains Proposed under ADR 0120.
+**Design baseline:** `65402b9`. The foundation Goal remains active.
 
 ## Pressure And Selected Seam
 
@@ -36,15 +37,17 @@ flowchart LR
     World --> Retire["Existing strict Scene retirement"]
 ```
 
-The proposed names are design vocabulary, not frozen signatures. Implement a complete consumer
-before exporting any new abstraction merely to make the module catalogue look complete.
+The source and public consumers own actual signatures. Do not export further abstractions merely
+to make the module catalogue look complete.
 
 Backend-free owner admission and the closed `SceneComponentBindings` selection now have
 production source/compiler consumers. Native and data records use the existing semantic
-compiler; data records require explicit owner/current-version admission. This partial
-implementation does not qualify managed definition installation, data materialization, mutation,
-export or language readiness. The [implementation ledger](adr/implementation-status.md) links
-the actual verification separately from this design's remaining contract.
+compiler; data records require explicit owner/current-version admission. Runtime preparation now
+captures exact managed definitions, stages complete groups with native values, and exposes guarded
+membership/read/write and current-live export through the existing owners. Headless evidence is
+separate from product recipe/content-replacement integration, language execution readiness and
+native Editor qualification. The [implementation ledger](adr/implementation-status.md) links the
+actual verification separately from this design's remaining contract.
 
 ## Responsibility And Identity
 

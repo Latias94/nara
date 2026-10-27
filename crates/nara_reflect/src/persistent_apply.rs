@@ -988,6 +988,70 @@ pub fn validate_registered_persistent_apply_targets(
     Ok(())
 }
 
+/// Checks that every actual persistent native member on one entity has an admitted receipt and
+/// belongs to the caller's export selection with its exact native runtime type. Removed members
+/// do not require selection coverage.
+///
+/// This reads the existing World binding indexes and actual ECS membership only. It neither
+/// registers metadata nor invokes native lifecycle validators, codecs or application callbacks.
+#[doc(hidden)]
+pub fn validate_persistent_export_coverage(
+    world: &World,
+    target: Entity,
+    mut selected: impl FnMut(&ComponentTypeId, ComponentId) -> bool,
+) -> Result<(), ComponentCodecError> {
+    let entity = world
+        .get_entity(target)
+        .map_err(|_| ComponentCodecError::EntityMissing)?;
+    let bindings = world.get_resource::<PersistentWorldBindings>();
+    let receipts = entity.get::<PersistentApplyReceipts>();
+    if let Some(receipts) = receipts {
+        for (component, receipt) in &receipts.bindings {
+            if !entity.contains_id(receipt.runtime_component_id) {
+                continue;
+            }
+            if receipt.world_id != world.id() {
+                return Err(ComponentCodecError::WrongWorld);
+            }
+            let bindings = bindings.ok_or(ComponentCodecError::PersistentApplyReceiptMissing)?;
+            if component != &receipt.component_id
+                || bindings.by_stable.get(component) != Some(&receipt.runtime_component_id)
+                || bindings.by_runtime.get(&receipt.runtime_component_id) != Some(component)
+            {
+                return Err(ComponentCodecError::PersistentApplyBindingConflict {
+                    component_id: component.clone(),
+                });
+            }
+        }
+    }
+    if let Some(bindings) = bindings {
+        for runtime in entity.archetype().components() {
+            let Some(component) = bindings.by_runtime.get(runtime) else {
+                continue;
+            };
+            if bindings.by_stable.get(component) != Some(runtime) {
+                return Err(ComponentCodecError::PersistentApplyBindingConflict {
+                    component_id: component.clone(),
+                });
+            }
+            let receipt = receipts
+                .and_then(|receipts| receipts.bindings.get(component))
+                .ok_or(ComponentCodecError::PersistentApplyReceiptMissing)?;
+            if receipt.runtime_component_id != *runtime {
+                return Err(ComponentCodecError::PersistentApplyBindingConflict {
+                    component_id: component.clone(),
+                });
+            }
+            if !selected(component, *runtime) {
+                return Err(ComponentCodecError::MissingNativeBinding {
+                    component_id: component.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod persistent_apply_contract_tests {
     use std::sync::{
@@ -1005,6 +1069,32 @@ mod persistent_apply_contract_tests {
     use super::*;
 
     static SUPPORT_OBSERVER_RUNS: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn export_coverage_never_calls_native_apply_validators() {
+        let mut world = World::new();
+        let target = world.spawn_empty().id();
+        let component = ComponentTypeId::new("nara.test.ExportCoverage");
+        bound_component(DirectProbe, component.as_str())
+            .apply(&mut world, target)
+            .unwrap();
+        world
+            .get_mut::<PersistentApplyReceipts>(target)
+            .unwrap()
+            .bindings
+            .get_mut(&component)
+            .unwrap()
+            .validate_component = |_, _| panic!("export must not invoke native apply validators");
+        validate_persistent_export_coverage(&world, target, |_, _| true).unwrap();
+        assert_eq!(
+            validate_persistent_export_coverage(&world, target, |_, _| false),
+            Err(ComponentCodecError::MissingNativeBinding {
+                component_id: component
+            }),
+        );
+        world.entity_mut(target).remove::<DirectProbe>();
+        validate_persistent_export_coverage(&world, target, |_, _| false).unwrap();
+    }
 
     #[derive(Component)]
     struct DirectProbe;

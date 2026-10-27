@@ -6,7 +6,7 @@ use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 
 use crate::{
     ComponentCodecError, ComponentFieldPathError, ComponentFieldPathSegment, ComponentSchema,
-    ComponentValue, EntityReference, schema::MAX_SHAPE_DEPTH,
+    ComponentValue, ComponentValueCost, EntityReference, schema::MAX_SHAPE_DEPTH,
 };
 
 /// Bounds one expanded effective value using logical value cost rather than wire size.
@@ -94,6 +94,40 @@ pub fn effective_component_value_owned(
     Ok(value)
 }
 
+/// Performs one effective-value admission against raw residual ceilings and returns the exact
+/// retained logical cost. This is the composition seam for callers that admit many component
+/// values under one aggregate allowance. The caller must admit any independently retained source
+/// clone before calling this function.
+pub fn effective_component_value_with_budget<'value>(
+    schema: &ComponentSchema,
+    value: &'value ComponentValue,
+    remaining_nodes: usize,
+    remaining_bytes: usize,
+    maximum_depth: DepthLimit,
+) -> Result<(Cow<'value, ComponentValue>, ComponentValueCost), ComponentCodecError> {
+    let mut budget = MaterializationBudget {
+        maximum_nodes: remaining_nodes,
+        maximum_bytes: remaining_bytes,
+        maximum_depth,
+        nodes: 0,
+        bytes: 0,
+    };
+    budget.observe_tree(value, 1)?;
+    let plan = plan_defaults(schema, value)?;
+    if let Some(plan) = &plan {
+        preflight_plan(plan, Some(value), 1, &mut budget)?;
+    }
+    let cost = ComponentValueCost::from_parts(budget.nodes, budget.bytes);
+    match plan {
+        Some(plan) => {
+            let mut effective = value.clone();
+            apply_plan(&plan, &mut effective)?;
+            Ok((Cow::Owned(effective), cost))
+        }
+        None => Ok((Cow::Borrowed(value), cost)),
+    }
+}
+
 #[derive(Default)]
 struct DefaultPlan<'schema> {
     value: Option<&'schema ComponentValue>,
@@ -155,7 +189,9 @@ fn preflight_materialization(
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(), ComponentCodecError> {
     let mut budget = MaterializationBudget {
-        limits,
+        maximum_nodes: limits.nodes().get(),
+        maximum_bytes: limits.bytes().get(),
+        maximum_depth: limits.depth(),
         nodes: 0,
         bytes: 0,
     };
@@ -185,7 +221,7 @@ fn preflight_plan(
     }
     let child_depth = depth
         .checked_add(1)
-        .ok_or_else(|| depth_overflow(budget.limits.depth().get()))?;
+        .ok_or_else(|| depth_overflow(budget.maximum_depth.get()))?;
     match first {
         ComponentFieldPathSegment::Field(_) => {
             let fields = match existing {
@@ -295,7 +331,9 @@ fn materialize_branch(plan: &DefaultPlan<'_>) -> Result<ComponentValue, Componen
 }
 
 struct MaterializationBudget {
-    limits: ComponentValueMaterializationLimits,
+    maximum_nodes: usize,
+    maximum_bytes: usize,
+    maximum_depth: DepthLimit,
     nodes: usize,
     bytes: usize,
 }
@@ -305,7 +343,9 @@ pub(crate) fn validate_value_materialization_budget(
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(), ComponentCodecError> {
     MaterializationBudget {
-        limits,
+        maximum_nodes: limits.nodes().get(),
+        maximum_bytes: limits.bytes().get(),
+        maximum_depth: limits.depth(),
         nodes: 0,
         bytes: 0,
     }
@@ -346,7 +386,7 @@ impl MaterializationBudget {
                                 values.iter(),
                                 depth
                                     .checked_add(1)
-                                    .ok_or_else(|| depth_overflow(self.limits.depth().get()))?,
+                                    .ok_or_else(|| depth_overflow(self.maximum_depth.get()))?,
                             ));
                         }
                         ComponentValue::Map(values) if !values.is_empty() => {
@@ -354,7 +394,7 @@ impl MaterializationBudget {
                                 values.iter(),
                                 depth
                                     .checked_add(1)
-                                    .ok_or_else(|| depth_overflow(self.limits.depth().get()))?,
+                                    .ok_or_else(|| depth_overflow(self.maximum_depth.get()))?,
                             ));
                         }
                         ComponentValue::List(_) | ComponentValue::Map(_) => {}
@@ -386,10 +426,10 @@ impl MaterializationBudget {
     }
 
     fn observe_node(&mut self, depth: usize) -> Result<(), ComponentCodecError> {
-        if depth > self.limits.depth().get() {
+        if depth > self.maximum_depth.get() {
             return Err(ComponentCodecError::MaterializationDepthLimit {
                 observed: depth,
-                maximum: self.limits.depth().get(),
+                maximum: self.maximum_depth.get(),
             });
         }
         self.nodes =
@@ -397,12 +437,12 @@ impl MaterializationBudget {
                 .checked_add(1)
                 .ok_or(ComponentCodecError::MaterializationNodeLimit {
                     observed: usize::MAX,
-                    maximum: self.limits.nodes().get(),
+                    maximum: self.maximum_nodes,
                 })?;
-        if self.nodes > self.limits.nodes().get() {
+        if self.nodes > self.maximum_nodes {
             return Err(ComponentCodecError::MaterializationNodeLimit {
                 observed: self.nodes,
-                maximum: self.limits.nodes().get(),
+                maximum: self.maximum_nodes,
             });
         }
         Ok(())
@@ -414,12 +454,12 @@ impl MaterializationBudget {
                 .checked_add(bytes)
                 .ok_or(ComponentCodecError::MaterializationByteLimit {
                     observed: usize::MAX,
-                    maximum: self.limits.bytes().get(),
+                    maximum: self.maximum_bytes,
                 })?;
-        if self.bytes > self.limits.bytes().get() {
+        if self.bytes > self.maximum_bytes {
             return Err(ComponentCodecError::MaterializationByteLimit {
                 observed: self.bytes,
-                maximum: self.limits.bytes().get(),
+                maximum: self.maximum_bytes,
             });
         }
         Ok(())
@@ -437,4 +477,91 @@ fn materialization_error(message: impl std::fmt::Display) -> ComponentCodecError
     ComponentCodecError::Message(format!(
         "effective component value materialization: {message}"
     ))
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+    use crate::{
+        ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentSchemaVersion,
+        ComponentTypeId, ComponentValueKind,
+    };
+
+    fn defaulted(value: ComponentValue) -> ComponentSchema {
+        ComponentSchema::new(
+            ComponentTypeId::new("test.Data"),
+            "Data",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_fields([ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("value"),
+            "Value",
+            ComponentFieldPath::from_fields(["value"]),
+            ComponentValueKind::String,
+            value,
+        )])
+    }
+
+    #[test]
+    fn aggregate_zero_bytes_accepts_empty_values_but_refuses_default_growth() {
+        let schema = ComponentSchema::new(
+            ComponentTypeId::new("test.Empty"),
+            "Empty",
+            ComponentSchemaVersion::ONE,
+        );
+        let value = ComponentValue::Null;
+        let (effective, cost) = effective_component_value_with_budget(
+            &schema,
+            &value,
+            1,
+            0,
+            DepthLimit::new(2).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(effective, Cow::Borrowed(_)));
+        assert_eq!(cost, value.cost());
+        let schema = defaulted(ComponentValue::String(String::new()));
+        assert!(matches!(
+            effective_component_value_with_budget(
+                &schema,
+                &ComponentValue::map([] as [(String, ComponentValue); 0]),
+                2,
+                0,
+                DepthLimit::new(2).unwrap()
+            ),
+            Err(ComponentCodecError::MaterializationByteLimit { .. })
+        ));
+    }
+
+    #[test]
+    fn aggregate_default_cost_is_exact_and_depth_is_checked_without_insertions() {
+        let schema = defaulted(ComponentValue::String("yes".into()));
+        let value = ComponentValue::map([] as [(String, ComponentValue); 0]);
+        let (effective, cost) = effective_component_value_with_budget(
+            &schema,
+            &value,
+            2,
+            8,
+            DepthLimit::new(2).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(effective, Cow::Owned(_)));
+        assert_eq!(cost, effective.cost());
+        assert_eq!(cost.nodes(), 2);
+        assert_eq!(cost.logical_bytes(), 8);
+        assert!(matches!(
+            effective_component_value_with_budget(
+                &schema,
+                &value,
+                2,
+                7,
+                DepthLimit::new(2).unwrap(),
+            ),
+            Err(ComponentCodecError::MaterializationByteLimit { .. })
+        ));
+        assert!(matches!(
+            effective_component_value_with_budget(&schema, &effective, 2, 8, DepthLimit::ONE,),
+            Err(ComponentCodecError::MaterializationDepthLimit { .. })
+        ));
+    }
 }

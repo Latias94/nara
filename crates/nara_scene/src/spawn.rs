@@ -40,12 +40,12 @@ use nara_reflect::{
         validate_declared_persistent_apply_targets, validate_fresh_persistent_component_apply,
         validate_persistent_apply_support_topology, validate_registered_persistent_apply_targets,
     },
-    ComponentCodecError, ComponentRegistry, ComponentTypeId,
+    ComponentCodecError, ComponentRegistry, ComponentTypeId, ComponentValueMaterializationLimits,
 };
 
 use crate::{
-    ExpandedSceneCandidate, SceneEntityId, SceneEntityProvenance, SceneEntityProvenanceMap,
-    SceneOccurrenceKey, SourceDocumentKey,
+    ExpandedSceneCandidate, SceneComponentBindings, SceneEntityId, SceneEntityProvenance,
+    SceneEntityProvenanceMap, SceneOccurrenceKey, SourceDocumentKey,
     asset_bindings::SceneAssetBindings,
     candidate::validate_scene_provenance,
     diagnostics::{error as diagnostic_error, with_codec_error, with_public_locator},
@@ -62,7 +62,10 @@ use crate::{
         combine_scene_hierarchy_operations, prepare_scene_hierarchy_retirement,
         validate_scene_entity_retirement_admission,
     },
-    validation::{PreparedScene as PreflightScene, preflight_scene_with_context},
+    validation::{
+        PreparedScene as PreflightScene, preflight_scene_with_context,
+        preflight_scene_with_context_and_bindings,
+    },
 };
 
 #[derive(Debug)]
@@ -352,9 +355,21 @@ impl SceneSpawner {
         claims: &SceneNativeRetirementClaims,
     ) -> Result<PreparedScenePublication, SceneSpawnReport> {
         let definition = preparation::ScenePreparationDefinition::capture(world, registry)?;
+        if !matches!(commit, SceneIdentityCommit::Projection(_)) {
+            definition.require_managed_definition()?;
+        }
         self.prepare_unbound_with_asset_context_and_product_bindings(
-            world, registry, definition, candidate, occurrence, database, commit, product,
-            bindings, claims,
+            world,
+            registry,
+            definition,
+            candidate,
+            occurrence,
+            database,
+            commit,
+            product,
+            bindings,
+            claims,
+            ComponentValueMaterializationLimits::default(),
         )?
         .bind(world)
     }
@@ -371,7 +386,17 @@ impl SceneSpawner {
         product: Option<SceneProductTransactionInput<'_>>,
         bindings: SceneAssetBindings,
         claims: &SceneNativeRetirementClaims,
+        value_limits: ComponentValueMaterializationLimits,
     ) -> Result<UnboundScenePublication, SceneSpawnReport> {
+        if !definition.matches_registry(registry) {
+            return Err(preparation::definition_rejection());
+        }
+        if registry
+            .schema_for_type::<crate::SceneDataComponents>()
+            .is_some()
+        {
+            return Err(preparation::data_binding_rejection());
+        }
         let document = candidate.document();
         let provenance = candidate.provenance();
         if validate_scene_provenance(document, provenance).is_err() {
@@ -405,7 +430,16 @@ impl SceneSpawner {
             }
         };
         let mut preflight = component_batch.with_decode_context(database, |context| {
-            preflight_scene_with_context(document, registry, context)
+            context.set_materialization_limits(value_limits);
+            match definition.bindings() {
+                None => preflight_scene_with_context(document, registry, context),
+                Some(component_bindings) => preflight_scene_with_context_and_bindings(
+                    document,
+                    registry,
+                    component_bindings,
+                    context,
+                ),
+            }
         });
         if preflight.diagnostics.has_errors() {
             return Err(SceneSpawnReport {
@@ -427,6 +461,20 @@ impl SceneSpawner {
         };
         // Product configuration and decoding precede the shared semantic World baseline.
         prepare_mutation_baseline(world);
+        if preflight
+            .entities
+            .iter()
+            .any(|entity| !entity.data_components.is_empty())
+        {
+            world.register_component::<crate::SceneDataComponents>();
+            if validate_registered_persistent_component_apply::<crate::SceneDataComponents>(
+                world, None,
+            )
+            .is_err()
+            {
+                return Err(preparation::data_lifecycle_rejection());
+            }
+        }
         if validate_hierarchy(world).is_err() {
             diagnostics.push(diagnostic_error(
                 "scene.hierarchy-invalid",
@@ -714,6 +762,59 @@ where
             claims,
         )
         .map(PreparedSceneReplacement)
+}
+
+impl SceneComponentBindings {
+    /// Prepares a complete mixed replacement before product-owned native retirement starts.
+    ///
+    /// This advanced operation retains the existing claims, product writes and explicit
+    /// commit/retry/discard custody of [`PreparedSceneReplacement`]. Data definitions are captured
+    /// with the same managed authority as ordinary mixed preparation.
+    #[doc(hidden)]
+    pub fn prepare_scene_replacement_with_claims<F>(
+        &self,
+        world: &mut World,
+        candidate: &ExpandedSceneCandidate,
+        database: Option<&ProjectAssetDatabase>,
+        current: &SpawnedSceneInstance,
+        assets: SceneAssetBindings,
+        claims: &SceneNativeRetirementClaims,
+        limits: SceneProductTransactionLimits,
+        additional_retirements: &[WorldEntityToken],
+        configure: F,
+    ) -> Result<PreparedSceneReplacement, SceneSpawnReport>
+    where
+        F: FnOnce(&mut SceneProductOverlayWriter<'_>),
+    {
+        let occurrence = occurrence_for_instance(world, current)
+            .map_err(|error| occurrence_rejection(DiagnosticReport::default(), error))?
+            .clone();
+        let definition = preparation::ScenePreparationDefinition::capture_with_bindings(
+            world,
+            self.native_registry(),
+            self,
+        )?;
+        SceneSpawner::new()
+            .prepare_unbound_with_asset_context_and_product_bindings(
+                world,
+                self.native_registry(),
+                definition,
+                candidate,
+                &occurrence,
+                database,
+                SceneIdentityCommit::Replace(current),
+                Some(SceneProductTransactionInput {
+                    limits,
+                    additional_retirements,
+                    configure: Box::new(configure),
+                }),
+                assets,
+                claims,
+                ComponentValueMaterializationLimits::default(),
+            )?
+            .bind(world)
+            .map(PreparedSceneReplacement)
+    }
 }
 
 fn validate_scene_predecessor(

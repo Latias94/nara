@@ -18,8 +18,9 @@ ADR 0049, ADR 0051, ADR 0068, ADR 0079, ADR 0081, ADR 0083, ADR 0084, ADR 0093, 
 
 ## Context
 
-Rust-first strong typing and a frozen runtime-binding registry, currently implemented with native
-bindings only, are runtime strengths, but editors must survive common authoring conditions:
+Rust-first strong typing and frozen admitted runtime definitions are runtime strengths. Native
+bindings retain their exact Rust-type proof; ADR 0006's explicit pure-data family has separate
+Schema/storage admission. Editors must also survive common authoring conditions:
 
 - a project plugin is temporarily unavailable on one workstation or branch;
 - a schema catalog describes a component whose native provider is not compiled into this editor;

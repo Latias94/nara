@@ -67,6 +67,13 @@ pub struct ComponentValueCost {
 }
 
 impl ComponentValueCost {
+    pub(crate) const fn from_parts(nodes: usize, logical_bytes: usize) -> Self {
+        Self {
+            nodes,
+            logical_bytes,
+        }
+    }
+
     pub const ZERO: Self = Self {
         nodes: 0,
         logical_bytes: 0,

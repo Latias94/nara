@@ -1084,6 +1084,20 @@ impl ComponentRegistrySnapshot {
     }
 }
 
+pub(crate) fn component_snapshot_matches_runtime_type(
+    snapshot: &ComponentRegistrySnapshot,
+    world: &World,
+    component: &ComponentTypeId,
+    runtime: nara_ecs::bevy_ecs::component::ComponentId,
+) -> bool {
+    world
+        .components()
+        .get_info(runtime)
+        .and_then(|info| info.type_id())
+        .and_then(|rust_type| snapshot.0.rust_type_ids.get(&rust_type))
+        == Some(component)
+}
+
 impl ComponentRegistry {
     #[must_use]
     pub fn new() -> Self {

@@ -302,4 +302,5 @@ fn is_reserved_component<T: Component>() -> bool {
     type_id == TypeId::of::<Parent>()
         || type_id == TypeId::of::<Children>()
         || type_id == TypeId::of::<SceneEntitySource>()
+        || type_id == TypeId::of::<crate::SceneDataComponents>()
 }

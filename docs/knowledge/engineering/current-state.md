@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "2361e13f9ad8b6099a3d223973880c8fed9d7c287eaa08dd3224de9ee0aa7055"
+source_fingerprint: "e3c7f3b59f8aae8f304f487d119f414e8202d84d96563730ea898ea353682557"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "2361e13f9ad8b6099a3d223973880c8fed9d7c287eaa08dd3224de9ee0a
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `2361e13f9ad8b6099a3d223973880c8fed9d7c287eaa08dd3224de9ee0aa7055`
-- Immutable records: 975
+- Source fingerprint: `e3c7f3b59f8aae8f304f487d119f414e8202d84d96563730ea898ea353682557`
+- Immutable records: 976
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Production Scene native-data runtime and managed authority qualification](verification/2026-10/2026-10-27T125421Z-production-scene-native-data-runtime-and-managed-authority-qualification-294f613511bb48e49fed958c05a1a469.md) - Qualifies the closed Scene storage family and records remaining product and language owner integration.
 - **Verification Evidence**: [Closed Scene binding selection and shared strict data compilation](verification/2026-10/2026-10-27T105601Z-closed-scene-binding-selection-and-shared-strict-data-compilation-263aa2e60c62429db4a8862d2df6e059.md) - Qualifies explicit mixed Schema selection and public Prefab compilation while preserving separate runtime authority, data publication and export obligations.
 - **Verification Evidence**: [Backend-free owner schema snapshots and clarified owned Editor UI sequencing](verification/2026-10/2026-10-27T102723Z-backend-free-owner-schema-snapshots-and-clarified-owned-editor-ui-sequencing-7e4b079a81b64d149b8f031b8b2c84ea.md) - Qualifies metadata-only owner admission and migrated consumers; records user-directed Nara UI ownership and the plan review without blocking ongoing production Scene work.
 - **Work Progress**: [Updated custom UI and language extension evidence integrated with the production data design](progress/2026-10/2026-10-27T100227Z-updated-custom-ui-and-language-extension-evidence-integrated-with-the-production-data-design-5f8d5f8dc41e42888f9099767abc1248.md) - Records source-only UI and language findings, the closed Scene representation proposal, resolved export-policy design review and next production work without declaring SDK or toolkit adoption.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Editor conversion source admission fixes pass full foundation cohort](progress/2026-10/2026-10-27T061533Z-editor-conversion-source-admission-fixes-pass-full-foundation-cohort-33359bf2b64a4517acffb1e0d41eb554.md) - Work Progress for Editor conversion source admission fixes pass full foundation cohort.
 - **Work Progress**: [Editor complete Prefab conversion integration and pre-copy budget corrections](progress/2026-10/2026-10-27T053151Z-editor-complete-prefab-conversion-integration-and-pre-copy-budget-corrections-394c727d98ae4d55846b93f121fd416b.md) - Shared actual-demand acquisition and Editor conversion custody are integrated; source pre-copy budget fixes, independent consumers and native qualification remain in progress.
 - **Verification Evidence**: [Complete source-owned Prefab conversion and current stable lookup qualification](verification/2026-10/2026-10-27T041718Z-complete-source-owned-prefab-conversion-and-current-stable-lookup-qualification-cbce190af0c4488b97895e68905573a6.md) - Qualifies nominal owned source conversion, same-history replay, actual semantic dependency fencing and fresh Host stable lookup validation; Editor conversion custody and native interaction remain open.
-- **Verification Evidence**: [Selected Prefab compiler and scoped source replay private qualification](verification/2026-10/2026-10-27T022733Z-selected-prefab-compiler-and-scoped-source-replay-private-qualification-c55e3532dbfd4367990424c40afe75c1.md) - Qualifies selected semantic compilation and exact same-owner replay with 557 passing Scene tests; localization, contextual publication and the Editor conversion workflow remain unimplemented.
 
 # Integration Notes
 

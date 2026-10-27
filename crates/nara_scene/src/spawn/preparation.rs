@@ -55,6 +55,7 @@ pub(super) struct ScenePreparationDefinition {
     world: WorldId,
     snapshot: ComponentRegistrySnapshot,
     host: SceneHostCompositionBasis,
+    bindings: Option<SceneComponentBindings>,
 }
 
 enum SceneHostCompositionBasis {
@@ -89,16 +90,40 @@ impl ScenePreparationDefinition {
             world: world.id(),
             snapshot,
             host,
+            bindings: None,
         })
     }
 
-    fn require_managed_definition(&self) -> Result<(), SceneSpawnReport> {
+    pub(super) fn capture_with_bindings(
+        world: &World,
+        registry: &ComponentRegistry,
+        bindings: &SceneComponentBindings,
+    ) -> Result<Self, SceneSpawnReport> {
+        let mut definition = Self::capture(world, registry)?;
+        if !definition.snapshot.ptr_eq(bindings.native_snapshot()) {
+            return Err(definition_rejection());
+        }
+        definition.bindings = Some(bindings.clone());
+        definition.require_managed_definition()?;
+        definition.validate(world)?;
+        Ok(definition)
+    }
+
+    pub(super) fn require_managed_definition(&self) -> Result<(), SceneSpawnReport> {
         match &self.host {
             SceneHostCompositionBasis::Managed(snapshot) if !snapshot.ptr_eq(&self.snapshot) => {
                 Err(definition_rejection())
             }
             _ => Ok(()),
         }
+    }
+
+    pub(super) fn bindings(&self) -> Option<&SceneComponentBindings> {
+        self.bindings.as_ref()
+    }
+
+    pub(super) fn matches_registry(&self, registry: &ComponentRegistry) -> bool {
+        registry.shares_snapshot(&self.snapshot)
     }
 
     pub(super) fn validate(&self, world: &World) -> Result<(), SceneSpawnReport> {
@@ -124,7 +149,32 @@ impl ScenePreparationDefinition {
                 Err(ComponentRegistryAuthorityError::MissingAuthority),
             ) => Ok(()),
             _ => Err(definition_rejection()),
+        }?;
+        if let Some(bindings) = &self.bindings {
+            if !bindings.native_snapshot().ptr_eq(&self.snapshot) {
+                return Err(definition_rejection());
+            }
+            match &self.host {
+                SceneHostCompositionBasis::Managed(_) => {
+                    crate::validate_scene_component_bindings_authority(world)
+                        .map_err(|_| definition_rejection())?;
+                    if !crate::scene_component_bindings(world)
+                        .is_some_and(|installed| bindings.same_definitions(installed))
+                    {
+                        return Err(definition_rejection());
+                    }
+                }
+                SceneHostCompositionBasis::Standalone => {
+                    if crate::scene_component_bindings(world).is_some()
+                        || crate::validate_scene_component_bindings_authority(world)
+                            != Err(crate::SceneComponentBindingsAuthorityError::MissingAuthority)
+                    {
+                        return Err(definition_rejection());
+                    }
+                }
+            }
         }
+        Ok(())
     }
 }
 
@@ -237,9 +287,117 @@ pub(super) fn prepare_ordinary_scene(
         None,
         bindings,
         &SceneNativeRetirementClaims::default(),
+        ComponentValueMaterializationLimits::default(),
     )?;
     unbound.definition.validate(world)?;
     Ok(PreparedScene { unbound })
+}
+
+impl SceneComponentBindings {
+    /// Prepares the complete native/data Scene using this explicit representation selection.
+    /// A managed World must have installed the same selection during App composition.
+    pub fn prepare_scene(
+        &self,
+        world: &mut World,
+        candidate: &ExpandedSceneCandidate,
+        occurrence: &SceneOccurrenceKey,
+        database: Option<&ProjectAssetDatabase>,
+    ) -> Result<PreparedScene, SceneSpawnReport> {
+        self.prepare_scene_with_limits(
+            world,
+            candidate,
+            occurrence,
+            database,
+            ComponentValueMaterializationLimits::default(),
+        )
+    }
+
+    /// Prepares all native and data values under one aggregate retained-value allowance.
+    pub fn prepare_scene_with_limits(
+        &self,
+        world: &mut World,
+        candidate: &ExpandedSceneCandidate,
+        occurrence: &SceneOccurrenceKey,
+        database: Option<&ProjectAssetDatabase>,
+        limits: ComponentValueMaterializationLimits,
+    ) -> Result<PreparedScene, SceneSpawnReport> {
+        self.prepare_selected_scene(
+            world,
+            candidate,
+            occurrence,
+            database,
+            SceneIdentityCommit::Register,
+            limits,
+        )
+    }
+
+    /// Prepares replacement of one exact live activation with complete native/data values.
+    pub fn prepare_scene_replacement(
+        &self,
+        world: &mut World,
+        candidate: &ExpandedSceneCandidate,
+        current: &SpawnedSceneInstance,
+        database: Option<&ProjectAssetDatabase>,
+    ) -> Result<PreparedScene, SceneSpawnReport> {
+        self.prepare_scene_replacement_with_limits(
+            world,
+            candidate,
+            current,
+            database,
+            ComponentValueMaterializationLimits::default(),
+        )
+    }
+
+    /// Prepares replacement with the same aggregate allowance available to initial publication.
+    pub fn prepare_scene_replacement_with_limits(
+        &self,
+        world: &mut World,
+        candidate: &ExpandedSceneCandidate,
+        current: &SpawnedSceneInstance,
+        database: Option<&ProjectAssetDatabase>,
+        limits: ComponentValueMaterializationLimits,
+    ) -> Result<PreparedScene, SceneSpawnReport> {
+        let occurrence = occurrence_for_instance(world, current)
+            .map_err(|error| occurrence_rejection(DiagnosticReport::default(), error))?
+            .clone();
+        self.prepare_selected_scene(
+            world,
+            candidate,
+            &occurrence,
+            database,
+            SceneIdentityCommit::Replace(current),
+            limits,
+        )
+    }
+
+    fn prepare_selected_scene(
+        &self,
+        world: &mut World,
+        candidate: &ExpandedSceneCandidate,
+        occurrence: &SceneOccurrenceKey,
+        database: Option<&ProjectAssetDatabase>,
+        target: SceneIdentityCommit<'_>,
+        limits: ComponentValueMaterializationLimits,
+    ) -> Result<PreparedScene, SceneSpawnReport> {
+        let definition =
+            ScenePreparationDefinition::capture_with_bindings(world, self.native_registry(), self)?;
+        let asset_bindings = SceneAssetBindings::from_world(world);
+        let unbound = SceneSpawner::new().prepare_unbound_with_asset_context_and_product_bindings(
+            world,
+            self.native_registry(),
+            definition,
+            candidate,
+            occurrence,
+            database,
+            target,
+            None,
+            asset_bindings,
+            &SceneNativeRetirementClaims::default(),
+            limits,
+        )?;
+        unbound.definition.validate(world)?;
+        Ok(PreparedScene { unbound })
+    }
 }
 
 fn preparation_rejection(code: &'static str, summary: &'static str) -> SceneSpawnReport {
@@ -251,10 +409,24 @@ fn preparation_rejection(code: &'static str, summary: &'static str) -> SceneSpaw
     }
 }
 
-fn definition_rejection() -> SceneSpawnReport {
+pub(super) fn definition_rejection() -> SceneSpawnReport {
     preparation_rejection(
         "scene.prepared-definition-changed",
         "Prepared Scene definition or managed authority is unavailable",
+    )
+}
+
+pub(super) fn data_lifecycle_rejection() -> SceneSpawnReport {
+    preparation_rejection(
+        "scene.data-lifecycle-ineligible",
+        "Scene data carrier would run unsupported lifecycle work",
+    )
+}
+
+pub(super) fn data_binding_rejection() -> SceneSpawnReport {
+    preparation_rejection(
+        "scene.reserved-native-component",
+        "Scene-owned data carrier cannot be bound through a native component codec",
     )
 }
 
@@ -303,6 +475,18 @@ impl UnboundScenePublication {
         })?;
         if has_targets {
             world.register_component::<SceneEntitySource>();
+        }
+        if self
+            .preflight
+            .entities
+            .iter()
+            .any(|entity| !entity.data_components.is_empty())
+        {
+            world.register_component::<crate::SceneDataComponents>();
+            validate_registered_persistent_component_apply::<crate::SceneDataComponents>(
+                world, None,
+            )
+            .map_err(|_| data_lifecycle_rejection())?;
         }
         self.prepared_values
             .validate_fresh_targets(world, has_targets)
@@ -390,7 +574,7 @@ impl UnboundScenePublication {
         let new_identity_domain = self.revalidate(world)?;
         let Self {
             definition,
-            preflight,
+            mut preflight,
             component_locations,
             prepared_values,
             prepared_product,
@@ -451,14 +635,27 @@ impl UnboundScenePublication {
                     });
                 }
             };
-        let (product_insertion, product_resources, additional_retirements) = match prepared_product
-        {
-            Some(product) => {
-                let (insertion, resources) = product.overlay.lower_components(&spawned_by_id);
-                (insertion, Some(resources), product.additional_retirements)
+        let (mut component_insertion, product_resources, additional_retirements) =
+            match prepared_product {
+                Some(product) => {
+                    let (insertion, resources) = product.overlay.lower_components(&spawned_by_id);
+                    (insertion, Some(resources), product.additional_retirements)
+                }
+                None => (LifecycleFreeInsertionPlan::new(), None, Vec::new()),
+            };
+        for entity in &mut preflight.entities {
+            if entity.data_components.is_empty() {
+                continue;
             }
-            None => (LifecycleFreeInsertionPlan::new(), None, Vec::new()),
-        };
+            let target = spawned_by_id[&entity.id];
+            let records = std::mem::take(&mut entity.data_components)
+                .into_iter()
+                .map(|entry| (entry.id, entry.owner, entry.record));
+            component_insertion.push(
+                target,
+                crate::SceneDataComponents::new(world, target, records),
+            );
+        }
         let additional_retirement_entities = additional_retirements
             .iter()
             .map(|token| token.entity())
@@ -758,10 +955,10 @@ impl UnboundScenePublication {
             }
         };
 
-        if product_insertion.validate(world).is_err() {
+        if component_insertion.validate(world).is_err() {
             diagnostics.push(diagnostic_error(
                 "scene.product-overlay-lifecycle-ineligible",
-                "Scene product overlay would run unsupported lifecycle work",
+                "Scene component insertion would run unsupported lifecycle work",
             ));
             rollback_spawn_transaction(world, &spawned_entities);
             return Err(SceneSpawnReport {
@@ -780,7 +977,7 @@ impl UnboundScenePublication {
                 ScenePublicationTarget::Projection(current) => current,
             },
             prepared_components,
-            product_insertion,
+            component_insertion,
             product_resources,
             hierarchy_operations,
             scene_retirements,

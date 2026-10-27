@@ -117,13 +117,16 @@ The October 27 [custom-drawn UI study](../research/2026-10-27-custom-drawn-edito
 and [language/extension study](../research/2026-10-27-language-extension-product-boundaries.md)
 integrate the updated conversation against pinned reference code and official documentation.
 The [Scene representation design](scene-component-representations-design.md) and its
-[production plan](../plans/2026-10-27-scene-data-representation-plan.md) remain Proposed.
+[production plan](../plans/2026-10-27-scene-data-representation-plan.md) separate ADR 0006's adopted
+closed native/data storage family from Proposed executable publications and language-owner work.
 The user-selected UI destination is [Nara's own custom-drawn Editor
 runtime](foundation-architecture-reassessment.md#updated-custom-ui-and-language-research), not
-embedding a reference toolkit. UI implementation remains future work; the Proposed Scene family
-starts with backend-free owner metadata admission, not a complete materializer. No official
-C# SDK was selected. The rebaseline
-plan keeps complete-tool evaluation and owned-UI implementation independent.
+embedding a reference toolkit. UI implementation remains future work. The
+[runtime-family evidence](../knowledge/engineering/verification/2026-10/2026-10-27T125421Z-production-scene-native-data-runtime-and-managed-authority-qualification-294f613511bb48e49fed958c05a1a469.md)
+owns actual managed Scene/data and public consumer verification; actual product recipe/selected
+language integration remains. The [fixed-baseline review](../audits/2026-10-27-scene-runtime-and-extension-plan-review.md)
+records owning-contract corrections and concrete subsequent cleanups. No official C# SDK was
+selected. Complete-tool evaluation and owned-UI implementation remain independent.
 
 The [per-document persistence-custody design](editor-document-persistence-custody-design.md)
 specifies R5c's concrete replacement for the integrated Host's per-kind file lanes. It separates

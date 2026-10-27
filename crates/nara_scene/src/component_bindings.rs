@@ -49,6 +49,9 @@ impl SceneComponentBindingLimits {
 /// Refusal to compose disjoint native and data-only Scene definitions.
 #[derive(Debug)]
 pub enum SceneComponentBindingError {
+    ReservedNativeComponent {
+        component: ComponentTypeId,
+    },
     DuplicateOwner {
         owner: PersistentComponentSchemaOwnerId,
     },
@@ -68,6 +71,10 @@ pub enum SceneComponentBindingError {
 impl std::fmt::Display for SceneComponentBindingError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ReservedNativeComponent { component } => write!(
+                formatter,
+                "Scene-owned data carrier cannot be bound as native component '{component}'"
+            ),
             Self::DuplicateOwner { owner } => write!(
                 formatter,
                 "Scene bindings repeat durable Schema owner '{owner}'"
@@ -129,6 +136,12 @@ impl SceneComponentBindings {
         owners: impl IntoIterator<Item = ComponentSchemaOwnerSnapshot>,
         limits: SceneComponentBindingLimits,
     ) -> Result<Self, SceneComponentBindingError> {
+        let native_registry = ComponentRegistry::from_snapshot(native.clone());
+        if let Some(schema) = native_registry.schema_for_type::<crate::SceneDataComponents>() {
+            return Err(SceneComponentBindingError::ReservedNativeComponent {
+                component: schema.id().clone(),
+            });
+        }
         let mut admitted = BTreeMap::new();
         let mut declared = 0usize;
         for owner in owners {
@@ -192,7 +205,7 @@ impl SceneComponentBindings {
             }
         }
         Ok(Self(Arc::new(Bindings {
-            native_registry: ComponentRegistry::from_snapshot(native.clone()),
+            native_registry,
             native,
             owners,
             claims,
@@ -225,5 +238,18 @@ impl SceneComponentBindings {
 
     pub(crate) fn native_registry(&self) -> &ComponentRegistry {
         &self.0.native_registry
+    }
+
+    /// Compares the immutable representation selection without depending on the container
+    /// allocation. The native registry snapshot and every admitted data-owner snapshot must be
+    /// the exact same admission witnesses.
+    pub(crate) fn same_definitions(&self, other: &Self) -> bool {
+        self.native_snapshot().ptr_eq(other.native_snapshot())
+            && self.data_owners().len() == other.data_owners().len()
+            && self
+                .data_owners()
+                .iter()
+                .zip(other.data_owners())
+                .all(|(left, right)| left.owner_id() == right.owner_id() && left.ptr_eq(right))
     }
 }

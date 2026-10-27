@@ -16,12 +16,12 @@ its hidden entry points. Native registry cardinality, exact native preparation a
 retirement remain intact. This is a prerequisite to actual optional-language owner integration,
 not proof that R3 or the foundation Goal is complete.
 
-The existing private code-lifetime checkpoint is `65402b9`. Backend-free owner metadata admission
-and closed mixed selection/shared compilation are the first implementation slices; identifying
-insertion/export seams does not implement the complete runtime family. Detailed verification
-and continuity belong in engineering memory.
-Durable contract changes require ADR reconciliation when evidence is ready; ADR 0120 remains
-Proposed during implementation.
+The existing private code-lifetime checkpoint is `65402b9`. Backend-free owner metadata admission,
+closed mixed selection/shared compilation and the production runtime-family successor are scoped
+implementation slices. The [runtime evidence](../knowledge/engineering/verification/2026-10/2026-10-27T125421Z-production-scene-native-data-runtime-and-managed-authority-qualification-294f613511bb48e49fed958c05a1a469.md)
+owns actual checks and remaining integration, rather than treating identified seams as execution.
+ADR 0006 adopts the closed native/data storage contract; ADR 0120 remains Proposed for broader
+executable publication, language custody, migration and cohort replacement.
 
 ## Delivery Order
 
@@ -35,6 +35,13 @@ The shared Prefab compiler accepts this strict mixed authority and preserves com
 provenance/actual demand. Do not compile runtime records through native-preview omissions.
 
 ### Atomic Production Materialization And Export
+
+The [fixed-baseline runtime review](../audits/2026-10-27-scene-runtime-and-extension-plan-review.md)
+adds three shared native prerequisites: compose plugin-owned authority guards at existing App
+safe points; require exact managed definitions through advanced replacement as well as ordinary
+prepare while preserving independent projections; and reject export definitions that omit actual
+live native persistent members. Implement these in their owning paths rather than a data-only
+workaround.
 
 Prepare complete per-entity data groups with native prepared values before target allocation.
 Insert the concrete pure-data carrier through the existing validated insertion tail, reserving
@@ -63,6 +70,12 @@ the selected optional owner away from the private helper. Materialization of pla
 language execution readiness: required callback/module contributions still reject when absent.
 Select one production optional-language path using domain access and author-workflow evidence;
 do not turn both experimental bridges into maintained SDKs for optionality.
+
+Include an actual scheduled Rust data consumer: read and replace one member, preserve its sibling,
+reject a command retaining a retired entity incarnation, and keep runtime writes out of source
+history. The initial family may expose conservative carrier-level ECS access/change granularity;
+per-Schema dynamic descriptors require independent query/scheduler pressure. Share this consumer
+with the later semantic tool/inline Inspector workflow without freezing a toolkit panel API.
 
 ## Verification And Removal
 

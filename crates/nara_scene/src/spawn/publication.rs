@@ -22,7 +22,7 @@ pub(super) struct PreparedScenePublication {
     pub(super) identity_tokens: BTreeMap<SceneEntityId, WorldEntityToken>,
     pub(super) expected: Option<SpawnedSceneInstance>,
     pub(super) prepared_components: PreparedComponentApplyBatch,
-    pub(super) product_insertion: LifecycleFreeInsertionPlan,
+    pub(super) component_insertion: LifecycleFreeInsertionPlan,
     pub(super) product_resources: Option<PreparedSceneProductResources>,
     pub(super) hierarchy_operations: Vec<HierarchyOperation>,
     pub(super) scene_retirements: Vec<Entity>,
@@ -100,7 +100,7 @@ impl PreparedScenePublication {
         self.prepared_components
             .validate_commit(world)
             .map_err(|_| changed())?;
-        self.product_insertion
+        self.component_insertion
             .validate(world)
             .map_err(|_| changed())?;
         if let Some(resources) = &self.product_resources {
@@ -284,7 +284,7 @@ impl PreparedScenePublication {
         let Self {
             prepared_identity,
             prepared_components,
-            product_insertion,
+            component_insertion,
             product_resources,
             scene_retirements,
             retired_entities,
@@ -296,7 +296,7 @@ impl PreparedScenePublication {
         } = self;
         // All callbacks have already run. The remaining tail holds exclusive World access and
         // applies only freshly validated, lifecycle-free publications.
-        let world = product_insertion
+        let world = component_insertion
             .prepare(world)
             .expect("Scene overlay was validated in the same exclusive publication tail")
             .commit();

@@ -1,21 +1,35 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+};
 
-use nara_asset::AssetRefExportPolicy;
-use nara_diagnostic::DiagnosticReport;
+use nara_asset::{AssetRef, AssetRefExportPolicy, ProjectAssetDatabase, StableAssetId};
+use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Entity, World};
 use nara_hierarchy::{Children, HierarchyRoots, Parent, validate_hierarchy};
 use nara_identity::{
-    EntityLookup, EntityReference, RuntimeEntityReference, SceneInstanceId, WorldEntityLocator,
-    WorldIdentityDomain, WorldIdentityDomainId,
+    EntityLookup, EntityReference, PersistentRuntimeReference, RuntimeEntityReference,
+    SceneInstanceId, WorldEntityLocator, WorldIdentityDomain, WorldIdentityDomainId,
+};
+use nara_reflect::__private::{
+    component_snapshot_matches_runtime_type, effective_component_value_with_budget,
+    validate_persistent_export_coverage,
 };
 use nara_reflect::{
-    ComponentCapability, ComponentEncodeContext, ComponentRegistry, ComponentValue,
-    ComponentValueMaterializationLimits, effective_component_value_owned,
-    rewrite_declared_entity_references,
+    ComponentCapability, ComponentEncodeContext, ComponentEntityReferenceRewriteError,
+    ComponentRegistry, ComponentRegistryAuthorityError, ComponentSchema, ComponentValue,
+    ComponentValueMaterializationLimits, collect_declared_asset_references_from_schema_with_limits,
+    component_registry, validate_component_registry_authority,
+    validate_component_value_with_limits,
 };
 
 use crate::{
-    SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
+    SceneComponentBindings, SceneComponentRecord, SceneDataComponents, SceneDocument,
+    SceneEntityId, SceneEntityRecord,
+    component_binding_plugin::{
+        SceneComponentBindingsAuthorityError, scene_component_bindings,
+        validate_scene_component_bindings_authority,
+    },
     diagnostics::{
         error as diagnostic_error, with_codec_error, with_entity_reference_rewrite_error,
         with_public_locator, with_public_u64,
@@ -118,9 +132,15 @@ enum ExportReferenceResolutionError {
     PersistentTargetDeleted,
     PersistentTargetStale,
     InvalidIdentityState,
+    ValueBudgetExceeded { observed: usize },
 }
 
 #[must_use]
+/// Exports all current live Scene identities as a flattened native-only document.
+///
+/// This is distinct from source Save and requires the exact installed native definition in a
+/// managed World. Independent preview publication does not make another registry the managed
+/// export authority. Any encountered data-family member refuses the complete output.
 pub fn export_scene(world: &World, registry: &ComponentRegistry) -> SceneExportReport {
     export_scene_with_options(world, registry, SceneExportOptions::default())
 }
@@ -131,9 +151,100 @@ pub fn export_scene_with_options(
     registry: &ComponentRegistry,
     options: SceneExportOptions,
 ) -> SceneExportReport {
+    export_scene_selected(world, registry, None, options, None)
+}
+
+/// Exports native values using explicit immutable project metadata for asset policy lowering,
+/// including references introduced by omitted-field defaults after native encoding.
+#[must_use]
+pub fn export_scene_with_asset_database(
+    world: &World,
+    registry: &ComponentRegistry,
+    options: SceneExportOptions,
+    database: &ProjectAssetDatabase,
+) -> SceneExportReport {
+    export_scene_selected(world, registry, None, options, Some(database))
+}
+
+impl SceneComponentBindings {
+    /// Exports the current live Scene identities with this exact representation selection.
+    #[must_use]
+    pub fn export_scene(&self, world: &World) -> SceneExportReport {
+        self.export_scene_with_options(world, SceneExportOptions::default(), None)
+    }
+
+    /// Exports native and data records without realizing data-family assets or invoking codecs
+    /// for them. Path export of a stable asset ID requires the selected project metadata.
+    #[must_use]
+    pub fn export_scene_with_options(
+        &self,
+        world: &World,
+        options: SceneExportOptions,
+        database: Option<&ProjectAssetDatabase>,
+    ) -> SceneExportReport {
+        export_scene_selected(world, self.native_registry(), Some(self), options, database)
+    }
+}
+
+fn export_scene_selected(
+    world: &World,
+    registry: &ComponentRegistry,
+    bindings: Option<&SceneComponentBindings>,
+    options: SceneExportOptions,
+    database: Option<&ProjectAssetDatabase>,
+) -> SceneExportReport {
     let mut diagnostics = DiagnosticReport::default();
     let mut exported_value_nodes = 0_usize;
     let mut exported_value_bytes = 0_usize;
+    if bindings.is_none() {
+        let native_authority = match (
+            component_registry(world),
+            validate_component_registry_authority(world),
+        ) {
+            (None, Err(ComponentRegistryAuthorityError::MissingAuthority)) => true,
+            (Some(installed), Ok(())) => registry
+                .snapshot()
+                .is_ok_and(|selected| installed.shares_snapshot(&selected)),
+            _ => false,
+        };
+        if !native_authority {
+            diagnostics.push(diagnostic_error(
+                "scene.export-native-authority-invalid",
+                "Scene export requires the exact admitted managed native definition",
+            ));
+            return SceneExportReport {
+                output: None,
+                diagnostics,
+            };
+        }
+    }
+    if let Some(bindings) = bindings {
+        let standalone = component_registry(world).is_none()
+            && validate_component_registry_authority(world)
+                == Err(ComponentRegistryAuthorityError::MissingAuthority);
+        let native_matches = standalone
+            || (validate_component_registry_authority(world).is_ok()
+                && component_registry(world)
+                    .is_some_and(|registry| registry.shares_snapshot(bindings.native_snapshot())));
+        let selection_matches = match (
+            scene_component_bindings(world),
+            validate_scene_component_bindings_authority(world),
+        ) {
+            (Some(installed), Ok(())) => installed.same_definitions(bindings),
+            (None, Err(SceneComponentBindingsAuthorityError::MissingAuthority)) => standalone,
+            _ => false,
+        };
+        if !native_matches || !selection_matches {
+            diagnostics.push(diagnostic_error(
+                "scene.export-bindings-authority-invalid",
+                "Scene export requires the exact admitted managed component bindings",
+            ));
+            return SceneExportReport {
+                output: None,
+                diagnostics,
+            };
+        }
+    }
     let execution = match registry.snapshot() {
         Ok(snapshot) => snapshot,
         Err(_) => {
@@ -224,6 +335,36 @@ pub fn export_scene_with_options(
         }
     }
 
+    // Complete native coverage admission before any encoder runs. A refusal on the last entity
+    // must not execute callbacks for an earlier member under an incomplete selection.
+    for entity in &export_entities {
+        if let Err(error) =
+            validate_persistent_export_coverage(world, entity.entity, |component, runtime| {
+                execution
+                    .schema(component)
+                    .is_some_and(|schema| schema.has_capability(ComponentCapability::Scene))
+                    && component_snapshot_matches_runtime_type(
+                        &execution, world, component, runtime,
+                    )
+            })
+        {
+            diagnostics.push(with_codec_error(
+                with_public_locator(
+                    diagnostic_error(
+                        "scene.export-native-binding-unavailable",
+                        "Scene export selection does not cover the actual persistent native components",
+                    ),
+                    "entity-id", entity.authored_id.as_str(),
+                ), &error, None,
+            ));
+        }
+    }
+    if diagnostics.has_errors() {
+        return SceneExportReport {
+            output: None,
+            diagnostics,
+        };
+    }
     let assigned_ids = assign_export_ids(&export_entities, &mut diagnostics);
     let mut remap_entries = BTreeMap::new();
     let mut id_by_entity = BTreeMap::<Entity, SceneEntityId>::new();
@@ -275,8 +416,11 @@ pub fn export_scene_with_options(
         .filter(|entity| id_by_entity.contains_key(entity))
         .collect::<BTreeSet<_>>();
 
-    let encode_context =
+    let mut encode_context =
         ComponentEncodeContext::new().with_asset_ref_export_policy(options.asset_ref_export_policy);
+    if let Some(database) = database {
+        encode_context = encode_context.with_project_asset_database(database);
+    }
     let mut records = Vec::with_capacity(export_entities.len());
     for (export_entity, id) in export_entities.iter().zip(assigned_ids) {
         let parent = world
@@ -314,10 +458,20 @@ pub fn export_scene_with_options(
             );
             match encoded {
                 Ok(Some(value)) => {
-                    let value = match effective_component_value_owned(
+                    let (effective, cost) = match effective_component_value_with_budget(
                         schema,
-                        value,
-                        options.value_limits,
+                        &value,
+                        options
+                            .value_limits
+                            .nodes()
+                            .get()
+                            .saturating_sub(exported_value_nodes),
+                        options
+                            .value_limits
+                            .bytes()
+                            .get()
+                            .saturating_sub(exported_value_bytes),
+                        options.value_limits.depth(),
                     ) {
                         Ok(value) => value,
                         Err(error) => {
@@ -340,90 +494,33 @@ pub fn export_scene_with_options(
                             continue;
                         }
                     };
-                    let rewritten = rewrite_declared_entity_references(
-                        schema,
-                        &value,
-                        reference_traversal_limits(options.value_limits),
-                        |_path, reference| {
-                            rewrite_export_reference(
-                                world,
-                                domain,
-                                export_entity.instance,
-                                reference,
-                                &remap_entries,
-                            )
-                        },
-                    );
-                    match rewritten {
-                        Ok(value) => {
-                            let output_cost = value.cost();
-                            let output_depth = value_depth(&value);
-                            let Some(output_nodes) =
-                                exported_value_nodes.checked_add(output_cost.nodes())
-                            else {
-                                diagnostics.push(export_value_budget_diagnostic(
-                                    usize::MAX,
-                                    options.value_limits.nodes().get(),
-                                    id.as_str(),
-                                    schema.id.as_str(),
-                                ));
-                                continue;
-                            };
-                            let Some(output_bytes) =
-                                exported_value_bytes.checked_add(output_cost.logical_bytes())
-                            else {
-                                diagnostics.push(export_value_budget_diagnostic(
-                                    usize::MAX,
-                                    options.value_limits.bytes().get(),
-                                    id.as_str(),
-                                    schema.id.as_str(),
-                                ));
-                                continue;
-                            };
-                            if output_nodes > options.value_limits.nodes().get()
-                                || output_bytes > options.value_limits.bytes().get()
-                                || output_depth > options.value_limits.depth().get()
-                            {
-                                let (observed, maximum) =
-                                    if output_nodes > options.value_limits.nodes().get() {
-                                        (output_nodes, options.value_limits.nodes().get())
-                                    } else if output_bytes > options.value_limits.bytes().get() {
-                                        (output_bytes, options.value_limits.bytes().get())
-                                    } else {
-                                        (output_depth, options.value_limits.depth().get())
-                                    };
-                                diagnostics.push(export_value_budget_diagnostic(
-                                    observed,
-                                    maximum,
-                                    id.as_str(),
-                                    schema.id.as_str(),
-                                ));
-                                continue;
-                            }
-                            exported_value_nodes = output_nodes;
-                            exported_value_bytes = output_bytes;
+                    // Reuse the codec's owning value when no defaults were missing. Default
+                    // copies above were admitted against the complete aggregate remainder.
+                    let mut value = match effective {
+                        Cow::Borrowed(_) => value,
+                        Cow::Owned(value) => value,
+                    };
+                    let context = ExportValueContext {
+                        world,
+                        domain,
+                        instance: export_entity.instance,
+                        remap: &remap_entries,
+                        options,
+                        database,
+                        retained_nodes: exported_value_nodes,
+                        retained_bytes: exported_value_bytes,
+                    };
+                    match context.lower_references(schema, &mut value, cost.logical_bytes(), &id) {
+                        Ok(output_bytes) => {
+                            exported_value_nodes += cost.nodes();
+                            exported_value_bytes += output_bytes;
                             components.insert(
                                 schema.id.clone(),
                                 SceneComponentRecord::new(schema.version, value),
                             );
                         }
-                        Err(error) => {
-                            diagnostics.push(with_entity_reference_rewrite_error(
-                                with_public_locator(
-                                    with_public_locator(
-                                        diagnostic_error(
-                                            "scene.export-entity-reference-rewrite-failed",
-                                            "Scene entity reference export failed",
-                                        ),
-                                        "entity-id",
-                                        id.as_str(),
-                                    ),
-                                    "component-id",
-                                    schema.id.as_str(),
-                                ),
-                                &error,
-                                |error| export_reference_resolution_error_name(*error),
-                            ));
+                        Err(diagnostic) => {
+                            diagnostics.push(diagnostic);
                         }
                     }
                 }
@@ -445,6 +542,106 @@ pub fn export_scene_with_options(
                         &error,
                         Some(schema),
                     ));
+                }
+            }
+        }
+
+        if let Some(carrier) = world.get::<SceneDataComponents>(export_entity.entity) {
+            let location_matches = carrier.matches_location(world, export_entity.entity);
+            if !location_matches {
+                diagnostics.push(with_public_locator(
+                    diagnostic_error(
+                        "scene.export-data-location-mismatch",
+                        "Scene data carrier does not belong to this live entity location",
+                    ),
+                    "entity-id",
+                    id.as_str(),
+                ));
+            }
+            for (component, entry) in carrier.entries() {
+                let locate = |diagnostic| {
+                    with_public_locator(
+                        with_public_locator(diagnostic, "entity-id", id.as_str()),
+                        "component-id",
+                        component.as_str(),
+                    )
+                };
+                if !location_matches {
+                    continue;
+                }
+                if components.contains_key(component) {
+                    diagnostics.push(locate(diagnostic_error(
+                        "scene.export-component-collision",
+                        "Scene export contains duplicate native and data component IDs",
+                    )));
+                    continue;
+                }
+                let Some(owner) = bindings.and_then(|bindings| bindings.data_owner(component))
+                else {
+                    diagnostics.push(locate(diagnostic_error(
+                        "scene.export-data-binding-unavailable",
+                        "Scene export requires the selected live data component binding",
+                    )));
+                    continue;
+                };
+                let record = entry.record();
+                if !owner.ptr_eq(entry.owner()) || record.owner() != Some(owner.owner_id()) {
+                    diagnostics.push(locate(diagnostic_error(
+                        "scene.export-data-owner-mismatch",
+                        "Scene data component does not match the exact selected owner admission",
+                    )));
+                    continue;
+                }
+                let Some(schema) = owner.schema(component) else {
+                    diagnostics.push(locate(diagnostic_error(
+                        "scene.export-data-binding-unavailable",
+                        "Scene data component has no current selected Schema",
+                    )));
+                    continue;
+                };
+                if record.version != schema.version() {
+                    diagnostics.push(locate(diagnostic_error(
+                        "scene.export-data-version-mismatch",
+                        "Scene data export requires the current selected Schema version",
+                    )));
+                    continue;
+                }
+                if nara_reflect::__private::validate_schema_capabilities(
+                    schema,
+                    [ComponentCapability::Scene],
+                )
+                .is_err()
+                {
+                    diagnostics.push(locate(diagnostic_error(
+                        "scene.export-data-schema-invalid",
+                        "Scene data component Schema does not support complete Scene export",
+                    )));
+                    continue;
+                }
+                let context = ExportValueContext {
+                    world,
+                    domain,
+                    instance: export_entity.instance,
+                    remap: &remap_entries,
+                    options,
+                    database,
+                    retained_nodes: exported_value_nodes,
+                    retained_bytes: exported_value_bytes,
+                };
+                match context.export_data_value(schema, record, &id) {
+                    Ok(value) => {
+                        let cost = value.cost();
+                        exported_value_nodes += cost.nodes();
+                        exported_value_bytes += cost.logical_bytes();
+                        components.insert(
+                            component.clone(),
+                            SceneComponentRecord::new(record.version, value)
+                                .with_owner(owner.owner_id().clone()),
+                        );
+                    }
+                    Err(diagnostic) => {
+                        diagnostics.push(diagnostic);
+                    }
                 }
             }
         }
@@ -472,6 +669,276 @@ pub fn export_scene_with_options(
     SceneExportReport {
         output,
         diagnostics,
+    }
+}
+
+struct ExportValueContext<'a> {
+    world: &'a World,
+    domain: &'a WorldIdentityDomain,
+    instance: SceneInstanceId,
+    remap: &'a BTreeMap<WorldEntityLocator, SceneEntityId>,
+    options: SceneExportOptions,
+    database: Option<&'a ProjectAssetDatabase>,
+    retained_nodes: usize,
+    retained_bytes: usize,
+}
+
+impl ExportValueContext<'_> {
+    fn export_data_value(
+        &self,
+        schema: &ComponentSchema,
+        record: &SceneComponentRecord,
+        entity: &SceneEntityId,
+    ) -> Result<ComponentValue, Diagnostic> {
+        let locate = |diagnostic| {
+            with_public_locator(
+                with_public_locator(diagnostic, "entity-id", entity.as_str()),
+                "component-id",
+                schema.id().as_str(),
+            )
+        };
+        let limits = self.options.value_limits;
+        let nodes = limits.nodes().get().saturating_sub(self.retained_nodes);
+        let bytes = limits.bytes().get().saturating_sub(self.retained_bytes);
+        // Raw ceilings preserve an exact zero remainder. The helper admits all source nodes,
+        // default containers and keys before any owning materialization or output copy.
+        let (effective, cost) = effective_component_value_with_budget(
+            schema,
+            &record.value,
+            nodes,
+            bytes,
+            limits.depth(),
+        )
+        .map_err(|error| {
+            with_codec_error(
+                locate(diagnostic_error(
+                    "scene.export-value-budget-exceeded",
+                    "Scene data export default materialization was refused",
+                )),
+                &error,
+                Some(schema),
+            )
+        })?;
+        // Defaults are complete, so these existing validators and walkers borrow the admitted
+        // effective tree; they do not materialize another value using the typed limits.
+        validate_component_value_with_limits(schema, effective.as_ref(), limits).map_err(
+            |error| {
+                with_codec_error(
+                    locate(diagnostic_error(
+                        "scene.export-data-value-invalid",
+                        "Scene data component payload is invalid",
+                    )),
+                    &error,
+                    Some(schema),
+                )
+            },
+        )?;
+        let mut value = effective.into_owned();
+        self.lower_references(schema, &mut value, cost.logical_bytes(), entity)?;
+        Ok(value)
+    }
+
+    fn lower_references(
+        &self,
+        schema: &ComponentSchema,
+        value: &mut ComponentValue,
+        mut value_bytes: usize,
+        entity: &SceneEntityId,
+    ) -> Result<usize, Diagnostic> {
+        let locate = |diagnostic| {
+            with_public_locator(
+                with_public_locator(diagnostic, "entity-id", entity.as_str()),
+                "component-id",
+                schema.id().as_str(),
+            )
+        };
+        let budget = |observed, maximum| {
+            export_value_budget_diagnostic(observed, maximum, entity.as_str(), schema.id().as_str())
+        };
+        let limits = self.options.value_limits;
+        let bytes = limits.bytes().get().saturating_sub(self.retained_bytes);
+        let traversal = reference_traversal_limits(limits);
+        let assets = collect_declared_asset_references_from_schema_with_limits(
+            schema,
+            schema.version(),
+            value,
+            limits,
+            traversal,
+        )
+        .map_err(|_| {
+            locate(diagnostic_error(
+                "scene.export-data-asset-reference-invalid",
+                "Scene export requires valid Schema-declared asset references",
+            ))
+        })?;
+        // Asset policy is metadata lowering, independent of entity identity rewriting. Both
+        // operations admit their replacement bytes before constructing any owning payload.
+        for reference in assets {
+            let lowered = lower_data_asset_reference(
+                reference.asset_ref(),
+                self.options.asset_ref_export_policy,
+                self.database,
+            )
+            .ok_or_else(|| {
+                locate(diagnostic_error(
+                    "scene.export-data-asset-metadata-unavailable",
+                    "Scene asset export requires admitted project metadata for this conversion",
+                ))
+            })?;
+            let invalid_path = || {
+                locate(diagnostic_error(
+                    "scene.export-data-asset-reference-invalid",
+                    "Scene asset export could not resolve its declared property path",
+                ))
+            };
+            let target = value
+                .get_path_mut(reference.path())
+                .map_err(|_| invalid_path())?;
+            value_bytes = value_bytes
+                .checked_sub(target.cost().logical_bytes())
+                .and_then(|bytes| bytes.checked_add(lowered.logical_bytes()))
+                .ok_or_else(|| budget(usize::MAX, limits.bytes().get()))?;
+            if value_bytes > bytes {
+                return Err(budget(
+                    self.retained_bytes.saturating_add(value_bytes),
+                    limits.bytes().get(),
+                ));
+            }
+            *target = lowered.into_value();
+        }
+        self.rewrite_references(schema, value, value_bytes, entity)
+    }
+
+    fn rewrite_references(
+        &self,
+        schema: &ComponentSchema,
+        value: &mut ComponentValue,
+        mut value_bytes: usize,
+        entity: &SceneEntityId,
+    ) -> Result<usize, Diagnostic> {
+        let invalid =
+            |error: &ComponentEntityReferenceRewriteError<ExportReferenceResolutionError>| {
+                with_entity_reference_rewrite_error(
+                    with_public_locator(
+                        with_public_locator(
+                            diagnostic_error(
+                                "scene.export-entity-reference-rewrite-failed",
+                                "Scene entity reference export failed",
+                            ),
+                            "entity-id",
+                            entity.as_str(),
+                        ),
+                        "component-id",
+                        schema.id().as_str(),
+                    ),
+                    error,
+                    |error| export_reference_resolution_error_name(*error),
+                )
+            };
+        let references = nara_reflect::__private::plan_declared_entity_references::<
+            ExportReferenceResolutionError,
+        >(
+            schema,
+            value,
+            reference_traversal_limits(self.options.value_limits),
+        )
+        .map_err(|error| invalid(&error))?;
+        let bytes = self
+            .options
+            .value_limits
+            .bytes()
+            .get()
+            .saturating_sub(self.retained_bytes);
+        let rewritten = references.rewrite_in_place(value, |_path, reference| {
+            let target = resolve_export_reference(
+                self.world,
+                self.domain,
+                self.instance,
+                reference,
+                self.remap,
+            )?;
+            let projected = value_bytes
+                .checked_sub(export_reference_bytes(reference))
+                .and_then(|bytes| bytes.checked_add(target.logical_bytes()));
+            let projected = projected.unwrap_or(usize::MAX);
+            if projected > bytes {
+                return Err(ExportReferenceResolutionError::ValueBudgetExceeded {
+                    observed: self.retained_bytes.saturating_add(projected),
+                });
+            }
+            value_bytes = projected;
+            Ok(target.into_reference())
+        });
+        if let Err(error) = rewritten {
+            return Err(
+                if let ComponentEntityReferenceRewriteError::Rewrite {
+                    error: ExportReferenceResolutionError::ValueBudgetExceeded { observed },
+                    ..
+                } = &error
+                {
+                    export_value_budget_diagnostic(
+                        *observed,
+                        self.options.value_limits.bytes().get(),
+                        entity.as_str(),
+                        schema.id().as_str(),
+                    )
+                } else {
+                    invalid(&error)
+                },
+            );
+        }
+        Ok(value_bytes)
+    }
+}
+
+enum LoweredDataAssetReference<'a> {
+    Path(&'a str),
+    StableId(StableAssetId),
+}
+
+impl LoweredDataAssetReference<'_> {
+    fn logical_bytes(&self) -> usize {
+        // The canonical asset wire value contains the keys "kind" and "value".
+        9_usize.saturating_add(match self {
+            Self::Path(path) => 4_usize.saturating_add(path.len()),
+            Self::StableId(_) => 9 + 36,
+        })
+    }
+
+    fn into_value(self) -> ComponentValue {
+        let (kind, value) = match self {
+            Self::Path(path) => ("path", path.to_owned()),
+            Self::StableId(id) => ("stable_id", id.to_string()),
+        };
+        ComponentValue::map([
+            ("kind", ComponentValue::String(kind.to_owned())),
+            ("value", ComponentValue::String(value)),
+        ])
+    }
+}
+
+fn lower_data_asset_reference<'a>(
+    reference: &'a AssetRef,
+    policy: AssetRefExportPolicy,
+    database: Option<&'a ProjectAssetDatabase>,
+) -> Option<LoweredDataAssetReference<'a>> {
+    match (policy, reference) {
+        (AssetRefExportPolicy::Path, AssetRef::Path(path)) => {
+            Some(LoweredDataAssetReference::Path(path.as_str()))
+        }
+        (AssetRefExportPolicy::Path, AssetRef::StableId(id)) => database
+            .and_then(|database| database.record_for_stable_id(*id))
+            .map(|record| LoweredDataAssetReference::Path(record.path().as_str())),
+        (AssetRefExportPolicy::StableIdWhenKnown, AssetRef::StableId(id)) => {
+            Some(LoweredDataAssetReference::StableId(*id))
+        }
+        (AssetRefExportPolicy::StableIdWhenKnown, AssetRef::Path(path)) => Some(
+            database
+                .and_then(|database| database.record_for_path(path))
+                .map_or(LoweredDataAssetReference::Path(path.as_str()), |record| {
+                    LoweredDataAssetReference::StableId(record.stable_id())
+                }),
+        ),
     }
 }
 
@@ -503,28 +970,6 @@ fn export_value_budget_diagnostic(
     )
 }
 
-fn value_depth(value: &ComponentValue) -> usize {
-    let mut maximum = 1_usize;
-    let mut pending = vec![(value, 1_usize)];
-    while let Some((value, depth)) = pending.pop() {
-        maximum = maximum.max(depth);
-        match value {
-            ComponentValue::List(values) => {
-                pending.extend(values.iter().map(|value| (value, depth.saturating_add(1))));
-            }
-            ComponentValue::Map(values) => {
-                pending.extend(
-                    values
-                        .values()
-                        .map(|value| (value, depth.saturating_add(1))),
-                );
-            }
-            _ => {}
-        }
-    }
-    maximum
-}
-
 const fn export_reference_resolution_error_name(
     error: ExportReferenceResolutionError,
 ) -> &'static str {
@@ -542,6 +987,7 @@ const fn export_reference_resolution_error_name(
         ExportReferenceResolutionError::PersistentTargetDeleted => "persistent-target-deleted",
         ExportReferenceResolutionError::PersistentTargetStale => "persistent-target-stale",
         ExportReferenceResolutionError::InvalidIdentityState => "invalid-identity-state",
+        ExportReferenceResolutionError::ValueBudgetExceeded { .. } => "value-budget-exceeded",
     }
 }
 
@@ -590,13 +1036,47 @@ fn assign_export_ids(
         .collect()
 }
 
-fn rewrite_export_reference(
+enum ExportReferenceTarget<'a> {
+    SceneLocal(&'a SceneEntityId),
+    Persistent(&'a PersistentRuntimeReference),
+}
+
+impl ExportReferenceTarget<'_> {
+    fn logical_bytes(&self) -> usize {
+        match self {
+            Self::SceneLocal(entity) => entity.as_str().len(),
+            Self::Persistent(entity) => entity.namespace.as_str().len().saturating_add(16),
+        }
+    }
+
+    fn into_reference(self) -> EntityReference {
+        match self {
+            Self::SceneLocal(entity) => EntityReference::SceneLocal {
+                entity: entity.clone(),
+            },
+            Self::Persistent(entity) => EntityReference::Persistent {
+                entity: entity.clone(),
+            },
+        }
+    }
+}
+
+fn export_reference_bytes(reference: &EntityReference) -> usize {
+    match reference {
+        EntityReference::SceneLocal { entity } => entity.as_str().len(),
+        EntityReference::Persistent { entity } => {
+            entity.namespace.as_str().len().saturating_add(16)
+        }
+    }
+}
+
+fn resolve_export_reference<'a>(
     world: &World,
     domain: &WorldIdentityDomain,
     owner_instance: SceneInstanceId,
-    reference: &EntityReference,
-    remap: &BTreeMap<WorldEntityLocator, SceneEntityId>,
-) -> Result<EntityReference, ExportReferenceResolutionError> {
+    reference: &'a EntityReference,
+    remap: &'a BTreeMap<WorldEntityLocator, SceneEntityId>,
+) -> Result<ExportReferenceTarget<'a>, ExportReferenceResolutionError> {
     match (
         reference,
         domain.resolve_entity_reference(world, reference, Some(owner_instance)),
@@ -611,9 +1091,8 @@ fn rewrite_export_reference(
                 .ok_or(ExportReferenceResolutionError::SceneLocalTargetMissing)?;
             let entity = remap
                 .get(locator)
-                .cloned()
                 .ok_or(ExportReferenceResolutionError::SceneLocalTargetMissing)?;
-            Ok(EntityReference::SceneLocal { entity })
+            Ok(ExportReferenceTarget::SceneLocal(entity))
         }
         (EntityReference::SceneLocal { .. }, EntityLookup::Tombstoned(_)) => {
             Err(ExportReferenceResolutionError::SceneLocalTargetTombstoned)
@@ -633,13 +1112,9 @@ fn rewrite_export_reference(
                 .persistent()
                 .ok_or(ExportReferenceResolutionError::PersistentTargetStale)?;
             if let Some(entity) = remap.get(locator) {
-                return Ok(EntityReference::SceneLocal {
-                    entity: entity.clone(),
-                });
+                return Ok(ExportReferenceTarget::SceneLocal(entity));
             }
-            Ok(EntityReference::Persistent {
-                entity: entity.clone(),
-            })
+            Ok(ExportReferenceTarget::Persistent(entity))
         }
         (EntityReference::Persistent { .. }, EntityLookup::Tombstoned(_)) => {
             Err(ExportReferenceResolutionError::PersistentTargetTombstoned)
