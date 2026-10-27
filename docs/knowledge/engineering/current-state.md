@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "68ad25d73353f38bdc1c0ad750066235f2ae760cf37754407c549e85e9f5e0de"
+source_fingerprint: "dbd68448f0af52d5d0fd1fab6d84a8d00b6457ecef9ce9bc0a1e406250dc7802"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "68ad25d73353f38bdc1c0ad750066235f2ae760cf37754407c549e85e9f
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `68ad25d73353f38bdc1c0ad750066235f2ae760cf37754407c549e85e9f5e0de`
-- Immutable records: 965
+- Source fingerprint: `dbd68448f0af52d5d0fd1fab6d84a8d00b6457ecef9ce9bc0a1e406250dc7802`
+- Immutable records: 968
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,9 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Complete Editor Prefab conversion and source admission qualification](verification/2026-10/2026-10-27T064545Z-complete-editor-prefab-conversion-and-source-admission-qualification-bc6d938e4ea5421fa42d0028230a11dc.md) - Qualifies Source pre-copy admission, reviewed Editor conversion, actual dependency fences, public consumers and selected Windows/DX12 workflows.
+- **Work Progress**: [Editor conversion source admission fixes pass full foundation cohort](progress/2026-10/2026-10-27T061533Z-editor-conversion-source-admission-fixes-pass-full-foundation-cohort-33359bf2b64a4517acffb1e0d41eb554.md) - Work Progress for Editor conversion source admission fixes pass full foundation cohort.
+- **Work Progress**: [Editor complete Prefab conversion integration and pre-copy budget corrections](progress/2026-10/2026-10-27T053151Z-editor-complete-prefab-conversion-integration-and-pre-copy-budget-corrections-394c727d98ae4d55846b93f121fd416b.md) - Shared actual-demand acquisition and Editor conversion custody are integrated; source pre-copy budget fixes, independent consumers and native qualification remain in progress.
 - **Verification Evidence**: [Complete source-owned Prefab conversion and current stable lookup qualification](verification/2026-10/2026-10-27T041718Z-complete-source-owned-prefab-conversion-and-current-stable-lookup-qualification-cbce190af0c4488b97895e68905573a6.md) - Qualifies nominal owned source conversion, same-history replay, actual semantic dependency fencing and fresh Host stable lookup validation; Editor conversion custody and native interaction remain open.
 - **Verification Evidence**: [Selected Prefab compiler and scoped source replay private qualification](verification/2026-10/2026-10-27T022733Z-selected-prefab-compiler-and-scoped-source-replay-private-qualification-c55e3532dbfd4367990424c40afe75c1.md) - Qualifies selected semantic compilation and exact same-owner replay with 557 passing Scene tests; localization, contextual publication and the Editor conversion workflow remain unimplemented.
 - **Work Progress**: [Selected Prefab semantic compilation and exact history footprint comparison in progress](progress/2026-10/2026-10-27T021313Z-selected-prefab-semantic-compilation-and-exact-history-footprint-comparison-in-progress-d4d8d5cf51814d6aa3eb72e85e3d84f3.md) - Private selected-demand and same-owner replay implementations are integrated; first test build exposed fixture API errors and executable qualification is pending.
@@ -78,9 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Source-owned Prefab Revert integration and review corrections](progress/2026-10/2026-10-26T234134Z-source-owned-prefab-revert-integration-and-review-corrections-c8fb754f923b49de9812cb196b66a3d7.md) - Bounded source observation, exact Revert and retained rejected composition are integrated; source and UI review corrections await combined qualification.
 - **Verification Evidence**: [Captured Editor Scene preview and ordered Image publication qualification](verification/2026-10/2026-10-26T221436Z-captured-editor-scene-preview-and-ordered-image-publication-qualification-bd36086e52524bb1b227dbd21da81056.md) - Actual working-copy capture, source receipts, native content and selection fences, and ordered Image observations have complete scoped owner, public, independent, and selected Windows evidence.
 - **Work Progress**: [Editor capture regression and ordered Image observation corrections in progress](progress/2026-10/2026-10-26T211738Z-editor-capture-regression-and-ordered-image-observation-corrections-in-progress-0e0a11438b61465db4dd9818d1f0ee2a.md) - Preview cohort passes 60 cases; complete root and Editor run finds five failures, with source selection and Image evidence corrections still being integrated.
-- **Work Progress**: [Editor background Scene capture and native content stamp integration in progress](progress/2026-10/2026-10-26T201651Z-editor-background-scene-capture-and-native-content-stamp-integration-in-progress-068027a8af994642921dff01067fe9e6.md) - Actual Editor capture, persistence receipts, Image hydration and native stamp fencing are being integrated; review found publication and Image races, with fresh product verification pending.
-- **Work Progress**: [Independent authoring capture and preview dependency stamp integration](progress/2026-10/2026-10-26T192056Z-independent-authoring-capture-and-preview-dependency-stamp-integration-c31cf6ef3eaa457a87528419c09ea49c.md) - Shared actual-demand capture admits independent Scene and open Prefab snapshots; Editor task scheduling and native publication remain open.
-- **Work Progress**: [Staged Prefab structural demand and selected value program qualification](progress/2026-10/2026-10-26T175942Z-staged-prefab-structural-demand-and-selected-value-program-qualification-19ce2446522e4c28a5fbd70d31ab827f.md) - Production interleaved expansion is replaced; owner qualification passes while reusable Editor capture and preview remain open.
 
 # Integration Notes
 

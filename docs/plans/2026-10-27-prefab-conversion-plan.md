@@ -1,7 +1,7 @@
 ---
 title: Source-Owned Complete Prefab Conversion
 date: 2026-10-27
-status: design-comparison
+status: qualified-workflow
 related_plan: 2026-10-23-foundation-architecture-rebaseline-plan.md
 ---
 
@@ -15,10 +15,12 @@ source records, commit once, Undo/Redo, Save and Reopen. The source owner alloca
 rewrites declared references. The selected anchor keeps its ID, local components and placement.
 Its ordinary local children retain their IDs and relative order. Other instances remain linked.
 
-This is a design comparison and implementation plan, not an implemented conversion interface or
-an Accepted ADR amendment. The preceding declaration/Revert workflow is qualified at `f2fc60a`;
-its [evidence](../knowledge/engineering/verification/2026-10/2026-10-27T012127Z-source-owned-prefab-intent-review-and-revert-qualification-4b14705bceb545e79f34b7afbc5144bf.md)
-does not qualify conversion.
+The nominal source-owner interface, selected compilation, exact replay and dependency checks
+are implemented and qualified in the [source conversion evidence](../knowledge/engineering/verification/2026-10/2026-10-27T041718Z-complete-source-owned-prefab-conversion-and-current-stable-lookup-qualification-cbce190af0c4488b97895e68905573a6.md).
+ADRs 0026, 0038, 0047 and 0090 adopt those source contracts. The
+[Editor qualification](../knowledge/engineering/verification/2026-10/2026-10-27T064545Z-complete-editor-prefab-conversion-and-source-admission-qualification-bc6d938e4ea5421fa42d0028230a11dc.md)
+adds actual task custody, file/working-copy fences, bounded review and selected Windows/DX12
+interaction. It closes this complete-conversion workflow; the full foundation Goal remains active.
 
 The first workflow is **complete conversion of the selected instance**, including nested instances
 and overlay additions owned by its projection. It does not mean converting every instance in the
@@ -29,7 +31,7 @@ needs a separately designed source-targeting workflow; it is not a direct source
 
 ## Concrete Design Pressure
 
-The current implementation establishes several constraints:
+The implementation inspected at design time established these constraints:
 
 - `AuthoringPrefabExpansionReport` retains a semantic candidate and typed omissions.
   `into_native_preview` removes components without native bindings. Source conversion cannot use

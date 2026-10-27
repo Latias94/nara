@@ -143,9 +143,12 @@ before R2/R3/R5b persistent contracts freeze.
 The [declarative Prefab overlay design](prefab-overlay-design.md) separates durable intent from
 exact edit/inverse patches. Private property and structural/reference comparisons challenge
 whole-root patches, old-basis placement and ambiguous reference binding. ADRs 0006/0026/0038/0043/0090
-now adopt the declarative contract. Its production replacement is in progress, including shared
-Authoring/Runtime compilation and actual dependency capture; complete source-owner and native
-qualification remain open. The separate historical [typed-origin checkpoint](../knowledge/engineering/verification/2026-10/2026-10-26T041116Z-typed-prefab-instance-addition-provenance-and-complete-consumer-propagation-331ec66de92c4315971800928d8f2dc7.md)
+now adopt the declarative contract. Shared Authoring/Runtime compilation, actual dependency capture
+and selected source workflows have scoped implementation evidence. The
+[complete conversion successor](../knowledge/engineering/verification/2026-10/2026-10-27T064545Z-complete-editor-prefab-conversion-and-source-admission-qualification-bc6d938e4ea5421fa42d0028230a11dc.md)
+qualifies direct Scene/Prefab review, dependency-fenced Commit, history, persistence and selected
+native interaction without closing the full foundation program. The separate historical
+[typed-origin checkpoint](../knowledge/engineering/verification/2026-10/2026-10-26T041116Z-typed-prefab-instance-addition-provenance-and-complete-consumer-propagation-331ec66de92c4315971800928d8f2dc7.md)
 corrects current production addition ancestry through Scene, Runtime, retention and UI keys;
 it does not qualify the Proposed overlay compiler. The [Unity/Godot editor study](../research/2026-10-26-unity-godot-prefab-editor-ownership.md)
 grounds editing contexts, explicit Apply/Revert, unused overrides and Inspector/history routing

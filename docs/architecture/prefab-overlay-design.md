@@ -1,10 +1,12 @@
 # Scene-Owned Declarative Prefab Overlays
 
-Status: Production replacement in progress. ADRs 0006/0026/0038/0043/0090 adopt the source-owned
-declarative contract; implementation, complete consumer qualification and Host publication are
-not complete. Historical comparison results below retain their original scope. The current
-working replacement stores `PrefabInstance.overrides: Option<PrefabOverlay>` and deletes the
-superseded private compiler and patch-as-overlay execution path; this status is not a release claim.
+Status: The production compiler and selected source/Host workflows have scoped qualification.
+ADRs 0006/0026/0038/0043/0090 adopt the source-owned declarative contract. The
+[complete conversion successor](../knowledge/engineering/verification/2026-10/2026-10-27T064545Z-complete-editor-prefab-conversion-and-source-admission-qualification-bc6d938e4ea5421fa42d0028230a11dc.md)
+adds Source/Editor review, exact publication, persistence and selected native evidence; broader
+promotion and the foundation program remain open. Historical comparisons below retain their
+original scope. Production stores `PrefabInstance.overrides: Option<PrefabOverlay>` and removes
+the superseded private compiler and patch-as-overlay execution path. This is not a release claim.
 
 ## Shared Authoring And Runtime Compilation
 
@@ -856,9 +858,9 @@ does not imply inherited entity editing, automatic foreign-source navigation or 
 The UI Canvas still uses the separate direct Prefab preview helper and needs the shared capture
 path. Existing Play Apply Changes remains limited to ordinary Scene entities; extending
 cross-document Apply is a separate workflow and is not required to preserve that supported scope.
-The [complete-conversion plan](../plans/2026-10-27-prefab-conversion-plan.md) compares selected
-semantic compilation and source-owned replay admission before exposing a conversion interface.
-Native preview filtering is not an acceptable source-data authority for that operation.
+The [complete-conversion plan](../plans/2026-10-27-prefab-conversion-plan.md) qualifies selected
+semantic compilation and source-owned replay through the integrated Editor and independent public
+consumers. Native preview filtering remains separate from that operation's source-data authority.
 
 The exact declaration transaction counts both snapshots and retains their unmodified comparison
 semantics. Native canonicalization rejects a snapshot requiring component migration; an equality

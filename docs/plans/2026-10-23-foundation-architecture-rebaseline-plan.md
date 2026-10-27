@@ -359,10 +359,11 @@ redesign, not by clearing tombstones or changing Scene data into World truth.
 
 Delete operation-patch-as-long-term-overlay and accidental source/runtime identity conflations.
 
-The [complete-conversion plan](2026-10-27-prefab-conversion-plan.md) compares selected compiler
-demand, semantic data retention, local-ID/reference remap and exact source-history admission.
-Its counterexamples and private comparison precede a public conversion interface; the qualified
-declaration/Revert workflow does not imply conversion support.
+The [complete-conversion plan](2026-10-27-prefab-conversion-plan.md) now has a
+[qualified Source/Editor successor](../knowledge/engineering/verification/2026-10/2026-10-27T064545Z-complete-editor-prefab-conversion-and-source-admission-qualification-bc6d938e4ea5421fa42d0028230a11dc.md):
+selected compiler demand, semantic data retention, fixed local-ID/reference remap, exact source
+history, current Host dependency fences and selected native interaction. This closes direct
+selected-instance complete conversion, not outer-only unpack, cross-source Apply or full R5.
 
 ## R6: Resource Facets, Durable Continuity And Local Artifact Store
 
