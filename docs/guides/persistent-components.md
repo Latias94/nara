@@ -92,6 +92,22 @@ The [independent component consumer](../../tests/fixtures/module-consumer/tests/
 demonstrates a successor catalog, a new current component, explicit migration and the ordinary
 Editor Create/Edit/Save/Reopen workflow using one product contribution.
 
+## Data-Only Owner Metadata
+
+Schema tools can admit an already-owned owner ID, current catalog and optional predecessor with
+`ComponentSchemaOwnerSnapshot::admit`, without `serde` or a native codec. This reuses the ordinary
+catalog/lineage validation and retains no executable callbacks. File/transport callers must apply
+their input/work limits first; bounded `AuthoringSchemaBundle` loading does so and exposes these
+same admitted owner snapshots through `owners()`.
+
+Cloning a snapshot retains its exact admission identity (`ptr_eq`). Re-admitting equivalent data
+does not. Bundle equality remains persistent-content equality, including lineage, not runtime
+authority. Converting a snapshot to `AuthoringSchemaBundleOwner` copies content into an unpublished
+candidate and does not transfer that identity. The [backend-free
+tests](../../crates/nara_reflect/tests/schema_owner.rs) cover these distinctions. Metadata admission
+alone does not install dynamic Scene storage, a language module or an executable binding; ordinary
+native materialization still requires its complete frozen native registry.
+
 ## Prepare And Materialize A Scene
 
 `spawn_scene(world, registry, candidate, occurrence, database)` is the immediate convenience. Use

@@ -152,7 +152,9 @@ fn project() -> TestProject {
     let mut owners = AuthoringSchemaBundle::from_json_bytes(&fs::read(&path).unwrap())
         .unwrap()
         .owners()
-        .to_vec();
+        .iter()
+        .map(AuthoringSchemaBundleOwner::from)
+        .collect::<Vec<_>>();
     owners.push(AuthoringSchemaBundleOwner::new(
         PersistentComponentSchemaOwnerId::try_new("demo.domain-cooldown").unwrap(),
         ComponentSchemaCatalog {

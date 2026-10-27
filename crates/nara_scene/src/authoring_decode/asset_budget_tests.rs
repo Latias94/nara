@@ -1,6 +1,8 @@
 use std::convert::Infallible;
 
-use nara_reflect::{ComponentFieldPath, ComponentFieldSchema, ComponentSchemaCatalog};
+use nara_reflect::{
+    AuthoringSchemaBundleOwner, ComponentFieldPath, ComponentFieldSchema, ComponentSchemaCatalog,
+};
 
 use super::*;
 use crate::{
@@ -55,9 +57,10 @@ fn asset_basis(field_count: usize, defaults: bool) -> AuthoringSchemaBasis {
         },
         None,
     );
-    let adapter =
-        AuthoringAdapterReceipt::from_schema_owner(&schema_owner, &Default::default()).unwrap();
     let bundle = AuthoringSchemaBundle::new([schema_owner]).unwrap();
+    let adapter =
+        AuthoringAdapterReceipt::from_schema_owner(&bundle.owners()[0], &Default::default())
+            .unwrap();
     AuthoringSchemaBasis::admit(&bundle, &[adapter]).unwrap()
 }
 

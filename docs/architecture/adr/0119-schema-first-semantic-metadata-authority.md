@@ -63,6 +63,10 @@ Proposed ADR 0120. They do not become supported through this accepted metadata c
   evidence to retain when code changes. This documentation correction did not rerun them.
 - New storage families require their own prepare/encode/retire and missing-data qualification;
   they do not weaken the current native mapping.
+- Backend-free `ComponentSchemaOwnerSnapshot` admission now shares catalog/lineage validation
+  with bounded Authoring bundles. Its [tests](../../../crates/nara_reflect/tests/schema_owner.rs)
+  distinguish exact retained identity from equivalent re-admission and content equality. This
+  metadata implementation is not a runtime storage or language-binding qualification.
 - The implementation ledger owns test revisions and remaining coverage. The
   [reassessment D02](../foundation-architecture-reassessment.md#d02-schema-authority-and-executable-representations)
   records the full alternatives and follow-up workflow.

@@ -619,10 +619,12 @@ mod tests {
             },
             None,
         );
-        let adapter =
-            super::super::AuthoringAdapterReceipt::from_schema_owner(&owner, &Default::default())
-                .unwrap();
         let bundle = AuthoringSchemaBundle::new([owner]).unwrap();
+        let adapter = super::super::AuthoringAdapterReceipt::from_schema_owner(
+            &bundle.owners()[0],
+            &Default::default(),
+        )
+        .unwrap();
         let basis = Arc::new(AuthoringClassificationBasis::new(&bundle, &[adapter]).unwrap());
         let root = SceneEntityId::new("root").unwrap();
         let child = SceneEntityId::new("child").unwrap();

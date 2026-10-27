@@ -124,16 +124,20 @@ impl Project {
             ComponentValueKind::U64,
         )
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
-        let bundle = AuthoringSchemaBundle::new(builtins.owners().iter().cloned().chain([
-            AuthoringSchemaBundleOwner::new(
-                payload_owner(),
-                ComponentSchemaCatalog {
-                    components: vec![schema],
-                    ..Default::default()
-                },
-                None,
-            ),
-        ]))
+        let bundle = AuthoringSchemaBundle::new(
+            builtins
+                .owners()
+                .iter()
+                .map(AuthoringSchemaBundleOwner::from)
+                .chain([AuthoringSchemaBundleOwner::new(
+                    payload_owner(),
+                    ComponentSchemaCatalog {
+                        components: vec![schema],
+                        ..Default::default()
+                    },
+                    None,
+                )]),
+        )
         .unwrap();
         fs::write(
             root.join("schema/authoring.bundle.json"),

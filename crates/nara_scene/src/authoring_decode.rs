@@ -31,9 +31,9 @@ use nara_asset::AssetRef;
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
-    AuthoringSchemaBundle, AuthoringSchemaBundleOwner, CatalogFingerprint, ComponentCapability,
-    ComponentFieldId, ComponentFieldPathSegment, ComponentSchema,
-    ComponentSchemaContributionReceipt, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    AuthoringSchemaBundle, CatalogFingerprint, ComponentCapability, ComponentFieldId,
+    ComponentFieldPathSegment, ComponentSchema, ComponentSchemaContributionReceipt,
+    ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     ComponentValueShape, DeclaredAssetReference, EntityReference, PersistentComponentSchemaOwnerId,
     collect_declared_asset_references_from_schema_with_limits, effective_component_value,
 };
@@ -359,7 +359,7 @@ enum AuthoringAdapterCatalog {
 }
 
 impl AuthoringAdapterCatalog {
-    fn matches(&self, owner: &AuthoringSchemaBundleOwner) -> bool {
+    fn matches(&self, owner: &ComponentSchemaOwnerSnapshot) -> bool {
         match self {
             Self::Native(contribution) => {
                 let receipt = contribution.owner();
@@ -999,7 +999,7 @@ impl AuthoringAdapterReceipt {
     /// Installs the engine's finite data Adapter, without granting executable trust.
     #[doc(hidden)]
     pub fn from_schema_owner(
-        owner: &AuthoringSchemaBundleOwner,
+        owner: &ComponentSchemaOwnerSnapshot,
         native_coverage: &BTreeSet<ComponentTypeId>,
     ) -> Option<Self> {
         let components: BTreeSet<_> = owner

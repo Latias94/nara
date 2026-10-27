@@ -137,8 +137,13 @@ fn nested_instance_additions_preserve_tagged_provenance_through_public_spawn() {
             inner_key.clone(),
             PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("inner-leaf"))]),
         );
-    let mut inner_overlay =
-        PrefabOverlay::new(resolver.resolve_prefab(&inner_request).unwrap().key().clone());
+    let mut inner_overlay = PrefabOverlay::new(
+        resolver
+            .resolve_prefab(&inner_request)
+            .unwrap()
+            .key()
+            .clone(),
+    );
     inner_overlay
         .additions
         .push(PrefabAddition::new(id("inner-added")));
@@ -152,8 +157,13 @@ fn nested_instance_additions_preserve_tagged_provenance_through_public_spawn() {
         source: inner_request.clone(),
         overrides: Some(inner_overlay),
     });
-    let mut outer_overlay =
-        PrefabOverlay::new(resolver.resolve_prefab(&outer_request).unwrap().key().clone());
+    let mut outer_overlay = PrefabOverlay::new(
+        resolver
+            .resolve_prefab(&outer_request)
+            .unwrap()
+            .key()
+            .clone(),
+    );
     outer_overlay.additions.push(nested);
     outer_overlay.placements.push(PrefabPlacement {
         target: PrefabEntityTarget::addition(id("nested-added")),

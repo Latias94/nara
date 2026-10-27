@@ -4,8 +4,8 @@ use crate::{
     PrefabReferenceBinding, SceneAuthoringSession, SourceDocumentKey, SourceDocumentKind,
 };
 use nara_reflect::{
-    ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath, ComponentPropertyStep,
-    ComponentSchemaCatalog, ComponentShapeMember,
+    AuthoringSchemaBundleOwner, ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath,
+    ComponentPropertyStep, ComponentSchemaCatalog, ComponentShapeMember,
 };
 
 fn id(name: &str) -> SceneEntityId {
@@ -254,12 +254,15 @@ fn asset_basis(adapter: bool) -> Arc<AuthoringClassificationBasis> {
         },
         None,
     );
+    let bundle = AuthoringSchemaBundle::new([owner]).unwrap();
     let adapters = if adapter {
-        vec![AuthoringAdapterReceipt::from_schema_owner(&owner, &BTreeSet::new()).unwrap()]
+        vec![
+            AuthoringAdapterReceipt::from_schema_owner(&bundle.owners()[0], &BTreeSet::new())
+                .unwrap(),
+        ]
     } else {
         Vec::new()
     };
-    let bundle = AuthoringSchemaBundle::new([owner]).unwrap();
     Arc::new(AuthoringClassificationBasis::new(&bundle, &adapters).unwrap())
 }
 

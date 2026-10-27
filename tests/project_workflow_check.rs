@@ -137,7 +137,7 @@ fn public_check_rejects_a_bundle_missing_one_selected_native_owner() {
         .owners()
         .iter()
         .filter(|owner| !owner.owner_id().matches_executable(selected_owner).unwrap())
-        .cloned()
+        .map(AuthoringSchemaBundleOwner::from)
         .collect::<Vec<AuthoringSchemaBundleOwner>>();
     let divergent = AuthoringSchemaBundle::new(retained_owners).unwrap();
     fs::write(bundle_path, divergent.to_json_string().unwrap()).unwrap();
@@ -174,7 +174,11 @@ fn runtime_agreement_accepts_a_bundle_superset_and_rejects_divergence_or_unbound
     let superset_path = superset.path().join("schema/authoring.bundle.json");
     let superset_bundle =
         AuthoringSchemaBundle::from_json_bytes(&fs::read(&superset_path).unwrap()).unwrap();
-    let mut superset_owners = superset_bundle.owners().to_vec();
+    let mut superset_owners = superset_bundle
+        .owners()
+        .iter()
+        .map(AuthoringSchemaBundleOwner::from)
+        .collect::<Vec<_>>();
     superset_owners.push(custom_owner.clone());
     fs::write(
         &superset_path,
@@ -200,7 +204,11 @@ fn runtime_agreement_accepts_a_bundle_superset_and_rejects_divergence_or_unbound
             .as_str(),
     )
     .unwrap();
-    let mut divergent_owners = divergent_bundle.owners().to_vec();
+    let mut divergent_owners = divergent_bundle
+        .owners()
+        .iter()
+        .map(AuthoringSchemaBundleOwner::from)
+        .collect::<Vec<_>>();
     let selected = divergent_owners
         .iter_mut()
         .find(|owner| owner.owner_id() == &scene_owner)
@@ -241,7 +249,11 @@ fn runtime_agreement_accepts_a_bundle_superset_and_rejects_divergence_or_unbound
     let unbound_path = unbound.path().join("schema/authoring.bundle.json");
     let unbound_bundle =
         AuthoringSchemaBundle::from_json_bytes(&fs::read(&unbound_path).unwrap()).unwrap();
-    let mut unbound_owners = unbound_bundle.owners().to_vec();
+    let mut unbound_owners = unbound_bundle
+        .owners()
+        .iter()
+        .map(AuthoringSchemaBundleOwner::from)
+        .collect::<Vec<_>>();
     unbound_owners.push(custom_owner);
     fs::write(
         &unbound_path,

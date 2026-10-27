@@ -1,7 +1,7 @@
 ---
 title: Production Scene-owned data representation
 date: 2026-10-27
-status: design
+status: in-progress
 related_plan: 2026-10-23-foundation-architecture-rebaseline-plan.md
 ---
 
@@ -16,9 +16,11 @@ its hidden entry points. Native registry cardinality, exact native preparation a
 retirement remain intact. This is a prerequisite to actual optional-language owner integration,
 not proof that R3 or the foundation Goal is complete.
 
-The existing private code-lifetime checkpoint is `65402b9`. Implementation has not started merely
-because its insertion/export seams were identified. Durable contract changes require ADR
-reconciliation when evidence is ready; ADR 0120 remains Proposed during implementation.
+The existing private code-lifetime checkpoint is `65402b9`. Backend-free owner metadata admission
+is the first implementation slice; identifying insertion/export seams does not implement the
+complete runtime family. Detailed verification and continuity belong in engineering memory.
+Durable contract changes require ADR reconciliation when evidence is ready; ADR 0120 remains
+Proposed during implementation.
 
 ## Delivery Order
 

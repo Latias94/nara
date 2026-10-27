@@ -4,8 +4,8 @@ use nara_identity::{
     PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
 };
 use nara_reflect::{
-    ComponentFieldPath, ComponentFieldSchema, ComponentNumericDomain, ComponentSchemaCatalog,
-    ComponentValueKind,
+    AuthoringSchemaBundleOwner, ComponentFieldPath, ComponentFieldSchema, ComponentNumericDomain,
+    ComponentSchemaCatalog, ComponentValueKind,
 };
 
 fn id(value: &str) -> SceneEntityId {

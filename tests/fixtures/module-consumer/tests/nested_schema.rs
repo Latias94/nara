@@ -13,8 +13,7 @@ use nara_reflect::{
 use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, InMemoryPrefabSourceResolver,
     PrefabDocument, PrefabInstance, SceneAuthoringSession, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
-    export_scene,
+    SceneEntityId, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind, export_scene,
 };
 use nara_tooling::{SceneInspectorCommand, SceneInspectorState};
 use support::{COMPONENT_ID, IMAGE_ID, PREFAB_ID, PREFAB_PATH, Relationships};

@@ -14,14 +14,14 @@ use nara_core::{
 };
 
 use crate::{
-    ComponentSchemaCatalog, ComponentSchemaProviderDefinition, ComponentTypeId,
-    PersistentComponentSchemaOwnerId, PersistentComponentSchemaOwnerIdError,
+    ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaProviderDefinition,
+    ComponentTypeId, PersistentComponentSchemaOwnerId, PersistentComponentSchemaOwnerIdError,
     SchemaCompositionFingerprint,
     format::{
         ComponentCatalogCounts, ComponentCatalogFileBudgetError, ComponentCatalogFileLimits,
         ComponentSchemaCatalogWire, accumulate_catalog_budget,
     },
-    registry::{prepare_owner_catalogs, validate_catalog_contents},
+    registry::validate_catalog_contents,
 };
 
 const AUTHORING_SCHEMA_BUNDLE_KIND: &str = "authoring_schema_bundle";
@@ -143,11 +143,36 @@ impl AuthoringSchemaBundleOwner {
     }
 }
 
+impl From<&ComponentSchemaOwnerSnapshot> for AuthoringSchemaBundleOwner {
+    /// Copies persistent content into an unpublished candidate, not the snapshot's authority.
+    /// Admitting the candidate creates a new owner identity even when its content is unchanged.
+    fn from(owner: &ComponentSchemaOwnerSnapshot) -> Self {
+        Self::new(
+            owner.owner_id().clone(),
+            owner.current().clone(),
+            owner.predecessor().cloned(),
+        )
+    }
+}
+
 /// Canonical, non-executable schema composition loaded for project authoring.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct AuthoringSchemaBundle {
-    owners: Vec<AuthoringSchemaBundleOwner>,
+    owners: Vec<ComponentSchemaOwnerSnapshot>,
     fingerprint: SchemaCompositionFingerprint,
+}
+
+// Bundle equality compares persistent content; owner admission identity is tested by ptr_eq.
+impl PartialEq for AuthoringSchemaBundle {
+    fn eq(&self, other: &Self) -> bool {
+        self.fingerprint == other.fingerprint
+            && self.owners.len() == other.owners.len()
+            && self.owners.iter().zip(&other.owners).all(|(left, right)| {
+                left.owner_id() == right.owner_id()
+                    && left.current() == right.current()
+                    && left.predecessor() == right.predecessor()
+            })
+    }
 }
 
 impl AuthoringSchemaBundle {
@@ -196,7 +221,7 @@ impl AuthoringSchemaBundle {
     }
 
     #[must_use]
-    pub fn owners(&self) -> &[AuthoringSchemaBundleOwner] {
+    pub fn owners(&self) -> &[ComponentSchemaOwnerSnapshot] {
         &self.owners
     }
 
@@ -204,7 +229,7 @@ impl AuthoringSchemaBundle {
     pub fn owner(
         &self,
         owner_id: &PersistentComponentSchemaOwnerId,
-    ) -> Option<&AuthoringSchemaBundleOwner> {
+    ) -> Option<&ComponentSchemaOwnerSnapshot> {
         self.owners
             .binary_search_by(|owner| owner.owner_id().cmp(owner_id))
             .ok()
@@ -215,7 +240,7 @@ impl AuthoringSchemaBundle {
     pub fn owner_for_component(
         &self,
         component: &ComponentTypeId,
-    ) -> Option<&AuthoringSchemaBundleOwner> {
+    ) -> Option<&ComponentSchemaOwnerSnapshot> {
         self.owners.iter().find(|owner| {
             owner
                 .current()
@@ -343,8 +368,8 @@ struct AuthoringSchemaBundleOwnerRef<'a> {
     predecessor: Option<&'a ComponentSchemaCatalog>,
 }
 
-impl<'a> From<&'a AuthoringSchemaBundleOwner> for AuthoringSchemaBundleOwnerRef<'a> {
-    fn from(owner: &'a AuthoringSchemaBundleOwner) -> Self {
+impl<'a> From<&'a ComponentSchemaOwnerSnapshot> for AuthoringSchemaBundleOwnerRef<'a> {
+    fn from(owner: &'a ComponentSchemaOwnerSnapshot) -> Self {
         Self {
             owner: owner.owner_id().as_str(),
             current: owner.current(),
@@ -521,7 +546,8 @@ fn finish_bundle(
     validate_duplicate_owners(&owners)?;
 
     let mut counts = ComponentCatalogCounts::default();
-    for owner in &mut owners {
+    let mut admitted_owners = Vec::with_capacity(owners.len());
+    for owner in owners {
         accumulate_catalog_budget(owner.current(), limits.catalogs(), &mut counts)?;
         if let Some(predecessor) = owner.predecessor() {
             accumulate_catalog_budget(predecessor, limits.catalogs(), &mut counts)?;
@@ -546,32 +572,35 @@ fn finish_bundle(
             }
             InputOrdering::Canonicalize => None,
         };
-        let (current, predecessor) =
-            prepare_owner_catalogs(std::mem::take(&mut owner.current), owner.predecessor.take())
-                .map_err(|source| AuthoringSchemaBundleError::Catalog {
-                    owner: owner.owner_id.clone(),
-                    source: Box::new(source),
-                })?;
+        let admitted = ComponentSchemaOwnerSnapshot::admit(
+            owner.owner_id.clone(),
+            owner.current,
+            owner.predecessor,
+        )
+        .map_err(|source| AuthoringSchemaBundleError::Catalog {
+            owner: owner.owner_id.clone(),
+            source: Box::new(source),
+        })?;
         if let Some((original_current, original_predecessor)) = original
-            && (current != original_current || predecessor != original_predecessor)
+            && (admitted.current() != &original_current
+                || admitted.predecessor() != original_predecessor.as_ref())
         {
             return Err(AuthoringSchemaBundleError::NonCanonicalCatalog {
                 owner: owner.owner_id.clone(),
-                generation: current.generation(),
+                generation: admitted.current().generation(),
             });
         }
-        owner.current = current;
-        owner.predecessor = predecessor;
+        admitted_owners.push(admitted);
     }
 
-    validate_component_ownership(&owners)?;
+    validate_component_ownership(&admitted_owners)?;
     let fingerprint = SchemaCompositionFingerprint::from_persistent_owner_catalogs(
-        owners
+        admitted_owners
             .iter()
             .map(|owner| (owner.owner_id(), owner.current().fingerprint())),
     );
     Ok(AuthoringSchemaBundle {
-        owners,
+        owners: admitted_owners,
         fingerprint,
     })
 }
@@ -617,7 +646,7 @@ fn validate_duplicate_owners(
 }
 
 fn validate_component_ownership(
-    owners: &[AuthoringSchemaBundleOwner],
+    owners: &[ComponentSchemaOwnerSnapshot],
 ) -> Result<(), AuthoringSchemaBundleError> {
     let mut claims = BTreeMap::<ComponentTypeId, PersistentComponentSchemaOwnerId>::new();
     for owner in owners {

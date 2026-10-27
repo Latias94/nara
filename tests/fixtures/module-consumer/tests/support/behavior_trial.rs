@@ -129,7 +129,7 @@ impl Definition {
             native
                 .owners()
                 .iter()
-                .cloned()
+                .map(AuthoringSchemaBundleOwner::from)
                 .chain([AuthoringSchemaBundleOwner::new(owner(), catalog, None)]),
         )
         .map_err(|_| Error::Source)?;

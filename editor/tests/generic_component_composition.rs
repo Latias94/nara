@@ -178,7 +178,7 @@ fn ordinary_prefab_composition_cannot_bypass_specialized_ui_structure_admission(
             .owners()
             .iter()
             .chain(custom_bundle.owners())
-            .cloned(),
+            .map(nara::reflect::AuthoringSchemaBundleOwner::from),
     )
     .unwrap();
     fs::write(
