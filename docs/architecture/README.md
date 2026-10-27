@@ -128,7 +128,10 @@ owns actual managed Scene/data and public consumer verification. The
 records recipe-owned admissions through Check/content capture, startup and replacement; the
 language fixture now uses the public Scene family and real window-free Session, with
 [source and lifetime evidence](../knowledge/engineering/verification/2026-10/2026-10-27T145608Z-public-scene-language-consumer-and-obsolete-representation-runtime-removal-67783a7cb8514ce9bbb7957670b4ec37.md).
-Concrete language/tool product integration remains. The [fixed-baseline review](../audits/2026-10-27-scene-runtime-and-extension-plan-review.md)
+The [EnemyStats successor](../plans/2026-10-27-enemy-stats-semantic-tool-plan.md) exercises finite
+C# source proposals and exact Session preparation/history/persistence, including failed-read,
+owner/declaration and stale-result counterexamples. Concrete language/tool product integration
+remains. The [fixed-baseline review](../audits/2026-10-27-scene-runtime-and-extension-plan-review.md)
 records owning-contract corrections and concrete subsequent cleanups. No official C# SDK was
 selected. Complete-tool evaluation and owned-UI implementation remain independent.
 

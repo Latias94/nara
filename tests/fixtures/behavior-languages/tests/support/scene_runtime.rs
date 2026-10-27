@@ -34,9 +34,13 @@ pub struct Definition {
 }
 
 impl Definition {
-    pub fn from_catalog(catalog: ComponentSchemaCatalog) -> Result<Arc<Self>, String> {
+    pub fn from_catalog(
+        owner_id: &str,
+        catalog: ComponentSchemaCatalog,
+    ) -> Result<Arc<Self>, String> {
         let owner = ComponentSchemaOwnerSnapshot::admit(
-            PersistentComponentSchemaOwnerId::try_new("trial.behaviors").unwrap(),
+            PersistentComponentSchemaOwnerId::try_new(owner_id)
+                .map_err(|error| error.to_string())?,
             catalog,
             None,
         )

@@ -71,6 +71,12 @@ window-free Project Session for editing/history/Save/Reopen. Language bridges an
 routing remain experimental. The [updated extension study](../../research/2026-10-27-language-extension-product-boundaries.md)
 adds a complete C# Editor-tool evaluation to the gameplay evidence. Neither storage adoption
 nor that consumer changes this ADR's status or makes metadata admission proof of callback readiness.
+The [concrete EnemyStats tool experiment](../../plans/2026-10-27-enemy-stats-semantic-tool-plan.md)
+adds C#-described metadata and finite property proposals to that same public Session. Rust retains
+original source/Schema observations, executable publication and newest-request identity; review
+and acceptance use one owner-prepared candidate. Actual JSON/RON Attach/edit/Spawn, history,
+persistence and Rust data reads remain bounded consumer evidence. This does not adopt a generic
+language interface, installed-tool lifecycle or dependency/cohort publication.
 Backend-free owner admission and explicit native/data source compilation now have scoped
 production evidence in the [implementation ledger](implementation-status.md); complete runtime
 materialization and managed data ownership now have their narrow closed-family contract in

@@ -47,7 +47,9 @@ def main():
     environment["NARA_BEHAVIOR_MANAGED_DIR"] = str(artifacts / "bin" / "BehaviorTrial" / "debug")
     module_project = fixture / "authored" / "BehaviorModule.csproj"
     modules = artifacts.parent / "modules"
-    for name, revision in [("v1", "1"), ("invalid", "invalid"), ("missing", "missing"), ("live", "1")]:
+    for name, revision in [
+        ("v1", "1"), ("v2", "2"), ("invalid", "invalid"), ("missing", "missing"), ("live", "1"),
+    ]:
         destination = modules / name
         build(module_project, destination, revision)
         environment[f"NARA_BEHAVIOR_MODULE_{name.upper()}"] = str(

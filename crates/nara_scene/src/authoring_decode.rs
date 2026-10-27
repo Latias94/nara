@@ -104,12 +104,18 @@ impl AuthoringSchemaBasis {
         AuthoringClassificationBasis::new(bundle, adapters).map(|basis| Self(Arc::new(basis)))
     }
 
-    /// Borrows the current catalog declaration; record owner/version admission remains required.
-    pub(crate) fn schema(&self, component: &ComponentTypeId) -> Option<&ComponentSchema> {
+    /// Borrows the complete current declaration selected by this exact metadata admission.
+    ///
+    /// This does not establish record presence/readiness, executable binding or edit authority.
+    /// Observation-driven tools can compare their required declaration before interpreting data;
+    /// the document-query basis and prepared candidate still require independent revalidation.
+    pub fn schema(&self, component: &ComponentTypeId) -> Option<&ComponentSchema> {
         self.0.schemas.get(component).map(|entry| &entry.schema)
     }
 
-    pub(crate) fn component_schema_owner(
+    /// Borrows the owner of a selected current declaration, independently of record presence.
+    /// Equal declarations under different owners do not identify the same component contract.
+    pub fn component_schema_owner(
         &self,
         component: &ComponentTypeId,
     ) -> Option<&PersistentComponentSchemaOwnerId> {

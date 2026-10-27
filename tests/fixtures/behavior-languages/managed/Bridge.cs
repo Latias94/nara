@@ -67,6 +67,11 @@ public static class Bridge
                 return Serialize(DescribeModule(GetModule(ModuleId(request))), capacity);
             case "invoke":
                 return Serialize(InvokeModule(GetModule(ModuleId(request)), Snapshot(request)), capacity);
+            case "enemy_stats_catalog":
+                return Serialize(DescribeEnemyStatsModule(GetModule(ModuleId(request))), capacity);
+            case "enemy_stats_propose":
+                return Serialize(ProposeEnemyStatsModule(GetModule(ModuleId(request)),
+                    request.EnemyStats ?? throw new InvalidOperationException("Missing EnemyStats request")), capacity);
             case "retain":
                 return Retain(ModuleId(request), capacity);
             case "probe_lease":
@@ -156,6 +161,25 @@ public static class Bridge
     private static NameCommand[] InvokeModule(IBehaviorModule module, SchemaSnapshot snapshot) =>
         module.Invoke(snapshot).Select(command => new NameCommand(command.Target, command.Value)).ToArray();
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static JsonElement DescribeEnemyStatsModule(IBehaviorModule module) =>
+        (module as IEnemyStatsTool
+            ?? throw new InvalidOperationException("Module does not implement IEnemyStatsTool"))
+        .DescribeEnemyStats().Clone();
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static EnemyStatsProposal ProposeEnemyStatsModule(IBehaviorModule module, EnemyStatsRequest request)
+    {
+        var tool = module as IEnemyStatsTool
+            ?? throw new InvalidOperationException("Module does not implement IEnemyStatsTool");
+        var input = new EnemyStatsRequest(request.Operation, request.Name, request.Health,
+            request.Armor, request.Bonus, request.Fault);
+        EnemyStatsProposal proposal = tool.ProposeEnemyStats(input);
+        // Serialize only shared sealed records and cloned JSON, never collectible authored types.
+        return new EnemyStatsProposal(proposal.Title, proposal.Name, proposal.Writes
+            .Select(write => new EnemyStatsWrite(write.Field, write.Value.Clone())).ToArray());
+    }
+
     private static byte[] Retain(long moduleId, int capacity)
     {
         IBehaviorModule module = GetModule(moduleId);
@@ -199,7 +223,8 @@ public static class Bridge
         string? Path = null,
         long? Module = null,
         long? Lease = null,
-        SchemaSnapshot? Snapshot = null);
+        SchemaSnapshot? Snapshot = null,
+        EnemyStatsRequest? EnemyStats = null);
     private sealed record ModuleResponse(long Module);
     private sealed record LeaseResponse(long Lease);
     private sealed record CompletionResponse(bool Complete);

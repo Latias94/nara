@@ -41,7 +41,7 @@ The Host does not switch over authored Schema IDs to extract different fields.
 
 To add a Behavior for this trial, declare its Schema and source record, then register its
 language callback. A complete authoring creation template is required for Attach. Native Name
-is the sole command domain; a new native domain still requires its own actual binding.
+is the behavior callback command domain; a new native runtime domain requires its own binding.
 Callback IDs and versions are checked against the complete catalog before language activation.
 Separate actual managed candidates omit Sensor or report its wrong version; rejection preserves
 the active predecessor and observes candidate context retirement. Plain Scene data admission does
@@ -56,6 +56,25 @@ results and hold an actual callback/instance lease with zero executing callbacks
 the VM explicitly; a bare mlua Function does not. A still-live managed weak context remains pending,
 never success by timeout. The finite probes do not cover async work, escaping arbitrary language
 objects, dependent owners, Stop-first or Schema migration.
+
+The concrete `EnemyStats` tool adds a separate source-authoring domain. Its C# module describes
+the complete existing-format Schema and creation template; Rust admits that metadata and reads
+the same saved data through public Scene bindings. Copied scalar inputs produce named property
+write proposals. The Host retains the target/command, original query basis, exact code publication
+and newest request. It bounds accepted output, prepares through the existing Session, exposes
+that candidate's patch/inverse for review and consumes the same candidate on acceptance. Source
+IDs and document authority never come from the managed result. No drawing toolkit is involved.
+
+The actual JSON/RON workflow covers Attach, edit, additive Spawn, one Undo/Redo each, exact commit
+and created-ID receipts, correlated Save and physically closed fresh-Host Reopen. Late invalid
+writes, including a Spawn with a final invalid field, leave source/history/navigation/disk intact.
+Older requests, changed document bases, replaced code publications and disabled tools reject at
+preparation and final acceptance. A wrong-Schema candidate preserves the working predecessor;
+a real second C# body changes the proposed health increment. Rejected, replaced and disabled
+collectible contexts are explicitly retired and observed collected. This is synchronous retained
+result testing, not pending-task or installed-package qualification. Tool and behavior interfaces
+currently share the experimental authored assembly/loader; no standalone tool package is shipped.
+See the [concrete tool plan](../../../docs/plans/2026-10-27-enemy-stats-semantic-tool-plan.md).
 
 The old grouped-materialization/export prototype is superseded. The original representation
 comparison remains fixed-commit research; the remaining raw storage probes measure logical query

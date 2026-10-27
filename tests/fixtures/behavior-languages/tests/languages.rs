@@ -2,6 +2,8 @@
 
 #[path = "support/authoring_project.rs"]
 mod authoring_project;
+#[path = "support/enemy_stats.rs"]
+mod enemy_stats;
 #[path = "support/scene_runtime.rs"]
 mod scene_runtime;
 
@@ -319,7 +321,7 @@ fn assert_export(
 }
 
 fn workflow(program: &dyn Language) {
-    let definition = Definition::from_catalog(catalog()).unwrap();
+    let definition = Definition::from_catalog("trial.behaviors", catalog()).unwrap();
     let bindings = program.describe().unwrap();
     let original = source();
     let edited = authoring_project::edit_save_reopen(&definition.owner, &original);
@@ -411,7 +413,7 @@ fn workflow(program: &dyn Language) {
             .id;
         let target = runtime.target(actor);
         let input = capture(&runtime, &definition, actor, &mover()).unwrap();
-        let readmitted = Definition::from_catalog(catalog()).unwrap();
+        let readmitted = Definition::from_catalog("trial.behaviors", catalog()).unwrap();
         assert_eq!(
             readmitted.bindings.composition_fingerprint(),
             definition.bindings.composition_fingerprint()
@@ -607,5 +609,5 @@ fn invalid_catalog_and_native_schema_collision_refuse_definition() {
     );
     let mut collision = catalog();
     collision.components[0].id = ComponentTypeId::new("nara.scene.Name");
-    assert!(Definition::from_catalog(collision).is_err());
+    assert!(Definition::from_catalog("trial.behaviors", collision).is_err());
 }

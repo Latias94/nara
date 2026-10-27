@@ -58,7 +58,7 @@ fn runtime(definition: &Arc<Definition>, program: &dyn Language) -> Runtime {
 
 #[test]
 fn lua_body_iteration_preserves_world_rejects_old_results_and_leases_actual_vm() {
-    let definition = Definition::from_catalog(catalog()).unwrap();
+    let definition = Definition::from_catalog("trial.behaviors", catalog()).unwrap();
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("schema_behaviors.lua");
     let initial = include_str!("../../lua/schema_behaviors.lua");
@@ -139,7 +139,7 @@ fn await_collection(retirement: &super::dotnet::Retirement) {
 
 #[test]
 fn csharp_body_iteration_preserves_world_rejects_old_results_and_roots_real_code() {
-    let definition = Definition::from_catalog(catalog()).unwrap();
+    let definition = Definition::from_catalog("trial.behaviors", catalog()).unwrap();
     let mut active = Route::admit(
         DotnetProgram::load(&module_path("NARA_BEHAVIOR_MODULE_LIVE")).unwrap(),
         &definition,

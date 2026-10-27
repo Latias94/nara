@@ -153,8 +153,11 @@ in the ADR implementation ledger and engineering evidence, not a full-R1 complet
 and project workflow adapters; no new Automation crate.
 
 - Implement one pure semantic proposal over existing legal fields/patches. Expose preview and
-  submit through a small current Dear ImGui contribution and a window-free public-session test.
-  Do not wait for generalized queries, mixed transactions, full Nara UI or dynamic packages.
+  submit through the window-free public Session first; compare the current Dear contribution
+  only where it supplies useful predecessor evidence. The user-selected visual destination is
+  Nara's own custom-drawn frontend under ADR 0118. Do not wait for generalized queries, mixed
+  transactions, full Nara UI or dynamic packages. Window-free qualification alone does not
+  establish visual panel/session parity or an inline Inspector.
 - Carry exact action/request feedback to the originator through Application and tool adapters.
   Keep dispatch, persistence/Play completion and supplemental diagnostics distinct.
 - Resolve the earlier F1 Application feedback, F2 persistence correlation and F3 domain-diagnostic

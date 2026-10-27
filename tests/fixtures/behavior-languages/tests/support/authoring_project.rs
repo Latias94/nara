@@ -60,18 +60,7 @@ pub fn edit_save_reopen(
             .path,
         nara_reflect::ComponentFieldPath::from_fields(["wire_text"]),
     );
-    let native = AuthoringSchemaBundle::from_trusted_provider_definitions([
-        SCENE_COMPONENTS_SCHEMA_PROVIDER,
-    ])
-    .unwrap();
-    let bundle = AuthoringSchemaBundle::new(
-        native
-            .owners()
-            .iter()
-            .map(AuthoringSchemaBundleOwner::from)
-            .chain([AuthoringSchemaBundleOwner::from(owner)]),
-    )
-    .unwrap();
+    let bundle = schema_bundle(owner);
 
     let mut expected = original.clone();
     for (entity, kind, wire, value) in [
@@ -250,32 +239,9 @@ pub fn edit_save_reopen(
         assert_history(&editor, document, 4, 0);
         assert_eq!(fs::read(project.scene_path()).unwrap(), original_bytes);
 
-        let revision = editor.document_query_basis(document).unwrap().revision;
-        assert!(matches!(
-            dispatch(
-                &mut editor,
-                EditorAction::Persistence(EditorPersistenceAction::Save {
-                    document,
-                    base_revision: revision,
-                }),
-            ),
-            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { .. })
-        ));
-        wait(&mut editor, |editor| {
-            editor.current_frame().persistence().result().is_some()
-        });
-        assert!(matches!(
-            editor.current_frame().persistence().result(),
-            Some(EditorPersistenceResult::Saved { document: saved, revision: saved_revision, .. })
-                if saved == document && saved_revision == revision
-        ));
+        save(&mut editor, document);
         let saved = project.read();
         assert_eq!(saved, expected, "Save must preserve every source sibling");
-        let attempt = editor.current_frame().persistence().attempt().unwrap();
-        dispatch(
-            &mut editor,
-            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
-        );
         close(&mut editor);
         drop(editor);
 
@@ -340,7 +306,7 @@ fn record<'a>(document: &'a SceneDocument, entity: &str, kind: &str) -> &'a Scen
         .components[&component(kind)]
 }
 
-fn assert_value(
+pub(super) fn assert_value(
     editor: &EditorProjectSession,
     document: EditorDocumentId,
     entity: &str,
@@ -412,7 +378,7 @@ fn assert_label_present(editor: &EditorProjectSession, document: EditorDocumentI
     );
 }
 
-fn assert_history(
+pub(super) fn assert_history(
     editor: &EditorProjectSession,
     document: EditorDocumentId,
     undo: usize,
@@ -424,7 +390,7 @@ fn assert_history(
     assert_eq!(history.redo_depth, redo);
 }
 
-fn applied(outcome: EditorActionOutcome) {
+pub(super) fn applied(outcome: EditorActionOutcome) {
     assert!(
         matches!(outcome, EditorActionOutcome::Workspace(ref report) if report.applied),
         "{outcome:?}",
@@ -440,7 +406,7 @@ fn dispatch(editor: &mut EditorProjectSession, action: EditorAction) -> EditorAc
     report.into_outcomes().into_iter().next().unwrap()
 }
 
-fn replay(editor: &mut EditorProjectSession, document: EditorDocumentId, redo: bool) {
+pub(super) fn replay(editor: &mut EditorProjectSession, document: EditorDocumentId, redo: bool) {
     let base_revision = editor.document_query_basis(document).unwrap().revision;
     let mutation = if redo {
         EditorDocumentMutation::Redo {
@@ -465,7 +431,7 @@ fn wait(editor: &mut EditorProjectSession, ready: impl Fn(&EditorProjectSession)
     }
 }
 
-fn close(editor: &mut EditorProjectSession) {
+pub(super) fn close(editor: &mut EditorProjectSession) {
     let deadline = Instant::now() + TIMEOUT;
     loop {
         if let EditorProjectCloseProgress::Complete(receipt) = editor.advance_close() {
@@ -477,13 +443,64 @@ fn close(editor: &mut EditorProjectSession) {
     }
 }
 
-struct Project {
+pub(super) fn schema_bundle(owner: &ComponentSchemaOwnerSnapshot) -> AuthoringSchemaBundle {
+    let native = AuthoringSchemaBundle::from_trusted_provider_definitions([
+        SCENE_COMPONENTS_SCHEMA_PROVIDER,
+    ])
+    .unwrap();
+    AuthoringSchemaBundle::new(
+        native
+            .owners()
+            .iter()
+            .map(AuthoringSchemaBundleOwner::from)
+            .chain([AuthoringSchemaBundleOwner::from(owner)]),
+    )
+    .unwrap()
+}
+
+pub(super) fn save(editor: &mut EditorProjectSession, document: EditorDocumentId) {
+    let revision = editor.document_query_basis(document).unwrap().revision;
+    let attempt = match dispatch(
+        editor,
+        EditorAction::Persistence(EditorPersistenceAction::Save {
+            document,
+            base_revision: revision,
+        }),
+    ) {
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted { attempt }) => {
+            attempt
+        }
+        outcome => panic!("Save was not accepted: {outcome:?}"),
+    };
+    wait(editor, |editor| {
+        editor.current_frame().persistence().result().is_some()
+    });
+    assert_eq!(
+        editor.current_frame().persistence().attempt(),
+        Some(attempt)
+    );
+    assert!(matches!(
+        editor.current_frame().persistence().result(),
+        Some(EditorPersistenceResult::Saved { document: saved, revision: saved_revision, .. })
+            if saved == document && saved_revision == revision
+    ));
+    dispatch(
+        editor,
+        EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult { attempt }),
+    );
+}
+
+pub(super) struct Project {
     directory: tempfile::TempDir,
     extension: &'static str,
 }
 
 impl Project {
-    fn new(bundle: &AuthoringSchemaBundle, scene: &SceneDocument, extension: &'static str) -> Self {
+    pub(super) fn new(
+        bundle: &AuthoringSchemaBundle,
+        scene: &SceneDocument,
+        extension: &'static str,
+    ) -> Self {
         let project = Self {
             directory: tempfile::tempdir().unwrap(),
             extension,
@@ -543,16 +560,16 @@ impl Project {
         project
     }
 
-    fn root(&self) -> &Path {
+    pub(super) fn root(&self) -> &Path {
         self.directory.path()
     }
 
-    fn scene_path(&self) -> std::path::PathBuf {
+    pub(super) fn scene_path(&self) -> std::path::PathBuf {
         self.root()
             .join(format!("scenes/startup.scene.{}", self.extension))
     }
 
-    fn read(&self) -> SceneDocument {
+    pub(super) fn read(&self) -> SceneDocument {
         let bytes = fs::read(self.scene_path()).unwrap();
         let candidate = if self.extension == "ron" {
             SceneDocumentCandidate::decode_ron_bytes(&bytes)
@@ -563,7 +580,7 @@ impl Project {
         candidate.into_composition_source().unwrap()
     }
 
-    fn open(&self) -> EditorProjectSession {
+    pub(super) fn open(&self) -> EditorProjectSession {
         #[cfg(windows)]
         let directory = {
             use std::os::windows::fs::OpenOptionsExt;

@@ -929,6 +929,12 @@ create command, property customization and dockable panel. It must share the sam
 Undo, Save/Reopen and Rust-visible data, survive a rejected update, preserve unavailable source
 data on disable and reject an old callback after replacement. Successful private gameplay
 dispatch alone does not qualify any of those Editor extension facets.
+The [window-free EnemyStats experiment](../plans/2026-10-27-enemy-stats-semantic-tool-plan.md)
+now qualifies the finite semantic subset through real public Session transactions and persistence.
+Its concrete Host checks the selected owner/complete component declaration and retains original
+query, executable-publication and newest-request identities. This precedes product installation,
+unknown-data disable/re-enable, inline Inspector and the Nara-owned drawing runtime; those remain
+required evidence for the complete discriminator above.
 
 Do not implement the conversation's suggested crate list as a new central extension manager.
 Schema, document, command, UI, execution and native-resource owners retain their own admission

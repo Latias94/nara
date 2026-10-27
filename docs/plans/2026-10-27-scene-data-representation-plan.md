@@ -108,9 +108,11 @@ setter negative for a retired reference target. Two raw storage probes retain qu
 counterpressure; they do not measure the production carrier or throughput. Historical
 measurements do not justify retaining a second Runtime.
 
-The subsequent concrete `EnemyStats` tool should return limited semantic proposals to that same
-Session owner. The Host retains source basis and executable publication custody, prepares the edit
-and commits it once. Nara's custom-drawn frontend can then consume the same command/result path.
+The [concrete EnemyStats experiment](2026-10-27-enemy-stats-semantic-tool-plan.md) now returns
+limited semantic proposals to that same Session owner. The Host retains source basis, executable
+publication and newest-request custody, prepares the edit and consumes that candidate once.
+Real JSON/RON history/persistence and public Rust reads exercise Attach, edit and Spawn. Nara's
+custom-drawn frontend can later consume the same command/result path.
 This order requires no universal language backend, new generic transaction executor, toolkit
 embedding or official C# SDK designation. Install/update/disable, held tasks and delivery still
 need their own complete workflow evidence.

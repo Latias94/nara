@@ -35,6 +35,13 @@ adds recipe-owned admissions through strict Check/content capture, startup, Rest
 replacement, including public source witness retention and outer-composition counterexamples.
 The selected language execution owner remains a separate integration obligation; no SDK or
 complete R3 claim follows.
+The [EnemyStats consumer successor](../../knowledge/engineering/verification/2026-10/2026-10-27T152916Z-concrete-enemystats-semantic-proposals-through-the-public-project-session-1acb9412a2544e98b059654fe5ec2ca7.md)
+adds concrete C# metadata/proposals through the public window-free Session, with actual
+Attach/edit/Spawn, review/commit, history, JSON/RON persistence and Rust data reads. Borrowed
+authoring metadata queries let that consumer verify the required owner and full component
+declaration. Original query, code-publication and newest-request identities fence both review
+stages. This remains an experimental consumer; product contribution admission, standalone tool
+loading, asynchronous work and the custom-drawn frontend remain open under Proposed 0120.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.
