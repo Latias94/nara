@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "583314dc2bce3cd7dc41246b1d78180c74dc865755665202beede240d2b03409"
+source_fingerprint: "8c41f8d4d75e1276722e15623753be3f98c288bc8340ee423b63ef4384b76420"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "583314dc2bce3cd7dc41246b1d78180c74dc865755665202beede240d2b
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `583314dc2bce3cd7dc41246b1d78180c74dc865755665202beede240d2b03409`
-- Immutable records: 969
+- Source fingerprint: `8c41f8d4d75e1276722e15623753be3f98c288bc8340ee423b63ef4384b76420`
+- Immutable records: 970
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [First actual in-process CSharp and Lua Behavior snapshot workflow](verification/2026-10/2026-10-27T080553Z-first-actual-in-process-csharp-and-lua-behavior-snapshot-workflow-81c67c84e2fa47b38b7848f642dae81c.md) - Qualifies the bounded two-language Scene and Prefab command workflow without selecting a production language or claiming VM reload.
 - **Verification Evidence**: [Private Behavior representation comparison and revised language-trial candidate](verification/2026-10/2026-10-27T073822Z-private-behavior-representation-comparison-and-revised-language-trial-candidate-0025928de9064bb3b64bfcf4630d397d.md) - Records data-only envelope versus Rows evidence, review corrections and remaining public Runtime and VM lifecycle scope.
 - **Verification Evidence**: [Complete Editor Prefab conversion and source admission qualification](verification/2026-10/2026-10-27T064545Z-complete-editor-prefab-conversion-and-source-admission-qualification-bc6d938e4ea5421fa42d0028230a11dc.md) - Qualifies Source pre-copy admission, reviewed Editor conversion, actual dependency fences, public consumers and selected Windows/DX12 workflows.
 - **Work Progress**: [Editor conversion source admission fixes pass full foundation cohort](progress/2026-10/2026-10-27T061533Z-editor-conversion-source-admission-fixes-pass-full-foundation-cohort-33359bf2b64a4517acffb1e0d41eb554.md) - Work Progress for Editor conversion source admission fixes pass full foundation cohort.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Source-owned Prefab intent review and revert qualification](verification/2026-10/2026-10-27T012127Z-source-owned-prefab-intent-review-and-revert-qualification-4b14705bceb545e79f34b7afbc5144bf.md) - Qualifies bounded declaration observation, reviewed exact Revert, rejected composition fencing and explicit property value limits with independent and selected Windows evidence.
 - **Work Progress**: [Caller-owned property value budget correction in progress](progress/2026-10/2026-10-27T003831Z-caller-owned-property-value-budget-correction-in-progress-97d2113cb1104680bf471d7d3b7f036f.md) - Source Revert cohorts pass; final review found an implicit property payload ceiling and a shared resolver budget correction is being implemented.
 - **Work Progress**: [Source-owned Prefab Revert integration and review corrections](progress/2026-10/2026-10-26T234134Z-source-owned-prefab-revert-integration-and-review-corrections-c8fb754f923b49de9812cb196b66a3d7.md) - Bounded source observation, exact Revert and retained rejected composition are integrated; source and UI review corrections await combined qualification.
-- **Verification Evidence**: [Captured Editor Scene preview and ordered Image publication qualification](verification/2026-10/2026-10-26T221436Z-captured-editor-scene-preview-and-ordered-image-publication-qualification-bd36086e52524bb1b227dbd21da81056.md) - Actual working-copy capture, source receipts, native content and selection fences, and ordered Image observations have complete scoped owner, public, independent, and selected Windows evidence.
 
 # Integration Notes
 

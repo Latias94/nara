@@ -211,8 +211,9 @@ into durable allocated identities merely to complete the first consumer.
 
 ## R3: Behavior Representation And Immutable Module Publications
 
-**Design:** D02, D03, D06. **State:** private representation comparison executed; production
-representation, language workflow and replacement remain open. **Owners:** Schema, Scene materialization,
+**Design:** D02, D03, D06. **State:** private representation comparison and first in-process
+C#/Lua snapshot workflow executed; production representation, complete language workflow and
+replacement remain open. **Owners:** Schema, Scene materialization,
 concrete language adapter and executable Host; Proposed 0120.
 
 **R3a representation:** compare an explicit attachments envelope and owner-managed rows with one
@@ -231,6 +232,12 @@ not an owner-catalog migration transaction.
 **R3b language workflow:** fix the representation enough to compare the same gameplay task with
 C# and Lua feasibility adapters. Choose a production candidate on author workflow, targets,
 lifetime and measured toolchain cost. This is not a commitment to maintain both SDKs.
+
+The [first executable slice](../research/2026-10-27-behavior-language-workflow-comparison.md)
+passes the same Scene/Prefab task through real hostfxr and Lua calls with exact native command
+authority. It is a fixed DTO/event harness, not generic Schema binding, an optimized domain-call
+comparison or a language/SDK selection. Author iteration, data/VM authority and concrete owner
+lifetime remain required before production integration.
 
 **R3c replacement:** qualify only the modes needed by the selected owner, after its native
 completion/retirement proof in R4a. Defining coexist-and-switch and Stop-first semantics does not

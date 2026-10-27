@@ -48,6 +48,13 @@ independent scheduler access; their implementation must own layout/drop/by-ID sa
 synthesize arbitrary Rust layouts from file data. No duplicate Rust `TypeId` exception is an
 adequate design.
 
+The [first in-process language slice](../../research/2026-10-27-behavior-language-workflow-comparison.md)
+executes the same fixed Mover/Sensor task through actual C#/.NET and Lua calls. Exact native
+tokens guard returned Name batches; no World borrow crosses the call. This qualifies that
+private snapshot workflow only. Compiled field extraction/event cases, copied DTO costs,
+language iteration, generic Schema binding and VM instance/code custody still need evidence.
+Neither this JSON bridge nor either language is selected as the production interface.
+
 ### Publication Scope
 
 Native executable/layout changes continue to create a fresh native Runtime generation. A

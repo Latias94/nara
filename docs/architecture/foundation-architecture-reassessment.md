@@ -188,6 +188,11 @@ other; traverse nested entity/asset references; reject stale owner completion; d
 absence, unavailable binding and encode failure. Same-type multiplicity is an explicit tracer
 choice: if enabled, use stable attachment identity, never array position or VM handle.
 
+The [first language slice](../research/2026-10-27-behavior-language-workflow-comparison.md)
+executes a fixed admitted Scene/Prefab task through actual in-process C# and Lua calls.
+It removes a hosting feasibility uncertainty, not the need for Schema-driven binding, measured
+domain access, author iteration and VM ownership. The private DTO harness is not a selected SDK.
+
 ## D03: Immutable Publications And Reload
 
 Topics: T09, T11, T13, T35. ADRs: 0046, 0079, 0081, 0082, 0084, 0090, 0093, 0098.

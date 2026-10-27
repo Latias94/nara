@@ -11,6 +11,7 @@ resolver = "3"
 exclude = [
     "reference-game",
     "tests/fixtures/module-consumer",
+    "tests/fixtures/behavior-languages",
     "tests/fixtures/ui-module-consumer",
     "samples/collect-game",
     "samples/two-level-game",
