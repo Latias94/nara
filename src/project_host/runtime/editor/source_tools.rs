@@ -32,6 +32,11 @@ use serde::{Deserialize, Serialize};
 use super::{EditorEditPreparationError, EditorProjectSession};
 
 mod process;
+mod release;
+pub use release::{
+    EditorSourceToolReleaseError, EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
+    EditorSourceToolReleaseRequirement, PreparedEditorSourceToolRelease,
+};
 #[cfg(test)]
 mod tests;
 
@@ -113,18 +118,26 @@ impl EditorSourceToolDefinition {
         owner: ComponentSchemaOwnerSnapshot,
         component: ComponentTypeId,
     ) -> Result<Self, EditorSourceToolError> {
-        let schema = owner
-            .schema(&component)
-            .ok_or(EditorSourceToolError::Definition)?;
-        if schema.fields().len() > MAX_FIELDS || schema.authoring_initial_value().is_none() {
-            return Err(EditorSourceToolError::Definition);
-        }
+        validate_tool_component(&owner, &component)?;
         Ok(Self {
             command,
             owner,
             component,
         })
     }
+}
+
+fn validate_tool_component(
+    owner: &ComponentSchemaOwnerSnapshot,
+    component: &ComponentTypeId,
+) -> Result<(), EditorSourceToolError> {
+    let schema = owner
+        .schema(component)
+        .ok_or(EditorSourceToolError::Definition)?;
+    if schema.fields().len() > MAX_FIELDS || schema.authoring_initial_value().is_none() {
+        return Err(EditorSourceToolError::Definition);
+    }
+    Ok(())
 }
 
 impl From<EditorEditPreparationError> for EditorSourceToolError {

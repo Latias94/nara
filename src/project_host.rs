@@ -127,6 +127,8 @@ pub use runtime::{
     EditorProjectOpenFailureImpact, EditorProjectOpenFailureSource, EditorProjectOpenHost,
     EditorProjectOpenPhase, EditorProjectOpenProgress, EditorProjectOpenTasksCloseReport,
     EditorProjectSession, EditorSourceToolCommand, EditorSourceToolDefinition,
+    EditorSourceToolReleaseError, EditorSourceToolReleaseMember, EditorSourceToolReleaseMemberKind,
+    EditorSourceToolReleaseRequirement, PreparedEditorSourceToolRelease,
     SupervisedDesktopSourceAdmissionError, SupervisedDesktopSourceAuthority,
     TrustedCompiledEditorProjectIntent, admit_supervised_desktop_source_receipt,
 };

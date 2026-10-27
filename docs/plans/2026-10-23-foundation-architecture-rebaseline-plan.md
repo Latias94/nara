@@ -183,6 +183,9 @@ authority, author concepts, update/diagnostic/recovery behavior and measured cal
 implementing three production SDKs. The selected ordinary-tool path then completes local install,
 update, enable/disable and remove under the phased Package contract, including required dependent
 closure, stale proposals and modified/adopted file preservation. A panel alone cannot close this.
+The [local source-tool release plan](2026-10-28-local-source-tool-release-plan.md) orders code-free
+artifact capture before installation ownership, approved activation, dependency-safe removal and
+actual public/native qualification. Its first capture API is not an installed or enabled tool.
 
 Acceptance: panel/session parity, exact result, one Undo, Save/Reopen, rejected/stale proposal,
 delayed completion after newer requests, multiple observers and bounded structured diagnostic

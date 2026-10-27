@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-28 (finite Session-owned tools, integer property facets and complete-observation preparation)
+**Last Revised**: 2026-10-28 (finite tool facets, code-free local release capture and complete-observation preparation)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -453,6 +453,17 @@ control; activation does not delete or convert that input into a tool parameter.
 the default field renderer while admitted metadata still permits ordinary editing. Missing
 metadata follows existing unavailable/read-only rules. Text/caret/IME and widget instances remain
 frontend-local. This finite capability does not select a recursive UI language or a native ABI.
+
+Local finite tool release preparation is code-free and separate from installation and approval.
+The Host supplies a strict source capability and its selected manifest digest. The release owner
+admits bounded target/protocol/trust metadata and exact relationship declarations, then captures
+and verifies every declared artifact/content member before returning owned bytes. Existing Reflect
+catalog admission validates the explicit Schema owner/component; Package identity never substitutes
+for that owner. Source edits after capture cannot change the candidate. Undeclared siblings are
+outside the candidate and cannot become implicit installed dependencies. Preparation neither writes
+project state nor probes a child, grants command execution, establishes an installed receipt or
+grants deletion authority. The [local release plan](../../plans/2026-10-28-local-source-tool-release-plan.md)
+orders those subsequent owners; the concrete first format has no old reader or compatibility path.
 
 A component schema may publish one optional complete `authoring_initial_value` in the existing bounded generic value grammar.
 It is creation-only data, validated through the canonical complete schema/value validator at catalog admission and copied for an explicit creation transaction.

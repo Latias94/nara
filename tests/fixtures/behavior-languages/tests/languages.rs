@@ -4,6 +4,8 @@
 mod authoring_project;
 #[path = "support/enemy_stats.rs"]
 mod enemy_stats;
+#[path = "support/local_release.rs"]
+mod local_release;
 #[path = "support/scene_runtime.rs"]
 mod scene_runtime;
 

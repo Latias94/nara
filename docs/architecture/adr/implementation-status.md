@@ -54,6 +54,14 @@ Open workflows exercise the shared candidate. Generic dirty input retains indepe
 only tool parameters retire with their original route. Exact revocation remains available during
 Close decisions. Local installation, general inline contributions, executable gameplay publications
 and the custom-drawn frontend remain open; no SDK or complete R1b/R3 claim follows.
+The [local release preparation successor](../../knowledge/engineering/verification/2026-10/2026-10-27T201403Z-code-free-local-finite-tool-release-capture-and-lifecycle-owner-design-1f12c7706bd44248adec1203402d167e.md)
+adds code-free strict-capability capture of a selected manifest and complete declared artifact/
+content bytes, with actual C# payload and source-drift consumers. It admits bounded exact local
+relationship declarations and generation-one Schema through Reflect; it does not resolve an
+installed graph or approve execution. The [local lifecycle plan](../../plans/2026-10-28-local-source-tool-release-plan.md)
+keeps installation/ownership receipts, approved runtime custody, evolved-Schema integration,
+durable selection and safe dependent-aware removal in progress. No Package lifecycle claim
+follows from immutable capture alone.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

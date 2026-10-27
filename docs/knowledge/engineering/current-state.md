@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "024ff25b6c1e55665b97aac2ef21c75d3ce7ad7c02a720b1bf4794c8c5ab607e"
+source_fingerprint: "3fe7d26dbdf79b2aeca6ed55c51dd0a9be27dfec29f907beb30be94db3d422ed"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "024ff25b6c1e55665b97aac2ef21c75d3ce7ad7c02a720b1bf4794c8c5a
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `024ff25b6c1e55665b97aac2ef21c75d3ce7ad7c02a720b1bf4794c8c5ab607e`
-- Immutable records: 983
+- Source fingerprint: `3fe7d26dbdf79b2aeca6ed55c51dd0a9be27dfec29f907beb30be94db3d422ed`
+- Immutable records: 984
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Code-free local finite tool release capture and lifecycle owner design](verification/2026-10/2026-10-27T201403Z-code-free-local-finite-tool-release-capture-and-lifecycle-owner-design-1f12c7706bd44248adec1203402d167e.md) - Qualifies immutable declared artifact capture before installation, records pinned placement findings and the remaining local Package ownership and activation boundaries.
 - **Verification Evidence**: [Finite source tool property facets and shared native review qualification](verification/2026-10/2026-10-27T193225Z-finite-source-tool-property-facets-and-shared-native-review-qualification-c47581dc5dfa45038a38a6aea5b2d4be.md) - Records the UI-neutral Tooling replacement, exact activation and revocation corrections, shared panel and Inspector candidate, actual C# and DX12 workflow, independent review and bounded cleanup.
 - **Work Progress**: [Inline source tool facet contract and frontend integration in progress](progress/2026-10/2026-10-27T185417Z-inline-source-tool-facet-contract-and-frontend-integration-in-progress-cd9355db64e64f6b8ff437035268bdc0.md) - Records the shared Tooling replacement, explicit activation routing and active disjoint implementation lanes before complete production qualification.
 - **Verification Evidence**: [Production finite source tools and exact physical close observations](verification/2026-10/2026-10-27T180941Z-production-finite-source-tools-and-exact-physical-close-observations-fc2363973364434096d350ae4a8d762c.md) - Qualifies Session/Application-owned trusted child proposals, deletes the displaced tool bridge, and fixes concurrent result and physical-close observations.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Closed Scene binding selection and shared strict data compilation](verification/2026-10/2026-10-27T105601Z-closed-scene-binding-selection-and-shared-strict-data-compilation-263aa2e60c62429db4a8862d2df6e059.md) - Qualifies explicit mixed Schema selection and public Prefab compilation while preserving separate runtime authority, data publication and export obligations.
 - **Verification Evidence**: [Backend-free owner schema snapshots and clarified owned Editor UI sequencing](verification/2026-10/2026-10-27T102723Z-backend-free-owner-schema-snapshots-and-clarified-owned-editor-ui-sequencing-7e4b079a81b64d149b8f031b8b2c84ea.md) - Qualifies metadata-only owner admission and migrated consumers; records user-directed Nara UI ownership and the plan review without blocking ongoing production Scene work.
 - **Work Progress**: [Updated custom UI and language extension evidence integrated with the production data design](progress/2026-10/2026-10-27T100227Z-updated-custom-ui-and-language-extension-evidence-integrated-with-the-production-data-design-5f8d5f8dc41e42888f9099767abc1248.md) - Records source-only UI and language findings, the closed Scene representation proposal, resolved export-policy design review and next production work without declaring SDK or toolkit adoption.
-- **Verification Evidence**: [Actual authored code iteration with retained Lua VM and collectible managed code](verification/2026-10/2026-10-27T091400Z-actual-authored-code-iteration-with-retained-lua-vm-and-collectible-managed-code-060183fe1373441980ece9733ef76f57.md) - Qualifies unchanged-World body routing, rejected candidates, exact old-result fencing and actual physical code/VM retention in the private two-language comparison.
 
 # Integration Notes
 

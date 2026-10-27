@@ -10,6 +10,7 @@ with independent file evidence and complete content authorization
 **Amended**: 2026-10-28 to require complete retained observations at public authoring preparation ingress
 **Amended**: 2026-10-28 to retain finite trusted tool execution and review in the Project Session
 **Amended**: 2026-10-28 to share complete tool observations and activation-bound actions across frontends
+**Amended**: 2026-10-28 to separate code-free local release capture from installation and activation
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
 **Refined By**: [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor
 Workspace Installation
@@ -156,6 +157,11 @@ Rules:
   acquire a successor merely because its document basis remains current. Process ownership and
   trusted command configuration remain in Project Session; no second frontend result bus or
   transaction owner is introduced.
+  An owned, code-free local tool release candidate remains separate from this activation owner.
+  Captured file bytes and admitted data-only Schema grant no execution or document publication
+  rights. Installation selection and executable approval must bind to that same candidate before
+  a future installed route may invoke the existing Session probe. Preparation alone does not
+  register metadata into an open document or acquire a second request/review owner.
 - Retained construction uses that same source owner. Workspace routes the original complete
   query basis plus the draft's exact source/Schema basis, and carries a nominal prepared
   construction with its fixed local mapping. A new query cannot authorize an obsolete draft.

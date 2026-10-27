@@ -7,8 +7,42 @@ generated entity IDs, inverse patches, history and persistence retain their exis
 No drawing toolkit or gameplay VM is involved.
 
 This is explicit command configuration for a concrete tool. Ordinary project Open never executes
-the command. Automatic discovery, persistent installation, executable byte pinning, dependency
-resolution and a public language SDK remain separate work.
+the command. A separate code-free local release capture API prepares declared artifact bytes;
+persistent installation, approved installed execution, dependency resolution and a public language
+SDK remain separate work. Raw command paths are trusted local configuration, not immutable
+installed release identity.
+
+## Prepare A Local Release
+
+`PreparedEditorSourceToolRelease::capture(&source, expected_manifest_digest)` reads the fixed
+`nara-tool.json` through a Host-issued strict source capability. Supply the manifest's raw BLAKE3
+digest and length from the source observation you selected; the manifest does not approve itself.
+Capture verifies each declared member and retains owned bytes plus the ordinary admitted Schema
+owner snapshot. Editing the original directory afterward does not modify the candidate.
+
+Format 1 requires explicit `package`, opaque `release` label, `host_target`,
+`authority: "trusted_process"`, `protocol_version: 1`, `owner`, `component`, `catalog`, `entry`,
+`requires` and `files`. An exact requirement has `package` and `manifest: {length, blake3}`; each
+member has `path`, `length`, lowercase 64-digit BLAKE3 `blake3`, and `kind` (`tool` or `content`).
+`catalog` and `entry` exactly name distinct nonempty tool members. The catalog uses Reflect's
+existing JSON catalog envelope. This first capture form requires catalog generation one and has
+no predecessor-lineage input; an already evolved catalog is not yet admitted even if only tool
+code changes. Package identity and Schema owner identity are separate fields.
+The first Host targets are `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu`; capture rejects
+a different current Host. The executable runtime/launcher remains an external Host prerequisite.
+
+Paths are portable ASCII with at most eight components and 512 bytes. File and directory spelling
+aliases, traversal, device names, manifest self-membership, and file/directory collisions reject.
+Ceilings are 64 KiB manifest, 64 members, 16 MiB per member and 64 MiB aggregate payload; existing
+Reflect catalog limits apply as well. Unlisted siblings are not read or included. Only the captured
+closure may be staged by a future installer; ambient siblings cannot become implicit dependencies.
+
+Preparation starts no child, writes no project file and changes no active tool or document Schema.
+Content classification grants no project destination, overwrite or deletion authority. Exact
+requirement declarations do not resolve or prove installed dependencies. This candidate is the
+input to the subsequent [local lifecycle plan](../plans/2026-10-28-local-source-tool-release-plan.md),
+not an installation receipt, executable approval or immutable launch proof. Installation and
+execution need the later publication and runtime-custody boundaries before they can use it.
 
 ## Configure And Probe
 

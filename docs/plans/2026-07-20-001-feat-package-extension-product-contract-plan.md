@@ -2,7 +2,7 @@
 title: Nara Package and Extension Product Contract - Plan
 type: feat
 date: 2026-07-20
-last_updated: 2026-10-23
+last_updated: 2026-10-28
 topic: package-extension-product-contract
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: requirements-only
@@ -200,19 +200,23 @@ task, tested target, cost and stop conditions; freeze numeric goals before measu
 Nara UI toolkit, marketplace, historical RGF result or second implementation is a research gate.
 
 **P1 - First local Package workflow.** Build one immutable local release containing content and
-one Rust semantic command/property tool in a replaceable child Host, with the current Shell
+one concrete semantic command/property tool in a replaceable child Host, with the current Shell
 frontend rendering the declared data. Pin one desktop Host/target profile before implementation.
 Implement F1-F6 for this bounded release: author validation and receipt; code-free bounded metadata
 preflight; strict staging and ownership records; preview/confirm/cancel; inspectable installed,
 enabled and active states; candidate update/disable/crash recovery; and safe removal. The tool
 returns proposals, never a `World`, raw UI/window/GPU handle or file authority. Prove exact edit
 results, Undo/Save/Reopen, stale-result rejection, required-dependent blocking and explicit cascade.
-Exercise applicable R1-R13 and R17-R29; R11 is one semantic facet and R29 is the local content/Rust
-authoring subset, not all listed families. R13 retains the complete source-built runtime path.
+Exercise applicable R1-R13 and R17-R29; R11 is one semantic facet and R29 is the local content/tool
+authoring subset, not all listed families. The selected next consumer is the independently built
+EnemyStats finite C# child under the [local release plan](2026-10-28-local-source-tool-release-plan.md);
+that concrete artifact does not select an official managed SDK or require a duplicate Rust tool.
+R13 retains the complete source-built runtime path.
 Validate explicitly declared Package relationships; do not add version solving or a source resolver.
 Reject schema-migration-required updates and unsupported artifacts explicitly; R26's no-publication
-rule applies without claiming a migration engine. This slice does not require C#, Lua, a stable
-native ABI, importer/build plugins, Git/Cargo transport adapters or a remote registry.
+rule applies without claiming a migration engine. This slice does not require another authoring
+language, a stable native ABI, importer/build plugins, Git/Cargo transport adapters or a remote
+registry. The selected finite C# artifact retains its separately stated runtime prerequisites.
 
 **P2 - Shared boundary qualification.** Challenge the first role-specific API with an independent
 consumer before freezing a reusable protocol. Compare the placements on the same semantic tool;
