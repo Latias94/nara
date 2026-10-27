@@ -81,6 +81,30 @@ publication. Keep registration in the contribution's provider callback, not a se
 receipt; a mismatch rejects App or runtime publication. Advanced raw-plugin installation outside a
 recipe remains responsible for its own schema registration.
 
+For a Scene-owned data family, admit its owner-local catalogs through
+`ComponentSchemaOwnerSnapshot` and pass the snapshots to `SchemaContribution::data_for_default`
+or `data_configured`. A native contribution can also call `with_data_owners`. The data-only
+contribution's plugin declares no native schema provider; no Rust component type or codec is
+synthesized for each data Schema. The contribution retains the exact admitted snapshots.
+
+Every recipe installs the Scene component selection, including a recipe with no data owners.
+Its native side comes from the actual frozen registry; its data side comes from the contributing
+plugins. Removing or replacing a data contributor through an outer edited group rejects its
+orphaned declaration before plugin build. Change the contribution through the recipe itself.
+The generated Scene selection is also recipe-owned: outer configuration cannot substitute another
+selection, and seal checks the exact owner admissions even when configuration bytes are equal.
+File-backed resolution also rejects owner and type claims reserved by a known inactive native
+provider, including tombstones and immediate predecessors.
+
+`RuntimePlan::schema_validation().bindings()` exposes the complete selected definitions.
+Its composition fingerprint covers native and data owners. Native provider receipts and the
+executable registry fingerprint still describe native bindings. Content capture, Check, startup,
+Restart and Scene replacement require the exact complete admission, independently of matching
+fingerprints. A disk authoring bundle supplies metadata agreement; adding an owner to that bundle
+alone does not select data storage or make a gameplay module executable. Content snapshots retain
+a weak native witness and data-owner metadata, so keeping source content does not keep native
+code alive.
+
 A game adds and reconfigures the contribution through the recipe:
 
 ```rust

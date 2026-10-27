@@ -1,20 +1,20 @@
 use nara_fs::{ContentDigest, DirectoryCapability, FileCapability, FileIdentity, RelativePath};
 use nara_project::ProjectPath;
 use nara_reflect::{
-    AuthoringSchemaBundle, AuthoringSchemaBundleLimits, ComponentRegistrySnapshot,
-    PersistentComponentSchemaOwnerId,
+    AuthoringSchemaBundle, AuthoringSchemaBundleLimits, PersistentComponentSchemaOwnerId,
 };
+use nara_scene::SceneComponentBindingsWitness;
 
 use super::{ProjectSettingsCandidate, ProjectSettingsLineage, RuntimePlan};
 use crate::project_content::ProjectContentError;
 
-/// Prepared proof that the selected executable schema owners agree with the declared authoring
-/// bundle. The proof remains tied to the exact settings, root, and frozen schema snapshot until the
-/// strict content loader finishes binding every reachable persistent record.
+/// Prepared proof that the selected native and data schema owners agree with the declared
+/// authoring bundle. The proof remains tied to the exact settings, root, and component definitions
+/// until the strict content loader finishes binding every reachable persistent record.
 pub(crate) struct PreparedRuntimeSchemaAgreement {
     settings_lineage: ProjectSettingsLineage,
     manifest_digest: ContentDigest,
-    schema_snapshot: ComponentRegistrySnapshot,
+    component_bindings: SceneComponentBindingsWitness,
     bundle_path: ProjectPath,
     bundle_file: FileCapability,
     bundle_digest: ContentDigest,
@@ -31,8 +31,8 @@ impl PreparedRuntimeSchemaAgreement {
             && self.settings_lineage.project_root_identity() == Some(project_root_identity)
             && self.manifest_digest == candidate.manifest_digest()
             && self
-                .schema_snapshot
-                .ptr_eq(plan.schema_validation().snapshot())
+                .component_bindings
+                .matches(plan.schema_validation().bindings())
     }
 
     pub(crate) fn revalidate_and_into_closure_member(
@@ -123,7 +123,8 @@ pub(crate) fn prepare_runtime_schema_agreement(
             )
         })?;
 
-    for selected in plan.schema_validation().owner_receipts() {
+    let validation = plan.schema_validation();
+    for selected in validation.owner_receipts() {
         let owner_id = PersistentComponentSchemaOwnerId::try_new(selected.owner().as_str())
             .map_err(|_| {
                 ProjectContentError::runtime_agreement_with_identifier(
@@ -145,6 +146,13 @@ pub(crate) fn prepare_runtime_schema_agreement(
         if current.generation() != selected.generation()
             || current.fingerprint() != selected.catalog()
             || current.predecessor().copied() != selected.predecessor()
+            || validation
+                .authoring_schema_bundle()
+                .owner(&owner_id)
+                .is_none_or(|selected_owner| {
+                    selected_owner.current() != current
+                        || selected_owner.predecessor() != owner.predecessor()
+                })
         {
             return Err(ProjectContentError::runtime_agreement_with_identifier(
                 "project.runtime-agreement.selected-owner-divergent",
@@ -154,11 +162,29 @@ pub(crate) fn prepare_runtime_schema_agreement(
             ));
         }
     }
+    for selected in validation.bindings().data_owners() {
+        let owner = bundle.owner(selected.owner_id()).ok_or_else(|| {
+            ProjectContentError::runtime_agreement_with_identifier(
+                "project.runtime-agreement.selected-owner-missing",
+                "Project authoring schema bundle is missing a selected data owner",
+                "schema_owner",
+                selected.owner_id().as_str(),
+            )
+        })?;
+        if owner.current() != selected.current() || owner.predecessor() != selected.predecessor() {
+            return Err(ProjectContentError::runtime_agreement_with_identifier(
+                "project.runtime-agreement.selected-owner-divergent",
+                "Project authoring schema owner differs from the selected data definition",
+                "schema_owner",
+                selected.owner_id().as_str(),
+            ));
+        }
+    }
 
     Ok(PreparedRuntimeSchemaAgreement {
         settings_lineage: candidate.lineage(),
         manifest_digest: candidate.manifest_digest(),
-        schema_snapshot: plan.schema_validation().snapshot().clone(),
+        component_bindings: validation.bindings().witness(),
         bundle_path,
         bundle_file,
         bundle_digest,

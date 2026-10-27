@@ -7,7 +7,12 @@ use nara_app::CoreStage;
 use nara_core::ItemLimit;
 use nara_ecs::Resource;
 use nara_identity::{EntityLookup, SceneEntityId, WorldIdentityDomain};
-use nara_reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue};
+use nara_reflect::{
+    ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
+    ComponentRegistry, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    PersistentComponentSchemaOwnerId, component_registry,
+};
 use nara_scene::{
     SceneComponentRecord, SceneEntityRecord, SceneSpawnReport,
     advanced::{SceneProductResource, SceneProductTransactionLimits},
@@ -69,12 +74,21 @@ fn assert_rejected(report: &SceneSpawnReport, code: &str) {
 }
 
 fn with_current_scene(inspect: impl FnOnce(&mut World) + Send + 'static) {
+    with_selected_current_scene([], source("a"), inspect);
+}
+
+fn with_selected_current_scene(
+    owners: impl IntoIterator<Item = ComponentSchemaOwnerSnapshot>,
+    startup: SceneSource,
+    inspect: impl FnOnce(&mut World) + Send + 'static,
+) {
     let inspect = Arc::new(Mutex::new(Some(inspect)));
     let inspection = Arc::clone(&inspect);
     let mut app = App::new();
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
         nara_scene::SceneComponentsPlugin,
+        nara_scene::SceneComponentBindingsPlugin::new(owners),
         StartupSceneActivationPlugin,
     ))
     .unwrap()
@@ -101,7 +115,7 @@ fn with_current_scene(inspect: impl FnOnce(&mut World) + Send + 'static) {
             scope.apply_command(move |world: &mut World| {
                 assert!(
                     command_result
-                        .set(materialize_startup_scene(world, source("a")))
+                        .set(materialize_startup_scene(world, startup))
                         .is_ok()
                 );
             });
@@ -120,6 +134,165 @@ fn with_current_scene(inspect: impl FnOnce(&mut World) + Send + 'static) {
         retirement.drive_retirement(),
         nara_app::RuntimeCandidateRetirementState::Retired
     );
+}
+
+fn data_owner() -> ComponentSchemaOwnerSnapshot {
+    ComponentSchemaOwnerSnapshot::admit(
+        PersistentComponentSchemaOwnerId::try_new("test.data").unwrap(),
+        ComponentSchemaCatalog {
+            components: vec![
+                ComponentSchema::new(
+                    ComponentTypeId::new("test.data.Flag"),
+                    "Flag",
+                    ComponentSchemaVersion::ONE,
+                )
+                .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                .with_fields([ComponentFieldSchema::required(
+                    ComponentFieldId::new("enabled"),
+                    "Enabled",
+                    ComponentFieldPath::from_fields(["enabled"]),
+                    ComponentValueKind::Bool,
+                )
+                .with_capabilities(ComponentCapability::SCENE_AUTHORING)]),
+            ],
+            ..Default::default()
+        },
+        None,
+    )
+    .unwrap()
+}
+
+fn mixed_source(name: &str, enabled: bool) -> SceneSource {
+    SceneSource::direct(
+        candidate(Arc::new(SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(id(name))
+                .with_component(
+                    ComponentTypeId::new("nara.scene.Name"),
+                    SceneComponentRecord::new(
+                        ComponentSchemaVersion::ONE,
+                        ComponentValue::String(name.to_owned()),
+                    ),
+                )
+                .with_component(
+                    ComponentTypeId::new("test.data.Flag"),
+                    SceneComponentRecord::new(
+                        ComponentSchemaVersion::ONE,
+                        ComponentValue::map([("enabled", ComponentValue::Bool(enabled))]),
+                    )
+                    .with_owner(PersistentComponentSchemaOwnerId::try_new("test.data").unwrap()),
+                ),
+        ]))),
+        ByteLimit::new(16 * 1024).unwrap(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn mixed_startup_replacement_and_restart_preserve_selected_data_definitions() {
+    with_selected_current_scene([data_owner()], mixed_source("a", true), |world| {
+        let bindings = scene_component_bindings(world).unwrap().clone();
+        let initial = world.resource::<CurrentSceneOwner>().receipt().clone();
+        let EntityLookup::Resolved(entity) = initial.resolve(world, &id("a")) else {
+            panic!("startup publishes the mixed entity");
+        };
+        assert_eq!(world.get::<nara_scene::Name>(entity).unwrap().as_str(), "a");
+        assert_eq!(
+            bindings
+                .data_component(world, entity, &ComponentTypeId::new("test.data.Flag"))
+                .unwrap()
+                .unwrap()
+                .value,
+            ComponentValue::map([("enabled", ComponentValue::Bool(true))])
+        );
+
+        let replaced = replace_current_scene_with_product(
+            world,
+            &initial,
+            mixed_source("b", false),
+            limits(),
+            &[],
+            |writer| {
+                writer.replace_resource(RunValue(2));
+            },
+        );
+        assert!(
+            !replaced.diagnostics.has_errors(),
+            "{:?}",
+            replaced.diagnostics
+        );
+        let replaced = replaced.instance.unwrap();
+        let restarted = restart_current_scene_with_product(world, &replaced, limits(), &[], |_| {});
+        assert!(
+            !restarted.diagnostics.has_errors(),
+            "{:?}",
+            restarted.diagnostics
+        );
+        let restarted = restarted.instance.unwrap();
+        let EntityLookup::Resolved(entity) = restarted.resolve(world, &id("b")) else {
+            panic!("restart publishes the retained mixed source");
+        };
+        assert_eq!(world.get::<nara_scene::Name>(entity).unwrap().as_str(), "b");
+        assert_eq!(
+            bindings
+                .data_component(world, entity, &ComponentTypeId::new("test.data.Flag"))
+                .unwrap()
+                .unwrap()
+                .value,
+            ComponentValue::map([("enabled", ComponentValue::Bool(false))])
+        );
+        assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &restarted);
+        assert_eq!(*world.resource::<RunValue>(), RunValue(2));
+        assert!(!matches!(
+            initial.resolve(world, &id("a")),
+            EntityLookup::Resolved(_)
+        ));
+        assert!(!matches!(
+            replaced.resolve(world, &id("b")),
+            EntityLookup::Resolved(_)
+        ));
+    });
+}
+
+#[test]
+fn replacement_rejects_equivalent_owner_catalog_with_another_admission_basis() {
+    with_selected_current_scene([data_owner()], mixed_source("a", true), |world| {
+        let installed = scene_component_bindings(world).unwrap().clone();
+        let foreign = nara_scene::SceneComponentBindings::new(
+            installed.native_snapshot().clone(),
+            [data_owner()],
+        )
+        .unwrap();
+        assert!(!installed.same_definitions(&foreign));
+        let current = world.resource::<CurrentSceneOwner>().receipt().clone();
+        let source_view = source_view(world);
+        let entities = world.entities().len();
+        let stats = world.resource::<WorldIdentityDomain>().stats();
+        let next = mixed_source("b", false);
+        let assets = nara_scene::advanced::SceneAssetBindings::from_world(world);
+        let result = foreign.prepare_scene_replacement_with_claims(
+            world,
+            &next.candidate,
+            None,
+            &current,
+            assets,
+            &nara_scene::advanced::SceneNativeRetirementClaims::default(),
+            limits(),
+            &[],
+            |_| panic!("another owner admission cannot configure product state"),
+        );
+        let Err(report) = result else {
+            panic!("another owner admission cannot prepare replacement");
+        };
+        assert_rejected(&report, "scene.prepared-definition-changed");
+        assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &current);
+        assert_eq!(
+            source_view.with_document(|scene| scene.roots.clone()),
+            Some(vec![id("a")])
+        );
+        assert_eq!(world.entities().len(), entities);
+        assert_eq!(world.resource::<WorldIdentityDomain>().stats(), stats);
+        assert_eq!(*world.resource::<RunValue>(), RunValue(1));
+    });
 }
 
 #[test]

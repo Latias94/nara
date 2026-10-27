@@ -594,6 +594,6 @@ fn snapshot_matches_admission(snapshot: &ProjectContentSnapshot, admission: &Adm
         && snapshot.content_closure().manifest_digest()
             == admission.context.candidate.manifest_digest()
         && snapshot.selected_scene_path() == &admission.path
-        && snapshot.shares_schema_snapshot(admission.context.plan.schema_validation().snapshot())
+        && snapshot.shares_component_bindings(admission.context.plan.schema_validation().bindings())
         && snapshot.matches_asset_domains(&admission.context.plan)
 }

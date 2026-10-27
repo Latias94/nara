@@ -297,7 +297,18 @@ fn escaping_component_asset_paths_reject_before_source_access() {
 
     let error = loader.load(&candidate, &plan).unwrap_err();
 
-    assert_eq!(error.kind(), ProjectContentErrorKind::AssetReference);
+    // The shared compiler validates surviving root and Prefab values before asset capture.
+    assert_eq!(error.kind(), ProjectContentErrorKind::PrefabExpansion);
+    assert!(
+        error.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.prefab-compilation-failed"
+                && diagnostic.fields().iter().any(|field| {
+                    field.key().as_str() == "failure-kind"
+                        && field.display_value().as_ref() == "component"
+                })
+        }),
+        "{error:?}"
+    );
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
 }
 
@@ -314,7 +325,17 @@ fn document_catalog_mismatch_rejects_without_partial_publication() {
 
     let error = loader.load(&candidate, &plan).unwrap_err();
 
-    assert_eq!(error.kind(), ProjectContentErrorKind::ScenePublication);
+    assert_eq!(error.kind(), ProjectContentErrorKind::PrefabExpansion);
+    assert!(
+        error.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.prefab-component-migration-failed"
+                && diagnostic.fields().iter().any(|field| {
+                    field.key().as_str() == "component-id"
+                        && field.display_value().as_ref() == "nara.test.MissingFromFrozenCatalog"
+                })
+        }),
+        "{error:?}"
+    );
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
 }
 

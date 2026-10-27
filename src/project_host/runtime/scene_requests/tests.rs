@@ -1,7 +1,7 @@
 use std::{
     fs,
     path::PathBuf,
-    sync::Mutex,
+    sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
 
@@ -179,7 +179,7 @@ fn worker_prepares_selected_scene_and_refunds_rejected_content() {
         target.expanded_scene().roots,
         [SceneEntityId::new("second").unwrap()]
     );
-    assert!(target.shares_schema_snapshot(context.plan.schema_validation().snapshot()));
+    assert!(target.shares_component_bindings(context.plan.schema_validation().bindings()));
     assert_eq!(
         current.expanded_scene().roots,
         [SceneEntityId::new("startup").unwrap()]
@@ -379,22 +379,43 @@ impl Fixture {
             .unwrap();
         let inspect = Arc::new(Mutex::new(Some(inspect)));
         let inspection = Arc::clone(&inspect);
+        let native = Arc::new(OnceLock::new());
+        assert!(
+            native
+                .set(context.plan.schema_validation().snapshot().clone())
+                .is_ok()
+        );
         let mut app = App::new();
-        app.add_plugins((
-            nara_reflect::ComponentRegistryPlugin,
-            nara_scene::SceneComponentsPlugin,
-            StartupSceneActivationPlugin,
-        ))
-        .unwrap()
-        .add_systems(nara_app::CoreStage::Update, move |world: &mut World| {
-            if let Some(inspect) = inspection.lock().unwrap().take() {
-                inspect(world);
-                if let Some(pools) = world.get_resource::<TaskPools>() {
-                    pools.shutdown_blocking().unwrap();
+        app.add_plugins(nara_reflect::preloaded_component_registry_plugin(native))
+            .unwrap()
+            .add_plugins((
+                nara_scene::SceneComponentsPlugin,
+                nara_hierarchy::HierarchyPlugin,
+                nara_transform::TransformPlugin,
+                nara_render::RenderComponentsPlugin,
+                nara_sprite::SpritePlugin,
+                nara_tilemap::TilemapPlugin,
+                nara_scene::SceneComponentBindingsPlugin::new(
+                    context
+                        .plan
+                        .schema_validation()
+                        .bindings()
+                        .data_owners()
+                        .iter()
+                        .cloned(),
+                ),
+                StartupSceneActivationPlugin,
+            ))
+            .unwrap()
+            .add_systems(nara_app::CoreStage::Update, move |world: &mut World| {
+                if let Some(inspect) = inspection.lock().unwrap().take() {
+                    inspect(world);
+                    if let Some(pools) = world.get_resource::<TaskPools>() {
+                        pools.shutdown_blocking().unwrap();
+                    }
                 }
-            }
-        })
-        .unwrap();
+            })
+            .unwrap();
         let mut candidate = nara_app::RuntimeAdmissionReservation::try_acquire()
             .unwrap()
             .admit(

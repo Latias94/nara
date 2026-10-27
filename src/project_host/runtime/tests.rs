@@ -5862,7 +5862,7 @@ fn editor_startup_source_has_an_exact_independent_retained_budget_lease() {
         .prepare_editor_startup_scene(
             snapshot.selected_scene_source_key(),
             snapshot.expanded_scene(),
-            plan.schema_validation().registry(),
+            plan.schema_validation().bindings(),
         )
         .unwrap();
     let source_charge = source.retained_bytes();
@@ -5906,7 +5906,7 @@ fn editor_startup_source_has_an_exact_independent_retained_budget_lease() {
         .prepare_editor_startup_scene(
             snapshot.selected_scene_source_key(),
             snapshot.expanded_scene(),
-            plan.schema_validation().registry(),
+            plan.schema_validation().bindings(),
         )
         .unwrap();
     assert_eq!(
@@ -5936,7 +5936,7 @@ fn editor_startup_source_has_an_exact_independent_retained_budget_lease() {
     let result = snapshot.prepare_editor_startup_scene(
         snapshot.selected_scene_source_key(),
         snapshot.expanded_scene(),
-        plan.schema_validation().registry(),
+        plan.schema_validation().bindings(),
     );
     assert!(result.is_err());
     assert_eq!(
@@ -6014,7 +6014,7 @@ fn editor_activation_lease_survives_failed_startup_until_delayed_cleanup_finishe
         .prepare_editor_startup_scene(
             snapshot.selected_scene_source_key(),
             snapshot.expanded_scene(),
-            plan.schema_validation().registry(),
+            plan.schema_validation().bindings(),
         )
         .unwrap();
     let editor_source_charge = source.retained_bytes();

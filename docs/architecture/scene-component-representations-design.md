@@ -45,9 +45,12 @@ production source/compiler consumers. Native and data records use the existing s
 compiler; data records require explicit owner/current-version admission. Runtime preparation now
 captures exact managed definitions, stages complete groups with native values, and exposes guarded
 membership/read/write and current-live export through the existing owners. Headless evidence is
-separate from product recipe/content-replacement integration, language execution readiness and
-native Editor qualification. The [implementation ledger](adr/implementation-status.md) links the
-actual verification separately from this design's remaining contract.
+separate from language execution readiness and native Editor qualification. Product integration
+retains the same owner admissions through recipe contributions and `SchemaValidationInput`.
+Strict content capture and runtime agreement select the complete bindings; startup and replacement
+use the same publication kernel. Content snapshots retain metadata-only witnesses rather than
+native code. The [implementation ledger](adr/implementation-status.md) links actual verification
+separately from this design's remaining contract.
 
 ## Responsibility And Identity
 
@@ -181,7 +184,7 @@ without output.
 | --- | --- | --- |
 | Promote the private native-preview plus post-commit carrier helper | Small diff, existing tests | Reject: omits strict representation proof, leaves fallible work after native publication and uses a stale entity roster |
 | Register several Schemas against one native carrier type | Reuses native entry points superficially | Reject: violates exact native binding cardinality, grouped membership and encode/absence semantics |
-| Scene-owned closed native/data families | Shares real compiler, identity, publication and export; no VM dependency | Selected for implementation; must earn public workflow evidence before adoption |
+| Scene-owned closed native/data families | Shares real compiler, identity, publication and export; no VM dependency | Adopted for closed storage/publication with independent and product consumer evidence; language execution remains separate |
 | Public arbitrary representation callback SPI | Future storage flexibility | Reject now: admits uncontrolled World work and lifecycle obligations without a second production family/consumer requiring that interface |
 
 Owner Rows and dynamic descriptors remain counterfactuals from the executed representation

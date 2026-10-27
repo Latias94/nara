@@ -7,7 +7,8 @@ use std::{
 use nara_app::PluginSchemaProviderId;
 
 use crate::{
-    CatalogFingerprint, ComponentRegistry, ComponentRegistryError, ComponentSchemaCatalog,
+    CatalogFingerprint, ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
+    ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
 };
 
 type RegisterComponentSchemas = fn(&mut ComponentRegistry) -> Result<(), ComponentRegistryError>;
@@ -658,30 +659,28 @@ impl SchemaCompositionFingerprint {
     pub(crate) fn from_owner_receipts(
         receipts: impl IntoIterator<Item = ComponentSchemaOwnerContributionReceipt>,
     ) -> Self {
-        let mut receipts = receipts.into_iter().collect::<Vec<_>>();
-        receipts.sort_by_key(|receipt| receipt.owner());
-        let mut hasher = blake3::Hasher::new();
-        feed_bytes(&mut hasher, b"nara.schema-composition-fingerprint.v1");
-        feed_len(&mut hasher, receipts.len());
-        for receipt in receipts {
-            feed_str(&mut hasher, receipt.owner().as_str());
-            feed_bytes(&mut hasher, receipt.owner_fingerprint().0.as_slice());
-        }
-        Self(*hasher.finalize().as_bytes())
+        Self::from_owner_fingerprints(
+            receipts
+                .into_iter()
+                .map(|receipt| (receipt.owner().as_str(), receipt.owner_fingerprint())),
+        )
     }
 
     pub(crate) fn from_persistent_owner_catalogs<'a>(
         owners: impl IntoIterator<Item = (&'a PersistentComponentSchemaOwnerId, CatalogFingerprint)>,
     ) -> Self {
-        let mut owners = owners
-            .into_iter()
-            .map(|(owner, catalog)| {
-                (
-                    owner.as_str(),
-                    owner_fingerprint_from_str(owner.as_str(), catalog),
-                )
-            })
-            .collect::<Vec<_>>();
+        Self::from_owner_fingerprints(owners.into_iter().map(|(owner, catalog)| {
+            (
+                owner.as_str(),
+                owner_fingerprint_from_str(owner.as_str(), catalog),
+            )
+        }))
+    }
+
+    fn from_owner_fingerprints<'a>(
+        owners: impl IntoIterator<Item = (&'a str, ComponentSchemaOwnerFingerprint)>,
+    ) -> Self {
+        let mut owners = owners.into_iter().collect::<Vec<_>>();
         owners.sort_by_key(|(owner, _)| *owner);
         let mut hasher = blake3::Hasher::new();
         feed_bytes(&mut hasher, b"nara.schema-composition-fingerprint.v1");
@@ -692,6 +691,31 @@ impl SchemaCompositionFingerprint {
         }
         Self(*hasher.finalize().as_bytes())
     }
+}
+
+/// Combines an already-admitted Scene selection in the existing Schema composition domain.
+///
+/// The caller owns owner/type disjointness admission. Only native owner receipts and current
+/// data-owner catalogs contribute; no executable binding identity or snapshot authority is added.
+#[doc(hidden)]
+pub fn scene_component_composition_fingerprint(
+    native: &ComponentRegistrySnapshot,
+    owners: &[ComponentSchemaOwnerSnapshot],
+) -> SchemaCompositionFingerprint {
+    SchemaCompositionFingerprint::from_owner_fingerprints(
+        native
+            .owner_receipts()
+            .map(|receipt| (receipt.owner().as_str(), receipt.owner_fingerprint()))
+            .chain(owners.iter().map(|owner| {
+                (
+                    owner.owner_id().as_str(),
+                    owner_fingerprint_from_str(
+                        owner.owner_id().as_str(),
+                        owner.current().fingerprint(),
+                    ),
+                )
+            })),
+    )
 }
 
 impl ExecutableRegistryFingerprint {

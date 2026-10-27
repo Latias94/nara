@@ -125,11 +125,16 @@ candidate preflights before target allocation and commits through one guarded pu
 `prepare_scene_with_limits` and `prepare_scene_replacement_with_limits` apply one aggregate
 logical allowance across both families. Data Schemas do not acquire independent Rust types.
 
-In a managed App, add `SceneComponentBindingsPlugin::new(data_owners)` alongside the native registry
-plugin, then obtain `scene_component_bindings(world)` at `StartupStage::Scene` or a later safe
-point. The plugin captures the actual frozen native definition at seal. Passing independently
-re-admitted catalogs with the same bytes cannot replace that installed authority. Several engine
-domain guards coexist and are checked at the existing App/runtime boundaries.
+For an ordinary product, pass owner snapshots through `SchemaContribution::data_for_default`,
+`data_configured` or a native contribution's `with_data_owners`. `ProductRecipe` installs the Scene
+selection and carries the same admissions into content checking and runtime publication; see
+[Product Recipes](rust-product-recipes.md#persistent-schema-contributions).
+
+An advanced direct App without a recipe installs `SceneComponentBindingsPlugin::new(data_owners)`
+alongside the native registry plugin. Obtain `scene_component_bindings(world)` at
+`StartupStage::Scene` or a later safe point. The plugin captures the actual frozen native definition
+at seal. Independently re-admitted catalogs with the same bytes cannot replace that installed
+authority. Several engine domain guards coexist at the existing App/runtime boundaries.
 
 ```rust,ignore
 let bindings = scene_component_bindings(world).ok_or(MissingSceneDefinitions)?.clone();

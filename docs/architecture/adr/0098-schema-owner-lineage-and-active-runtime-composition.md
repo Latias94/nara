@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-27
-**Last Revised**: 2026-10-25
+**Last Revised**: 2026-10-27
 **Owner**: `nara_reflect`, schema-owning plugins, and product composition
 **Refines**: [ADR 0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md) and
 [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md)
@@ -189,6 +189,26 @@ Re-enabling an owner selects the same validated head or a descendant validated a
 owner's own predecessor. It does not compare the owner with an intervening recipe from which it
 was absent.
 
+For ADR 0006's closed Scene data family, a recipe contribution retains already-admitted
+owner-local data snapshots alongside its native provider definitions. Data-only contributions
+require no synthetic native provider or codec. The resolved plan and direct App preflight require
+the exact contributing plugin definition to remain selected; an outer group edit cannot leave
+its data owners active after removing or replacing the contribution. Recipe replacement owns
+that change. The generated Scene definition is also checked in full-plan preflight; seal verifies
+the actual installed data-owner admissions rather than relying on its configuration key alone.
+Its canonical configuration retains the current and immediate predecessor lineage facts,
+independently of the semantic fingerprint's exclusion of lineage. Known native owner/type claims
+remain reserved against data owners even when their native provider is inactive.
+
+`SchemaValidationInput` selects one complete `SceneComponentBindings`; the runtime installs
+the same native snapshot and data-owner admissions. Content compilation, strict Check,
+materialization, Restart and replacement compare that complete selection. A metadata-only content
+witness holds the native snapshot weakly and retains only data-owner Schema metadata. Neither
+equal fingerprints nor an authoring bundle can create runtime selection authority. The Schema
+composition fingerprint includes both storage families; native provider receipts and executable
+fingerprints keep their distinct native meaning. Language callbacks and executable owner
+publications remain separately subject to their execution contracts and Proposed ADR 0120.
+
 Four fingerprint domains remain distinct:
 
 - `CatalogFingerprint` retains its existing algorithm and identifies the canonical content of one
@@ -198,8 +218,9 @@ Four fingerprint domains remain distinct:
 - `SchemaCompositionFingerprint` hashes the canonical selected owner-ID order and each selected
   owner fingerprint. Scene, Prefab, and `ProjectContentSnapshot` compatibility use this
   World-independent semantic identity.
-- `ExecutableRegistryFingerprint` hashes the schema-composition fingerprint plus canonical
-  selected provider and binding receipts. It proves executable-behavior equivalence only.
+- `ExecutableRegistryFingerprint` hashes the native registry's Schema-composition projection
+  plus canonical selected native provider and binding receipts. It proves native executable
+  behavior equivalence only; the complete Scene composition fingerprint remains separate.
 
 Provider input order therefore affects neither typed fingerprint. Changing owner attribution
 changes the schema-composition fingerprint even when flattened component bytes match. Changing
@@ -213,9 +234,9 @@ fail closed under the current unknown-component path.
 
 Fingerprints prove canonical equivalence, not shared authority. Within one admitted executable
 composition, `RuntimePlan`, its executable Editor consumers, and candidate `World` require pointer
-identity with the same `ComponentRegistrySnapshot`. Independently constructed direct-App and file-backed
-registries may have equal semantic and executable fingerprints while retaining distinct snapshot
-instances.
+identity with the same `ComponentRegistrySnapshot` and each selected data-owner snapshot.
+Independently constructed direct-App and file-backed registries may have equal semantic and
+executable fingerprints while retaining distinct snapshot instances.
 
 ADR 0114's data-authoring basis and explicitly selected native-preview capability are not the
 project's executable Runtime composition. A typed preview retains its own exact frozen execution

@@ -33,8 +33,10 @@ use nara_ecs::{Mut, Resource, World};
 use nara_gameplay::{GameplayCommandQueue, GameplayCommandSubmission};
 use nara_image::ImageAsset;
 use nara_reflect::{
-    ComponentRegistrySnapshot, SchemaCompositionFingerprint, component_registry,
-    validate_component_registry_authority,
+    SchemaCompositionFingerprint, component_registry, validate_component_registry_authority,
+};
+use nara_scene::{
+    SceneComponentBindings, scene_component_bindings, validate_scene_component_bindings_authority,
 };
 use nara_tasks::TaskShutdownReport;
 use nara_tilemap::TileSet;
@@ -144,19 +146,20 @@ struct RuntimeStartInputs {
     )>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
 struct RuntimeStartStamp {
     lineage: ProjectSettingsLineage,
     content_revision: ProjectContentRevision,
     schema_fingerprint: SchemaCompositionFingerprint,
+    bindings: SceneComponentBindings,
 }
 
 impl RuntimeStartStamp {
-    fn capture(snapshot: &ProjectContentSnapshot) -> Self {
+    fn capture(snapshot: &ProjectContentSnapshot, plan: &RuntimePlan) -> Self {
         Self {
             lineage: snapshot.lineage(),
             content_revision: snapshot.revision(),
             schema_fingerprint: snapshot.schema_fingerprint(),
+            bindings: plan.schema_validation().bindings().clone(),
         }
     }
 
@@ -166,7 +169,10 @@ impl RuntimeStartStamp {
             && self.content_revision == snapshot.revision()
             && self.schema_fingerprint == snapshot.schema_fingerprint()
             && self.schema_fingerprint == plan.schema_validation().composition_fingerprint()
-            && snapshot.shares_schema_snapshot(plan.schema_validation().snapshot())
+            && self
+                .bindings
+                .same_definitions(plan.schema_validation().bindings())
+            && snapshot.shares_component_bindings(&self.bindings)
             && snapshot.matches_asset_domains(plan)
     }
 }
@@ -576,7 +582,7 @@ impl ProjectHost {
             )));
         };
         let world = published.runtime().world();
-        let expected = published._plan.schema_validation().snapshot();
+        let expected = published._plan.schema_validation().bindings();
         verify_published_runtime_registry(world, expected)?;
         let output = operation(world);
         verify_published_runtime_registry(world, expected)?;
@@ -616,7 +622,7 @@ impl ProjectHost {
                 "Project runtime is unavailable for driving",
             )));
         };
-        let expected = published._plan.schema_validation().snapshot().clone();
+        let expected = published._plan.schema_validation().bindings().clone();
         let generation = published.runtime().generation();
         verify_published_runtime_registry(published.runtime().world(), &expected)?;
         let drive = published.runtime_mut().drive(real_delta);
@@ -734,7 +740,7 @@ impl ProjectHost {
             )));
         }
         if snapshot.schema_fingerprint() != plan.schema_validation().composition_fingerprint()
-            || !snapshot.shares_schema_snapshot(plan.schema_validation().snapshot())
+            || !snapshot.shares_component_bindings(plan.schema_validation().bindings())
             || !snapshot.matches_asset_domains(&plan)
         {
             return Err(HostFault::new(single_error(
@@ -761,7 +767,7 @@ impl ProjectHost {
                 "Project Host already owns an active run",
             )));
         }
-        let stamp = RuntimeStartStamp::capture(&snapshot);
+        let stamp = RuntimeStartStamp::capture(&snapshot, &plan);
         Ok(RuntimeStartAttempt {
             owner: Arc::clone(&self.start_claim),
             epoch,
@@ -1022,7 +1028,7 @@ impl ProjectHost {
                 "Project runtime is not available for a frame",
             )));
         };
-        let expected = published._plan.schema_validation().snapshot().clone();
+        let expected = published._plan.schema_validation().bindings().clone();
         let generation = published.runtime().generation();
         verify_published_runtime_registry(published.runtime().world(), &expected)?;
         let outcome = published.runtime_mut().drive(real_delta).map_err(|error| {
@@ -1048,7 +1054,7 @@ impl ProjectHost {
             )));
         };
 
-        let expected = published._plan.schema_validation().snapshot().clone();
+        let expected = published._plan.schema_validation().bindings().clone();
         let generation = published.runtime().generation();
         verify_published_runtime_registry(published.runtime().world(), &expected)?;
         let runtime = published.runtime_mut();
@@ -1588,12 +1594,12 @@ fn publish_snapshot_tilesets(
 }
 
 fn verify_runtime_registry(world: &World, plan: &RuntimePlan) -> Result<(), HostFault> {
-    verify_runtime_registry_snapshot(world, plan.schema_validation().snapshot())
+    verify_runtime_component_bindings(world, plan.schema_validation().bindings())
 }
 
-fn verify_runtime_registry_snapshot(
+fn verify_runtime_component_bindings(
     world: &World,
-    expected: &ComponentRegistrySnapshot,
+    expected: &SceneComponentBindings,
 ) -> Result<(), HostFault> {
     let registry = component_registry(world).ok_or_else(|| {
         HostFault::new(single_error(
@@ -1601,7 +1607,7 @@ fn verify_runtime_registry_snapshot(
             "Project runtime component registry is missing",
         ))
     })?;
-    if !registry.shares_snapshot(expected) {
+    if !registry.shares_snapshot(expected.native_snapshot()) {
         return Err(HostFault::new(single_error(
             "project.run.registry-mismatch",
             "Project runtime component registry does not match its admitted behavior snapshot",
@@ -1613,14 +1619,32 @@ fn verify_runtime_registry_snapshot(
             "Project runtime component registry authority is invalid",
         ))
     })?;
+    let bindings = scene_component_bindings(world).ok_or_else(|| {
+        HostFault::new(single_error(
+            "project.run.component-bindings-missing",
+            "Project runtime component bindings are missing",
+        ))
+    })?;
+    if !bindings.same_definitions(expected) {
+        return Err(HostFault::new(single_error(
+            "project.run.component-bindings-mismatch",
+            "Project runtime component bindings do not match their admitted definitions",
+        )));
+    }
+    validate_scene_component_bindings_authority(world).map_err(|_| {
+        HostFault::new(single_error(
+            "project.run.component-bindings-authority-invalid",
+            "Project runtime component bindings authority is invalid",
+        ))
+    })?;
     Ok(())
 }
 
 fn verify_published_runtime_registry(
     world: &World,
-    expected: &ComponentRegistrySnapshot,
+    expected: &SceneComponentBindings,
 ) -> Result<(), HostFault> {
-    let result = verify_runtime_registry_snapshot(world, expected);
+    let result = verify_runtime_component_bindings(world, expected);
     if result.is_err()
         && let Some(reporter) = world.get_resource::<RuntimeFaultReporter>()
     {
@@ -1670,6 +1694,8 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
         CompositionError::SchemaProviderRejected { .. } => "schema-provider-rejected",
         CompositionError::SchemaProviderPanicked { .. } => "schema-provider-panicked",
         CompositionError::SchemaFreezeRejected { .. } => "schema-freeze-rejected",
+        CompositionError::DataContributionNotSelected { .. } => "data-contribution-not-selected",
+        CompositionError::SceneBindingsRejected { .. } => "scene-bindings-rejected",
         CompositionError::SchemaAuthorityPublicationFailed => "schema-authority-conflict",
     };
     let mut diagnostic = failure_diagnostic(
@@ -1679,6 +1705,7 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
     );
     match error {
         CompositionError::AdvancedProbeProvidesSchema { plugin }
+        | CompositionError::DataContributionNotSelected { plugin }
         | CompositionError::UnsupportedDefaultConfiguration { plugin } => {
             diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
         }
@@ -1722,6 +1749,7 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
         }
         CompositionError::ProjectLineageMismatch
         | CompositionError::SchemaFreezeRejected { .. }
+        | CompositionError::SceneBindingsRejected { .. }
         | CompositionError::SchemaAuthorityPublicationFailed => {}
     }
     single_diagnostic(diagnostic)
@@ -2190,3 +2218,62 @@ fn inject_publication_fault_if_armed(reporter: &nara_app::RuntimeFaultReporter) 
 
 #[cfg(all(test, feature = "serde", feature = "runtime-2d"))]
 mod tests;
+
+#[cfg(test)]
+mod component_binding_admission_tests {
+    use nara_app::{App, CoreStage};
+    use nara_reflect::{
+        ComponentRegistryPlugin, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
+        PersistentComponentSchemaOwnerId,
+    };
+
+    use super::*;
+
+    fn owner() -> ComponentSchemaOwnerSnapshot {
+        ComponentSchemaOwnerSnapshot::admit(
+            PersistentComponentSchemaOwnerId::try_new("test.host-data").unwrap(),
+            ComponentSchemaCatalog::default(),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn host_requires_exact_data_owner_basis_alongside_the_same_native_snapshot() {
+        let mut app = App::new();
+        app.add_plugins((
+            ComponentRegistryPlugin,
+            nara_scene::SceneComponentBindingsPlugin::new([owner()]),
+        ))
+        .unwrap()
+        .add_systems(CoreStage::Update, |world: &mut World| {
+            let installed = scene_component_bindings(world).unwrap();
+            let shared = SceneComponentBindings::new(
+                installed.native_snapshot().clone(),
+                installed.data_owners().iter().cloned(),
+            )
+            .unwrap();
+            verify_runtime_component_bindings(world, &shared).unwrap();
+            let foreign =
+                SceneComponentBindings::new(installed.native_snapshot().clone(), [owner()])
+                    .unwrap();
+            let omitted =
+                SceneComponentBindings::new(installed.native_snapshot().clone(), []).unwrap();
+            for selection in [foreign, omitted] {
+                let failure = verify_runtime_component_bindings(world, &selection).unwrap_err();
+                assert!(failure.diagnostics.iter().any(|diagnostic| {
+                    diagnostic.code().as_str() == "project.run.component-bindings-mismatch"
+                }));
+            }
+            verify_runtime_component_bindings(world, installed).unwrap();
+        })
+        .unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        let mut retirement = runtime.begin_retirement();
+        assert_eq!(
+            retirement.drive_retirement(),
+            RuntimeCandidateRetirementState::Retired
+        );
+    }
+}

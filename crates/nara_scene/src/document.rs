@@ -5,15 +5,15 @@ use nara_diagnostic::DiagnosticReport;
 use nara_identity::SceneEntityId;
 use nara_reflect::{
     ComponentDecodeContext, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, PersistentComponentSchemaOwnerId,
+    ComponentValue, ComponentValueMaterializationLimits, PersistentComponentSchemaOwnerId,
 };
 
 use crate::{
-    PrefabInstance,
+    PrefabInstance, SceneComponentBindings,
     validation::{
         preflight_authoring_scene, preflight_authoring_scene_for_patch,
         preflight_authoring_scene_with_context, preflight_authoring_scene_with_context_for_patch,
-        preflight_scene, preflight_scene_with_context,
+        preflight_scene, preflight_scene_with_context, preflight_scene_with_context_and_bindings,
     },
 };
 
@@ -102,6 +102,35 @@ impl SceneDocument {
             registry,
             &mut context,
             operation_index,
+        )
+        .diagnostics
+    }
+}
+
+impl SceneComponentBindings {
+    /// Validates a complete expanded Scene through the shared native/data preflight.
+    ///
+    /// Native records use the selected real codecs and migrations; data records require their
+    /// admitted owner, current version, Schema and declared references. `limits` bounds aggregate
+    /// retained effective component values across both families. When supplied, `database`
+    /// checks declared asset references against project metadata without loading assets.
+    /// This does not access a `World`, mutate the source, expand Prefabs or publish runtime state.
+    #[must_use]
+    pub fn validate_scene(
+        &self,
+        document: &SceneDocument,
+        database: Option<&ProjectAssetDatabase>,
+        limits: ComponentValueMaterializationLimits,
+    ) -> DiagnosticReport {
+        let mut context = ComponentDecodeContext::new().with_materialization_limits(limits);
+        if let Some(database) = database {
+            context = context.with_project_asset_database(database);
+        }
+        preflight_scene_with_context_and_bindings(
+            document,
+            self.native_registry(),
+            self,
+            &mut context,
         )
         .diagnostics
     }

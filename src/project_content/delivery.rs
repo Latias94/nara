@@ -135,7 +135,7 @@ impl ProjectContentLoader {
             )
         })?;
         let content = snapshot.content_closure();
-        if !snapshot.shares_schema_snapshot(plan.schema_validation().snapshot())
+        if !snapshot.shares_component_bindings(plan.schema_validation().bindings())
             || !snapshot.matches_asset_domains(plan)
             || !snapshot.has_runtime_schema_agreement()
             || content.settings_lineage() != candidate.lineage()

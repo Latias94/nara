@@ -22,10 +22,11 @@ use nara_reflect::{
 use nara_reflect::{
     ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
     ComponentSchemaContributionReceipt, ComponentSchemaOwnerContributionReceipt,
-    ComponentSchemaOwnerId, ComponentSchemaProviderDefinition, ComponentSchemaProviderReceipt,
-    ComponentTypeId, ExecutableRegistryFingerprint, SchemaCompositionFingerprint,
-    preloaded_component_registry_plugin,
+    ComponentSchemaOwnerId, ComponentSchemaOwnerSnapshot, ComponentSchemaProviderDefinition,
+    ComponentSchemaProviderReceipt, ComponentTypeId, ExecutableRegistryFingerprint,
+    SchemaCompositionFingerprint, preloaded_component_registry_plugin,
 };
+use nara_scene::{SceneComponentBindingError, SceneComponentBindings};
 
 /// The product capabilities compiled into this root package instance.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -325,8 +326,8 @@ impl ProjectRuntimePlugins {
 
 /// Frozen schema authority selected for one admitted Runtime plan.
 ///
-/// Provider and contribution receipts are immutable projections of `snapshot`; exact authority
-/// inside the managed Host still requires the same snapshot identity rather than equal hashes.
+/// Native receipts project the selected registry; data owners retain their admitted snapshots.
+/// Managed admission requires the same complete selection, independently of equal fingerprints.
 #[derive(Clone)]
 pub struct SchemaValidationInput {
     provider_ids: Arc<[PluginSchemaProviderId]>,
@@ -335,6 +336,7 @@ pub struct SchemaValidationInput {
     authoring_schema_bundle: AuthoringSchemaBundle,
     snapshot: ComponentRegistrySnapshot,
     registry: Arc<ComponentRegistry>,
+    bindings: SceneComponentBindings,
     composition_fingerprint: SchemaCompositionFingerprint,
     executable_fingerprint: ExecutableRegistryFingerprint,
 }
@@ -361,7 +363,7 @@ impl SchemaValidationInput {
         &self.provider_ids
     }
 
-    /// Projects the selected native schema owners into a data-only authoring bundle.
+    /// Projects every selected native and data owner into metadata for authoring.
     #[cfg(feature = "serde")]
     #[must_use]
     pub const fn authoring_schema_bundle(&self) -> &AuthoringSchemaBundle {
@@ -388,6 +390,11 @@ impl SchemaValidationInput {
     #[must_use]
     pub fn snapshot(&self) -> &ComponentRegistrySnapshot {
         &self.snapshot
+    }
+
+    #[must_use]
+    pub fn bindings(&self) -> &SceneComponentBindings {
+        &self.bindings
     }
 
     #[must_use]
@@ -530,6 +537,12 @@ pub enum CompositionError {
     SchemaFreezeRejected {
         source: Box<ComponentRegistryError>,
     },
+    DataContributionNotSelected {
+        plugin: PluginId,
+    },
+    SceneBindingsRejected {
+        source: Box<SceneComponentBindingError>,
+    },
     SchemaAuthorityPublicationFailed,
 }
 
@@ -572,6 +585,10 @@ impl fmt::Display for CompositionError {
             Self::SchemaProviderRejected { .. } => "component schema provider was rejected",
             Self::SchemaProviderPanicked { .. } => "component schema provider panicked",
             Self::SchemaFreezeRejected { .. } => "component schema catalog freeze was rejected",
+            Self::DataContributionNotSelected { .. } => {
+                "data Schema contribution requires its exact recipe plugin definition"
+            }
+            Self::SceneBindingsRejected { .. } => "Scene component binding selection was rejected",
             Self::SchemaAuthorityPublicationFailed => {
                 "component registry snapshot authority was published more than once"
             }
@@ -585,6 +602,7 @@ impl std::error::Error for CompositionError {
             Self::SchemaProviderRejected { source, .. } | Self::SchemaFreezeRejected { source } => {
                 Some(source.as_ref())
             }
+            Self::SceneBindingsRejected { source } => Some(source.as_ref()),
             _ => None,
         }
     }
@@ -794,6 +812,12 @@ pub fn resolve_runtime_plan(
     }
 
     let recipe_providers = request.recipe.schema_providers().collect::<Vec<_>>();
+    let data_owners = request
+        .recipe
+        .data_schema_owners()
+        .map(|(_, owner)| owner)
+        .collect::<Vec<_>>();
+    let data_contributors = request.recipe.data_contributors();
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     let asset_domains = request.recipe.asset_domains.clone();
     let snapshot_cell = Arc::new(OnceLock::new());
@@ -806,6 +830,11 @@ pub fn resolve_runtime_plan(
         overlay: request.overlay,
         host_policy: request.host_policy,
     })?;
+    if let Some(plugin) =
+        crate::product::data_contributor_mismatch(&data_contributors, plugin_plan.entries())
+    {
+        return Err(CompositionError::DataContributionNotSelected { plugin }.into());
+    }
     if let Some(overlay) = plugin_plan.entries().iter().find(|entry| {
         entry
             .group_provenance()
@@ -821,6 +850,7 @@ pub fn resolve_runtime_plan(
     let schema_validation = resolve_schema_validation(
         &plugin_plan,
         known_providers.into_iter().chain(recipe_providers),
+        data_owners,
     )?;
     snapshot_cell
         .set(schema_validation.snapshot().clone())
@@ -911,6 +941,7 @@ fn product_capability(declared: PluginProductCapability) -> Option<ProductCapabi
 fn resolve_schema_validation(
     plugin_plan: &PluginPlan,
     known_providers: impl IntoIterator<Item = ComponentSchemaProviderDefinition>,
+    data_owners: Vec<ComponentSchemaOwnerSnapshot>,
 ) -> Result<SchemaValidationInput, CompositionError> {
     let mut provider_catalog =
         BTreeMap::<PluginSchemaProviderId, ResolvedComponentSchemaProvider>::new();
@@ -946,22 +977,52 @@ fn resolve_schema_validation(
         {
             return Err(CompositionError::DivergentSchemaOwner { owner });
         }
-        for component_id in resolved
-            .current()
-            .catalog()
-            .components()
-            .iter()
-            .map(|schema| schema.id())
-            .chain(resolved.current().catalog().type_tombstones())
-        {
-            if let Some(existing) = known_claims.insert(component_id.clone(), owner)
-                && existing != owner
+        for source in std::iter::once(resolved.current()).chain(resolved.predecessor()) {
+            for component_id in source
+                .catalog()
+                .components()
+                .iter()
+                .map(|schema| schema.id())
+                .chain(source.catalog().type_tombstones())
             {
-                return Err(CompositionError::ConflictingSchemaOwnerClaim {
-                    component_id: component_id.clone(),
-                    first_owner: existing,
-                    second_owner: owner,
-                });
+                if let Some(existing) = known_claims.insert(component_id.clone(), owner)
+                    && existing != owner
+                {
+                    return Err(CompositionError::ConflictingSchemaOwnerClaim {
+                        component_id: component_id.clone(),
+                        first_owner: existing,
+                        second_owner: owner,
+                    });
+                }
+            }
+        }
+    }
+
+    for owner in &data_owners {
+        if known_owners
+            .keys()
+            .any(|native| native.as_str() == owner.owner_id().as_str())
+        {
+            return Err(CompositionError::SceneBindingsRejected {
+                source: Box::new(SceneComponentBindingError::DuplicateOwner {
+                    owner: owner.owner_id().clone(),
+                }),
+            });
+        }
+        for catalog in std::iter::once(owner.current()).chain(owner.predecessor()) {
+            for component in catalog
+                .components()
+                .iter()
+                .map(|schema| schema.id())
+                .chain(catalog.type_tombstones())
+            {
+                if known_claims.contains_key(component) {
+                    return Err(CompositionError::SceneBindingsRejected {
+                        source: Box::new(SceneComponentBindingError::DivergentComponentOwnership {
+                            component: component.clone(),
+                        }),
+                    });
+                }
             }
         }
     }
@@ -1013,9 +1074,13 @@ fn resolve_schema_validation(
             .map_err(|source| CompositionError::SchemaFreezeRejected {
                 source: Box::new(source),
             })?;
-    let composition_fingerprint = snapshot
-        .schema_composition_fingerprint()
-        .map_err(|_| CompositionError::SchemaAuthorityPublicationFailed)?;
+    let bindings =
+        SceneComponentBindings::new(snapshot.clone(), data_owners).map_err(|source| {
+            CompositionError::SceneBindingsRejected {
+                source: Box::new(source),
+            }
+        })?;
+    let composition_fingerprint = bindings.composition_fingerprint();
     let executable_fingerprint = snapshot
         .executable_registry_fingerprint()
         .map_err(|_| CompositionError::SchemaAuthorityPublicationFailed)?;
@@ -1026,8 +1091,17 @@ fn resolve_schema_validation(
         .collect::<Vec<_>>();
     let registry = ComponentRegistry::from_snapshot(snapshot.clone());
     #[cfg(feature = "serde")]
-    let authoring_schema_bundle = AuthoringSchemaBundle::new(authoring_schema_owners)
-        .map_err(|_| CompositionError::SchemaAuthorityPublicationFailed)?;
+    let authoring_schema_bundle = {
+        authoring_schema_owners.extend(bindings.data_owners().iter().map(|owner| {
+            AuthoringSchemaBundleOwner::new(
+                owner.owner_id().clone(),
+                owner.current().clone(),
+                owner.predecessor().cloned(),
+            )
+        }));
+        AuthoringSchemaBundle::new(authoring_schema_owners)
+            .map_err(|_| CompositionError::SchemaAuthorityPublicationFailed)?
+    };
 
     Ok(SchemaValidationInput {
         provider_ids: provider_ids.into(),
@@ -1036,6 +1110,7 @@ fn resolve_schema_validation(
         authoring_schema_bundle,
         snapshot,
         registry: Arc::new(registry),
+        bindings,
         composition_fingerprint,
         executable_fingerprint,
     })

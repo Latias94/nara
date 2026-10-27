@@ -1059,6 +1059,20 @@ pub(crate) fn validate_patch_publication_shape(
 }
 
 impl SceneDocumentCandidate {
+    /// Consumes bounded decoded declarations for deferred mixed Scene/Prefab composition.
+    ///
+    /// Decoding already enforced the selected file and decoded-value limits. This step checks
+    /// the local hierarchy without interpreting component payloads or stored overlays. The
+    /// consumer must retain source evidence and select the exact Schema basis for compilation.
+    /// Success does not establish standalone publication or runtime materialization readiness.
+    pub fn into_composition_source(self) -> Result<SceneDocument, SceneFilePublicationError> {
+        let diagnostics = crate::validation::validate_scene_structure(&self.document);
+        if diagnostics.has_errors() {
+            return Err(SceneFilePublicationError::new(diagnostics));
+        }
+        Ok(self.document)
+    }
+
     pub(crate) fn into_authoring_parts(self) -> (SceneDocument, SceneFileLimits) {
         (self.document, self.limits)
     }

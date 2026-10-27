@@ -9,10 +9,13 @@ use std::{
 
 use nara_app::{
     App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
-    PluginError, PluginGroup, PluginGroupBuilder, PluginGroupId, PluginId, PluginSchemaProviderId,
-    PluginSlot, PluginSlotId,
+    PluginDefinitionKey, PluginError, PluginGroup, PluginGroupBuilder, PluginGroupId, PluginId,
+    PluginPlanEntry, PluginPreflightContext, PluginSchemaProviderId, PluginSlot, PluginSlotId,
 };
-use nara_reflect::ComponentSchemaProviderDefinition;
+use nara_reflect::{
+    ComponentSchemaOwnerSnapshot, ComponentSchemaProviderDefinition,
+    PersistentComponentSchemaOwnerId,
+};
 use thiserror::Error;
 
 mod default_settings;
@@ -34,7 +37,10 @@ const PRODUCT_RECIPE_SCHEMA_AUTHORITY_DECLARATION: PluginDeclaration = PluginDec
     PRODUCT_RECIPE_SCHEMA_AUTHORITY_PLUGIN_ID,
     PluginCategory::Core,
 )
-.requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT);
+.requires_plugins(&[
+    nara_reflect::COMPONENT_REGISTRY_PLUGIN_ID,
+    nara_scene::SCENE_COMPONENT_BINDINGS_PLUGIN_ID,
+]);
 const PRODUCT_RECIPE_SCHEMA_AUTHORITY_DEFINITION_ID: PluginDefinitionId =
     PluginDefinitionId::new("nara.product-recipe.schema-authority", 1);
 const PRODUCT_RECIPE_SCHEMA_AUTHORITY_CONFIGURATION_PREFIX: &[u8] =
@@ -70,6 +76,7 @@ pub struct ProductRecipeEntry {
     configuration_fingerprint: [u8; 32],
     schema_provider_ids: Arc<[PluginSchemaProviderId]>,
     schema_providers: Arc<[ComponentSchemaProviderDefinition]>,
+    data_owners: Arc<[ComponentSchemaOwnerSnapshot]>,
     definition: PluginDefinition,
 }
 
@@ -81,11 +88,36 @@ struct RecipeSchemaProviderBinding {
 
 struct ProductRecipeSchemaAuthorityPlugin {
     providers: Arc<[RecipeSchemaProviderBinding]>,
+    data_contributors: Arc<[(PluginId, PluginDefinitionKey)]>,
+    scene_definition: PluginDefinitionKey,
+    data_owners: Arc<[ComponentSchemaOwnerSnapshot]>,
 }
 
 impl Plugin for ProductRecipeSchemaAuthorityPlugin {
     fn declaration() -> &'static PluginDeclaration {
         &PRODUCT_RECIPE_SCHEMA_AUTHORITY_DECLARATION
+    }
+
+    fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
+        if !context.entries().iter().any(|entry| {
+            entry.plugin_id() == nara_scene::SCENE_COMPONENT_BINDINGS_PLUGIN_ID
+                && entry.definition_key() == Some(self.scene_definition)
+        }) {
+            return Err(PluginError::SetupFailed {
+                plugin: PRODUCT_RECIPE_SCHEMA_AUTHORITY_PLUGIN_ID,
+                message: "Scene definitions must be selected by the product recipe contributions"
+                    .into(),
+            });
+        }
+        if let Some(plugin) = data_contributor_mismatch(&self.data_contributors, context.entries())
+        {
+            return Err(PluginError::SetupFailed {
+                plugin,
+                message: "data Schema contribution requires its exact recipe plugin definition"
+                    .into(),
+            });
+        }
+        Ok(())
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
@@ -96,6 +128,25 @@ impl Plugin for ProductRecipeSchemaAuthorityPlugin {
                 binding.provider.id().as_str(),
                 &binding.provider,
             )?;
+        }
+        Ok(())
+    }
+
+    fn finish(&self, app: &mut App) -> Result<(), PluginError> {
+        let matches = nara_scene::scene_component_bindings(app.world()).is_some_and(|bindings| {
+            bindings.data_owners().len() == self.data_owners.len()
+                && bindings
+                    .data_owners()
+                    .iter()
+                    .zip(self.data_owners.iter())
+                    .all(|(actual, expected)| actual.ptr_eq(expected))
+        });
+        if !matches {
+            return Err(PluginError::SetupFailed {
+                plugin: PRODUCT_RECIPE_SCHEMA_AUTHORITY_PLUGIN_ID,
+                message: "installed Scene definitions differ from the recipe owner admissions"
+                    .into(),
+            });
         }
         Ok(())
     }
@@ -110,6 +161,7 @@ impl fmt::Debug for ProductRecipeEntry {
             .field("kind", &self.kind)
             .field("configuration_fingerprint", &self.configuration_fingerprint)
             .field("schema_provider_ids", &self.schema_provider_ids)
+            .field("data_owners", &self.data_owners)
             .finish_non_exhaustive()
     }
 }
@@ -133,6 +185,11 @@ impl ProductRecipeEntry {
     #[must_use]
     pub fn schema_provider_ids(&self) -> &[PluginSchemaProviderId] {
         &self.schema_provider_ids
+    }
+
+    #[must_use]
+    pub fn data_schema_owners(&self) -> &[ComponentSchemaOwnerSnapshot] {
+        &self.data_owners
     }
 }
 
@@ -180,7 +237,7 @@ impl<P: Plugin> SchemaContribution<P> {
             PRODUCT_RECIPE_CONFIGURATION_PREFIX,
             P::default,
         );
-        schema_contribution(declaration, definition, providers)
+        schema_contribution(declaration, definition, providers, Vec::new())
     }
 
     /// Creates a contribution from typed configuration and a reconstructible factory.
@@ -195,7 +252,61 @@ impl<P: Plugin> SchemaContribution<P> {
     {
         let declaration = recipe_declaration::<P>()?;
         let definition = configured_definition(declaration, configuration, factory)?;
-        schema_contribution(declaration, definition, providers)
+        schema_contribution(declaration, definition, providers, Vec::new())
+    }
+
+    /// Creates a data-only contribution without synthesizing a native provider or codec.
+    pub fn data_for_default(
+        owners: impl IntoIterator<Item = ComponentSchemaOwnerSnapshot>,
+    ) -> Result<Self, ProductRecipeError>
+    where
+        P: Default,
+    {
+        let declaration = recipe_declaration::<P>()?;
+        let definition = PluginDefinition::infallible::<P, _>(
+            recipe_definition_id(declaration),
+            PRODUCT_RECIPE_CONFIGURATION_PREFIX,
+            P::default,
+        );
+        schema_contribution(
+            declaration,
+            definition,
+            [],
+            admit_data_owners(declaration.id, owners)?,
+        )
+    }
+
+    /// Creates a configured data-only contribution with replayable owner-local admissions.
+    pub fn data_configured<C, F>(
+        configuration: C,
+        factory: F,
+        owners: impl IntoIterator<Item = ComponentSchemaOwnerSnapshot>,
+    ) -> Result<Self, ProductRecipeError>
+    where
+        C: ProductConfiguration,
+        F: Fn(&C) -> P + Send + Sync + 'static,
+    {
+        let declaration = recipe_declaration::<P>()?;
+        let definition = configured_definition(declaration, configuration, factory)?;
+        schema_contribution(
+            declaration,
+            definition,
+            [],
+            admit_data_owners(declaration.id, owners)?,
+        )
+    }
+
+    /// Adds data owners to an existing native contribution, preserving their admission identity.
+    pub fn with_data_owners(
+        mut self,
+        owners: impl IntoIterator<Item = ComponentSchemaOwnerSnapshot>,
+    ) -> Result<Self, ProductRecipeError> {
+        self.entry.data_owners = admit_data_owners(
+            self.entry.plugin_id,
+            self.entry.data_owners.iter().cloned().chain(owners),
+        )?
+        .into();
+        Ok(self)
     }
 }
 
@@ -398,6 +509,26 @@ impl ProductRecipe {
             .map(|binding| binding.provider)
     }
 
+    pub(crate) fn data_schema_owners(
+        &self,
+    ) -> impl Iterator<Item = (PluginId, ComponentSchemaOwnerSnapshot)> + '_ {
+        self.entries.values().flat_map(|entry| {
+            entry
+                .data_owners
+                .iter()
+                .cloned()
+                .map(move |owner| (entry.plugin_id, owner))
+        })
+    }
+
+    pub(crate) fn data_contributors(&self) -> Vec<(PluginId, PluginDefinitionKey)> {
+        self.entries
+            .values()
+            .filter(|entry| !entry.data_owners.is_empty())
+            .filter_map(|entry| entry.definition.key().map(|key| (entry.plugin_id, key)))
+            .collect()
+    }
+
     fn schema_provider_bindings(&self) -> impl Iterator<Item = RecipeSchemaProviderBinding> + '_ {
         self.entries.values().flat_map(|entry| {
             entry.schema_providers.iter().copied().map(move |provider| {
@@ -409,31 +540,85 @@ impl ProductRecipe {
         })
     }
 
-    fn schema_authority_definition(&self) -> Option<PluginDefinition> {
+    fn schema_authority_definition(
+        &self,
+        scene_definition: PluginDefinitionKey,
+        data_owners: Arc<[ComponentSchemaOwnerSnapshot]>,
+    ) -> PluginDefinition {
         let mut providers = self.schema_provider_bindings().collect::<Vec<_>>();
-        if providers.is_empty() {
-            return None;
-        }
+        let data_contributors = self.data_contributors();
         providers.sort_by_key(|binding| (binding.plugin, binding.provider.id()));
-        let canonical_configuration = schema_authority_configuration(&providers);
+        let mut canonical_configuration = schema_authority_configuration(&providers);
+        write_canonical_string(
+            &mut canonical_configuration,
+            scene_definition.definition().as_str(),
+        );
+        canonical_configuration
+            .extend_from_slice(&scene_definition.definition().version().to_le_bytes());
+        canonical_configuration.extend_from_slice(&scene_definition.configuration().as_bytes());
+        canonical_configuration.extend_from_slice(&(data_contributors.len() as u64).to_le_bytes());
+        for (plugin, key) in &data_contributors {
+            write_canonical_string(&mut canonical_configuration, plugin.as_str());
+            write_canonical_string(&mut canonical_configuration, key.definition().as_str());
+            canonical_configuration.extend_from_slice(&key.definition().version().to_le_bytes());
+            canonical_configuration.extend_from_slice(&key.configuration().as_bytes());
+        }
         let providers: Arc<[RecipeSchemaProviderBinding]> = providers.into();
-        Some(PluginDefinition::infallible::<
-            ProductRecipeSchemaAuthorityPlugin,
-            _,
-        >(
+        let data_contributors: Arc<[(PluginId, PluginDefinitionKey)]> = data_contributors.into();
+        PluginDefinition::infallible::<ProductRecipeSchemaAuthorityPlugin, _>(
             PRODUCT_RECIPE_SCHEMA_AUTHORITY_DEFINITION_ID,
             canonical_configuration,
             move || ProductRecipeSchemaAuthorityPlugin {
                 providers: Arc::clone(&providers),
+                data_contributors: Arc::clone(&data_contributors),
+                scene_definition,
+                data_owners: Arc::clone(&data_owners),
             },
-        ))
+        )
     }
 
     fn build_entries(self, builder: PluginGroupBuilder) -> PluginGroupBuilder {
-        let builder = match self.schema_authority_definition() {
-            Some(definition) => builder.add_definition(definition),
-            None => builder,
-        };
+        let mut owners = self
+            .data_schema_owners()
+            .map(|(_, owner)| owner)
+            .collect::<Vec<_>>();
+        owners.sort_by(|left, right| left.owner_id().cmp(right.owner_id()));
+        let mut configuration = Vec::from(b"nara.product-recipe.scene-definitions.v1\0".as_slice());
+        for owner in &owners {
+            write_canonical_string(&mut configuration, owner.owner_id().as_str());
+            configuration.extend_from_slice(&owner.current().generation().to_le_bytes());
+            write_canonical_string(&mut configuration, &owner.current().fingerprint().to_hex());
+            if let Some(previous) = owner.predecessor() {
+                configuration.push(1);
+                configuration.extend_from_slice(&previous.generation().to_le_bytes());
+                write_canonical_string(&mut configuration, &previous.fingerprint().to_hex());
+                if let Some(link) = previous.predecessor() {
+                    configuration.push(1);
+                    write_canonical_string(&mut configuration, &link.to_hex());
+                } else {
+                    configuration.push(0);
+                }
+            } else {
+                configuration.push(0);
+            }
+        }
+        let owners: Arc<[ComponentSchemaOwnerSnapshot]> = owners.into();
+        let selected_owners = Arc::clone(&owners);
+        let scene_definition =
+            PluginDefinition::infallible::<nara_scene::SceneComponentBindingsPlugin, _>(
+                PluginDefinitionId::new("nara.product-recipe.scene-definitions", 1),
+                configuration,
+                move || nara_scene::SceneComponentBindingsPlugin::new(owners.iter().cloned()),
+            );
+        let authority = self.schema_authority_definition(
+            scene_definition
+                .key()
+                .expect("recipe Scene definition has a canonical key"),
+            selected_owners,
+        );
+        let builder = builder
+            .add_definition(scene_definition)
+            .add_definition(authority);
         self.entries.into_values().fold(builder, |builder, entry| {
             builder.add_definition(entry.definition)
         })
@@ -481,8 +666,17 @@ pub enum ProductRecipeError {
     },
     #[error("runtime-only plugin {plugin} declares schema providers and requires a contribution")]
     RuntimePluginProvidesSchema { plugin: PluginId },
-    #[error("schema contribution plugin {plugin} declares no schema providers")]
+    #[error(
+        "schema contribution plugin {plugin} supplies neither native providers nor data owners"
+    )]
     SchemaContributionWithoutSchema { plugin: PluginId },
+    #[error("schema contribution for {plugin} repeats data owner {owner}")]
+    DuplicateDataOwner {
+        plugin: PluginId,
+        owner: PersistentComponentSchemaOwnerId,
+    },
+    #[error("schema contribution for {plugin} exceeds its data owner allowance {maximum}")]
+    DataOwnerLimit { plugin: PluginId, maximum: usize },
     #[error(
         "schema contribution for {plugin} does not match its declared providers: declared {declared:?}, supplied {supplied:?}"
     )]
@@ -538,8 +732,9 @@ fn schema_contribution<P: Plugin>(
     declaration: &'static PluginDeclaration,
     definition: PluginDefinition,
     providers: impl IntoIterator<Item = ComponentSchemaProviderDefinition>,
+    data_owners: Vec<ComponentSchemaOwnerSnapshot>,
 ) -> Result<SchemaContribution<P>, ProductRecipeError> {
-    if declaration.provides_schema.is_empty() {
+    if declaration.provides_schema.is_empty() && data_owners.is_empty() {
         return Err(ProductRecipeError::SchemaContributionWithoutSchema {
             plugin: declaration.id,
         });
@@ -569,13 +764,15 @@ fn schema_contribution<P: Plugin>(
         });
     }
 
+    let mut entry = recipe_entry::<P>(
+        declaration,
+        ProductRecipeEntryKind::SchemaContribution,
+        definition,
+        providers,
+    )?;
+    entry.data_owners = data_owners.into();
     Ok(SchemaContribution {
-        entry: recipe_entry::<P>(
-            declaration,
-            ProductRecipeEntryKind::SchemaContribution,
-            definition,
-            providers,
-        )?,
+        entry,
         marker: PhantomData,
     })
 }
@@ -602,7 +799,40 @@ fn recipe_entry<P: Plugin>(
         configuration_fingerprint,
         schema_provider_ids,
         schema_providers: providers.into(),
+        data_owners: Arc::from([]),
         definition,
+    })
+}
+
+fn admit_data_owners(
+    plugin: PluginId,
+    owners: impl IntoIterator<Item = ComponentSchemaOwnerSnapshot>,
+) -> Result<Vec<ComponentSchemaOwnerSnapshot>, ProductRecipeError> {
+    let maximum = nara_scene::SceneComponentBindingLimits::default()
+        .owners()
+        .get();
+    let mut admitted = BTreeMap::new();
+    for owner in owners {
+        if admitted.len() >= maximum {
+            return Err(ProductRecipeError::DataOwnerLimit { plugin, maximum });
+        }
+        let id = owner.owner_id().clone();
+        if admitted.insert(id.clone(), owner).is_some() {
+            return Err(ProductRecipeError::DuplicateDataOwner { plugin, owner: id });
+        }
+    }
+    Ok(admitted.into_values().collect())
+}
+
+pub(crate) fn data_contributor_mismatch(
+    contributors: &[(PluginId, PluginDefinitionKey)],
+    entries: &[PluginPlanEntry],
+) -> Option<PluginId> {
+    contributors.iter().find_map(|(plugin, key)| {
+        (!entries
+            .iter()
+            .any(|entry| entry.plugin_id() == *plugin && entry.definition_key() == Some(*key)))
+        .then_some(*plugin)
     })
 }
 

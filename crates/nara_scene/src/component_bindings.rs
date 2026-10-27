@@ -2,8 +2,12 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use nara_core::ItemLimit;
 use nara_reflect::{
+    __private::{
+        ComponentRegistrySnapshotWitness, component_registry_snapshot_witness,
+        component_registry_snapshot_witness_matches, scene_component_composition_fingerprint,
+    },
     ComponentRegistry, ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaOwnerSnapshot,
-    ComponentTypeId, PersistentComponentSchemaOwnerId,
+    ComponentTypeId, PersistentComponentSchemaOwnerId, SchemaCompositionFingerprint,
 };
 
 /// Bounds the data-owner and declaration indexes built for one Scene binding selection.
@@ -47,7 +51,7 @@ impl SceneComponentBindingLimits {
 }
 
 /// Refusal to compose disjoint native and data-only Scene definitions.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SceneComponentBindingError {
     ReservedNativeComponent {
         component: ComponentTypeId,
@@ -105,6 +109,17 @@ impl std::error::Error for SceneComponentBindingError {}
 #[derive(Clone)]
 pub struct SceneComponentBindings(Arc<Bindings>);
 
+/// Metadata-only witness of one exact native and data-only Scene definition selection.
+///
+/// The native snapshot is held weakly: retaining this witness does not keep native bindings,
+/// codecs or migrations alive. Data-owner snapshots contain only admitted Schema metadata.
+/// This is transient admission identity, not a persistent fingerprint or runtime authority.
+#[derive(Clone)]
+pub struct SceneComponentBindingsWitness {
+    native: ComponentRegistrySnapshotWitness,
+    owners: Vec<ComponentSchemaOwnerSnapshot>,
+}
+
 struct Bindings {
     native: ComponentRegistrySnapshot,
     native_registry: ComponentRegistry,
@@ -118,6 +133,32 @@ impl std::fmt::Debug for SceneComponentBindings {
             .debug_struct("SceneComponentBindings")
             .field("data_owners", &self.0.owners)
             .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for SceneComponentBindingsWitness {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SceneComponentBindingsWitness")
+            .field("data_owners", &self.owners)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SceneComponentBindingsWitness {
+    /// Requires the exact native snapshot and the exact owner snapshots in canonical owner order.
+    ///
+    /// Separately admitted equivalent catalogs do not match. Matching does not retain or upgrade
+    /// the native snapshot and does not grant permission to replace a managed Runtime.
+    #[must_use]
+    pub fn matches(&self, bindings: &SceneComponentBindings) -> bool {
+        component_registry_snapshot_witness_matches(&self.native, bindings.native_snapshot())
+            && self.owners.len() == bindings.data_owners().len()
+            && self
+                .owners
+                .iter()
+                .zip(bindings.data_owners())
+                .all(|(left, right)| left.owner_id() == right.owner_id() && left.ptr_eq(right))
     }
 }
 
@@ -236,14 +277,39 @@ impl SceneComponentBindings {
         })
     }
 
+    /// Captures exact selection identity without retaining native executable definitions.
+    #[must_use]
+    pub fn witness(&self) -> SceneComponentBindingsWitness {
+        SceneComponentBindingsWitness {
+            native: component_registry_snapshot_witness(self.native_snapshot()),
+            owners: self.data_owners().to_vec(),
+        }
+    }
+
+    /// Returns canonical Schema identity for native owner receipts and selected data owners.
+    ///
+    /// Uses Reflect's existing composition fingerprint domain and canonical owner order.
+    /// Provider order and native binding behavior do not affect this value; raw standalone
+    /// native definitions without owner receipts contribute no owner entries. Fingerprint
+    /// equality never replaces [`Self::same_definitions`] or exact managed admission.
+    #[must_use]
+    pub fn composition_fingerprint(&self) -> SchemaCompositionFingerprint {
+        scene_component_composition_fingerprint(self.native_snapshot(), self.data_owners())
+    }
+
     pub(crate) fn native_registry(&self) -> &ComponentRegistry {
         &self.0.native_registry
     }
 
-    /// Compares the immutable representation selection without depending on the container
-    /// allocation. The native registry snapshot and every admitted data-owner snapshot must be
-    /// the exact same admission witnesses.
-    pub(crate) fn same_definitions(&self, other: &Self) -> bool {
+    /// Tests exact immutable selection identity independently of the bindings container.
+    ///
+    /// The native snapshots must satisfy [`ComponentRegistrySnapshot::ptr_eq`]. Data owners are
+    /// stored sorted by durable owner ID; both selections must have the same length and each
+    /// corresponding owner ID and [`ComponentSchemaOwnerSnapshot::ptr_eq`] must match.
+    /// Reordering the same admitted inputs matches; separately admitting equivalent catalogs
+    /// does not. Catalog or composition fingerprint equality is insufficient.
+    #[must_use]
+    pub fn same_definitions(&self, other: &Self) -> bool {
         self.native_snapshot().ptr_eq(other.native_snapshot())
             && self.data_owners().len() == other.data_owners().len()
             && self

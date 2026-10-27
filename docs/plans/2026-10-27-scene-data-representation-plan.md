@@ -20,6 +20,9 @@ The existing private code-lifetime checkpoint is `65402b9`. Backend-free owner m
 closed mixed selection/shared compilation and the production runtime-family successor are scoped
 implementation slices. The [runtime evidence](../knowledge/engineering/verification/2026-10/2026-10-27T125421Z-production-scene-native-data-runtime-and-managed-authority-qualification-294f613511bb48e49fed958c05a1a469.md)
 owns actual checks and remaining integration, rather than treating identified seams as execution.
+The [product selection successor](../knowledge/engineering/verification/2026-10/2026-10-27T141025Z-mixed-scene-product-selection-and-content-to-runtime-admission-qualification-7c90588821aa4e8da374958ef2e436e4.md)
+records recipe, strict content and managed startup/replacement integration. The private language
+harness replacement and concrete language-owner workflow remain next.
 ADR 0006 adopts the closed native/data storage contract; ADR 0120 remains Proposed for broader
 executable publication, language custody, migration and cohort replacement.
 
@@ -76,6 +79,44 @@ reject a command retaining a retired entity incarnation, and keep runtime writes
 history. The initial family may expose conservative carrier-level ECS access/change granularity;
 per-Schema dynamic descriptors require independent query/scheduler pressure. Share this consumer
 with the later semantic tool/inline Inspector workflow without freezing a toolkit panel API.
+
+### Product Selection And Language Consumer Sequence
+
+Product contributions retain admitted owner snapshots. One complete selection passes through
+`SchemaValidationInput`, strict content capture/Check, installed World authority and all startup
+or replacement entries. Project-backed `SceneSource` must retain its exact metadata-only witness
+even when consumed through public direct startup; a Host-only comparison is insufficient.
+Outer group edits cannot orphan a data declaration from its contributing plugin. Native known
+owner claims remain reserved against selected data owners, including inactive tombstones and
+immediate predecessor claims. Source declaration compilation precedes effective asset capture;
+rejected surviving records are reported by that compiler rather than an early native-only reader.
+
+After this product checkpoint, replace the existing language fixture's runtime harness with the
+public Scene selection/preparation/access/export path. Keep its concrete C# experiment and actual
+collectible-context/held-callback evidence; existing Lua tests may share the corrected harness
+without becoming a second production SDK program. Preserve complete callback ID/version admission,
+atomic command rejection, execution-publication fencing and physical code-retirement observation.
+Do not use Authoring preview or a fallible post-commit carrier installation for runtime storage.
+
+Use the existing public window-free Project Session for source edits/history and Save/Reopen;
+an empty authoring-adapter receipt list does not make known-unbound fields editable. Remove the
+superseded grouped materialization/export helper after migrating its remaining representation
+correctness consumers. Retain only a bounded storage comparison when it still distinguishes Rows
+from the selected carrier; historical measurements do not justify retaining a second Runtime.
+
+The subsequent concrete `EnemyStats` tool should return limited semantic proposals to that same
+Session owner. The Host retains source basis and executable publication custody, prepares the edit
+and commits it once. Nara's custom-drawn frontend can then consume the same command/result path.
+This order requires no universal language backend, new generic transaction executor, toolkit
+embedding or official C# SDK designation. Install/update/disable, held tasks and delivery still
+need their own complete workflow evidence.
+
+Keep compiled Editor visual authoring coverage explicit. Its native preview and native
+Apply Changes exporter are still separate consumers; mixed runtime startup does not establish
+editable data records or mixed Apply Changes in that lane. Use the complete metadata-based
+Session consumer for the next language/tool workflow, then replace any remaining native-only
+authoring assumptions at their owning boundary. Do not silently omit data records in a live
+export or promote a preview capability into project execution authority.
 
 ## Verification And Removal
 

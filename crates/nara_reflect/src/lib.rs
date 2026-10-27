@@ -131,7 +131,10 @@ pub mod __private {
         validate_persistent_apply_support_topology, validate_persistent_export_coverage,
         validate_registered_persistent_apply_targets,
     };
-    pub use crate::provider::{ComponentSchemaOwnerRecord, ResolvedComponentSchemaProvider};
+    pub use crate::provider::{
+        ComponentSchemaOwnerRecord, ResolvedComponentSchemaProvider,
+        scene_component_composition_fingerprint,
+    };
     pub use crate::registry::{ComponentRegistrySnapshotWitness, validate_schema_capabilities};
 
     use crate::{

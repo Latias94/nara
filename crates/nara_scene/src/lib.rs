@@ -74,6 +74,7 @@ pub use component_binding_plugin::{
 };
 pub use component_bindings::{
     SceneComponentBindingError, SceneComponentBindingLimits, SceneComponentBindings,
+    SceneComponentBindingsWitness,
 };
 pub use data_components::{SceneDataComponentError, SceneDataComponents};
 pub use document::{SceneComponentRecord, SceneDocument, SceneEntityRecord};

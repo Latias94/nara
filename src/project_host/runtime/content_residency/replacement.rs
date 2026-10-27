@@ -29,11 +29,9 @@ impl PreparedProjectSceneReplacement {
         F: FnOnce(&mut SceneProductOverlayWriter<'_>),
     {
         nara_hierarchy::__private::prepare_mutation_baseline(world);
-        let registry = current_scene_registry(world, expected)?;
+        let component_bindings = current_scene_bindings(world, expected)?;
         validate_resources(world, snapshot).map_err(rejected)?;
-        if !snapshot
-            .shares_schema_snapshot(&registry.snapshot().expect("current registry is frozen"))
-        {
+        if !snapshot.shares_component_bindings(&component_bindings) {
             return Err(rejected(failure(
                 "project.scene.schema-mismatch",
                 "Prepared Scene uses another schema authority",
@@ -59,9 +57,8 @@ impl PreparedProjectSceneReplacement {
             &catalog.database,
         )
         .map_err(rejected)?;
-        let scene = prepare_expanded_scene_replacement_with_claims(
+        let scene = component_bindings.prepare_scene_replacement_with_claims(
             world,
-            &registry,
             snapshot.expanded_candidate(),
             Some(snapshot.asset_database()),
             expected,
@@ -102,7 +99,13 @@ impl PreparedProjectSceneReplacement {
     }
 
     fn validate_content(&self, world: &World) -> Result<(), SceneSpawnReport> {
-        current_scene_registry(world, &self.expected)?;
+        let bindings = current_scene_bindings(world, &self.expected)?;
+        if !self.snapshot.shares_component_bindings(&bindings) {
+            return Err(rejected(failure(
+                "project.scene.schema-mismatch",
+                "Prepared Scene uses another schema authority",
+            )));
+        }
         validate_resources(world, &self.snapshot).map_err(rejected)?;
         if world.get_resource::<ProjectAssetDatabase>() != Some(&self.original_catalog) {
             return Err(rejected(failure(

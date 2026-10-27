@@ -123,8 +123,10 @@ The user-selected UI destination is [Nara's own custom-drawn Editor
 runtime](foundation-architecture-reassessment.md#updated-custom-ui-and-language-research), not
 embedding a reference toolkit. UI implementation remains future work. The
 [runtime-family evidence](../knowledge/engineering/verification/2026-10/2026-10-27T125421Z-production-scene-native-data-runtime-and-managed-authority-qualification-294f613511bb48e49fed958c05a1a469.md)
-owns actual managed Scene/data and public consumer verification; actual product recipe/selected
-language integration remains. The [fixed-baseline review](../audits/2026-10-27-scene-runtime-and-extension-plan-review.md)
+owns actual managed Scene/data and public consumer verification. The
+[product selection successor](../knowledge/engineering/verification/2026-10/2026-10-27T141025Z-mixed-scene-product-selection-and-content-to-runtime-admission-qualification-7c90588821aa4e8da374958ef2e436e4.md)
+records recipe-owned admissions through Check/content capture, startup and replacement; the
+selected language integration remains. The [fixed-baseline review](../audits/2026-10-27-scene-runtime-and-extension-plan-review.md)
 records owning-contract corrections and concrete subsequent cleanups. No official C# SDK was
 selected. Complete-tool evaluation and owned-UI implementation remain independent.
 

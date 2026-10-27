@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "e3c7f3b59f8aae8f304f487d119f414e8202d84d96563730ea898ea353682557"
+source_fingerprint: "ed5a3aebddd0f2170cbac094ced7b5e02f3a8d5c2bc32d5fe9d3a0a2c1a302f1"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "e3c7f3b59f8aae8f304f487d119f414e8202d84d96563730ea898ea3536
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `e3c7f3b59f8aae8f304f487d119f414e8202d84d96563730ea898ea353682557`
-- Immutable records: 976
+- Source fingerprint: `ed5a3aebddd0f2170cbac094ced7b5e02f3a8d5c2bc32d5fe9d3a0a2c1a302f1`
+- Immutable records: 977
 - Active lane heads: 1
 
 # Active Registrations
@@ -69,6 +69,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Mixed Scene product selection and content-to-runtime admission qualification](verification/2026-10/2026-10-27T141025Z-mixed-scene-product-selection-and-content-to-runtime-admission-qualification-7c90588821aa4e8da374958ef2e436e4.md) - Qualifies exact mixed definitions through recipes, strict content and managed publication; records remaining language and Editor work.
 - **Verification Evidence**: [Production Scene native-data runtime and managed authority qualification](verification/2026-10/2026-10-27T125421Z-production-scene-native-data-runtime-and-managed-authority-qualification-294f613511bb48e49fed958c05a1a469.md) - Qualifies the closed Scene storage family and records remaining product and language owner integration.
 - **Verification Evidence**: [Closed Scene binding selection and shared strict data compilation](verification/2026-10/2026-10-27T105601Z-closed-scene-binding-selection-and-shared-strict-data-compilation-263aa2e60c62429db4a8862d2df6e059.md) - Qualifies explicit mixed Schema selection and public Prefab compilation while preserving separate runtime authority, data publication and export obligations.
 - **Verification Evidence**: [Backend-free owner schema snapshots and clarified owned Editor UI sequencing](verification/2026-10/2026-10-27T102723Z-backend-free-owner-schema-snapshots-and-clarified-owned-editor-ui-sequencing-7e4b079a81b64d149b8f031b8b2c84ea.md) - Qualifies metadata-only owner admission and migrated consumers; records user-directed Nara UI ownership and the plan review without blocking ongoing production Scene work.
@@ -80,7 +81,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Complete Editor Prefab conversion and source admission qualification](verification/2026-10/2026-10-27T064545Z-complete-editor-prefab-conversion-and-source-admission-qualification-bc6d938e4ea5421fa42d0028230a11dc.md) - Qualifies Source pre-copy admission, reviewed Editor conversion, actual dependency fences, public consumers and selected Windows/DX12 workflows.
 - **Work Progress**: [Editor conversion source admission fixes pass full foundation cohort](progress/2026-10/2026-10-27T061533Z-editor-conversion-source-admission-fixes-pass-full-foundation-cohort-33359bf2b64a4517acffb1e0d41eb554.md) - Work Progress for Editor conversion source admission fixes pass full foundation cohort.
 - **Work Progress**: [Editor complete Prefab conversion integration and pre-copy budget corrections](progress/2026-10/2026-10-27T053151Z-editor-complete-prefab-conversion-integration-and-pre-copy-budget-corrections-394c727d98ae4d55846b93f121fd416b.md) - Shared actual-demand acquisition and Editor conversion custody are integrated; source pre-copy budget fixes, independent consumers and native qualification remain in progress.
-- **Verification Evidence**: [Complete source-owned Prefab conversion and current stable lookup qualification](verification/2026-10/2026-10-27T041718Z-complete-source-owned-prefab-conversion-and-current-stable-lookup-qualification-cbce190af0c4488b97895e68905573a6.md) - Qualifies nominal owned source conversion, same-history replay, actual semantic dependency fencing and fresh Host stable lookup validation; Editor conversion custody and native interaction remain open.
 
 # Integration Notes
 

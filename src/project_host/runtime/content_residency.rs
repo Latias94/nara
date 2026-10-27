@@ -23,7 +23,6 @@ use nara_scene::{
     advanced::{
         PreparedSceneReplacement, SceneAssetBindings, SceneNativeRetirementClaims,
         SceneProductOverlayWriter, SceneProductTransactionLimits,
-        prepare_expanded_scene_replacement_with_claims,
     },
 };
 use nara_tilemap::{
@@ -37,7 +36,7 @@ use super::{
 };
 use crate::{
     project_content::{ProjectContentLease, asset_record_retained_bytes},
-    startup_scene::{CurrentSceneOwner, current_scene_registry},
+    startup_scene::{CurrentSceneOwner, current_scene_bindings},
 };
 use catalog::CatalogChange;
 use images::{ImagePublications, OwnedImage};

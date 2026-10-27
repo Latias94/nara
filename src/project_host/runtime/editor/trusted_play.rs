@@ -479,7 +479,7 @@ impl EditorProjectSession {
                     .expect("a playable Scene retains its admitted source")
                     .source_key,
                 slot.session().document(),
-                lane.plan.schema_validation().registry(),
+                lane.plan.schema_validation().bindings(),
             )
         }) {
             None => {

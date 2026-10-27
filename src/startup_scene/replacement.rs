@@ -1,13 +1,13 @@
 use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
 use nara_ecs::{Mut, World};
 use nara_identity::{SpawnedSceneInstance, WorldEntityToken};
-use nara_reflect::{ComponentRegistry, component_registry, validate_component_registry_authority};
 use nara_scene::{
-    SceneSpawnReport,
+    SceneComponentBindings, SceneSpawnReport,
     advanced::{
-        SceneProductOverlayWriter, SceneProductTransactionLimits,
-        replace_expanded_scene_with_product,
+        SceneAssetBindings, SceneNativeRetirementClaims, SceneProductOverlayWriter,
+        SceneProductTransactionLimits,
     },
+    scene_component_bindings, validate_scene_component_bindings_authority,
 };
 
 use super::{
@@ -52,7 +52,7 @@ where
 /// project source here is rejected before the callback or any Scene mutation. Use
 /// [`restart_current_scene_with_product`] to restart already resident project content.
 ///
-/// The exact expected receipt, registry authority, source coverage and bounded product writes are
+/// The exact expected receipt, bindings authority, source coverage and bounded product writes are
 /// validated before retiring the prior instance. This does not promise rollback of arbitrary native
 /// effects and does not expose hosted project travel.
 #[must_use]
@@ -88,8 +88,8 @@ fn replace_current<F>(
 where
     F: FnOnce(&mut SceneProductOverlayWriter<'_>),
 {
-    let registry = match current_scene_registry(world, expected) {
-        Ok(registry) => registry,
+    let bindings = match current_scene_bindings(world, expected) {
+        Ok(bindings) => bindings,
         Err(report) => return report,
     };
     let owner = world.resource::<CurrentSceneOwner>();
@@ -110,16 +110,35 @@ where
     }
     world.resource_scope(|world, mut owner: Mut<CurrentSceneOwner>| {
         let source = source.map_or_else(|| Arc::clone(&owner.source), Arc::new);
-        let report = replace_expanded_scene_with_product(
+        let assets = SceneAssetBindings::from_world(world);
+        let prepared = match bindings.prepare_scene_replacement_with_claims(
             world,
-            &registry,
             &source.candidate,
             source.asset_database(),
             &owner.receipt,
+            assets,
+            &SceneNativeRetirementClaims::default(),
             limits,
             additional_retirements,
             configure,
-        );
+        ) {
+            Ok(prepared) => prepared,
+            Err(report) => return report,
+        };
+        let report = match prepared.commit(world) {
+            Ok(report) => report,
+            Err((prepared, mut report)) => {
+                if prepared.discard(world).is_err() {
+                    report.diagnostics.push(Diagnostic::error(
+                        DiagnosticCode::new("scene.candidate-cleanup-incomplete")
+                            .expect("engine-owned diagnostic codes are valid"),
+                        SafeSummary::new("Rejected Scene candidate could not be safely discarded")
+                            .expect("engine-owned diagnostic summaries are safe"),
+                    ));
+                }
+                return report;
+            }
+        };
         if !report.diagnostics.has_errors()
             && let Some(receipt) = &report.instance
         {
@@ -130,10 +149,10 @@ where
     })
 }
 
-pub(crate) fn current_scene_registry(
+pub(crate) fn current_scene_bindings(
     world: &World,
     expected: &SpawnedSceneInstance,
-) -> Result<ComponentRegistry, SceneSpawnReport> {
+) -> Result<SceneComponentBindings, SceneSpawnReport> {
     if !world
         .get_resource::<StartupSceneActivationAuthority>()
         .is_some_and(|authority| authority.phase == StartupSceneActivationPhase::Finalized)
@@ -155,22 +174,19 @@ pub(crate) fn current_scene_registry(
             "Current Scene no longer matches the expected instance",
         ));
     }
-    if validate_component_registry_authority(world).is_err() {
+    if validate_scene_component_bindings_authority(world).is_err() {
         return Err(rejected(
-            "scene.current.component-registry-authority-invalid",
-            "Current Scene component registry authority is invalid",
+            "scene.current.component-bindings-authority-invalid",
+            "Current Scene component bindings authority is invalid",
         ));
     }
-    let Some(registry) = component_registry(world)
-        .and_then(|registry| registry.snapshot().ok())
-        .map(ComponentRegistry::from_snapshot)
-    else {
+    let Some(bindings) = scene_component_bindings(world).cloned() else {
         return Err(rejected(
-            "scene.current.component-registry-unavailable",
-            "Current Scene component registry is unavailable",
+            "scene.current.component-bindings-unavailable",
+            "Current Scene component bindings are unavailable",
         ));
     };
-    Ok(registry)
+    Ok(bindings)
 }
 
 fn rejected(code: &'static str, summary: &'static str) -> SceneSpawnReport {

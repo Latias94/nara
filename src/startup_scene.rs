@@ -7,7 +7,7 @@
 
 mod replacement;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-pub(crate) use replacement::current_scene_registry;
+pub(crate) use replacement::current_scene_bindings;
 pub use replacement::{replace_current_scene_with_product, restart_current_scene_with_product};
 
 use std::{
@@ -35,8 +35,10 @@ use nara_ecs::{
     system::SystemParam,
 };
 use nara_identity::SpawnedSceneInstance;
-use nara_reflect::{ComponentRegistry, component_registry, validate_component_registry_authority};
-use nara_scene::{ExpandedSceneCandidate, SceneDocument, SceneOccurrenceKey, spawn_scene};
+use nara_scene::{
+    ExpandedSceneCandidate, SceneComponentBindings, SceneDocument, SceneOccurrenceKey,
+    scene_component_bindings, validate_scene_component_bindings_authority,
+};
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 use crate::project_content::{
@@ -49,7 +51,10 @@ pub const STARTUP_SCENE_ACTIVATION_PLUGIN_ID: PluginId =
     PluginId::new("nara.startup-scene-activation");
 const STARTUP_SCENE_ACTIVATION_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(STARTUP_SCENE_ACTIVATION_PLUGIN_ID, PluginCategory::Runtime)
-        .requires_plugins(&[nara_scene::SCENE_COMPONENTS_PLUGIN_ID])
+        .requires_plugins(&[
+            nara_scene::SCENE_COMPONENTS_PLUGIN_ID,
+            nara_scene::SCENE_COMPONENT_BINDINGS_PLUGIN_ID,
+        ])
         .shutdown_obligations(&[
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             crate::project_host::PROJECT_SCENE_REQUEST_CLOSE_OBLIGATION,
@@ -82,6 +87,7 @@ enum SceneRetention {
         _generation: ProjectContentGenerationLease,
         assets: Arc<ProjectContentAssets>,
         retained_bytes: usize,
+        schema_authority: Arc<nara_scene::SceneComponentBindingsWitness>,
     },
     Direct {
         retained_bytes: usize,
@@ -147,6 +153,7 @@ impl SceneSource {
         lease: ProjectContentLease,
         generation: ProjectContentGenerationLease,
         retained_bytes: usize,
+        schema_authority: Arc<nara_scene::SceneComponentBindingsWitness>,
     ) -> Self {
         Self {
             candidate,
@@ -155,6 +162,7 @@ impl SceneSource {
                 _generation: generation,
                 assets,
                 retained_bytes,
+                schema_authority,
             },
         }
     }
@@ -177,6 +185,19 @@ impl SceneSource {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             SceneRetention::Project { .. } => true,
             SceneRetention::Direct { .. } => false,
+        }
+    }
+
+    fn matches_component_bindings(&self, bindings: &SceneComponentBindings) -> bool {
+        match &self.retention {
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            SceneRetention::Project {
+                schema_authority, ..
+            } => schema_authority.matches(bindings),
+            SceneRetention::Direct { .. } => {
+                let _ = bindings;
+                true
+            }
         }
     }
 
@@ -530,8 +551,8 @@ impl Plugin for StartupSceneActivationPlugin {
 ///
 /// The operation must run while the caller has exclusive access to an unpublished managed-App
 /// candidate. Every predictable rejection occurs before scene spawning. A scene failure publishes
-/// neither pending input nor activation. The executable component registry is always derived from
-/// and validated against the candidate World; callers cannot substitute another registry.
+/// neither pending input nor activation. The complete component selection is always derived from
+/// and validated against the candidate World; callers cannot substitute another selection.
 pub fn materialize_startup_scene(
     world: &mut World,
     source: SceneSource,
@@ -566,32 +587,37 @@ pub fn materialize_startup_scene(
         ));
     }
 
-    validate_component_registry_authority(world).map_err(|_| {
+    validate_scene_component_bindings_authority(world).map_err(|_| {
         StartupSceneMaterializeError::single(
-            "startup.scene.component-registry-authority-invalid",
-            "Startup scene component registry authority is invalid",
+            "startup.scene.component-bindings-authority-invalid",
+            "Startup scene component bindings authority is invalid",
         )
     })?;
-    let registry = component_registry(world)
-        .and_then(|registry| registry.snapshot().ok())
-        .map(ComponentRegistry::from_snapshot)
-        .ok_or_else(|| {
-            StartupSceneMaterializeError::single(
-                "startup.scene.component-registry-unavailable",
-                "Startup scene component registry is unavailable",
-            )
-        })?;
+    let bindings = scene_component_bindings(world).cloned().ok_or_else(|| {
+        StartupSceneMaterializeError::single(
+            "startup.scene.component-bindings-unavailable",
+            "Startup scene component bindings are unavailable",
+        )
+    })?;
+    if !source.matches_component_bindings(&bindings) {
+        return Err(StartupSceneMaterializeError::single(
+            "startup.scene.component-bindings-mismatch",
+            "Startup scene source does not match the installed component definitions",
+        ));
+    }
 
     // The product owns one current-Scene slot for the complete managed runtime lifetime.
     let occurrence = SceneOccurrenceKey::new("nara.product", "current-scene")
         .expect("the product declares a valid startup occurrence");
-    let mut report = spawn_scene(
-        world,
-        &registry,
-        &source.candidate,
-        &occurrence,
-        source.asset_database(),
-    );
+    let prepared = bindings
+        .prepare_scene(
+            world,
+            &source.candidate,
+            &occurrence,
+            source.asset_database(),
+        )
+        .map_err(|report| StartupSceneMaterializeError::new(report.diagnostics))?;
+    let mut report = prepared.commit(world);
     if report.diagnostics.has_errors() {
         return Err(StartupSceneMaterializeError::new(report.diagnostics));
     }
@@ -705,6 +731,8 @@ mod tests {
     use std::sync::OnceLock;
 
     use nara_ecs::bevy_ecs::system::SystemState;
+    use nara_reflect::ComponentRegistry;
+    use nara_scene::spawn_scene;
 
     use super::*;
 
@@ -841,11 +869,12 @@ mod tests {
     }
 
     #[test]
-    fn direct_materialization_uses_candidate_registry_and_promotes_once() {
+    fn direct_materialization_uses_candidate_bindings_and_promotes_once() {
         let mut app = App::new();
         app.add_plugins((
             nara_reflect::ComponentRegistryPlugin,
             nara_scene::SceneComponentsPlugin,
+            nara_scene::SceneComponentBindingsPlugin::new([]),
             StartupSceneActivationPlugin,
         ))
         .unwrap();

@@ -30,18 +30,15 @@ use nara_image::{
     ImageAsset, ImageBytesImportRequest, ImageImportError, ImageImportMemoryPlan,
     ImageImportSettings, ImageImporter, ImageImporterCreateError,
 };
-use nara_reflect::__private::{
-    ComponentRegistrySnapshotWitness, component_registry_snapshot_witness,
-    component_registry_snapshot_witness_matches,
-};
 use nara_reflect::{
-    ComponentRegistrySnapshot, DeclaredAssetReferenceError, SchemaCompositionFingerprint,
-    collect_declared_asset_references,
+    ComponentValueMaterializationLimits, DeclaredAssetReferenceError, SchemaCompositionFingerprint,
+    collect_declared_asset_references_from_schema,
 };
 use nara_scene::{
     ExpandedSceneCandidate, PrefabDocument, PrefabDocumentCandidate, PrefabSourceResolver,
-    ResolvedPrefabSource, SceneDocument, SceneDocumentCandidate, SceneEntityProvenanceMap,
-    SceneEntityRecord, SceneFormatError, SourceDocumentKey, SourceDocumentKind,
+    ResolvedPrefabSource, SceneComponentBindings, SceneComponentBindingsWitness, SceneDocument,
+    SceneDocumentCandidate, SceneEntityProvenanceMap, SceneEntityRecord, SceneFormatError,
+    SourceDocumentKey, SourceDocumentKind,
 };
 use nara_tilemap::{
     TileSetSource, TileSetSourceFileLimits, TilemapMembershipError,
@@ -230,7 +227,7 @@ pub struct ProjectContentSnapshot {
 }
 
 struct ProjectContentSnapshotInner {
-    schema_authority: ComponentRegistrySnapshotWitness,
+    schema_authority: Arc<SceneComponentBindingsWitness>,
     domain_authority: ProjectAssetDomains,
     content_closure: ProjectContentClosureReceipt,
     source_upgrade_required: bool,
@@ -281,8 +278,8 @@ impl ProjectContentSnapshot {
     }
 
     #[must_use]
-    pub(crate) fn shares_schema_snapshot(&self, snapshot: &ComponentRegistrySnapshot) -> bool {
-        component_registry_snapshot_witness_matches(&self.inner.schema_authority, snapshot)
+    pub(crate) fn shares_component_bindings(&self, bindings: &SceneComponentBindings) -> bool {
+        self.inner.schema_authority.matches(bindings)
     }
 
     #[must_use]
@@ -409,6 +406,7 @@ impl ProjectContentSnapshot {
             self.inner._generation_lease.clone(),
             startup_scene_retained_bytes(&self.inner.expanded_scene)
                 .expect("an admitted Scene already has a valid retained-byte plan"),
+            Arc::clone(&self.inner.schema_authority),
         )
     }
 
@@ -416,18 +414,28 @@ impl ProjectContentSnapshot {
         &self,
         source_key: &SourceDocumentKey,
         document: &SceneDocument,
-        registry: &nara_reflect::ComponentRegistry,
+        bindings: &SceneComponentBindings,
     ) -> Result<SceneSource, ProjectContentError> {
+        if !self.shares_component_bindings(bindings) {
+            return Err(ProjectContentError::single(
+                ProjectContentErrorKind::SchemaMismatch,
+                "project.content.schema-mismatch",
+                "Editor startup Scene bindings do not match the admitted content",
+            ));
+        }
         let resolver = SnapshotPrefabResolver {
             prefabs: self.prefabs(),
             database: self.inner.assets.database(),
         };
-        let expansion = document.expand_prefabs_with_options_and_asset_database(
-            registry,
-            &resolver,
+        let expansion = match bindings.try_expand_prefabs_with_loader(
+            document,
             nara_scene::PrefabExpansionOptions::default(),
-            self.inner.assets.database(),
-        );
+            Some(self.inner.assets.database()),
+            |source, _| Ok::<_, std::convert::Infallible>(resolver.resolve_prefab(source)),
+        ) {
+            Ok(report) => report,
+            Err(error) => match error {},
+        };
         let nara_scene::PrefabExpansionReport {
             candidate,
             diagnostics,
@@ -439,8 +447,11 @@ impl ProjectContentSnapshot {
             })?
             .bind_source(source_key.clone());
         let expanded = expanded_candidate.document();
-        let diagnostics =
-            expanded.validate_with_asset_database(registry, self.inner.assets.database());
+        let diagnostics = bindings.validate_scene(
+            expanded,
+            Some(self.inner.assets.database()),
+            ComponentValueMaterializationLimits::default(),
+        );
         if diagnostics.has_errors() {
             return Err(map_scene_diagnostics(
                 ProjectContentErrorKind::ScenePublication,
@@ -459,6 +470,7 @@ impl ProjectContentSnapshot {
             lease,
             self.inner._generation_lease.clone(),
             retained_bytes,
+            Arc::clone(&self.inner.schema_authority),
         ))
     }
 
@@ -1040,20 +1052,11 @@ impl ProjectContentLoader {
                 "Project content root does not match the settings authority",
             ));
         }
-        let registry = plan.schema_validation().registry();
-        let snapshot_fingerprint = plan
-            .schema_validation()
-            .snapshot()
-            .schema_composition_fingerprint()
-            .map_err(|_| {
-                ProjectContentError::single(
-                    ProjectContentErrorKind::SchemaMismatch,
-                    "project.content.schema-unavailable",
-                    "Project schema validation authority is unavailable",
-                )
-            })?;
-        if !registry.shares_snapshot(plan.schema_validation().snapshot())
-            || snapshot_fingerprint != plan.schema_validation().composition_fingerprint()
+        let validation = plan.schema_validation();
+        let bindings = validation.bindings();
+        if !validation.registry().shares_snapshot(validation.snapshot())
+            || !validation.snapshot().ptr_eq(bindings.native_snapshot())
+            || bindings.composition_fingerprint() != validation.composition_fingerprint()
         {
             return Err(ProjectContentError::single(
                 ProjectContentErrorKind::SchemaMismatch,
@@ -1138,6 +1141,12 @@ impl<'a> LoadContext<'a> {
                     .checked_add(catalogue_work_bytes)
                     .and_then(|bytes| bytes.checked_add(asset_database_work_bytes))
                     .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?,
+            )
+            .map_err(ProjectContentError::budget)?;
+        budget
+            .add(
+                ProjectContentBudgetKind::RetainedBytes,
+                component_bindings_witness_retained_bytes(validation.bindings())?,
             )
             .map_err(ProjectContentError::budget)?;
         Ok(Self {
@@ -1254,12 +1263,12 @@ impl<'a> LoadContext<'a> {
             ),
         );
         let validation = self.validation;
-        let registry = validation.registry();
+        let bindings = validation.bindings();
         // The compiler owns selection, including complete replacement of nested instances.
         // Only an actual surviving source request may read a document or require its metadata.
         // Asset discovery and native publication follow compilation of effective values.
-        let expansion = scene.try_expand_prefabs_with_loader(
-            registry,
+        let expansion = bindings.try_expand_prefabs_with_loader(
+            &scene,
             options,
             None,
             |reference, working_set| {
@@ -1389,8 +1398,11 @@ impl<'a> LoadContext<'a> {
         self.validate_tileset_image_extents(&tilesets, &images)?;
         self.validate_tilemap_membership(&expanded, &provenance, &tilesets)?;
         self.commit_tileset_identities(&settings.paths.assets, &tilesets)?;
-        let diagnostics =
-            expanded.validate_with_asset_database(self.validation.registry(), &self.asset_database);
+        let diagnostics = bindings.validate_scene(
+            expanded,
+            Some(&self.asset_database),
+            ComponentValueMaterializationLimits::default(),
+        );
         if diagnostics.has_errors() {
             return Err(map_scene_diagnostics(
                 ProjectContentErrorKind::ScenePublication,
@@ -1545,7 +1557,7 @@ impl<'a> LoadContext<'a> {
 
         Ok(ProjectContentSnapshot {
             inner: Arc::new(ProjectContentSnapshotInner {
-                schema_authority: component_registry_snapshot_witness(self.validation.snapshot()),
+                schema_authority: Arc::new(bindings.witness()),
                 domain_authority: self.domains.clone(),
                 content_closure,
                 source_upgrade_required: self.source_upgrade_required,
@@ -1851,12 +1863,9 @@ impl<'a> LoadContext<'a> {
     ) -> Result<SceneDocument, ProjectContentError> {
         let work_before =
             self.reserve_work(scene_decode_work_plan(self.loader.limits.scene_file())?)?;
-        let (document, source_upgrade_required) =
-            decode_scene_candidate(path, bytes, self.loader.limits.scene_file())?
-                .canonicalize(self.validation.registry())
-                .map_err(map_scene_publication_error)?
-                .into_source_document();
-        self.source_upgrade_required |= source_upgrade_required;
+        let document = decode_scene_candidate(path, bytes, self.loader.limits.scene_file())?
+            .into_composition_source()
+            .map_err(map_scene_publication_error)?;
         let retained = scene_retained_bytes(&document)?;
         self.commit_work_as_retained(work_before, retained)?;
         Ok(document)
@@ -1887,9 +1896,17 @@ impl<'a> LoadContext<'a> {
         let mut sources = SourceCandidates::default();
         for entity in &document.entities {
             for (component, record) in &entity.components {
-                let references = collect_declared_asset_references(
-                    self.validation.registry(),
-                    component,
+                let schema = self
+                    .validation
+                    .bindings()
+                    .schema(component)
+                    .ok_or_else(|| {
+                        map_asset_reference_error(DeclaredAssetReferenceError::UnknownComponent {
+                            component: component.clone(),
+                        })
+                    })?;
+                let references = collect_declared_asset_references_from_schema(
+                    schema,
                     record.version,
                     &record.value,
                 )
@@ -2892,6 +2909,56 @@ fn image_retained_plan_bytes(
         .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
 }
 
+fn component_bindings_witness_retained_bytes(
+    bindings: &SceneComponentBindings,
+) -> Result<usize, ProjectContentError> {
+    // The native witness is weak. Charge the complete data-owner metadata even when its Arcs
+    // are shared with the plan; encoded size times sixteen covers tree and allocation overhead.
+    // Snapshot and escaped Scene sources share one witness allocation and one metadata charge.
+    // Count through a sink so estimating retained metadata needs no temporary encoded buffer.
+    let mut encoded = SchemaMetadataSize(0);
+    for owner in bindings.data_owners() {
+        serde_json::to_writer(
+            &mut encoded,
+            &(owner.owner_id(), owner.current(), owner.predecessor()),
+        )
+        .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))?;
+    }
+    checked_plan_sum(
+        ProjectContentBudgetKind::RetainedBytes,
+        [
+            size_of::<SceneComponentBindingsWitness>(),
+            ARC_CONTROL_BLOCK_BYTES,
+            checked_plan_product(ProjectContentBudgetKind::RetainedBytes, encoded.0, 16)?,
+            checked_plan_product(
+                ProjectContentBudgetKind::RetainedBytes,
+                bindings.data_owners().len(),
+                ARC_CONTROL_BLOCK_BYTES
+                    + size_of::<(
+                        nara_reflect::PersistentComponentSchemaOwnerId,
+                        nara_reflect::ComponentSchemaOwnerSnapshot,
+                    )>(),
+            )?,
+        ],
+    )
+}
+
+struct SchemaMetadataSize(usize);
+
+impl io::Write for SchemaMetadataSize {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0 = self
+            .0
+            .checked_add(bytes.len())
+            .ok_or_else(|| io::Error::other("schema metadata size overflow"))?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 fn snapshot_retained_overhead(
     selected_scene_source: &SourceDocumentKey,
     prefabs: &BTreeMap<AssetPath, LoadedPrefabContent>,
@@ -3171,28 +3238,356 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use nara_asset::AssetRef;
+    use nara_app::{App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId};
+    use nara_asset::{
+        AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, StableAssetId,
+    };
     use nara_fs::{
         CapabilityRights, ContentDigest, DirectoryCapability, HostCapabilityOptions, RelativePath,
         TrustMode,
     };
     use nara_identity::SceneEntityId;
-    use nara_reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue};
+    use nara_reflect::{
+        AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
+        ComponentFieldPath, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
+        ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+        ComponentValueKind, PersistentComponentSchemaOwnerId,
+    };
     use nara_scene::{
         PrefabAddition, PrefabComponentIntent, PrefabDocument, PrefabEntityTarget, PrefabInstance,
         PrefabInstanceClaim, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
-        PrefabPlacementSlot, SceneComponentRecord, SceneDocument, SceneEntityRecord,
-        SourceDocumentKey, SourceDocumentKind,
+        PrefabPlacementSlot, SceneComponentBindings, SceneComponentRecord, SceneDocument,
+        SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
     };
 
     use crate::project_host::{
         ProjectSettingsCandidate, RuntimePlan, ingest_project_manifest, resolve_product_recipe,
+        runtime_agreement::prepare_runtime_schema_agreement,
     };
+    use crate::{ProductRecipe, SchemaContribution};
 
     use super::{
         LoadContext, ProjectContentBudgetKind, ProjectContentErrorKind, ProjectContentLimits,
-        ProjectContentLoader, ProjectContentMemberKind,
+        ProjectContentLoader, ProjectContentMemberKind, component_bindings_witness_retained_bytes,
     };
+
+    #[test]
+    fn runtime_content_loads_mixed_root_records_and_data_declared_assets() {
+        let project = LazyContentProject::new();
+        let owner = data_owner();
+        let data = ComponentTypeId::new("test.content.Image");
+        let record = SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::map([
+                ("kind", ComponentValue::String("path".into())),
+                ("value", ComponentValue::String("data.png".into())),
+            ]),
+        )
+        .with_owner(owner.owner_id().clone());
+        let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            SceneEntityId::new("mixed").unwrap(),
+        )
+        .with_component(data.clone(), record.clone())
+        .with_component(
+            ComponentTypeId::new("nara.scene.Name"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("Mixed root".into()),
+            ),
+        )]);
+        fs::write(
+            project.root.join("scenes/startup.scene.json"),
+            document.to_json_string().unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            project.root.join("assets/data.png"),
+            include_bytes!("../tests/fixtures/images/valid-rgba-1x1.png"),
+        )
+        .unwrap();
+        let metadata = AssetMeta::new(
+            AssetMetaIdentity::new(
+                StableAssetId::parse_str("98dd688f-1cb5-42be-b9f2-f580ca0778af").unwrap(),
+                AssetPath::new("data.png").unwrap(),
+                AssetSourceKind::Image,
+            ),
+            nara_image::ImageImportSettings::default(),
+        );
+        fs::write(
+            project.root.join("assets/data.png.meta"),
+            metadata.to_json_string().unwrap(),
+        )
+        .unwrap();
+        let (candidate, plan, loader) = project.inputs_with_recipe(data_recipe(&owner));
+        let snapshot = loader.load(&candidate, &plan).unwrap();
+        assert_eq!(
+            snapshot.scene(),
+            &document,
+            "the captured root remains authored",
+        );
+        assert_eq!(
+            snapshot.expanded_scene().entities[0].components[&data],
+            record
+        );
+        assert_eq!(snapshot.images().len(), 1);
+        assert!(!snapshot.source_upgrade_required());
+        assert!(snapshot.content_closure().members().iter().any(|member| {
+            member.kind() == ProjectContentMemberKind::AssetSource
+                && member.path().as_str() == "assets/data.png"
+        }));
+        let bindings = plan.schema_validation().bindings();
+        let shared =
+            SceneComponentBindings::new(bindings.native_snapshot().clone(), [owner]).unwrap();
+        let independent =
+            SceneComponentBindings::new(bindings.native_snapshot().clone(), [data_owner()])
+                .unwrap();
+        assert!(snapshot.shares_component_bindings(&shared));
+        assert_eq!(
+            bindings.composition_fingerprint(),
+            independent.composition_fingerprint(),
+        );
+        assert!(!snapshot.shares_component_bindings(&independent));
+        let baseline = loader
+            .budget_snapshot()
+            .active(ProjectContentBudgetKind::RetainedBytes);
+        let source = snapshot
+            .prepare_editor_startup_scene(
+                snapshot.selected_scene_source_key(),
+                snapshot.scene(),
+                &shared,
+            )
+            .unwrap();
+        assert_eq!(
+            loader
+                .budget_snapshot()
+                .active(ProjectContentBudgetKind::RetainedBytes),
+            baseline + source.retained_bytes(),
+        );
+        drop(source);
+        assert_eq!(
+            snapshot
+                .prepare_editor_startup_scene(
+                    snapshot.selected_scene_source_key(),
+                    snapshot.scene(),
+                    &independent,
+                )
+                .unwrap_err()
+                .kind(),
+            ProjectContentErrorKind::SchemaMismatch,
+        );
+        assert_eq!(
+            loader
+                .budget_snapshot()
+                .active(ProjectContentBudgetKind::RetainedBytes),
+            baseline,
+        );
+        let metadata_bytes = component_bindings_witness_retained_bytes(bindings).unwrap();
+        assert!(metadata_bytes > 0);
+        assert!(
+            loader
+                .budget_snapshot()
+                .active(ProjectContentBudgetKind::RetainedBytes)
+                >= metadata_bytes
+        );
+        drop(snapshot);
+        assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+        let limits = ProjectContentLimits::default()
+            .with_limit(ProjectContentBudgetKind::RetainedBytes, metadata_bytes - 1)
+            .unwrap();
+        let short = ProjectContentLoader::with_limits(loader.project_root(), limits).unwrap();
+        assert_eq!(
+            short.load(&candidate, &plan).unwrap_err().kind(),
+            ProjectContentErrorKind::BudgetExceeded,
+        );
+        assert_eq!(
+            short
+                .budget_snapshot()
+                .high_water(ProjectContentBudgetKind::Files),
+            0,
+        );
+        assert_eq!(short.budget_snapshot().active_reservations(), 0);
+    }
+
+    #[test]
+    fn runtime_content_rejects_unselected_or_invalid_data_root_records() {
+        let project = LazyContentProject::new();
+        let owner = data_owner();
+        for case in [
+            "unselected",
+            "missing-owner",
+            "wrong-owner",
+            "future",
+            "invalid",
+        ] {
+            let mut record =
+                SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::U64(7))
+                    .with_owner(owner.owner_id().clone());
+            match case {
+                "missing-owner" => record.owner = None,
+                "wrong-owner" => {
+                    record.owner =
+                        Some(PersistentComponentSchemaOwnerId::try_new("test.other").unwrap());
+                }
+                "future" => record.version = ComponentSchemaVersion::new(2).unwrap(),
+                "invalid" => record.value = ComponentValue::Bool(true),
+                _ => {}
+            }
+            let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+                SceneEntityId::new("data").unwrap(),
+            )
+            .with_component(ComponentTypeId::new("test.content.Score"), record)]);
+            fs::write(
+                project.root.join("scenes/startup.scene.json"),
+                document.to_json_string().unwrap(),
+            )
+            .unwrap();
+            let recipe = if case == "unselected" {
+                ProductRecipe::new()
+            } else {
+                data_recipe(&owner)
+            };
+            let (candidate, plan, loader) = project.inputs_with_recipe(recipe);
+            let error = loader.load(&candidate, &plan).unwrap_err();
+            assert!(error.diagnostics().has_errors(), "{case}");
+            assert_eq!(loader.budget_snapshot().active_reservations(), 0, "{case}");
+        }
+    }
+
+    #[test]
+    fn runtime_agreement_checks_selected_data_catalogs_and_exact_owner_witness() {
+        let project = LazyContentProject::new();
+        let manifest = project.root.join("nara.toml");
+        let source = fs::read_to_string(&manifest).unwrap();
+        fs::write(
+            manifest,
+            format!("{source}\n[authoring]\nschema_bundle = \"schema.bundle.json\"\n"),
+        )
+        .unwrap();
+        let owner = data_owner();
+        let (candidate, plan, loader) = project.inputs_with_recipe(data_recipe(&owner));
+        let bundle = plan.schema_validation().authoring_schema_bundle();
+        for case in ["matching", "missing", "divergent"] {
+            let mut owners = bundle
+                .owners()
+                .iter()
+                .filter(|selected| selected.owner_id() != owner.owner_id())
+                .map(AuthoringSchemaBundleOwner::from)
+                .collect::<Vec<_>>();
+            if case != "missing" {
+                let mut current = owner.current().clone();
+                if case == "divergent" {
+                    current.components[0].aliases.push("Changed".into());
+                }
+                owners.push(AuthoringSchemaBundleOwner::new(
+                    owner.owner_id().clone(),
+                    current,
+                    owner.predecessor().cloned(),
+                ));
+            }
+            let bundle = AuthoringSchemaBundle::new(owners).unwrap();
+            fs::write(
+                project.root.join("schema.bundle.json"),
+                bundle.to_json_string().unwrap(),
+            )
+            .unwrap();
+            let result =
+                prepare_runtime_schema_agreement(&loader.project_root(), &candidate, &plan);
+            if case == "matching" {
+                let agreement = result.unwrap();
+                assert!(agreement.matches_inputs(
+                    loader.project_root().identity(),
+                    &candidate,
+                    &plan,
+                ));
+                let (_, independent, _) = project.inputs_with_recipe(data_recipe(&data_owner()));
+                assert!(!agreement.matches_inputs(
+                    loader.project_root().identity(),
+                    &candidate,
+                    &independent,
+                ));
+                let snapshot = loader
+                    .load_with_runtime_agreement(&candidate, &plan, agreement)
+                    .unwrap();
+                assert!(snapshot.has_runtime_schema_agreement());
+                drop(snapshot);
+            } else {
+                let error = result.err().unwrap();
+                let code = if case == "missing" {
+                    "project.runtime-agreement.selected-owner-missing"
+                } else {
+                    "project.runtime-agreement.selected-owner-divergent"
+                };
+                assert!(
+                    error
+                        .diagnostics()
+                        .iter()
+                        .any(|diagnostic| diagnostic.code().as_str() == code)
+                );
+            }
+            assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+        }
+    }
+
+    #[derive(Default)]
+    struct DataContentPlugin;
+
+    impl Plugin for DataContentPlugin {
+        fn declaration() -> &'static PluginDeclaration {
+            static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+                PluginId::new("test.project-content.data"),
+                PluginCategory::Runtime,
+            );
+            &DECLARATION
+        }
+
+        fn build(&self, _app: &mut App) -> Result<(), PluginError> {
+            Ok(())
+        }
+    }
+
+    fn data_owner() -> ComponentSchemaOwnerSnapshot {
+        ComponentSchemaOwnerSnapshot::admit(
+            PersistentComponentSchemaOwnerId::try_new("test.project-content.data").unwrap(),
+            ComponentSchemaCatalog {
+                components: [
+                    ("test.content.Score", ComponentValueKind::U64),
+                    ("test.content.Image", ComponentValueKind::AssetRef),
+                ]
+                .into_iter()
+                .map(|(name, kind)| {
+                    let mut field = ComponentFieldSchema::required(
+                        ComponentFieldId::new("value"),
+                        "Value",
+                        ComponentFieldPath::empty(),
+                        kind,
+                    )
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING);
+                    if kind == ComponentValueKind::AssetRef {
+                        field = field.with_capability(ComponentCapability::AssetRef);
+                    }
+                    ComponentSchema::new(
+                        ComponentTypeId::new(name),
+                        name,
+                        ComponentSchemaVersion::ONE,
+                    )
+                    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                    .with_fields([field])
+                })
+                .collect(),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap()
+    }
+
+    fn data_recipe(owner: &ComponentSchemaOwnerSnapshot) -> ProductRecipe {
+        ProductRecipe::new()
+            .add_contribution(
+                SchemaContribution::<DataContentPlugin>::data_for_default([owner.clone()]).unwrap(),
+            )
+            .unwrap()
+    }
 
     #[test]
     fn runtime_content_loads_only_selected_prefabs_and_effective_asset_facts() {
@@ -3618,6 +4013,13 @@ requested = ["runtime-2d"]
         }
 
         fn inputs(&self) -> (ProjectSettingsCandidate, RuntimePlan, ProjectContentLoader) {
+            self.inputs_with_recipe(ProductRecipe::new())
+        }
+
+        fn inputs_with_recipe(
+            &self,
+            recipe: ProductRecipe,
+        ) -> (ProjectSettingsCandidate, RuntimePlan, ProjectContentLoader) {
             #[cfg(windows)]
             let file = {
                 use std::{fs::OpenOptions, os::windows::fs::OpenOptionsExt};
@@ -3639,7 +4041,7 @@ requested = ["runtime-2d"]
                 .open_file(&RelativePath::new("nara.toml").unwrap())
                 .unwrap();
             let candidate = ingest_project_manifest(&manifest, None).unwrap();
-            let plan = resolve_product_recipe(&candidate, crate::ProductRecipe::new()).unwrap();
+            let plan = resolve_product_recipe(&candidate, recipe).unwrap();
             (candidate, plan, ProjectContentLoader::new(root).unwrap())
         }
 
