@@ -233,6 +233,16 @@ not an owner-catalog migration transaction.
 C# and Lua feasibility adapters. Choose a production candidate on author workflow, targets,
 lifetime and measured toolchain cost. This is not a commitment to maintain both SDKs.
 
+The [October 27 extension study](../research/2026-10-27-language-extension-product-boundaries.md)
+adds a complete Editor-tool discriminator: evaluate C# first for one `EnemyStats` component,
+create command, property customization and dockable panel through public owner APIs. Compare
+against the source-built Rust workflow, including diagnostics, one Undo, Save/Reopen, Rust access
+to the same data, rejected update, disable/restore and stale task/callback refusal. Keep Runtime
+and Editor assemblies/deployment separate. This prioritizes a candidate, not an official-language
+announcement or a second maintained SDK. Rust remains complete without a VM. A universal
+language-backend trait, native binary ABI or replacement package resolver is not a prerequisite.
+Coordinate this tool with R1b rather than creating a second install/lifecycle mechanism.
+
 The [first executable slice](../research/2026-10-27-behavior-language-workflow-comparison.md)
 passes the same Scene/Prefab task through real hostfxr and Lua calls with exact native command
 authority. It is a fixed DTO/event harness, not generic Schema binding, an optimized domain-call
@@ -243,8 +253,8 @@ The [Schema-driven successor](../research/2026-10-27-schema-driven-behavior-comp
 replaces the fixed extraction path with external catalog admission and complete callback
 availability checks. Three authored Schemas, stable/wire field mapping, Attach/Edit/history,
 disk persistence and repeated Prefab identity have private evidence. Fresh catalog admission
-is not successor migration; author code iteration, domain-call cost and physical VM ownership
-remain open before selecting or integrating a production owner.
+is not successor migration. The body/lifetime comparison below adds bounded iteration/ownership;
+complete Editor author workflow and representative domain-call cost remain unqualified.
 
 **R3c replacement:** qualify only the modes needed by the selected owner, after its native
 completion/retirement proof in R4a. Defining coexist-and-switch and Stop-first semantics does not
@@ -257,6 +267,11 @@ rebuild, Lua source edits, rejected last binding, native World continuity, old-r
 held callback/instance roots have private evidence. This informs language-owner selection, not
 completion of R3c: arbitrary in-flight work, dependency cohorts, Stop-first, catalog migration,
 post-publication cleanup failure and public integration remain open.
+
+The next production prerequisite is the [Scene-owned data representation
+plan](2026-10-27-scene-data-representation-plan.md), not promotion of the private preview helper.
+The mixed compiler/materializer/export family remains Proposed until its public independent and
+managed consumers pass. Its implementation proceeds independently of the future owned UI.
 
 Acceptance: independent attach/edit/Undo/Prefab/source round-trip, recursive refs, one-record
 migration, missing-module preservation, mixed native materialization, exact absence/export/retire
@@ -499,6 +514,35 @@ do not conflate durable game player identity with a local input seat. Amend 0041
 
 **Design:** D13, D17. **State:** not started. **Owners:** UI compile/presented sessions, text and frontend.
 
+The user clarified the destination: **Nara's own custom-drawn Editor UI**, not embedding a
+reference toolkit. The [source study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md)
+informs the [owned runtime direction](../architecture/foundation-architecture-reassessment.md#updated-custom-ui-and-language-research).
+Preserve current semantic owners and use Dear's existing workflow behavior as the replacement baseline. Design
+Nara-owned controls, identity, interaction, layout and drawing. Mature text/layout primitives
+may be reused without importing a complete foreign UI runtime. No third-party embedding
+experiment or demonstration that adoption fails is required first.
+
+Use the same useful document tool and an actual Nara-owned window/render-view handoff. Establish
+these observations before replacing the selected frontend:
+
+- Reorder/filter/recycle a large list while preserving logical selection and compatible field
+  drafts. Count live widgets and layout work against visible rows; mere clipping is not evidence
+  of virtualization or bounded allocation.
+- Keep Chinese preedit out of source/history; one accepted field commit makes one edit. Exercise
+  actual OS candidate placement separately from backend event injection. Text Delete and viewport
+  Delete must follow focus/capture policy, including focus loss and panel retirement.
+- Retain Viewport receipt, texture-generation, color/alpha, clipping and input-mapping authority.
+  Report device/version/resource sharing or copy costs, not just that both stacks use wgpu.
+- Separate structural/layout/paint/semantic invalidation and measure idle work with a live
+  Viewport. Qualify DPI/detached-window transfer and actual accessibility for any support claim.
+- Disable/replace the selected tool with queued events and retained callbacks/resources. Restore
+  only explicitly compatible state; observe physical retirement separately from route removal.
+
+Keep this work independent of Scene data-family delivery and pure semantic tools. Qualify the
+owned runtime incrementally through these workflows, then remove superseded frontend code
+when matching complete workflows pass. The current Dear adapter is a working predecessor,
+not a competing intended final toolkit or a requirement for permanent coexistence.
+
 Repair exact theme revision/content association and Canvas/Runtime conflict admission (earlier
 F7/F8). Move glyph preparation reservations ahead of raster allocation where the model can prove
 them (F9), while distinguishing modeled bound from arbitrary allocator isolation. Keep terminal
@@ -509,7 +553,8 @@ composition, focus, keyboard routing, DPI and actual affected native detach/acce
 Pure semantic tool delivery is not blocked on unrelated whole-toolkit parity, and Runtime
 accessibility is not evidence of Editor assistive-technology support.
 
-Delete duplicate state machines and ambiguous theme identity, not the selected working frontend.
+Delete duplicate state machines and ambiguous theme identity. A source study alone does not
+justify deleting the working frontend or claim its native capability has transferred.
 
 ## R12: Consumer Integration And Canonical Contract Consolidation
 

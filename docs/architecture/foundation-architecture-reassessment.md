@@ -904,6 +904,41 @@ a pure semantic tool experiment on unrelated complete-toolkit parity. Theme revi
 association and preallocation glyph limits from the earlier audit remain root fixes, not solved
 by changing frontend strategy.
 
+### Updated Custom UI And Language Research
+
+The October 27 conversation additions and subsequent user clarification select a **Nara-owned
+custom-drawn Editor UI direction**, not third-party toolkit embedding. Its runtime design still
+needs implementation and qualification; no official language was selected. The
+[custom UI study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md)
+and [language/extension study](../research/2026-10-27-language-extension-product-boundaries.md)
+trace the proposals to primary sources. Keep three independent choices explicit: widget state
+ownership, UI description/update style, and pixel/platform integration. Retained widgets can
+support declarative rebuilding; neither retained storage nor a shared GPU API proves integration,
+virtualization, IME correctness or unload safety.
+
+| Proposal | Nara disposition | Evidence still needed |
+| --- | --- | --- |
+| Persistent UI runtime with declarative panel APIs | Design Nara's own Editor runtime; retain Dear during qualified replacement; shared game/Editor widgets remain optional | Nara-owned controls with the same document tool, input, Viewport and close semantics |
+| Stable widget identity | Preserve logical document/property identity separately from runtime node, panel and native window identity | Reorder/filter/recycle without transferring drafts; source/Schema replacement must still reject an incompatible draft |
+| Host-owned dynamic panel descriptions | Candidate for one selected language tool, not a universal widget or command protocol | Event routes, text ownership, code leases, tasks and resources retire through their actual owners |
+| C# as the first official reloadable layer | Prioritize a complete C# tool evaluation; retain Lua as comparison evidence and Rust as a complete native path | Full tool workflow, diagnostics, update/recovery and desktop delivery before an official SDK decision |
+| Versioned C ABI for native binaries | Keep as a separate capability proposal, not a prerequisite for ordinary Rust or managed tools | A real independently distributed native consumer and explicit compatibility/retirement semantics |
+
+The next language discriminator is an independently authored `EnemyStats` component plus a
+create command, property customization and dockable panel. It must share the same source edits,
+Undo, Save/Reopen and Rust-visible data, survive a rejected update, preserve unavailable source
+data on disable and reject an old callback after replacement. Successful private gameplay
+dispatch alone does not qualify any of those Editor extension facets.
+
+Do not implement the conversation's suggested crate list as a new central extension manager.
+Schema, document, command, UI, execution and native-resource owners retain their own admission
+and physical retirement. A concrete product may coordinate an exact required contribution set;
+one registration scope cannot make native effects reversible or prove arbitrary code unload.
+Runtime batch access and authoring Undo remain different paths over shared declared semantics.
+Turn these reference concepts into Nara-owned runtime mechanisms when the UI implementation
+stage begins. Failed third-party adoption is not a prerequisite or a reason to delay current
+Scene representation work.
+
 ### Different Facts Need Different Authority
 
 | Operation | Required basis |

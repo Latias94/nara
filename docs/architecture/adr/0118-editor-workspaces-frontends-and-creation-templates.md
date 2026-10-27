@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-10-26 (retained authoring predecessors and native graphics retirement)
+**Last Revised**: 2026-10-27 (Nara-owned frontend direction; existing native support unchanged)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -31,6 +31,12 @@ Document mutation remains revision-based; geometric input remains bound to the a
 No universal widget tree, generic command transport, parallel undo system or Editor kernel crate is required.
 Future custom UI reuses these semantic boundaries and render-view handoff, but may replace all widget, layout, focus and docking code.
 Sharing rendering does not require sharing the runtime game's complete UI toolkit.
+
+The October 27 user clarification selects a Nara-owned custom-drawn Editor frontend as the
+future destination, not embedding Fyrox, Masonry or another toolkit. References inform concepts;
+the existing Dear frontend remains the qualified predecessor until matching workflows are
+replaced. This direction does not require complete UI work before independent Scene/language
+foundation development or introduce a second document/history authority.
 
 ### Independent document domains share the workspace lifecycle
 

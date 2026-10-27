@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-10-27 (Nara-owned Editor frontend direction; product owners unchanged)
 **Owner**: UI Foundation, Runtime UI, Editor Domain, Editor Host
 **Refines**: [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
 **Refined By**: [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md);
@@ -96,10 +96,17 @@ prove OS candidate-window placement, and Runtime accessibility is not Editor acc
 Reference projects are comparative pressure, not implementation authority. Open-GPUI may inform
 stable-key, frame-journal, virtualization and logical-docking behavior; Dear ImGui may inform
 Editor adapter and viewport failure handling; Godot may inform Control and author workflows; Bevy
-may inform algorithms and controlled widgets. Unity remains a secondary organization analogy until
-a primary source/version and neutral assertion are pinned. Nara does not inherit external
-App/Window/Entity, Node/Object/Variant, global-service, toolkit-ID or public render-topology
-ownership models. The reproducible pressure matrix lives in the non-normative
+may inform algorithms and controlled widgets. The [custom-drawn Editor UI
+study](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md) adds pinned Fyrox and
+Xilem/Masonry source observations; Unity 6.0's [EditorWindow
+guide](https://docs.unity3d.com/6000.0/Documentation/Manual/UIE-HowTo-CreateEditorWindow.html)
+grounds explicit UI reconstruction/state restoration, not automatic state survival. The user
+selected Nara's own custom-drawn Editor frontend as the destination; reference toolkits inform
+mechanisms, not an embedding shortlist. Concrete runtime mechanics remain future implementation
+work. Current Dear support stays until qualified replacement; this does not require a shared
+game/Editor toolkit. Nara does not inherit external App/Window/Entity, Node/Object/Variant,
+global-service, toolkit-ID or public
+render-topology ownership models. The reproducible pressure matrix lives in the non-normative
 [UI Foundation Design](../ui-foundation-design.md).
 
 ## Alternatives Considered

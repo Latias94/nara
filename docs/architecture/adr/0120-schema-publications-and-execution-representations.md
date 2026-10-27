@@ -59,6 +59,12 @@ source/history/persistence and repeated Prefab identity without a per-Schema nat
 Binding availability checks are not publication dependency/ABI compatibility or VM lifetime proof.
 Neither this JSON bridge nor either language is selected as the production interface.
 
+The [Scene-owned representation design](../scene-component-representations-design.md) proposes
+the first production closed native/data family through the existing compiler, publication and
+live export owners. The [updated extension study](../../research/2026-10-27-language-extension-product-boundaries.md)
+adds a complete C# Editor-tool evaluation to the private gameplay evidence. Neither proposal
+changes this ADR's status or makes metadata admission proof of an executable binding.
+
 ### Publication Scope
 
 Native executable/layout changes continue to create a fresh native Runtime generation. A

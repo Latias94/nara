@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-10-27 (research scope evidence; iteration decision unchanged)
 **Owner**: Rust authoring, executable/runtime hosts, optional scripting adapter packages
 **Supersedes**: [ADR 0021](0021-scripting-and-wasm-boundary.md)
 **Related**: ADR 0034, ADR 0039, ADR 0042, ADR 0045, ADR 0076, ADR 0084, ADR 0086
@@ -137,6 +137,12 @@ reference game are not research authorization gates. A first concrete adapter-ow
 designed and tested without a second adapter; a shared Nara-owned protocol still needs independent
 consumer evidence and explicit semantic limits before freeze. Supported products and platforms
 need their own complete authoring, diagnostics, lifecycle, recovery and export evidence.
+
+The [updated language/extension study](../../research/2026-10-27-language-extension-product-boundaries.md)
+adds a complete C# Editor-tool candidate to that research scope. Optional first-party experiment,
+optional official SDK and mandatory second language are distinct support decisions. Evaluating
+the first needs no premature decision on the second; the complete Rust/no-VM baseline remains
+required. This source study does not implement or designate an official managed SDK.
 
 The [foundation reassessment](../foundation-architecture-reassessment.md#d03-immutable-publications-and-reload)
 and [Proposed ADR 0120](0120-schema-publications-and-execution-representations.md) study owner-local

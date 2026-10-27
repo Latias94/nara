@@ -11,6 +11,15 @@ ADR 0119 metadata authority are documentation decisions, not new runtime qualifi
 evidence, while its public production representation and publication replacement remain unimplemented;
 0121 remains not-started. Current native binding and stock-render behavior are unchanged.
 The reviewed recommendation to amend/replace another ADR is not silently counted as implementation.
+The October 27 [UI](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md) and
+[language/extension](../../research/2026-10-27-language-extension-product-boundaries.md) studies
+add source evidence and experiment priorities only. The [closed Scene native/data
+design](../scene-component-representations-design.md) remains Proposed. Backend-free owner
+metadata admission is its first implementation slice, not the complete runtime family; neither
+a managed tools SDK nor a replacement Editor frontend is implemented by those documents.
+Its [metadata qualification](../../knowledge/engineering/verification/2026-10/2026-10-27T102723Z-backend-free-owner-schema-snapshots-and-clarified-owned-editor-ui-sequencing-7e4b079a81b64d149b8f031b8b2c84ea.md)
+records no-default admission, bounded bundles, exact identity/content distinctions and migrated
+Scene/root/Editor/independent consumers. It does not qualify mixed runtime materialization.
 The [documentation verification](../../knowledge/engineering/verification/2026-10/2026-10-23T115037Z-foundation-architecture-rebaseline-documentation-checks-and-adversarial-closure-33c8c794baf142ee964468a01248af17.md)
 records inventory/link/status checks and the scoped adversarial correction/recheck. No Cargo,
 performance or native trajectory was re-executed for this design-only unit.

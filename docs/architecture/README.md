@@ -113,6 +113,18 @@ orders concrete comparisons and fearless replacements. ADR 0119 adopts the Schem
 correction; 0120 and 0121 remain Proposed. Coverage does not mean the replacements are implemented
 or every recommended ADR amendment has been applied.
 
+The October 27 [custom-drawn UI study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md)
+and [language/extension study](../research/2026-10-27-language-extension-product-boundaries.md)
+integrate the updated conversation against pinned reference code and official documentation.
+The [Scene representation design](scene-component-representations-design.md) and its
+[production plan](../plans/2026-10-27-scene-data-representation-plan.md) remain Proposed.
+The user-selected UI destination is [Nara's own custom-drawn Editor
+runtime](foundation-architecture-reassessment.md#updated-custom-ui-and-language-research), not
+embedding a reference toolkit. UI implementation remains future work; the Proposed Scene family
+starts with backend-free owner metadata admission, not a complete materializer. No official
+C# SDK was selected. The rebaseline
+plan keeps complete-tool evaluation and owned-UI implementation independent.
+
 The [per-document persistence-custody design](editor-document-persistence-custody-design.md)
 specifies R5c's concrete replacement for the integrated Host's per-kind file lanes. It separates
 source aliases, document sessions, preview selection and executable startup without an erased
